@@ -396,6 +396,16 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
     )?;
     // xtream: per-type fingerprints of the last import (unchanged check).
     tx.execute("DELETE FROM app_state WHERE key = 'xtream_fp:' || ?1", [id])?;
+    // stalker: fingerprint of the last import (unchanged check).
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'stalker_fp:' || ?1",
+        [id],
+    )?;
+    // m3u: ETag / Last-Modified of the last playlist download.
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'm3u_validators:' || ?1",
+        [id],
+    )?;
     tx.commit()?;
     Ok(())
 }

@@ -126,13 +126,26 @@ where
     F: Fn() -> Fut,
     Fut: Future<Output = CoreResult<T>>,
 {
+    with_retry_if(attempts, op, |_| true).await
+}
+
+/// [`with_retry`] that also stops when `retry` rejects the error (a request
+/// that used up its whole time budget).
+pub async fn with_retry_if<T, F, Fut, R>(attempts: u32, op: F, retry: R) -> CoreResult<T>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = CoreResult<T>>,
+    R: Fn(&CoreError) -> bool,
+{
     let attempts = attempts.max(1);
     let mut n = 0;
     loop {
         match op().await {
             Ok(v) => return Ok(v),
             // A cancelled import run (C8) stops retrying at once.
-            Err(err) if err.is_retryable() && n + 1 < attempts && !import_cancelled() => {
+            Err(err)
+                if err.is_retryable() && retry(&err) && n + 1 < attempts && !import_cancelled() =>
+            {
                 let delay = backoff_delay(n);
                 tracing::debug!(attempt = n + 1, ?delay, error = %err, "retrying after transient error");
                 cancellable(tokio::time::sleep(delay)).await?;
@@ -983,10 +996,32 @@ where
 /// `max` bytes (checked against Content-Length first, then while streaming).
 /// `context` starts the error message ("Xtream get_vod_streams").
 pub async fn read_capped(
-    mut resp: reqwest::Response,
+    resp: reqwest::Response,
     context: &str,
     max: usize,
 ) -> CoreResult<bytes::Bytes> {
+    read_body(resp, context, max, None).await
+}
+
+/// [`read_capped`] for a large list sent without a whole-request deadline:
+/// the body must keep [`crate::m3u::body::MinRate::standard`] instead, and
+/// falling under it is a `Timeout` (IN-2).
+pub async fn read_capped_at_rate(
+    resp: reqwest::Response,
+    context: &str,
+    max: usize,
+) -> CoreResult<bytes::Bytes> {
+    let rate = crate::m3u::body::MinRate::standard();
+    read_body(resp, context, max, Some(rate)).await
+}
+
+async fn read_body(
+    mut resp: reqwest::Response,
+    context: &str,
+    max: usize,
+    mut rate: Option<crate::m3u::body::MinRate>,
+) -> CoreResult<bytes::Bytes> {
+    let host = resp.url().host_str().unwrap_or("the server").to_owned();
     let too_large = || {
         CoreError::Invalid(format!(
             "{context}: the server sent more than {}, which is not an API answer. Check the server URL.",
@@ -1011,6 +1046,12 @@ pub async fn read_capped(
             CoreError::from(err)
         }
     })? {
+        if let Some(rate) = rate.as_mut() {
+            rate.on_bytes(chunk.len(), &host).map_err(|err| match err {
+                CoreError::Timeout(m) => CoreError::Timeout(m.replace("the playlist", "the list")),
+                other => other,
+            })?;
+        }
         if buf.len().saturating_add(chunk.len()) > max {
             return Err(too_large());
         }
@@ -1075,6 +1116,63 @@ mod tests {
         .await;
         assert!(r.is_err());
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// IN-2: a caller can stop the retries of an error it knows will repeat.
+    #[tokio::test]
+    async fn retry_if_stops_on_a_rejected_error() {
+        let calls = AtomicU32::new(0);
+        let r: CoreResult<()> = with_retry_if(
+            3,
+            || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Err(CoreError::Timeout("slow".into()))
+            },
+            |err| !matches!(err, CoreError::Timeout(_)),
+        )
+        .await;
+        assert!(matches!(r, Err(CoreError::Timeout(_))), "{r:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// IN-2: a large list read without a whole deadline still fails on a
+    /// body that drips under the minimum rate (a 2 s window in tests).
+    #[tokio::test]
+    async fn rate_read_fails_on_a_dripping_body() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(b"HTTP/1.1 200 OK\r\n\r\n[").await;
+                loop {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    if sock.write_all(b" ").await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        let resp = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/"))
+            .send()
+            .await
+            .unwrap();
+        let err = tokio::time::timeout(
+            Duration::from_secs(15),
+            read_capped_at_rate(resp, "Stalker itv/get_all_channels", 1024 * 1024),
+        )
+        .await
+        .expect("the rate read hung")
+        .unwrap_err();
+        assert!(
+            matches!(err, CoreError::Timeout(ref m) if m.contains("the list too slowly")),
+            "{err:?}"
+        );
     }
 
     #[test]

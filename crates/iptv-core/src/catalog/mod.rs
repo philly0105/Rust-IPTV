@@ -104,6 +104,20 @@ impl Default for ItemRow {
 }
 
 impl ItemRow {
+    /// Fills a movie or series row's `title_base`, and the year its title
+    /// carries, the way [`CatalogWriter::insert`] would. Importers that map
+    /// rows on the blocking pool call it there, so the title regexes do not
+    /// run inside the write transaction (IN-3).
+    pub fn derive_title_base(&mut self) {
+        if self.title_base.is_none()
+            && matches!(self.content_type, ContentType::Movie | ContentType::Series)
+        {
+            let (base, year) = title_base(&self.title);
+            self.year = self.year.or(year);
+            self.title_base = Some(base);
+        }
+    }
+
     /// The item's reference.
     pub fn item_ref(&self) -> ItemRef {
         ItemRef::new(
@@ -2161,6 +2175,31 @@ mod tests {
         assert_eq!(row.catchup().unwrap().days, Some(366));
         row.extra = serde_json::json!({ "catchup": { "type": "xc", "days": -5 } });
         assert_eq!(row.catchup().unwrap().days, Some(0));
+    }
+
+    /// IN-3: a title base worked out before the write is the one the
+    /// writer would have stored; live rows and set bases are left alone.
+    #[test]
+    fn derived_title_base_matches_the_writer() {
+        let mut movie = item("1", "a", "|EN| The Matrix (1999)", 0);
+        movie.content_type = ContentType::Movie;
+        movie.derive_title_base();
+        let (base, year) = title_base("|EN| The Matrix (1999)");
+        assert_eq!(movie.title_base.as_deref(), Some(base.as_str()));
+        assert_eq!(movie.year, year);
+        let mut dated = item("2", "a", "Heat (1995)", 0);
+        dated.content_type = ContentType::Series;
+        dated.year = Some(1996);
+        dated.derive_title_base();
+        assert_eq!(dated.year, Some(1996), "the row's own year wins");
+        let mut live = item("3", "a", "Heat (1995)", 0);
+        live.derive_title_base();
+        assert_eq!(live.title_base, None);
+        let mut set = item("4", "a", "Heat (1995)", 0);
+        set.content_type = ContentType::Movie;
+        set.title_base = Some("heat".into());
+        set.derive_title_base();
+        assert_eq!((set.title_base.as_deref(), set.year), (Some("heat"), None));
     }
 
     #[test]

@@ -9,7 +9,7 @@
 use super::raw::{RawAccount, RawUserInfo};
 use super::url::{api_endpoint, normalize_server_url};
 use crate::error::{CoreError, CoreResult};
-use crate::http::{backoff_delay, cancellable, read_capped, send_checked, send_checked_within};
+use crate::http::{backoff_delay, cancellable, read_capped, send_checked_within};
 use crate::model::XtreamSourceConfig;
 use crate::state::AppState;
 use serde::de::DeserializeOwned;
@@ -213,7 +213,17 @@ impl XtreamClient {
                 })
             }
             BodyKind::List => {
-                let resp = send_checked(req, &context).await.map_err(Failed::retry)?;
+                // Panels build big lists before sending the head, like M3U
+                // generators: the playlist head deadline, and a head that
+                // did not come in time is not asked for again (IN-2).
+                let head = crate::m3u::importer::PLAYLIST_HEADER_TIMEOUT;
+                let resp = send_checked_within(req, head, &context)
+                    .await
+                    .map_err(|err| Failed {
+                        budget_spent: matches!(err, CoreError::Timeout(_))
+                            && tried.elapsed() >= head,
+                        err,
+                    })?;
                 read_list_body(resp, &context, MAX_BODY_BYTES).await
             }
         }
@@ -715,6 +725,40 @@ mod tests {
         assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
         assert_eq!(hits.load(SeqCst), 1, "a stalled body was retried");
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    /// IN-2: a list head got 15 s and the timeout was retried twice, so a
+    /// panel that builds a big list before answering did the work three
+    /// times and the sync failed. The head now gets the playlist deadline
+    /// (1.5 s in unit tests), and a head that never came is not asked again.
+    #[tokio::test]
+    async fn silent_list_head_gets_one_long_deadline() {
+        use std::sync::atomic::Ordering::SeqCst;
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                counter.fetch_add(1, SeqCst);
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let _ = sock.read(&mut buf).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                });
+            }
+        });
+        let c = client_for(&format!("http://127.0.0.1:{port}")).with_attempts(3);
+        let started = std::time::Instant::now();
+        let err = c.get_bytes("get_vod_streams").await.unwrap_err();
+        assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
+        assert_eq!(hits.load(SeqCst), 1, "a spent head deadline was retried");
+        let took = started.elapsed();
+        assert!(took >= crate::m3u::importer::PLAYLIST_HEADER_TIMEOUT, "{took:?}");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
     }
 
     /// Review R2-7: Xtream retries were silent and the final message did not

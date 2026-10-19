@@ -641,6 +641,7 @@ async fn fetch_kind(
                     .into_iter()
                     .enumerate()
                     .filter_map(|(i, r)| vod_row(&sid, i as i64, r))
+                    .map(with_title_base)
                     .collect();
                 vec![part(ContentType::Movie, categories, rows)]
             }
@@ -653,6 +654,7 @@ async fn fetch_kind(
                     .into_iter()
                     .enumerate()
                     .filter_map(|(i, r)| series_row(&sid, i as i64, r))
+                    .map(with_title_base)
                     .collect();
                 vec![part(ContentType::Series, categories, rows)]
             }
@@ -661,6 +663,13 @@ async fn fetch_kind(
     })
     .await??;
     Ok(fetched)
+}
+
+/// `row` with its title base worked out here, on the blocking pool, instead
+/// of inside the write transaction (IN-3).
+fn with_title_base(mut row: ItemRow) -> ItemRow {
+    row.derive_title_base();
+    row
 }
 
 fn log_skipped(source_id: &str, kind: Kind, skipped: usize) {

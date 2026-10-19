@@ -156,6 +156,10 @@ pub struct StubState {
     pub fail: AtomicBool,
     pub hits: AtomicU32,
     pub last_user_agent: Mutex<Option<String>>,
+    /// ETag sent with the body; a matching `If-None-Match` gets a 304.
+    pub etag: Mutex<Option<String>>,
+    /// 304 answers sent.
+    pub not_modified: AtomicU32,
 }
 
 pub struct Stub {
@@ -177,6 +181,12 @@ impl Stub {
     pub fn hits(&self) -> u32 {
         self.state.hits.load(Ordering::SeqCst)
     }
+    pub fn set_etag(&self, tag: Option<&str>) {
+        *self.state.etag.lock() = tag.map(str::to_owned);
+    }
+    pub fn not_modified(&self) -> u32 {
+        self.state.not_modified.load(Ordering::SeqCst)
+    }
 }
 
 async fn serve_list(State(st): State<Arc<StubState>>, headers: HeaderMap) -> Response {
@@ -188,8 +198,26 @@ async fn serve_list(State(st): State<Arc<StubState>>, headers: HeaderMap) -> Res
     if st.fail.load(Ordering::SeqCst) {
         return (StatusCode::NOT_FOUND, "gone").into_response();
     }
+    let etag = st.etag.lock().clone();
+    if let Some(tag) = &etag {
+        let asked = headers.get("if-none-match").and_then(|v| v.to_str().ok());
+        if asked == Some(tag.as_str()) {
+            st.not_modified.fetch_add(1, Ordering::SeqCst);
+            return (StatusCode::NOT_MODIFIED, [("etag", tag.clone())]).into_response();
+        }
+    }
     let body = st.body.lock().clone();
-    ([("content-type", "audio/x-mpegurl")], body).into_response()
+    match etag {
+        Some(tag) => (
+            [
+                ("content-type", "audio/x-mpegurl".to_string()),
+                ("etag", tag),
+            ],
+            body,
+        )
+            .into_response(),
+        None => ([("content-type", "audio/x-mpegurl")], body).into_response(),
+    }
 }
 
 /// Starts the stub on 127.0.0.1 (ephemeral port). Stops when dropped.

@@ -225,35 +225,32 @@ impl<R: BufRead> M3uReader<R> {
             return None;
         }
         if let Some(rest) = line.strip_prefix('#') {
-            let upper_prefix: String = rest
-                .chars()
-                .take(10)
-                .collect::<String>()
-                .to_ascii_uppercase();
-            if upper_prefix.starts_with("EXTM3U") {
+            // Compared in place: no Strings per directive line (IN-10).
+            let directive = |name: &str| starts_with_ignore_case(rest, name);
+            if directive("EXTM3U") {
                 self.stats.saw_header = true;
                 self.parse_header(&rest[6..]);
-            } else if upper_prefix.starts_with("EXTINF:") {
+            } else if directive("EXTINF:") {
                 self.finish_pending_as_skipped();
                 let mut entry = parse_extinf(&rest[7..]);
                 entry.line = self.stats.lines;
                 entry.kodi_props.append(&mut self.pending_kodi);
                 self.pending = Some(entry);
-            } else if upper_prefix.starts_with("EXTGRP:") {
+            } else if directive("EXTGRP:") {
                 let v = rest[7..].trim().trim_matches('"').trim();
                 if let Some(p) = self.pending.as_mut() {
                     if !v.is_empty() {
                         p.group = Some(v.to_string());
                     }
                 }
-            } else if upper_prefix.starts_with("EXTVLCOPT:") {
+            } else if directive("EXTVLCOPT:") {
                 if let Some((k, v)) = split_kv(&rest[10..]) {
                     if let Some(p) = self.pending.as_mut() {
                         apply_header_opt(p, &k, &v);
                         p.vlc_opts.push((k, v));
                     }
                 }
-            } else if upper_prefix.starts_with("KODIPROP:") {
+            } else if directive("KODIPROP:") {
                 if let Some((k, v)) = split_kv(&rest[9..]) {
                     match self.pending.as_mut() {
                         Some(p) => p.kodi_props.push((k, v)),
@@ -741,6 +738,11 @@ impl<R: BufRead> Iterator for M3uReader<R> {
     }
 }
 
+/// True when `s` starts with the ASCII `prefix`, in any case.
+fn starts_with_ignore_case(s: &str, prefix: &str) -> bool {
+    s.len() >= prefix.len() && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+}
+
 /// Splits `key=value` (key lowercased, both trimmed, surrounding quotes removed).
 fn split_kv(s: &str) -> Option<(String, String)> {
     let (k, v) = s.split_once('=')?;
@@ -1066,6 +1068,32 @@ http://s/path/My%20Movie.mkv?token=1\n";
         assert_eq!(e[1].name, "My Movie.mkv");
         assert!(has_movie_extension(&e[1].url));
         assert_eq!(url_extension(&e[1].url).as_deref(), Some("mkv"));
+    }
+
+    /// IN-10: directives are matched in place, in any case; a short or
+    /// non-ASCII comment is not one.
+    #[test]
+    fn directives_match_in_any_case() {
+        let text = "#extm3u x-tvg-url=\"http://e/g.xml\"\n\
+#ExtInf:-1,One\n\
+#extgrp:Group\n\
+#ExtVlcOpt:http-user-agent=VLC/3\n\
+#kodiprop:k=v\n\
+http://s/1\n\
+#EXT\n\
+#ÉXTINF:-1,Not\n\
+http://s/2\n";
+        let (e, h, s) = parse_str(text);
+        assert!(s.saw_header);
+        assert_eq!(h.epg_urls, ["http://e/g.xml"]);
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[0].name, "One");
+        assert_eq!(e[0].group.as_deref(), Some("Group"));
+        assert_eq!(e[0].user_agent.as_deref(), Some("VLC/3"));
+        assert_eq!(e[0].kodi_props.len(), 1);
+        assert_eq!(e[1].url, "http://s/2");
+        assert!(starts_with_ignore_case("extinf:", "EXTINF:"));
+        assert!(!starts_with_ignore_case("EXTIN", "EXTINF:"));
     }
 
     #[test]

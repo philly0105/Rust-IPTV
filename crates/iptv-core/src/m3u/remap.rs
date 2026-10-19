@@ -12,7 +12,9 @@
 use crate::catalog::ItemRow;
 use crate::error::CoreResult;
 use rusqlite::{params, Connection};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 /// Tables keyed by `(source_id, content_type, item_id)`.
 const REF_TABLES: [&str; 13] = [
@@ -42,6 +44,22 @@ fn identity(content_type: &str, tvg_id: Option<&str>, title: &str, category_id: 
     }
 }
 
+/// Hash of an [`identity`]. A collision only makes a key look shared, and
+/// shared keys are left alone.
+fn identity_hash(key: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    key.hash(&mut h);
+    h.finish()
+}
+
+/// Hash of a `(content_type, item_id)` pair.
+fn ref_hash(content_type: &str, item_id: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    content_type.hash(&mut h);
+    item_id.hash(&mut h);
+    h.finish()
+}
+
 /// Inserts `id` under `key`, marking the key ambiguous (`None`) on a repeat.
 fn index(map: &mut HashMap<String, Option<String>>, key: String, id: &str) {
     map.entry(key)
@@ -51,17 +69,27 @@ fn index(map: &mut HashMap<String, Option<String>>, key: String, id: &str) {
 
 /// The catalog of a source before a re-import, limited to what a remap needs.
 /// Empty (and free) when no user table references an item of the source.
+///
+/// Only the referenced ids and their identities are kept as strings. Every
+/// other row adds two hashes: its id and its identity's count (IN-5; maps of
+/// every old and new row cost about 120 MB at 200k entries).
 #[derive(Default)]
 pub(crate) struct Remapper {
-    /// Referenced old ids and their identity.
-    referenced: HashMap<Ref, String>,
-    /// Every old id (a new id equal to one of these is not "new").
-    old_ids: HashSet<Ref>,
-    /// Identity -> the one old id with it (`None`: more than one).
-    old_by_key: HashMap<String, Option<String>>,
-    /// Identity -> the one new id with it (`None`: more than one).
+    /// Referenced old ids, their identity and its [`identity_hash`].
+    referenced: HashMap<Ref, (String, u64)>,
+    /// [`ref_hash`] of the referenced ids: a cheap first test per new row.
+    referenced_hashes: HashSet<u64>,
+    /// [`ref_hash`] of every old id (a new id equal to one of these is not
+    /// "new"; a collision only skips a move).
+    old_ids: HashSet<u64>,
+    /// [`identity_hash`] -> old rows with it.
+    old_counts: HashMap<u64, u32>,
+    /// The referenced identities.
+    wanted: HashSet<String>,
+    /// Referenced identity -> the one new id with it (`None`: more than one).
     new_by_key: HashMap<String, Option<String>>,
-    new_ids: HashSet<Ref>,
+    /// Referenced ids the import wrote again.
+    kept: HashSet<Ref>,
     /// Old rows before the import (also tells a first import apart).
     pub old_rows: u64,
 }
@@ -130,12 +158,15 @@ impl Remapper {
         for row in rows {
             let (ct, id, tvg, title, cat) = row?;
             let key = identity(&ct, tvg.as_deref(), &title, &cat);
-            index(&mut me.old_by_key, key.clone(), &id);
+            let key_hash = identity_hash(&key);
+            *me.old_counts.entry(key_hash).or_default() += 1;
+            me.old_ids.insert(ref_hash(&ct, &id));
             let r = (ct, id);
             if referenced.contains(&r) {
-                me.referenced.insert(r.clone(), key);
+                me.referenced_hashes.insert(ref_hash(&r.0, &r.1));
+                me.wanted.insert(key.clone());
+                me.referenced.insert(r, (key, key_hash));
             }
-            me.old_ids.insert(r);
         }
         Ok(me)
     }
@@ -151,34 +182,40 @@ impl Remapper {
             return;
         }
         let ct = row.content_type.as_str();
+        if self.referenced_hashes.contains(&ref_hash(ct, &row.item_id)) {
+            let r = (ct.to_string(), row.item_id.clone());
+            if self.referenced.contains_key(&r) {
+                self.kept.insert(r);
+            }
+        }
         let key = identity(
             ct,
             row.epg_channel_id.as_deref(),
             &row.title,
             &row.category_id,
         );
-        index(&mut self.new_by_key, key, &row.item_id);
-        self.new_ids.insert((ct.to_string(), row.item_id.clone()));
+        if self.wanted.contains(&key) {
+            index(&mut self.new_by_key, key, &row.item_id);
+        }
     }
 
     /// `(content_type, old id, new id)` for every referenced id that vanished
     /// and has exactly one successor.
     fn pairs(&self) -> Vec<(String, String, String)> {
         let mut out = Vec::new();
-        for ((ct, old), key) in &self.referenced {
-            if self.new_ids.contains(&(ct.clone(), old.clone())) {
+        for ((ct, old), (key, key_hash)) in &self.referenced {
+            if self.kept.contains(&(ct.clone(), old.clone())) {
                 continue;
             }
-            let Some(Some(unique_old)) = self.old_by_key.get(key) else {
-                continue;
-            };
-            if unique_old != old {
+            // The referenced row is one of the old rows with its identity:
+            // it is the only one when the count is 1.
+            if self.old_counts.get(key_hash) != Some(&1) {
                 continue;
             }
             let Some(Some(new)) = self.new_by_key.get(key) else {
                 continue;
             };
-            if self.old_ids.contains(&(ct.clone(), new.clone())) {
+            if self.old_ids.contains(&ref_hash(ct, new)) {
                 continue;
             }
             out.push((ct.clone(), old.clone(), new.clone()));

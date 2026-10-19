@@ -11,12 +11,13 @@ use crate::model::{ContentType, ImportSummary, Source, SourceKind};
 use crate::sources::{progress, Importer, ProgressGate};
 use crate::state::AppState;
 use crate::xtream::sync::{replace_catalogs_with, CatalogPart};
+use rusqlite::{Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// Safety cap for paged list walks.
-const MAX_PAGES: i64 = 400;
 /// Category id for channels without a (known) genre.
 const UNCATEGORIZED: &str = "uncategorized";
 /// Category id of the single radio category.
@@ -43,24 +44,11 @@ impl Importer for StalkerImporter {
     }
 }
 
-/// Walks every page of a `get_ordered_list` style call.
+/// Walks every page of a `get_ordered_list` style call. The page count
+/// follows the total page 1 reports (it was capped at 400 pages, 5,600
+/// channels), and the pages after the first go out a few at a time.
 pub async fn fetch_all_pages(client: &StalkerClient, base: Req) -> CoreResult<Vec<Value>> {
-    let mut out: Vec<Value> = Vec::new();
-    let mut page = 1;
-    loop {
-        let js = client.call(base.clone().p("p", page)).await?;
-        let total = n(&js, "total_items");
-        let items = into_list(js);
-        if items.is_empty() {
-            break;
-        }
-        out.extend(items);
-        if total.is_some_and(|t| out.len() as i64 >= t) || total.is_none() || page >= MAX_PAGES {
-            break;
-        }
-        page += 1;
-    }
-    Ok(out)
+    super::vod::walk_pages(client, base, i64::MAX).await
 }
 
 /// A radio, VOD or series answer that failed. A temporary failure (the
@@ -107,6 +95,143 @@ async fn remote_total(client: &StalkerClient, kind: &str) -> Option<i64> {
     }
 }
 
+/// Movie and series totals for the summary (VOD is not stored, so ask the
+/// portal). An unanswered total keeps the stored count:
+/// `sources::run_import` records whatever the summary carries.
+async fn totals(state: &Arc<AppState>, client: &StalkerClient, source_id: &str) -> (i64, i64) {
+    let (movies, series) =
+        tokio::join!(remote_total(client, "vod"), remote_total(client, "series"));
+    if movies.is_none() || series.is_none() {
+        let sid = source_id.to_string();
+        let (_, old_movies, old_series) = state
+            .db_call(move |conn| catalog::source_counts(conn, &sid))
+            .await
+            .unwrap_or((0, 0, 0));
+        (movies.unwrap_or(old_movies), series.unwrap_or(old_series))
+    } else {
+        (movies.unwrap_or(0), series.unwrap_or(0))
+    }
+}
+
+/// Version of the Stalker mapping rules, hashed into the stored fingerprint
+/// ([`answers_hash`]): bumping it makes the next refresh rewrite an
+/// unchanged catalog once. Bump it whenever a change alters the rows a sync
+/// writes (like `xtream::sync::SYNC_VERSION`).
+pub const SYNC_VERSION: u32 = 1;
+
+/// `app_state` key of a source's fingerprint (dropped with the source, see
+/// `sources::store::delete`).
+fn print_key(source_id: &str) -> String {
+    format!("stalker_fp:{source_id}")
+}
+
+/// What the last complete write stored: the hash of the portal's answers
+/// and the live and radio rows it wrote.
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Print {
+    hash: String,
+    live: i64,
+    radio: i64,
+}
+
+/// Feeds what serde_json writes into a hasher.
+struct HashWriter<'a>(&'a mut Sha256);
+
+impl std::io::Write for HashWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// sha256 (hex) of everything a sync builds the catalog from:
+/// [`SYNC_VERSION`], the endpoint (logo URLs are made absolute against it),
+/// the live, movie and series categories, and the channel and radio
+/// answers. serde_json writes an answer tree the same way every time.
+fn answers_hash(
+    endpoint: &str,
+    categories: [&[CategoryRow]; 3],
+    channels: &[Value],
+    radio: &[Value],
+) -> CoreResult<String> {
+    let mut h = Sha256::new();
+    h.update(format!("tsrust-stalker-sync-v{SYNC_VERSION}\n{endpoint}\n").as_bytes());
+    for cats in categories {
+        for c in cats {
+            h.update(c.category_id.as_bytes());
+            h.update([0]);
+            h.update(c.name.as_bytes());
+            h.update([0]);
+            h.update(c.position.to_le_bytes());
+            h.update([b'\n']);
+        }
+        h.update([0xff]);
+    }
+    for list in [channels, radio] {
+        serde_json::to_writer(HashWriter(&mut h), list)?;
+        h.update([0xff]);
+    }
+    Ok(hex::encode(h.finalize()))
+}
+
+/// Live plus radio rows in the catalog when the stored fingerprint matches
+/// `hash` and the rows it wrote are all still there; `None` otherwise.
+fn unchanged_rows(conn: &Connection, source_id: &str, hash: &str) -> CoreResult<Option<i64>> {
+    let print: Option<Print> = conn
+        .query_row(
+            "SELECT value FROM app_state WHERE key = ?1",
+            [print_key(source_id)],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|v| serde_json::from_str(&v).ok());
+    let Some(print) = print.filter(|p| p.hash == hash) else {
+        return Ok(None);
+    };
+    let count = |ct: ContentType| -> CoreResult<i64> {
+        Ok(conn.query_row(
+            "SELECT count(*) FROM items WHERE source_id = ?1 AND content_type = ?2",
+            [source_id, ct.as_str()],
+            |r| r.get(0),
+        )?)
+    };
+    let (live, radio) = (count(ContentType::Live)?, count(ContentType::Radio)?);
+    Ok((live == print.live && radio == print.radio).then_some(live + radio))
+}
+
+/// Stores the fingerprint of a complete write inside its transaction, or
+/// drops it after a write that kept a section (the next refresh writes it
+/// all again).
+fn store_print(
+    conn: &Connection,
+    source_id: &str,
+    hash: Option<String>,
+    counts: &std::collections::HashMap<ContentType, u64>,
+) -> CoreResult<()> {
+    let Some(hash) = hash else {
+        conn.execute(
+            "DELETE FROM app_state WHERE key = ?1",
+            [print_key(source_id)],
+        )?;
+        return Ok(());
+    };
+    let count = |ct: ContentType| counts.get(&ct).copied().unwrap_or(0) as i64;
+    let print = Print {
+        hash,
+        live: count(ContentType::Live),
+        radio: count(ContentType::Radio),
+    };
+    conn.execute(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        rusqlite::params![print_key(source_id), serde_json::to_string(&print)?],
+    )?;
+    Ok(())
+}
+
 /// Full resync of one source, emitting `fetching` / `parsing` / `saving`
 /// progress. It does not emit `done` / `error` or touch `last_refresh_at` /
 /// `last_error`: `sources::run_import` (which `stalker.sync` and
@@ -137,22 +262,27 @@ async fn run(
     let genres = mapping::categories(&list(client, Req::new("itv", "get_genres")).await?);
 
     emit("fetching", 0, None, Some("Loading channels"));
-    let channels = match client
+    // The answer tree is taken apart, not cloned (IN-1): a 20k-channel
+    // portal's tree is 150-200 MB.
+    let all = match client
         .call(Req::new("itv", "get_all_channels").timeout(LONG_TIMEOUT))
         .await
     {
-        Ok(js) if !into_list(js.clone()).is_empty() => into_list(js),
-        Ok(_) | Err(CoreError::Invalid(_)) | Err(CoreError::NotFound(_)) => {
-            // Some panels disable get_all_channels: page through the list instead.
-            fetch_all_pages(
-                client,
-                Req::new("itv", "get_ordered_list")
-                    .p("genre", "*")
-                    .p("sortby", "number"),
-            )
-            .await?
-        }
+        Ok(js) => into_list(js),
+        Err(CoreError::Invalid(_)) | Err(CoreError::NotFound(_)) => Vec::new(),
         Err(err) => return Err(err),
+    };
+    let channels = if all.is_empty() {
+        // Some panels disable get_all_channels: page through the list instead.
+        fetch_all_pages(
+            client,
+            Req::new("itv", "get_ordered_list")
+                .p("genre", "*")
+                .p("sortby", "number"),
+        )
+        .await?
+    } else {
+        all
     };
 
     emit(
@@ -192,6 +322,48 @@ async fn run(
         Err(err @ CoreError::Auth(_)) => return Err(err),
         Err(err) => optional_section(err, "series categories", "series categories")?,
     };
+    // Unchanged refresh (ST-3): when every section answered, the answers
+    // are hashed (on the blocking pool: tens of MB of JSON). A hash and row
+    // counts that match the last write keep the catalog as it is.
+    let complete = radio.is_some() && vod_categories.is_some() && series_categories.is_some();
+    let (channels, radio, hash) = if complete {
+        let cats = (
+            genres.clone(),
+            vod_categories.clone().unwrap_or_default(),
+            series_categories.clone().unwrap_or_default(),
+        );
+        let ep = endpoint.clone();
+        tokio::task::spawn_blocking(move || -> CoreResult<_> {
+            let hash = answers_hash(
+                &ep,
+                [cats.0.as_slice(), cats.1.as_slice(), cats.2.as_slice()],
+                &channels,
+                radio.as_deref().unwrap_or_default(),
+            )?;
+            Ok((channels, radio, Some(hash)))
+        })
+        .await??
+    } else {
+        (channels, radio, None)
+    };
+    if let Some(hash) = hash.clone() {
+        let sid = source_id.to_string();
+        let kept = state
+            .db_call(move |conn| unchanged_rows(conn, &sid, &hash))
+            .await?;
+        if let Some(rows) = kept {
+            tracing::info!(source_id, "stalker portal unchanged; catalog kept");
+            emit("saving", 0, None, Some(crate::sources::UNCHANGED_MESSAGE));
+            let (movies, series) = totals(state, client, source_id).await;
+            Runtime::get(state).forget_listings(source_id);
+            return Ok(ImportSummary {
+                channels: rows,
+                movies,
+                series,
+                unchanged: true,
+            });
+        }
+    }
     let keep_radio = radio.is_none();
     let radio = radio.unwrap_or_default();
 
@@ -244,6 +416,9 @@ async fn run(
         })
         .filter(|r| seen.insert(r.item_id.clone()))
         .collect();
+    // The answer trees are mapped: free them before the totals and the write.
+    drop(channels);
+    drop(radio);
     let radio_categories = if radio_rows.is_empty() {
         Vec::new()
     } else {
@@ -255,21 +430,7 @@ async fn run(
     };
     emit("parsing", total, Some(total), None);
 
-    // Totals for the summary (VOD is not stored, so ask the portal).
-    // An unanswered total keeps the stored count: `sources::run_import`
-    // records whatever the summary carries.
-    let (movies, series) =
-        tokio::join!(remote_total(client, "vod"), remote_total(client, "series"));
-    let (movies, series) = if movies.is_none() || series.is_none() {
-        let sid = source_id.to_string();
-        let (_, old_movies, old_series) = state
-            .db_call(move |conn| catalog::source_counts(conn, &sid))
-            .await
-            .unwrap_or((0, 0, 0));
-        (movies.unwrap_or(old_movies), series.unwrap_or(old_series))
-    } else {
-        (movies.unwrap_or(0), series.unwrap_or(0))
-    };
+    let (movies, series) = totals(state, client, source_id).await;
 
     // A cancelled run keeps the old catalog (C8): stop before saving, and
     // save all four types in one transaction so a cancel seen by the writer
@@ -328,7 +489,7 @@ async fn run(
                 cancel,
                 &mut |_| {},
                 &mut on_finish,
-                |_, _| Ok(()),
+                |tx, counts| store_print(tx, &sid, hash, counts),
             )?;
             // The rewrite grew the WAL by about the catalog's size.
             crate::db::checkpoint_truncate(conn);

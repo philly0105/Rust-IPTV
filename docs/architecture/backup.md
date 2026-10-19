@@ -77,12 +77,12 @@ M3U entries carry the stored playlist text in `rawM3u`. Playlists over 8 MB keep
 
 ## Export to a file
 
-Without `path`, `backup.export` returns the manifest as `json` and a suggested `fileName` (`tsrust-iptv-backup-YYYY-MM-DD.json`); the UI downloads it. The desktop settings page instead asks for a location with the native save dialog and sends `path`. The core then:
+Without `path`, `backup.export` returns the manifest as `json` (serialized on the blocking pool; playlist text makes it tens of MB) and a suggested `fileName` (`tsrust-iptv-backup-YYYY-MM-DD.json`); the UI downloads it. The desktop settings page instead asks for a location with the native save dialog and sends `path`. The core then:
 
 - refuses with `Unsupported` when it runs as the server (`is_desktop` false), so a browser client cannot write files on the server's disk;
 - requires an absolute path whose folder exists and that is not itself a folder (`Invalid` otherwise);
 - canonicalizes the folder (symlinks and `..` resolved) and refuses any target inside the app data dir (`Invalid`), so a backup can never overwrite the database or cached playlists;
-- writes the JSON to a hidden `.<name>.<uuid>.tmp` file in the same folder, flushes it, and renames it over the target (an existing file is replaced; the temp file is removed on failure);
+- streams the JSON (`serde_json::to_writer_pretty` through a buffered writer, on the blocking pool, so no string copy of the manifest is made) to a hidden `.<name>.<uuid>.tmp` file in the same folder, flushes it, and renames it over the target (an existing file is replaced; the temp file is removed on failure);
 - returns `{json: "", fileName: <file name of the target>, path: <saved path>}`.
 
 A UI that gets a non-empty `json` back (a core that predates `path`) falls back to the download.

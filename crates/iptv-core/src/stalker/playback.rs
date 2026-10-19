@@ -445,7 +445,8 @@ impl BulkEpgEntry {
                 .p("period", 6)
                 .timeout(LONG_TIMEOUT);
             let (by_channel, ok) = match client.call(req).await {
-                Ok(js) => match js.get("data").cloned().unwrap_or(js) {
+                // `data` is taken out of the answer, not cloned (IN-1).
+                Ok(js) => match take_data(js) {
                     Value::Object(m) => (m, true),
                     _ => (Map::new(), true),
                 },
@@ -479,6 +480,17 @@ impl BulkEpgEntry {
             Some(b) => b.at.elapsed() >= if b.ok { BULK_EPG_TTL } else { BULK_EPG_RETRY },
             None => false,
         }
+    }
+}
+
+/// The answer's `data` member, or the answer itself when it has none.
+fn take_data(js: Value) -> Value {
+    match js {
+        Value::Object(mut m) => match m.remove("data") {
+            Some(data) => data,
+            None => Value::Object(m),
+        },
+        other => other,
     }
 }
 
@@ -817,6 +829,17 @@ pub fn user_message(err: &CoreError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// IN-1: the bulk guide's `data` is moved out, with the same results as
+    /// the clone it replaced.
+    #[test]
+    fn take_data_moves_the_data_member() {
+        let data = json!({"7": [{"name": "News"}]});
+        assert_eq!(take_data(json!({ "data": data.clone() })), data);
+        assert_eq!(take_data(json!({"x": 1})), json!({"x": 1}));
+        assert_eq!(take_data(json!({ "data": null })), Value::Null);
+        assert_eq!(take_data(json!([1])), json!([1]));
+    }
 
     /// D10: `(a - ts).abs()` overflowed on a hostile start timestamp, and
     /// `day ± 1 day` panicked at chrono's date range edge.

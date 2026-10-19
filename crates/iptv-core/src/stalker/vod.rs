@@ -24,6 +24,9 @@ pub const MAX_LIMIT: i64 = 200;
 const PAGE_CONCURRENCY: usize = 4;
 /// Safety cap when walking episode pages.
 const MAX_EPISODE_PAGES: i64 = 30;
+/// Most rows [`walk_pages`] reads: a reported total past this is not
+/// believed (each 14-row page is one request).
+const MAX_WALK_ITEMS: i64 = 100_000;
 
 /// Portal list kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,17 +87,28 @@ pub async fn list_page(
     let search = query.search.as_deref();
     let runtime = Runtime::get(state);
     let key = page_size_key(source_id, kind);
-    let mut ps = runtime
-        .page_sizes
-        .get(&key)
-        .map(|v| *v)
-        .unwrap_or(p::DEFAULT_PAGE_SIZE)
-        .max(1);
+    let cached = runtime.page_sizes.get(&key).map(|v| *v);
+    let mut ps = cached.unwrap_or(p::DEFAULT_PAGE_SIZE).max(1);
+    let assumed = ps;
 
     let first = offset / ps + 1;
-    let first_js = client
-        .call(list_req(kind, &category, sort, search, first))
+    // With a page size the portal confirmed earlier, every covering page
+    // goes out in one wave; otherwise page `first` says the size first and
+    // the rest follow (IN-4).
+    let wave_last = if cached.is_some() {
+        last_needed_page(offset, limit, ps, i64::MAX).max(first)
+    } else {
+        first
+    };
+    let mut wave: Vec<(i64, Value)> = stream::iter(first..=wave_last)
+        .map(|page| {
+            let req = list_req(kind, &category, sort, search, page);
+            async move { Ok::<_, CoreError>((page, client.call(req).await?)) }
+        })
+        .buffered(PAGE_CONCURRENCY)
+        .try_collect()
         .await?;
+    let first_js = wave.remove(0).1;
     let total = n(&first_js, "total_items");
     let reported = n(&first_js, "max_page_items").filter(|x| *x > 0);
     let mut first_rows = into_list(first_js);
@@ -118,15 +132,26 @@ pub async fn list_page(
             // No page size reported and the page is bigger than assumed.
             ps = first_rows.len() as i64;
             runtime.page_sizes.insert(key, ps);
+        } else if reported.is_some() && cached.is_none() {
+            // Confirmed: the next listing sends its pages in one wave.
+            runtime.page_sizes.insert(key, ps);
         }
         pages.push((offset / ps + 1, first_rows));
+    }
+    // The rest of the wave holds only when the assumed size was right.
+    if ps == assumed {
+        pages.extend(wave.into_iter().map(|(page, js)| (page, into_list(js))));
     }
     let first_page = pages[0].0;
     let total = total.unwrap_or_else(|| (first_page - 1) * ps + pages[0].1.len() as i64);
     let last_needed = last_needed_page(offset, limit, ps, total);
+    // Wave pages past the end are dropped: some portals repeat their last
+    // page for any page number past it.
+    pages.truncate((last_needed - first_page).max(0) as usize + 1);
+    let fetched = pages.last().map_or(first_page, |(page, _)| *page);
 
-    if last_needed > first_page {
-        let rest: Vec<(i64, Vec<Value>)> = stream::iter((first_page + 1)..=last_needed)
+    if last_needed > fetched {
+        let rest: Vec<(i64, Vec<Value>)> = stream::iter((fetched + 1)..=last_needed)
             .map(|page| {
                 let req = list_req(kind, &category, sort, search, page);
                 async move { Ok::<_, CoreError>((page, into_list(client.call(req).await?))) }
@@ -420,20 +445,44 @@ fn regular_season(
 }
 
 async fn vod_pages(client: &StalkerClient, base: Req) -> CoreResult<Vec<Value>> {
-    let mut out = Vec::new();
-    let mut page = 1;
-    loop {
-        let js = client.call(base.clone().p("p", page)).await?;
-        let total = n(&js, "total_items");
-        let rows = into_list(js);
+    walk_pages(client, base, MAX_EPISODE_PAGES).await
+}
+
+/// Every page of a `get_ordered_list` style call, at most `max_pages` and
+/// [`MAX_WALK_ITEMS`] rows. Page 1 gives the total and the page size; the
+/// other pages then go out [`PAGE_CONCURRENCY`] at a time instead of one
+/// after another (IN-4). An empty page ends the list.
+pub(super) async fn walk_pages(
+    client: &StalkerClient,
+    base: Req,
+    max_pages: i64,
+) -> CoreResult<Vec<Value>> {
+    let js = client.call(base.clone().p("p", 1)).await?;
+    let total = n(&js, "total_items");
+    let mut out = into_list(js);
+    let per_page = out.len() as i64;
+    let Some(total) = total.filter(|t| per_page > 0 && *t > per_page) else {
+        return Ok(out);
+    };
+    if total > MAX_WALK_ITEMS {
+        tracing::warn!(
+            total,
+            kept = MAX_WALK_ITEMS,
+            "stalker list longer than the walk cap; the rest is left out"
+        );
+    }
+    let pages = (total.min(MAX_WALK_ITEMS) as u64).div_ceil(per_page as u64) as i64;
+    let rest: Vec<Vec<Value>> = stream::iter(2..=pages.min(max_pages))
+        .map(|page| client.call(base.clone().p("p", page)))
+        .buffered(PAGE_CONCURRENCY)
+        .map_ok(into_list)
+        .try_collect()
+        .await?;
+    for rows in rest {
         if rows.is_empty() {
             break;
         }
         out.extend(rows);
-        if total.is_none_or(|t| out.len() as i64 >= t) || page >= MAX_EPISODE_PAGES {
-            break;
-        }
-        page += 1;
     }
     Ok(out)
 }

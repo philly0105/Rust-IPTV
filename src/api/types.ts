@@ -988,6 +988,14 @@ export interface SourcesChangedEvent {
   reason?: SourcesChangeReason;
 }
 
+/**
+ * `epg.changed`: `{}` when guide data, mappings or enabled urls changed; `{reason: 'status'}` when
+ * only a url's status moved (a refresh started, or a 304 kept the stored guide).
+ */
+export interface EpgChangedEvent {
+  reason?: 'status';
+}
+
 /** Server mode: the event socket fell behind and `skipped` events were dropped; refetch everything. */
 export interface EventsLaggedEvent {
   skipped: number;
@@ -997,7 +1005,7 @@ export interface AppEventMap {
   'import.progress': ImportProgressEvent;
   'sources.changed': SourcesChangedEvent;
   'epg.progress': EpgProgressEvent;
-  'epg.changed': EmptyEvent;
+  'epg.changed': EpgChangedEvent;
   'downloads.update': EmptyEvent;
   'downloads.progress': DownloadProgressEvent;
   'remote.command': RemoteCommandEvent;

@@ -212,6 +212,13 @@ describe('event invalidation', () => {
     ]);
   });
 
+  it('refetches only epg.sources for a status-only epg.changed (EP-2)', () => {
+    const extra = { 'epg.changed': ['epg.'] };
+    expect(invalidationPrefixes({ type: 'epg.changed', payload: { reason: 'status' } }, extra)).toEqual(['epg.sources']);
+    expect(invalidationPrefixes({ type: 'epg.changed', payload: {} }, extra)).toEqual(['epg.']);
+    expect(invalidationPrefixes({ type: 'epg.changed', payload: null })).toEqual(['epg.']);
+  });
+
   it('does not refetch settings when the event carries them', () => {
     expect(invalidationPrefixes({ type: 'settings.changed', payload: { language: 'en' } })).toEqual([]);
     expect(invalidationPrefixes({ type: 'settings.changed', payload: { language: 'en' } }, { 'settings.changed': ['sources.schedule'] })).toEqual([

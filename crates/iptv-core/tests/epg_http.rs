@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use iptv_core::epg;
-use iptv_core::{AppState, BroadcastSink};
+use iptv_core::{AppEvent, AppState, BroadcastSink};
 use parking_lot::Mutex;
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -117,8 +117,19 @@ async fn spawn_stub() -> (String, Arc<Hits>, tokio::sync::oneshot::Sender<()>) {
 }
 
 async fn state_with_source(urls: &[String]) -> (tempfile::TempDir, Arc<AppState>) {
+    let (tmp, state, _events) = state_with_events(urls).await;
+    (tmp, state)
+}
+
+async fn state_with_events(
+    urls: &[String],
+) -> (
+    tempfile::TempDir,
+    Arc<AppState>,
+    tokio::sync::broadcast::Receiver<AppEvent>,
+) {
     let tmp = tempfile::tempdir().unwrap();
-    let (sink, _rx) = BroadcastSink::channel(1024);
+    let (sink, events) = BroadcastSink::channel(1024);
     let state = AppState::new(tmp.path().join("data"), Arc::new(sink), false)
         .await
         .unwrap();
@@ -141,7 +152,7 @@ async fn state_with_source(urls: &[String]) -> (tempfile::TempDir, Arc<AppState>
         })
         .await
         .unwrap();
-    (tmp, state)
+    (tmp, state, events)
 }
 
 #[tokio::test]
@@ -184,6 +195,37 @@ async fn remote_fetch_uses_source_headers_and_etag() {
         .map(|d| d.count())
         .unwrap_or(0);
     assert_eq!(leftovers, 0);
+}
+
+/// EP-2: a refresh starting, and one that ends on a 304, changed no guide
+/// data: their `epg.changed` carries `reason: "status"` and the generation
+/// (the cached channel directory) stays. A full download bumps it.
+#[tokio::test]
+async fn refresh_start_and_304_are_status_only_changes() {
+    let (base, _hits, _stop) = spawn_stub().await;
+    let url = format!("{base}/epg.xml");
+    let (_tmp, state, mut events) = state_with_events(std::slice::from_ref(&url)).await;
+    let changes = |events: &mut tokio::sync::broadcast::Receiver<AppEvent>| {
+        let mut out = Vec::new();
+        while let Ok(ev) = events.try_recv() {
+            if ev.kind == "epg.changed" {
+                out.push(ev.payload);
+            }
+        }
+        out
+    };
+    let rt = epg::runtime(&state);
+
+    let before = rt.generation();
+    epg::refresh_now(state.clone(), &url).await.unwrap();
+    let status = serde_json::json!({"reason": "status"});
+    assert_eq!(changes(&mut events), [status.clone(), serde_json::json!({})]);
+    assert_eq!(rt.generation(), before + 1);
+
+    let stats = epg::refresh_now(state.clone(), &url).await.unwrap();
+    assert!(stats.not_modified);
+    assert_eq!(changes(&mut events), [status.clone(), status]);
+    assert_eq!(rt.generation(), before + 1, "a 304 keeps the directory");
 }
 
 #[tokio::test]

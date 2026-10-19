@@ -248,6 +248,11 @@ export function invalidationPrefixes(
     // an older core's '{}' keep the full set.
     if (reason === 'added' || reason === 'status') return ['sources.'];
   }
+  // A refresh started or ended on a 304: only the url's status moved, so the guide windows and
+  // now/next answers stay; refetching them here doubled every refresh's refetch rounds (EP-2).
+  if (event.type === 'epg.changed' && (event.payload as { reason?: unknown } | null | undefined)?.reason === 'status') {
+    return ['epg.sources'];
+  }
   const defaults = event.type === 'settings.changed' && isSettingsPayload(event.payload) ? [] : (DEFAULT_EVENT_INVALIDATION[event.type] ?? []);
   return [...new Set([...defaults, ...(extra[event.type] ?? [])])];
 }

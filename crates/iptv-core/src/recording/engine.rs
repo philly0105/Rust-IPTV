@@ -1,5 +1,6 @@
-//! Recording engines: a headless mpv with `--stream-record`, or a direct
-//! HTTP copy for plain TS/HTTP streams when mpv is not available.
+//! Recording engines: a direct HTTP copy for plain TS/HTTP streams, or a
+//! headless mpv with `--stream-record` for HLS, DASH and other streams (and
+//! when the copy fails).
 //!
 //! An engine writes one part file and returns when the stream ends, fails,
 //! the stop time passes, or the stop signal fires. Retrying with a new part
@@ -96,31 +97,62 @@ pub fn xtream_ts_variant(source: &PlayerSource, kind: SourceKind) -> Option<Play
 /// Message for a stream no engine can record.
 pub const ENGINE_MISSING_MESSAGE: &str = "Recording this stream needs mpv. Install mpv or set its path in Settings > Player, then schedule the recording again.";
 
-/// Picks the engine for `source`: mpv when found, else the HTTP copy for
-/// plain streams (an Xtream HLS URL is swapped for its TS variant), else
-/// `engine_missing`. Returns the source to record.
+/// The source the HTTP copy records, when it can record `source`: a plain
+/// stream as is, an Xtream live HLS URL as its TS variant.
+fn http_source(source: &PlayerSource, kind: SourceKind) -> Option<PlayerSource> {
+    if is_plain_http(source) {
+        Some(source.clone())
+    } else {
+        xtream_ts_variant(source, kind)
+    }
+}
+
+/// Picks the engine for `source`: the HTTP copy for plain streams (an
+/// Xtream HLS URL is swapped for its TS variant), which writes the bytes
+/// without decoding them; mpv for anything else, and instead of the copy
+/// when `http_failed` (a part copied over HTTP failed: a provider that
+/// refuses the TS variant, or an address that answers with a manifest);
+/// else `engine_missing`. Returns the source to record.
 pub fn choose(
     state: &AppState,
     source: PlayerSource,
     kind: SourceKind,
+    http_failed: bool,
 ) -> CoreResult<(Engine, PlayerSource)> {
     let forced = state
         .ext::<ForcedEngine>(FORCED_KEY)
         .and_then(|f| f.0.clone());
-    if let Some(Engine::Http) = forced {
-        return Ok((
-            Engine::Http,
-            xtream_ts_variant(&source, kind).unwrap_or(source),
-        ));
+    match forced {
+        Some(Engine::Http) => {
+            return Ok((
+                Engine::Http,
+                xtream_ts_variant(&source, kind).unwrap_or(source),
+            ));
+        }
+        Some(Engine::Mpv(mpv)) => return Ok((Engine::Mpv(mpv), source)),
+        None => {}
     }
-    if let Some(mpv) = mpv_path(state) {
+    pick(source, kind, http_failed, || mpv_path(state))
+}
+
+/// [`choose`] without the test override; `mpv` finds mpv, only asked for
+/// when the HTTP copy is not picked.
+fn pick(
+    source: PlayerSource,
+    kind: SourceKind,
+    http_failed: bool,
+    mpv: impl FnOnce() -> Option<PathBuf>,
+) -> CoreResult<(Engine, PlayerSource)> {
+    if !http_failed {
+        if let Some(http) = http_source(&source, kind) {
+            return Ok((Engine::Http, http));
+        }
+    }
+    if let Some(mpv) = mpv() {
         return Ok((Engine::Mpv(mpv), source));
     }
-    if is_plain_http(&source) {
-        return Ok((Engine::Http, source));
-    }
-    if let Some(ts) = xtream_ts_variant(&source, kind) {
-        return Ok((Engine::Http, ts));
+    if let Some(http) = http_source(&source, kind) {
+        return Ok((Engine::Http, http));
     }
     Err(CoreError::EngineMissing(ENGINE_MISSING_MESSAGE.into()))
 }
@@ -174,7 +206,9 @@ pub struct PartEnd {
 }
 
 /// Arguments for the headless recording mpv. The URL is validated by the
-/// caller; `--` keeps it from being read as an option.
+/// caller; `--` keeps it from being read as an option. `--stream-record`
+/// only needs the demuxed packets, so the video decoder skips every frame
+/// (`--vd-lavc-skipframe=all`) instead of decoding what `--vo=null` drops.
 pub fn mpv_args(source: &PlayerSource, path: &Path, pipe: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "--no-config".to_string(),
@@ -186,6 +220,7 @@ pub fn mpv_args(source: &PlayerSource, path: &Path, pipe: Option<&str>) -> Vec<S
         "--vo=null".to_string(),
         "--ao=null".to_string(),
         "--hwdec=no".to_string(),
+        "--vd-lavc-skipframe=all".to_string(),
         "--network-timeout=20".to_string(),
         format!("--stream-record={}", path.display()),
     ];
@@ -609,6 +644,34 @@ mod tests {
     }
 
     #[test]
+    fn plain_and_xtream_live_streams_are_copied_even_with_mpv() {
+        let mpv = || Some(PathBuf::from("C:/mpv/mpv.exe"));
+        let ts = src("http://h/live/1.ts", PlayerKind::Direct);
+        let (engine, out) = pick(ts.clone(), SourceKind::M3u, false, mpv).unwrap();
+        assert_eq!(engine, Engine::Http);
+        assert_eq!(out.url, ts.url);
+        let hls = src("http://h/live/u/p/7.m3u8", PlayerKind::Hls);
+        let (engine, out) = pick(hls.clone(), SourceKind::Xtream, false, mpv).unwrap();
+        assert_eq!(engine, Engine::Http);
+        assert_eq!(out.url, "http://h/live/u/p/7.ts");
+        // HLS that cannot be swapped goes to mpv.
+        let (engine, out) = pick(hls.clone(), SourceKind::M3u, false, mpv).unwrap();
+        assert_eq!(engine, Engine::Mpv(PathBuf::from("C:/mpv/mpv.exe")));
+        assert_eq!(out.url, hls.url);
+        // After a failed copy mpv takes over, with the original URL.
+        let (engine, out) = pick(hls.clone(), SourceKind::Xtream, true, mpv).unwrap();
+        assert!(matches!(engine, Engine::Mpv(_)));
+        assert_eq!(out.url, hls.url);
+        // Without mpv the copy keeps going, and HLS is refused.
+        let (engine, _) = pick(ts, SourceKind::M3u, true, || None).unwrap();
+        assert_eq!(engine, Engine::Http);
+        assert!(matches!(
+            pick(hls, SourceKind::M3u, false, || None),
+            Err(CoreError::EngineMissing(_))
+        ));
+    }
+
+    #[test]
     fn http_statuses_map_to_actionable_messages() {
         use reqwest::StatusCode as S;
         assert_eq!(
@@ -649,6 +712,7 @@ mod tests {
         for want in [
             "--vo=null",
             "--ao=null",
+            "--vd-lavc-skipframe=all",
             "--idle=no",
             "--no-config",
             "--user-agent=UA/1",

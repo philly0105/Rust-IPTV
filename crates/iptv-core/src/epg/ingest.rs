@@ -32,6 +32,16 @@ pub const TICK: Duration = Duration::from_secs(30);
 /// Minimum gap between two `epg.progress` events of one url while parsing.
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 
+/// `epg.changed` payload when only a url's status moved (a refresh started,
+/// or the server answered 304): no guide data changed, so clients refetch
+/// `epg.sources` and keep their guide windows.
+#[derive(Serialize)]
+struct StatusOnly {
+    reason: &'static str,
+}
+
+const STATUS_ONLY: StatusOnly = StatusOnly { reason: "status" };
+
 /// Process-wide EPG runtime.
 pub struct EpgRuntime {
     sem: Arc<Semaphore>,
@@ -355,9 +365,15 @@ async fn run_refresh(
                 ms = started.elapsed().as_millis() as u64,
                 "EPG refresh done"
             );
-            rt.bump();
             progress(&state, &url, "done", stats.programs, stats.warning.clone());
-            state.emit("epg.changed", serde_json::json!({}));
+            // A 304 kept the stored guide: only the url's status moved, so
+            // cached directories stay valid and clients keep their guide windows.
+            if stats.not_modified {
+                state.emit("epg.changed", STATUS_ONLY);
+            } else {
+                rt.bump();
+                state.emit("epg.changed", serde_json::json!({}));
+            }
         }
         Err(err) => {
             let msg = user_message(err);
@@ -421,7 +437,7 @@ async fn refresh_inner(state: &Arc<AppState>, cfg: &ConfiguredUrl) -> CoreResult
             .unwrap_or_default()
     };
     progress(state, &url, "fetching", 0, None);
-    state.emit("epg.changed", serde_json::json!({}));
+    state.emit("epg.changed", STATUS_ONLY);
 
     // Conditional GET only when the stored data came from that ETag.
     let etag = row

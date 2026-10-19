@@ -43,9 +43,10 @@ export function EpgSection({ settings, update }: SectionProps) {
       setLive((prev) => ({ ...prev, [e.url]: e }));
       if (e.phase === 'done' || e.phase === 'error') void invalidate('epg.sources');
     });
-    const offChanged = onAppEvent('epg.changed', () => {
+    const offChanged = onAppEvent('epg.changed', (e) => {
       setLive({});
-      void invalidate('epg.');
+      // A status-only change (a refresh starting, a 304) leaves the guide data as it was.
+      void invalidate(e.reason === 'status' ? 'epg.sources' : 'epg.');
     });
     return () => {
       offProgress();

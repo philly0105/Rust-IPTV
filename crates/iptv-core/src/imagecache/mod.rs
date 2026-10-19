@@ -73,7 +73,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use store::{Lookup, Op};
-use tokio::sync::{mpsc, oneshot, OnceCell};
+use tokio::sync::{mpsc, oneshot, OnceCell, Semaphore};
 use url::Url;
 
 /// Folder under the data dir that holds the cached files.
@@ -450,6 +450,17 @@ struct ImageCache {
     /// they are served from the original's entry.
     kept: Mutex<HashSet<u64>>,
     next_flight: AtomicU64,
+    /// Resizes running at once ([`resize_slots`]): a poster wall's first
+    /// view queued one per poster, all decoding at the same time.
+    resizes: Semaphore,
+}
+
+/// Resizes at once: every core but one, so a poster wall's first view leaves
+/// a core for the UI and playback.
+fn resize_slots() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |n| n.get().saturating_sub(1))
+        .max(1)
 }
 
 /// The cache of `state`, created on first use (tests and the server
@@ -471,6 +482,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
             touched: Mutex::default(),
             kept: Mutex::default(),
             next_flight: AtomicU64::new(1),
+            resizes: Semaphore::new(resize_slots()),
         })
     })
 }
@@ -796,12 +808,7 @@ impl ImageCache {
         };
         // Only the copy the caller shows is kept, not the original. The
         // resizer borrows the body and hands it back when it keeps it.
-        let (shrunk, body) = tokio::task::spawn_blocking(move || {
-            let shrunk = resize::shrink(&body, width);
-            (shrunk, body)
-        })
-        .await
-        .map_err(|e| ImageError::local(CoreError::from(e)))?;
+        let (shrunk, body) = self.shrink(body, width).await?;
         match shrunk {
             resize::Shrunk::Resized {
                 content_type: small_type,
@@ -828,9 +835,7 @@ impl ImageCache {
         width: u32,
         body: Vec<u8>,
     ) -> Result<Option<Done>, ImageError> {
-        let shrunk = tokio::task::spawn_blocking(move || resize::shrink(&body, width))
-            .await
-            .map_err(|e| ImageError::local(CoreError::from(e)))?;
+        let (shrunk, _) = self.shrink(body, width).await?;
         match shrunk {
             resize::Shrunk::Keep => Ok(None),
             resize::Shrunk::Resized {
@@ -842,6 +847,23 @@ impl ImageCache {
                     .map(Some)
             }
         }
+    }
+
+    /// [`resize::shrink`] on the blocking pool, at most [`resize_slots`] at
+    /// once; hands `body` back.
+    async fn shrink(
+        &self,
+        body: Vec<u8>,
+        width: u32,
+    ) -> Result<(resize::Shrunk, Vec<u8>), ImageError> {
+        // Never closed, so a permit always comes.
+        let _slot = self.resizes.acquire().await.ok();
+        tokio::task::spawn_blocking(move || {
+            let shrunk = resize::shrink(&body, width);
+            (shrunk, body)
+        })
+        .await
+        .map_err(|e| ImageError::local(CoreError::from(e)))
     }
 
     /// Writes `body` under `key` and queues its index row (`url` is what
@@ -972,11 +994,18 @@ pub async fn fetch_sized(
     };
     let cache = cache(state);
     cache.ready().await?;
-    let source = load_source(state, source_id).await?;
     let mode = http::server_mode(state);
-    if let Some(mode) = &mode {
-        mode.guard.check(&url, source.trusted.as_ref()).await?;
-    }
+    // Server mode checks the URL against the source's authority first, hit
+    // or not. The desktop needs the source row only to fetch, so a hit
+    // skips reading it.
+    let checked = match &mode {
+        Some(mode) => {
+            let source = load_source(state, source_id).await?;
+            mode.guard.check(&url, source.trusted.as_ref()).await?;
+            Some(source)
+        }
+        None => None,
+    };
     if let Some(image) = cache.lookup(&key).await? {
         return Ok(image);
     }
@@ -985,6 +1014,10 @@ pub async fn fetch_sized(
             return Ok(image);
         }
     }
+    let source = match checked {
+        Some(source) => source,
+        None => load_source(state, source_id).await?,
+    };
     let scope = flight_scope(
         mode.as_ref().is_some_and(|m| !m.guard.allow_private),
         source.trusted.as_ref(),

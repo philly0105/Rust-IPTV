@@ -27,6 +27,12 @@ pub const JPEG_QUALITY: u8 = 82;
 const MAX_SOURCE_SIDE: u32 = 8192;
 /// Decoder allocation cap (an 8192x8192 RGBA image is 256 MiB).
 const MAX_DECODE_ALLOC: u64 = 192 * 1024 * 1024;
+/// An image more than this many times the target width is first shrunk to
+/// that multiple with [`image::imageops::thumbnail`] (an integer box
+/// average), and only the rest is resampled with Catmull-Rom: the filter's
+/// cost grows with the source size, and a 2000x3000 original took about ten
+/// times a 600x900 poster.
+const PRESHRINK_FACTOR: u32 = 2;
 
 /// The bucket of a width hint: the smallest bucket at least `hint` wide, or
 /// `None` (serve the original) for 0 and hints above the largest bucket.
@@ -124,6 +130,11 @@ fn try_shrink(body: &[u8], width: u32) -> Option<Shrunk> {
         return None;
     }
     let nh = ((u64::from(h) * u64::from(width) + u64::from(w) / 2) / u64::from(w)).max(1) as u32;
+    let mid = width.saturating_mul(PRESHRINK_FACTOR);
+    if w > mid {
+        let mh = ((u64::from(h) * u64::from(mid) + u64::from(w) / 2) / u64::from(w)).max(1) as u32;
+        img = img.thumbnail_exact(mid, mh);
+    }
     let small = img.resize_exact(width, nh, FilterType::CatmullRom);
     let mut out = Vec::with_capacity(body.len() / 2);
     let content_type = match format {
@@ -235,6 +246,33 @@ mod tests {
         assert!(small.len() < body.len());
         let decoded = image::load_from_memory(&small).unwrap();
         assert_eq!(decoded.dimensions(), (384, 576));
+    }
+
+    /// EP-4: a source far wider than the bucket is box-shrunk first; the
+    /// result still has the bucket's size and the source's colours.
+    #[test]
+    fn a_large_original_is_preshrunk_to_the_same_size() {
+        let img = RgbImage::from_pixel(2000, 3000, Rgb([200, 40, 90]));
+        let mut body = Vec::new();
+        JpegEncoder::new_with_quality(&mut body, 90)
+            .write_image(img.as_raw(), 2000, 3000, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let Shrunk::Resized {
+            body: small,
+            width,
+            height,
+            ..
+        } = shrink(&body, 192)
+        else {
+            panic!("expected a resized copy")
+        };
+        assert_eq!((width, height), (192, 288));
+        let decoded = image::load_from_memory(&small).unwrap().into_rgb8();
+        assert_eq!(decoded.dimensions(), (192, 288));
+        let px = decoded.get_pixel(96, 144);
+        for (got, want) in px.0.iter().zip([200u8, 40, 90]) {
+            assert!(got.abs_diff(want) <= 8, "{px:?}");
+        }
     }
 
     #[test]

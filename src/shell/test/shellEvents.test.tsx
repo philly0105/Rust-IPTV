@@ -128,6 +128,27 @@ describe('downloads.update (XB2-33)', () => {
   });
 });
 
+describe('epg.changed (EP-2)', () => {
+  it('keeps guide windows on a status-only change and refetches them on a data change', async () => {
+    expect(EVENT_INVALIDATION['epg.changed']).toBeUndefined();
+    mount();
+    const stale = (cmd: 'epg.sources' | 'epg.grid' | 'epg.nowNext') => queryClient.getQueryState(rpcKey(cmd))?.isInvalidated ?? false;
+    queryClient.setQueryData(rpcKey('epg.sources'), []);
+    queryClient.setQueryData(rpcKey('epg.grid'), {});
+    queryClient.setQueryData(rpcKey('epg.nowNext'), {});
+
+    // A refresh starting (or a 304): only the url's status moved.
+    emit('epg.changed', { reason: 'status' });
+    await vi.waitFor(() => expect(stale('epg.sources')).toBe(true));
+    expect(stale('epg.grid')).toBe(false);
+    expect(stale('epg.nowNext')).toBe(false);
+
+    emit('epg.changed', {});
+    await vi.waitFor(() => expect(stale('epg.grid')).toBe(true));
+    expect(stale('epg.nowNext')).toBe(true);
+  });
+});
+
 describe('connection lost toast (web)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

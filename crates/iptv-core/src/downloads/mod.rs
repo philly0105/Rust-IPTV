@@ -74,22 +74,41 @@ fn present(state: &AppState, mut d: Download) -> Download {
     d
 }
 
+/// [`present`] for a list. The files are checked on the blocking pool: a
+/// stat of a file on a sleeping disk would hold up a runtime worker.
+async fn present_all(
+    state: &Arc<AppState>,
+    rows: Vec<store::DownloadRow>,
+) -> CoreResult<Vec<Download>> {
+    let mut list: Vec<Download> = tokio::task::spawn_blocking(move || {
+        rows.into_iter()
+            .map(|r| {
+                let mut d = r.download;
+                store::derive_availability(&mut d);
+                d
+            })
+            .collect::<Vec<_>>()
+    })
+    .await?;
+    let m = manager::manager(state);
+    for d in &mut list {
+        if let Some(bytes) = m.live_bytes(d.id) {
+            d.bytes_downloaded = bytes;
+        }
+    }
+    Ok(list)
+}
+
 /// Every download, newest first.
 pub async fn list(state: &Arc<AppState>) -> CoreResult<Vec<Download>> {
     let rows = state.db_call(|c| store::list(c, false)).await?;
-    Ok(rows
-        .into_iter()
-        .map(|r| present(state, r.download))
-        .collect())
+    present_all(state, rows).await
 }
 
 /// Completed downloads (My Videos), most recently completed first.
 pub async fn list_completed(state: &Arc<AppState>) -> CoreResult<Vec<Download>> {
     let rows = state.db_call(|c| store::list(c, true)).await?;
-    Ok(rows
-        .into_iter()
-        .map(|r| present(state, r.download))
-        .collect())
+    present_all(state, rows).await
 }
 
 /// One download.

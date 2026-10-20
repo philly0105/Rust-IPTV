@@ -897,6 +897,21 @@ describe('embedded mpv recovery', () => {
     expect(usePlayerStore.getState()).toMatchObject({ positionSeconds: 3, status: 'playing' });
   });
 
+  it('a new play of the loaded item loads it again (Start over); an update that only renames it does not', async () => {
+    render(surfaceTree);
+    await tick();
+    const loadsBefore = calls('mpv.load').length;
+    act(() => usePlayerStore.setState({ source: { ...usePlayerStore.getState().source!, title: 'Renamed' } }));
+    await tick();
+    expect(calls('mpv.load').length).toBe(loadsBefore);
+    await act(async () => {
+      await usePlayerStore.getState().play({ ...usePlayerStore.getState().source! }, { mode: 'embedded-mpv' });
+    });
+    await tick();
+    expect(calls('mpv.load').length).toBe(loadsBefore + 1);
+    expect((calls('mpv.load').at(-1)![1] as { source: { url: string } }).source.url).toBe('http://h/movie/1.mkv');
+  });
+
   it('a placeholder without a stream URL pauses mpv instead of loading an empty URL', async () => {
     render(surfaceTree);
     await tick();

@@ -212,27 +212,118 @@ describe('the error overlay', () => {
     expect(vi.mocked(rpc).mock.calls.some(([name, args]) => name === 'sources.refresh' && (args as { id: string }).id === 's1')).toBe(true);
   });
 
-  it('raw MPEG-TS the browser cannot play, on Xtream: Play as HLS switches the format and plays the item again', async () => {
+  /** An Xtream source on the TS stream format, with the settings the HLS switch answers. */
+  async function xtreamOnTs(): Promise<void> {
     const { DEFAULT_SETTINGS } = await import('@/api/types');
     const { setSettingsCache, sourceKindOf } = await import('../store');
     handlers['sources.get'] = () => ({ id: 's1', kind: 'xtream' });
     await sourceKindOf('s1');
     setSettingsCache({ ...DEFAULT_SETTINGS, streamFormat: 'ts' });
     handlers['settings.update'] = (args) => ({ ...DEFAULT_SETTINGS, ...(args as { patch: object }).patch });
-    handlers['xtream.streamUrl'] = () => ({ url: 'http://h/m.m3u8', kind: 'hls', title: 'Movie', isLive: false, isRadio: false });
-    handlers['positions.get'] = () => null;
+    handlers['catalog.item'] = () => ({ ref: live, name: 'News', number: 7, categoryId: 'news', isRadio: false });
+    handlers['epg.nowNext'] = () => ({});
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://h/live/7.m3u8', kind: 'hls', title: 'News', isLive: true, isRadio: false });
+  }
+  const tsChannel: PlayerSource = { url: 'http://h/live/7.ts', kind: 'direct', title: 'News', isLive: true, isRadio: false, ref: live };
+
+  it('raw MPEG-TS the browser cannot play, on an Xtream channel: Play as HLS switches the format and plays the channel again', async () => {
+    await xtreamOnTs();
     render(
       <MemoryRouter>
         <InlinePlayer />
       </MemoryRouter>,
     );
-    fail({ url: 'http://h/m.ts', kind: 'direct', title: 'Movie', isLive: false, isRadio: false, ref: movie }, 'MEDIA_ERR_SRC_NOT_SUPPORTED');
+    fail(tsChannel, 'MEDIA_ERR_SRC_NOT_SUPPORTED');
     expect(screen.getByRole('alert').textContent).toContain(en.errorTsXtream);
     const actions = screen.getByTestId('error-actions');
     expect(Array.from(actions.querySelectorAll('button')).map((b) => b.dataset['action'])).toEqual(['playAsHls', 'playbackSettings']);
     fireEvent.click(screen.getByRole('button', { name: 'Play as HLS' }));
-    await waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://h/m.m3u8'));
+    await waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://h/live/7.m3u8'));
     expect(vi.mocked(rpc).mock.calls.find(([name]) => name === 'settings.update')?.[1]).toEqual({ patch: { streamFormat: 'm3u8' } });
+  });
+
+  it('another channel picked while Play as HLS saves the setting keeps playing: neither channel starts again', async () => {
+    await xtreamOnTs();
+    const { DEFAULT_SETTINGS } = await import('@/api/types');
+    let saved!: () => void;
+    handlers['settings.update'] = () => new Promise((resolve) => (saved = () => resolve({ ...DEFAULT_SETTINGS, streamFormat: 'm3u8' })));
+    render(
+      <MemoryRouter>
+        <InlinePlayer />
+      </MemoryRouter>,
+    );
+    fail(tsChannel, 'MEDIA_ERR_SRC_NOT_SUPPORTED');
+    fireEvent.click(screen.getByRole('button', { name: 'Play as HLS' }));
+    const other: PlayerSource = { url: 'http://h/live/8.m3u8', kind: 'hls', title: 'Sport', isLive: true, isRadio: false, ref: { ...live, itemId: '8' } };
+    await act(async () => {
+      await usePlayerStore.getState().play(other);
+    });
+    await act(async () => {
+      saved();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(usePlayerStore.getState().source).toBe(other);
+    expect(vi.mocked(rpc).mock.calls.some(([name]) => name === 'catalog.item' || name === 'xtream.streamUrl')).toBe(false);
+  });
+
+  it('a Stop while Play as HLS saves the setting stays stopped', async () => {
+    await xtreamOnTs();
+    const { DEFAULT_SETTINGS } = await import('@/api/types');
+    let saved!: () => void;
+    handlers['settings.update'] = () => new Promise((resolve) => (saved = () => resolve({ ...DEFAULT_SETTINGS, streamFormat: 'm3u8' })));
+    render(
+      <MemoryRouter>
+        <InlinePlayer />
+      </MemoryRouter>,
+    );
+    fail(tsChannel, 'MEDIA_ERR_SRC_NOT_SUPPORTED');
+    fireEvent.click(screen.getByRole('button', { name: 'Play as HLS' }));
+    act(() => usePlayerStore.getState().stop());
+    await act(async () => {
+      saved();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(usePlayerStore.getState()).toMatchObject({ source: undefined, status: 'idle' });
+    expect(vi.mocked(rpc).mock.calls.some(([name]) => name === 'catalog.item' || name === 'xtream.streamUrl')).toBe(false);
+  });
+
+  it.each([
+    ['movie', { url: 'http://h/movie/demo/secret/42.ts', kind: 'direct', title: 'Movie', isLive: false, isRadio: false, ref: movie }],
+    ['catch-up programme', { url: 'http://h/timeshift/demo/secret/60/2026-10-20:20-00/7.ts', kind: 'direct', title: 'News', isLive: false, isRadio: false, ref: live }],
+  ] as const)('a TS %s on Xtream gets no Play as HLS: the setting only changes live streams', async (_name, source) => {
+    await xtreamOnTs();
+    render(
+      <MemoryRouter>
+        <InlinePlayer />
+      </MemoryRouter>,
+    );
+    fail(source, 'MEDIA_ERR_SRC_NOT_SUPPORTED');
+    // The browser has no link to hand out (an Xtream link is a login): the desktop app plays it.
+    expect(screen.getByRole('alert').textContent).toContain(en.errorTsBrowserDesktop);
+    expect(screen.getByRole('alert').textContent).not.toContain(en.errorTsXtream);
+    const actions = screen.getByTestId('error-actions');
+    expect(Array.from(actions.querySelectorAll('button')).map((b) => b.dataset['action'])).toEqual(['retry']);
+  });
+
+  it('another title played while Refresh source imports keeps playing: the import replays nothing', async () => {
+    let imported!: () => void;
+    handlers['sources.refresh'] = () => new Promise((resolve) => (imported = () => resolve({ id: 's1' })));
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'm3u' });
+    handlers['catalog.item'] = () => ({ ref: movie, name: 'Movie', url: 'http://h/moved.mp4' });
+    handlers['positions.get'] = () => null;
+    render(<InlinePlayer />);
+    fail({ url: 'http://h/m.mp4', kind: 'direct', title: 'Movie', isLive: false, isRadio: false, ref: movie }, 'HTTP 404');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh source' }));
+    const other: PlayerSource = { url: 'http://h/other.mp4', kind: 'direct', title: 'Other', isLive: false, isRadio: false, ref: { ...movie, itemId: '43' } };
+    await act(async () => {
+      await usePlayerStore.getState().play(other);
+    });
+    await act(async () => {
+      imported();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(usePlayerStore.getState().source).toBe(other);
+    expect(vi.mocked(rpc).mock.calls.some(([name]) => name === 'catalog.item')).toBe(false);
   });
 
   it('Copy details copies the headline and the engine’s words, with the login taken out', async () => {

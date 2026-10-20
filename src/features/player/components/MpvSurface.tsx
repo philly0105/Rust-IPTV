@@ -503,9 +503,11 @@ export function MpvSurface({ className }: { className?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load (or reload) the current source into the attached session.
+  // Load (or reload) the current source into the attached session: a new item, or a new play of
+  // the same one (Start over, a recovery that resolved the same link).
   const loadKey = source ? mpvLoadKey(source) : '';
   const hasSource = !!source;
+  const generation = usePlayerStore((s) => s.playGeneration);
   useEffect(() => {
     if (sessionNonce === 0 || !hasSource) return;
     const src = usePlayerStore.getState().source;
@@ -538,7 +540,7 @@ export function MpvSurface({ className }: { className?: string }) {
     return () => {
       stale = true;
     };
-  }, [sessionNonce, loadKey, reloadNonce, hasSource]);
+  }, [sessionNonce, loadKey, generation, reloadNonce, hasSource]);
 
   // Cut the menu out of the video as it opens, give the video back as it closes.
   useEffect(() => {

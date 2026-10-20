@@ -1426,4 +1426,109 @@ describe('replayFromRef: the item again, its stream looked up anew (PL-ERROR-DEA
     await usePlayerStore.getState().play({ url: 'http://h/a.mp4', kind: 'direct', title: 'A', isLive: false, isRadio: false });
     await expect(store.replayFromRef()).resolves.toBe(false);
   });
+
+  it('a Stop while the channel is looked up again wins: the failed channel does not start again', async () => {
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'm3u' });
+    handlers['epg.nowNext'] = () => ({});
+    await playChannel(channel(1, { url: 'http://h/old/101.m3u8' }), 'm3u');
+    let answer!: (c: Channel) => void;
+    handlers['catalog.item'] = () => new Promise<Channel>((resolve) => (answer = resolve));
+    const replaying = store.replayFromRef();
+    await flush();
+    usePlayerStore.getState().stop();
+    answer(channel(1, { url: 'http://h/new/101.m3u8' }));
+    await expect(replaying).resolves.toBe(false);
+    await flush();
+    expect(usePlayerStore.getState()).toMatchObject({ source: undefined, status: 'idle' });
+  });
+
+  it('a newer play while the item is looked up again wins over the recovery', async () => {
+    let kind!: (s: { id: string; kind: 'xtream' }) => void;
+    handlers['sources.get'] = () => new Promise((resolve) => (kind = resolve));
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/movie/9.m3u8', kind: 'hls', title: 'srv', isLive: false, isRadio: false });
+    await usePlayerStore.getState().play(vod('9', { url: 'http://x/movie/9.ts', ref: { sourceId: 's9', contentType: 'movie', itemId: '9' } }));
+    const replaying = store.replayFromRef();
+    await flush();
+    await playSource(vod('10'));
+    kind({ id: 's9', kind: 'xtream' });
+    await expect(replaying).resolves.toBe(false);
+    await flush();
+    expect(calls('xtream.streamUrl')).toHaveLength(0);
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('10');
+  });
+
+  it('a recovery taken before a Stop or a newer play gives up, without asking for the stream', async () => {
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/movie/9.m3u8', kind: 'hls', title: 'srv', isLive: false, isRadio: false });
+    await usePlayerStore.getState().play(vod('9', { url: 'http://x/movie/9.ts' }));
+    // The press (Play as HLS, Refresh source) took its point; its setting or import is on its way.
+    const pressed = store.recoveryPoint();
+    await playSource(vod('10'));
+    await expect(store.replayFromRef(pressed)).resolves.toBe(false);
+    const stopped = store.recoveryPoint();
+    usePlayerStore.getState().stop();
+    await expect(store.replayFromRef(stopped)).resolves.toBe(false);
+    expect(calls('xtream.streamUrl')).toHaveLength(0);
+    expect(usePlayerStore.getState().source).toBeUndefined();
+  });
+
+  it('keeps a start over until it saved a position of its own (the old resume row stays saved)', async () => {
+    const ref: ItemRef = { sourceId: 's1', contentType: 'movie', itemId: '9' };
+    let saved = { ref, positionSeconds: 900, durationSeconds: 3000, updatedAt: '', watched: false };
+    // The core puts the saved row's point in an Xtream stream answer.
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/movie/9.mkv', kind: 'direct', title: 'srv', isLive: false, isRadio: false, resumeSeconds: saved.positionSeconds });
+    handlers['positions.get'] = () => saved;
+    handlers['positions.set'] = (a) => {
+      saved = { ...saved, positionSeconds: (a as { positionSeconds: number }).positionSeconds };
+    };
+    await playItem({ ref, title: 'Film', isLive: false, sourceKind: 'xtream', fromStart: true });
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+    // It fails before anything was saved: the recovery starts from 0 again, not from 15:00.
+    usePlayerStore.setState({ status: 'error', error: 'HTTP 404' });
+    await expect(store.replayFromRef()).resolves.toBe(true);
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+    expect(usePlayerStore.getState().positionSeconds).toBe(0);
+    expect(calls('positions.remove')).toHaveLength(0);
+    // It played to 2:00 and that landed: a recovery now resumes there.
+    usePlayerStore.setState({ status: 'playing', positionSeconds: 120 });
+    store.flushProgress();
+    await flush();
+    usePlayerStore.setState({ status: 'error', error: 'HTTP 404' });
+    await expect(store.replayFromRef()).resolves.toBe(true);
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(120);
+  });
+
+  it('a plain play of the item after a start over resumes, and so does its recovery', async () => {
+    const ref: ItemRef = { sourceId: 's1', contentType: 'movie', itemId: '9' };
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/movie/9.mkv', kind: 'direct', title: 'srv', isLive: false, isRadio: false, resumeSeconds: 900 });
+    handlers['positions.get'] = () => ({ ref, positionSeconds: 900, durationSeconds: 3000, updatedAt: '', watched: false });
+    await playItem({ ref, title: 'Film', isLive: false, sourceKind: 'xtream', fromStart: true });
+    await playItem({ ref, title: 'Film', isLive: false, sourceKind: 'xtream' });
+    await expect(store.replayFromRef()).resolves.toBe(true);
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(900);
+  });
+});
+
+describe('playGeneration: a new play of the same media loads it again', () => {
+  it('counts every play, one of the same URL too, and not an update that only renames the item', async () => {
+    const before = usePlayerStore.getState().playGeneration;
+    await usePlayerStore.getState().play(vod('9'));
+    await usePlayerStore.getState().play(vod('9'));
+    expect(usePlayerStore.getState().playGeneration).toBe(before + 2);
+    usePlayerStore.setState({ source: { ...usePlayerStore.getState().source!, title: 'Renamed' } });
+    expect(usePlayerStore.getState().playGeneration).toBe(before + 2);
+  });
+
+  it('a start over of the movie playing, resolved to the same URL, is a new play from 0', async () => {
+    const ref: ItemRef = { sourceId: 's1', contentType: 'movie', itemId: '9' };
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/movie/9.mkv', kind: 'direct', title: 'srv', isLive: false, isRadio: false, resumeSeconds: 900 });
+    handlers['positions.get'] = () => ({ ref, positionSeconds: 900, durationSeconds: 3000, updatedAt: '', watched: false });
+    await playItem({ ref, title: 'Film', isLive: false, sourceKind: 'xtream' });
+    usePlayerStore.setState({ status: 'playing', positionSeconds: 1500 });
+    const playing = usePlayerStore.getState().playGeneration;
+    await playItem({ ref, title: 'Film', isLive: false, sourceKind: 'xtream', fromStart: true });
+    const s = usePlayerStore.getState();
+    expect(s.source?.url).toBe('http://x/movie/9.mkv');
+    expect(s.playGeneration).toBe(playing + 1);
+    expect(s.positionSeconds).toBe(0);
+  });
 });

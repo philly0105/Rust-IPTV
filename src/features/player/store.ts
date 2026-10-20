@@ -70,6 +70,13 @@ export interface PlayerState {
   durationSeconds?: number;
   queue: PlayerSource[];
   zapContext?: ZapContext;
+  /**
+   * Counts the plays `play` committed. The surfaces load their media again when it changes, even
+   * for the same URL (a Start over of the item playing, a recovery that resolved the same link).
+   * Updates that only describe the item (a channel's new name) leave it alone, so they never
+   * reload the stream.
+   */
+  playGeneration: number;
 }
 
 export interface PlayerActions {
@@ -133,6 +140,12 @@ let externalChoice: { source: PlayerSource; player: 'mpv' | 'vlc' } | null = nul
  * series never prompts twice.
  */
 let allowedRefKey: string | null = null;
+/**
+ * The item (`playKey`) a Start over began, until this playback saves a position of its own. A
+ * Start over leaves the saved row alone, so a recovery that looks the item up again
+ * (`replayFromRef`) would otherwise resume from that old row and undo the user's choice.
+ */
+let startOverKey: string | null = null;
 /** Saved positions this close to the start are not worth a resume (and no "Resumed at 0:03"). */
 export const MIN_RESUME_SECONDS = 5;
 /**
@@ -290,6 +303,11 @@ export function sameSource(a: PlayerSource | undefined, b: PlayerSource | undefi
     );
   }
   return a.url === b.url;
+}
+
+/** One item with its episode, as `sameSource` tells items apart. */
+function playKey(ref: ItemRef, episodeId: string | undefined): string {
+  return `${itemKey(ref)}|${episodeId ?? ''}`;
 }
 
 const SETTINGS_KEY = rpcKey('settings.get');
@@ -456,6 +474,8 @@ function savePosition(): Promise<void> {
   if (snap) args.snapshot = snap;
   return (lastSave = rpc('positions.set', args).then(
     () => {
+      // A start over has its own resume point now: a recovery resumes from it.
+      if (startOverKey === playKey(source.ref, source.episodeId)) startOverKey = null;
       // C4 caches `positions.` for 15 s and no event follows a save: mark it stale so Continue
       // Watching reads the new position on its next mount. No refetch now: this runs every 5 s.
       void queryClient.invalidateQueries({ predicate: (q) => isPositionsKey(q.queryKey), refetchType: 'none' });
@@ -529,6 +549,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   muted: initialVolume.muted,
   positionSeconds: 0,
   queue: [],
+  playGeneration: 0,
 
   async play(source, opts) {
     const token = ++playToken;
@@ -572,6 +593,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       positionSeconds: source.resumeSeconds ?? 0,
       durationSeconds: undefined,
       dock: mode === 'external' ? 'hidden' : stageCount > 0 ? 'stage' : 'mini',
+      playGeneration: get().playGeneration + 1,
     });
 
     if (source.ref) {
@@ -1322,6 +1344,8 @@ export async function startItem(
   const gate: PlaybackGateItem = args.categoryId ? { ref: args.ref, categoryId: args.categoryId, title: args.title } : { ref: args.ref, title: args.title };
   if (!(await passGate(gate))) return seq === requestSeq ? 'refused' : 'superseded';
   if (seq !== requestSeq) return 'superseded';
+  // Any other start replaces a start over's intent (a plain play of the same item resumes).
+  startOverKey = args.fromStart ? playKey(args.ref, args.episodeId) : null;
   opts?.onAllowed?.();
   if (!opts?.keepList) leaveListZap(args.ref);
   const queueOpts = opts?.queue ? { queue: opts.queue } : undefined;
@@ -1488,31 +1512,61 @@ export async function refreshPlayingChannel(sourceId?: string): Promise<void> {
  * cannot do, since that reloads the same URL. For the error screen's actions that change what
  * the lookup answers (a refreshed source, the Xtream stream format switched to HLS). A channel
  * row this session holds may carry the old URL, so it is read again from the catalog. Keeps the
- * queue; false when there is no ref to look up or the lookup fails.
+ * queue, and a Start over that has not saved a position of its own starts from 0 again.
+ *
+ * `from` is where the recovery began (`recoveryPoint`, taken as the user pressed the action):
+ * the item it replays, and the request it may replace. A Stop or any newer play since then
+ * (taken while the setting or the source refresh was on its way, or while this looks the item
+ * up) wins, and the recovery gives up. False then, when there is no ref to look up, or when the
+ * lookup fails.
  */
-export async function replayFromRef(): Promise<boolean> {
-  const s = usePlayerStore.getState();
-  const src = s.source;
+export async function replayFromRef(from: RecoveryPoint | null = recoveryPoint()): Promise<boolean> {
+  const src = from?.source;
   const ref = src?.ref;
-  if (!src || !ref) return false;
+  if (!from || !src || !ref || !recoveryCurrent(from)) return false;
   try {
     const kind = await sourceKindOf(ref.sourceId);
+    if (!recoveryCurrent(from)) return false;
     if (src.isLive && (ref.contentType === 'live' || ref.contentType === 'radio')) {
       knownChannels.delete(itemKey(ref));
       const item = await rpc('catalog.item', { ref });
       if (!('isRadio' in item)) return false;
-      await playChannel(item, kind, { keepList: !!s.zapContext?.listId });
+      const settings = peekSettings() ?? (await getSettings());
+      // With the settings and the kind in hand, the tune claims its request at once.
+      if (!recoveryCurrent(from)) return false;
+      await tuneChannel(item, kind, { keepList: from.listZap, settings });
       return true;
     }
     const args: PlayItemArgs = { ref, title: src.title, isLive: src.isLive, isRadio: src.isRadio, sourceKind: kind };
     if (src.episodeId) args.episodeId = src.episodeId;
     if (src.subtitle) args.subtitle = src.subtitle;
     if (src.posterUrl) args.posterUrl = src.posterUrl;
-    await startItem(args, s.queue.length ? { queue: s.queue } : undefined);
+    if (startOverKey === playKey(ref, src.episodeId)) args.fromStart = true;
+    await startItem(args, from.queue.length ? { queue: from.queue } : undefined);
     return true;
   } catch {
     return false;
   }
+}
+
+/** Where a recovery action began: the item on screen and the request it may replace. */
+export interface RecoveryPoint {
+  readonly seq: number;
+  readonly source: PlayerSource;
+  readonly queue: PlayerSource[];
+  /** Zapping walked a channel list: the replayed channel keeps walking it. */
+  readonly listZap: boolean;
+}
+
+/** The recovery point for what is on screen now (none when nothing is). */
+export function recoveryPoint(): RecoveryPoint | null {
+  const s = usePlayerStore.getState();
+  return s.source ? { seq: requestSeq, source: s.source, queue: s.queue, listZap: !!s.zapContext?.listId } : null;
+}
+
+/** No Stop and no newer play since `from` was taken: its recovery may still start the item. */
+export function recoveryCurrent(from: RecoveryPoint): boolean {
+  return from.seq === requestSeq;
 }
 
 interface TuneOptions {
@@ -2158,6 +2212,7 @@ export function __resetPlayerForTests(): void {
   finishedSavedFor = undefined;
   failedResolve = null;
   allowedRefKey = null;
+  startOverKey = null;
   sourceKindCache.clear();
   stopSaver();
   if (upNextTimer) clearTimeout(upNextTimer);

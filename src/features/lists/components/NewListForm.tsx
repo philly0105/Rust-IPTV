@@ -17,16 +17,20 @@ export interface NewListFormProps {
   lists: readonly CustomList[] | undefined;
   /** The new list starts with this channel. */
   channel?: Channel;
+  /** The new list starts with these channels (a whole group); wins over `channel`. */
+  channels?: readonly Channel[];
+  /** The name the field starts with (a group's name). */
+  initialName?: string;
   onCreated?(list: CustomList): void;
   autoFocus?: boolean;
   className?: string;
 }
 
-export function NewListForm({ lists, channel, onCreated, autoFocus, className }: NewListFormProps) {
+export function NewListForm({ lists, channel, channels, initialName, onCreated, autoFocus, className }: NewListFormProps) {
   const { t } = useTranslation('lists');
   const actions = useListActions();
   const id = useId();
-  const [name, setName] = useState('');
+  const [name, setName] = useState(initialName ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const atLimit = (lists?.length ?? 0) >= MAX_LISTS;
@@ -42,7 +46,7 @@ export function NewListForm({ lists, channel, onCreated, autoFocus, className }:
     }
     setBusy(true);
     try {
-      const list = await actions.create(name, channel);
+      const list = await actions.create(name, channels ?? channel);
       setName('');
       setError(null);
       onCreated?.(list);

@@ -141,5 +141,7 @@
   "announceSwapped": "{{a}} и {{b}} поменялись местами",
   "announceLayout": "Раскладка: {{layout}}",
   "announceMuted": "Звук стены выключен",
-  "announceUnmuted": "Звук стены включён"
+  "announceUnmuted": "Звук стены включён",
+  "pickerScope": "Показать",
+  "pickerEmptyScope": "Здесь нет ничего из этого источника"
 }

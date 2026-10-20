@@ -868,3 +868,42 @@ describe('picker connection limit', () => {
     expect(within(free).queryByTestId('multiview-picker-row-limit')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Picker: browsing by group and view, with what is on (LG-19)
+// ---------------------------------------------------------------------------
+
+describe('picker browsing (LG-19)', () => {
+  it('browses one group of the source and names each row by what is on', async () => {
+    handlers['catalog.categories'] = () => [{ id: 'sport', sourceId: 'm3u1', contentType: 'live', name: 'Sport', hidden: false, itemCount: 2, position: 0 }];
+    handlers['lists.list'] = () => [];
+    handlers['catalog.channels'] = (a) =>
+      (a as { categoryId?: string }).categoryId === 'sport'
+        ? { items: [channel(5, 'm3u1'), channel(6, 'm3u1')], total: 2 }
+        : { items: [1, 2, 3, 4, 5, 6].map((i) => channel(i, 'm3u1')), total: 6 };
+    handlers['epg.nowNext'] = () => ({ 'm3u1|live|c5': { now: { title: 'Cup final', start: '2026-10-20T10:00:00Z', end: '2026-10-20T12:00:00Z' } } });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('multiview-pick'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add channels' });
+    fireEvent.change(within(dialog).getByLabelText('Source'), { target: { value: 'm3u1' } });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));
+    fireEvent.click(await screen.findByRole('option', { name: /^Sport/ }));
+    await waitFor(() => expect(within(dialog).getAllByTestId('multiview-picker-row')).toHaveLength(2));
+    expect(calls.some((c) => c.cmd === 'catalog.channels' && (c.args as { categoryId?: string }).categoryId === 'sport')).toBe(true);
+    expect(await within(dialog).findByText('Cup final')).toBeTruthy();
+  });
+});
+
+describe('layout reasons', () => {
+  it('a layout that cannot hold the tiles stays reachable and says why', async () => {
+    seed([1, 2, 3]);
+    renderPage();
+    const side = await screen.findByTestId('multiview-layout-1x2');
+    expect(side.getAttribute('aria-disabled')).toBe('true');
+    expect(side.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(side);
+    expect(useMultiviewStore.getState().layout).toBe('2x2');
+    fireEvent.mouseEnter(side);
+    expect((await screen.findByRole('tooltip', {}, { timeout: 2000 })).textContent).toContain('Holds two channels');
+  });
+});

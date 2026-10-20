@@ -1,12 +1,13 @@
-import { EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { EllipsisVertical, EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
 
-import { Button, ErrorState, IconButton, SearchInput, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
+import { Button, cn, ErrorState, IconButton, SearchInput, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+import { useLongPress } from '../hooks/useLongPress';
 import { documentIsRtl } from '../lib/rtl';
 
 /** A group row's slot at 100 %. */
@@ -35,6 +36,11 @@ export interface CategorySidebarProps {
   onGroupMenu?(pos: { x: number; y: number }, category: Category): void;
   /** Parental Ask mode: the group asks for the PIN, so its row carries a lock. */
   isLocked?(categoryId: string): boolean;
+  /**
+   * LG-12: views pinned above "All channels" (Favorites, Recently watched). Their `id` goes through
+   * `hrefFor` like a group's and is `activeId` while open; they are not filtered and have no menu.
+   */
+  pinned?: readonly { id: string; label: string; icon: ReactNode }[];
 }
 
 function linkClass(active: boolean): string {
@@ -99,6 +105,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
     virtualizer.scrollToIndex(activeIndex, { align: 'auto' });
   }, [activeIndex, props.activeId, virtualizer]);
 
+  const pinnedCount = props.pinned?.length ?? 0;
   // Roving focus: one tab stop in the list (the open group, else the first), arrows move between links.
   const [cursor, setCursor] = useState<number>(ALL);
   const tabStop = cursor !== ALL && cursor < visible.length ? cursor : activeIndex >= 0 ? activeIndex : 0;
@@ -113,9 +120,14 @@ export function CategorySidebar(props: CategorySidebarProps) {
     }
   });
   const moveTo = (i: number) => {
-    const next = Math.max(ALL, Math.min(visible.length - 1, i));
+    const next = Math.max(ALL - pinnedCount, Math.min(visible.length - 1, i));
     if (next === ALL) {
       navRef.current?.querySelector<HTMLElement>('[data-cat-index="all"]')?.focus();
+      return;
+    }
+    if (next < ALL) {
+      // The pinned views sit above All channels, in order.
+      navRef.current?.querySelector<HTMLElement>(`[data-cat-index="pin-${next - ALL + pinnedCount}"]`)?.focus();
       return;
     }
     focusPending.current = next;
@@ -132,6 +144,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
     if (!(el instanceof HTMLElement)) return null;
     const raw = el.dataset.catIndex;
     if (raw === undefined) return null;
+    if (raw.startsWith('pin-')) return ALL - pinnedCount + Number(raw.slice(4));
     return raw === 'all' ? ALL : Number(raw);
   };
   /** The group menu for the focused link, anchored near its inline start (its right edge in RTL). */
@@ -165,7 +178,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
         moveTo(Math.max(0, at - page));
         break;
       case 'Home':
-        moveTo(ALL);
+        moveTo(ALL - pinnedCount);
         break;
       case 'End':
         moveTo(visible.length - 1);
@@ -210,6 +223,25 @@ export function CategorySidebar(props: CategorySidebarProps) {
         />
       </div>
 
+      {props.pinned?.map((p, k) => {
+        const on = props.activeId === p.id;
+        return (
+          <div key={p.id} className="px-2" style={{ height: rowHeight }}>
+            <Link
+              to={props.hrefFor(p.id)}
+              onClick={props.onNavigate}
+              data-cat-index={`pin-${k}`}
+              aria-current={on ? 'page' : undefined}
+              className={linkClass(on)}
+            >
+              <span aria-hidden className={`flex shrink-0 ${on ? 'text-accent' : 'text-fg-subtle'}`}>
+                {p.icon}
+              </span>
+              <span className="flex-1 truncate">{p.label}</span>
+            </Link>
+          </div>
+        );
+      })}
       <div className="px-2" style={{ height: rowHeight }}>
         {/* Plain links with an explicit aria-current: radio groups differ only in `?category=`, which NavLink ignores. */}
         <Link
@@ -258,33 +290,30 @@ export function CategorySidebar(props: CategorySidebarProps) {
               const active = props.activeId === c.id;
               const locked = props.isLocked?.(c.id) ?? false;
               return (
-                <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}>
-                  <Link
+                <div
+                  key={c.id}
+                  className="flex min-w-0 items-center"
+                  style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}
+                >
+                  <GroupLink
+                    category={c}
+                    index={v.index}
                     to={props.hrefFor(c.id)}
-                    onClick={props.onNavigate}
+                    active={active}
+                    locked={locked}
+                    tabbable={v.index === tabStop}
+                    count={fmt.format(c.itemCount)}
+                    onNavigate={props.onNavigate}
                     onFocus={() => setCursor(v.index)}
-                    data-cat-index={v.index}
-                    tabIndex={v.index === tabStop ? 0 : -1}
-                    aria-current={active ? 'page' : undefined}
-                    aria-haspopup={props.onGroupMenu ? 'menu' : undefined}
-                    onContextMenu={
+                    onMenu={
                       props.onGroupMenu
-                        ? (e) => {
-                            e.preventDefault();
+                        ? (pos) => {
                             setCursor(v.index);
-                            props.onGroupMenu?.({ x: e.clientX, y: e.clientY }, c);
+                            props.onGroupMenu?.(pos, c);
                           }
                         : undefined
                     }
-                    className={linkClass(active)}
-                    title={locked ? `${c.name} (${t('locked')})` : c.name}
-                  >
-                    <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
-                    {locked ? (
-                      <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={t('locked')} />
-                    ) : null}
-                    <span className={countClass(active)}>{fmt.format(c.itemCount)}</span>
-                  </Link>
+                  />
                 </div>
               );
             })}
@@ -302,5 +331,85 @@ export function CategorySidebar(props: CategorySidebarProps) {
         </button>
       ) : null}
     </nav>
+  );
+}
+
+/**
+ * A group's row: its link, and its menu (LG-13) from a right click, the context-menu key (the
+ * list's own handler), a long press, or on touch a ⋮ button. iOS Safari fires no `contextmenu` on
+ * a long press, so "Add all to list…" and "Open in TV guide" were out of reach on an iPhone or
+ * iPad. The button, not the link, says it opens a menu: the link navigates.
+ */
+function GroupLink({
+  category: c,
+  index,
+  to,
+  active,
+  locked,
+  tabbable,
+  count,
+  onNavigate,
+  onFocus,
+  onMenu,
+}: {
+  category: Category;
+  index: number;
+  to: string;
+  active: boolean;
+  locked: boolean;
+  tabbable: boolean;
+  count: string;
+  onNavigate?(): void;
+  onFocus(): void;
+  onMenu?(pos: { x: number; y: number }): void;
+}) {
+  const { t } = useTranslation('live');
+  const longPress = useLongPress((x, y) => onMenu?.({ x, y }));
+  // Inside the row's slot (a flex row): the link, then the touch screen's ⋮.
+  return (
+    <>
+      <Link
+        to={to}
+        onClick={onNavigate}
+        onFocus={onFocus}
+        data-cat-index={index}
+        tabIndex={tabbable ? 0 : -1}
+        aria-current={active ? 'page' : undefined}
+        onContextMenu={
+          onMenu
+            ? (e) => {
+                e.preventDefault();
+                onMenu({ x: e.clientX, y: e.clientY });
+              }
+            : undefined
+        }
+        {...(onMenu ? longPress : undefined)}
+        // No callout or text selection on a long press (iOS would offer to open the link).
+        className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
+        title={locked ? `${c.name} (${t('locked')})` : c.name}
+      >
+        <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
+        {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={t('locked')} /> : null}
+        <span className={countClass(active)}>{count}</span>
+      </Link>
+      {onMenu ? (
+        <IconButton
+          size="sm"
+          tabIndex={-1}
+          label={t('groupMenu')}
+          aria-haspopup="menu"
+          icon={<EllipsisVertical size={16} />}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            // Under the button from its inline start, as a channel row's ⋮ opens.
+            onMenu({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 });
+          }}
+          // Touch only, as tall as the row (a mouse has the right click). 44 px wide; the row's own
+          // height, so it never reaches into the next row.
+          className="hidden h-full shrink-0 pointer-coarse:inline-flex pointer-coarse:min-h-0"
+          data-testid="group-menu-button"
+        />
+      ) : null}
+    </>
   );
 }

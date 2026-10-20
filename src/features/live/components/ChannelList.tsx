@@ -21,6 +21,8 @@ export interface ChannelListProps {
   openOnDoubleClick: boolean;
   now: number;
   compact?: boolean;
+  /** Radio stations: see `ChannelRow.station`. */
+  station?: boolean;
   sourceKind?: SourceKind;
   /** Initial-height hint for tests and SSR-less environments. */
   initialHeight?: number;
@@ -377,6 +379,14 @@ export function ChannelList(props: ChannelListProps) {
     },
     [],
   );
+  // The ⋮ button and a long press (LG-04): the same menu, at the button or the finger.
+  const onRowMenuAt = useCallback(
+    (at: { x: number; y: number }, channel: Channel, index: number) => {
+      setActive(index);
+      propsRef.current.onContextMenu(at, channel, isFavoriteRef.current(index));
+    },
+    [],
+  );
 
   return (
     <>
@@ -401,7 +411,8 @@ export function ChannelList(props: ChannelListProps) {
           const to = e.relatedTarget;
           if (!(to instanceof Node && e.currentTarget.contains(to)) && (e.target as HTMLElement).isConnected) lastFocused.current = null;
         }}
-        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
+        // `group/list`: the cursor row is marked only while the list has focus (ChannelRow).
+        className={`group/list relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
           paged.refreshing ? 'opacity-60' : ''
         }`}
       >
@@ -425,6 +436,7 @@ export function ChannelList(props: ChannelListProps) {
                   playing={!!ch && sameRef(ch.ref, playingRef)}
                   active={v.index === active}
                   compact={props.compact}
+                  station={props.station}
                   now={now}
                   sourceKind={props.sourceKind}
                   stripPrefix={prefs.stripCountryPrefix}
@@ -434,6 +446,7 @@ export function ChannelList(props: ChannelListProps) {
                   onActivate={activate}
                   onToggleFavorite={props.onToggleFavorite}
                   onContextMenu={onRowContext}
+                  onMenuAt={onRowMenuAt}
                 />
               </div>
             );

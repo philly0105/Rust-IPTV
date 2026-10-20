@@ -12,7 +12,7 @@ import { itemKey, type Category, type Channel, type EpgProgram, type GuideSearch
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, GRID_SLOT_MIN, HIGHLIGHT_MS } from '../../components/EpgGridPage';
-import { addLocalDays, floorLocal, formatClock, formatDay, HOUR, MINUTE } from '../../lib/epgTime';
+import { addLocalDays, floorLocal, formatClockBare, formatDay, HOUR, MINUTE } from '../../lib/epgTime';
 import { findChannelIndex, LOCATE_PAGE } from '../search';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
@@ -72,7 +72,8 @@ afterEach(() => {
 const GRID = [{ path: '/epg', element: <EpgGridPage /> }];
 const gridFroms = () => rpc.of('epg.grid').map((a) => Date.parse((a as { from: string }).from));
 /** The window the toolbar shows starts at `s`. */
-const showsWindow = (s: number) => expect(screen.getByTestId('guide-window').textContent).toContain(`${formatDay(s, 'en')} ${formatClock(s, 'en')}`);
+// The window's start: its AM/PM is named once, at the range's end, when both ends share it.
+const showsWindow = (s: number) => expect(screen.getByTestId('guide-window').textContent).toContain(`${formatDay(s, 'en')} ${formatClockBare(s, 'en')}`);
 const atOf = () => {
   const v = new URLSearchParams(router.location!.search).get('at');
   return v === null ? null : Number(v);

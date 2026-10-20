@@ -359,7 +359,7 @@ describe('ArchivePage', () => {
     const list = await rows();
     expect(list.map((r) => r.getAttribute('data-state'))).toEqual(['playable', 'airing', 'future']);
     expect(list[2]?.getAttribute('aria-disabled')).toBe('true');
-    expect(within(list[1]!).getByText('Watch from start')).toBeTruthy();
+    expect(within(list[1]!).getByText('Play from start')).toBeTruthy();
     // The airing programme holds the roving tab stop.
     expect(list[1]?.getAttribute('tabindex')).toBe('0');
   });
@@ -479,10 +479,33 @@ describe('ArchivePage', () => {
     expect(await screen.findByText('Nothing listed for this day')).toBeTruthy();
   });
 
+  it('plays catch-up in its own full player and marks the programme it plays (LG-09)', async () => {
+    renderAt('/live/archive/src1/c0', ROUTE);
+    expect(within(await screen.findByTestId('archive-stage')).getByTestId('player-stage')).toBeTruthy();
+    const list = await rows();
+    fireEvent.click(list[0]!);
+    await waitFor(() => expect(recorded.playSource).toHaveLength(1));
+    // The fake player now holds the catch-up: its row says so.
+    await waitFor(async () => expect((await rows())[0]!.getAttribute('aria-current')).toBe('true'));
+    expect(within((await rows())[0]!).getByTestId('archive-playing')).toBeTruthy();
+    // Navigation back is "Live TV", not "Back to live" (the stream), LG-08.
+    expect(screen.getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/src1/live');
+  });
+
+  it('offers no download for an M3U archive that would stream on into live (FW-ARCHIVE-DOWNLOAD-UNBOUNDED)', async () => {
+    rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'm3u', name: 'Playlist' });
+    // No catch-up type: the `shift` form, ?utc=<start>&lutc=<now>, which has no end.
+    rpcMock.handlers['catalog.item'] = () => ch({ url: 'http://host/live/c0.ts', archive: { enabled: true, durationHours: 30 } });
+    renderAt('/live/archive/src1/c0', ROUTE);
+    const list = await rows();
+    expect(list[0]!.getAttribute('data-state')).toBe('playable');
+    expect(screen.queryByTestId('archive-download')).toBeNull();
+  });
+
   it('explains a channel without an archive and a missing channel', async () => {
     rpcMock.handlers['catalog.item'] = () => ch({ archive: undefined });
     renderAt('/live/archive/src1/c0', ROUTE);
-    expect(await screen.findByText('No archive for this channel')).toBeTruthy();
+    expect(await screen.findByText('No catch-up for this channel')).toBeTruthy();
     cleanup();
 
     rpcMock.handlers['catalog.item'] = () => {

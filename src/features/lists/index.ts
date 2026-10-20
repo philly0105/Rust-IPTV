@@ -22,5 +22,6 @@ export type { ListsSidebarSectionProps } from './components/ListsSidebarSection'
 export { useAddToListMenuItem, useAddToListShortcut } from './hooks/useAddToList';
 export { ListsDialogHost } from './host';
 export { CustomListRails } from './rails';
-export { openCreateList, openListPicker, openManageLists } from './store';
+export { openAddChannels, openAddGroupToList, openCreateList, openListPicker, openManageLists } from './store';
+export type { GroupTarget } from './store';
 export { LISTS_PATH, listPath } from './paths';

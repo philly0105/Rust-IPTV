@@ -14,7 +14,6 @@ export {
   EmptyState,
   ErrorState,
   IconButton,
-  initialsOf,
   isTypingTarget,
   Kbd,
   SearchInput,

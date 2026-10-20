@@ -10,7 +10,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { rpcKey, useRpcQuery } from '@/api/query';
 import { rpcRaw, type RpcResult } from '@/api/transport';
-import type { Channel, FavoriteEntry } from '@/api/types';
+import { sameRef, type Channel, type FavoriteEntry, type ItemRef } from '@/api/types';
 
 import type { PagedChannels } from '../hooks/usePagedChannels';
 
@@ -94,6 +94,22 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
     [favorites, queryClient, stamp], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const listChannel = useCallback((index: number): Channel | undefined => listChannels[index], [listChannels]);
+  // Every entry's ref is known without its channel: the guide finds a favorite's row (a focus link,
+  // a typed number, Go to playing) even when it is far from the rows on screen.
+  const listIndexOf = useCallback(
+    (ref: ItemRef) => {
+      const i = listChannels.findIndex((c) => sameRef(c.ref, ref));
+      return i < 0 ? undefined : i;
+    },
+    [listChannels],
+  );
+  const favoriteIndexOf = useCallback(
+    (ref: ItemRef) => {
+      const i = favorites.findIndex((e) => sameRef(e.ref, ref));
+      return i < 0 ? undefined : i;
+    },
+    [favorites],
+  );
 
   return useMemo(() => {
     if (!view) return null;
@@ -117,9 +133,10 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
       error: q.error,
       retry: () => void q.refetch(),
       loaded,
+      indexOf: isList ? listIndexOf : favoriteIndexOf,
       pageSize: total,
       guideUnavailable: false,
       retryGuide: () => undefined,
     };
-  }, [view?.kind, list, favs, listChannels, favorites, listChannel, favoriteChannel, setVisibleRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view?.kind, list, favs, listChannels, favorites, listChannel, favoriteChannel, listIndexOf, favoriteIndexOf, setVisibleRange]); // eslint-disable-line react-hooks/exhaustive-deps
 }

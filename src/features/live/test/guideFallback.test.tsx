@@ -10,7 +10,7 @@ import { HOUR, MINUTE } from '../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
 // Guide slice: the Xtream short-EPG fallback in the ribbon, the channel rows and the guide grid,
-// and the "Browse archive" entry points of the live context menu and the programme dialog.
+// and the "Browse catch-up" entry points of the live context menu and the programme dialog.
 
 configure({ asyncUtilTimeout: 10_000 });
 vi.setConfig({ testTimeout: 30_000 });
@@ -136,17 +136,17 @@ describe('LivePage short-EPG fallback and archive entry', () => {
     expect(shortCalls()).toHaveLength(0);
   });
 
-  it('offers "Browse archive" only on archive channels and opens the archive route', async () => {
+  it('offers "Browse catch-up" only on archive channels and opens the archive route', async () => {
     renderAt('/s/src1/live', LIVE);
     await screen.findByText('Channel 5');
     const row = (i: number) => document.querySelector<HTMLElement>(`[data-testid="channel-list"] [data-row-index="${i}"]`)!.parentElement!;
     fireEvent.contextMenu(row(5), { clientX: 40, clientY: 40 });
-    expect(within(await screen.findByRole('menu')).queryByRole('menuitem', { name: 'Browse archive' })).toBeNull();
+    expect(within(await screen.findByRole('menu')).queryByRole('menuitem', { name: 'Browse catch-up' })).toBeNull();
     fireEvent.keyDown(within(screen.getByRole('menu')).getAllByRole('menuitem')[0]!, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
 
     fireEvent.contextMenu(row(0), { clientX: 40, clientY: 40 });
-    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Browse archive' }));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Browse catch-up' }));
     expect(await screen.findByText('archive route')).toBeTruthy();
   });
 });

@@ -216,7 +216,9 @@ describe('Live page', () => {
     await waitFor(() => expect(screen.getByTestId('digit-osd').textContent).toContain('9'));
   });
 
-  it('keeps the archive slot on rows without one and red off the progress bars (L1-visual-15)', async () => {
+  // LG-03 replaced the fixed archive slot of L1-visual-15 with a glyph after the name: a row without
+  // catch-up gives that room to its title, and the bars still line up (the actions float over the end).
+  it('marks catch-up after the name, leaves no empty slot, and keeps red off the progress bars (L1-visual-15, LG-03)', async () => {
     const now = Date.now();
     rpcMock.handlers['epg.nowNext'] = (a) =>
       Object.fromEntries(
@@ -228,9 +230,14 @@ describe('Live page', () => {
     renderAt('/s/src1/live', ROUTE);
     await waitFor(() => expect(screen.getAllByTestId('channel-progress').length).toBeGreaterThan(4));
     for (const bar of screen.getAllByTestId('channel-progress')) expect(bar.className).not.toContain('bg-live');
-    // makeChannel gives channels 0-2 an archive; channel 4 has none but keeps the slot.
-    const row = document.querySelector('button[data-row-index="4"]')!.parentElement!;
-    expect(row.querySelector('span[aria-hidden="true"].size-6')).not.toBeNull();
+    // makeChannel gives channels 0-2 an archive; channel 4 has none.
+    const archived = document.querySelector<HTMLElement>('button[data-row-index="0"]')!;
+    expect(within(archived).getByTestId('row-archive')).toBeTruthy();
+    const plain = document.querySelector<HTMLElement>('button[data-row-index="4"]')!.parentElement!;
+    expect(within(plain).queryByTestId('row-archive')).toBeNull();
+    expect(plain.querySelector('span[aria-hidden="true"].size-6')).toBeNull();
+    // The bars are as wide on both rows: the row's actions float, they take no column.
+    expect(within(plain).getByTestId('row-actions').className).toContain('absolute');
   });
 
   it('the radio stage hosts the running player instead of drawing a second one (L1-live-6)', async () => {

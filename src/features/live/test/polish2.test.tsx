@@ -266,7 +266,8 @@ describe('radio', () => {
     rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'Pop', contentType: 'radio' }), cat(2, { name: 'Jazz', contentType: 'radio' })];
     rpcMock.handlers['catalog.channels'] = serve([{ ...makeChannel(0), isRadio: true, name: 'Classic FM' }]);
     renderIn('/s/src1/radio?category=g2', RADIO);
-    await screen.findByText('Classic FM');
+    // The row, and its tile on the idle stage's station shelf.
+    await within(await screen.findByTestId('channel-list')).findByText('Classic FM');
     expect(screen.getByRole('searchbox', { name: 'Search stations' })).toBeTruthy();
     expect(screen.getByText('1 station')).toBeTruthy();
     const nav = screen.getByRole('navigation', { name: 'Groups' });
@@ -552,7 +553,8 @@ describe('ribbon live button', () => {
     rpcMock.handlers['epg.programs'] = () => [program('Show', Date.now() - 10 * MINUTE, Date.now() + 10 * MINUTE)];
     renderIn('/s/src1/live', LIVE);
     const btn = await screen.findByTestId('ribbon-back-to-live');
-    expect(btn.getAttribute('aria-label')).toBe('Watch live');
+    // With nothing playing it also names the channel it starts (the ribbon follows the cursor).
+    expect(btn.getAttribute('aria-label')).toBe('Watch live, Channel 0');
     cleanup();
     // A catch-up of channel 0 is playing (not live): the button takes you back to live.
     fakes.usePlayerStore.setState({
@@ -564,11 +566,13 @@ describe('ribbon live button', () => {
 });
 
 describe('channel row in RTL', () => {
-  it('truncates only the next title, in its own direction, with the clock outside it', () => {
+  // LG-03 took the next programme off the rows (the stage column's Up next has it); the airing
+  // programme's line is built the same way and keeps what this protected.
+  it('truncates only the programme title, in its own direction, with the time left outside it', () => {
     const now = Date.now();
     const nn: EpgNowNext = {
-      now: program('الأخبار', now - 10 * MINUTE, now + 20 * MINUTE),
-      next: program('World News Today', now + 20 * MINUTE, now + 80 * MINUTE),
+      now: program('World News Today', now - 10 * MINUTE, now + 20 * MINUTE),
+      next: program('الأخبار', now + 20 * MINUTE, now + 80 * MINUTE),
     };
     render(
       <I18nextProvider i18n={i18n}>
@@ -588,16 +592,18 @@ describe('channel row in RTL', () => {
         </div>
       </I18nextProvider>,
     );
-    const title = screen.getByTestId('row-next-title');
+    const title = screen.getByTestId('row-now-title');
     expect(title.textContent).toBe('World News Today');
     expect(title.getAttribute('dir')).toBe('auto');
     expect(title.className).toContain('truncate');
     expect(title.className).toContain('min-w-0');
-    // The clock is a sibling, not inside the truncating span.
-    const line = screen.getByTestId('row-next');
+    // The time left is a sibling, not inside the truncating span.
+    const line = screen.getByTestId('row-now');
     expect(line.className).not.toContain('truncate');
     expect(line.textContent).not.toBe(title.textContent);
     expect(screen.getByText('BBC World').getAttribute('dir')).toBe('auto');
+    // Three lines: no next-programme line.
+    expect(screen.queryByText('الأخبار')).toBeNull();
   });
 });
 
@@ -674,9 +680,9 @@ describe('guide grid', () => {
     // part of the cell that is on screen so it ends in an ellipsis there.
     expect(text.className).toContain('sticky');
     expect(parseFloat(text.style.maxWidth)).toBeGreaterThan(0);
-    // Kit Select: same accessible name, with the kit's chevron beside the native control.
+    // The source picker (LG-11): same accessible name, with a chevron like the kit Select's.
     const source = screen.getByRole('combobox', { name: 'Source' });
-    expect(source.parentElement!.querySelector('svg')).toBeTruthy();
+    expect(source.querySelector('svg.lucide-chevron-down')).toBeTruthy();
   });
 });
 

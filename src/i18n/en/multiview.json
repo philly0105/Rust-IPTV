@@ -137,5 +137,7 @@
   "announceSwapped": "Swapped {{a}} and {{b}}",
   "announceLayout": "Layout: {{layout}}",
   "announceMuted": "Wall muted",
-  "announceUnmuted": "Wall unmuted"
+  "announceUnmuted": "Wall unmuted",
+  "pickerScope": "Show",
+  "pickerEmptyScope": "Nothing here from this source"
 }

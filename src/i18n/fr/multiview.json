@@ -139,5 +139,7 @@
   "announceSwapped": "{{a}} et {{b}} échangées",
   "announceLayout": "Disposition : {{layout}}",
   "announceMuted": "Son du mur coupé",
-  "announceUnmuted": "Son du mur rétabli"
+  "announceUnmuted": "Son du mur rétabli",
+  "pickerScope": "Afficher",
+  "pickerEmptyScope": "Rien ici pour cette source"
 }

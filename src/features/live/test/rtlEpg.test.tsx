@@ -328,12 +328,16 @@ describe('EpgRibbon RTL (F3) and header layout (F15)', () => {
     expect(scrollToCalls.filter((c) => c.el === scroller).at(-1)?.left).toBeGreaterThan(0);
   });
 
-  it('keeps the time range and remaining time on one line and drops the category below 1440 px', async () => {
+  it('keeps the time range and remaining time on one line, whole, and drops the category in a narrow pane', async () => {
     renderRibbon(Date.now());
     const time = await screen.findByTestId('ribbon-time');
     expect(time.className).toContain('whitespace-nowrap');
-    expect(screen.getByTestId('ribbon-remaining').className).toContain('whitespace-nowrap');
+    const remaining = screen.getByTestId('ribbon-remaining');
+    expect(remaining.className.split(' ')).toEqual(expect.arrayContaining(['whitespace-nowrap', 'shrink-0']));
+    // A narrow pane gets the short form ("27m"), a wide one the words: never a cut number.
+    expect(remaining.children).toHaveLength(2);
+    expect(remaining.children[0]!.className).toContain('@[22rem]/ribbon:hidden');
     const category = screen.getByTestId('ribbon-category');
-    expect(category.className.split(' ')).toEqual(expect.arrayContaining(['hidden', 'min-[1440px]:block', 'truncate']));
+    expect(category.className.split(' ')).toEqual(expect.arrayContaining(['hidden', '@[30rem]/ribbon:block', 'truncate']));
   });
 });

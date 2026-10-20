@@ -275,8 +275,10 @@ describe('rows and windows without guide data (L1-guide-library-14, L1-perf-1)',
     expect(notice.textContent).toContain('Nothing in the guide for this time.');
     expect(notice.textContent).not.toContain('Add an XMLTV address');
     fireEvent.click(within(notice).getByRole('button', { name: 'Back to now' }));
+    // Back at now with no guide at all: the empty state over the rows, with the way to add one (LG-10).
     await waitFor(() => expect(screen.getByTestId('guide-no-data').textContent).toContain('No guide data for these channels yet.'));
-    expect(within(screen.getByTestId('guide-no-data')).getByRole('link', { name: 'EPG settings' })).toBeTruthy();
+    expect(within(screen.getByTestId('guide-no-data')).getByRole('heading', { name: "Add a TV guide to see what's on" })).toBeTruthy();
+    expect(within(screen.getByTestId('guide-no-data')).getByRole('link', { name: 'Add guide' }).getAttribute('href')).toBe('/settings/epg');
   });
 });
 

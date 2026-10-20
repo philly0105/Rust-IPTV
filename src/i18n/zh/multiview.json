@@ -135,5 +135,7 @@
   "announceSwapped": "已交换 {{a}} 和 {{b}}",
   "announceLayout": "布局：{{layout}}",
   "announceMuted": "电视墙已静音",
-  "announceUnmuted": "电视墙已取消静音"
+  "announceUnmuted": "电视墙已取消静音",
+  "pickerScope": "显示",
+  "pickerEmptyScope": "这里没有来自此来源的内容"
 }

@@ -5,7 +5,7 @@
  * Channels the provider dropped sit under the list, greyed, with Remove.
  */
 
-import { ListOrdered, ListPlus, ListTree, ListVideo, Play, Settings2, Star, Trash2, Tv, X } from 'lucide-react';
+import { ListOrdered, ListTree, ListVideo, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
@@ -14,9 +14,12 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type CustomListEntry, type EpgNowNext, type ItemKey, type SourceKind } from '@/api/types';
 import { registerCommands } from '@/shell/commands';
-import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/channeledit';
+import { useChannelEditShortcuts } from '@/features/channeledit';
 import { EpgMappingDialog } from '@/features/live/components/EpgMappingDialog';
 import { EpgRibbon } from '@/features/live/components/EpgRibbon';
+import { LiveStageColumn } from '@/features/live/components/LiveStageColumn';
+import { StageIdle } from '@/features/live/components/StageIdle';
+import { useLastChannel } from '@/features/live/hooks/useLastChannel';
 import { intlLocale } from '@/lib/intl';
 
 import {
@@ -28,6 +31,7 @@ import {
   ContextMenu,
   EmptyState,
   canZap,
+  channelMenuHeader,
   ErrorState,
   IconButton,
   PlayerStage,
@@ -42,6 +46,7 @@ import {
   usePlayerStore,
   useRowHeight,
   useShell,
+  useChannelMenuItems,
   useToast,
   useVisibleSources,
   type MenuItem,
@@ -54,7 +59,7 @@ import { useListChannels } from '../hooks/useListChannels';
 import { useListLocks } from '../hooks/useListLocks';
 import { useLists } from '../hooks/useLists';
 import { LISTS_PATH } from '../paths';
-import { openEditListItems, openListPicker, openManageLists } from '../store';
+import { openAddChannels, openEditListItems, openManageLists } from '../store';
 
 const SIDEBAR_KEY = 'lists.sidebarCollapsed';
 
@@ -132,6 +137,14 @@ export function ListPage() {
     }
   }, [listId, inList, rowsAreThisList]);
 
+  // CB-AUTOPLAY-LAST: the idle stage offers the channel of this list watched last.
+  const last = useLastChannel({
+    contentType: 'live',
+    accept: (r) => inList.has(itemKey(r)),
+    enabled: !stageBusy && rowsAreThisList && inList.size > 0,
+    epgOffsetMinutes: prefs.epgOffsetMinutes,
+  });
+
   // `l` on a focused row: the picker for that row's channel.
   useAddToListShortcut(activeChannel, paged.getChannel);
   // C2 (wired by I): F2 / Shift+Delete on the row that has DOM focus, as on the Live page. The row
@@ -182,32 +195,35 @@ export function ListPage() {
   const onToggleFavorite = useCallback((c: Channel, fav: boolean) => void toggleFavorite(c, fav), [toggleFavorite]);
 
   // ---- row menu -----------------------------------------------------------
+  // LG-13: Live's own channel menu (catch-up, external players, multi-view, guide matching), with
+  // "Remove from list" among the Organize entries.
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; favorite: boolean } | null>(null);
   const onContextMenu = useCallback((pos: { x: number; y: number }, channel: Channel, favorite: boolean) => setMenu({ pos, channel, favorite }), []);
   const closeMenu = useCallback(() => setMenu(null), []);
   const entryOf = useCallback((c: Channel) => paged.entries?.find((e) => sameRef(e.ref, c.ref)), [paged.entries]);
-  // C2 (wired by I): Rename / Reset name / Hide, as in Live's channel menu.
-  const editItems = useChannelEditMenuItems(menu?.channel ?? null);
-  const menuItems: MenuItem[] = useMemo(() => {
-    if (!menu) return [];
+  const playRow = useCallback((ch: Channel) => play(ch, paged.getNowNext(paged.channels.indexOf(ch))), [play, paged]);
+  const removeItem = useMemo((): MenuItem[] => {
+    const entry = menu ? entryOf(menu.channel) : undefined;
+    if (!menu || !list || !entry) return [];
+    const name = displayChannelName(menu.channel.name, prefs.stripCountryPrefix);
+    return [{ id: 'remove', label: t('removeFromList'), icon: <X className="size-4" />, onSelect: () => actions.removeEntries(list, [entry], name) }];
+  }, [menu, list, entryOf, prefs.stripCountryPrefix, t, actions]);
+  const menuItems = useChannelMenuItems(menu?.channel ?? null, {
+    source: menu ? sourceById.get(menu.channel.ref.sourceId) : undefined,
+    favorite: menu?.favorite,
+    onPlay: playRow,
+    onToggleFavorite,
+    onMapGuide: setMapping,
+    organize: removeItem,
+    editHints: true,
+  });
+  const menuHeader = useMemo(() => {
+    if (!menu) return undefined;
     const ch = menu.channel;
-    const name = displayChannelName(ch.name, prefs.stripCountryPrefix);
-    const entry = entryOf(ch);
-    return [
-      { id: 'play', label: tl('play'), icon: <Play className="size-4" />, onSelect: () => play(ch, paged.getNowNext(paged.channels.indexOf(ch))) },
-      {
-        id: 'favorite',
-        label: menu.favorite ? tl('removeFavorite') : tl('addFavorite'),
-        icon: <Star className="size-4" fill={menu.favorite ? 'currentColor' : 'none'} />,
-        onSelect: () => void toggleFavorite(ch, menu.favorite),
-      },
-      { id: 'lists', label: t('addToList'), icon: <ListPlus className="size-4" />, onSelect: () => openListPicker(ch) },
-      ...editItems,
-      ...(list && entry
-        ? [{ id: 'remove', label: t('removeFromList'), icon: <X className="size-4" />, onSelect: () => actions.removeEntries(list, [entry], name) }]
-        : []),
-    ];
-  }, [menu, prefs.stripCountryPrefix, entryOf, t, tl, play, paged, toggleFavorite, list, actions, editItems]);
+    // C2: a locked channel's programme stays back until the PIN, in the menu as in its row.
+    const nowTitle = locks.channelLocked(ch) ? undefined : paged.getNowNext(paged.channels.indexOf(ch))?.now?.title;
+    return channelMenuHeader(ch, displayChannelName(ch.name, prefs.stripCountryPrefix), nowTitle);
+  }, [menu, locks, paged, prefs.stripCountryPrefix]);
 
   // ---- sidebar ------------------------------------------------------------
   const wide = useMediaQuery('(min-width: 1024px)');
@@ -381,14 +397,21 @@ export function ListPage() {
         title={paged.unavailable.length > 0 ? t('allUnavailableTitle') : t('listEmptyTitle')}
         description={t('listEmptyHint')}
         action={
-          // Live TV, where L adds a channel (the hint above). Not `/`: it restores the saved screen, this one.
-          <Link
-            to={firstSource ? `/s/${encodeURIComponent(firstSource.id)}/live` : '/dashboard'}
-            className={buttonClass('secondary', 'sm')}
-            data-testid="list-browse-channels"
-          >
-            {t('browseChannels')}
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {list ? (
+              <Button variant="primary" size="sm" icon={<Plus className="size-4" />} onClick={() => openAddChannels(list.id)}>
+                {t('addChannels')}
+              </Button>
+            ) : null}
+            {/* Live TV, where L adds a channel (the hint above). Not `/`: it restores the saved screen, this one. */}
+            <Link
+              to={firstSource ? `/s/${encodeURIComponent(firstSource.id)}/live` : '/dashboard'}
+              className={buttonClass('secondary', 'sm')}
+              data-testid="list-browse-channels"
+            >
+              {t('browseChannels')}
+            </Link>
+          </div>
         }
       />
     );
@@ -438,6 +461,7 @@ export function ListPage() {
         aria-label={tl('channels')}
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:flex-none md:shrink-0 md:border-e"
       >
+        {/* The list's name is in the header (and on its sidebar row): the bar holds the tools. */}
         <div className="flex items-center gap-2 border-b border-divider px-2 py-2">
           <IconButton
             size="sm"
@@ -446,26 +470,43 @@ export function ListPage() {
             icon={<ListTree className="size-4" />}
             onClick={toggleSidebar}
           />
-          <p dir="auto" className="min-w-0 flex-1 truncate text-sm font-semibold text-fg">
-            {list?.name ?? ''}
-          </p>
+          {composition.length > 1 ? (
+            // Where the list's channels come from: one chip per source, on one line that scrolls.
+            <ul
+              aria-label={t('sourcesLabel')}
+              className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto [scrollbar-width:none] [mask-image:linear-gradient(to_right,#000_85%,transparent)] rtl:[mask-image:linear-gradient(to_left,#000_85%,transparent)]"
+              data-testid="list-sources"
+            >
+              {composition.map((s) => (
+                <li key={s.id} className="flex shrink-0 items-center gap-1.5 rounded-full border border-edge bg-surface-2 py-0.5 pe-2.5 ps-2 text-xs text-fg-muted">
+                  <span dir="auto" className="max-w-40 truncate">
+                    {s.name}
+                  </span>
+                  <span className="tabular-nums text-fg-subtle">{fmt.format(s.count)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span className="flex-1" />
+          )}
           {list ? (
-            <IconButton size="sm" label={t('editChannels')} icon={<ListOrdered className="size-4" />} onClick={() => openEditListItems(list.id)} />
+            <>
+              {/* LG-13: the list grows from here too, not only from Live's menus. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Plus className="size-4" />}
+                onClick={() => openAddChannels(list.id)}
+                className="shrink-0 max-sm:w-8 max-sm:px-0"
+                data-testid="list-add-channels"
+              >
+                <span className="max-sm:sr-only">{t('addChannels')}</span>
+              </Button>
+              {/* From sm up Edit channels is in the header; a phone's header has no room for it. */}
+              <IconButton size="sm" label={t('editChannels')} icon={<ListOrdered className="size-4" />} onClick={() => openEditListItems(list.id)} className="sm:hidden" />
+            </>
           ) : null}
         </div>
-        {composition.length > 1 ? (
-          // Where the list's channels come from: one chip per source.
-          <ul aria-label={t('sourcesLabel')} className="flex flex-wrap gap-1.5 border-b border-divider px-3 py-2" data-testid="list-sources">
-            {composition.map((s) => (
-              <li key={s.id} className="flex max-w-full items-center gap-1.5 rounded-full bg-surface-2 py-0.5 pe-2.5 ps-2 text-xs text-fg-muted">
-                <span dir="auto" className="truncate">
-                  {s.name}
-                </span>
-                <span className="tabular-nums text-fg-subtle">{fmt.format(s.count)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
         {listBody}
         {list && paged.unavailable.length > 0 ? (
           <UnavailableEntries
@@ -476,38 +517,35 @@ export function ListPage() {
         ) : null}
       </section>
 
-      {/* stage: on top on a phone, as wide as the screen. With nothing playing a phone gets a slim
-          prompt above the channels instead of a black 16:9 box, and an empty list (nothing to pick)
-          no stage at all; from 768 px the stage stays (L3-visual-5, as Live's L2-visual-13). */}
-      <section
-        aria-label={tl('stage')}
-        className={cn('order-first flex min-w-0 shrink-0 flex-col md:order-none md:flex-1', !stageBusy && listEmpty && 'max-md:hidden')}
-        data-testid="list-stage-section"
-      >
-        <div
-          data-testid="list-stage"
-          data-idle={stageBusy ? undefined : ''}
-          className={cn(
-            'relative min-h-0 bg-black md:aspect-auto md:flex-1',
-            stageBusy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2',
-          )}
-        >
-          <PlayerStage className={stageBusy ? 'h-full w-full' : 'h-full w-full max-md:bg-transparent'}>
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70 max-md:flex-row max-md:justify-start max-md:gap-3 max-md:px-4 max-md:text-start max-md:text-fg-muted">
-              <Tv className="size-8 max-md:size-5 max-md:shrink-0" aria-hidden />
-              <div className="flex min-w-0 flex-col gap-2 max-md:gap-0">
-                <p className="text-sm max-md:truncate max-md:font-medium max-md:text-fg">{tl('stageIdle')}</p>
-                <p className="text-xs text-white/50 max-md:truncate max-md:text-fg-subtle">{t('stageIdleHint')}</p>
-              </div>
-            </div>
-          </PlayerStage>
-        </div>
-        {/* On a phone the ribbon comes with a channel playing, as on Live; until then the channels start
-            near the top, and nothing shifts when the list arrives (L3-visual-4). While something plays
-            and the list loads it holds its place, so the channels don't jump down when the first one
-            arrives (L2-vod-5); with no channel of a list known to be empty it is only an empty state,
-            which would push the list's own empty state and dropped channels below the fold. */}
-        <div className={cn('contents', (!stageBusy || (!ribbonChannel && listEmpty)) && 'max-md:hidden')} data-testid="list-ribbon">
+      {/* The stage column Live uses (LG-07). With nothing playing a phone gets a slim prompt above
+          the channels instead of a black 16:9 box, and an empty list (nothing to pick) no stage at
+          all (L3-visual-5, as Live's L2-visual-13). On a phone the ribbon comes with a channel
+          playing, as on Live; until then the channels start near the top, and nothing shifts when
+          the list arrives (L3-visual-4). While something plays and the list loads it holds its
+          place, so the channels don't jump down when the first one arrives (L2-vod-5); with no
+          channel of a list known to be empty it is only an empty state, which would push the
+          list's own empty state and dropped channels below the fold. */}
+      <LiveStageColumn
+        Stage={PlayerStage}
+        label={tl('stage')}
+        busy={stageBusy}
+        hiddenOnPhone={listEmpty}
+        sectionTestId="list-stage-section"
+        stageTestId="list-stage"
+        ribbonTestId="list-ribbon"
+        ribbonOnPhone={stageBusy && !(!ribbonChannel && listEmpty)}
+        idle={
+          <StageIdle
+            kind="live"
+            last={last?.channel ? { channel: last.channel, nowNext: last.nowNext } : undefined}
+            now={now}
+            stripPrefix={prefs.stripCountryPrefix}
+            epgOffsetMinutes={prefs.epgOffsetMinutes}
+            hint={t('stageIdleHint')}
+            onResume={(c) => play(c)}
+          />
+        }
+        ribbon={
           <EpgRibbon
             channel={ribbonChannel}
             sourceKind={ribbonKind}
@@ -515,12 +553,19 @@ export function ListPage() {
             watchingArchive={watchingArchive}
             onPlayLive={(c) => play(c)}
             onMapEpg={setMapping}
-            guideHref={ribbonChannel ? `/epg?source=${encodeURIComponent(ribbonChannel.ref.sourceId)}` : undefined}
+            guideHref={ribbonChannel ? `/epg?${new URLSearchParams({ source: ribbonChannel.ref.sourceId, view: `list:${listId}`, focus: ribbonChannel.ref.itemId }).toString()}` : undefined}
+            details
           />
-        </div>
-      </section>
+        }
+      />
 
-      <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
+      <ContextMenu
+        pos={menu?.pos ?? null}
+        items={menuItems}
+        header={menuHeader}
+        label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
+        onClose={closeMenu}
+      />
       <EpgMappingDialog channel={mapping} onClose={() => setMapping(null)} />
     </div>
   );

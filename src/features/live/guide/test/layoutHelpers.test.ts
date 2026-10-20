@@ -36,11 +36,11 @@ describe('searchQuery counts code points, as the core does', () => {
 describe('panelPlacement keeps the results panel inside the guide page', () => {
   const MAX = 450; // 30rem at 15px
 
-  it('desktop: the panel lines up with the field’s inline end', () => {
+  it('desktop: the panel hangs from the field’s inline start', () => {
     // Page from x=72 (beside the rail) to 1280; field 484..724.
     const p = panelPlacement({ left: 484, right: 724 }, { left: 72, right: 1280 }, MAX, false)!;
     expect(p.width).toBe(MAX);
-    expect(484 + p.left + p.width).toBe(724);
+    expect(484 + p.left).toBe(484);
   });
 
   it('phone (390 px, 72 px rail): a field at the page start no longer pushes the panel under the rail or off screen', () => {
@@ -58,18 +58,21 @@ describe('panelPlacement keeps the results panel inside the guide page', () => {
     expect(84 + p.left + p.width).toBe(382);
   });
 
-  it('RTL mirrors it: the panel starts at the field’s left edge, slid back inside the page', () => {
+  it('RTL mirrors it: the panel ends at the field’s right edge, slid back inside the page', () => {
     // RTL rail on the right: page 0..318; field near the page's start (its right side).
     const desk = panelPlacement({ left: 556, right: 796 }, { left: 0, right: 1208 }, MAX, true)!;
-    expect(556 + desk.left).toBe(556);
+    expect(556 + desk.left + desk.width).toBe(796);
     const phone = panelPlacement({ left: 140, right: 306 }, { left: 0, right: 318 }, MAX, true)!;
     expect(140 + phone.left).toBeGreaterThanOrEqual(8);
     expect(140 + phone.left + phone.width).toBeLessThanOrEqual(310);
   });
 
   it('a field near the page’s end edge slides the panel back from that side too', () => {
-    const p = panelPlacement({ left: 900, right: 960 }, { left: 72, right: 1000 }, MAX, true)!;
+    const p = panelPlacement({ left: 900, right: 960 }, { left: 72, right: 1000 }, MAX, false)!;
     expect(900 + p.left + p.width).toBe(992);
+    // And in RTL from the other side: a field near the page's left edge.
+    const rtl = panelPlacement({ left: 100, right: 160 }, { left: 72, right: 1000 }, MAX, true)!;
+    expect(100 + rtl.left).toBe(80);
   });
 
   it('null when there is nothing to measure (jsdom, a page with no width)', () => {

@@ -438,7 +438,7 @@ export function MultiviewPage() {
             </div>
           ) : null}
           {!fsActive ? banners : null}
-          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size]', fsActive ? 'p-0' : 'p-1 @2xl:p-2')}>{wall}</div>
+          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size]', fsActive ? 'p-0' : 'px-(--page-gutter) py-3 sm:py-4')}>{wall}</div>
           {fsActive ? (
             <div
               ref={overlayRef}

@@ -137,5 +137,7 @@
   "announceSwapped": "{{a}} en {{b}} gewisseld",
   "announceLayout": "Indeling: {{layout}}",
   "announceMuted": "Wand gedempt",
-  "announceUnmuted": "Geluid van de wand aan"
+  "announceUnmuted": "Geluid van de wand aan",
+  "pickerScope": "Tonen",
+  "pickerEmptyScope": "Niets hier uit deze bron"
 }

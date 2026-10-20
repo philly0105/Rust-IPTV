@@ -135,5 +135,7 @@
   "announceSwapped": "{{a}}와(과) {{b}}을(를) 바꿨습니다",
   "announceLayout": "레이아웃: {{layout}}",
   "announceMuted": "월 음소거됨",
-  "announceUnmuted": "월 음소거 해제됨"
+  "announceUnmuted": "월 음소거 해제됨",
+  "pickerScope": "표시",
+  "pickerEmptyScope": "이 소스의 채널이 여기에 없습니다"
 }

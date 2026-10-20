@@ -1,22 +1,30 @@
-import { History, Lock, Star } from 'lucide-react';
+import { EllipsisVertical, History, Lock, Star } from 'lucide-react';
 import { memo, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
 import { listSeparator } from '@/lib/intl';
-import { Tooltip } from '@/ui/Tooltip';
+import { IconButton } from '@/ui/Button';
+import { cn } from '@/ui/cn';
 
+import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName } from '../lib/channelName';
-import { formatClock, hasUsableArchive, isValidProgram, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
+import { documentIsRtl } from '../lib/rtl';
+import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo } from './ChannelLogo';
 
-export const CHANNEL_ROW_HEIGHT = 64;
 /**
- * The part of {@link CHANNEL_ROW_HEIGHT} made of Tailwind spacing at 100 %,
- * which compact density tightens: py-2 (15 px at the 15 px root) plus the two
- * gap-0.5 between name, programme and progress bar (3.75 px).
+ * Three lines with room around them (LG-03): the name, the programme on now with its time left,
+ * and the progress bar. What comes next is in the stage column's Up next for the channel the
+ * stage follows; the old fourth line crammed four lines into 64 px and ran into the dividers.
  */
-export const CHANNEL_ROW_SPACING = 19;
+export const CHANNEL_ROW_HEIGHT = 68;
+/**
+ * The part of {@link CHANNEL_ROW_HEIGHT} made of Tailwind spacing at 100 %, which compact
+ * density tightens: py-3 (22.5 px at the 15 px root) plus the two gaps between name,
+ * programme and progress bar (gap-0.5 and mt-1, 3.75 px each).
+ */
+export const CHANNEL_ROW_SPACING = 30;
 
 export interface ChannelRowProps {
   index: number;
@@ -26,6 +34,11 @@ export interface ChannelRowProps {
   playing: boolean;
   active: boolean;
   compact?: boolean;
+  /**
+   * Radio: a station is known by its logo, and a show has no picture to follow, so the logo is
+   * larger and the progress bar goes; the current show stays on its one line.
+   */
+  station?: boolean;
   now: number;
   /** Hides the archive icon when the source cannot play this channel's catch-up. */
   sourceKind?: SourceKind;
@@ -40,14 +53,19 @@ export interface ChannelRowProps {
   onActivate(index: number, how: 'click' | 'double' | 'key'): void;
   onToggleFavorite(channel: Channel, favorite: boolean): void;
   onContextMenu(e: MouseEvent, channel: Channel, index: number): void;
+  /**
+   * The row's menu from its ⋮ button or a long press (touch has no right click): `at` is where it
+   * opens, in viewport px.
+   */
+  onMenuAt?(at: { x: number; y: number }, channel: Channel, index: number): void;
 }
 
 /** Same columns and height as a loaded row, so nothing moves when the data lands. */
 export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
   return (
     <div className={`flex h-full items-center gap-3 ps-3 pe-3 ${pulse ? 'motion-safe:animate-pulse' : ''}`} aria-hidden>
-      <span className="h-3 w-8 shrink-0 rounded-xs bg-surface-3" />
-      <span className="size-9 shrink-0 rounded-md bg-surface-3" />
+      <span className="h-3 w-7 shrink-0 rounded-xs bg-surface-3" />
+      <span className="size-10 shrink-0 rounded-md bg-surface-3" />
       <span className="flex flex-1 flex-col gap-1.5">
         <span className="h-3 w-2/5 rounded-xs bg-surface-3" />
         <span className="h-2.5 w-3/5 rounded-xs bg-surface-2" />
@@ -56,9 +74,22 @@ export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
   );
 }
 
+/**
+ * The actions that float over a row's end (LG-04): shown on hover, while the row has keyboard
+ * focus (a click's focus does not count, or the clicked row would keep them up), and always on
+ * touch screens, where nothing hovers. A mouse at rest sees a clean row; the title runs on under
+ * where they appear. On touch they sit in the row's flow, so they never cover the time, and only
+ * the ⋮ stays: the star is one of its items.
+ */
+const ROW_ACTIONS =
+  'absolute inset-y-0 end-1.5 my-auto flex h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 opacity-0 shadow-2 group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 pointer-coarse:static pointer-coarse:me-1 pointer-coarse:border-transparent pointer-coarse:bg-transparent pointer-coarse:opacity-100 pointer-coarse:shadow-none';
+
 export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const { t, i18n } = useTranslation('live');
   const { channel, nowNext, favorite, playing, active, index, now, compact } = props;
+  const longPress = useLongPress((x, y) => {
+    if (channel) props.onMenuAt?.({ x, y }, channel, index);
+  });
   if (!channel) return <RowSkeleton />;
 
   const locked = props.locked ?? false;
@@ -66,20 +97,25 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const shifted = locked ? undefined : shiftNowNext(nowNext, props.epgOffsetMinutes ?? 0);
   // A programme with unreadable times would read as airing since 1970: show the group instead.
   const cur = shifted?.now && isValidProgram(shifted.now) ? shifted.now : undefined;
-  const nxt = shifted?.next && isValidProgram(shifted.next) ? shifted.next : undefined;
   const progress = cur ? programProgress(cur, now) : 0;
   const archive = hasUsableArchive(channel, props.sourceKind);
   const name = displayChannelName(channel.name, props.stripPrefix);
   const left = cur ? minutesLeft(cur, now) : 0;
+  const archiveLabel = channel.archive?.durationHours
+    ? t('archiveDays', { count: Math.max(1, Math.round(channel.archive.durationHours / 24)) })
+    : t('archive');
 
   return (
     <div
-      className={`group relative flex h-full items-stretch border-b border-divider ${
-        playing ? 'bg-selected' : active ? 'bg-hover' : 'hover:bg-hover'
-      }`}
+      className={cn(
+        // `group/row` for the floating actions; the list is `group/list`, so the keyboard cursor's
+        // row is marked only while the list has focus (a phantom "selected" first row otherwise).
+        'group/row relative flex h-full touch-manipulation items-stretch border-b border-divider select-none [-webkit-touch-callout:none]',
+        playing ? 'tuning-tick bg-selected' : cn('hover:bg-hover', active && 'group-focus-within/list:bg-hover'),
+      )}
       onContextMenu={(e) => props.onContextMenu(e, channel, index)}
+      {...longPress}
     >
-      {playing ? <span aria-hidden className="absolute inset-y-2 start-0 w-[3px] rounded-e bg-accent" /> : null}
       <button
         type="button"
         data-row-index={index}
@@ -88,6 +124,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         aria-label={[
           channel.number !== undefined ? `${channel.number}` : '',
           name,
+          favorite ? t('favorite') : '',
           locked ? t('locked') : '',
           cur ? t('nowShowing', { title: cur.title }) : '',
           playing ? t('playingNow') : '',
@@ -96,84 +133,97 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           .join(listSeparator(i18n.language))}
         onClick={() => props.onActivate(index, 'click')}
         onDoubleClick={() => props.onActivate(index, 'double')}
-        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-3 pe-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+        className="flex min-w-0 flex-1 items-center gap-3 py-3 ps-2.5 pe-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       >
-        <span className="w-8 shrink-0 text-end font-numeric text-sm tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
-        {!compact ? <ChannelLogo src={channel.logoUrl} name={name} sourceId={channel.ref.sourceId} /> : null}
+        <span
+          className={cn(
+            'w-7 shrink-0 text-end font-numeric text-sm tabular-nums',
+            playing ? 'text-accent' : 'text-fg-muted',
+          )}
+        >
+          {channel.number ?? ''}
+        </span>
+        {!compact ? <ChannelLogo src={channel.logoUrl} name={name} size={props.station ? 44 : 40} sourceId={channel.ref.sourceId} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span dir="auto" className={`truncate text-sm text-match-parent ${playing ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{name}</span>
-            {locked ? <Lock data-testid="row-locked" aria-hidden className="size-3 shrink-0 text-fg-subtle" /> : null}
+            <span dir="auto" className={cn('truncate text-body-sm text-match-parent text-fg', playing ? 'font-semibold' : 'font-medium')}>
+              {name}
+            </span>
+            {/* Marks, not slots: an empty row gives their room to the title. */}
+            {favorite ? <Star data-testid="row-favorite" aria-hidden size={12} className="shrink-0 fill-current text-warning" /> : null}
+            {archive ? (
+              <span title={archiveLabel} className="inline-flex shrink-0 text-fg-subtle">
+                <History size={12} aria-label={t('archive')} data-testid="row-archive" />
+              </span>
+            ) : null}
+            {locked ? <Lock data-testid="row-locked" aria-hidden size={12} className="shrink-0 text-fg-subtle" /> : null}
           </span>
           {cur ? (
             <>
-              {/* The title takes the width; the remaining time stays a compact "38m" so narrow lists keep the title readable. */}
-              <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-fg-muted">
-                <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" title={cur.title}>
+              {/* Only the title truncates, in its own direction; the remaining time is a sibling in
+                  compact "38m" form, so narrow lists keep the title readable (and RTL titles put the
+                  ellipsis at their own end, not before the clock). */}
+              <span className="flex min-w-0 items-baseline gap-2 text-caption text-fg-muted" data-testid="row-now">
+                <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" data-testid="row-now-title" title={cur.title}>
                   {cur.title}
                 </span>
                 <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: left })}>
                   {t('minutesLeftShort', { count: left })}
                 </span>
               </span>
-              <span className="relative h-[3px] w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                {/* Neutral on every row, the accent on the one playing: a list of red bars read as "all live, all alerting". */}
-                <span
-                  data-testid="channel-progress"
-                  className={`absolute inset-y-0 start-0 rounded-full ${playing ? 'bg-accent' : 'bg-fg-subtle'}`}
-                  style={{ width: `${progress * 100}%` }}
-                />
-              </span>
-              {nxt && !compact ? (
-                // Only the title truncates, in its own direction: one RTL truncate over clock and a Latin
-                // title put the ellipsis at the title's start ("…ews Today").
-                <span className="flex min-w-0 items-baseline gap-1 text-[calc(11rem/15)] text-fg-subtle" data-testid="row-next">
-                  <span className="shrink-0 tabular-nums">{formatClock(ms(nxt.start), i18n.language)}</span>
-                  <span dir="auto" className="min-w-0 truncate text-match-parent" data-testid="row-next-title" title={nxt.title}>
-                    {nxt.title}
-                  </span>
+              {props.station ? null : (
+                <span className="relative mt-1 h-[3px] w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
+                  {/* Quiet on every row, the accent on the one playing: a list of bright bars read as
+                      stripes, and red ones as "all live, all alerting". */}
+                  <span
+                    data-testid="channel-progress"
+                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent' : 'bg-fg-subtle/55')}
+                    style={{ width: `${progress * 100}%` }}
+                  />
                 </span>
-              ) : null}
+              )}
             </>
           ) : props.guideUnavailable ? (
-            <span className="truncate text-xs text-fg-subtle" data-testid="row-guide-unavailable">
+            <span className="truncate text-caption text-fg-subtle" data-testid="row-guide-unavailable">
               {t('guideNotAnswering')}
             </span>
           ) : (
-            <span className="truncate text-xs text-fg-subtle">{channel.categoryName}</span>
+            <span dir="auto" className="truncate text-caption text-match-parent text-fg-subtle">
+              {channel.categoryName}
+            </span>
           )}
         </span>
       </button>
-      <span className="flex shrink-0 items-center gap-0.5 pe-2">
-        {archive ? (
-          <span
-            title={
-              channel.archive?.durationHours
-                ? t('archiveDays', { count: Math.max(1, Math.round(channel.archive.durationHours / 24)) })
-                : t('archive')
-            }
-            className="inline-flex size-6 items-center justify-center text-fg-subtle"
-          >
-            <History className="size-3.5" aria-label={t('archive')} />
-          </span>
-        ) : (
-          // The slot stays when a row has no archive, so progress bars and times line up row to row.
-          <span aria-hidden className="size-6" />
-        )}
-        <Tooltip content={favorite ? t('removeFavorite') : t('addFavorite')} describe={false}>
-          <button
-            type="button"
+      <span className={ROW_ACTIONS} data-testid="row-actions">
+        <IconButton
+          size="sm"
+          tabIndex={-1}
+          pressed={favorite}
+          label={favorite ? t('removeFavorite') : t('addFavorite')}
+          shortcut="s"
+          icon={<Star size={16} className={favorite ? 'fill-current text-warning' : undefined} />}
+          onClick={() => props.onToggleFavorite(channel, favorite)}
+          // A pressed toggle draws the selected fill; the filled star says enough here. On touch the
+          // actions sit in the row's flow, so a 44 px star beside the ⋮ cut a tablet's narrow list to
+          // "M…": the ⋮ menu (and a long press) has Add to favorites, and the row keeps its mark.
+          className={cn('aria-pressed:bg-transparent hover:bg-hover', props.onMenuAt ? 'pointer-coarse:hidden' : 'pointer-coarse:max-sm:hidden')}
+        />
+        {props.onMenuAt ? (
+          <IconButton
+            size="sm"
             tabIndex={-1}
-            aria-pressed={favorite}
-            aria-label={favorite ? t('removeFavorite') : t('addFavorite')}
-            onClick={() => props.onToggleFavorite(channel, favorite)}
-            className={`inline-flex size-7 items-center justify-center rounded-md hover:bg-surface-3 ${
-              favorite ? 'text-warning' : 'text-fg-subtle opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
-            }`}
-          >
-            <Star className="size-4" fill={favorite ? 'currentColor' : 'none'} />
-          </button>
-        </Tooltip>
+            label={t('channelMenu')}
+            aria-haspopup="menu"
+            icon={<EllipsisVertical size={16} />}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              // Opens under the button from its inline start (the menu grows toward the inline end and
+              // stays on screen).
+              props.onMenuAt?.({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 }, channel, index);
+            }}
+            className="hover:bg-hover"
+          />
+        ) : null}
       </span>
     </div>
   );

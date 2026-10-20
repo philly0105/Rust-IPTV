@@ -6,7 +6,7 @@ import { playItem, playSource } from '@/features/player';
 import { parseClearKey } from '@/features/player/clearKey';
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
-import { type CatchupChannel, resolveM3uCatchupUrl } from './catchup';
+import { type CatchupChannel, m3uCatchupEnds, resolveM3uCatchupUrl } from './catchup';
 import { durationMinutes, ms } from './epgTime';
 
 function guessKind(url: string): PlayerKind {
@@ -137,6 +137,18 @@ export async function playCatchup(
   });
 }
 
+/**
+ * Whether a channel's catch-up can be downloaded: its archive links must end by themselves
+ * (FW-ARCHIVE-DOWNLOAD-UNBOUNDED). Xtream and Stalker links carry the programme's length; an M3U
+ * archive does only in some forms ({@link m3uCatchupEnds}). The others stream on from the start
+ * into live, so a download would never finish: Download is not offered for them.
+ */
+export function canDownloadCatchup(channel: Channel, kind: SourceKind | undefined): boolean {
+  if (kind === 'xtream' || kind === 'stalker') return true;
+  if (kind === 'm3u') return m3uCatchupEnds(channel as Channel & CatchupChannel);
+  return false;
+}
+
 /** File extensions an archive download keeps from its URL; anything else (`.php`, none) saves as MPEG-TS. */
 const ARCHIVE_EXTENSIONS = new Set(['ts', 'mp4', 'mkv', 'avi', 'mov']);
 
@@ -153,6 +165,8 @@ export async function catchupDownloadArgs(
   program: EpgProgram,
   opts: { now?: number; displayName?: string; subtitle: string; notFileMessage: string },
 ): Promise<DownloadStartArgs | null> {
+  // A link that streams on into live is never queued, whatever the caller offered.
+  if (!canDownloadCatchup(channel, kind)) throw new Error(opts.notFileMessage);
   const title = opts.displayName || channel.name;
   const allowed = await ensureUnlocked([{ ref: channel.ref, title, ...(channel.categoryId ? { categoryId: channel.categoryId } : {}) }]);
   if (!allowed) return null;

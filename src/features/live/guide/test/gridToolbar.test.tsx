@@ -12,7 +12,7 @@ import { registerRenameHost, useRenameStore } from '@/features/channeledit/store
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage } from '../../components/EpgGridPage';
-import { formatClock, formatDay } from '../../lib/epgTime';
+import { formatClockBare, formatDay } from '../../lib/epgTime';
 import { createRpcMock, installDomStubs, makeChannel, renderGuide, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -100,7 +100,8 @@ describe('the toolbar at narrow widths', () => {
     const label = screen.getByTestId('guide-window');
     expect(label.className).toContain('flex-1');
     expect(label.className).toContain('min-w-0');
-    expect(label.textContent).toContain(`${formatDay(at, 'en')} ${formatClock(at, 'en')}`);
+    // The window's start (its AM/PM named once, at the range's end, when both ends share it).
+    expect(label.textContent).toContain(`${formatDay(at, 'en')} ${formatClockBare(at, 'en')}`);
     expect(label.querySelectorAll('.truncate')).toHaveLength(2);
     // Every day is still reachable: the label opens Jump to date and time.
     fireEvent.click(label);

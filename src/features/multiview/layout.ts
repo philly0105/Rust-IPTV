@@ -61,7 +61,7 @@ export function nextLayout(layout: MultiviewLayout, count: number): MultiviewLay
  * keeps to its content instead (`self-start`, rows packed at the top) and the host scrolls.
  * From 42rem WALL_CLASSES give it a size and the auto margins centre it.
  */
-export const WALL_BASE = 'grid w-full gap-1 self-start content-start @2xl:mx-auto @2xl:my-auto';
+export const WALL_BASE = 'grid w-full gap-2 self-start content-start @2xl:mx-auto @2xl:my-auto';
 
 /** Grid classes of the wall per layout (see the module comment for the ratios). */
 export const WALL_CLASSES: Record<MultiviewLayout, string> = {

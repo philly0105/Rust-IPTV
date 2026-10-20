@@ -145,5 +145,7 @@
   "announceSwapped": "تبدلو {{a}} و{{b}}",
   "announceLayout": "التصميم: {{layout}}",
   "announceMuted": "صوت الحيط تكتم",
-  "announceUnmuted": "صوت الحيط رجع"
+  "announceUnmuted": "صوت الحيط رجع",
+  "pickerScope": "بيّن",
+  "pickerEmptyScope": "ما كاين والو هنا من هاد المصدر"
 }

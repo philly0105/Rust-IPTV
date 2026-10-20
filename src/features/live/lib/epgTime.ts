@@ -166,15 +166,70 @@ export function floorTo(t: number, stepMs: number): number {
   return Math.floor(t / stepMs) * stepMs;
 }
 
+/**
+ * The hour form of a locale's clock: two digits on a 24-hour clock ("08:05", as de, fr, ja and
+ * the rest write it, and as wide as any other time, so the guide's columns line up), numeric on a
+ * 12-hour one ("8:05 PM", "오후 8:05": a leading zero there reads as a typo).
+ */
+function hourForm(tag: string): '2-digit' | 'numeric' {
+  const cycle = new Intl.DateTimeFormat(tag, { hour: 'numeric' }).resolvedOptions().hourCycle;
+  return cycle === 'h23' || cycle === 'h24' ? '2-digit' : 'numeric';
+}
+
 const timeFormatters = new Map<string, Intl.DateTimeFormat>();
-export function formatClock(t: number, locale?: string): string {
+function clockFormatter(locale?: string): Intl.DateTimeFormat {
   const key = locale ?? '';
   let f = timeFormatters.get(key);
   if (!f) {
-    f = new Intl.DateTimeFormat(intlLocale(locale), { hour: '2-digit', minute: '2-digit' });
+    const tag = intlLocale(locale);
+    f = new Intl.DateTimeFormat(tag, { hour: hourForm(tag), minute: '2-digit' });
     timeFormatters.set(key, f);
   }
-  return f.format(t);
+  return f;
+}
+
+/** Clock time in the UI language: "8:30 PM", "20:30", "08:05". */
+export function formatClock(t: number, locale?: string): string {
+  return clockFormatter(locale).format(t);
+}
+
+/** The parts of a formatted time, with the day period (AM/PM) and the space next to it dropped. */
+function withoutDayPeriod(parts: Intl.DateTimeFormatPart[]): string {
+  const i = parts.findIndex((p) => p.type === 'dayPeriod');
+  if (i < 0) return parts.map((p) => p.value).join('');
+  // The literal between the period and the time goes with it ("8:30 PM" -> "8:30", "오후 8:30" -> "8:30").
+  const drop = new Set([i, i === 0 ? 1 : i - 1]);
+  return parts
+    .filter((p, j) => !(drop.has(j) && (j === i || p.type === 'literal')))
+    .map((p) => p.value)
+    .join('')
+    .trim();
+}
+
+/**
+ * Clock time without AM/PM ("8:30"), for the guide's time ruler, which names the period on
+ * the hour only. Locales without a day period get the same string as {@link formatClock}.
+ */
+export function formatClockBare(t: number, locale?: string): string {
+  return withoutDayPeriod(clockFormatter(locale).formatToParts(t));
+}
+
+/**
+ * "8:00 – 8:30 PM": a time range that names a shared AM/PM once, on the side the locale puts
+ * it ("오후 8:00 – 8:30" in Korean). Hours keep the locale's form; 24-hour locales read "08:00 – 08:30".
+ * Intl's own formatRange is not used: it switches some locales to longer forms ("8時00分～").
+ */
+export function formatTimeRange(start: number, end: number, locale?: string): string {
+  const f = clockFormatter(locale);
+  const a = f.formatToParts(start);
+  const b = f.formatToParts(end);
+  const pa = a.find((p) => p.type === 'dayPeriod')?.value;
+  const pb = b.find((p) => p.type === 'dayPeriod')?.value;
+  const join = (x: string, y: string) => `${x} – ${y}`;
+  if (pa === undefined || pa !== pb) return join(f.format(start), f.format(end));
+  // The period leads in some locales (ko, zh-TW): it stays on the start and goes from the end.
+  const leads = a.findIndex((p) => p.type === 'dayPeriod') === 0;
+  return leads ? join(f.format(start), withoutDayPeriod(b)) : join(withoutDayPeriod(a), f.format(end));
 }
 
 const dayFormatters = new Map<string, Intl.DateTimeFormat>();
@@ -189,19 +244,20 @@ export function formatDay(t: number, locale?: string): string {
 }
 
 const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
-/** Clock time with the zone's short name ("01:30 GMT+1"): tells the two 01:30s of a fall-back night apart. */
+/** Clock time with the zone's short name ("01:30 GMT+1", "1:30 AM GMT"): tells the two 01:30s of a fall-back night apart. */
 export function formatClockZone(t: number, locale?: string): string {
   const key = locale ?? '';
   let f = zoneFormatters.get(key);
   if (!f) {
-    f = new Intl.DateTimeFormat(intlLocale(locale), { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+    const tag = intlLocale(locale);
+    f = new Intl.DateTimeFormat(tag, { hour: hourForm(tag), minute: '2-digit', timeZoneName: 'short' });
     zoneFormatters.set(key, f);
   }
   return f.format(t);
 }
 
 export function formatRange(p: EpgProgram, locale?: string): string {
-  return `${formatClock(ms(p.start), locale)} – ${formatClock(ms(p.end), locale)}`;
+  return formatTimeRange(ms(p.start), ms(p.end), locale);
 }
 
 /**

@@ -307,7 +307,7 @@ export const Tile = memo(function Tile({
       onDragLeave={() => setDropTarget(false)}
       onDragEnd={() => setDropTarget(false)}
       onDrop={onDrop}
-      className={cn('group/tile @container/tile relative isolate overflow-hidden rounded-sm bg-black', className)}
+      className={cn('group/tile @container/tile relative isolate overflow-hidden rounded-md bg-black', className)}
     >
       <video
         ref={videoRef}
@@ -332,7 +332,7 @@ export const Tile = memo(function Tile({
         aria-keyshortcuts={String(number)}
         onClick={onMainClick}
         className={cn(
-          'absolute inset-0 cursor-pointer rounded-sm outline-none',
+          'absolute inset-0 cursor-pointer rounded-md outline-none',
           'focus-visible:shadow-[inset_0_0_0_3px_var(--color-bg,#0c1320),inset_0_0_0_5px_var(--color-focus,#ffc865)]',
         )}
       />
@@ -384,7 +384,7 @@ export const Tile = memo(function Tile({
           <span className="px-3 text-center text-sm font-semibold text-balance text-[color:var(--color-on-glass,#f4f6fa)]">{t('swapping')}</span>
         </div>
       ) : null}
-      {dropTarget ? <div aria-hidden className={cn('pointer-events-none absolute inset-0 z-20 rounded-sm border-2', GLASS_ACCENT_BORDER)} /> : null}
+      {dropTarget ? <div aria-hidden className={cn('pointer-events-none absolute inset-0 z-20 rounded-md border-2', GLASS_ACCENT_BORDER)} /> : null}
 
       {/* Tools: top end; shown on hover and focus, always where there is no hover. */}
       <div

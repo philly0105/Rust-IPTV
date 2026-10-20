@@ -16,7 +16,10 @@ export {
   ErrorState,
   IconButton,
   Input,
+  SearchInput,
+  Select,
   Skeleton,
+  SkeletonList,
   Toggle,
   Tooltip,
   buttonClass,
@@ -36,7 +39,10 @@ export { ChannelCard } from '@/shell/dashboard/cards';
 export { ChannelList } from '@/features/live/components/ChannelList';
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';
 export { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from '@/features/live/components/ChannelRow';
-export { ContextMenu, type MenuItem } from '@/features/live/components/ContextMenu';
+export { ContextMenu, type MenuEntry, type MenuItem } from '@/features/live/components/ContextMenu';
+export { ScopePicker } from '@/features/live/components/ScopePicker';
+export { channelMenuHeader, useChannelMenuItems } from '@/features/live/hooks/useChannelMenuItems';
+export { nowTitleOf, SCOPE_ALL, scopeOfList, useBrowseSections, useChannelBrowse, type BrowseScope } from '@/features/live/hooks/useChannelBrowse';
 export { CHANNEL_PAGE_SIZE, type PagedChannels } from '@/features/live/hooks/usePagedChannels';
 export { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';

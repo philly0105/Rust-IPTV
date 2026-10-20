@@ -310,7 +310,7 @@ impl M3uGen {
         let name = format!(
             "{} {} {:05}",
             NAME_STEMS[i % NAME_STEMS.len()],
-            if i % 4 == 0 { "HD" } else { "" },
+            if i.is_multiple_of(4) { "HD" } else { "" },
             i + 1
         )
         .replace("  ", " ");
@@ -319,7 +319,7 @@ impl M3uGen {
             "#EXTINF:-1 tvg-id=\"{tvg_id}\" tvg-name=\"{name}\" tvg-logo=\"{base}/img/logo/{tvg_id}.svg\" tvg-chno=\"{}\" group-title=\"{group}\"",
             i + 1
         );
-        if i % 25 == 0 {
+        if i.is_multiple_of(25) {
             out.push_str(" catchup=\"xc\" catchup-days=\"3\"");
         }
         let radio = i % 50 == 7;

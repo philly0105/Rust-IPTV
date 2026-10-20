@@ -42,7 +42,7 @@ pub fn video_bytes(offset: u64, len: usize) -> Vec<u8> {
     let mut i = offset;
     let end = offset + len as u64;
     // Head until 8-aligned.
-    while i < end && i % 8 != 0 {
+    while i < end && !i.is_multiple_of(8) {
         out.push(video_byte(i));
         i += 1;
     }

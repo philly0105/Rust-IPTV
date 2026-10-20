@@ -338,7 +338,7 @@ fn write_ts(b: &mut [u8], ts: u64) {
 /// 90 kHz ticks (modulo 2^33). Packets that do not parse are left alone.
 pub fn retime_ts(src: &[u8], offset: u64) -> Vec<u8> {
     let mut out = src.to_vec();
-    for pkt in out.chunks_exact_mut(188) {
+    for pkt in out.as_chunks_mut::<188>().0 {
         if pkt[0] != 0x47 {
             continue;
         }

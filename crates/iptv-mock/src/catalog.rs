@@ -488,7 +488,7 @@ fn programme(seed: u64, category: &str, start: i64, stop: i64, h: u64) -> Progra
         _ => (&ENT_SHOWS, "Entertainment"),
     };
     let title = pool[((h >> 8) % pool.len() as u64) as usize].to_string();
-    let episodic = cat == "Entertainment" && (h >> 16) % 3 != 0;
+    let episodic = cat == "Entertainment" && !(h >> 16).is_multiple_of(3);
     let (sub_title, episode_ns) = if episodic {
         let season = (h >> 20) % 6;
         let ep = (h >> 24) % 12;

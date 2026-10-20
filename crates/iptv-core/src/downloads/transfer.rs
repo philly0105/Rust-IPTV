@@ -413,8 +413,8 @@ async fn attempt(
     // and a manual Accept-Encoding also turns off reqwest's transparent decoding.
     let url = &row.download.url;
     let client = crate::http::source_client(state, &row.download.item_ref.source_id, url).await;
-    let mut req = apply_source_headers(client.get(url), &row.headers)
-        .header(ACCEPT_ENCODING, "identity");
+    let mut req =
+        apply_source_headers(client.get(url), &row.headers).header(ACCEPT_ENCODING, "identity");
     if resume_from > 0 {
         req = req.header(RANGE, format!("bytes={resume_from}-"));
         if let Some(v) = &rep.validator {

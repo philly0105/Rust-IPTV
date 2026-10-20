@@ -35,5 +35,8 @@
   "clearBody": "A teljes számolt nézési idő törlődik. A lejátszási előrehaladás és a Legutóbb megtekintett lista megmarad.",
   "cleared": "Nézési statisztika törölve",
   "clearFailed": "Nem sikerült törölni a statisztikát",
-  "watchLive": "Élő TV nézése"
+  "watchLive": "Élő TV nézése",
+  "kpiWeek": "Nézve az elmúlt 7 napban",
+  "kpiMonth": "Nézve az elmúlt 30 napban",
+  "dailyAverage": "Napi átlag"
 }

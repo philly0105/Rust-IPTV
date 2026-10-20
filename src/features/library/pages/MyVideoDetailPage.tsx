@@ -367,7 +367,7 @@ export function MyVideoDetailPage() {
 
   if (watching) {
     return (
-      <Page width="wide" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col gap-4 pb-4 pt-4" data-state="watch">
+      <Page width="wide" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 pb-4 pt-4" data-state="watch">
         <PlayerStage className="aspect-video max-h-[62vh] w-full shrink-0 overflow-hidden rounded-lg bg-black shadow-2" />
         <div className="flex flex-wrap items-center gap-4">
           <div className="min-w-0 flex-1">
@@ -391,7 +391,7 @@ export function MyVideoDetailPage() {
   }
 
   return (
-    <Page width="wide" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col gap-6 pb-4 pt-6" data-state="browse">
+    <Page width="wide" className="flex min-h-0 min-w-0 flex-1 flex-col gap-6 pb-4 pt-6" data-state="browse">
       <div className="relative flex shrink-0 gap-6 lg:gap-10">
         {entry.posterUrl && <PosterGlow src={entry.posterUrl} sourceId={artSourceId} />}
         <div className={cn('relative w-32 shrink-0 md:w-44 xl:w-56', (movieMissing || allMissing) && 'opacity-60 grayscale')}>

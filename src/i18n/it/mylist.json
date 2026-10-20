@@ -75,5 +75,11 @@
   "menuChecking": "Controllo della mia lista…",
   "menuRetry": "Ricarica la mia lista",
   "notReady": "La mia lista è ancora in caricamento. Riprova tra un attimo.",
-  "loadFailed": "Impossibile caricare la mia lista"
+  "loadFailed": "Impossibile caricare la mia lista",
+  "playTitle": "Riproduci {{title}}",
+  "resumeTitle": "Riprendi {{title}}",
+  "playFailed": "Impossibile avviare la riproduzione",
+  "minutesLeft_one": "Manca {{count}} minuto",
+  "minutesLeft_many": "Mancano {{count}} minuti",
+  "minutesLeft_other": "Mancano {{count}} minuti"
 }

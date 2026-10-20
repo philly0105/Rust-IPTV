@@ -24,8 +24,8 @@ import {
 } from '../lib/episodeQueue';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
-import { VodLandingPage } from '../pages/VodLandingPage';
-import { installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
+import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
+import { installDomStubs, makeSource, openHeroMenu, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -265,7 +265,9 @@ describe('SeriesDetailPage (B4-vod-D1, D3, D4, D10)', () => {
 
   it('D3: a resumable episode also offers "Start over", which forgets the position first', async () => {
     renderAt('/s/src1/series/s1', route);
-    fireEvent.click(await screen.findByRole('button', { name: 'Start S01E02 over' }));
+    await screen.findByRole('button', { name: 'Resume S01E02' });
+    // VL-hero-actions: Start over waits in the hero's More menu.
+    fireEvent.click(within(await openHeroMenu()).getByRole('menuitem', { name: 'Start S01E02 over' }));
     await waitFor(() => expect(played).toHaveLength(1));
     expect(callsOf('positions.remove')[0]!.args).toEqual({ ref: sref, episodeId: 'e12' });
     expect(played[0]).toMatchObject({ episodeId: 'e12' });
@@ -277,10 +279,10 @@ describe('SeriesDetailPage (B4-vod-D1, D3, D4, D10)', () => {
     await waitFor(() => expect(queueIds()).toContain('e13'));
     act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 3000, durationSeconds: 3000 }));
     await screen.findByRole('button', { name: 'Close player' });
-    expect(screen.queryByText(/Next episode in/)).toBeNull();
+    expect(screen.queryAllByText(/Next episode in/)).toHaveLength(0);
     // Without a queue (it could not be built), the page's own card still offers the next episode.
     act(() => usePlayerStore.setState({ queue: [] }));
-    expect(await screen.findByText(/Next episode in/)).toBeTruthy();
+    expect((await screen.findAllByText(/Next episode in/)).length).toBeGreaterThan(0);
   });
 
   it('D10: an untitled episode falls back to its code on the artwork tile', async () => {
@@ -383,6 +385,7 @@ describe('VodLandingPage (B4-vod-D11)', () => {
     const cats: Category[] = [{ id: 'c1', sourceId: 'src1', contentType: 'movie', name: 'Action', hidden: false, itemCount: 3, position: 0 } as Category];
     rpcMock.handlers['catalog.categories'] = () => cats;
     rpcMock.handlers['catalog.recentlyAdded'] = () => [];
+    localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     renderAt('/s/src1/movies', [{ path: '/s/:sourceId/movies', element: <VodLandingPage kind="movie" /> }]);
     await screen.findByRole('link', { name: /Action/ });
     fireEvent.change(screen.getByPlaceholderText('Filter categories'), { target: { value: 'zzz' } });

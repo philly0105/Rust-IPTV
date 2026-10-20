@@ -1,38 +1,71 @@
-import { Clapperboard, ListFilter, SearchX, Tv } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { ChevronRight, Clapperboard, ListFilter, SearchX, Tv } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
-import { itemKey, type SeriesItem, type VodItem } from '@/api/types';
+import { itemKey, type ItemSnapshot, type PlaybackPosition, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 // The module itself, not the player barrel: small, no imports, already in the player core chunk.
 import { preloadEngines } from '@/features/player/enginePreload';
+import { snapshotTitle } from '@/lib/title';
 
+import { CatalogRail } from '../components/CatalogRail';
 import { CategoryIndex, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { itemLanguage } from '../lib/language';
-import { PosterRail } from '../components/PosterRail';
+import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
-import { resumeKey, useRecentlyAdded, useResumeMap, useSource } from '../hooks/queries';
+import { resumeKey, useRecentlyAdded, useResumeMap, useSectionContinue, useSettings, useSource } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { useVodLocks } from '../hooks/useVodLocks';
 import { loadSearchPage } from '../routes';
-import { ALL_CATEGORIES, type VodKind } from '../lib/paging';
+import { ALL_CATEGORIES, effectiveMinRating, type GridQueryInput, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
-import { Button, EmptyState, ErrorState, SearchInput, Skeleton, buttonClass } from '@/ui';
+import { Button, EmptyState, ErrorState, Page, SearchInput, Skeleton, buttonClass, cn } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+
+/** Category rails under the top rails; the rest of the categories are one click away in the index. */
+export const CATEGORY_RAIL_LIMIT = 12;
+
+/** Whether "Browse all categories" is open, kept between visits (a UI preference, so localStorage). */
+export const CATEGORY_INDEX_KEY = 'vod.categoryIndexOpen';
+
+function readIndexOpen(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(CATEGORY_INDEX_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeIndexOpen(open: boolean): void {
+  try {
+    if (open) localStorage.setItem(CATEGORY_INDEX_KEY, '1');
+    else localStorage.removeItem(CATEGORY_INDEX_KEY);
+  } catch {
+    // Storage full or blocked: the disclosure still works for this visit.
+  }
+}
 
 export function VodLandingPage({ kind }: { kind: VodKind }) {
   const { t, i18n } = useTranslation('vod');
   const { sourceId = '' } = useParams();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const indexRef = useRef<HTMLDivElement>(null);
   const [manageOpen, setManageOpen] = useState(false);
   const [filter, setFilter] = useState('');
+  const [indexOpen, setIndexOpenState] = useState(readIndexOpen);
+  const setIndexOpen = (open: boolean) => {
+    writeIndexOpen(open);
+    setIndexOpenState(open);
+  };
+  const indexId = useId();
   const source = useSource(sourceId);
+  const settings = useSettings();
   const contentType = kind;
   const section = kind === 'movie' ? 'movies' : 'series';
   // One request for the shown and the hidden categories (L3-perf-desktop-7); the grid and the
@@ -41,6 +74,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const shownCats = useMemo(() => allCats.data?.filter((c) => !c.hidden), [allCats.data]);
   const recent = useRecentlyAdded(source.data, kind);
   const resume = useResumeMap(sourceId, kind);
+  const continuing = useSectionContinue(sourceId, kind);
   const watched = useWatchedKeys(recent.data);
   const locks = useVodLocks(sourceId, kind);
 
@@ -109,15 +143,70 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 
   const hrefFor = (id: string) => `/s/${encodeURIComponent(sourceId)}/${section}/c/${encodeURIComponent(id)}`;
 
-  // Back from a category: same scroll offset, focus on the category you opened.
+  // The rails ask for each grid's first page with the grid's own arguments (sort, the minimum
+  // rating and Hide watched from settings), so See all opens on a page already in the cache.
+  const sourceKind = source.data?.kind;
+  const minRating = effectiveMinRating(settings.vodMinRating, new URLSearchParams());
+  const hideWatched = settings.vodHideWatched === true;
+  const gridInput = useCallback(
+    (categoryId: string, sort: GridQueryInput['sort']): GridQueryInput | undefined =>
+      sourceKind
+        ? {
+            sourceKind,
+            kind,
+            sourceId,
+            categoryId,
+            sort,
+            dir: 'desc',
+            search: '',
+            minRating,
+            ...(hideWatched ? { hideWatched } : {}),
+          }
+        : undefined,
+    [sourceKind, kind, sourceId, minRating, hideWatched],
+  );
+  // Categories with titles (a Stalker portal may not count them), in the provider's order. Locked
+  // categories stay out of the rails: their posters would show before the PIN is asked.
+  const railCats = useMemo(
+    () =>
+      (shownCats ?? [])
+        .filter((c) => (c.itemCount > 0 || sourceKind === 'stalker') && !locks.categoryLocked(c.id))
+        .slice(0, CATEGORY_RAIL_LIMIT),
+    [shownCats, sourceKind, locks],
+  );
+
+  const card = useCallback(
+    (item: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean) => (
+      <PosterCard
+        index={i}
+        tabIndex={rail.tabIndex}
+        title={item.titleBase || item.title}
+        fullTitle={item.title}
+        href={detailHref(item.ref) ?? '#'}
+        posterUrl={item.posterUrl}
+        year={item.year}
+        rating={item.rating}
+        progress={resume.get(resumeKey(item.ref))}
+        watched={isWatched}
+        language={itemLanguage(item.title, item.categoryName)}
+        myList={myListTarget(item)}
+        locked={locks.itemLocked(item)}
+        prefetch={sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined}
+      />
+    ),
+    [resume, locks, sourceKind],
+  );
+
+  // Back from a category: same scroll offset, focus on the category you opened. The index's own
+  // positions only (the rails above hold grid indices of their own).
   const { pathname } = useLocation();
   useScrollMemory({
     key: pathname,
     getScroller: () => scrollRef.current,
     ready: !!shownCats && !filter.trim(),
-    onRestored: (spot, scroller) => {
+    onRestored: (spot) => {
       if (spot.index === undefined) return;
-      scroller.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
+      indexRef.current?.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
     },
   });
   // Enter on a focused link also fires click, so this covers the keyboard too.
@@ -139,10 +228,11 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 
   const isEmptySource =
     source.data && source.data.kind !== 'stalker' && sourceCount === 0 && shownCats && shownCats.length === 0 && hiddenCount === 0;
+  const allHref = hrefFor(ALL_CATEGORIES);
 
   return (
-    <div ref={scrollRef} className="h-full min-h-0 overflow-y-auto" data-testid={`vod-landing-${kind}`}>
-      <div className="mx-auto flex w-full max-w-[2200px] flex-col gap-10 px-4 py-6 md:px-8">
+    <div ref={scrollRef} className="h-full min-h-0 overflow-y-auto overflow-x-hidden" data-testid={`vod-landing-${kind}`}>
+      <Page width="wide" className="flex flex-col gap-10 max-sm:gap-8">
         {/* The shell header shows the title, the source and the count (one place, L1-visual-13). Its
             subtitle folds away below md, so only there the source line shows here. */}
         <h1 className="sr-only">{title}</h1>
@@ -160,88 +250,146 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
           />
         ) : (
           <>
+            {/* CB-VOD-LANDING: rails first, the way Plex and Apple TV open a library. */}
+            {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} />}
             <PosterRail<VodItem | SeriesItem>
               title={t('recentlyAdded')}
+              seeAll={{ to: allHref }}
               items={recent.data ?? []}
+              bleed
               // Placeholder cards from the first frame (L2-vod-5): the rail never pops in and pushes the categories down.
               loading={recent.isPending}
               empty={recent.isError ? <ErrorState size="inline" error={recent.error} onRetry={() => void recent.refetch()} /> : undefined}
               myList={myListTarget}
-              render={(item, i, rail) => (
-                <PosterCard
-                  index={i}
-                  tabIndex={rail.tabIndex}
-                  title={item.titleBase || item.title}
-                  fullTitle={item.title}
-                  href={detailHref(item.ref) ?? '#'}
-                  posterUrl={item.posterUrl}
-                  year={item.year}
-                  rating={item.rating}
-                  progress={resume.get(resumeKey(item.ref))}
-                  watched={watched.has(itemKey(item.ref))}
-                  language={itemLanguage(item.title, item.categoryName)}
-                  myList={myListTarget(item)}
-                  locked={locks.itemLocked(item)}
-                  prefetch={
-                    source.data
-                      ? { ref: item.ref, sourceKind: source.data.kind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl }
-                      : undefined
-                  }
-                />
-              )}
+              render={(item, i, rail) => card(item, i, rail, watched.has(itemKey(item.ref)))}
             />
+            <CatalogRail
+              title={t('topRated')}
+              seeAll={{ to: `${allHref}?sort=rating&dir=desc` }}
+              input={gridInput(ALL_CATEGORIES, 'rating')}
+              rootRef={scrollRef}
+              card={card}
+            />
+            {railCats.map((c) => (
+              <CatalogRail
+                key={c.id}
+                title={c.name}
+                count={c.itemCount > 0 ? fmt.format(c.itemCount) : undefined}
+                seeAll={{ to: hrefFor(c.id) }}
+                input={gridInput(c.id, 'added')}
+                rootRef={scrollRef}
+                card={card}
+              />
+            ))}
 
+            {/* The full index: providers with hundreds of groups need it, so it stays one click away (VL-landing-index). */}
             <section aria-labelledby="vod-categories-heading" className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <h2 id="vod-categories-heading" className="text-title-sm text-fg">
-                  {t('categories')}
+                  <button
+                    type="button"
+                    aria-expanded={indexOpen}
+                    aria-controls={indexId}
+                    onClick={() => setIndexOpen(!indexOpen)}
+                    className="-ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
+                  >
+                    <ChevronRight aria-hidden size={18} className={cn('text-fg-muted motion-safe:transition-transform rtl:rotate-180', indexOpen && 'rotate-90 rtl:rotate-90')} />
+                    {t('browseAllCategories')}
+                  </button>
                 </h2>
-                {shownCats && (
-                  <span className="tabular text-sm text-fg-subtle">{t('categoryCount', { count: shownCats.length })}</span>
-                )}
+                {shownCats && <span className="tabular text-sm text-fg-subtle">{t('categoryCount', { count: shownCats.length })}</span>}
                 <div className="ms-auto flex flex-wrap items-center gap-2">
-                  <SearchInput
-                    value={filter}
-                    onChange={setFilter}
-                    size="sm"
-                    placeholder={t('filterCategories')}
-                    className="w-56"
-                  />
-                  <Button size="sm" variant="secondary" icon={<ListFilter aria-hidden size={15} />} onClick={() => setManageOpen(true)}>
+                  {indexOpen && (
+                    <SearchInput value={filter} onChange={setFilter} size="sm" placeholder={t('filterCategories')} className="w-56 max-sm:w-full" />
+                  )}
+                  <Button size="sm" variant="ghost" icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)}>
                     {hiddenCount > 0 ? t('manageCategoriesHidden', { count: hiddenCount }) : t('manageCategories')}
                   </Button>
                 </div>
               </div>
-              {allCats.isError ? (
-                <ErrorState error={allCats.error} onRetry={() => void allCats.refetch()} />
-              ) : allCats.isPending ? (
-                <div role="status" aria-busy="true" className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-                  <span className="sr-only">{t('loading')}</span>
-                  {Array.from({ length: 12 }, (_, i) => (
-                    <Skeleton key={i} className="h-11 rounded-md" />
-                  ))}
-                </div>
-              ) : entries.length === 0 ? (
-                <EmptyState
-                  size="inline"
-                  icon={<SearchX size={20} />}
-                  title={t('noCategoryMatch')}
-                  action={
-                    <Button size="sm" variant="secondary" onClick={() => setFilter('')}>
-                      {t('clearFilter')}
-                    </Button>
-                  }
-                />
-              ) : (
-                <div onClickCapture={rememberCategory}>
-                  <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} lockedLabel={t('locked')} />
-                </div>
-              )}
+              <div id={indexId} hidden={!indexOpen}>
+                {!indexOpen ? null : allCats.isError ? (
+                  <ErrorState error={allCats.error} onRetry={() => void allCats.refetch()} />
+                ) : allCats.isPending ? (
+                  <div role="status" aria-busy="true" className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+                    <span className="sr-only">{t('loading')}</span>
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <Skeleton key={i} className="h-11 rounded-md" />
+                    ))}
+                  </div>
+                ) : entries.length === 0 ? (
+                  <EmptyState
+                    size="inline"
+                    icon={<SearchX size={20} />}
+                    title={t('noCategoryMatch')}
+                    action={
+                      <Button size="sm" variant="secondary" onClick={() => setFilter('')}>
+                        {t('clearFilter')}
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <div ref={indexRef} onClickCapture={rememberCategory}>
+                    <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} lockedLabel={t('locked')} />
+                  </div>
+                )}
+              </div>
             </section>
           </>
         )}
-      </div>
+      </Page>
       <HiddenCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
     </div>
+  );
+}
+
+/**
+ * Continue watching for this source and section (CB-VOD-LANDING): the titles started here, newest
+ * first, each opening its detail page, where Resume is the primary action. The poster shows how
+ * far you got; the caption says the episode or the time left.
+ */
+function ContinueSectionRail({
+  positions,
+  locked,
+  sourceKind,
+}: {
+  positions: PlaybackPosition[];
+  locked: (item: { ref: PlaybackPosition['ref'] }) => boolean;
+  sourceKind: SourceKind | undefined;
+}) {
+  const { t } = useTranslation('vod');
+  const myList = (p: PlaybackPosition) => {
+    const name = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;
+    const snapshot: ItemSnapshot = { title: name, contentType: p.ref.contentType };
+    if (p.snapshot?.posterUrl) snapshot.posterUrl = p.snapshot.posterUrl;
+    return { itemRef: p.ref, snapshot };
+  };
+  return (
+    <PosterRail<PlaybackPosition>
+      title={t('continueWatching')}
+      items={positions}
+      bleed
+      myList={myList}
+      render={(p, i, rail) => {
+        const name = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;
+        const left = p.durationSeconds ? Math.max(0, p.durationSeconds - p.positionSeconds) : 0;
+        const fraction = p.durationSeconds ? Math.min(1, p.positionSeconds / p.durationSeconds) : undefined;
+        return (
+          <PosterCard
+            index={i}
+            tabIndex={rail.tabIndex}
+            title={name}
+            href={detailHref(p.ref) ?? '#'}
+            posterUrl={p.snapshot?.posterUrl}
+            // A series names the episode it resumes; a movie, the time left.
+            meta={p.episodeId && p.snapshot?.subtitle ? p.snapshot.subtitle : t('minutesLeft', { count: Math.max(1, Math.round(left / 60)) })}
+            progress={fraction}
+            myList={myList(p)}
+            locked={locked(p)}
+            prefetch={sourceKind ? { ref: p.ref, sourceKind, posterUrl: p.snapshot?.posterUrl } : undefined}
+          />
+        );
+      }}
+    />
   );
 }

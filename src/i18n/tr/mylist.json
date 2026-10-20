@@ -73,5 +73,10 @@
   "menuChecking": "Listem denetleniyor…",
   "menuRetry": "Listemi yeniden yükle",
   "notReady": "Listem hâlâ yükleniyor. Birazdan yeniden deneyin.",
-  "loadFailed": "Listem yüklenemedi"
+  "loadFailed": "Listem yüklenemedi",
+  "playTitle": "Oynat: {{title}}",
+  "resumeTitle": "Devam et: {{title}}",
+  "playFailed": "Oynatma başlatılamadı",
+  "minutesLeft_one": "{{count}} dakika kaldı",
+  "minutesLeft_other": "{{count}} dakika kaldı"
 }

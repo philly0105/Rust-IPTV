@@ -101,12 +101,14 @@ export function PageTitle({ children }: { children: string }) {
 }
 
 /** Section header row used inside the virtual lists. */
-export function SectionHeading({ title, count, hint }: { title: string; count: number; hint?: string }) {
+/** A section's heading row in a virtual list: title, count, an optional hint and an action at the end. */
+export function SectionHeading({ title, count, hint, action }: { title: string; count: number; hint?: string; action?: ReactNode }) {
   return (
     <div className="flex h-full items-end gap-3 px-1 pb-2">
       <h2 className="text-title-sm text-fg">{title}</h2>
-      <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
-      {hint && <span className="ms-auto truncate text-xs text-fg-subtle">{hint}</span>}
+      <span className="text-body-sm tabular-nums text-fg-subtle">{count}</span>
+      {hint && <span className="ms-auto min-w-0 truncate text-xs text-fg-subtle">{hint}</span>}
+      {action && <span className={cn('shrink-0', !hint && 'ms-auto')}>{action}</span>}
     </div>
   );
 }

@@ -16,7 +16,7 @@ import { VirtualGrid } from '@/ui';
 import { sameGridSlot, useSource } from '../hooks/queries';
 import { forgetSpots, recallSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
-import { VodLandingPage } from '../pages/VodLandingPage';
+import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
 import { i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -102,6 +102,7 @@ describe('L2-settings-5: lock marks in Ask mode', () => {
   });
 
   it('marks a locked category on the landing with the Live groups glyph', async () => {
+    localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     renderAt('/s/src1/movies', landingRoute);
     const locked = await screen.findByRole('link', { name: /Late night/ });
     await waitFor(() => expect(within(locked).getByTestId('category-locked').getAttribute('aria-label')).toBe(i18n.t('vod:locked')));

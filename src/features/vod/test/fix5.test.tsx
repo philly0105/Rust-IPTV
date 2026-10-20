@@ -16,7 +16,7 @@ import { hueOf } from '@/ui/Poster';
 import { PosterCard } from '../components/PosterCard';
 import { PosterRail, railEdges } from '../components/PosterRail';
 import { formatRating } from '../lib/format';
-import { i18n, installDomStubs } from './harness';
+import { i18n, installDomStubs, QueryWrapper } from './harness';
 
 beforeAll(installDomStubs);
 afterEach(cleanup);
@@ -87,6 +87,7 @@ describe('R6-r2 F7: rail start after the snap settles on the padding', () => {
       <I18nextProvider i18n={i18n}>
         <PosterRail title="Rail" items={Array.from({ length: 20 }, (_, i) => i)} render={(i) => <span>Card {i}</span>} />
       </I18nextProvider>,
+      { wrapper: QueryWrapper },
     );
     const list = screen.getByRole('list');
     expect(list.className).toContain('scroll-px-1');

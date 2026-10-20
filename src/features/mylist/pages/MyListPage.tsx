@@ -16,14 +16,15 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { itemKey, sameRef, type ItemKey, type WatchlistEntry } from '@/api/types';
+import { useRpcQuery } from '@/api/query';
+import { itemKey, sameRef, type ItemKey, type PlaybackPosition, type WatchlistEntry } from '@/api/types';
 import { itemPath } from '@/shell/dashboard/cards';
 import { intlLocale } from '@/lib/intl';
 
 import { MyListEmpty } from '../components/MyListEmpty';
 import { MyListRow, MyListSkeleton, ROW_HEIGHT, type RowReorder } from '../components/MyListRow';
 import { MyListToolbar } from '../components/MyListToolbar';
-import { Button, EmptyState, ErrorState, Page, VirtualRows, usePendingRemovals, useShell, useShortcut, useVisibleSources } from '../deps';
+import { Button, EmptyState, ErrorState, Page, VirtualRows, errorDescription, usePendingRemovals, useShell, useShortcut, useToast, useVisibleSources } from '../deps';
 import { useListParams } from '../hooks/useListParams';
 import { useMyList } from '../hooks/useMyList';
 import { useMyListActions } from '../hooks/useMyListActions';
@@ -31,6 +32,9 @@ import { readList } from '../lib/cache';
 import { buildView, moveInSubset, relativeTime } from '../lib/list';
 
 const DRAG_MIME = 'application/x-tsrust-mylist';
+
+/** The continue-watching answer the VOD grids read too (the same arguments, so one request serves both). */
+const RESUME_LOOKUP = { limit: 500 } as const;
 
 /**
  * Watched ticks and order change only through writes that invalidate the list
@@ -127,6 +131,20 @@ export function MyListPage() {
   }, [view.base, language]);
 
   const sourcesById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
+  const { toast } = useToast();
+
+  // VL-mylist-rows: how far each saved title got (newest position per title; a series names the
+  // episode it resumes), so a row shows its progress and plays from there.
+  const continueQ = useRpcQuery('positions.continueWatching', RESUME_LOOKUP, { staleTime: 30_000 });
+  const resumeByKey = useMemo(() => {
+    const out = new Map<string, PlaybackPosition>();
+    for (const p of continueQ.data ?? []) {
+      if (p.watched || !p.durationSeconds || !(p.positionSeconds > 0)) continue;
+      const key = itemKey(p.ref);
+      if (!out.has(key)) out.set(key, p);
+    }
+    return out;
+  }, [continueQ.data]);
   const manySources = useMemo(() => new Set(view.base.map((e) => e.ref.sourceId)).size > 1, [view.base]);
 
   const title = t('title');
@@ -144,6 +162,28 @@ export function MyListPage() {
   }, []);
 
   const open = useCallback((e: WatchlistEntry) => void navigate(itemPath(e.ref)), [navigate]);
+  /**
+   * Plays a row: from its saved position (a series with the rest of the season queued, as from its
+   * page), or a movie from the start. Loaded on use, so the page does not carry the player.
+   */
+  const play = useCallback(
+    (e: WatchlistEntry) => {
+      const saved = resumeByKey.get(itemKey(e.ref));
+      const position: PlaybackPosition = saved
+        ? { ...saved, snapshot: saved.snapshot ?? e.snapshot }
+        : { ref: e.ref, positionSeconds: 0, updatedAt: e.addedAt, watched: e.watched, snapshot: e.snapshot };
+      void import('@/features/library/lib/open')
+        .then(({ resumePosition }) => resumePosition(position, sourcesById.get(e.ref.sourceId)))
+        .catch((err: unknown) =>
+          toast({
+            title: err instanceof Error && err.name === 'SourceGoneError' ? t('errorSourceGone') : t('playFailed'),
+            ...(err instanceof Error && err.name === 'SourceGoneError' ? {} : { description: errorDescription(err) }),
+            variant: 'error',
+          }),
+        );
+    },
+    [resumeByKey, sourcesById, toast, t],
+  );
 
   // The rows on screen: a move reshuffles only these (moves need the user's order, so they are a filter of the list).
   const visibleKeys = useMemo(() => new Set<string>(rows.map((r) => r.key)), [rows]);
@@ -248,6 +288,10 @@ export function MyListPage() {
     const e = row.entry;
     const at = Date.parse(e.addedAt);
     const ago = relativeTime(e.addedAt, language);
+    const saved = resumeByKey.get(row.key);
+    const left = saved?.durationSeconds ? Math.max(1, Math.round((saved.durationSeconds - saved.positionSeconds) / 60)) : undefined;
+    // A series names the episode it resumes; a movie, the time left.
+    const progressLabel = saved ? (saved.episodeId && saved.snapshot?.subtitle ? saved.snapshot.subtitle : left !== undefined ? t('minutesLeft', { count: left }) : undefined) : undefined;
     return (
       <MyListRow
         entry={e}
@@ -268,6 +312,10 @@ export function MyListPage() {
         onOpen={open}
         onRemove={remove}
         onToggleWatched={toggleWatched}
+        // A series with nothing started has no one episode to play: its page picks one.
+        onPlay={e.ref.contentType === 'movie' || saved ? play : undefined}
+        progress={saved?.durationSeconds ? Math.min(1, saved.positionSeconds / saved.durationSeconds) : undefined}
+        progressLabel={progressLabel}
       />
     );
   };
@@ -341,7 +389,7 @@ export function MyListPage() {
   const showToolbar = !query.isPending && view.base.length > 0;
 
   return (
-    <Page width="default" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col pb-4 pt-3" data-testid="mylist-page">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-3" data-testid="mylist-page">
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
       {showToolbar && (

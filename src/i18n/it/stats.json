@@ -35,5 +35,8 @@
   "clearBody": "Tutto il tempo di visione conteggiato viene eliminato. I progressi e Visti di recente restano.",
   "cleared": "Statistiche di visione cancellate",
   "clearFailed": "Impossibile cancellare le statistiche",
-  "watchLive": "Guarda la TV in diretta"
+  "watchLive": "Guarda la TV in diretta",
+  "kpiWeek": "Visti negli ultimi 7 giorni",
+  "kpiMonth": "Visti negli ultimi 30 giorni",
+  "dailyAverage": "Media giornaliera"
 }

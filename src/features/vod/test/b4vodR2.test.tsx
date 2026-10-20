@@ -15,7 +15,7 @@ import { joinList } from '@/shell/dashboard/cards';
 import { CastRow } from '../components/detail/CastRow';
 import { PosterCard } from '../components/PosterCard';
 import { PosterRail } from '../components/PosterRail';
-import { i18n, installDomStubs } from './harness';
+import { i18n, installDomStubs, QueryWrapper } from './harness';
 
 beforeAll(installDomStubs);
 afterEach(cleanup);
@@ -40,7 +40,7 @@ describe('B4-vod-D16: horizontally scrolling VOD rows are keyboard reachable', (
   });
 
   it('a loading poster rail (skeletons only, nothing to focus) clips instead of scrolling', () => {
-    const { rerender } = render(<MemoryRouter><PosterRail title="Movies" items={[]} render={() => null} loading /></MemoryRouter>);
+    const { rerender } = render(<MemoryRouter><PosterRail title="Movies" items={[]} render={() => null} loading /></MemoryRouter>, { wrapper: QueryWrapper });
     const loadingRow = screen.getByRole('list');
     expect(loadingRow.className).toContain('overflow-x-hidden');
     expect(loadingRow.className).not.toContain('overflow-x-auto');

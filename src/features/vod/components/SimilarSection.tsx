@@ -2,22 +2,29 @@ import { Clapperboard, KeyRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import type { TmdbBrief } from '@/api/types';
+import { itemKey, type SeriesItem, type SourceKind, type TmdbBrief, type VodItem } from '@/api/types';
 
+import { useCatalogMatches } from '../hooks/useCatalogMatches';
+import { useWatchedKeys } from '../hooks/useWatched';
+import { detailHref } from '../lib/search';
 import { EmptyState, buttonClass } from '@/ui';
+import { myListTarget, PosterCard } from './PosterCard';
+import { PosterRail } from './PosterRail';
 import { TmdbAttribution } from './TmdbAttribution';
 import { TmdbErrorState } from './TmdbErrorState';
-import { TmdbRail } from './TmdbRail';
 
 /**
- * "More like this" on the detail pages. With no TMDB key it shows how to add
- * one instead of claiming TMDB found nothing; the TMDB notice shows only when
- * something on the page came from TMDB.
+ * "More like this" on the detail pages. TMDB names the titles; only the ones this source has are
+ * shown, each opening its own detail page (VL-tmdb-deadend), so no card leads to an empty search.
+ * With no TMDB key it shows how to add one instead of claiming TMDB found nothing; the TMDB notice
+ * shows only when something on the page came from TMDB.
  */
 export function SimilarSection({
   items,
   loading,
   sourceId,
+  kind = 'movie',
+  sourceKind,
   error,
   onRetry,
   keyMissing,
@@ -26,6 +33,10 @@ export function SimilarSection({
   items: TmdbBrief[];
   loading: boolean;
   sourceId: string;
+  /** Which part of the catalog the similar titles are looked up in. */
+  kind?: 'movie' | 'series';
+  /** The source's kind, so resting on a card warms its detail page. */
+  sourceKind?: SourceKind | undefined;
   error: unknown;
   onRetry: () => void;
   keyMissing: boolean;
@@ -33,6 +44,8 @@ export function SimilarSection({
   enriched: boolean;
 }) {
   const { t } = useTranslation('vod');
+  const matches = useCatalogMatches(items, sourceId, kind, !keyMissing && !error);
+  const watched = useWatchedKeys(matches.items);
   if (keyMissing) {
     return (
       <section aria-label={t('similar')} data-testid="vod-tmdb-key-missing" className="relative">
@@ -52,18 +65,35 @@ export function SimilarSection({
   }
   return (
     <div className="relative flex flex-col gap-4">
-      <TmdbRail
+      <PosterRail<VodItem | SeriesItem>
         title={t('similar')}
-        items={items}
-        loading={loading}
-        sourceId={sourceId}
+        items={matches.items}
+        loading={loading || (items.length > 0 && matches.pending)}
+        bleed
+        myList={myListTarget}
         empty={
           error ? (
             <TmdbErrorState size="inline" title={t('tmdbUnavailable')} error={error} onRetry={onRetry} />
           ) : (
-            <EmptyState size="inline" icon={<Clapperboard size={20} />} title={t('noSimilar')} />
+            // TMDB found none, or none of its titles is in this source: say which.
+            <EmptyState size="inline" icon={<Clapperboard size={20} />} title={items.length > 0 ? t('noSimilarInSource') : t('noSimilar')} />
           )
         }
+        render={(item, i, rail) => (
+          <PosterCard
+            index={i}
+            tabIndex={rail.tabIndex}
+            title={item.titleBase || item.title}
+            fullTitle={item.title}
+            href={detailHref(item.ref) ?? '#'}
+            posterUrl={item.posterUrl}
+            year={item.year}
+            rating={item.rating}
+            watched={watched.has(itemKey(item.ref))}
+            myList={myListTarget(item)}
+            prefetch={sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined}
+          />
+        )}
       />
       {(enriched || items.length > 0) && <TmdbAttribution />}
     </div>

@@ -71,5 +71,10 @@
   "menuChecking": "내 목록 확인 중…",
   "menuRetry": "내 목록 다시 불러오기",
   "notReady": "내 목록을 아직 불러오는 중입니다. 잠시 후 다시 시도하세요.",
-  "loadFailed": "내 목록을 불러오지 못했습니다"
+  "loadFailed": "내 목록을 불러오지 못했습니다",
+  "playTitle": "{{title}} 재생",
+  "resumeTitle": "{{title}} 이어 보기",
+  "playFailed": "재생을 시작할 수 없습니다",
+  "minutesLeft_one": "{{count}}분 남음",
+  "minutesLeft_other": "{{count}}분 남음"
 }

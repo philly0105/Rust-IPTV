@@ -13,7 +13,7 @@ import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { vodRoutes } from '../routes';
-import { currentLocation, i18n, installDomStubs, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
+import { currentLocation, i18n, installDomStubs, makeSource, openCategoryIndex, openHeroMenu, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -134,6 +134,8 @@ describe('VodLandingPage', () => {
     renderAt('/s/src1/movies', [{ path: '/s/:sourceId/movies', element: <VodLandingPage kind="movie" /> }]);
     await screen.findByText('Recently added');
     await screen.findByText('Movie 1');
+    // VL-landing-index: the full index waits behind "Browse all categories", under the rails.
+    await openCategoryIndex();
     const index = await screen.findByRole('list', { name: 'Categories' });
     expect(within(index).getByText('All movies')).toBeTruthy();
     expect(within(index).getByText('Action').closest('a')?.getAttribute('href')).toBe('/s/src1/movies/c/c1');
@@ -177,11 +179,16 @@ describe('CategoryGridPage', () => {
     const marker = (name: RegExp) => screen.getByRole('group', { name }).querySelector('[data-testid="mylist-grid-toggle"]');
     expect(marker(/^Movie 1 \(/)?.getAttribute('data-in-list')).toBe('true');
     expect(marker(/^Movie 0 \(/)?.hasAttribute('data-in-list')).toBe(false);
-    // C5 (data-perf r1 F5): an unsaved corner blurs only while it is up on one card (hover or the
-    // cursor). Without hover it shows on every card at once, so there it is opaque, not blurred.
+    // C5 (data-perf r1 F5): an unsaved corner blurs only while it is up on one card (hover or the cursor).
     const resting = marker(/^Movie 3 \(/)!.className.split(/\s+/);
     expect(resting).not.toContain('glass-blur');
-    expect(resting).toEqual(expect.arrayContaining(['group-hover/card:glass-blur', '[@media(hover:none)]:bg-glass-strong', '[@media(hover:none)]:opacity-100']));
+    expect(resting).toEqual(expect.arrayContaining(['opacity-0', 'group-hover/card:opacity-100', 'group-hover/card:glass-blur']));
+    // VL-poster-chips: the toggle is never forced up on every card (touch screens save from the
+    // poster's menu); a saved title carries the small glass chip on its top-end corner instead.
+    expect(resting).not.toContain('[@media(hover:none)]:opacity-100');
+    expect(marker(/^Movie 1 \(/)!.className.split(/\s+/)).toContain('opacity-0');
+    expect(within(screen.getByRole('group', { name: /^Movie 1 \(/ })).getByTestId('poster-saved')).toBeTruthy();
+    expect(within(screen.getByRole('group', { name: /^Movie 0 \(/ })).queryByTestId('poster-saved')).toBeNull();
     // Nothing focusable inside an option (axe nested-interactive).
     expect(document.querySelectorAll('[role="option"] button, [role="option"] a, [role="option"] [tabindex]')).toHaveLength(0);
 
@@ -312,10 +319,13 @@ describe('MovieDetailPage', () => {
     await screen.findByRole('heading', { name: 'Dune: Part Two', level: 1 });
     await screen.findByText('Paul Atreides unites with the Fremen.');
     expect(await screen.findByRole('button', { name: 'Resume from 12:34' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy();
     const actor = await screen.findByRole('link', { name: /Timothee Chalamet/ });
     expect(actor.getAttribute('href')).toBe(`/s/src1/actor/${ACTOR_ID}`);
-    expect(await screen.findByRole('button', { name: '1 other source' })).toBeTruthy();
+    // The other copy is listed under the hero and offered in the More menu, beside Start over (VL-hero-actions).
+    expect(await screen.findByTestId('vod-other-sources')).toBeTruthy();
+    const menu = await openHeroMenu();
+    expect(within(menu).getByRole('menuitem', { name: 'Start over' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: '1 other source' })).toBeTruthy();
     expect(callsOf('tmdb.movie')[0]!.args).toMatchObject({ title: 'Dune: Part Two', year: 2007 });
   });
 
@@ -414,17 +424,27 @@ describe('SeriesDetailPage', () => {
 });
 
 describe('ActorPage', () => {
-  it('shows the person and links known-for titles into source search', async () => {
+  it('shows the person and links the known-for titles this source has to their own pages (VL-tmdb-deadend)', async () => {
     rpcMock.handlers['tmdb.person'] = () => ({
       id: ACTOR_ID,
       name: 'Timothee Chalamet',
       biography: 'American actor.',
-      knownFor: [{ tmdbId: 1, mediaType: 'movie', title: 'Wonka', year: 2023 }],
+      knownFor: [
+        { tmdbId: 1, mediaType: 'movie', title: 'Wonka', year: 2023 },
+        { tmdbId: 2, mediaType: 'movie', title: 'Not Here', year: 2019 },
+      ],
     });
+    const wonka: VodItem = { ref: { sourceId: 'src1', contentType: 'movie', itemId: 'w1' }, title: 'Wonka (2023)', titleBase: 'Wonka', year: 2024, categoryId: 'c1' };
+    rpcMock.handlers['catalog.search'] = (a) => ({ live: [], movies: (a as { query: string }).query === 'Wonka' ? [wonka] : [], series: [] });
     renderAt(`/s/src1/actor/${ACTOR_ID}`, [{ path: '/s/:sourceId/actor/:personId', element: <ActorPage /> }]);
     await screen.findByRole('heading', { name: 'Timothee Chalamet' });
     expect(screen.getByText('American actor.')).toBeTruthy();
-    expect(screen.getByRole('link', { name: /Wonka/ }).getAttribute('href')).toBe('/s/src1/search?q=Wonka');
+    // A year apart still matches (providers list other release dates); the title the source lacks is left out.
+    expect((await screen.findByRole('link', { name: /Wonka/ })).getAttribute('href')).toBe('/s/src1/movie/w1');
+    expect(screen.queryByRole('link', { name: /Not Here/ })).toBeNull();
+    expect(callsOf('catalog.search').map((c) => c.args)).toEqual(
+      expect.arrayContaining([{ query: 'Wonka', sourceId: 'src1', contentTypes: ['movie'], limit: 8 }]),
+    );
   });
 
   it('explains that TMDB is off', async () => {
@@ -514,6 +534,8 @@ describe('Downloads of M3U movies and whole seasons', () => {
   const mref = { sourceId: 'src1', contentType: 'movie' as const, itemId: 'm7' };
   const m3uSource = () => ({ ...makeSource('src1', 'm3u', 'Home list'), m3u: { origin: 'url' as const, url: 'http://l/x.m3u', headers: { referrer: 'http://ref.example/' } } });
 
+  // FW-M3U-MOVIE-URL: the mock answers catalog.item the way the core does since it serializes them
+  // (iptv-core catalog, M3U sources only): the VodItem's own `url` and camelCase `headers`.
   it('downloads an M3U movie from its playlist URL, with the playlist and row headers', async () => {
     rpcMock.handlers['settings.get'] = () => settings();
     rpcMock.handlers['sources.get'] = () => m3uSource();

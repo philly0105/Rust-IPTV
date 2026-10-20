@@ -11,7 +11,7 @@ import { isResumable, progressFraction } from '../lib/format';
 import { resumeTarget } from '../lib/merge';
 import { effectiveMinRating, filterByRating } from '../lib/paging';
 import { forgetSpots } from '../hooks/useScrollMemory';
-import { currentLocation, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { currentLocation, installDomStubs, makeSource, openHeroMenu, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -299,7 +299,7 @@ describe('U4-fix3: watched state', () => {
     renderAt('/s/src1/movie/m7', movieRoute);
     expect(await screen.findByRole('button', { name: 'Mark as unwatched' })).toBeTruthy();
     expect(await screen.findByRole('button', { name: /Resume/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy();
+    expect(within(await openHeroMenu()).getByRole('menuitem', { name: 'Start over' })).toBeTruthy();
   });
 
   it('isResumable: a watched movie resumes only between 5 % and 95 %; a watched episode never does', () => {
@@ -376,15 +376,18 @@ describe('U4-fix3: minimum rating filter', () => {
     await screen.findByText('Rated 1');
     expect(screen.queryByText('Rated 2')).toBeNull();
     expect(screen.queryByText('Rated 3')).toBeNull();
+    // VL-grid-toolbars: the floor is a chip in the toolbar ("7.0+"), named with the full sentence.
     const note = screen.getByTestId('vod-rating-filter');
-    expect(note.textContent).toContain('Showing titles rated 7.0 or higher');
+    expect(note.textContent).toBe('7.0+');
+    expect(note.getAttribute('aria-pressed')).toBe('true');
+    expect(note.getAttribute('aria-label')).toContain('Showing titles rated 7.0 or higher');
     // The core filters (50 of 150 pass): one request, exact count from the first page.
     await waitFor(() => expect(within(screen.getByTestId('vod-grid-movie')).getByText('50 titles')).toBeTruthy());
     const movieCalls = callsOf('catalog.movies');
     expect(movieCalls).toHaveLength(1);
     expect(movieCalls[0]!.args).toMatchObject({ sourceId: 'src1', minRating: 7, query: { offset: 0 } });
 
-    fireEvent.click(within(note).getByRole('button', { name: 'Show all ratings' }));
+    fireEvent.click(note);
     await screen.findByText('Rated 2');
     expect(currentLocation).toBe('/s/src1/movies/c/all?ratings=all');
     expect(screen.getByRole('button', { name: 'Show only titles rated 7.0 or higher' })).toBeTruthy();

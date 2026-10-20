@@ -73,5 +73,10 @@
   "menuChecking": "Meine Liste wird geprüft…",
   "menuRetry": "Meine Liste erneut laden",
   "notReady": "Meine Liste wird noch geladen. Versuchen Sie es gleich noch einmal.",
-  "loadFailed": "Meine Liste konnte nicht geladen werden"
+  "loadFailed": "Meine Liste konnte nicht geladen werden",
+  "playTitle": "{{title}} abspielen",
+  "resumeTitle": "{{title}} fortsetzen",
+  "playFailed": "Wiedergabe konnte nicht starten",
+  "minutesLeft_one": "Noch {{count}} Minute",
+  "minutesLeft_other": "Noch {{count}} Minuten"
 }

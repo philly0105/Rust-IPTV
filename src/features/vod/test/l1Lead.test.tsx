@@ -2,7 +2,7 @@
 // toast per series (L1-vod-14), a fresh visit opens the Resume season (L1-vod-11), a Back control
 // on the detail hero (L1-vod-2) and a designed state for a removed source (L1-vod-13).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +15,7 @@ import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { VodLandingPage } from '../pages/VodLandingPage';
 import { forgetSpots, rememberSeason } from '../hooks/useScrollMemory';
 import { seriesWatchedWrite } from '../lib/seriesWatched';
-import { currentLocation, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { currentLocation, i18n, installDomStubs, makeSource, openHeroMenu, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -216,7 +216,9 @@ describe('Base titles (L1-visual-6)', () => {
     });
     rpcMock.handlers['favorites.toggle'] = () => ({ isFavorite: true });
     renderAt('/s/src1/movie/m7', [{ path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> }]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add to favorites' }));
+    await screen.findByRole('heading', { name: 'Black Harbor', level: 1 });
+    // Favorites wait in the hero's More menu (VL-hero-actions).
+    fireEvent.click(within(await openHeroMenu()).getByRole('menuitem', { name: 'Add to favorites' }));
     await waitFor(() => expect(callsOf('favorites.toggle')).toHaveLength(1));
     expect((callsOf('favorites.toggle')[0] as { snapshot: unknown }).snapshot).toEqual({
       title: 'Black Harbor',

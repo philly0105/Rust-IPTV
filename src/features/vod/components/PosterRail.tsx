@@ -3,9 +3,10 @@ import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type 
 import { useTranslation } from 'react-i18next';
 
 import { MyListKey, useMyListKeyFocus, type MyListTarget } from '../hooks/useMyListKey';
+import { useRailCardWidth } from '../hooks/useRailCardWidth';
 import { handleGridKeyDown } from '../lib/gridNav';
-import { IconButton, PosterWidthContext, cn } from '@/ui';
-import { PosterCardSkeleton } from './PosterCard';
+import { IconButton, PosterWidthContext, SectionHeader, cn } from '@/ui';
+import { GridMyListProvider, PosterCardSkeleton } from './PosterCard';
 
 /** True when the user asked the OS to reduce motion. */
 function prefersReducedMotion(): boolean {
@@ -50,8 +51,17 @@ export interface PosterRailProps<T> {
   /** Shown instead of the rail when there are no items and not loading. Omit to hide the rail. */
   empty?: ReactNode;
   action?: ReactNode;
-  /** Card width in px. */
+  /** A muted number after the title (a category's title count), formatted by the caller. */
+  count?: ReactNode;
+  /** "See all" on the heading row: the grid this rail is a slice of. */
+  seeAll?: { to: string; label?: ReactNode } | undefined;
+  /** Card width in px. Defaults to the cover-size setting at the UI scale (useRailCardWidth). */
   cardWidth?: number;
+  /**
+   * The track runs out to the page edge through the page gutter (it sits inside `Page`), so the
+   * last visible card is cut by the window, not by a hard edge inside the content (VL-page-rhythm).
+   */
+  bleed?: boolean;
   className?: string;
   /** The title a card saves to My List: S on a focused card toggles it (its corner button is out of the Tab order). */
   myList?: ((item: T) => MyListTarget | undefined) | undefined;
@@ -64,9 +74,11 @@ export interface PosterRailProps<T> {
  * the focused card to My List when the rail has `myList`. The step buttons
  * page by the visible width.
  */
-export function PosterRail<T>({ title, items, render, loading, empty, action, cardWidth = 150, className, myList }: PosterRailProps<T>) {
+export function PosterRail<T>({ title, items, render, loading, empty, action, count, seeAll, cardWidth: fixedWidth, bleed, className, myList }: PosterRailProps<T>) {
   const { t } = useTranslation('vod');
   const headingId = useId();
+  const autoWidth = useRailCardWidth();
+  const cardWidth = fixedWidth ?? autoWidth;
   const scroller = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
   // The card holding the rail's Tab stop: the last one focused, clamped when the list shrinks.
@@ -105,7 +117,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
 
   if (!loading && items.length === 0 && !empty) return null;
 
-  return (
+  const rail = (
     <section aria-labelledby={headingId} className={cn('min-w-0', className)}>
       {myList && (
         <MyListKey
@@ -116,32 +128,41 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
           }}
         />
       )}
-      <div className="mb-3 flex items-end gap-3">
-        <h2 id={headingId} className="text-title-sm text-fg">
-          {title}
-        </h2>
-        <div className="ms-auto flex items-center gap-1">
-          {action}
-          {items.length > 0 && (
+      <SectionHeader
+        id={headingId}
+        title={title}
+        count={count}
+        seeAll={seeAll}
+        className="mb-3"
+        action={
+          action || items.length > 0 ? (
             <>
-              <IconButton
-                size="sm"
-                label={t('railPrevious')}
-                icon={<ChevronLeft aria-hidden size={18} className="rtl:rotate-180" />}
-                disabled={edges.start}
-                onClick={() => page(-1)}
-              />
-              <IconButton
-                size="sm"
-                label={t('railNext')}
-                icon={<ChevronRight aria-hidden size={18} className="rtl:rotate-180" />}
-                disabled={edges.end}
-                onClick={() => page(1)}
-              />
+              {action}
+              {items.length > 0 && (
+                // Touch screens swipe the track; the step buttons are for a mouse (no sideways wheel) and the keyboard.
+                <span className="flex items-center gap-1 pointer-coarse:hidden">
+                  <IconButton
+                    size="sm"
+                    label={t('railPrevious')}
+                    icon={<ChevronLeft aria-hidden size={18} className="rtl:rotate-180" />}
+                    disabled={edges.start}
+                    onClick={() => page(-1)}
+                    className="disabled:opacity-30"
+                  />
+                  <IconButton
+                    size="sm"
+                    label={t('railNext')}
+                    icon={<ChevronRight aria-hidden size={18} className="rtl:rotate-180" />}
+                    disabled={edges.end}
+                    onClick={() => page(1)}
+                    className="disabled:opacity-30"
+                  />
+                </span>
+              )}
             </>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
       {!loading && items.length === 0 ? (
         empty
       ) : (
@@ -153,7 +174,12 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
           onBlur={myListFocus.onBlur}
           onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: items.length })}
           // Skeletons have nothing to focus, so the loading row clips instead of scrolling (axe scrollable-region-focusable).
-          className={cn('-mx-1 flex snap-x scroll-px-1 gap-4 px-1 pt-1 pb-3 motion-safe:scroll-smooth', loading ? 'overflow-x-hidden' : 'overflow-x-auto')}
+          className={cn(
+            'flex snap-x gap-4 pt-1 pb-3 motion-safe:scroll-smooth',
+            // Bleeding through the gutter, the first card still snaps to the content edge (scroll padding = gutter).
+            bleed ? '-mx-(--page-gutter) scroll-px-(--page-gutter) px-(--page-gutter)' : '-mx-1 scroll-px-1 px-1',
+            loading ? 'overflow-x-hidden' : 'overflow-x-auto scrollbar-none',
+          )}
         >
           {/* The posters fill the card, so they load at its width without measuring (SH-6). */}
           <PosterWidthContext.Provider value={cardWidth}>
@@ -173,4 +199,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
       )}
     </section>
   );
+  // A rail of savable titles shares one My List subscription, like a grid (VD-1), and its cards
+  // know which titles are saved, so they draw the small saved chip instead of a standing toggle.
+  return myList ? <GridMyListProvider>{rail}</GridMyListProvider> : rail;
 }

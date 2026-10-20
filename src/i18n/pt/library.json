@@ -66,7 +66,6 @@
   "folderChanged": "Novos downloads serão salvos na pasta escolhida",
   "folderChangeFailed": "Não foi possível alterar a pasta de downloads",
   "folderOpenFailed": "Não foi possível abrir a pasta de downloads",
-  "clearFinished": "Limpar finalizados",
   "clearConfirmTitle_one": "Limpar {{count, number}} download?",
   "clearConfirmTitle_many": "Limpar {{count, number}} downloads?",
   "clearConfirmTitle_other": "Limpar {{count, number}} downloads?",
@@ -92,7 +91,6 @@
   "shortcutCancel": "Cancelar o download em foco",
   "shortcutRemove": "Remover o download em foco",
   "shortcutReveal": "Mostrar a transferência selecionada na pasta",
-
   "myVideosTitle": "Meus vídeos",
   "libraryTitleCount_one": "{{count, number}} título",
   "libraryTitleCount_many": "{{count, number}} títulos",
@@ -159,7 +157,6 @@
   "episodeRedownloadAria": "Baixar {{title}} novamente",
   "episodeRevealAria": "Mostrar {{title}} na pasta",
   "episodeRemoveAria": "Remover {{title}}",
-
   "favoritesTitle": "Favoritos",
   "sourceFavoritesTitle": "Favoritos em {{source}}",
   "favoritesCount_one": "{{count, number}} favorito",
@@ -182,7 +179,6 @@
   "shortcutMoveDown": "Mover o favorito em foco para baixo",
   "addedAgo": "Adicionado {{time}}",
   "undo": "Desfazer",
-
   "recentTitle": "Assistidos recentemente",
   "sourceRecentTitle": "Assistidos recentemente em {{source}}",
   "recentCount_one": "{{count, number}} item",
@@ -208,7 +204,6 @@
   "continueTitle": "Continuar {{title}} em {{time}}",
   "removeContinue": "Remover {{title}} de Continuar assistindo",
   "watchedPercent": "{{percent}}% assistido",
-
   "typeLive": "Canal ao vivo",
   "typeMovie": "Filme",
   "typeSeries": "Série",
@@ -298,5 +293,8 @@
   "stopConfirmTitle": "Parar a gravação?",
   "stopConfirmBody": "A gravação de {{title}} para agora e não pode ser retomada. O que já foi gravado fica em Meus vídeos.",
   "stopConfirmKeep": "Continuar a gravar",
-  "stopConfirmAction": "Parar gravação"
+  "stopConfirmAction": "Parar gravação",
+  "clearFailedDownloads": "Limpar com falha",
+  "downloadDone": "{{title}} baixado",
+  "downloadFailedNamed": "Não foi possível baixar {{title}}"
 }

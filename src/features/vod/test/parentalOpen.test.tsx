@@ -5,7 +5,7 @@
  */
 
 import { QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -17,7 +17,7 @@ import mylist from '@/i18n/en/mylist.json';
 import parental from '@/i18n/en/parental.json';
 import vod from '@/i18n/en/vod.json';
 
-import { installDomStubs, makeSource, settings } from './harness';
+import { installDomStubs, makeSource, openHeroMenu, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -198,8 +198,11 @@ describe('movie page parental gate (Ask mode)', () => {
       { sourceId: 'src1', contentType: 'movie', kind: 'category', targetId: 'c1', name: 'Late shows', createdAt: '2026-10-15T00:00:00Z' },
     ];
     renderMovie();
-    const entry = await screen.findByRole<HTMLButtonElement>('button', { name: 'Locked with its group' });
-    expect(entry.disabled).toBe(true);
-    expect(screen.queryByRole('button', { name: 'Lock movie' })).toBeNull();
+    await screen.findByText('A film for grown-ups.');
+    // The lock entries sit in the hero's More menu (VL-hero-actions).
+    const menu = await openHeroMenu();
+    const entry = await within(menu).findByRole('menuitem', { name: 'Locked with its group' });
+    expect(entry.getAttribute('aria-disabled')).toBe('true');
+    expect(within(menu).queryByRole('menuitem', { name: 'Lock movie' })).toBeNull();
   });
 });

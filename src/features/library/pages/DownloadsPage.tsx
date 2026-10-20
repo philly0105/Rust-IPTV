@@ -137,7 +137,17 @@ export function DownloadsPage() {
           <SectionHeading
             title={t(row.section === 'active' ? 'sectionActive' : 'sectionAttention')}
             count={row.count}
-            {...(row.section === 'attention' ? { hint: t('sectionAttentionHint') } : {})}
+            {...(row.section === 'attention'
+              ? {
+                  hint: t('sectionAttentionHint'),
+                  // VL-clear-finished-copy: beside the rows it removes, and named for them.
+                  action: (
+                    <Button size="sm" variant="ghost" icon={<Eraser size={16} aria-hidden />} onClick={() => setConfirm({ action: 'clear' })}>
+                      {t('clearFailedDownloads')}
+                    </Button>
+                  ),
+                }
+              : {})}
           />
         );
       }
@@ -209,18 +219,9 @@ export function DownloadsPage() {
   }
 
   return (
-    <Page width="default" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col gap-4 pb-4 pt-4">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 pb-4 pt-4">
       <PageTitle>{title}</PageTitle>
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <FolderBar pageError={query.isError} />
-        </div>
-        {attention.length > 0 && (
-          <Button variant="ghost" icon={<Eraser size={16} aria-hidden />} onClick={() => setConfirm({ action: 'clear' })}>
-            {t('clearFinished')}
-          </Button>
-        )}
-      </div>
+      <FolderBar pageError={query.isError} />
       {body}
       <ConfirmDialog
         open={confirm !== null}
@@ -241,7 +242,7 @@ export function DownloadsPage() {
               ? t('clearConfirmBody')
               : t('removeConfirmBody', { title: confirm?.download?.title ?? '' })
         }
-        confirmLabel={confirm?.action === 'cancel' ? t('actionCancel') : confirm?.action === 'clear' ? t('clearFinished') : t('actionRemove')}
+        confirmLabel={confirm?.action === 'cancel' ? t('actionCancel') : confirm?.action === 'clear' ? t('clearFailedDownloads') : t('actionRemove')}
         onConfirm={() => void confirmAction()}
       >
         {confirm?.action === 'remove' && confirmUnfinished && confirmTarget.bytesDownloaded > 0 && (

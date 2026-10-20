@@ -276,7 +276,7 @@ export function RecentPage() {
     );
 
   return (
-    <Page width="default" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col pb-4 pt-4" data-testid="recent-page">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-4" data-testid="recent-page">
       <PageTitle>{title}</PageTitle>
       {phone && count > 0 && !query.isLoading && !query.isError ? (
         <div className="mb-2 flex min-h-8 items-center justify-between gap-3" data-testid="recent-phone-bar">

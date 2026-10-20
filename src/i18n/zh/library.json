@@ -60,7 +60,6 @@
   "folderChanged": "新的下载将保存到所选文件夹",
   "folderChangeFailed": "无法更改下载文件夹",
   "folderOpenFailed": "无法打开下载文件夹",
-  "clearFinished": "清除已结束的下载",
   "clearConfirmTitle_one": "清除 {{count, number}} 个下载？",
   "clearConfirmTitle_other": "清除 {{count, number}} 个下载？",
   "clearConfirmBody": "失败和已取消的下载将从队列中移除，未完成的文件也会一并删除。",
@@ -83,7 +82,6 @@
   "shortcutCancel": "取消当前下载",
   "shortcutRemove": "移除当前下载",
   "shortcutReveal": "在文件夹中显示所选下载",
-
   "myVideosTitle": "我的视频",
   "libraryTitleCount_one": "{{count, number}} 部作品",
   "libraryTitleCount_other": "{{count, number}} 部作品",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "重新下载 {{title}}",
   "episodeRevealAria": "在文件夹中显示 {{title}}",
   "episodeRemoveAria": "移除 {{title}}",
-
   "favoritesTitle": "收藏",
   "sourceFavoritesTitle": "{{source}} 中的收藏",
   "favoritesCount_one": "{{count, number}} 个收藏",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "下移当前收藏",
   "addedAgo": "添加于 {{time}}",
   "undo": "撤销",
-
   "recentTitle": "最近观看",
   "sourceRecentTitle": "{{source}} 中最近观看",
   "recentCount_one": "{{count, number}} 项",
@@ -192,7 +188,6 @@
   "continueTitle": "从 {{time}} 继续观看 {{title}}",
   "removeContinue": "将 {{title}} 从“继续观看”中移除",
   "watchedPercent": "已观看 {{percent}}%",
-
   "typeLive": "直播频道",
   "typeMovie": "电影",
   "typeSeries": "剧集",
@@ -280,5 +275,8 @@
   "stopConfirmTitle": "停止录制？",
   "stopConfirmBody": "{{title}} 的录制将立即停止，且无法继续。已录制的内容会保留在我的视频中。",
   "stopConfirmKeep": "继续录制",
-  "stopConfirmAction": "停止录制"
+  "stopConfirmAction": "停止录制",
+  "clearFailedDownloads": "清除失败的下载",
+  "downloadDone": "已下载{{title}}",
+  "downloadFailedNamed": "无法下载{{title}}"
 }

@@ -1,8 +1,15 @@
 /**
- * Watch time per day: one stacked bar per day, live at the base in solid
- * accent and movies/series above it in accent hatching, so the two parts
- * differ by pattern as well as by shade. Gridlines carry their own labels.
+ * Watch time per day: one stacked bar per day, live at the base in the solid
+ * accent and movies/series above it in a lighter tone of it, with a 2 px gap
+ * between the parts (the accent is the user's choice, so the second series is
+ * a step of the same hue; the pair is about 21 OKLab ΔE apart for every kind
+ * of colour vision, and the legend, the table and the readout name the parts).
+ * Under forced colours the movies part turns to hatching. Gridlines carry
+ * their own labels.
  *
+ * Pointer: resting on a day shows a small card above its bar with the total
+ * and the split (VL-stats-interaction), and dims the other days; clicking
+ * keeps that day picked.
  * Keyboard: the bar area is one tab stop exposed as a slider over the days;
  * ArrowLeft/ArrowRight follow the screen (mirrored in RTL), Home and End jump
  * to the first and last day, and the value text reads the picked day aloud.
@@ -25,8 +32,10 @@ import { Button, cn } from '../deps';
 import { barPercent, chartScale, labelsFit, showDayLabel } from '../lib/chart';
 import { dayOfMonthLabel, formatAxisHours, formatAxisMinutes, formatWatchTime, longDayLabel, narrowWeekdayLabel, weekdayLabel } from '../lib/format';
 
-/** Movies and series: accent hatching inside an accent outline. */
-export const VOD_FILL = 'border border-accent bg-[repeating-linear-gradient(135deg,var(--color-accent)_0_1.5px,transparent_1.5px_5px)]';
+/** Movies and series: a lighter step of the accent; hatching under forced colours, where fills are dropped. */
+export const VOD_FILL = 'bg-accent/60 forced-colors:bg-[repeating-linear-gradient(135deg,CanvasText_0_1.5px,transparent_1.5px_5px)]';
+/** Live: the solid accent. */
+export const LIVE_FILL = 'bg-accent forced-colors:bg-[CanvasText]';
 
 export interface DayChartProps {
   days: readonly WatchStatsDay[];
@@ -38,6 +47,8 @@ export function DayChart({ days, today }: DayChartProps) {
   const { t, i18n } = useTranslation('stats');
   const lang = i18n.language;
   const [picked, setPicked] = useState<string | null>(null);
+  // The day under the pointer: its card shows above the bar while the pointer rests there.
+  const [hovered, setHovered] = useState<string | null>(null);
   const [showTable, setShowTable] = useState(false);
   const headingId = useId();
   const tableId = useId();
@@ -46,6 +57,9 @@ export function DayChart({ days, today }: DayChartProps) {
   const found = picked ? days.findIndex((d) => d.day === picked) : -1;
   const index = found >= 0 ? found : days.length - 1;
   const current = days[index];
+  const hoverIndex = hovered ? days.findIndex((d) => d.day === hovered) : -1;
+  // A day singled out (resting pointer, or picked by click or key) lights up; the others step back.
+  const focusIndex = hoverIndex >= 0 ? hoverIndex : found;
   const short = days.length <= 7;
 
   const labelsRef = useRef<HTMLDivElement>(null);
@@ -121,14 +135,14 @@ export function DayChart({ days, today }: DayChartProps) {
         </Button>
       </div>
 
-      {/* The plot. ms-12 leaves the gutter the gridline labels hang into. */}
-      <div className="relative ms-12 mt-2 h-44 sm:h-56">
+      {/* The plot. ms-12 leaves the gutter the gridline labels hang into; mt-8 the room for a day's card. */}
+      <div className="relative ms-12 mt-8 h-44 sm:h-56" onPointerLeave={() => setHovered(null)}>
         <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-border" />
         {scale.ticks.map((s) => (
           <div
             key={s}
             aria-hidden
-            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-divider"
+            className="pointer-events-none absolute inset-x-0 border-t border-divider"
             style={{ bottom: `${(s / scale.top) * 100}%` }}
           >
             <span className="absolute end-full top-0 me-2 -translate-y-1/2 whitespace-nowrap text-[11px] tabular-nums text-fg-subtle">{tick(s)}</span>
@@ -150,23 +164,35 @@ export function DayChart({ days, today }: DayChartProps) {
           {days.map((d, i) => {
             const height = barPercent(d.seconds, scale.top);
             const livePart = d.seconds > 0 ? (d.liveSeconds / d.seconds) * 100 : 0;
+            const both = d.liveSeconds > 0 && d.vodSeconds > 0;
             return (
               <div
                 key={d.day}
+                // The whole column is the target, wider and taller than the bar.
                 className="relative flex h-full min-w-0 flex-1 cursor-pointer items-end justify-center"
                 onClick={() => setPicked(d.day)}
+                onPointerEnter={(e) => {
+                  if (e.pointerType !== 'touch') setHovered(d.day);
+                }}
                 data-day={d.day}
                 data-selected={i === index || undefined}
               >
-                {i === index && <div aria-hidden className="absolute inset-0 rounded-sm bg-surface-2" />}
                 <div
                   aria-hidden
-                  className="relative flex w-full max-w-10 flex-col-reverse overflow-hidden rounded-t-[3px] motion-safe:transition-[height] motion-safe:duration-300 motion-safe:ease-out"
+                  className={cn(
+                    // A 4 px round top, a square foot on the baseline, and a 2 px gap between the two parts.
+                    'relative flex w-full max-w-7 flex-col-reverse overflow-hidden rounded-t-xs',
+                    'motion-safe:transition-[height,opacity] motion-safe:duration-300 motion-safe:ease-out',
+                    both && 'gap-0.5',
+                    focusIndex >= 0 && i !== focusIndex && 'opacity-55',
+                  )}
                   style={{ height: `${height}%` }}
+                  data-testid="stats-bar"
                 >
-                  {d.liveSeconds > 0 && <div className="shrink-0 bg-accent" style={{ height: `${livePart}%` }} />}
-                  {d.vodSeconds > 0 && <div className={cn('min-h-0 flex-1 rounded-t-[3px]', VOD_FILL)} />}
+                  {d.liveSeconds > 0 && <div className={cn('shrink-0', LIVE_FILL)} style={{ height: `calc(${livePart}% - ${both ? 1 : 0}px)` }} />}
+                  {d.vodSeconds > 0 && <div className={cn('min-h-0 flex-1', VOD_FILL)} />}
                 </div>
+                {i === hoverIndex && <DayCard day={d} first={i === 0} last={i === days.length - 1} top={height} />}
               </div>
             );
           })}
@@ -240,5 +266,41 @@ export function DayChart({ days, today }: DayChartProps) {
         </table>
       </div>
     </section>
+  );
+}
+
+/**
+ * The resting pointer's day (VL-stats-interaction): the date, the total and the live and movies
+ * split, in a small card above the bar. Decorative for assistive technology: the slider's value
+ * text and the readout under the chart say the same.
+ */
+function DayCard({ day, first, last, top }: { day: WatchStatsDay; first: boolean; last: boolean; top: number }) {
+  const { t, i18n } = useTranslation('stats');
+  const lang = i18n.language;
+  const time = (s: number) => formatWatchTime(s, lang);
+  return (
+    <div
+      aria-hidden
+      data-testid="stats-day-card"
+      className={cn(
+        'pointer-events-none absolute z-10 mb-2 w-max max-w-56 rounded-lg border border-edge bg-surface-3 px-3 py-2 text-xs shadow-2',
+        // Edge days open inward, so the card never leaves the plot.
+        first ? 'start-0' : last ? 'end-0' : 'start-1/2 -translate-x-1/2 rtl:translate-x-1/2',
+      )}
+      style={{ bottom: `${top}%` }}
+    >
+      <p className="font-medium text-fg">{longDayLabel(day.day, lang)}</p>
+      <p className="text-body-sm font-semibold tabular-nums text-fg">{time(day.seconds)}</p>
+      <ul className="mt-1 flex flex-col gap-0.5 text-fg-muted">
+        <li className="flex items-center gap-1.5">
+          <span className={cn('size-2 rounded-[2px]', LIVE_FILL)} />
+          {t('live')} <span className="ms-auto ps-3 tabular-nums text-fg">{time(day.liveSeconds)}</span>
+        </li>
+        <li className="flex items-center gap-1.5">
+          <span className={cn('size-2 rounded-[2px]', VOD_FILL)} />
+          {t('vod')} <span className="ms-auto ps-3 tabular-nums text-fg">{time(day.vodSeconds)}</span>
+        </li>
+      </ul>
+    </div>
   );
 }

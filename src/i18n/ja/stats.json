@@ -35,5 +35,8 @@
   "clearBody": "集計された視聴時間がすべて削除されます。再生位置と「最近視聴した項目」は残ります。",
   "cleared": "視聴統計を消去しました",
   "clearFailed": "統計を消去できませんでした",
-  "watchLive": "ライブ TV を見る"
+  "watchLive": "ライブ TV を見る",
+  "kpiWeek": "過去7日間の視聴時間",
+  "kpiMonth": "過去30日間の視聴時間",
+  "dailyAverage": "1日平均"
 }

@@ -25,7 +25,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type ItemRef, type ItemSnapshot } from '@/api/types';
 
-import { Button, Tooltip, cn } from '../deps';
+import { Button, IconButton, Tooltip, cn } from '../deps';
 import { useMyListState, type MyListStatus } from '../hooks/useMyList';
 import { useMyListToggle } from '../hooks/useMyListToggle';
 import { canSave } from '../lib/list';
@@ -33,7 +33,11 @@ import { canSave } from '../lib/list';
 export interface MyListButtonProps {
   itemRef: ItemRef;
   snapshot: ItemSnapshot;
-  variant?: 'icon' | 'button';
+  /**
+   * `button`: the labelled detail-page button. `icon`: the frosted poster corner. `round`: the
+   * detail hero's round icon button (VL-hero-actions), with the state as its tooltip.
+   */
+  variant?: 'icon' | 'button' | 'round';
   /** Height of the `button` variant, matching the detail page's other actions. Default `lg`. */
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -141,6 +145,29 @@ function MyListButtonBody({
           <Icon aria-hidden size={17} strokeWidth={2.25} className={cn(loading && 'motion-safe:animate-pulse')} />
         </button>
       </Tooltip>
+    );
+  }
+
+  if (variant === 'round') {
+    return (
+      <IconButton
+        size={size}
+        variant="secondary"
+        label={t('toggleLabel', { title })}
+        tooltip={hint}
+        icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} className={cn(loading && 'motion-safe:animate-pulse')} />}
+        aria-pressed={pressed}
+        aria-busy={busy}
+        aria-disabled={loading || undefined}
+        tabIndex={tabIndex}
+        onClick={onClick}
+        data-testid="mylist-button"
+        data-variant="round"
+        data-state={status}
+        data-in-list={inList || undefined}
+        // A saved title reads as pressed (the neutral selected fill), not amber: saved is a state, not an action.
+        className={cn('rounded-full', inList && 'bg-selected text-fg', (pending || loading) && 'cursor-progress', className)}
+      />
     );
   }
 

@@ -7,29 +7,48 @@ import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
-import { BackButton, Poster, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, useImageChain } from '@/ui';
+import { BackButton, MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, useImageChain } from '@/ui';
 import { formatList } from '@/lib/intl';
 import { CastRow } from './CastRow';
+
+/** The column grid of the hero: poster beside the title on every width, the body under the title from sm. */
+const HERO_GRID =
+  'relative grid w-full max-w-[120rem] grid-cols-[6rem_minmax(0,1fr)] gap-x-4 gap-y-5 px-(--page-gutter) pb-8 ' +
+  'sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-x-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-x-8';
+
+/** Space above the poster: room for the artwork when there is a backdrop, little when there is none. */
+const HERO_TOP_WITH_ART = 'pt-[clamp(88px,20vh,240px)]';
+const HERO_TOP_PLAIN = 'pt-[clamp(56px,9vh,112px)]';
 
 export interface DetailHeroProps {
   model: DetailModel;
   sourceId: string;
-  /** Primary and secondary actions. */
+  /**
+   * The action row: the one primary button (Play or Resume), one or two text buttons, then round
+   * icon buttons (IconButton lg secondary, `rounded-full`) and a More menu (VL-hero-actions,
+   * HERO_MENU_TRIGGER). Pass them as two groups (`HeroActionGroup`),
+   * so a narrow column breaks the row between the groups, never inside one.
+   */
   actions: ReactNode;
-  /** Small chips after the meta line (Offline, Enriched, status). */
-  chips?: ReactNode;
+  /** How far the resume point is, drawn as a bar under the actions with its caption ("42 min left"). */
+  progress?: { fraction: number; label: string } | undefined;
+  /** More facts at the end of the meta line (series status, Downloaded). */
+  chips?: ReactNode[];
   /** Line under the actions (e.g. "Plays from <source>"). */
   note?: ReactNode;
   /** Inline status above the actions (e.g. provider details unavailable). */
   notice?: ReactNode;
+  /** Cast names link to their actor pages only when TMDB can show them (VL-tmdb-deadend). */
+  castLinks?: boolean;
 }
 
 /**
- * Browse-state hero: the backdrop bleeds across the top and fades into the
- * page; poster and the text column sit on its lower edge. The title is the
- * one large type moment on the page.
+ * Browse-state hero (VL-hero-chrome): the backdrop runs full bleed across the top at full strength
+ * and fades into the page only at its lower part and its leading edge, where the text sits, so the
+ * artwork reads and the title and buttons stay legible on any image. Poster and title sit on its
+ * lower edge; the title is the one large type moment on the page.
  */
-export function DetailHero({ model, sourceId, actions, chips, note, notice }: DetailHeroProps) {
+export function DetailHero({ model, sourceId, actions, progress, chips, note, notice, castLinks = true }: DetailHeroProps) {
   const { t, i18n } = useTranslation('vod');
   const [expanded, setExpanded] = useState(false);
   const formatRuntime = useFormatRuntime();
@@ -46,58 +65,71 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
     <section className="relative" aria-labelledby="vod-detail-title">
       <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} />
       {/* L1-vod-2: the window has no browser chrome, so Back is on the page. */}
-      <div className="absolute inset-x-0 top-0 z-10 mx-auto w-full max-w-[1800px] px-4 pt-4 md:px-8">
+      <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">
         <DetailBack fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />
       </div>
-      <div className="relative mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-4 pt-[clamp(120px,22vh,280px)] pb-8 sm:flex-row sm:items-end md:px-8">
-        <div className="w-36 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:w-44 lg:w-56" data-testid="vod-detail-poster">
+      <div className={cn(HERO_GRID, model.backdropUrl ? HERO_TOP_WITH_ART : HERO_TOP_PLAIN)}>
+        <div
+          className="self-end overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:row-span-2 sm:self-start"
+          data-testid="vod-detail-poster"
+        >
           {/* Provider artwork first (through the cache, then directly); when it fails, the TMDB poster (if any) the same way. */}
           <Poster src={model.posterUrl} fallbackSrc={model.posterFallbackUrl} sourceId={sourceId} alt={model.title} aspect="poster" priority />
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
-            <h1
-              id="vod-detail-title"
-              dir="auto"
-              tabIndex={-1}
-              className="text-match-parent outline-none text-display text-fg"
-            >
-              {model.titleBase ?? model.title}
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-fg-muted">
-              {model.year && <span className="tabular">{model.year}</span>}
-              {runtime && <span className="tabular">{runtime}</span>}
-              {rating && (
+        <div className="flex min-w-0 flex-col gap-2 self-end">
+          {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
+          <h1 id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-title">
+            {model.titleBase ?? model.title}
+          </h1>
+          <MetaLine
+            data-testid="vod-detail-meta"
+            className="text-body-sm text-fg-muted"
+            items={[
+              model.year && <span className="tabular">{model.year}</span>,
+              runtime && <span className="tabular">{runtime}</span>,
+              rating && (
                 <span className="tabular inline-flex items-center gap-1 text-fg">
                   <Star aria-hidden size={14} className="fill-current text-accent" />
                   {rating}
                   <span className="sr-only">{t('ratingOutOfTen')}</span>
                 </span>
-              )}
-              {language && (
+              ),
+              language && (
                 <span data-testid="vod-detail-language" className="inline-flex items-center gap-1.5 text-fg">
-                  <span aria-hidden className="rounded-sm bg-surface-3 px-1.5 py-0.5 text-[calc(11rem/15)] font-semibold tracking-wide">
+                  <span aria-hidden className="rounded-xs bg-surface-3 px-1.5 py-0.5 text-2xs font-semibold tracking-wide">
                     {model.language?.code}
                   </span>
                   {language}
                 </span>
-              )}
-              {model.genres.length > 0 && <span>{formatList(model.genres.slice(0, 4), i18n.language)}</span>}
-              {chips}
-            </div>
-          </div>
+              ),
+              model.genres.length > 0 && formatList(model.genres.slice(0, 3), i18n.language),
+              ...(chips ?? []),
+            ]}
+          />
+        </div>
+        <div className="col-span-2 flex min-w-0 flex-col gap-4 sm:col-span-1 sm:col-start-2">
           {notice && (
             <p role="status" className="inline-flex max-w-[72ch] items-start gap-2 text-sm text-fg-muted">
               <CircleAlert aria-hidden size={16} className="mt-0.5 shrink-0 text-warning" />
               {notice}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-2">{actions}</div>
+          <div className="flex flex-col gap-2">
+            {/* Two groups (the text buttons, the icon buttons): a narrow column breaks between them, never inside one. */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="vod-hero-actions">
+              {actions}
+            </div>
+            {progress && (
+              <div className="flex items-center gap-2 text-caption text-fg-muted" data-testid="vod-hero-progress">
+                <ProgressBar value={progress.fraction} max={1} size="xs" className="w-32" label={progress.label} />
+                <span className="tabular">{progress.label}</span>
+              </div>
+            )}
+          </div>
           {note && <div className="text-xs text-fg-subtle">{note}</div>}
           {model.plot && (
             <div className="max-w-[72ch]">
-              <p dir="auto" className={cn('text-[calc(15rem/15)] leading-relaxed text-fg-muted text-match-parent', !expanded && plotLong && 'line-clamp-4')}>{model.plot}</p>
+              <p dir="auto" className={cn('text-body leading-relaxed text-fg-muted text-match-parent', !expanded && plotLong && 'line-clamp-4')}>{model.plot}</p>
               {plotLong && (
                 <button type="button" className={cn(TEXT_LINK, 'mt-1 text-sm')} onClick={() => setExpanded((v) => !v)}>
                   {expanded ? t('showLess') : t('showMore')}
@@ -111,7 +143,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
               {model.director}
             </p>
           )}
-          {model.cast.length > 0 && <CastRow cast={model.cast} sourceId={sourceId} />}
+          {model.cast.length > 0 && <CastRow cast={model.cast} sourceId={sourceId} links={castLinks} />}
         </div>
       </div>
     </section>
@@ -119,13 +151,32 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
 }
 
 /**
+ * One group of the hero's action row: its buttons stay on one line together. The first group holds
+ * the text buttons (on a phone the primary takes the whole width), the second the icon buttons.
+ */
+export function HeroActionGroup({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('flex min-w-0 items-center gap-2', className)}>{children}</div>;
+}
+
+/** The hero's More menu trigger: the Menu's own icon button, drawn as the other round secondaries. */
+export const HERO_MENU_TRIGGER =
+  'h-12 w-12 rounded-full border border-edge bg-surface-2 text-fg hover:bg-surface-3 hover:text-fg active:bg-pressed active:text-fg';
+
+/**
  * Back to where you came from (the grid or search restores its place), or to the
- * movies/series landing when the page was opened cold. The kit back button on glass,
- * so it reads on any backdrop.
+ * movies/series landing when the page was opened cold. The kit back button on a
+ * frosted page surface: it reads on any backdrop, and in the light theme it is a
+ * light pill instead of a dark glass capsule over pale artwork (critique: light detail).
  */
 function DetailBack({ fallbackHref }: { fallbackHref: string }) {
   const goBack = useGoBack(fallbackHref);
-  return <BackButton tone="glass" onClick={goBack} data-testid="vod-detail-back" />;
+  return (
+    <BackButton
+      onClick={goBack}
+      className="border border-edge bg-surface/80 text-fg shadow-1 glass-blur hover:bg-surface hover:text-fg active:bg-surface-2"
+      data-testid="vod-detail-back"
+    />
+  );
 }
 
 function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; posterUrl?: string; sourceId: string }) {
@@ -149,11 +200,14 @@ function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; 
           referrerPolicy="no-referrer"
           data-backdrop-kind={wide ? 'backdrop' : 'poster'}
           onError={image.onError}
-          className={wide ? 'h-full w-full object-cover object-top opacity-70' : cn(QUARTER_BLUR, 'object-top opacity-40')}
+          // A real backdrop shows at full strength; a poster standing in is only a blurred colour field.
+          className={wide ? 'h-full w-full object-cover object-top' : cn(QUARTER_BLUR, 'object-top opacity-50')}
         />
       )}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-bg/10 via-bg/60 to-bg" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-bg/80 rtl:bg-gradient-to-l via-bg/20 to-transparent" />
+      {/* The top quarter stays clear; below it the art fades into the page, where the title and buttons sit. */}
+      <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-transparent from-25% via-bg/75 via-60% to-bg" />
+      {/* The leading edge darkens behind the text column only; the far side of the artwork stays clear. */}
+      <div className="pointer-events-none absolute inset-0 bg-linear-to-r from-bg/90 via-bg/50 via-40% to-transparent to-75% rtl:bg-linear-to-l" />
     </div>
   );
 }
@@ -161,15 +215,19 @@ function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; 
 export function DetailHeroSkeleton() {
   const { t } = useTranslation('vod');
   return (
-    <div role="status" aria-busy="true" className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-4 pt-[clamp(120px,22vh,280px)] pb-8 sm:flex-row sm:items-end md:px-8">
+    <div role="status" aria-busy="true" className={cn(HERO_GRID, HERO_TOP_WITH_ART)}>
       <span className="sr-only">{t('loading')}</span>
-      <div className="skeleton-surface w-36 shrink-0 rounded-lg motion-safe:animate-shimmer sm:w-44 lg:w-56" style={{ aspectRatio: 2 / 3 }} />
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
+      <div className="skeleton-surface w-full self-end rounded-lg motion-safe:animate-shimmer sm:row-span-2 sm:self-start" style={{ aspectRatio: 2 / 3 }} />
+      <div className="flex min-w-0 flex-col gap-3 self-end">
         <Skeleton className="h-12 w-2/3" />
         <Skeleton className="h-4 w-1/3" />
+      </div>
+      <div className="col-span-2 flex min-w-0 flex-col gap-4 sm:col-span-1 sm:col-start-2">
         <div className="flex gap-2">
           <Skeleton className="h-12 w-36 rounded-md" />
-          <Skeleton className="h-12 w-28 rounded-md" />
+          <Skeleton className="h-12 w-12 rounded-full" />
+          <Skeleton className="h-12 w-12 rounded-full" />
+          <Skeleton className="h-12 w-12 rounded-full" />
         </div>
         <Skeleton className="h-4 w-full max-w-[72ch]" />
         <Skeleton className="h-4 w-5/6 max-w-[72ch]" />

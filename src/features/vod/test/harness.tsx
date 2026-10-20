@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import i18next from 'i18next';
 import type { ReactNode } from 'react';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
@@ -142,4 +142,25 @@ export function makeSource(id: string, kind: Source['kind'], name: string): Sour
     movieCount: 5000,
     seriesCount: 40,
   } as Source;
+}
+
+/**
+ * Opens a detail hero's More menu (VL-hero-actions: Start over, Favorites, Other sources and the
+ * lock live there) and returns the menu.
+ */
+export async function openHeroMenu(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole('button', { name: i18n.t('common:moreActions') }));
+  return screen.findByRole('menu');
+}
+
+/** Opens the landing's "Browse all categories" index (VL-landing-index) if it is closed. */
+export async function openCategoryIndex(): Promise<void> {
+  const toggle = await screen.findByRole('button', { name: i18n.t('vod:browseAllCategories') });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+
+/** A test wrapper with a fresh query client, for components rendered alone that read a query (a rail reads the cover size). */
+export function QueryWrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

@@ -77,5 +77,12 @@
   "menuChecking": "Sprawdzanie Mojej listy…",
   "menuRetry": "Wczytaj Moją listę ponownie",
   "notReady": "Moja lista wciąż się wczytuje. Spróbuj ponownie za chwilę.",
-  "loadFailed": "Nie udało się wczytać Mojej listy"
+  "loadFailed": "Nie udało się wczytać Mojej listy",
+  "playTitle": "Odtwórz {{title}}",
+  "resumeTitle": "Wznów {{title}}",
+  "playFailed": "Nie udało się rozpocząć odtwarzania",
+  "minutesLeft_one": "Została {{count}} minuta",
+  "minutesLeft_few": "Zostały {{count}} minuty",
+  "minutesLeft_many": "Zostało {{count}} minut",
+  "minutesLeft_other": "Zostało {{count}} minuty"
 }

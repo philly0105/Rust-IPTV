@@ -184,6 +184,8 @@ function usePosterText(): PosterText {
 interface PosterCardViewProps extends PosterCardProps {
   /** Extra part of the accessible name (e.g. "In My List"). */
   extraLabel?: string | undefined;
+  /** In My List: a small glass bookmark joins the chips on the top-end corner (the toggle itself shows on hover). */
+  saved?: boolean | undefined;
   /** Drawn over the artwork's corner (the grid's My List toggle). */
   artCorner?: ReactNode;
   /** A grid's shared My List and strings, for a linked card's corner button. */
@@ -227,11 +229,14 @@ function PosterCardBody({
   sourceId,
   locked,
   extraLabel,
+  saved: savedProp,
   artCorner,
   list,
   t,
   locale,
 }: PosterCardViewProps & { t: TFunction; locale: string }) {
+  // A linked card in a shared list knows whether its title is saved; a grid cell is told (GridPosterCardWith).
+  const saved = savedProp ?? (!!myList && !!list && list.status === 'ready' && list.keys.has(itemKey(myList.itemRef)));
   const ownIntent = usePrefetchIntent(intent ? null : (prefetch ?? null));
   const { onPointerEnter, onPointerLeave, onFocus, onBlur } = intent ?? ownIntent;
   const artSourceId = sourceId ?? prefetch?.ref.sourceId ?? myList?.itemRef.sourceId;
@@ -273,14 +278,20 @@ function PosterCardBody({
             {badge}
           </div>
         )}
-        {(r || watched) && (
-          // The tick holds the corner; the rating sits beside it.
+        {(r || watched || saved) && (
+          // The state chips share the top-end corner: rating, then saved, then watched. All glass and
+          // small, so amber stays on progress and play (DS amber rules); the 36 px toggle is only for hover.
           <div aria-hidden className="pointer-events-none absolute end-1.5 top-1.5 flex items-center gap-1">
             {r && (
               <div aria-hidden className="tabular inline-flex items-center gap-1 rounded-sm bg-glass-strong px-1.5 py-1 text-xs leading-none font-semibold text-on-glass">
                 {/* Glass chips stay dark in every theme, so the star takes the bright glass accent, not the light theme's deep one. */}
                 <Star aria-hidden size={11} className="fill-current text-glass-accent" />
                 {r}
+              </div>
+            )}
+            {saved && (
+              <div aria-hidden data-testid="poster-saved" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-glass-strong text-on-glass shadow-1">
+                <BookmarkCheck aria-hidden size={12} strokeWidth={2.5} />
               </div>
             )}
             {watched && (
@@ -370,7 +381,11 @@ function PosterCardBody({
     // Roving host (rail): the link is the card's only Tab stop; S toggles, and the corner shows while the link has focus.
     tabIndex: tabIndex !== undefined ? -1 : undefined,
     className: cn(
-      'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 group-has-[a:focus-visible]/poster:opacity-100 data-in-list:opacity-100 [@media(hover:none)]:opacity-100',
+      // Shown on hover and on keyboard focus only (VL-poster-chips): the saved state is the small chip
+      // on the top-end corner, and touch screens save from the title's page. Outside a shared list
+      // the card cannot draw that chip, so there a saved title keeps its corner up.
+      'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 group-has-[a:focus-visible]/poster:opacity-100',
+      !list && 'data-in-list:opacity-100',
       'motion-safe:transition-[opacity,background-color,color,transform]',
       hasProgress ? 'bottom-5' : 'bottom-1.5',
     ),
@@ -419,6 +434,7 @@ function GridPosterCardWith({ list, ...props }: PosterCardProps & { myList: { it
       {...props}
       t={t}
       locale={language}
+      saved={inList}
       extraLabel={inList ? t('posterInMyList') : undefined}
       artCorner={
         <GridMyListToggle
@@ -491,15 +507,13 @@ function GridMyListToggle({
       className={cn(
         'absolute end-1.5 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border shadow-1',
         'motion-safe:transition-[opacity,background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
-        // C5: blur only while the corner is up on one card (hover, or the keyboard cursor). Without
-        // hover it shows on every card at once, so it is opaque there instead of blurred.
+        // C5: blur only while the corner is up on one card (hover, or the keyboard cursor).
+        // Up on hover or under the keyboard cursor only; the saved state stays visible as the chip on
+        // the top-end corner. Touch screens save from the poster's menu (long press) or the title's page.
+        'opacity-0 group-hover/card:opacity-100',
         saved
           ? 'border-glass-border bg-glass-strong text-on-glass hover:bg-glass'
-          : cn(
-              'border-glass-border bg-glass text-on-glass opacity-0 group-hover/card:opacity-100 group-hover/card:glass-blur hover:bg-glass-strong',
-              '[@media(hover:none)]:bg-glass-strong [@media(hover:none)]:opacity-100',
-              shown && 'glass-blur',
-            ),
+          : cn('border-glass-border bg-glass text-on-glass group-hover/card:glass-blur hover:bg-glass-strong', shown && 'glass-blur'),
         shown && 'opacity-100',
         (pending || loading) && 'cursor-progress',
         raised ? 'bottom-5' : 'bottom-1.5',

@@ -60,7 +60,6 @@
   "folderChanged": "Yeni indirmeler seçilen klasöre kaydedilecek",
   "folderChangeFailed": "İndirme klasörü değiştirilemedi",
   "folderOpenFailed": "İndirme klasörü açılamadı",
-  "clearFinished": "Bitenleri temizle",
   "clearConfirmTitle_one": "{{count, number}} indirme temizlensin mi?",
   "clearConfirmTitle_other": "{{count, number}} indirme temizlensin mi?",
   "clearConfirmBody": "Başarısız ve iptal edilen indirmeler, yarım kalan dosyalarıyla birlikte sıradan kaldırılır.",
@@ -83,7 +82,6 @@
   "shortcutCancel": "Odaktaki indirmeyi iptal et",
   "shortcutRemove": "Odaktaki indirmeyi kaldır",
   "shortcutReveal": "Seçili indirmeyi klasöründe göster",
-
   "myVideosTitle": "Videolarım",
   "libraryTitleCount_one": "{{count, number}} içerik",
   "libraryTitleCount_other": "{{count, number}} içerik",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "Yeniden indir: {{title}}",
   "episodeRevealAria": "Klasörde göster: {{title}}",
   "episodeRemoveAria": "Kaldır: {{title}}",
-
   "favoritesTitle": "Favoriler",
   "sourceFavoritesTitle": "{{source}} içindeki favoriler",
   "favoritesCount_one": "{{count, number}} favori",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "Odaktaki favoriyi aşağı taşı",
   "addedAgo": "{{time}} eklendi",
   "undo": "Geri al",
-
   "recentTitle": "Son izlenenler",
   "sourceRecentTitle": "{{source}} içinde son izlenenler",
   "recentCount_one": "{{count, number}} öğe",
@@ -192,7 +188,6 @@
   "continueTitle": "Devam et: {{title}}, {{time}}",
   "removeContinue": "İzlemeye devam et listesinden kaldır: {{title}}",
   "watchedPercent": "%{{percent}} izlendi",
-
   "typeLive": "Canlı kanal",
   "typeMovie": "Film",
   "typeSeries": "Dizi",
@@ -280,5 +275,8 @@
   "stopConfirmTitle": "Kayıt durdurulsun mu?",
   "stopConfirmBody": "{{title}} kaydı şimdi durur ve devam ettirilemez. Şimdiye kadar kaydedilenler Videolarım içinde kalır.",
   "stopConfirmKeep": "Kayda devam et",
-  "stopConfirmAction": "Kaydı durdur"
+  "stopConfirmAction": "Kaydı durdur",
+  "clearFailedDownloads": "Başarısızları temizle",
+  "downloadDone": "{{title}} indirildi",
+  "downloadFailedNamed": "{{title}} indirilemedi"
 }

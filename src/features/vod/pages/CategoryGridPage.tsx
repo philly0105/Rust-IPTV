@@ -30,7 +30,7 @@ import { useShortcut } from '@/shell';
 
 import { GridMyListProvider, PosterCard, PosterCardSkeleton, myListTarget } from '../components/PosterCard';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
-import { VodFilterBar } from '../components/VodFilterBar';
+import { DecadeChips, YearRangeFields, useYearFilter } from '../components/VodFilterBar';
 import { preloadDetailChunk, usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
 import { usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
@@ -62,7 +62,7 @@ import {
 } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
-import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, TEXT_LINK, Select, SkeletonGrid, VirtualGrid, buttonClass, cn, type VirtualItemState } from '@/ui';
+import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, Toggle, Tooltip, VirtualGrid, buttonClass, cn, type VirtualItemState } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -207,6 +207,37 @@ const GridPoster = memo(function GridPoster({
     />
   );
 });
+
+/**
+ * The minimum rating from Settings as a chip in the grid's toolbar (VL-grid-toolbars), instead of
+ * a bar of its own: "★ 7.0+" while it filters, struck out while the grid shows every rating.
+ * Pressing it switches between the two; the tooltip and the name say which way.
+ */
+function RatingFloorChip({ setting, on, onChange, className }: { setting: number; on: boolean; onChange: (on: boolean) => void; className?: string }) {
+  const { t, i18n } = useTranslation('vod');
+  const rating = formatRating(setting, i18n.language);
+  const label = on ? `${t('ratingFilterNote', { rating })}. ${t('ratingFilterClear')}` : t('ratingFilterApply', { rating });
+  return (
+    <Tooltip content={on ? t('ratingFilterClear') : t('ratingFilterApply', { rating })} describe={false}>
+      <button
+        type="button"
+        aria-pressed={on}
+        aria-label={label}
+        onClick={() => onChange(!on)}
+        data-testid="vod-rating-filter"
+        className={cn(
+          'tabular inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-3 text-sm whitespace-nowrap',
+          className,
+          'motion-safe:transition-[color,background-color] motion-safe:duration-150',
+          on ? 'bg-fg font-medium text-bg' : 'bg-surface-2 text-fg-subtle line-through hover:bg-surface-3 hover:text-fg',
+        )}
+      >
+        <Star aria-hidden size={13} className="fill-current" />
+        {`${rating}+`}
+      </button>
+    </Tooltip>
+  );
+}
 
 export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const { t, i18n } = useTranslation('vod');
@@ -367,6 +398,17 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filtersId = useId();
   const activeFilters = (yearFiltered ? 1 : 0) + (hideWatched ? 1 : 0);
+  const yearFilter = useYearFilter({
+    sourceId,
+    kind,
+    categoryId,
+    ready: !!source.data,
+    stalker,
+    yearsLikely: source.data?.kind !== 'm3u',
+    range: years,
+    onRangeChange: setYears,
+    hideWatched,
+  });
 
   const sortOptions = VOD_SORT_KEYS.map((k) => ({ value: k, label: t(`sort_${k}`) }));
   const coverWidth = useCoverWidth(settings.coverSize);
@@ -564,112 +606,91 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     // The grid's posters share one My List subscription (L2-vod-1).
     <GridMyListProvider>
       <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
-        <div className="flex flex-wrap items-center gap-2 border-b border-divider px-4 py-3 md:px-8">
-          <BackButton to={backHref} label={kind === 'movie' ? t('movies') : t('series')} />
-          {/*
-            Takes only the room the row leaves (flex-basis 0), so the count arriving after load
-            truncates instead of wrapping the Filters button onto a new row (L3-visual-9).
-          */}
-          <div className="flex min-w-0 flex-1 basis-0 items-baseline gap-3">
+        {/*
+          VL-grid-toolbars: one toolbar under the header, one hairline. Back, the decade chips, the
+          rating floor, search and sort share a row; From/To and Hide watched wait behind Filters,
+          whose badge counts what is on. Below sm the row wraps: the search takes a line, and the
+          sort and the chips move into the Filters panel.
+        */}
+        <div className="flex flex-col gap-2 border-b border-divider px-(--page-gutter) py-2.5" data-testid="vod-grid-toolbar">
+          <div className="flex flex-wrap items-center gap-2">
+            <BackButton to={backHref} label={kind === 'movie' ? t('movies') : t('series')} className="-ms-2" />
             <h1 className="sr-only">{pageTitle}</h1>
             {/* The shell header carries the count from md up; below it the header has room for the title only. */}
             {countText && (
-              <span title={countText} className="tabular min-w-0 truncate text-sm text-fg-subtle md:hidden">
+              <span title={countText} className="tabular min-w-0 flex-1 truncate text-sm text-fg-subtle sm:hidden">
                 {countText}
               </span>
             )}
-          </div>
-          <button
-            type="button"
-            aria-expanded={filtersOpen}
-            aria-controls={`${filtersId}-sort ${filtersId}-bar`}
-            onClick={() => setFiltersOpen((o) => !o)}
-            className={cn(buttonClass(filtersOpen ? 'primary' : 'secondary', 'sm'), 'sm:hidden')}
-            data-testid="vod-filters-toggle"
-          >
-            <SlidersHorizontal aria-hidden size={15} />
-            {t('filters')}
-            {activeFilters > 0 && <span className="sr-only">{t('filtersActive', { n: activeFilters })}</span>}
-            {activeFilters > 0 && (
-              <span
-                aria-hidden
-                className={cn(
-                  'tabular inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-xs leading-none font-semibold',
-                  filtersOpen ? 'bg-bg text-fg' : 'bg-fg text-bg',
-                )}
-              >
-                {activeFilters}
-              </span>
+            {/* Mounted from the first frame (L2-vod-5): its placeholder chips hold the row while the source loads. */}
+            <div id={`${filtersId}-chips`} className={cn('min-w-0 sm:flex-1', 'max-sm:order-3 max-sm:basis-full', !filtersOpen && 'max-sm:hidden')}>
+              {sourceId && !source.isError && <DecadeChips filter={yearFilter} />}
+            </div>
+            {ratingFilterSet && (
+              <RatingFloorChip
+                setting={settingMinRating}
+                on={filtered}
+                onChange={(on) => setAllRatings(!on)}
+                className="max-sm:order-2"
+              />
             )}
-          </button>
-          <SearchInput
-            value={searchDraft}
-            onChange={setSearchDraft}
-            size="sm"
-            className="w-full sm:w-64"
-            placeholder={t('searchInCategory')}
-            onSubmit={focusGrid}
-            onKeyDown={(e) => {
-              // ArrowDown leaves the search box for the posters.
-              if (e.key === 'ArrowDown' && getListbox()) {
-                e.preventDefault();
-                focusGrid();
-              }
-            }}
-          />
-          <div id={`${filtersId}-sort`} className={cn('flex items-center gap-2', !filtersOpen && 'max-sm:hidden')}>
-            <Select
-              aria-label={t('sortBy')}
-              options={sortOptions}
-              value={sort}
-              onValueChange={(v) => setSort(v as VodSortKey)}
-              className="h-8 w-auto min-w-36"
-            />
-            <IconButton
+            <SearchInput
+              value={searchDraft}
+              onChange={setSearchDraft}
               size="sm"
-              variant="secondary"
-              label={dirLabel}
-              icon={dir === 'asc' ? <ArrowUpNarrowWide aria-hidden size={16} /> : <ArrowDownWideNarrow aria-hidden size={16} />}
-              onClick={flipDir}
+              className="w-full max-sm:order-1 sm:w-56"
+              placeholder={t('searchInCategory')}
+              onSubmit={focusGrid}
+              onKeyDown={(e) => {
+                // ArrowDown leaves the search box for the posters.
+                if (e.key === 'ArrowDown' && getListbox()) {
+                  e.preventDefault();
+                  focusGrid();
+                }
+              }}
             />
+            <div id={`${filtersId}-sort`} className={cn('flex items-center gap-1', 'max-sm:order-2', !filtersOpen && 'max-sm:hidden')}>
+              <Select
+                aria-label={t('sortBy')}
+                options={sortOptions}
+                value={sort}
+                onValueChange={(v) => setSort(v as VodSortKey)}
+                className="h-8 w-auto min-w-36"
+              />
+              <IconButton
+                size="sm"
+                label={dirLabel}
+                icon={dir === 'asc' ? <ArrowUpNarrowWide aria-hidden size={16} /> : <ArrowDownWideNarrow aria-hidden size={16} />}
+                onClick={flipDir}
+              />
+            </div>
+            <button
+              type="button"
+              aria-expanded={filtersOpen}
+              aria-controls={`${filtersId}-sort ${filtersId}-bar`}
+              onClick={() => setFiltersOpen((o) => !o)}
+              className={cn(buttonClass('ghost', 'sm'), filtersOpen && 'bg-selected text-fg')}
+              data-testid="vod-filters-toggle"
+            >
+              <SlidersHorizontal aria-hidden size={16} />
+              {t('filters')}
+              {activeFilters > 0 && <span className="sr-only">{t('filtersActive', { n: activeFilters })}</span>}
+              {activeFilters > 0 && (
+                <span aria-hidden className="tabular inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-fg px-1 text-xs leading-none font-semibold text-bg">
+                  {activeFilters}
+                </span>
+              )}
+            </button>
+          </div>
+          <div
+            id={`${filtersId}-bar`}
+            className={cn('flex flex-wrap items-center gap-x-4 gap-y-2', !filtersOpen && 'hidden max-sm:hidden')}
+            data-testid="vod-filter-bar"
+          >
+            {sourceId && !source.isError && <YearRangeFields filter={yearFilter} />}
+            <Toggle className="shrink-0 items-center gap-2" label={t('hideWatched')} checked={hideWatched} onChange={setHideWatched} />
           </div>
         </div>
-
-        {/* Mounted from the first frame (L2-vod-5): its placeholder chips hold the row while the source loads. */}
-        {sourceId && !source.isError && (
-          <div id={`${filtersId}-bar`} className={cn(!filtersOpen && 'max-sm:hidden')}>
-            <VodFilterBar
-              sourceId={sourceId}
-              kind={kind}
-              categoryId={categoryId}
-              ready={!!source.data}
-              stalker={stalker}
-              yearsLikely={source.data?.kind !== 'm3u'}
-              range={years}
-              onRangeChange={setYears}
-              hideWatched={hideWatched}
-              onHideWatchedChange={setHideWatched}
-            />
-          </div>
-        )}
-
-        {ratingFilterSet && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-divider px-4 py-2 text-sm text-fg-muted md:px-8" data-testid="vod-rating-filter">
-            <Star aria-hidden size={14} className="fill-current text-accent" />
-            {filtered ? (
-              <>
-                <span>{t('ratingFilterNote', { rating: formatRating(minRating, i18n.language) })}</span>
-                <button type="button" className={TEXT_LINK} onClick={() => setAllRatings(true)}>
-                  {t('ratingFilterClear')}
-                </button>
-              </>
-            ) : (
-              <button type="button" className={TEXT_LINK} onClick={() => setAllRatings(false)}>
-                {t('ratingFilterApply', { rating: formatRating(settingMinRating, i18n.language) })}
-              </button>
-            )}
-          </div>
-        )}
 
         {/* Right clicks bubble here from the grid's options; so do focus changes (React's focusin/focusout). */}
         <div
@@ -677,7 +698,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
           aria-busy={refreshing || undefined}
           data-refreshing={refreshing || undefined}
           className={cn(
-            'min-h-0 flex-1 px-4 pt-4 md:px-8 motion-safe:transition-opacity motion-safe:duration-200',
+            'min-h-0 flex-1 px-(--page-gutter) pt-4 motion-safe:transition-opacity motion-safe:duration-200',
             refreshing && 'motion-safe:opacity-60 motion-safe:delay-150',
           )}
           onContextMenu={onGridContextMenu}

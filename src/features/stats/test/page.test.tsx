@@ -83,7 +83,12 @@ describe('stats page', () => {
 
   it('shows the total as a sentence and the live and VOD split', async () => {
     await loaded();
-    expect(screen.getByTestId('stats-total').textContent).toBe('3 hr 20 min watched in the last 7 days');
+    // A KPI tile: the number over its label, read as one sentence.
+    const total = screen.getByTestId('stats-total');
+    expect(within(total).getByText('3 hr 20 min watched in the last 7 days')).toBeTruthy();
+    expect(within(total).getByText('3 hr 20 min').getAttribute('aria-hidden')).toBe('true');
+    expect(within(total).getByText('Watched in the last 7 days')).toBeTruthy();
+    expect(screen.getByTestId('stats-average').textContent).toBe('Daily average 29 min');
     const split = screen.getByTestId('stats-split');
     expect(within(split).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Live 2 hr 30 min', 'Movies and series 50 min']);
   });

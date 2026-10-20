@@ -73,5 +73,10 @@
   "menuChecking": "Saját lista ellenőrzése…",
   "menuRetry": "Saját lista újratöltése",
   "notReady": "A Saját lista még töltődik. Próbálja újra egy pillanat múlva.",
-  "loadFailed": "Nem sikerült betölteni a Saját listát"
+  "loadFailed": "Nem sikerült betölteni a Saját listát",
+  "playTitle": "{{title}} lejátszása",
+  "resumeTitle": "{{title}} folytatása",
+  "playFailed": "A lejátszás nem indult el",
+  "minutesLeft_one": "Még {{count}} perc",
+  "minutesLeft_other": "Még {{count}} perc"
 }

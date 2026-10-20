@@ -1,8 +1,10 @@
 /**
- * The two ranked lists under the chart. Channels (live and radio) get a
- * meter against the most-watched one and a Play button; titles (movies and
- * series) link to their detail page. Both are ordered lists, so the rank is
- * part of the semantics and the printed number is decoration.
+ * The two ranked lists under the chart, on one row template so they line up
+ * side by side. Each row has a meter against the list's most-watched item
+ * (VL-stats-interaction), neutral because it is a share, not progress.
+ * Channels (live and radio) get a Play button on hover or focus; titles
+ * (movies and series) link to their detail page. Both are ordered lists, so
+ * the rank is part of the semantics and the printed number is decoration.
  */
 
 import { Play } from 'lucide-react';
@@ -27,6 +29,19 @@ function TopSection({ title, empty, testId, children }: { title: string; empty: 
   );
 }
 
+/** A row's share of the list's most-watched item. */
+function Meter({ seconds, most }: { seconds: number; most: number }) {
+  return (
+    <div aria-hidden className="mt-1.5 h-1 rounded-full bg-surface-3 @sm:col-span-2" data-testid="stats-meter">
+      <div className="h-full rounded-full bg-fg-subtle" style={{ width: `${most > 0 ? Math.max(2, (seconds / most) * 100) : 0}%` }} />
+    </div>
+  );
+}
+
+/** From sm, on a fine pointer, a row's Play button waits for hover or focus. */
+const revealOnFine =
+  'sm:pointer-fine:opacity-0 sm:pointer-fine:group-hover:opacity-100 sm:pointer-fine:group-focus-within:opacity-100 motion-safe:transition-opacity';
+
 function Rank({ n }: { n: number }) {
   return (
     <span aria-hidden className="w-5 shrink-0 text-end text-sm tabular-nums text-fg-subtle">
@@ -48,7 +63,7 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
   return (
     <TopSection title={t('topChannels')} empty={items.length === 0 ? t('noChannels') : null} testId="stats-top-channels">
       {items.map((item, i) => (
-        <li key={`${item.ref.sourceId}|${item.ref.contentType}|${item.ref.itemId}`} className="flex items-center gap-3 py-2" data-testid="stats-channel">
+        <li key={`${item.ref.sourceId}|${item.ref.contentType}|${item.ref.itemId}`} className="group flex min-h-14 items-center gap-3 py-2" data-testid="stats-channel">
           <Rank n={i + 1} />
           <Poster
             src={item.posterUrl ?? null}
@@ -68,9 +83,7 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
             </p>
             <span className="whitespace-nowrap text-sm tabular-nums text-fg-muted">{formatWatchTime(item.seconds, i18n.language)}</span>
             {item.sourceName && <p className="truncate text-xs text-fg-subtle @sm:col-span-2">{item.sourceName}</p>}
-            <div aria-hidden className="mt-1.5 h-1 rounded-full bg-surface-3 @sm:col-span-2">
-              <div className="h-full rounded-full bg-accent" style={{ width: `${most > 0 ? Math.max(2, (item.seconds / most) * 100) : 0}%` }} />
-            </div>
+            <Meter seconds={item.seconds} most={most} />
           </div>
           {canPlay(item) && (
             <IconButton
@@ -79,6 +92,7 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
               variant="ghost"
               size="sm"
               onClick={() => onPlay(item)}
+              className={revealOnFine}
               data-testid="stats-play"
             />
           )}
@@ -90,10 +104,11 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
 
 export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
   const { t, i18n } = useTranslation('stats');
+  const most = items[0]?.seconds ?? 0;
   return (
     <TopSection title={t('topTitles')} empty={items.length === 0 ? t('noTitles') : null} testId="stats-top-titles">
       {items.map((item, i) => (
-        <li key={`${item.ref.sourceId}|${item.ref.contentType}|${item.ref.itemId}`} className="flex items-center gap-3 py-1.5" data-testid="stats-title">
+        <li key={`${item.ref.sourceId}|${item.ref.contentType}|${item.ref.itemId}`} className="flex min-h-14 items-center gap-3 py-2" data-testid="stats-title">
           <Rank n={i + 1} />
           <Link
             to={itemPath(item.ref)}
@@ -102,15 +117,14 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
             data-testid="stats-open"
           >
             <Poster src={item.posterUrl ?? null} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" rounded="sm" className="w-9 shrink-0" />
-            {/* Narrow list: title (two lines at most), time, source. From @sm the time sits at the end, centred on both lines. */}
-            <span className="grid min-w-0 flex-1 grid-cols-1 items-center @sm:grid-cols-[minmax(0,1fr)_auto] @sm:gap-x-3">
+            {/* The channel rows' template: name and time on one line from @sm, the source under it, then the meter. */}
+            <span className="grid min-w-0 flex-1 grid-cols-1 items-baseline @sm:grid-cols-[minmax(0,1fr)_auto] @sm:gap-x-3">
               <span className="line-clamp-2 font-medium [overflow-wrap:anywhere]" title={item.title}>
                 {item.title}
               </span>
-              <span className="whitespace-nowrap text-sm tabular-nums text-fg-muted @sm:col-start-2 @sm:row-span-2 @sm:row-start-1 @sm:pe-1">
-                {formatWatchTime(item.seconds, i18n.language)}
-              </span>
-              {item.sourceName && <span className="block truncate text-xs text-fg-subtle @sm:col-start-1">{item.sourceName}</span>}
+              <span className="whitespace-nowrap text-sm tabular-nums text-fg-muted">{formatWatchTime(item.seconds, i18n.language)}</span>
+              {item.sourceName && <span className="block truncate text-xs text-fg-subtle @sm:col-span-2">{item.sourceName}</span>}
+              <Meter seconds={item.seconds} most={most} />
             </span>
           </Link>
         </li>

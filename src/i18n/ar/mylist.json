@@ -81,5 +81,14 @@
   "menuChecking": "جارٍ التحقق من قائمتي…",
   "menuRetry": "إعادة تحميل قائمتي",
   "notReady": "لا تزال قائمتي قيد التحميل. أعد المحاولة بعد لحظة.",
-  "loadFailed": "تعذّر تحميل قائمتي"
+  "loadFailed": "تعذّر تحميل قائمتي",
+  "playTitle": "تشغيل {{title}}",
+  "resumeTitle": "استئناف {{title}}",
+  "playFailed": "تعذّر بدء التشغيل",
+  "minutesLeft_zero": "المتبقي {{count}} دقيقة",
+  "minutesLeft_one": "المتبقي {{count}} دقيقة",
+  "minutesLeft_two": "المتبقي {{count}} دقيقتان",
+  "minutesLeft_few": "المتبقي {{count}} دقائق",
+  "minutesLeft_many": "المتبقي {{count}} دقيقة",
+  "minutesLeft_other": "المتبقي {{count}} دقيقة"
 }

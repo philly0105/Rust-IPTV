@@ -14,6 +14,7 @@ import { RpcError, rpcRaw } from '@/api/transport';
 import type {
   ItemRef,
   Page,
+  PlaybackPosition,
   SeriesDetail,
   SeriesItem,
   Settings,
@@ -84,6 +85,33 @@ export function useResumeLookup(enabled = true, accept?: (ref: ItemRef) => boole
     }
     return out;
   }, [q.data, filterKey]);
+}
+
+/** Cards in a landing's Continue watching rail. */
+export const CONTINUE_RAIL_LIMIT = 20;
+
+/**
+ * Continue watching for one source and section (CB-VOD-LANDING): the titles with a saved,
+ * unfinished position, newest first, one entry per title (a series shows the episode you were
+ * last in). Reads the same `positions.continueWatching` answer as {@link useResumeMap}, so the
+ * landing asks for it once.
+ */
+export function useSectionContinue(sourceId: string, kind: 'movie' | 'series'): PlaybackPosition[] {
+  const q = useRpcQuery('positions.continueWatching', { limit: RESUME_LOOKUP_LIMIT }, { enabled: !!sourceId });
+  return useMemo(() => {
+    const out: PlaybackPosition[] = [];
+    const seen = new Set<string>();
+    for (const p of q.data ?? []) {
+      if (p.watched || p.ref.sourceId !== sourceId || p.ref.contentType !== kind) continue;
+      if (!p.durationSeconds || !(p.positionSeconds > 0)) continue;
+      const key = resumeKey(p.ref);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+      if (out.length >= CONTINUE_RAIL_LIMIT) break;
+    }
+    return out;
+  }, [q.data, sourceId, kind]);
 }
 
 /**

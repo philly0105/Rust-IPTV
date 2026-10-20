@@ -14,16 +14,18 @@ import vod from '@/i18n/en/vod.json';
 
 import { SimilarSection } from '../components/SimilarSection';
 import { TmdbErrorState } from '../components/TmdbErrorState';
-import { installDomStubs } from './harness';
+import { installDomStubs, QueryWrapper } from './harness';
 
 beforeAll(installDomStubs);
 afterEach(cleanup);
 
 const rejected = new RpcError('auth', 'TMDB rejected the API key (401)');
 const similar = (error: unknown) => (
-  <MemoryRouter>
-    <SimilarSection items={[]} loading={false} sourceId="src1" error={error} onRetry={() => undefined} keyMissing={false} enriched={false} />
-  </MemoryRouter>
+  <QueryWrapper>
+    <MemoryRouter>
+      <SimilarSection items={[]} loading={false} sourceId="src1" error={error} onRetry={() => undefined} keyMissing={false} enriched={false} />
+    </MemoryRouter>
+  </QueryWrapper>
 );
 
 describe('B4-vod-D18: TMDB key rejected', () => {

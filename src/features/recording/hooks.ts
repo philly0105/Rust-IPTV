@@ -167,16 +167,23 @@ export function useScheduleActions() {
     [t, toast],
   );
 
-  /** Stops a running recording or cancels a waiting one; resolves true on success. Repeats while one runs join it. */
+  /**
+   * Stops a running recording or cancels a waiting one; resolves true on success. Repeats while one
+   * runs join it. `undo` puts an Undo on the toast (VL-cancel-recording: a cancelled future
+   * recording can be scheduled again from it).
+   */
   const cancelRecording = useCallback(
-    (r: Recording): Promise<boolean> => {
+    (r: Recording, opts?: { undo?: { label: string; onClick: () => void } }): Promise<boolean> => {
       const running = cancelsInFlight.get(r.id);
       if (running) return running;
       setCancelling(r.id, true);
       const work = (async () => {
         try {
           await rpc('recordings.cancel', { id: r.id });
-          toast({ title: r.status === 'recording' ? t('recordingStopped', { title: r.title ?? r.channelName }) : t('recordingCancelled', { title: r.title ?? r.channelName }) });
+          toast({
+            title: r.status === 'recording' ? t('recordingStopped', { title: r.title ?? r.channelName }) : t('recordingCancelled', { title: r.title ?? r.channelName }),
+            ...(opts?.undo ? { action: opts.undo, duration: 8_000 } : {}),
+          });
           return true;
         } catch (e) {
           toast({ variant: 'error', title: t('recordCancelFailed'), description: message(e) });

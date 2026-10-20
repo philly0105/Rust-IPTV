@@ -16,7 +16,7 @@ import { CategoryGridPage } from '../pages/CategoryGridPage';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
-import { VodLandingPage } from '../pages/VodLandingPage';
+import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
 import { currentLocation, installDomStubs, keyboardFocus, makeSource, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -308,6 +308,11 @@ describe('CategoryGridPage: states', () => {
 });
 
 describe('VodLandingPage', () => {
+  // These are about the category index, which waits behind "Browse all categories" (VL-landing-index);
+  // the open state is a remembered preference.
+  beforeEach(() => localStorage.setItem(CATEGORY_INDEX_KEY, '1'));
+  const indexed = async (name: string) => within(await screen.findByRole('list', { name: 'Categories' })).findByText(name);
+
   it('shows a loading status while categories load', async () => {
     rpcMock.handlers['catalog.categories'] = () => new Promise(() => undefined);
     renderAt('/s/src1/movies', [landingRoute]);
@@ -324,7 +329,7 @@ describe('VodLandingPage', () => {
     await screen.findByText('Portal unreachable');
     fail = false;
     fireEvent.click(screen.getAllByRole('button', { name: 'Try again' })[0]!);
-    await screen.findByText('Action');
+    await indexed('Action');
   });
 
   it('shows the empty-source state with a link to sources', async () => {
@@ -336,14 +341,14 @@ describe('VodLandingPage', () => {
 
   it('back from a category restores the landing scroll and focuses the category you opened', async () => {
     renderAt('/s/src1/movies', [landingRoute, { path: '/s/:sourceId/movies/c/:categoryId', element: <BackStub /> }]);
-    const action = await screen.findByText('Action');
+    const action = await indexed('Action');
     const scroller = screen.getByTestId('vod-landing-movie');
     scroller.scrollTop = 240;
     fireEvent.scroll(scroller);
     fireEvent.click(action.closest('a')!);
     await screen.findByText('back-stub');
     fireEvent.click(screen.getByText('back-stub'));
-    const again = await screen.findByText('Action');
+    const again = await indexed('Action');
     await waitFor(() => expect(document.activeElement).toBe(again.closest('a')));
     expect(screen.getByTestId('vod-landing-movie').scrollTop).toBe(240);
   });

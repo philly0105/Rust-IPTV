@@ -66,7 +66,6 @@
   "folderChanged": "Les nouveaux téléchargements seront enregistrés dans le dossier choisi",
   "folderChangeFailed": "Impossible de changer le dossier de téléchargements",
   "folderOpenFailed": "Impossible d'ouvrir le dossier de téléchargements",
-  "clearFinished": "Effacer les terminés",
   "clearConfirmTitle_one": "Effacer {{count, number}} téléchargement ?",
   "clearConfirmTitle_many": "Effacer {{count, number}} téléchargements ?",
   "clearConfirmTitle_other": "Effacer {{count, number}} téléchargements ?",
@@ -92,7 +91,6 @@
   "shortcutCancel": "Annuler le téléchargement sélectionné",
   "shortcutRemove": "Supprimer le téléchargement sélectionné",
   "shortcutReveal": "Afficher le téléchargement sélectionné dans son dossier",
-
   "myVideosTitle": "Mes vidéos",
   "libraryTitleCount_one": "{{count, number}} titre",
   "libraryTitleCount_many": "{{count, number}} titres",
@@ -159,7 +157,6 @@
   "episodeRedownloadAria": "Télécharger {{title}} de nouveau",
   "episodeRevealAria": "Afficher {{title}} dans le dossier",
   "episodeRemoveAria": "Supprimer {{title}}",
-
   "favoritesTitle": "Favoris",
   "sourceFavoritesTitle": "Favoris dans {{source}}",
   "favoritesCount_one": "{{count, number}} favori",
@@ -182,7 +179,6 @@
   "shortcutMoveDown": "Descendre le favori sélectionné",
   "addedAgo": "Ajouté {{time}}",
   "undo": "Annuler",
-
   "recentTitle": "Récemment regardés",
   "sourceRecentTitle": "Récemment regardés dans {{source}}",
   "recentCount_one": "{{count, number}} élément",
@@ -208,7 +204,6 @@
   "continueTitle": "Reprendre {{title}} à {{time}}",
   "removeContinue": "Retirer {{title}} de Reprendre la lecture",
   "watchedPercent": "{{percent}}% regardé",
-
   "typeLive": "Chaîne en direct",
   "typeMovie": "Film",
   "typeSeries": "Série",
@@ -298,5 +293,8 @@
   "stopConfirmTitle": "Arrêter l’enregistrement ?",
   "stopConfirmBody": "L’enregistrement de {{title}} s’arrête maintenant et ne pourra pas reprendre. Ce qui a déjà été enregistré reste dans Mes vidéos.",
   "stopConfirmKeep": "Continuer l’enregistrement",
-  "stopConfirmAction": "Arrêter l’enregistrement"
+  "stopConfirmAction": "Arrêter l’enregistrement",
+  "clearFailedDownloads": "Effacer les échecs",
+  "downloadDone": "{{title}} téléchargé",
+  "downloadFailedNamed": "Impossible de télécharger {{title}}"
 }

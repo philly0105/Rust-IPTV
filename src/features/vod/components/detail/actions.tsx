@@ -9,9 +9,10 @@ import { captureWatched } from '@/features/library/lib/watchedUndo';
 
 import { useSetWatched } from '../../hooks/queries';
 import { seriesWatchedTargets, watchedToastId, watchedUndoAll } from '../../lib/seriesWatched';
-import { Button, IconButton, Tooltip, buttonClass, cn, useToast, errorDescription } from '@/ui';
+import { Button, IconButton, Tooltip, buttonClass, cn, useToast, errorDescription, type MenuAction } from '@/ui';
 
-export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; compact?: boolean }) {
+/** Adds the title to favorites or takes it off, with the toast; shared by the button and the hero's More menu. */
+function useFavoriteToggle(itemRef: ItemRef, snapshot: ItemSnapshot) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
   const toggle = useRpcMutation('favorites.toggle');
@@ -26,6 +27,30 @@ export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { ite
         onError: (err) => toast({ title: t('favoriteFailed'), description: errorDescription(err), variant: 'error' }),
       },
     );
+  return { onClick, pending: toggle.isPending };
+}
+
+/**
+ * Favorites as an item of the hero's More menu (VL-hero-actions): favorites are the Home rail and
+ * the rail's Favorites page, a second list beside My List, so they sit one step back from the
+ * buttons rather than as a look-alike bookmark next to My List.
+ */
+export function useFavoriteMenuItem(itemRef: ItemRef, snapshot: ItemSnapshot, isFavorite: boolean): MenuAction {
+  const { t } = useTranslation('vod');
+  const { onClick, pending } = useFavoriteToggle(itemRef, snapshot);
+  return {
+    id: 'favorite',
+    label: isFavorite ? t('removeFromFavorites') : t('addToFavorites'),
+    icon: <Heart aria-hidden size={16} className={cn(isFavorite && 'fill-current text-live')} />,
+    onSelect: onClick,
+    disabled: pending,
+  };
+}
+
+export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; compact?: boolean }) {
+  const { t } = useTranslation('vod');
+  const { onClick, pending } = useFavoriteToggle(itemRef, snapshot);
+  const toggle = { isPending: pending };
   const icon = <Heart aria-hidden size={18} className={cn(isFavorite && 'fill-current text-live')} />;
   if (compact) {
     return <IconButton label={isFavorite ? t('removeFromFavorites') : t('addToFavorites')} pressed={isFavorite} icon={icon} onClick={onClick} disabled={toggle.isPending} />;
@@ -47,15 +72,21 @@ export function WatchedButton({
   series,
   watched,
   compact,
+  round,
+  size = 'lg',
   labels,
   name,
 }: {
   itemRef: ItemRef;
+  /** Height of the labelled button: `lg` in a hero, `sm` beside a section heading. */
+  size?: 'sm' | 'lg';
   episodeIds?: string[];
   /** With `episodeIds`: also set the series-level row to the new state. */
   series?: boolean;
   watched: boolean;
   compact?: boolean;
+  /** The detail hero's round icon button, pressed while watched (VL-hero-actions). */
+  round?: boolean;
   /** Overrides for the two button labels (season-level wording). */
   labels?: { mark: string; unmark: string };
   /** What the toast says was marked ("Season 2", the series title). */
@@ -93,11 +124,26 @@ export function WatchedButton({
     );
   };
   const icon = <CircleCheck aria-hidden size={18} className={cn(watched && 'text-success')} />;
+  if (round) {
+    return (
+      <IconButton
+        size="lg"
+        variant="secondary"
+        label={label}
+        icon={icon}
+        // Watched is a state, so it reads as pressed (neutral), with the green tick; the label says what a press does.
+        className={cn('rounded-full', watched && 'bg-selected text-fg')}
+        onClick={() => void onClick()}
+        disabled={setWatched.isPending}
+        data-testid="vod-watched-button"
+      />
+    );
+  }
   if (compact) {
     return <IconButton label={label} icon={icon} onClick={() => void onClick()} disabled={setWatched.isPending} />;
   }
   return (
-    <Button size="lg" variant="ghost" icon={icon} loading={setWatched.isPending} onClick={() => void onClick()}>
+    <Button size={size} variant="ghost" icon={icon} loading={setWatched.isPending} onClick={() => void onClick()}>
       {label}
     </Button>
   );
@@ -114,29 +160,36 @@ export function DownloadButton({
   pending,
   onStart,
   compact,
+  round,
   label,
+  downloadedHref = '/my-videos',
 }: {
   download: Download | undefined;
   pending: boolean;
   onStart: () => void;
   compact?: boolean;
+  /** The detail hero's round icon button: the state in the icon and the tooltip (VL-hero-actions). */
+  round?: boolean;
   /** Accessible context, e.g. the episode title. */
   label?: string;
+  /** Where the finished download opens: its own My Videos page when the caller knows it (VL-offline-play). */
+  downloadedHref?: string;
 }) {
   const { t } = useTranslation('vod');
   const size = compact ? 'sm' : 'lg';
   const status = download?.status;
   const ctx = label ? ` ${label}` : '';
+  if (round) return <RoundDownloadButton download={download} pending={pending} onStart={onStart} downloadedHref={downloadedHref} />;
 
   if (status === 'completed') {
     return compact ? (
       <Tooltip content={t('downloaded')} describe={false}>
-        <Link to="/my-videos" aria-label={`${t('downloaded')}${ctx}`} className={buttonClass('ghost', 'sm', 'w-8 px-0 text-success')}>
+        <Link to={downloadedHref} aria-label={`${t('downloaded')}${ctx}`} className={buttonClass('ghost', 'sm', 'w-8 px-0 text-success')}>
           <Check aria-hidden size={16} />
         </Link>
       </Tooltip>
     ) : (
-      <Link to="/my-videos" className={buttonClass('secondary', size)}>
+      <Link to={downloadedHref} className={buttonClass('secondary', size)}>
         <Check aria-hidden size={18} className="text-success" />
         {t('downloaded')}
       </Link>
@@ -181,5 +234,66 @@ export function DownloadButton({
     <Button size={size} variant="secondary" icon={<DownloadIcon aria-hidden size={18} />} loading={pending} onClick={onStart}>
       {text}
     </Button>
+  );
+}
+
+/** Round variant of {@link DownloadButton}: one 48 px circle whose icon and tooltip carry the state. */
+function RoundDownloadButton({
+  download,
+  pending,
+  onStart,
+  downloadedHref,
+}: {
+  download: Download | undefined;
+  pending: boolean;
+  onStart: () => void;
+  downloadedHref: string;
+}) {
+  const { t } = useTranslation('vod');
+  const status = download?.status;
+  const round = buttonClass('secondary', 'lg', 'w-12 rounded-full px-0');
+  if (status === 'completed' || status === 'downloading' || status === 'queued' || status === 'paused') {
+    const pct = download ? downloadPercent(download) : undefined;
+    const text =
+      status === 'completed'
+        ? t('downloaded')
+        : status === 'paused'
+          ? t('downloadPaused')
+          : pct !== undefined
+            ? t('downloadingPercent', { percent: pct })
+            : status === 'queued'
+              ? t('downloadQueuedShort')
+              : t('downloading');
+    const icon =
+      status === 'completed' ? (
+        <Check aria-hidden size={18} className="text-success" />
+      ) : status === 'paused' ? (
+        <Pause aria-hidden size={18} />
+      ) : (
+        <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" />
+      );
+    return (
+      <Tooltip content={text} describe={false}>
+        <Link to={status === 'completed' ? downloadedHref : '/downloads'} aria-label={text} className={round} data-testid="vod-download-button">
+          {icon}
+        </Link>
+      </Tooltip>
+    );
+  }
+  const failed = status === 'failed';
+  return (
+    <IconButton
+      size="lg"
+      variant="secondary"
+      label={failed ? t('downloadRetry') : t('download')}
+      icon={pending ? <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" /> : failed ? <CircleAlert aria-hidden size={18} className="text-danger" /> : <DownloadIcon aria-hidden size={18} />}
+      aria-busy={pending || undefined}
+      aria-disabled={pending || undefined}
+      onClick={() => {
+        if (!pending) onStart();
+      }}
+      className="rounded-full"
+      data-testid="vod-download-button"
+    />
   );
 }

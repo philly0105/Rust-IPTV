@@ -15,7 +15,7 @@ import { Link, useSearchParams } from 'react-router';
 
 import type { WatchStatsTop } from '@/api/types';
 
-import { DayChart, VOD_FILL } from '../components/DayChart';
+import { DayChart, LIVE_FILL, VOD_FILL } from '../components/DayChart';
 import { StatsSkeleton } from '../components/StatsSkeleton';
 import { TopChannels, TopTitles } from '../components/TopList';
 import { Button, Dialog, EmptyState, ErrorState, Page, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources, errorDescription } from '../deps';
@@ -121,25 +121,41 @@ export function StatsPage() {
     );
   } else {
     const split = rangeTotals(data.days);
+    // KPI tiles (critique: stats): the total leads, then the split (which doubles as the chart's
+    // legend) and the daily average, each a number with its label rather than one long sentence.
+    const tile = 'flex min-w-0 flex-col justify-between gap-1 rounded-lg border border-edge bg-surface px-4 py-3';
     headline = (
-      <div className="min-w-0 flex-1">
-        <p className="max-w-[36ch] text-title text-balance sm:text-headline" data-testid="stats-total">
-          {t(range === 7 ? 'totalWeek' : 'totalMonth', { time: time(data.totalSeconds) })}
-        </p>
-        <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-fg-muted" data-testid="stats-split">
-          <li className="flex items-center gap-2">
-            <span aria-hidden className="size-3 rounded-[3px] bg-accent" />
-            <span>
-              {t('live')} <span className="tabular-nums text-fg">{time(split.live)}</span>
-            </span>
+      <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1fr)]" data-testid="stats-kpis">
+        <div className={tile} data-testid="stats-total">
+          {/* Read as one sentence ("3 hr 20 min watched in the last 7 days"); drawn as a number over its label. */}
+          <span className="sr-only">{t(range === 7 ? 'totalWeek' : 'totalMonth', { time: time(data.totalSeconds) })}</span>
+          <span aria-hidden className="text-headline tabular-nums text-fg sm:text-[calc(36rem/15)]">
+            {time(data.totalSeconds)}
+          </span>
+          <span aria-hidden className="text-body-sm text-fg-muted">
+            {t(range === 7 ? 'kpiWeek' : 'kpiMonth')}
+          </span>
+        </div>
+        <ul className="grid min-w-0 grid-cols-2 gap-3" data-testid="stats-split">
+          <li className={tile}>
+            <span className="flex items-center gap-2 text-body-sm text-fg-muted">
+              <span aria-hidden className={cn('size-2.5 rounded-[3px]', LIVE_FILL)} />
+              {t('live')}
+            </span>{' '}
+            <span className="text-title tabular-nums text-fg">{time(split.live)}</span>
           </li>
-          <li className="flex items-center gap-2">
-            <span aria-hidden className={cn('size-3 rounded-[3px]', VOD_FILL)} />
-            <span>
-              {t('vod')} <span className="tabular-nums text-fg">{time(split.vod)}</span>
-            </span>
+          <li className={tile}>
+            <span className="flex items-center gap-2 text-body-sm text-fg-muted">
+              <span aria-hidden className={cn('size-2.5 rounded-[3px]', VOD_FILL)} />
+              {t('vod')}
+            </span>{' '}
+            <span className="text-title tabular-nums text-fg">{time(split.vod)}</span>
           </li>
         </ul>
+        <div className={cn(tile, 'sm:col-span-2 lg:col-span-1')} data-testid="stats-average">
+          <span className="text-body-sm text-fg-muted">{t('dailyAverage')}</span>{' '}
+          <span className="text-title tabular-nums text-fg">{time(Math.round(data.totalSeconds / Math.max(1, data.days.length)))}</span>
+        </div>
       </div>
     );
     body = (
@@ -163,8 +179,8 @@ export function StatsPage() {
     <Page width="default" className="flex min-w-0 flex-col gap-6 pb-10 pt-4" data-testid="stats-page">
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
-      {/* The range control comes first for keyboard and phones; from sm up it sits at the row's end. */}
-      <div className="flex flex-col gap-4 sm:flex-row-reverse sm:items-start sm:justify-between">
+      {/* The range control comes first for keyboard and phones; from lg up it sits at the row's end. */}
+      <div className="flex flex-col gap-4 lg:flex-row-reverse lg:items-start lg:justify-between">
         <Tabs
           className="self-start"
           variant="pill"

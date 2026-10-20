@@ -60,7 +60,6 @@
   "folderChanged": "新的下載將儲存至所選資料夾",
   "folderChangeFailed": "無法變更下載資料夾",
   "folderOpenFailed": "無法開啟下載資料夾",
-  "clearFinished": "清除已結束的下載",
   "clearConfirmTitle_one": "要清除 {{count, number}} 個下載嗎？",
   "clearConfirmTitle_other": "要清除 {{count, number}} 個下載嗎？",
   "clearConfirmBody": "失敗與已取消的下載會從佇列中移除，未完成的檔案也會一併刪除。",
@@ -83,7 +82,6 @@
   "shortcutCancel": "取消目前的下載",
   "shortcutRemove": "移除目前的下載",
   "shortcutReveal": "在資料夾中顯示所選下載",
-
   "myVideosTitle": "我的影片",
   "libraryTitleCount_one": "{{count, number}} 部作品",
   "libraryTitleCount_other": "{{count, number}} 部作品",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "重新下載 {{title}}",
   "episodeRevealAria": "在資料夾中顯示 {{title}}",
   "episodeRemoveAria": "移除 {{title}}",
-
   "favoritesTitle": "我的最愛",
   "sourceFavoritesTitle": "{{source}} 中的我的最愛",
   "favoritesCount_one": "{{count, number}} 個最愛項目",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "下移目前的最愛項目",
   "addedAgo": "新增於 {{time}}",
   "undo": "復原",
-
   "recentTitle": "最近觀看",
   "sourceRecentTitle": "{{source}} 中最近觀看",
   "recentCount_one": "{{count, number}} 個項目",
@@ -192,7 +188,6 @@
   "continueTitle": "從 {{time}} 繼續觀看 {{title}}",
   "removeContinue": "將 {{title}} 從「繼續觀看」中移除",
   "watchedPercent": "已觀看 {{percent}}%",
-
   "typeLive": "直播頻道",
   "typeMovie": "電影",
   "typeSeries": "影集",
@@ -280,5 +275,8 @@
   "stopConfirmTitle": "停止錄影？",
   "stopConfirmBody": "{{title}} 的錄影將立即停止，且無法繼續。已錄下的內容會保留在我的影片中。",
   "stopConfirmKeep": "繼續錄影",
-  "stopConfirmAction": "停止錄影"
+  "stopConfirmAction": "停止錄影",
+  "clearFailedDownloads": "清除失敗的下載",
+  "downloadDone": "已下載{{title}}",
+  "downloadFailedNamed": "無法下載{{title}}"
 }

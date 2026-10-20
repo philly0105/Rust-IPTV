@@ -8,7 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Category, Source } from '@/api/types';
 
 import { forgetSpots } from '../hooks/useScrollMemory';
-import { VodLandingPage } from '../pages/VodLandingPage';
+import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
 import { i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -52,6 +52,8 @@ beforeAll(installDomStubs);
 beforeEach(() => {
   forgetSpots();
   localStorage.clear();
+  // The counts under test sit in the category index, behind "Browse all categories" (VL-landing-index).
+  localStorage.setItem(CATEGORY_INDEX_KEY, '1');
   rpcMock.calls.length = 0;
   source = makeSource('src1', 'xtream', 'Alpha IPTV'); // movieCount 5000: the raw import
   cats = [cat('c1', 'Action', 12), cat('c2', 'Drama', 30, false, 1), cat('c3', 'Late night', 400, true, 2)];

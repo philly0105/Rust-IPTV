@@ -35,5 +35,8 @@
   "clearBody": "Todo o tempo de exibição contado é apagado. O progresso e Assistidos recentemente são mantidos.",
   "cleared": "Estatísticas de exibição limpas",
   "clearFailed": "Não foi possível limpar as estatísticas",
-  "watchLive": "Ver TV em direto"
+  "watchLive": "Ver TV em direto",
+  "kpiWeek": "Assistido nos últimos 7 dias",
+  "kpiMonth": "Assistido nos últimos 30 dias",
+  "dailyAverage": "Média diária"
 }

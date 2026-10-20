@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { Episode, PlaybackPosition } from '@/api/types';
 
+import { useEdgeFades } from '../../hooks/useEdgeFades';
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, progressFraction } from '../../lib/format';
 import { Button, IconButton, Poster, ProgressBar, cn } from '@/ui';
@@ -42,11 +43,18 @@ export function UpNextRail({
 }) {
   const { t } = useTranslation('vod');
   const formatRuntime = useFormatRuntime();
+  // VL-upnext-strip: below xl the strip scrolls sideways with no scrollbar, so the hidden end fades
+  // and a vertical wheel moves it; at xl it is a column and nothing is hidden sideways.
+  const fades = useEdgeFades(episodes.map((e) => e.id).join(','));
   if (episodes.length === 0) return null;
   return (
     <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:w-[340px] xl:shrink-0">
       <h2 className="text-sm text-fg-muted">{t('upNext')}</h2>
-      <ol className="flex gap-3 overflow-x-auto pb-2 scrollbar-none xl:max-h-[calc(72vh-2rem)] xl:flex-col xl:overflow-x-hidden xl:overflow-y-auto">
+      <ol
+        ref={fades.ref}
+        style={fades.style}
+        className="flex gap-3 overflow-x-auto pb-2 scrollbar-none xl:max-h-[calc(72vh-2rem)] xl:flex-col xl:overflow-x-hidden xl:overflow-y-auto"
+      >
         {episodes.map((ep) => {
           const fraction = progressFraction(positions.get(ep.id));
           const runtime = formatRuntime(ep.durationSeconds);
@@ -120,19 +128,21 @@ export function NextEpisodeCard({
     return () => clearTimeout(h);
   }, [autoplay, left]);
 
+  const code = episodeCode(next.season, next.episode);
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className={cn('flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface-2 px-4 py-3 shadow-1')}
-    >
+    <div className={cn('flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface-2 px-4 py-3 shadow-1')}>
+      {/* VL-next-episode-live: the live region says it once (the countdown's start); the number that
+          ticks every second is hidden from screen readers. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {`${autoplay ? t('nextEpisodeIn', { seconds: AUTOPLAY_SECONDS }) : t('nextEpisode')}: ${code} ${next.title}`}
+      </span>
       <SkipForward aria-hidden size={18} className="text-accent" />
-      <div className="min-w-0 flex-1">
-        <div className="text-sm text-fg-muted">
+      <div aria-hidden className="min-w-0 flex-1">
+        <div className="tabular text-sm text-fg-muted">
           {autoplay ? t('nextEpisodeIn', { seconds: left }) : t('nextEpisode')}
         </div>
-        <div className="truncate text-[calc(15rem/15)] text-fg">
-          <span className="font-display tabular me-2 text-fg-subtle">{episodeCode(next.season, next.episode)}</span>
+        <div className="truncate text-body text-fg">
+          <span className="tabular me-2 text-fg-subtle">{code}</span>
           {next.title}
         </div>
       </div>

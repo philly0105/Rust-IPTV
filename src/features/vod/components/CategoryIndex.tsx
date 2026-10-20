@@ -83,7 +83,9 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
             const entry = entries[i];
             if (!entry) return null;
             return (
-              <div key={entry.id} role="listitem" className="min-w-0">
+              // VL-category-row-nit: the divider is on the square row, the radius and the hover fill on the
+              // link inside it, so the hairline no longer curls up into the rounded corners.
+              <div key={entry.id} role="listitem" className="min-w-0 border-b border-divider pb-px">
                 <Link
                   to={hrefFor(entry.id)}
                   // The grid reads this: Escape there goes back one step instead of pushing the landing again.
@@ -91,7 +93,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
                   data-grid-index={i}
                   title={entry.locked && lockedLabel ? `${entry.name} (${lockedLabel})` : undefined}
                   className={cn(
-                    'group flex h-11 items-center gap-3 rounded-md border-b border-divider px-3',
+                    'group flex h-11 items-center gap-3 rounded-md px-3',
                     'text-sm text-fg-muted hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg',
                     entry.emphasis && 'font-semibold text-fg',
                   )}
@@ -101,7 +103,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
                     <Lock data-testid="category-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} />
                   )}
                   {entry.count !== undefined && entry.count > 0 && (
-                    <span className="tabular font-display text-[calc(13rem/15)] text-fg-subtle group-hover:text-fg-muted group-focus-visible:text-fg-muted">
+                    <span className="tabular text-body-sm text-fg-subtle group-hover:text-fg-muted group-focus-visible:text-fg-muted">
                       {fmt.format(entry.count)}
                     </span>
                   )}

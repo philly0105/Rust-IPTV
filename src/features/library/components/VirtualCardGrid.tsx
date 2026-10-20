@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
+import { CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
 import { useListVirtualizer } from '@/ui/virtualizer';
 
@@ -225,7 +226,8 @@ export function VirtualCardGrid<T>({
                     onFocus={() => setActive(index)}
                     onKeyDown={(e) => onKeyDown(e, index, item)}
                     onClick={() => open(index, item)}
-                    className="group min-w-0 cursor-pointer rounded-lg"
+                    // CARD_ROOT hands the focus ring to the artwork (CARD_ART), so the caption is not boxed in too.
+                    className={cn(CARD_ROOT, 'min-w-0 cursor-pointer rounded-lg')}
                   >
                     {render(item, { index })}
                   </div>

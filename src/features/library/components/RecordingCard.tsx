@@ -9,6 +9,7 @@ import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
+import { CARD_ART } from '@/ui/card';
 import { cn } from '@/ui/cn';
 
 import { Badge, Poster } from '../deps';
@@ -24,16 +25,11 @@ function RecordingCardImpl({ entry }: { entry: RecordingEntry }) {
 
   return (
     <div className="flex h-full flex-col gap-2" data-testid="library-card" data-kind="recording" data-missing={entry.missing || undefined}>
-      <div
-        className={cn(
-          'relative overflow-hidden rounded-lg ring-1 ring-edge',
-          'group-hover:ring-border group-focus-visible:ring-2 group-focus-visible:ring-focus',
-          entry.missing && 'opacity-60 grayscale',
-        )}
-      >
-        <Poster src={undefined} alt="" label={f.channelName ?? entry.title} kind="live" aspect="poster" />
-        <span className="absolute start-2 top-2 inline-flex items-center gap-1 rounded-sm bg-bg/85 px-1.5 py-0.5 text-xs font-medium text-fg">
-          <Disc3 size={12} aria-hidden className={writing ? 'text-live' : 'text-fg-muted'} />
+      <div className={cn(CARD_ART, entry.missing && 'opacity-60 grayscale')}>
+        <Poster src={undefined} alt="" label={f.channelName ?? entry.title} kind="live" aspect="poster" className="after:hidden" />
+        {/* Glass like every chip on artwork (VL-library-cards); bg-bg turned near-white in the light theme. */}
+        <span className="absolute start-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-glass-strong px-1.5 py-0.5 text-xs font-medium text-on-glass">
+          <Disc3 size={12} aria-hidden className={writing ? 'text-live' : 'text-on-glass-muted'} />
           {writing ? t('recStatusRecording') : t('recordingKind')}
         </span>
       </div>

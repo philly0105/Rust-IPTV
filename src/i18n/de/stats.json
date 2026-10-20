@@ -35,5 +35,8 @@
   "clearBody": "Die gesamte gezählte Sehzeit wird gelöscht. Wiedergabefortschritt und „Zuletzt angesehen“ bleiben erhalten.",
   "cleared": "Wiedergabestatistik gelöscht",
   "clearFailed": "Statistik konnte nicht gelöscht werden",
-  "watchLive": "Live-TV ansehen"
+  "watchLive": "Live-TV ansehen",
+  "kpiWeek": "Geschaut in den letzten 7 Tagen",
+  "kpiMonth": "Geschaut in den letzten 30 Tagen",
+  "dailyAverage": "Durchschnitt pro Tag"
 }

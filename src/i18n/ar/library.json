@@ -84,7 +84,6 @@
   "folderChanged": "ستُحفظ التنزيلات الجديدة في المجلد المختار",
   "folderChangeFailed": "تعذّر تغيير مجلد التنزيلات",
   "folderOpenFailed": "تعذّر فتح مجلد التنزيلات",
-  "clearFinished": "مسح المنتهية",
   "clearConfirmTitle_zero": "مسح {{count, number}} تنزيل؟",
   "clearConfirmTitle_one": "مسح {{count, number}} تنزيل؟",
   "clearConfirmTitle_two": "مسح {{count, number}} تنزيلين؟",
@@ -119,7 +118,6 @@
   "shortcutCancel": "إلغاء التنزيل المحدد",
   "shortcutRemove": "إزالة التنزيل المحدد",
   "shortcutReveal": "إظهار التنزيل المحدد في مجلده",
-
   "myVideosTitle": "فيديوهاتي",
   "libraryTitleCount_zero": "{{count, number}} عنوان",
   "libraryTitleCount_one": "{{count, number}} عنوان",
@@ -201,7 +199,6 @@
   "episodeRedownloadAria": "تنزيل {{title}} مجددًا",
   "episodeRevealAria": "إظهار {{title}} في المجلد",
   "episodeRemoveAria": "إزالة {{title}}",
-
   "favoritesTitle": "المفضلة",
   "sourceFavoritesTitle": "المفضلة في {{source}}",
   "favoritesCount_zero": "{{count, number}} عنصر مفضل",
@@ -227,7 +224,6 @@
   "shortcutMoveDown": "نقل العنصر المفضل المحدد لأسفل",
   "addedAgo": "أُضيف {{time}}",
   "undo": "تراجع",
-
   "recentTitle": "شوهد مؤخرًا",
   "sourceRecentTitle": "شوهد مؤخرًا في {{source}}",
   "recentCount_zero": "{{count, number}} عنصر",
@@ -256,7 +252,6 @@
   "continueTitle": "متابعة {{title}} عند {{time}}",
   "removeContinue": "إزالة {{title}} من متابعة المشاهدة",
   "watchedPercent": "تمت مشاهدة {{percent}}%",
-
   "typeLive": "قناة مباشرة",
   "typeMovie": "فيلم",
   "typeSeries": "مسلسل",
@@ -352,5 +347,8 @@
   "stopConfirmTitle": "إيقاف التسجيل؟",
   "stopConfirmBody": "يتوقف تسجيل {{title}} الآن ولا يمكن استئنافه. يبقى ما سُجّل حتى الآن في فيديوهاتي.",
   "stopConfirmKeep": "مواصلة التسجيل",
-  "stopConfirmAction": "إيقاف التسجيل"
+  "stopConfirmAction": "إيقاف التسجيل",
+  "clearFailedDownloads": "مسح الفاشلة",
+  "downloadDone": "اكتمل تنزيل {{title}}",
+  "downloadFailedNamed": "تعذّر تنزيل {{title}}"
 }

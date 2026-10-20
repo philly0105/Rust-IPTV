@@ -84,7 +84,6 @@
   "folderChanged": "التحميلات الجديدة غادي يتحفظو فالمجلد اللي ختاريتي",
   "folderChangeFailed": "ما قدرناش نبدلو مجلد التحميلات",
   "folderOpenFailed": "ما قدرناش نحلو مجلد التحميلات",
-  "clearFinished": "مسح اللي سالاو",
   "clearConfirmTitle_zero": "تمسح التحميلات ({{count, number}})؟",
   "clearConfirmTitle_one": "تمسح {{count, number}} تحميل؟",
   "clearConfirmTitle_two": "تمسح جوج تحميلات؟",
@@ -119,7 +118,6 @@
   "shortcutCancel": "لغي التحميل المختار",
   "shortcutRemove": "حيد التحميل المختار",
   "shortcutReveal": "بيّن التحميل المختار فالدوسي ديالو",
-
   "myVideosTitle": "الفيديوهات ديالي",
   "libraryTitleCount_zero": "حتى عنوان ما كاين",
   "libraryTitleCount_one": "{{count, number}} عنوان",
@@ -201,7 +199,6 @@
   "episodeRedownloadAria": "عاود حمّل {{title}}",
   "episodeRevealAria": "ورّي {{title}} فالمجلد",
   "episodeRemoveAria": "حيد {{title}}",
-
   "favoritesTitle": "المفضلة",
   "sourceFavoritesTitle": "المفضلة ف {{source}}",
   "favoritesCount_zero": "حتى مفضّل ما كاين",
@@ -227,7 +224,6 @@
   "shortcutMoveDown": "هبّط المفضّل المختار",
   "addedAgo": "تزاد {{time}}",
   "undo": "تراجع",
-
   "recentTitle": "متشافين مؤخراً",
   "sourceRecentTitle": "متشافين مؤخراً ف {{source}}",
   "recentCount_zero": "حتى عنصر ما كاين",
@@ -256,7 +252,6 @@
   "continueTitle": "كمّل {{title}} من {{time}}",
   "removeContinue": "حيد {{title}} من كمّل المشاهدة",
   "watchedPercent": "تشاهد {{percent}}%",
-
   "typeLive": "قناة مباشرة",
   "typeMovie": "فيلم",
   "typeSeries": "سلسلة",
@@ -352,5 +347,8 @@
   "stopConfirmTitle": "توقف التسجيل؟",
   "stopConfirmBody": "التسجيل ديال {{title}} غادي يوقف دابا وما يمكنش يكمل. داكشي اللي تسجل حتى لدابا كيبقى فالفيديوهات ديالي.",
   "stopConfirmKeep": "كمّل التسجيل",
-  "stopConfirmAction": "وقّف التسجيل"
+  "stopConfirmAction": "وقّف التسجيل",
+  "clearFailedDownloads": "مسح اللي فشلو",
+  "downloadDone": "تحمّل {{title}}",
+  "downloadFailedNamed": "ماقدرناش نحمّلو {{title}}"
 }

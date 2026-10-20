@@ -60,7 +60,6 @@
   "folderChanged": "Nieuwe downloads worden opgeslagen in de gekozen map",
   "folderChangeFailed": "Kan de downloadmap niet wijzigen",
   "folderOpenFailed": "Kan de downloadmap niet openen",
-  "clearFinished": "Afgeronde wissen",
   "clearConfirmTitle_one": "{{count, number}} download wissen?",
   "clearConfirmTitle_other": "{{count, number}} downloads wissen?",
   "clearConfirmBody": "Mislukte en geannuleerde downloads worden uit de wachtrij verwijderd, samen met eventuele gedeeltelijke bestanden.",
@@ -83,7 +82,6 @@
   "shortcutCancel": "Geselecteerde download annuleren",
   "shortcutRemove": "Geselecteerde download verwijderen",
   "shortcutReveal": "Geselecteerde download in de map tonen",
-
   "myVideosTitle": "Mijn video's",
   "libraryTitleCount_one": "{{count, number}} titel",
   "libraryTitleCount_other": "{{count, number}} titels",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "{{title}} opnieuw downloaden",
   "episodeRevealAria": "{{title}} tonen in map",
   "episodeRemoveAria": "{{title}} verwijderen",
-
   "favoritesTitle": "Favorieten",
   "sourceFavoritesTitle": "Favorieten in {{source}}",
   "favoritesCount_one": "{{count, number}} favoriet",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "Geselecteerde favoriet omlaag verplaatsen",
   "addedAgo": "Toegevoegd {{time}}",
   "undo": "Ongedaan maken",
-
   "recentTitle": "Recent bekeken",
   "sourceRecentTitle": "Recent bekeken in {{source}}",
   "recentCount_one": "{{count, number}} item",
@@ -192,7 +188,6 @@
   "continueTitle": "{{title}} verder kijken vanaf {{time}}",
   "removeContinue": "{{title}} verwijderen uit Verder kijken",
   "watchedPercent": "{{percent}}% bekeken",
-
   "typeLive": "Live kanaal",
   "typeMovie": "Film",
   "typeSeries": "Serie",
@@ -280,5 +275,8 @@
   "stopConfirmTitle": "Opname stoppen?",
   "stopConfirmBody": "De opname van {{title}} stopt nu en kan niet worden hervat. Wat al is opgenomen, blijft in Mijn video's.",
   "stopConfirmKeep": "Blijven opnemen",
-  "stopConfirmAction": "Opname stoppen"
+  "stopConfirmAction": "Opname stoppen",
+  "clearFailedDownloads": "Mislukte wissen",
+  "downloadDone": "{{title}} gedownload",
+  "downloadFailedNamed": "{{title}} kon niet worden gedownload"
 }

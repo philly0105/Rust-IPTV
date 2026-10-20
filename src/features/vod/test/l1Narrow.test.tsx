@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { gridLayout } from '@/ui';
 
-import { VodFilterBar } from '../components/VodFilterBar';
+import { DecadeChips, useYearFilter, type YearFilterProps } from '../components/VodFilterBar';
 import { COVER_WIDTH, NARROW_COVER_WIDTH, useCoverWidth } from '../hooks/useCoverWidth';
 import { installDomStubs, renderAt } from './harness';
 
@@ -73,12 +73,17 @@ describe('poster columns at phone width (L1-vod-4, L1-visual-19)', () => {
   });
 });
 
+/** The grid toolbar's decade chips, as CategoryGridPage draws them (VL-grid-toolbars). */
+function Chips(props: YearFilterProps) {
+  return <DecadeChips filter={useYearFilter(props)} />;
+}
+
 describe('year chips while the facets load (L1-vod-12)', () => {
   const bar = (sourceId: string, yearsLikely: boolean) => [
     {
       path: '/',
       element: (
-        <VodFilterBar
+        <Chips
           sourceId={sourceId}
           kind="movie"
           categoryId="all"
@@ -87,7 +92,6 @@ describe('year chips while the facets load (L1-vod-12)', () => {
           range={{}}
           onRangeChange={() => undefined}
           hideWatched={false}
-          onHideWatchedChange={() => undefined}
         />
       ),
     },

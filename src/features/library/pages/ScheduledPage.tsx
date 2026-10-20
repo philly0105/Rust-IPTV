@@ -312,16 +312,46 @@ function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
   const [removing, setRemoving] = useState(false);
   const busy = cancelling || removing;
 
+  // VL-cancel-recording: one press cancels, so the toast carries an Undo that puts the recording (or
+  // the reminder) back for the same programme. The core applies the padding from Settings again.
+  const undoFailed = (e: unknown) => toast({ variant: 'error', title: t('undoFailed'), description: errorDescription(e) });
   const cancel = async () => {
     if (busy) return;
     if (entry.type === 'recording') {
-      await actions.cancelRecording(entry.recording);
+      const r = entry.recording;
+      const again = r.kind === 'programme' && r.status === 'scheduled' && r.title;
+      await actions.cancelRecording(
+        r,
+        again
+          ? {
+              undo: {
+                label: t('undo'),
+                onClick: () => {
+                  void actions
+                    .record({ ref: r.ref, channelName: r.channelName, program: { title: r.title ?? name, start: r.start, end: r.end } })
+                    .catch(undoFailed);
+                },
+              },
+            }
+          : undefined,
+      );
       return;
     }
+    const reminder = entry.reminder;
     setRemoving(true);
     try {
-      await rpc('reminders.remove', { id: entry.reminder.id });
-      toast({ title: t('scheduledReminderRemoved', { title: name }) });
+      await rpc('reminders.remove', { id: reminder.id });
+      toast({
+        title: t('scheduledReminderRemoved', { title: name }),
+        action: {
+          label: t('undo'),
+          onClick: () => {
+            rpc('reminders.add', { ref: reminder.ref, channelName: reminder.channelName, title: reminder.title, start: reminder.start, end: reminder.end })
+              .then(() => invalidate('reminders.'))
+              .catch(undoFailed);
+          },
+        },
+      });
       // Stays pending until the refreshed list drops the row.
       await invalidate('reminders.');
     } catch (e) {

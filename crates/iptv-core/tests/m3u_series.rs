@@ -479,8 +479,8 @@ async fn state_on_episodes_follows_them_through_a_token_rotation() {
     );
 }
 
-const RECENT: &str = "SELECT content_type || '/' || item_id, viewed_at, json_extract(snapshot_json, '$.posterUrl')
-     FROM recent WHERE source_id = ?1";
+const RECENT: &str = "SELECT content_type || '/' || item_id, viewed_at,
+       json_extract(snapshot_json, '$.posterUrl') FROM recent WHERE source_id = ?1";
 
 /// Two episodes in history, stored as movies by imports before grouping,
 /// leave one series entry with the newer view and its snapshot, whichever

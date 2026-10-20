@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyStreamError, errorCopyKeys, httpStatusOf, NO_VIDEO_MESSAGE, rpcErrorCode, type StreamErrorClass } from './errors';
+import { classifyStreamError, errorCopyKeys, hintWithoutOthers, httpStatusOf, NO_VIDEO_MESSAGE, rpcErrorCode, type ExternalRoute, type StreamErrorClass } from './errors';
 
 import en from '@/i18n/en/player.json';
 
@@ -121,5 +121,29 @@ describe('copy that names only the ways out the screen offers (PL-ERROR-DEAD-END
     }
     // Hints that name no external player are the same everywhere.
     expect(errorCopyKeys('auth', { external: 'none' }).hint).toBe('errorAuth');
+  });
+
+  it('without other sources on screen (a movie, a channel without copies), no hint suggests one', () => {
+    const strings = en as Record<string, string>;
+    const cases: [StreamErrorClass, string | undefined, ExternalRoute, string, string][] = [
+      ['unsupported', 'codec not supported', 'none', 'errorUnsupportedBrowser', 'errorUnsupportedBrowserDesktop'],
+      ['unsupported', NO_VIDEO_MESSAGE, 'none', 'errorNoVideoBrowser', 'errorNoVideoBrowserDesktop'],
+      ['generic', undefined, 'none', 'errorGenericBrowser', 'errorGenericBrowserDesktop'],
+      ['server', 'HTTP 503', 'app', 'errorBusy', 'errorBusyRetry'],
+      ['unsupported', NO_VIDEO_MESSAGE, 'app', 'errorNoVideo', 'errorNoVideoExternal'],
+    ];
+    for (const [cls, message, external, withOthers, without] of cases) {
+      expect(errorCopyKeys(cls, { message, external, others: true }).hint).toBe(withOthers);
+      // Not known (a caller that does not say): the hint stays as it was.
+      expect(errorCopyKeys(cls, { message, external }).hint).toBe(withOthers);
+      expect(errorCopyKeys(cls, { message, external, others: false }).hint).toBe(without);
+      expect(strings[withOthers]).toMatch(/another source/);
+      expect(strings[without], without).toBeTruthy();
+      expect(strings[without]).not.toMatch(/another source/);
+    }
+    expect(hintWithoutOthers('errorTsBrowser', false)).toBe('errorTsBrowserDesktop');
+    expect(strings['errorTsBrowserDesktop']).not.toMatch(/another source/);
+    // Hints that suggest no other source are the same either way.
+    expect(errorCopyKeys('media', { external: 'none', others: false }).hint).toBe('errorMediaBrowser');
   });
 });

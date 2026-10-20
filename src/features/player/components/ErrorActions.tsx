@@ -11,12 +11,11 @@ import { useInRouterContext, useNavigate } from 'react-router';
 
 import { queryClient, rpcKey } from '@/api/query';
 import { rpc } from '@/api/transport';
-import { itemKey, type PlayerSource, type Settings, type Source } from '@/api/types';
+import type { PlayerSource, Settings, Source } from '@/api/types';
 import { toast } from '@/ui/Toast';
 import { errorDescription } from '@/ui/States';
 
-import { isParentalRefusal, type ExternalRoute, type StreamErrorClass } from '../errors';
-import { useAlternatesStore } from '../failover';
+import { hintWithoutOthers, isParentalRefusal, type ExternalRoute, type StreamErrorClass } from '../errors';
 import { useMediaStore } from '../media';
 import { exitPip, usePipStore } from '../pip';
 import { canZap, knownSourceKind, replayFromRef, setSettingsCache, usePlayerStore, zap } from '../store';
@@ -47,6 +46,11 @@ export interface ErrorActionContext {
   external: ExternalRoute;
   /** The live channel has copies on other sources (the options menu lists them). */
   alternates: boolean;
+  /**
+   * The options menu can open here, to list those copies: not over the compact bar (the mini
+   * player, embedded mpv's picture-in-picture window), which has no Playback options.
+   */
+  menu: boolean;
   /** Next channel can step from here. */
   zappable: boolean;
   /** The item's source can be imported again (it has a ref; a pasted playlist has nothing to fetch). */
@@ -74,7 +78,7 @@ export function errorActionIds(c: ErrorActionContext): ErrorActionId[] {
     for (const id of ids) if (id && !out.includes(id)) out.push(id);
   };
   const external: ErrorActionId[] = !c.hasMedia ? [] : c.external === 'app' ? ['openMpv', 'openVlc'] : c.external === 'link' ? ['copyLink'] : [];
-  const others = c.live && c.alternates && 'otherSources';
+  const others = c.live && c.alternates && c.menu && 'otherSources';
 
   if (c.rawTs) {
     if (c.rawTsXtream) add('playAsHls', c.routed && 'playbackSettings');
@@ -117,20 +121,19 @@ function xtreamOnTs(source: PlayerSource | undefined, settings: Settings | null)
 /**
  * The hint for raw MPEG-TS a browser without Media Source Extensions cannot play, naming only
  * what the screen offers: Play as HLS on an Xtream source, the link for VLC or MPV, else the
- * desktop app. The desktop always has MSE; its words stay for completeness.
+ * desktop app, and another source while `others` are offered. The desktop always has MSE; its
+ * words stay for completeness.
  */
-export function rawTsHintKey(source: PlayerSource | undefined, settings: Settings | null, external: ExternalRoute): string {
+export function rawTsHintKey(source: PlayerSource | undefined, settings: Settings | null, external: ExternalRoute, others: boolean): string {
   if (xtreamOnTs(source, settings)) return 'errorTsXtream';
-  return external === 'none' ? 'errorTsBrowser' : external === 'link' ? 'errorTsLink' : 'errorTsLive';
+  return external === 'none' ? hintWithoutOthers('errorTsBrowser', others) : external === 'link' ? 'errorTsLink' : 'errorTsLive';
 }
 
 /** The context for the current failure, read from the stores. */
-function useActionContext(view: StreamErrorView, source: PlayerSource | undefined, rawTs: boolean): ErrorActionContext {
+function useActionContext(view: StreamErrorView, source: PlayerSource | undefined, rawTs: boolean, menu: boolean): ErrorActionContext {
   const message = usePlayerStore((s) => s.error);
   const zappable = usePlayerStore((s) => canZap(s));
   const settings = usePlayerSettings();
-  const key = source?.isLive && source.ref ? itemKey(source.ref) : undefined;
-  const alternates = useAlternatesStore((s) => s.status === 'ready' && !!key && s.forKey === key && !!s.data?.alternates.length);
   const routed = useInRouterContext();
   const sourceId = source?.ref?.sourceId;
   // A pasted playlist has nothing to fetch again (when the lookup cached the source to tell).
@@ -141,7 +144,8 @@ function useActionContext(view: StreamErrorView, source: PlayerSource | undefine
     live: !!source?.isLive,
     hasMedia: !!source?.url,
     external: view.external,
-    alternates: alternates && settings?.liveFailover !== false,
+    alternates: view.others,
+    menu,
     zappable,
     refreshable: !!sourceId && !pasted,
     hasSource: !!sourceId,
@@ -199,6 +203,8 @@ export interface ErrorActionsProps {
   barRetry?: boolean;
   /** Raw MPEG-TS the browser cannot play (no MSE). */
   rawTs?: boolean;
+  /** The bar under this has Playback options (default): Other sources opens it. */
+  menu?: boolean;
   /** The primary button, which takes focus when the player has it. */
   primaryRef?: Ref<HTMLButtonElement>;
   /** Extra buttons after these (the mpv strip's "Use the built-in player"). */
@@ -216,11 +222,12 @@ export function ErrorActions({
   max,
   barRetry = false,
   rawTs = false,
+  menu = true,
   primaryRef,
   children,
   className,
 }: ErrorActionsProps) {
-  const ctx = useActionContext(view, source, rawTs);
+  const ctx = useActionContext(view, source, rawTs, menu);
   let ids = errorActionIds({
     ...ctx,
     // A launcher the caller does not wire up is not offered.

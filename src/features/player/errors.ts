@@ -212,10 +212,30 @@ const WITHOUT_EXTERNAL: Readonly<Record<string, string>> = {
 };
 
 /**
+ * Hints that suggest another source, and their words without it. The screen offers another
+ * source (Other sources) only for a live channel with copies elsewhere, so a movie, or a channel
+ * without copies, reads with the steps it does offer: Retry, MPV or VLC, the desktop app.
+ */
+const WITHOUT_OTHERS: Readonly<Record<string, string>> = {
+  errorUnsupportedBrowser: 'errorUnsupportedBrowserDesktop',
+  errorNoVideoBrowser: 'errorNoVideoBrowserDesktop',
+  errorGenericBrowser: 'errorGenericBrowserDesktop',
+  errorTsBrowser: 'errorTsBrowserDesktop',
+  errorBusy: 'errorBusyRetry',
+  errorNoVideo: 'errorNoVideoExternal',
+};
+
+/** `key`, or its words without another source when the screen offers none (`others` false). */
+export function hintWithoutOthers(key: string, others: boolean | undefined): string {
+  return others === false ? (WITHOUT_OTHERS[key] ?? key) : key;
+}
+
+/**
  * i18n keys (namespace `player`) for a class: the headline and what to do next. `params`
  * (account: the connection counts) go to both keys when present. `external`: where an
  * undecodable stream can go (`ExternalRoute`); with `none`, hints that name MPV or VLC give way to
- * the browser's own.
+ * the browser's own. `others`: whether the screen offers the channel's other sources; false
+ * drops "try another source" from the hints that suggest it (unknown keeps it).
  */
 export function errorCopyKeys(
   cls: StreamErrorClass,
@@ -223,11 +243,13 @@ export function errorCopyKeys(
     /** A live channel: a missing stream is the channel being unavailable, not a removed file. */
     live?: boolean | undefined;
     external?: ExternalRoute | undefined;
+    others?: boolean | undefined;
   },
 ): { title: string; hint: string; params?: Record<string, number> } {
   const keys = copyKeysFor(cls, input);
-  const browser = input?.external === 'none' ? WITHOUT_EXTERNAL[keys.hint] : undefined;
-  return browser ? { ...keys, hint: browser } : keys;
+  const browser = input?.external === 'none' ? (WITHOUT_EXTERNAL[keys.hint] ?? keys.hint) : keys.hint;
+  const hint = hintWithoutOthers(browser, input?.others);
+  return hint === keys.hint ? keys : { ...keys, hint };
 }
 
 function copyKeysFor(

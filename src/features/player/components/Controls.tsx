@@ -37,6 +37,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { isDesktop, rpc } from '@/api/transport';
@@ -57,6 +58,7 @@ import { nextInQueue, prevInQueue, replay, reportStatus, retryResolve, selectEnd
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { canEnterFullscreen } from '../fullscreen';
 import { InlineSpinner } from './InlineSpinner';
+import { MENU_HEADER, menuFrameClass, menuFrameStyle, playerMenuLayer, SHEET_BELOW_PX, type MenuFit } from './menuFrame';
 import { useNarrow } from './useNarrow';
 // failover: AlternatesMenu, AlternatesRow
 import {
@@ -393,10 +395,13 @@ export function MenuRow({ label, value, onClick }: { label: string; value?: Reac
   );
 }
 
-/** A key hint at the end of a menu row, in the UI language; the item carries `aria-keyshortcuts`. */
+/**
+ * A key hint at the end of a menu row, in the UI language; the item carries `aria-keyshortcuts`.
+ * Not under a coarse pointer: a phone's menu has no keys to name.
+ */
 function MenuHint({ combo }: { combo: string }) {
   return (
-    <span aria-hidden className="ms-auto shrink-0 ps-4 font-sans text-caption text-on-glass-muted">
+    <span aria-hidden className="ms-auto shrink-0 ps-4 font-sans text-caption text-on-glass-muted pointer-coarse:hidden">
       {comboKeys(combo).join('+')}
     </span>
   );
@@ -533,11 +538,6 @@ function captureScreenshot(): void {
   void import('../screenshot').then((m) => m.takeScreenshot());
 }
 
-/**
- * Quality, audio, subtitles, speed. Overlay: popover above the bar. Dock: rendered by the caller
- * inline above the bar. Picking a choice closes the menu; the header X closes it too, since
- * Escape may never reach the webview while the native mpv window has focus.
- */
 /** Space kept between a floating menu and the top of what is visible (the app header, the screen). */
 const MENU_EDGE = 8;
 
@@ -553,6 +553,71 @@ export function roomAbove(menu: HTMLElement): number | null {
   const top = Math.max(0, header?.getBoundingClientRect().bottom ?? 0, host?.getBoundingClientRect().top ?? 0) + MENU_EDGE;
   const room = Math.floor(bottom - top);
   return Number.isFinite(room) && bottom > 0 ? Math.max(room, 0) : null;
+}
+
+/**
+ * Where a player menu opens from the bar (the options menu, the channel history). `className`
+ * places this frame, and with it the menu's bottom edge, just above the bar. The room from there
+ * up to the top of the player is measured here and handed to the menu (`fit`), again whenever the
+ * bar or the player changes size: the live seek row arriving under an open menu, fullscreen,
+ * a resized window. With less room than a header and a few rows (`SHEET_BELOW_PX`: a phone's
+ * inline player, the mini player), and when `sheet` allows it, the menu opens as a sheet from the
+ * bottom of the screen instead, over a scrim that closes it (`onScrim`). The frame stays in place
+ * empty then, so the room is still measured from the same edge and the sheet goes back to a popover
+ * when the player grows.
+ */
+function PlayerPopup({
+  className,
+  sheet: sheetAllowed,
+  onScrim,
+  children,
+}: {
+  className: string;
+  sheet: boolean;
+  onScrim(): void;
+  children(fit: MenuFit): ReactNode;
+}) {
+  const [frame, setFrame] = useState<HTMLDivElement | null>(null);
+  const [room, setRoom] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!frame) return;
+    const measure = (): void => setRoom(roomAbove(frame));
+    measure();
+    window.addEventListener('resize', measure);
+    document.addEventListener('fullscreenchange', measure);
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    for (const el of [frame.closest('[data-player-controls]'), frame.closest('[data-player-host]')]) if (el) ro?.observe(el);
+    return () => {
+      window.removeEventListener('resize', measure);
+      document.removeEventListener('fullscreenchange', measure);
+      ro?.disconnect();
+    };
+  }, [frame]);
+  const sheet = sheetAllowed && room !== null && room < SHEET_BELOW_PX;
+  const menu = children({ room, sheet });
+  return (
+    <div ref={setFrame} data-menu-frame="" className={cn('absolute z-10', className)}>
+      {sheet
+        ? createPortal(
+            <>
+              {/* A press here only closes the menu: it never reaches the page under it, and focus stays put until the menu hands it back. */}
+              <div
+                aria-hidden
+                data-menu-scrim=""
+                className="fixed inset-0 z-[60] touch-none bg-scrim motion-safe:animate-fade-in"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onScrim();
+                }}
+              />
+              {menu}
+            </>,
+            playerMenuLayer(),
+          )
+        : menu}
+    </div>
+  );
 }
 
 /** When an Escape last closed a player menu (see `playerMenuJustClosed`). */
@@ -574,6 +639,11 @@ interface MenuCommands {
   stop: boolean;
 }
 
+/**
+ * Quality, audio, subtitles, speed and the rest, as a popover above the bar or a sheet (`fit`, see
+ * `PlayerPopup`). Picking a choice closes the menu; the header X closes it too, since Escape may
+ * never reach the webview while the native mpv window has focus.
+ */
 function OptionsMenu({
   id,
   view,
@@ -581,6 +651,7 @@ function OptionsMenu({
   isVod,
   moved,
   commandsShown,
+  fit,
 }: {
   id: string;
   view: MenuView;
@@ -589,6 +660,7 @@ function OptionsMenu({
   /** Controls the bar has no room for (a narrow player), as a row at the top of the root view. */
   moved?: ReactNode;
   commandsShown: MenuCommands;
+  fit: MenuFit;
 }) {
   const { t } = useTranslation('player');
   const { t: tc } = useTranslation('common');
@@ -600,24 +672,9 @@ function OptionsMenu({
   const syncAvailable = useSyncAvailable();
   const pictureValue = usePictureSummary();
   const ref = useRef<HTMLDivElement>(null);
-  const [room, setRoom] = useState<number | null>(null);
   // The style view holds form fields (radio groups, a slider), which a menu may not contain: it
   // is a small dialog in the same frame instead.
   const styleView = view === 'subStyle';
-
-  useLayoutEffect(() => {
-    const menu = ref.current;
-    if (!menu) return;
-    // Floating over the picture and growing upward: never taller than the room above its bottom edge.
-    const measure = (): void => setRoom(roomAbove(menu));
-    measure();
-    window.addEventListener('resize', measure);
-    document.addEventListener('fullscreenchange', measure);
-    return () => {
-      window.removeEventListener('resize', measure);
-      document.removeEventListener('fullscreenchange', measure);
-    };
-  }, [view]);
 
   /**
    * More rows below the fold (a short stage caps the menu's height): a fade along the bottom
@@ -660,7 +717,7 @@ function OptionsMenu({
   };
 
   const header = (
-    <div className="mb-1 flex items-center gap-1 border-b border-white/10 pb-1">
+    <div className={MENU_HEADER}>
       {view === 'root' ? (
         <span className="flex-1 px-2 py-1.5 text-body-sm font-medium text-on-glass">{t('settingsMenu')}</span>
       ) : (
@@ -731,9 +788,10 @@ function OptionsMenu({
           next?.focus();
         }
       }}
-      style={room !== null ? { maxHeight: `min(70vh, 420px, ${room}px)` } : undefined}
+      data-sheet={fit.sheet ? '' : undefined}
+      style={menuFrameStyle(fit, '70vh, 420px')}
       onScroll={updateMore}
-      className="player-glass-strong player-glass-edge glass-blur max-h-[min(70vh,420px)] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className={menuFrameClass(fit, 'max-h-[min(70vh,420px)] w-64 max-w-[calc(100vw-1.5rem)]')}
     >
       {view === 'root' && (
         <>
@@ -855,6 +913,12 @@ export interface ControlsProps {
   visible: boolean;
   /** Compact chrome for the mini player. */
   compact?: boolean;
+  /**
+   * Overlay: a short player (a phone's inline player, a docked stage; see `SHORT_PLAYER_PX`). The
+   * scrim fades in over 2rem instead of 4rem, so the shade is mostly the bar's own height and the
+   * picture above it stays clear.
+   */
+  short?: boolean;
   onMenuOpenChange?(open: boolean): void;
   /** Dock bar: a lasting status (embedded mpv buffering) shown in the readout when no transient one is up. */
   readoutIdle?: ReactNode;
@@ -940,7 +1004,7 @@ function useWhileShown<S, T>(store: Subscribable<S>, select: (s: S) => T, shown:
 /** The time at one end of the seek bar: tabular, on-glass, wide enough that the bar never shifts. */
 const SEEK_TIME = 'shrink-0 font-numeric text-caption text-on-glass tabular-nums [text-shadow:0_1px_2px_rgb(0_0_0/0.6)] [[data-big]_&]:text-body';
 
-/** Elapsed time, left of the seek bar. */
+/** Elapsed time, left of the seek bar (in right-to-left languages too). */
 function ElapsedTime({ shown }: { shown: boolean }) {
   const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
   return (
@@ -986,9 +1050,16 @@ function PositionSeekBar({
       className={times ? 'min-w-0 flex-1' : undefined}
     />
   );
-  if (!times || live) return <div className="px-1">{bar}</div>;
+  // Left to right in every language, as on other players: the timeline is the tape's direction, and
+  // the bar fills from the left. The elapsed time stays at the played end, the length at the other.
+  if (!times || live)
+    return (
+      <div dir="ltr" className="px-1">
+        {bar}
+      </div>
+    );
   return (
-    <div data-testid="seek-row" className="flex items-center gap-3 px-1">
+    <div data-testid="seek-row" dir="ltr" className="flex items-center gap-3 px-1">
       <ElapsedTime shown={shown} />
       {bar}
       <span data-testid="time-duration" className={cn(SEEK_TIME, 'min-w-[4ch] text-end text-on-glass-muted')}>
@@ -1185,7 +1256,7 @@ function jump(seconds: number): void {
   usePlayerStore.getState().seekBy(seconds);
 }
 
-export function Controls({ variant, visible, compact, onMenuOpenChange, readoutIdle }: ControlsProps) {
+export function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle }: ControlsProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
@@ -1235,7 +1306,8 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
    */
   const setMenuView = (v: MenuView | null): void => {
     if (v === null && root) {
-      const open = root.querySelector('[data-testid="player-options-menu"]');
+      // By id: a sheet is portalled out of the bar.
+      const open = document.getElementById(menuId);
       if (open?.contains(document.activeElement)) {
         const trigger = focusFromPointer()
           ? root.closest<HTMLElement>('[data-player-focus]')
@@ -1262,7 +1334,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       setMenu('text');
     }
   }, [subtitleMenuAt]);
-  // The error screen's "Other sources" (PL-ERROR-DEAD-ENDS): the channel's other copies, to pick from.
+  // The error screen's "Other sources" (PL-ERROR-DEAD-ENDS): the channel's other copies, to pick
+  // from. A compact bar has no options menu, and the error strip over it does not offer the action
+  // (ErrorActions `menu`); a request still pending when the bar grows is taken then.
   const sourcesMenuAt = useMediaStore((s) => s.sourcesMenuAt);
   useEffect(() => {
     if (sourcesMenuAt === undefined || compact) return;
@@ -1271,7 +1345,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       setOpener('options');
       setMenu('sources');
     }
-  }, [sourcesMenuAt]);
+  }, [sourcesMenuAt, compact]);
 
   // The history popover (also opened by Shift+B) keeps the chrome up like a menu, and only one
   // of them is open at a time.
@@ -1297,8 +1371,9 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
     if (!popupOpen || !root) return;
     const onPress = (e: PointerEvent): void => {
       const target = e.target instanceof Element ? e.target : null;
-      // The menus themselves, and the triggers, which toggle them on their own click.
-      if (target?.closest('[data-testid="player-options-menu"], [data-testid="channel-history"], [data-ctl="options"], [data-ctl="sleep"]')) return;
+      // The menus themselves, the triggers, which toggle them on their own click, and a sheet's
+      // scrim, which closes it on its click (so the click never lands on the page under it).
+      if (target?.closest('[data-testid="player-options-menu"], [data-testid="channel-history"], [data-ctl="options"], [data-ctl="sleep"], [data-menu-scrim]')) return;
       noteMenuDismissed(e.target);
       if (menu !== null) setMenuView(null);
       if (useHistoryStore.getState().open) setHistoryOpen(false);
@@ -1444,6 +1519,32 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
     </CtlButton>
   );
 
+  const overlay = variant === 'overlay';
+  /** The player itself, which takes focus after a pointer closes a menu (PL-SPACE-CLICKED-CONTROL). */
+  const focusPlayer = (): void => root?.closest<HTMLElement>('[data-player-focus]')?.focus({ preventScroll: true });
+  // Overlay: the menus open from the top of the bar's pane, whatever scrim pads it (none over an
+  // error), so the gap above the bar is always the same and a menu never covers it. Too short a
+  // player for that, they are sheets. Dock: above the strip, over the picture. Over mpv the native
+  // window leaves an open menu (role="menu" or "dialog") out of its region (mpvBounds), so the
+  // strip it reserves for the bar keeps the bar's height and the video keeps its size.
+  const menuPopup = menu && (
+    <PlayerPopup className={overlay ? cn('end-0 bottom-full', compact ? 'mb-1' : 'mb-2') : 'end-1.5 bottom-full mb-1'} sheet={overlay} onScrim={() => setMenuView(null)}>
+      {(fit) => <OptionsMenu id={menuId} view={menu} setView={setMenuView} isVod={isVod} moved={moved} commandsShown={commandsShown} fit={fit} />}
+    </PlayerPopup>
+  );
+  const historyPopup = showHistory && (
+    <PlayerPopup
+      className={overlay ? cn('start-0 bottom-full', compact ? 'mb-1' : 'mb-2') : 'start-1.5 bottom-full mb-1'}
+      sheet={overlay}
+      onScrim={() => {
+        setHistoryOpen(false);
+        focusPlayer();
+      }}
+    >
+      {(fit) => <ChannelHistory fit={fit} />}
+    </PlayerPopup>
+  );
+
   return (
     <ChromeScaleContext.Provider value={scale}>
       <div
@@ -1454,13 +1555,14 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
         className={cn(
           'player-chrome relative',
           // Over a failed stream the error screen has darkened the picture already: no scrim
-          // rising over its buttons (a short player's error sits right above the bar).
-          variant === 'overlay'
+          // rising over its buttons (a short player's error sits right above the bar). A short
+          // player takes the mini player's shorter fade.
+          overlay
             ? compact
               ? cn('px-1', failed ? 'pt-1' : 'player-scrim-bottom player-scrim-compact pt-8')
               : big
                 ? cn('px-4 pb-4 sm:px-10 sm:pb-8', failed ? 'pt-4' : 'player-scrim-bottom player-scrim-big pt-24')
-                : cn('px-2 pb-1.5 sm:px-4 sm:pb-3', failed ? 'pt-2' : 'player-scrim-bottom pt-16')
+                : cn('px-2 pb-1.5 sm:px-4 sm:pb-3', failed ? 'pt-2' : short ? 'player-scrim-bottom player-scrim-compact pt-8' : 'player-scrim-bottom pt-16')
             : cn('player-glass-strong border-t py-1.5', big ? 'px-6' : 'px-3'),
           variant === 'overlay' && 'motion-safe:transition-opacity motion-safe:duration-(--duration-base)',
           // The scrim's padding is only shade: the pointer goes through it to what is under it (a
@@ -1471,151 +1573,133 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        {menu && (
-          // Floating: just above the bar, inside the scrim. Compact, and the embedded mpv dock: just
-          // above the bar, over the picture. Over mpv the native window leaves an open menu
-          // (role="menu" or "dialog") out of its region (mpvBounds), so the strip it reserves for the
-          // bar keeps the bar's height and the video keeps its size.
+        {!overlay && menuPopup}
+        {!overlay && historyPopup}
+
+        {/* The pane's box: the overlay's menus float up from its top edge. */}
+        <div className="relative">
+          {overlay && menuPopup}
+          {overlay && historyPopup}
           <div
-            className={cn(
-              'absolute z-10',
-              floating ? (big ? 'end-4 bottom-[calc(100%-5.5rem)] sm:end-10' : 'end-2 bottom-[calc(100%-3.5rem)] sm:end-4') : 'end-1.5 bottom-full mb-1',
-            )}
+            data-testid="controls-pane"
+            role="toolbar"
+            aria-label={t('playerControls')}
+            // The arrow keys stay the player's (seek, volume): a toolbar here does not move focus with them.
+            className={cn('flex flex-col', floating && (big ? 'gap-3' : 'gap-1'), variant === 'overlay' && compact && 'px-0.5')}
           >
-            <OptionsMenu id={menuId} view={menu} setView={setMenuView} isVod={isVod} moved={moved} commandsShown={commandsShown} />
-          </div>
-        )}
-
-        {showHistory && (
-          <div
-            className={cn(
-              'absolute z-10',
-              floating ? (big ? 'start-4 bottom-[calc(100%-5.5rem)] sm:start-10' : 'start-2 bottom-[calc(100%-3.5rem)] sm:start-4') : 'start-1.5 bottom-full mb-1',
-            )}
-          >
-            <ChannelHistory />
-          </div>
-        )}
-
-        <div
-          data-testid="controls-pane"
-          role="toolbar"
-          aria-label={t('playerControls')}
-          // The arrow keys stay the player's (seek, volume): a toolbar here does not move focus with them.
-          className={cn('flex flex-col', floating && (big ? 'gap-3' : 'gap-1'), variant === 'overlay' && compact && 'px-0.5')}
-        >
-          {showSeek && (
-            <PositionSeekBar
-              shown={visible}
-              live={isLive}
-              duration={duration}
-              edgeSlack={edgeSlack}
-              times={!compact}
-              onSeek={(s) => store.seekTo(s)}
-            />
-          )}
-          <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1')}>
-            {!compact && !narrow && prevButton}
-            {playButton}
-            {!compact && !narrow && nextButton}
-            {!narrow && jumpButtons}
-            <VolumeControl compact={compact || narrow} />
-
-            {isLive ? (
-              <LiveEdge
+            {showSeek && (
+              <PositionSeekBar
                 shown={visible}
-                status={status}
-                pulseKey={source.url}
-                short={!!compact || narrow}
-                narrow={narrow}
-                tiny={tiny}
+                live={isLive}
+                duration={duration}
                 edgeSlack={edgeSlack}
-                mpv={mode === 'embedded-mpv'}
+                times={!compact}
+                onSeek={(s) => store.seekTo(s)}
               />
-            ) : source.isRadio ? (
-              <span className="ms-1 inline-flex items-center gap-1.5 text-caption text-on-glass-muted">
-                <Radio className="size-4" aria-hidden />
-                {t('radio')}
-              </span>
-            ) : showTime && (compact || !showSeek) ? (
-              <TimeReadout shown={visible} duration={duration} tiny={tiny} />
-            ) : null}
-            {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
-            <SleepChip
-              compact={compact || narrow}
-              expanded={menu !== null && opener === 'sleep'}
-              menuId={menuId}
-              onOpen={() => {
-                setOpener('sleep');
-                setMenu(menu === 'sleep' ? null : 'sleep');
-              }}
-            />
-            {canRecord && <RecordControl compact={compact || narrow} />}
+            )}
+            <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1')}>
+              {!compact && !narrow && prevButton}
+              {playButton}
+              {!compact && !narrow && nextButton}
+              {!narrow && jumpButtons}
+              <VolumeControl compact={compact || narrow} />
 
-            <div data-row-free="" className="flex-1" />
-            {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
-            {/* A narrow row keeps its spares right of the volume, so they can step aside when it opens. */}
-            {narrow && inRow('jump') && jumpButtons}
-            {narrow && inRow('skip') && prevButton}
-            {narrow && inRow('skip') && nextButton}
+              {isLive ? (
+                <LiveEdge
+                  shown={visible}
+                  status={status}
+                  pulseKey={source.url}
+                  short={!!compact || narrow}
+                  narrow={narrow}
+                  tiny={tiny}
+                  edgeSlack={edgeSlack}
+                  mpv={mode === 'embedded-mpv'}
+                />
+              ) : source.isRadio ? (
+                <span className="ms-1 inline-flex items-center gap-1.5 text-caption text-on-glass-muted">
+                  <Radio className="size-4" aria-hidden />
+                  {t('radio')}
+                </span>
+              ) : showTime && (compact || !showSeek) ? (
+                <TimeReadout shown={visible} duration={duration} tiny={tiny} />
+              ) : null}
+              {/* Sleep timer (C5): the countdown while one runs; opens its menu. */}
+              <SleepChip
+                compact={compact || narrow}
+                expanded={menu !== null && opener === 'sleep'}
+                menuId={menuId}
+                onOpen={() => {
+                  setOpener('sleep');
+                  setMenu(menu === 'sleep' ? null : 'sleep');
+                }}
+              />
+              {canRecord && <RecordControl compact={compact || narrow} />}
 
-            <div className={cn('flex items-center', big ? 'gap-2' : 'gap-1')}>
-              {tracks.text.length > 0 && !compact && inRow('captions') && (
-                <CtlButton
-                  id="captions"
-                  className={spareClass}
-                  // In live fullscreen, C opens the channel list instead.
-                  shortcut={isLive && isFullscreen ? undefined : 'captions'}
-                  label={t('captions')}
-                  tooltip={captionsOn ? t('captionsOn') : t('captionsOff')}
-                  pressed={captionsOn}
-                  onClick={() => {
-                    const first = tracks.text[0];
-                    commands?.setText(captionsOn || !first ? null : first.id);
-                  }}
-                >
-                  {captionsOn ? <Captions /> : <CaptionsOff />}
-                </CtlButton>
-              )}
-              {!compact && (
-                <CtlButton
-                  id="options"
-                  label={t('settingsMenu')}
-                  popup={{ expanded: menu !== null && opener === 'options', controls: menuId }}
-                  onClick={() => {
-                    setOpener('options');
-                    setMenu(menu ? null : 'root');
-                  }}
-                >
-                  <Settings2 />
-                </CtlButton>
-              )}
-            </div>
-            {(showPip && (windowPip || inRow('pip'))) || showFullscreen ? (
-              <div className={cn('flex items-center', big ? 'ms-4 gap-2' : 'gap-1', !compact && !big && 'ms-1 sm:ms-2')}>
-                {showPip && (windowPip || inRow('pip')) && (
+              <div data-row-free="" className="flex-1" />
+              {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
+              {/* A narrow row keeps its spares right of the volume, so they can step aside when it opens. */}
+              {narrow && inRow('jump') && jumpButtons}
+              {narrow && inRow('skip') && prevButton}
+              {narrow && inRow('skip') && nextButton}
+
+              <div className={cn('flex items-center', big ? 'gap-2' : 'gap-1')}>
+                {tracks.text.length > 0 && !compact && inRow('captions') && (
                   <CtlButton
-                    id="pip"
-                    className={windowPip ? undefined : spareClass}
-                    shortcut={windowPip ? 'exitPip' : undefined}
-                    label={inPip ? t('exitPip') : t('pip')}
-                    onClick={() => commands?.togglePip()}
+                    id="captions"
+                    className={spareClass}
+                    // In live fullscreen, C opens the channel list instead.
+                    shortcut={isLive && isFullscreen ? undefined : 'captions'}
+                    label={t('captions')}
+                    tooltip={captionsOn ? t('captionsOn') : t('captionsOff')}
+                    pressed={captionsOn}
+                    onClick={() => {
+                      const first = tracks.text[0];
+                      commands?.setText(captionsOn || !first ? null : first.id);
+                    }}
                   >
-                    <PictureInPicture2 />
+                    {captionsOn ? <Captions /> : <CaptionsOff />}
                   </CtlButton>
                 )}
-                {showFullscreen && (
+                {!compact && (
                   <CtlButton
-                    id="fullscreen"
-                    shortcut="fullscreen"
-                    label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
-                    onClick={() => store.toggleFullscreen()}
+                    id="options"
+                    label={t('settingsMenu')}
+                    popup={{ expanded: menu !== null && opener === 'options', controls: menuId }}
+                    onClick={() => {
+                      setOpener('options');
+                      setMenu(menu ? null : 'root');
+                    }}
                   >
-                    {isFullscreen ? <Minimize /> : <Maximize />}
+                    <Settings2 />
                   </CtlButton>
                 )}
               </div>
-            ) : null}
+              {(showPip && (windowPip || inRow('pip'))) || showFullscreen ? (
+                <div className={cn('flex items-center', big ? 'ms-4 gap-2' : 'gap-1', !compact && !big && 'ms-1 sm:ms-2')}>
+                  {showPip && (windowPip || inRow('pip')) && (
+                    <CtlButton
+                      id="pip"
+                      className={windowPip ? undefined : spareClass}
+                      shortcut={windowPip ? 'exitPip' : undefined}
+                      label={inPip ? t('exitPip') : t('pip')}
+                      onClick={() => commands?.togglePip()}
+                    >
+                      <PictureInPicture2 />
+                    </CtlButton>
+                  )}
+                  {showFullscreen && (
+                    <CtlButton
+                      id="fullscreen"
+                      shortcut="fullscreen"
+                      label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
+                      onClick={() => store.toggleFullscreen()}
+                    >
+                      {isFullscreen ? <Minimize /> : <Maximize />}
+                    </CtlButton>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

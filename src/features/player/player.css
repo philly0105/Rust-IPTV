@@ -238,6 +238,14 @@ html[data-reduced-motion='true'] .player-osd {
   --color-danger: #ff7a7a;
   --color-warning: #eccb5c;
 }
+/*
+ * A player menu shown as a sheet (menuFrame.ts) leaves the picture for the page, whose text would
+ * show through the glass. It is the glass laid over black instead: the same colour as the menu over
+ * a dark frame, and opaque. (The class sits on the glass element, so it outranks the rule above.)
+ */
+.player-glass-strong.player-sheet {
+  background: linear-gradient(var(--color-glass-strong, rgb(12 19 32 / 0.88)), var(--color-glass-strong, rgb(12 19 32 / 0.88))), #000;
+}
 /* Secondary text on glass (passes 4.5:1 on the glass surface over black or white). */
 .player-on-glass-muted {
   color: var(--color-on-glass-muted, #c8cfdc);

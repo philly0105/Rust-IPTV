@@ -559,7 +559,7 @@ function ErrorOverlay({
   useEffect(() => focusIfPlayerOwnsFocus(primaryRef.current), []);
   // Raw TS only fails for lack of MSE when mpegts.js could not run at all.
   const isRawTs = !!source && looksLikeMpegTs(source) && !mseSupported();
-  const hint = isRawTs ? t(rawTsHintKey(source, settings, view.external)) : view.hint;
+  const hint = isRawTs ? t(rawTsHintKey(source, settings, view.external, view.others)) : view.hint;
 
   if (compact) {
     return (

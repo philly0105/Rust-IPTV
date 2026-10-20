@@ -774,6 +774,29 @@ describe('embedded mpv readouts and errors', () => {
     expect(rpcMock.mock.calls.some((c) => c[0] === 'mpv.load')).toBe(true);
     expect(screen.getByText('Opening the stream in MPV')).toBeTruthy();
   });
+
+  it.each([
+    [false, ['otherSources', 'nextChannel']],
+    [true, ['nextChannel']],
+  ] as const)('a channel the provider lacks, compact %s: Other sources only where the bar can open the menu that lists them', async (compact, actions) => {
+    const ref = { sourceId: 's1', contentType: 'live' as const, itemId: '7' };
+    act(() => {
+      usePlayerStore.setState({ source: { url: 'http://h/live/7.ts', kind: 'direct', title: 'News', isLive: true, isRadio: false, ref }, status: 'loading' });
+      useAlternatesStore.setState({ forKey: 's1|live|7', status: 'ready', data: { alternates: [{}] } as never });
+    });
+    onTestFinished(() => useAlternatesStore.setState({ forKey: undefined, status: 'idle', data: undefined }));
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={compact} channelPanelAvailable={false} />
+      </div>,
+    );
+    await tick();
+    act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 404' }));
+    const alert = screen.getByRole('alert');
+    expect(alert.getAttribute('data-error-class')).toBe('notFound');
+    // The mini player's strip has room for one button: never one that does nothing there.
+    expect(Array.from(within(alert).getByTestId('error-actions').querySelectorAll('[data-action]')).map((b) => b.getAttribute('data-action'))).toEqual(actions);
+  });
 });
 
 describe('embedded mpv recovery', () => {

@@ -12,6 +12,7 @@ import { canShareSource } from '../shareable';
 import { knownSourceKind, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { MenuAction, MenuChoice, MenuRow, MenuSeparator, MenuToggle, PictureRows, SpeedRows, usePictureSummary } from './Controls';
+import { playerMenuLayer } from './menuFrame';
 import { SleepMenu, SleepRowValue } from './SleepTimer';
 import { SubtitleStyleMenu, SubtitleTrackMenu } from './SubtitleMenu';
 import { SyncRows, useSyncAvailable, useSyncSummary } from './SyncMenu';
@@ -22,21 +23,12 @@ const EDGE = 8;
 type View = 'root' | 'audio' | 'text' | 'style' | 'sync' | 'sleep' | 'picture' | 'speed';
 
 /**
- * Where the menu mounts. Inside the player it would stay in the stage's stacking context, under
- * the page strips that follow it (the guide strip below the video); in the body it paints above
- * them. In fullscreen and PiP only the layer the player fills is visible, so it goes there.
- */
-function menuLayer(): Element {
-  return document.fullscreenElement ?? document.querySelector('[data-pip-layer]:not([hidden])') ?? document.body;
-}
-
-/**
  * The right-click menu of the video, opened at `at` (CSS px in the viewport): embedded mpv's, and
  * the built-in player's in place of the browser's page menu (PL-NATIVE-CONTEXT-MENU). The same
  * rows for both engines, Picture and (for VOD) Speed included. Over mpv the native window paints
  * above the DOM, so the surface cuts this menu out of the video while it is open (it carries
- * `data-mpv-overlay`). Portalled (`menuLayer`) so no page strip paints over it. Closes on a pick,
- * Escape, a click elsewhere or a resize; `onClose` must be stable (it is an effect dependency).
+ * `data-mpv-overlay`). Portalled (`playerMenuLayer`) so no page strip paints over it. Closes on a
+ * pick, Escape, a click elsewhere or a resize; `onClose` must be stable (it is an effect dependency).
  * A click elsewhere is noted (`noteMenuDismissed`), so the built-in player's click on the
  * picture that follows only closes it.
  */
@@ -276,6 +268,6 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
         </>
       )}
     </div>,
-    menuLayer(),
+    playerMenuLayer(),
   );
 }

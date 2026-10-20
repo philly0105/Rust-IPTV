@@ -10,6 +10,7 @@ import { cn } from '../cn';
 import { safeImageUrl } from '../format';
 import { currentLiveKey, playHistoryEntry, setHistoryOpen, useHistoryStore, type HistoryEntry } from '../history';
 import { getSettings, usePlayerStore } from '../store';
+import { MENU_HEADER, menuFrameClass, menuFrameStyle, UNMEASURED, type MenuFit } from './menuFrame';
 
 /** What airs now on each history channel, fetched once per opening. */
 function useNowPlaying(entries: readonly HistoryEntry[]): Record<string, string> {
@@ -60,11 +61,12 @@ function Logo({ entry }: { entry: HistoryEntry }) {
 }
 
 /**
- * Channels watched this session (Shift+B or the History button of the live controls). Arrow
- * keys move, Enter plays, Escape closes. A `role="menu"`, so embedded mpv cuts it out of the
- * native video like the other player menus.
+ * Channels watched this session (Shift+B or the History row of the options menu). Arrow keys
+ * move, Enter plays, Escape closes. A `role="menu"`, so embedded mpv cuts it out of the native
+ * video like the other player menus. `fit`: a popover as tall as the room above the bar, or a
+ * sheet in a short player (Controls measures it); its header stays in view while the list scrolls.
  */
-export function ChannelHistory() {
+export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
   const { t } = useTranslation('player');
   const { t: tc } = useTranslation('common');
   const entries = useHistoryStore((s) => s.entries);
@@ -108,10 +110,12 @@ export function ChannelHistory() {
           items[to]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge glass-blur max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-lg border p-1.5 text-on-glass motion-safe:animate-pop-in"
+      data-sheet={fit.sheet ? '' : undefined}
+      style={menuFrameStyle(fit, '60vh, 420px')}
+      className={menuFrameClass(fit, 'max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)]')}
     >
       {/* The options menu's header: the title, then Close. */}
-      <div className="mb-1 flex items-center gap-1 border-b border-white/10 pb-1">
+      <div className={MENU_HEADER}>
         <span className="flex-1 px-2 py-1.5 text-body-sm font-medium">{t('channelHistory')}</span>
         <Tooltip content={tc('close')} tone="glass" describe={false}>
           <button

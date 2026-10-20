@@ -1,4 +1,5 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
@@ -554,7 +555,8 @@ describe('Controls dock menus (L3-player-ui-x5)', () => {
   // leaves out of its native window (role="menu"), so the strip keeps the bar's height.
   it('float above the bar, out of the reserved strip, as tall as the room above them in the player', () => {
     const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const r = this.hasAttribute('data-player-host') ? { top: 0, bottom: 800 } : this.dataset['testid'] === 'player-options-menu' ? { top: 500, bottom: 740 } : { top: 0, bottom: 0 };
+      // The frame the menu hangs from (its bottom edge is the menu's).
+      const r = this.hasAttribute('data-player-host') ? { top: 0, bottom: 800 } : this.hasAttribute('data-menu-frame') ? { top: 500, bottom: 740 } : { top: 0, bottom: 0 };
       return { ...r, left: 0, right: 1000, width: 1000, height: r.bottom - r.top, x: 0, y: r.top, toJSON: () => ({}) } as DOMRect;
     });
     try {
@@ -592,5 +594,147 @@ describe('keepSpares', () => {
     expect([...keepSpares(groups, 2)]).toEqual(['pip', 'stop']);
     expect([...keepSpares(groups, 3)]).toEqual(['pip', 'skip']);
     expect([...keepSpares(groups, 6)]).toEqual(['pip', 'skip', 'stop', 'screenshot', 'history']);
+  });
+});
+
+describe('Controls menus fit the player (review: phone menu, error state, growing bar, history)', () => {
+  /** Rects by element: the player host, and the frame a menu hangs from (`data-menu-frame`). */
+  let rects: { host: [number, number]; frame: [number, number] };
+  /** The ResizeObserver callbacks registered so far. */
+  let observed: (() => void)[];
+  beforeEach(() => {
+    rects = { host: [0, 800], frame: [500, 740] };
+    observed = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observed.push(cb);
+        }
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const [top, bottom] = this.hasAttribute('data-player-host') ? rects.host : this.hasAttribute('data-menu-frame') ? rects.frame : [0, 0];
+      return { top, bottom, left: 0, right: 600, width: 600, height: bottom - top, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const host = (children: ReactNode) => (
+    <div data-player-host="" data-player-focus="" tabIndex={-1}>
+      {children}
+    </div>
+  );
+
+  it('overlay menus open from the top of the bar, also over an error, where the scrim is gone', async () => {
+    act(() =>
+      usePlayerStore.setState({
+        source: { url: 'http://v/live.ts', kind: 'direct', title: 'News', isLive: true, isRadio: false },
+        status: 'error',
+        error: 'HTTP 404',
+      }),
+    );
+    render(host(<Controls variant="overlay" visible />));
+    openMenu();
+    const pane = screen.getByTestId('controls-pane');
+    const frame = screen.getByTestId('player-options-menu').closest<HTMLElement>('[data-menu-frame]')!;
+    // In the pane's box, from its top edge: the same gap above the bar whatever the root's padding.
+    expect(frame.parentElement).toBe(pane.parentElement);
+    expect(frame.className.split(' ')).toEqual(expect.arrayContaining(['absolute', 'bottom-full', 'mb-2']));
+    expect(frame.className).not.toContain('calc(');
+    expect(pane.parentElement!.className).toContain('relative');
+
+    // The channel history the same way, with its own cap.
+    fireEvent.click(screen.getByRole('menuitem', { name: /channel history/i }));
+    const history = await screen.findByTestId('channel-history');
+    expect(history.closest('[data-menu-frame]')!.parentElement).toBe(pane.parentElement);
+    expect(history.getAttribute('style') ?? '').toContain('732px');
+  });
+
+  it('measures the room again when the bar grows under an open menu (the live seek row arriving)', () => {
+    render(host(<Controls variant="overlay" visible />));
+    openMenu();
+    const m = screen.getByTestId('player-options-menu');
+    expect(m.getAttribute('style') ?? '').toContain('732px');
+    // The bar grew 26 px: the menu's bottom edge moved up with it.
+    rects.frame = [474, 714];
+    act(() => {
+      for (const cb of observed) cb();
+    });
+    expect(m.getAttribute('style') ?? '').toContain('706px');
+  });
+
+  it('a player too short for a popover opens the menu as a sheet from the bottom of the screen', async () => {
+    const { bindInputModality } = await import('../format');
+    bindInputModality();
+    // A phone's 179 px inline player: 62 px between the bar and the top of the stage.
+    rects = { host: [60, 239], frame: [120, 130] };
+    render(host(<Controls variant="overlay" visible />));
+    openMenu();
+    const m = screen.getByTestId('player-options-menu');
+    expect(m.hasAttribute('data-sheet')).toBe(true);
+    // Out of the stage that would clip it, with no cap from the room above the bar.
+    expect(m.closest('[data-player-controls]')).toBeNull();
+    expect(m.getAttribute('style')).toBeNull();
+    expect(m.className.split(' ')).toEqual(expect.arrayContaining(['fixed', 'bottom-0']));
+    expect(m.contains(document.activeElement)).toBe(true);
+    // Its rows are all there.
+    expect(screen.getByRole('menuitem', { name: /subtitles/i })).toBeTruthy();
+
+    // A press on the scrim is not a press outside: the scrim's own click closes the sheet, so the
+    // click never lands on the page under it. Focus goes to the player, where Space is play/pause.
+    const scrim = document.querySelector<HTMLElement>('[data-menu-scrim]')!;
+    fireEvent.pointerDown(scrim);
+    expect(menu()).toBeTruthy();
+    fireEvent.mouseDown(scrim);
+    fireEvent.click(scrim);
+    expect(menu()).toBeNull();
+    expect(document.querySelector('[data-menu-scrim]')).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector('[data-player-focus]'));
+  });
+
+  it('the dock bar never turns its menu into a sheet (the native mpv window would cover it)', () => {
+    rects = { host: [60, 239], frame: [120, 130] };
+    render(host(<Controls variant="dock" visible />));
+    openMenu();
+    const m = screen.getByTestId('player-options-menu');
+    expect(m.hasAttribute('data-sheet')).toBe(false);
+    expect(m.closest('[data-player-controls]')).toBeTruthy();
+  });
+
+  it('keeps the menu header in view while a long list scrolls', () => {
+    render(host(<Controls variant="overlay" visible />));
+    openMenu();
+    const close = within(screen.getByTestId('player-options-menu')).getByRole('menuitem', { name: 'Close' });
+    expect(close.parentElement!.className.split(' ')).toContain('sticky');
+  });
+});
+
+describe('Controls on a short player (review: the scrim darkened most of a phone picture)', () => {
+  it('fades the scrim in over 2rem instead of 4rem', () => {
+    const { container, rerender } = render(<Controls variant="overlay" visible />);
+    const root = (): HTMLElement => container.querySelector<HTMLElement>('[data-player-controls]')!;
+    expect(root().className.split(' ')).toEqual(expect.arrayContaining(['player-scrim-bottom', 'pt-16']));
+    rerender(<Controls variant="overlay" visible short />);
+    expect(root().className.split(' ')).toEqual(expect.arrayContaining(['player-scrim-bottom', 'player-scrim-compact', 'pt-8']));
+    expect(root().className.split(' ')).not.toContain('pt-16');
+  });
+});
+
+describe('Controls seek row in a right-to-left language (review: times swapped against the fill)', () => {
+  it('lays the times and the bar out left to right, as the fill grows', () => {
+    render(
+      <div dir="rtl">
+        <Controls variant="overlay" visible />
+      </div>,
+    );
+    const row = screen.getByTestId('seek-row');
+    expect(row.getAttribute('dir')).toBe('ltr');
+    // Elapsed first (the left, where the played fill starts), the length last.
+    const order = Array.from(row.children).map((el) => el.getAttribute('data-testid') ?? el.getAttribute('role'));
+    expect(order).toEqual(['time-elapsed', 'slider', 'time-duration']);
   });
 });

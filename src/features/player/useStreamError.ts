@@ -2,15 +2,17 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isDesktop } from '@/api/transport';
-import type { PlayerSource } from '@/api/types';
+import { itemKey, type PlayerSource } from '@/api/types';
 
 // account:
 import { useConnectionCounts } from './connectionLimit';
 import type { EngineError } from './engines';
 import { browserOnline, classifyStreamError, errorCopyKeys, type ExternalRoute, type StreamErrorClass } from './errors';
+import { useAlternatesStore } from './failover';
 import { useMediaStore } from './media';
 import { canShareSource } from './shareable';
 import { usePlayerStore } from './store';
+import { usePlayerSettings } from './useSettings';
 
 export interface StreamErrorView {
   cls: StreamErrorClass;
@@ -18,6 +20,8 @@ export interface StreamErrorView {
   hint: string;
   /** Where the stream can go instead (`ExternalRoute`): the overlay offers that, and the hint names it. */
   external: ExternalRoute;
+  /** The live channel has copies on other sources and failover is on: the screen offers them, and the hint may name them. */
+  others: boolean;
 }
 
 /** Tracks `navigator.onLine` through the window's online/offline events. */
@@ -44,6 +48,14 @@ export function externalRouteFor(source: PlayerSource | undefined): ExternalRout
   return source?.url && canShareSource(source) ? 'link' : 'none';
 }
 
+/** A live channel with copies on other sources, while live failover is on (Other sources lists them). */
+function useOtherSources(): boolean {
+  const key = usePlayerStore((s) => (s.source?.isLive && s.source.ref ? itemKey(s.source.ref) : undefined));
+  const alternates = useAlternatesStore((s) => s.status === 'ready' && !!key && s.forKey === key && !!s.data?.alternates.length);
+  const failoverOn = usePlayerSettings()?.liveFailover !== false;
+  return alternates && failoverOn;
+}
+
 /** The current playback error, classified, with its headline and next step. */
 export function useStreamError(kind?: EngineError['kind'] | null): StreamErrorView {
   const { t } = useTranslation('player');
@@ -55,9 +67,10 @@ export function useStreamError(kind?: EngineError['kind'] | null): StreamErrorVi
   const connections = useConnectionCounts({ message, kind, code, online }, sourceId);
   const live = usePlayerStore((s) => !!s.source?.isLive);
   const external = usePlayerStore((s) => externalRouteFor(s.source));
+  const others = useOtherSources();
   const cls = classifyStreamError({ message, kind, code, online, connections });
-  const keys = errorCopyKeys(cls, { connections, message, live, external });
-  return { cls, title: t(keys.title, keys.params), hint: t(keys.hint, keys.params), external };
+  const keys = errorCopyKeys(cls, { connections, message, live, external, others });
+  return { cls, title: t(keys.title, keys.params), hint: t(keys.hint, keys.params), external, others };
 }
 
 /**

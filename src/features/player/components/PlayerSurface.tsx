@@ -379,6 +379,8 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
           onRetry={retryPlayback}
           size="xs"
           max={compact ? 1 : 2}
+          // The compact bar (the mini player, the PiP window) has no options menu to list other sources in.
+          menu={!compact}
           primaryRef={retryRef}
           className="flex shrink-0 flex-wrap items-center gap-2"
         >
@@ -983,8 +985,9 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
           data-testid="player-titlebar"
           className={cn(
             'player-chrome player-scrim-top pointer-events-none absolute inset-x-0 top-0 z-10 motion-safe:transition-opacity motion-safe:duration-(--duration-base)',
-            // Fullscreen: further in from the edges and larger, like the bar.
-            isFullscreen ? 'px-4 pt-4 pb-20 sm:px-10 sm:pt-8' : 'px-4 pt-3 pb-14 sm:px-5 sm:pt-4',
+            // Fullscreen: further in from the edges and larger, like the bar. A short player's
+            // shade fades out sooner, so the two scrims do not meet over the middle of the picture.
+            isFullscreen ? 'px-4 pt-4 pb-20 sm:px-10 sm:pt-8' : cn('px-4 pt-3 sm:px-5 sm:pt-4', shortPlayer ? 'pb-8' : 'pb-14'),
             titleHidden && 'opacity-0',
           )}
         >
@@ -1063,7 +1066,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         onPointerEnter={() => setOnBar(true)}
         onPointerLeave={() => setOnBar(false)}
       >
-        <Controls variant="overlay" visible={chromeVisible} compact={compact} onMenuOpenChange={setMenuOpen} />
+        <Controls variant="overlay" visible={chromeVisible} compact={compact} short={shortPlayer} onMenuOpenChange={setMenuOpen} />
       </div>
 
       <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} chromeVisible={chromeVisible} />

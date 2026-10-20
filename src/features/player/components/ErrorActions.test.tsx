@@ -72,6 +72,7 @@ describe('errorActionIds', () => {
     hasMedia: true,
     external: 'none',
     alternates: false,
+    menu: true,
     zappable: false,
     refreshable: false,
     hasSource: false,
@@ -111,17 +112,49 @@ describe('errorActionIds', () => {
   it('outside the app router, no page links', () => {
     expect(errorActionIds({ ...base, cls: 'auth', hasSource: true, routed: false })).toEqual(['retry']);
   });
+
+  it('no Other sources where the bar has no options menu to list them in (the compact bar, the mpv PiP window)', () => {
+    const live = { ...base, live: true, alternates: true, menu: false };
+    expect(errorActionIds({ ...live, cls: 'notFound', zappable: true })).toEqual(['nextChannel', 'retry']);
+    expect(errorActionIds({ ...live, cls: 'notFound' })).toEqual(['retry']);
+    expect(errorActionIds({ ...live, cls: 'unsupported', external: 'app' })).toEqual(['openMpv', 'openVlc', 'retry']);
+  });
 });
 
 describe('the error overlay', () => {
-  it('in the browser, a stream whose link cannot be shared reads without MPV or VLC', () => {
+  it('in the browser, a movie whose link cannot be shared reads without MPV, VLC or another source', () => {
     render(<InlinePlayer />);
     fail({ url: xtreamUrl, kind: 'direct', title: 'Movie', isLive: false, isRadio: false }, 'codec not supported');
     const alert = screen.getByRole('alert');
     expect(alert.getAttribute('data-error-class')).toBe('unsupported');
-    expect(alert.textContent).toContain(en.errorUnsupportedBrowser);
-    expect(alert.textContent).not.toMatch(/MPV|VLC/);
+    // Retry and the desktop app: what the screen offers, and nothing else.
+    expect(alert.textContent).toContain(en.errorUnsupportedBrowserDesktop);
+    expect(alert.textContent).not.toMatch(/MPV|VLC|another source/);
+    expect(Array.from(screen.getByTestId('error-actions').querySelectorAll('button')).map((b) => b.dataset['action'])).toEqual(['retry']);
     expect(screen.queryByRole('button', { name: 'Copy stream link' })).toBeNull();
+  });
+
+  it('in the browser, a channel with copies elsewhere names another source and offers it', () => {
+    const source: PlayerSource = { url: 'http://iptv.example.com:8080/live/demo/secret/7.mp4', kind: 'direct', title: 'News', isLive: true, isRadio: false, ref: live };
+    useAlternatesStore.setState({
+      forKey: itemKey(live),
+      status: 'ready',
+      data: {
+        key: 'news',
+        alternates: [
+          {
+            channel: { ref: { sourceId: 's2', contentType: 'live', itemId: '9' }, name: 'News HD', categoryId: 'c', categoryName: 'News', isRadio: false },
+            sourceName: 'Backup',
+            sourceKind: 'm3u',
+            matchedBy: 'name',
+          },
+        ],
+      },
+    });
+    render(<InlinePlayer />);
+    fail(source, 'codec not supported');
+    expect(screen.getByRole('alert').textContent).toContain(en.errorUnsupportedBrowser);
+    expect(Array.from(screen.getByTestId('error-actions').querySelectorAll('button')).map((b) => b.dataset['action'])).toEqual(['otherSources', 'retry']);
   });
 
   it('a live channel the provider lacks: Other sources opens the options menu at the channel’s copies', () => {

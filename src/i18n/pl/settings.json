@@ -446,7 +446,7 @@
   "imageCacheClearBodyServer": "Spowoduje to usunięcie z serwera {{size}} zapisanych obrazów. Ta przeglądarka pobierze każdy z nich ponownie, gdy znów się pojawi; inne przeglądarki mogą jeszcze do tygodnia pokazywać własną kopię.",
   "imageCacheCleared": "Wyczyszczono pamięć podręczną obrazów",
   "imageCacheClearFailed": "Nie udało się wyczyścić pamięci podręcznej obrazów",
-  "imageCacheLoadFailed": "Nie udało się odczytać pamięci podręcznej obrazów: {{message}}",
+  "imageCacheLoadFailed": "Nie udało się odczytać pamięci podręcznej obrazów.",
   "imageCacheUnavailable": "Ten serwer nie ma pamięci podręcznej obrazów, więc obrazy są wczytywane bezpośrednio od dostawców.",
   "backupOldVersion": "Ta kopia zapasowa ma starszy format, którego nie da się odczytać. Wyeksportuj nową kopię i zaimportuj ją.",
   "backupImportDone": "Zaimportowano kopię zapasową",

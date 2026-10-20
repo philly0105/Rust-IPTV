@@ -165,6 +165,14 @@ Smart reconnect (`streamReconnect`) and live failover (`liveFailover`) sit above
 - `tests/player_rpc.rs`: exactly the 14 player names are registered; server mode refuses every player command; non-media schemes are refused; `player.stopExternal` with nothing running; reuse closing the previous external mpv; capabilities reasons; errors without a session; `player.openExternal` with `whoami.exe` as a stand-in player (the `started` then `exited` events); and, when an mpv is detectable, a real embedded end-to-end run with `--vo=null --ao=null`. That run covers attach, attach again, loading an mpv-encoded clip with resume and headers, pause, volume, seek, a blocked `quit`, an unknown property, setBounds, a crash via `taskkill` (error state, window destroyed), re-attach, attach with volume and mute, recording to `recordingsDir` (file name, state, `stream-record` property, non-empty file), `mpv.stats` on the test clip (size, codec, container, no URL), audio-delay and sub-delay round trips, and an idempotent detach.
 - `tests/player_args.rs` also covers the `--` separator, the URL allowlist, VLC reuse flags, the `stream-record` IPC command, and recording file names.
 
+## Player chrome and the error screen (UI)
+
+Code: `src/features/player/components/` (`Controls.tsx`, `ErrorActions.tsx`, `glassButton.ts`).
+
+- The control bar sits on a scrim, in groups: playback (play or pause, seek, volume), the time or LIVE, and the menus. Commands used less often (Take screenshot, Channel history, Stop) are rows of the options menu, with their keys, and the same rows are in the video's right-click menu. Volume sliders are white: a level is not progress, which keeps the amber.
+- The Sync row hides when there is nothing to adjust (no subtitles, and no audio delay with the built-in engines).
+- A failed stream shows a translated cause and the actions that can help, the first one primary (`errorActionIds`): Retry; Try another source for a live channel with copies elsewhere (the options menu lists them); Next channel; Refresh source for a title the provider dropped; Edit source (`/sources?account=<sourceId>`) for refused credentials or a full account; Play as HLS (writes `settings.streamFormat = 'm3u8'`) and Playback settings for an Xtream TS stream a browser cannot play; Parental controls (`/settings/parental`) for a parental refusal; and, in the desktop app, Open in MPV or VLC, or in a browser Copy link. Copy details puts the code and the raw message on the clipboard. The buttons are `glassButton` (design-system.md, Glass).
+
 ## Sync, stream info and channel history (UI)
 
 Code: `src/features/player/` (`sync.ts`, `textDelay.ts`, `streamInfo.ts`, `inlineExtras.ts`, `mpvExtras.ts`, `history.ts`, and `components/SyncMenu.tsx`, `StreamInfoPanel.tsx`, `ChannelHistory.tsx`).

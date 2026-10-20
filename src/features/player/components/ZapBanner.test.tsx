@@ -190,13 +190,16 @@ describe('what the banner shows', () => {
     expect(banner.textContent).toContain('Next');
   });
 
-  it('says so when the guide has nothing, and falls back to an icon without a logo', async () => {
+  it("says so when the guide has nothing, and shows the channel's monogram without a logo", async () => {
     handlers['catalog.item'] = () => ({ ref: ref('102'), name: 'Sport 1', isRadio: false });
     tune(sport);
     render(<ZapBanner />);
     await advance(0);
     expect(screen.getByTestId('zap-no-guide').textContent).toBe('No guide information');
-    expect(screen.getByTestId('zap-logo-fallback')).toBeTruthy();
+    // LG-14: the same letters on the same fill as the channel list's tile.
+    const fallback = screen.getByTestId('zap-logo-fallback');
+    expect(fallback.textContent).toBe('S1');
+    expect(fallback.style.background).toContain('linear-gradient');
     expect(screen.queryByTestId('zap-number')).toBeNull();
   });
 

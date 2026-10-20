@@ -163,7 +163,9 @@ describe('ImageCacheRow', () => {
     renderRow();
     const error = await screen.findByTestId('image-cache-error');
     expect(error.getAttribute('role')).toBe('alert');
-    expect(error.textContent).toContain("Couldn't read the image cache: disk unavailable");
+    expect(within(error).getByText("Couldn't read the image cache.")).toBeTruthy();
+    // The core's message sits under the translated hint for its code, not glued to the title (SS-18).
+    expect(error.querySelector('[data-error-message]')?.textContent).toBe('disk unavailable');
     fail = false;
     fireEvent.click(within(error).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByTestId('image-cache-size').textContent).toBe('120 MB of 500 MB'));

@@ -60,6 +60,8 @@ A chosen filter chip is inverted (`bg-fg text-bg`), not amber.
 
 `bg-glass` / `bg-glass-strong`, `text-on-glass` / `text-on-glass-muted`, `border-glass-border`, `bg-glass-accent` with `text-glass-accent-fg`. Glass stays dark in every theme, so never use theme text or accent colours on it. Blur only through `glass-blur`, and only on small, short-lived overlays. Kit components take `tone="glass"` where they appear on glass (Tooltip, IconButton's tooltip, SegmentedControl, BackButton).
 
+Buttons over the picture (the player's error screen, Up next, the sleep prompt, the external player's stage) use the player's `glassButton(variant, size)` (`src/features/player/components/glassButton.ts`): the kit Button's shapes with `primary` (the solid accent, one per surface), `secondary` (a see-through fill with a hairline) and `ghost`, white state layers, and the 44 px touch floor. The kit Button has no glass variants; if it gets them, the player can switch. Inside the player a level is not progress: volume sliders are white, and only playback progress is amber.
+
 ## Type
 
 Inter Variable for everything (`font-sans`, `font-display`); Barlow Semi Condensed 600 (`font-numeric`) only for channel numbers, clocks and time readouts, the channel-number OSD and LIVE pills, always with `tabular-nums`. Only weight 600 of Barlow ships.
@@ -169,13 +171,13 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 - Fields: `Input`, `Textarea`, `Select` (native, restyled), `SearchInput` (search icon, clear button that keeps focus, first Escape clears). A field a feature must build itself takes `fieldClass('sm' | 'md', extra)`. The settings `CommitInput` (commit on blur or Enter, Escape restores) is built on it and merges classes, so `className="w-28"` works.
 - `Switch`: the only switch. Off is a recessed track with the control border and a `fg-muted` knob; on is the solid accent with a knob in the fill's text colour (`accent-solid-fg`) and an outline in the accent's indicator tone, so the on track keeps 3:1 against a white panel in light. A white knob is not an option: 1.2:1 on the light off track, 1.8:1 on amber. The classes live in `SWITCH_TONES` (`Field.tsx`), which `contrast.test.ts` reads. `Toggle` is a labelled Switch; the settings `SwitchRow` renders one too.
 - `Checkbox`: a native input drawn as an 18 px box; `indeterminate` for mixed. Wrap it in a `<label>` with its text. When the row draws its own focus ring, pass `className="focus-visible:outline-none focus-visible:shadow-none"`.
-- `Radio` and `RadioGroup`: native inputs (arrow keys work); RadioGroup is a list of labelled rows with a description and an optional `note`, the chosen row on `bg-selected`.
+- `Radio` and `RadioGroup`: native inputs (arrow keys work); RadioGroup is a list of labelled rows with a description and an optional `note`, the chosen row on `bg-selected`. To hide a radio inside a card that draws the choice itself, wrap it in a `<span className="sr-only">`: `wrapperClassName="sr-only"` does not work, because the radio's own `relative` and size outlast it in `cn`.
 - `SegmentedControl`: two to six short options side by side (role radiogroup, arrows choose). One neutral raised thumb. `content` shows an icon or sample instead of the label, which then becomes the tooltip. `tone="glass"` inside player menus. `itemClassName="flex-1"` for equal segments. The settings `Segmented` wraps it.
 - `Tabs`: `variant="underline"` (page sections: accent bar under the chosen tab) or `variant="pill"` (compact toolbars: the SegmentedControl look). Use Tabs when the choice switches a panel, SegmentedControl when it sets a value.
 
 ### Overlays
 
-- `Dialog`: `open`, `onClose`, `title`, `description`, `footer`, `size` (`sm` … `xl`, `full`), `placement="end"` for a drawer. Focus trap, Escape, focus restore, scroll lock, exit animation. Mark the first field `data-autofocus` if it is not the first focusable.
+- `Dialog`: `open`, `onClose`, `title`, `description`, `footer`, `size` (`sm` … `xl`, `full`), `placement="end"` for a drawer, and `sheet` for a dialog that is a bottom sheet below sm (full width from the bottom edge, top corners rounded, clear of the home indicator, rising in; the add and edit source dialogs, the Sources page's Sort and filter, the phone's More sheet). A sheet's height cap can be changed with `className="max-sm:max-h-…"`. `hideTitle` keeps the title as the accessible name only; with `hideClose` too no header row is drawn at all (the command palette). Focus trap, Escape, focus restore, scroll lock, exit animation. Mark the first field `data-autofocus` if it is not the first focusable.
 - `Menu`: `items` (actions with `icon`, `hint`, `danger`, `disabled`; separators), `label`, `align`, `placement`. The default trigger is an IconButton (ellipsis) with `label` as its tooltip; a custom `trigger` can take `tooltip`.
 - `toast({ title, description, variant, action, progress, duration, id })`: works outside React; an `id` updates in place. Use `errorDescription(err)` as the description of an error toast.
 
@@ -197,6 +199,7 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 - `Kbd`: key caps in the UI language (`comboKeys` for the strings).
 - `EmptyState` (`icon`, `title`, `description`, `action`, `size="page" | "inline"`) and `ErrorState` (`error`, `onRetry`, `action`, `hint`). For a core error the translated hint for its code leads; an error the UI raised itself (a plain `Error`) leads with its own message.
 - `Skeleton`, `SkeletonList`, `SkeletonGrid`; `Poster`; `VirtualList`, `VirtualGrid`; `Pagination`.
+- `SourceMonogram`: a source's initials on its own hue (`name`; size, corner and text size through `className`). The rail, the phone's More sheet, the source cards and the library's source badges draw it, so a source looks the same everywhere.
 - Cards: `CARD_ROOT` on the focusable card, `CARD_ART` on the artwork frame, `CARD_ART_CURSOR` for a grid's keyboard cursor (see [appearance.md](appearance.md#cards)). Chips on artwork use `bg-glass-strong text-on-glass`.
 
 ## Checks that guard this

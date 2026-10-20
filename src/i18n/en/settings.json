@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "This removes {{size}} of saved pictures from the server. This browser downloads each one again the next time it's shown; other browsers may show their own copy for up to a week.",
   "imageCacheCleared": "Image cache cleared",
   "imageCacheClearFailed": "Couldn't clear the image cache",
-  "imageCacheLoadFailed": "Couldn't read the image cache: {{message}}",
+  "imageCacheLoadFailed": "Couldn't read the image cache.",
   "imageCacheUnavailable": "This server has no image cache, so pictures load straight from each provider.",
   "backupOldVersion": "This backup uses an older format that can't be read. Export a new backup and import that.",
   "backupImportDone": "Backup imported",

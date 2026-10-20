@@ -37,7 +37,7 @@ export const Header = memo(function Header({
   const { t } = useTranslation('shell');
   const toggleRailHidden = useShellStore((s) => s.toggleRailHidden);
   const header = useShellStore((s) => s.header);
-  const hasPanel = useShellStore((s) => s.contextPanel !== null && s.panelDrawer);
+  const hasPanel = useShellStore((s) => s.contextPanel !== null);
   const panelOpen = useShellStore((s) => s.panelOpen);
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);

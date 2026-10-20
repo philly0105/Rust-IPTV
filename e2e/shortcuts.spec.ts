@@ -11,8 +11,12 @@ import { blurFocus, gotoLive, playerRegion } from './helpers/ui';
 const NAME = 'Shortcut Xtream';
 const MOD = 'ControlOrMeta';
 
-/** C16's required shortcuts, by the overlay's `data-combo` value. */
-const C16 = ['mod+k', 'mod+f', 'mod+r', 'mod+b', 'digit', 'space', 'k', 'f', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'm', '?', 'escape'];
+/**
+ * C16's required shortcuts, by the overlay's `data-combo` value, as the browser lists them. mod+r
+ * (Recently watched) is the desktop app's only: in a browser Ctrl+R reloads the page, so the app
+ * leaves it alone there (desktopShell.test.tsx covers the desktop key).
+ */
+const C16 = ['mod+k', 'mod+f', 'mod+b', 'digit', 'space', 'k', 'f', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'm', '?', 'escape'];
 
 test.describe.serial('keyboard shortcuts', () => {
   let sourceId: string;
@@ -35,6 +39,20 @@ test.describe.serial('keyboard shortcuts', () => {
       await expect(row, `overlay lists ${combo}`).toBeVisible();
       await expect(row.locator('dt')).not.toBeEmpty();
     }
+    await page.keyboard.press('Escape');
+    await expect(overlay).toBeHidden();
+  });
+
+  test("in the browser the overlay leaves out mod+r, which stays the browser's reload", async ({ page }) => {
+    // Not pressed here: in a browser Ctrl+R reloads the page, which is what the app now lets it do.
+    await page.goto('/dashboard');
+    await expect(page.getByTestId('dashboard')).toBeVisible();
+    await blurFocus(page);
+    await page.keyboard.press('?');
+    const overlay = page.getByTestId('shortcut-overlay');
+    await expect(overlay).toBeVisible();
+    await expect(overlay.locator('[data-combo="mod+k"]').first()).toBeVisible();
+    await expect(overlay.locator('[data-combo="mod+r"]')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(overlay).toBeHidden();
   });
@@ -66,15 +84,6 @@ test.describe.serial('keyboard shortcuts', () => {
     await expect(focused).toHaveCount(1);
     await page.keyboard.type('harbor');
     await expect(focused).toHaveValue('harbor');
-  });
-
-  test('mod+r opens recently watched', async ({ page }) => {
-    await page.goto('/dashboard');
-    await expect(page.getByTestId('dashboard')).toBeVisible();
-    await page.keyboard.press(`${MOD}+r`);
-    await expect(page).toHaveURL(/\/recent$/);
-    // The browser reload was prevented: still the same document, on /recent.
-    await expect(page.getByTestId('page-title')).toBeVisible();
   });
 
   test('mod+b toggles the live groups sidebar', async ({ page }) => {

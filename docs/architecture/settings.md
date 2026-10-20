@@ -43,7 +43,21 @@ Strings are trimmed, and empty optional strings (`mpvPath`, `vlcPath`, `download
 
 When `state.is_desktop` is false (the PWA server), `settings.update` refuses with `Unsupported` ("player and folder settings apply only to the desktop app") any patch that changes `mpvPath`, `vlcPath`, `mpvArgs`, `vlcArgs`, `downloadsDir` or `recordingsDir`. Any browser on the network can reach the server, and these fields name programs, their arguments and folders on the host. The check runs before validation, so a refused patch reveals nothing about which paths exist. Sending the current values back unchanged (a full-document patch) is allowed. `settings::save` applies the same rule except for `downloadsDir`, whose only caller (`downloads.setDir`) enforces its own server rule. `settings.reset` is allowed and keeps these six fields as they are: a server client cannot set them, so an Undo that sent them back would be refused.
 
-The browser UI follows the same rule: Settings has no External players section there, Settings > Playback lists only the built-in player (a saved `mpv` or `vlc` shows, and plays, as the built-in one), and Settings > General names the downloads and recordings folders as read-only text instead of offering inputs the core would refuse.
+The browser UI follows the same rule: Settings has no External players section there, Settings > Playback shows the built-in player as a single row with a note that mpv and VLC are in the desktop app (a saved `mpv` or `vlc` shows, and plays, as the built-in one), and Settings > General names the downloads folder, and Settings > Recording the recordings folder, as read-only text instead of offering inputs the core would refuse.
+
+## The Settings page
+
+`src/features/settings/SettingsPage.tsx` shows one section per route (`/settings/<section>`). From 768 px up the section nav is a sticky column at the page's inline start, grouped as App (General, Appearance, Shortcuts), Watching (Playback, External players, Guide, Recording, Metadata), Household (Parental controls, Remote control) and System (Backup and storage, About); the chosen section has the selected fill and the tuning tick. Below 768 px `/settings` is a list of the sections with their one-line leads, and each opens on its own screen with an "All settings" back button. The page does not use the shell's context panel. The command palette keeps its own copy of the section ids (`SETTINGS_SECTIONS` in `src/shell/CommandPalette.tsx`, checked against `SECTION_IDS` by a shell test) and its labels and search words in `shell.json` (`settings<Section>`, `settings<Section>Keywords`).
+
+Where rows live:
+
+- General: language, on startup and window at startup, how sources refresh and how early a subscription warns (`sourceRefreshIntervalHours`, `accountExpiryWarnDays`), the catalog filters (country prefix, English only, minimum rating) and the downloads folder.
+- Appearance: theme, OLED black, accent, density, interface size, poster size (`coverSize`), and the Home screen group (`showDashboard`, `dashboardRails`).
+- Guide: the global XMLTV addresses, then one status row per guide source, led by the source, with its refresh button beside the switch; then the view and time shift.
+- Recording: the recordings folder, the padding before and after as one row, and reminders.
+- Metadata: while TMDB is off, a note says what turning it on opens and the rows it governs are dimmed.
+- Remote control: whether the remote runs, and its address, show under the switch.
+- Backup and storage: Export in the group's header, Import with a drop zone for the backup file, the image cache row, and Reset settings.
 
 ## Fields added after wave 1
 
@@ -72,13 +86,13 @@ The browser UI follows the same rule: Settings has no External players section t
 | `density` | `"comfortable"` | `"compact"` tightens spacing in lists, rails and rows. |
 | `uiScale` | `1` | Interface size, 0.9..1.25 (the root font size is 15 px times it). |
 | `zapBanner` | `true` | The player shows the channel's logo, number and now/next for 5 s after each live channel change. Settings > Playback. |
-| `dashboardRails.myList` | `true` | The dashboard's My List rail (Settings > General, dashboard rails). |
+| `dashboardRails.myList` | `true` | The dashboard's My List rail (Settings > Appearance, Home screen). |
 | `subtitleSize` | `"medium"` | Subtitle text size in mpv and the built-in player: `small`, `medium`, `large` or `xlarge` (0.8, 1.0, 1.25 and 1.5 times the base size; mpv `sub-scale`, the built-in player's `::cue`). Settings > Playback. |
 | `subtitleColor` | `"white"` | Subtitle text colour: `white`, `yellow`, `cyan` or `green`. |
 | `subtitleBackground` | `"box"` | Behind subtitle text: `shadow` (a text shadow only), `box` (a translucent box) or `solid` (an opaque black box). |
 | `subtitlePosition` | `0` | Percent of the picture height subtitles are raised from the bottom, a whole number 0..40 (`SUBTITLE_POSITION_RANGE`), else `Invalid`. |
 | `vodHideWatched` | `false` | The movie and series grids' Hide watched toggle (Shift+W): `catalog.movies` / `catalog.series` are asked with `hideWatched`. See vod-browsing.md. |
-| `imageCacheMaxMb` | `500` | Size cap of the poster and logo cache in MB, 50..5000, else `Invalid`. Applies in server mode too (to the server's cache). Settings > General, image cache row (250 MB to 5 GB); see image-cache.md. |
+| `imageCacheMaxMb` | `500` | Size cap of the poster and logo cache in MB, 50..5000, else `Invalid`. Applies in server mode too (to the server's cache). Settings > Backup and storage, image cache row (250 MB to 5 GB); see image-cache.md. |
 | `tourCompleted` | `false` | The first-run tour was finished or skipped, so it does not start on its own again. Kept by `settings.reset`. See onboarding.md. |
 | `lastSeenVersion` | `""` | The app version whose What's new the user has seen; `''` on a fresh profile. Kept by `settings.reset`. See onboarding.md. |
 

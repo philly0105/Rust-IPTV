@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "这将从服务器删除已保存的图片，共 {{size}}。此浏览器会在每张图片下次显示时重新下载；其他浏览器可能在最长一周内继续显示各自的副本。",
   "imageCacheCleared": "图片缓存已清除",
   "imageCacheClearFailed": "无法清除图片缓存",
-  "imageCacheLoadFailed": "无法读取图片缓存：{{message}}",
+  "imageCacheLoadFailed": "无法读取图片缓存。",
   "imageCacheUnavailable": "此服务器没有图片缓存，图片将直接从各提供商加载。",
   "backupOldVersion": "此备份使用无法读取的旧格式。请导出新的备份后再导入。",
   "backupImportDone": "已导入备份",

@@ -47,7 +47,16 @@ export interface DialogProps {
   testId?: string;
   /** Where the panel sits. Default `center`. `end` ignores `size`; set the width through `className`. */
   placement?: DialogPlacement;
+  /**
+   * Below sm, a centred dialog becomes a bottom sheet: full width from the bottom edge, top
+   * corners rounded, clear of the home indicator, rising in. From sm up it is the usual card.
+   */
+  sheet?: boolean;
 }
+
+/** The sheet's panel below sm. Its height cap can be overridden through `className` (`max-sm:max-h-…`). */
+const SHEET =
+  'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:max-w-none max-sm:max-h-[calc(100dvh-1.5rem)] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[env(safe-area-inset-bottom,0px)]';
 
 const sizes: Record<DialogSize, string> = {
   sm: 'max-w-sm',
@@ -165,8 +174,10 @@ export function Dialog({
   initialFocus,
   testId,
   placement = 'center',
+  sheet = false,
 }: DialogProps) {
   const drawer = placement === 'end';
+  const asSheet = sheet && !drawer;
   const { t } = useTranslation('common');
   const toastReserve = useToastReserve((s) => s.px);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -339,41 +350,57 @@ export function Dialog({
             ? cn('h-full w-[min(var(--panel-width),90vw)] border-s', closing ? 'motion-safe:animate-drawer-out' : 'motion-safe:animate-drawer-in')
             : cn(
                 'w-full max-h-[calc(100vh-12vh-24px)] max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)] rounded-xl border',
-                closing ? 'motion-safe:animate-pop-out' : 'motion-safe:animate-pop-in',
+                // A sheet pops like a card from sm up and rises from the bottom edge below it.
+                asSheet
+                  ? closing
+                    ? 'motion-safe:sm:animate-pop-out max-sm:motion-safe:animate-sheet-out'
+                    : 'motion-safe:sm:animate-pop-in max-sm:motion-safe:animate-sheet-in'
+                  : closing
+                    ? 'motion-safe:animate-pop-out'
+                    : 'motion-safe:animate-pop-in',
               ),
           !drawer && sizes[size],
+          asSheet && SHEET,
           className,
         )}
       >
-        <div
-          className={cn(
-            'flex gap-4',
-            drawer
-              ? 'h-(--header-height) shrink-0 items-center border-b border-divider ps-5 pe-3'
-              : cn('items-start px-6 pt-5', hideTitle ? 'pb-0' : 'pb-4'),
-          )}
-        >
-          <div className={cn('min-w-0 flex-1', hideTitle && 'sr-only')}>
-            <h2 id={titleId} className="text-title-sm">
-              {title}
-            </h2>
-            {description && (
-              <p id={descId} className="mt-1 text-sm text-fg-muted">
-                {description}
-              </p>
+        {/* Neither a visible title nor a close button: the title is only the accessible name, and no padded row is left above the body. */}
+        {hideTitle && hideClose && !drawer ? (
+          <div className="sr-only">
+            <h2 id={titleId}>{title}</h2>
+            {description && <p id={descId}>{description}</p>}
+          </div>
+        ) : (
+          <div
+            className={cn(
+              'flex gap-4',
+              drawer
+                ? 'h-(--header-height) shrink-0 items-center border-b border-divider ps-5 pe-3'
+                : cn('items-start px-6 pt-5', hideTitle ? 'pb-0' : 'pb-4'),
+            )}
+          >
+            <div className={cn('min-w-0 flex-1', hideTitle && 'sr-only')}>
+              <h2 id={titleId} className="text-title-sm">
+                {title}
+              </h2>
+              {description && (
+                <p id={descId} className="mt-1 text-sm text-fg-muted">
+                  {description}
+                </p>
+              )}
+            </div>
+            {!hideClose && (
+              <IconButton
+                data-dialog-close=""
+                label={t('close')}
+                shortcut="escape"
+                icon={<X aria-hidden size={18} />}
+                onClick={() => onCloseRef.current()}
+                className={drawer ? 'ms-auto' : '-me-2'}
+              />
             )}
           </div>
-          {!hideClose && (
-            <IconButton
-              data-dialog-close=""
-              label={t('close')}
-              shortcut="escape"
-              icon={<X aria-hidden size={18} />}
-              onClick={() => onCloseRef.current()}
-              className={drawer ? 'ms-auto' : '-me-2'}
-            />
-          )}
-        </div>
+        )}
         {/* No body, no empty band: a confirm with only a description sits straight on its footer. */}
         {/*
           -mt-1 pt-1: a field at the top of a scrolling body keeps its focus glow, which the

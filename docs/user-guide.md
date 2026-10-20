@@ -35,13 +35,13 @@ No channels or other content come with the app. Add a source first:
 - An Xtream Codes account: server URL, username and password. Pasting a full `get.php` link fills in the fields for you.
 - A Stalker (Ministra) portal: the portal address ending in `/c/` and the MAC address registered with your provider.
 
-After the first source is added, a three-step tour points at Live TV, My List (movies and series) and search (Next, Back, Skip; Esc skips). After an update, What's new lists what changed since the version you last used. Both show once; "Take the tour" and "What's new" in the command palette (Ctrl+K) and Settings > About open them again. See [onboarding.md](architecture/onboarding.md).
+After the first source is added, a card points out search and the command palette. Got it closes it; Show me around turns it into a three-step tour of your sources, My List (movies and series) and search (Next, Back, Skip; Esc skips). After an update, What's new lists what changed since the version you last used. Both show once; "Take the tour" and "What's new" in the command palette (Ctrl+K) and Settings > About open them again. See [onboarding.md](architecture/onboarding.md).
 
 ## Sources
 
 ### Refreshing
 
-- Auto refresh is on by default for new playlist URLs, Xtream accounts and Stalker portals. A pasted or uploaded playlist has no address to refetch: to update it, open the source's Edit dialog and paste the new playlist or choose a file. The channels are replaced in place, so favorites, history, positions, renames and locks stay with the channels that are still there.
+- Auto refresh is on by default for new playlist URLs, Xtream accounts and Stalker portals. A pasted or uploaded playlist has no address to refetch: Re-import on its card (and Refresh all) imports the stored text again, and to update it, open the source's Edit dialog and paste the new playlist or choose a file. The channels are replaced in place, so favorites, history, positions, renames and locks stay with the channels that are still there. Saving new connection details (an address, a password, a MAC) in the Edit dialog refreshes the source at once.
 - Sources with auto refresh on refresh in the background every 12 hours, also while the app is in the tray (Settings > General > Sources: only at startup, 6, 12, 24 or 48 hours). At startup only sources more than a day old (or older than the chosen interval) refresh, about 30 s after launch. A source refreshes at most once at a time: a manual refresh of a source that is already refreshing waits for that refresh instead of starting another, Refresh all skips it, and a failing source retries later with a growing delay. Source cards show "Next refresh in ..." and when a refresh last failed.
 - An import or refresh can be cancelled while it runs. A cancelled run keeps the catalog the source had before, and a cancelled add leaves no source behind. "Refresh all" has a Stop button.
 
@@ -90,7 +90,8 @@ Right-click a channel with catch-up and choose "Browse archive" (also in the ful
 
 - Movies and episodes remember where you stopped. The detail page offers "Resume from m:ss" and "Start over".
 - Near the end of an episode, an Up next card counts down to the next one. Use "Play now" to skip the countdown, or press N to play the next item in the queue. The series page and Shift+P go back one episode.
-- Movie and series grids filter by decade or an exact year range (kept in the URL), mark watched titles with a tick, and "Hide watched" (Shift+W) leaves them out. W marks the title under the cursor watched or unwatched, and a series page can mark the whole series watched.
+- A source's Movies and Series pages open with rails (Continue watching, Recently added, then rails for the first categories). The chips at the top jump to a category, and "All categories" opens the full list under the rails.
+- Movie and series grids filter by decade (the chips in the toolbar) or an exact year range (under Filters, kept in the URL), mark watched titles with a tick, and "Hide watched" (under Filters, or Shift+W) leaves them out. W marks the title under the cursor watched or unwatched, and a series page can mark the whole series watched.
 - In a movie or series group, saved posters carry a marker and a corner toggle, S saves or removes the title under the cursor, and Shift+F10 or the context-menu key opens the poster menu (also on right click) with Add to or Remove from My List.
 - Movie and series pages can show plots, cast, trailers and more from TMDB when you turn it on; see [Movie and series details from TMDB](#movie-and-series-details-from-tmdb).
 
@@ -122,7 +123,7 @@ Multi-view plays two to four live channels at once: right-click a channel and ch
 
 ## Recording and reminders
 
-In the desktop app, embedded mpv can record the playing stream (`mpv.record`). Files go to the folder set in Settings > General (Recordings folder), or `<downloads folder>/recordings` when that is not set, named `<title>-YYYYMMDD-HHMM.ts`. mpv copies the stream as is and starts at the next keyframe; its recorder is marked experimental upstream.
+In the desktop app, embedded mpv can record the playing stream (`mpv.record`). Files go to the folder set in Settings > Recording (Recordings folder), or `<downloads folder>/recordings` when that is not set, named `<title>-YYYYMMDD-HHMM.ts`. mpv copies the stream as is and starts at the next keyframe; its recorder is marked experimental upstream.
 
 Scheduled recordings and reminders:
 
@@ -146,7 +147,7 @@ See [recording.md](architecture/recording.md).
 
 ### My List
 
-My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. Reorder it by dragging, with the arrow buttons, or with Alt+Up/Down, mark movies watched with W, and remove the focused title with Delete.
+My List keeps movies and series to watch later. Save a title with the bookmark on its poster or the My List button on its page; the list is in the side rail and on the dashboard. It opens as posters; the View switch turns it into a ranked list, and the app remembers the choice. Reorder it by dragging or with the arrow buttons in the list, or with Alt+Up/Down in either view, mark movies watched with W, and remove the focused title with Delete.
 
 ### Custom lists
 
@@ -168,7 +169,7 @@ To use a phone, turn on "Allow phones on this network" under Settings > Remote (
 
 ## Phones and touch screens
 
-On a phone or narrow window (below 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
+Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists the Library pages, each source's pages and Settings. The theme switch is then in Settings > Appearance and the command palette. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
 
 ## Appearance, language and startup
 
@@ -177,8 +178,8 @@ On a phone or narrow window (below 1024 px), "Hide sidebar" at the bottom of the
 - Settings > General > English only hides channels, movies and series whose name or category marks another language. Anything without a clear language still shows.
 - By default the app returns to the screen you last used (Settings > General > On startup). A fresh install opens the dashboard.
 - The window reopens at its last size and position. If that spot is no longer on any monitor (for example, a screen was unplugged), it is moved back onto one. To always open maximized or fullscreen instead, use Settings > General > Window at startup (desktop app). F11 leaves a fullscreen start.
-- Posters, channel logos and backdrops are cached on disk the first time they show, so pages you have seen fill in at once, also offline. Settings > General > Image cache shows how much it holds, clears it, and sets its limit (250 MB to 5 GB, default 500 MB); past the limit the pictures used longest ago are dropped. In the browser the server keeps the cache. See [image-cache.md](architecture/image-cache.md).
-- Settings > General > "Reset settings" puts every setting back to its default, including language, theme, player paths and the image cache limit. Sources, favorites, history and downloads stay, and the tour and What's new do not show again.
+- Posters, channel logos and backdrops are cached on disk the first time they show, so pages you have seen fill in at once, also offline. Settings > Backup and storage > Image cache shows how much it holds, clears it, and sets its limit (250 MB to 5 GB, default 500 MB); past the limit the pictures used longest ago are dropped. In the browser the server keeps the cache. See [image-cache.md](architecture/image-cache.md).
+- Settings > Backup and storage > "Reset settings" puts every setting back to its default, including language, theme, player paths and the image cache limit. Sources, favorites, history and downloads stay, and the tour and What's new do not show again.
 
 ## Keyboard shortcuts
 
@@ -188,7 +189,7 @@ Press `?` in the app for the full list. The main ones:
 | --- | --- |
 | Ctrl+K | Command palette |
 | Ctrl+F | Global search |
-| Ctrl+R | Recently watched |
+| Ctrl+R | Recently watched (desktop app; in a browser it reloads the page) |
 | Ctrl+Shift+L | Switch light / dark theme |
 | Ctrl+Alt+L | Lock parental controls now (while an unlock is running) |
 | F8 | Move focus to notifications |
@@ -234,7 +235,7 @@ Press `?` in the app for the full list. The main ones:
 | Backspace | Back to My Videos from a video's page |
 | Esc | Close the open dialog or overlay; leave picture-in-picture; on a movie or series page, go back to where you came from (a grid returns to the title you opened) |
 
-Space, the arrows and Page Up / Page Down control the player while it is expanded on a page, fullscreen, in picture-in-picture, or focused. While only the mini player shows and focus is on the page, they scroll the page and move through its lists and radio buttons as usual. Over an open dialog the app's shortcuts are off except Esc, F11, Ctrl+Shift+L, and Ctrl+K inside the command palette (it closes it). Ctrl+F and Ctrl+R also do nothing in a text field, so they never throw away what you typed.
+Space, the arrows and Page Up / Page Down control the player while it is expanded on a page, fullscreen, in picture-in-picture, or focused. While only the mini player shows and focus is on the page, they scroll the page and move through its lists and radio buttons as usual. Over an open dialog the app's shortcuts are off except Esc, F11, Ctrl+Shift+L, and Ctrl+K inside the command palette (it closes it). Ctrl+F, and Ctrl+R in the desktop app, also do nothing in a text field, so they never throw away what you typed.
 
 ### Multi-view page
 
@@ -260,7 +261,7 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 ## Backups and migrating from IPTVnator
 
-Settings > Backup exports and imports the IPTVnator playlist backup format (`iptvnator-playlist-backup`, version 1). A backup exported from IPTVnator imports here with its playlists, favorites, recently viewed items, hidden groups, playback positions, and EPG URLs, and a backup exported here opens in IPTVnator.
+Settings > Backup and storage exports and imports the IPTVnator playlist backup format (`iptvnator-playlist-backup`, version 1). A backup exported from IPTVnator imports here with its playlists, favorites, recently viewed items, hidden groups, playback positions, and EPG URLs, and a backup exported here opens in IPTVnator.
 
 A backup made here also keeps My List, your custom channel lists, channel renames and hidden channels, series recording rules, the watch history behind the Stats page, the subtitle style and the Hide watched setting of the movie and series grids, parental locks and the parental options, never the PIN. While parental controls are locked, a "Replace" import is refused until you unlock them with the PIN.
 

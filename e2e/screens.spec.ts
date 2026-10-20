@@ -14,7 +14,7 @@ import { channelButton, gotoLive, playerRegion } from './helpers/ui';
 // scroller) and is saved to test-results/screens/<screen>-<viewport>-<theme>.png for review.
 // Run 2 (check 13) adds a custom list page, the stats page and the guide with its search open.
 // Run 3 (check 13) adds the first-run tour (its first step, pointing at the rail) and the What's new
-// dialog, both opened from Settings > About, and the General section with the image cache row.
+// dialog, both opened from Settings > About, and the Backup and storage section with the image cache row.
 
 const NAME = 'Screens Xtream';
 const SHOTS = 'test-results/screens';
@@ -118,10 +118,10 @@ test.describe.serial('main screens at desktop and phone widths, in every theme',
         await expect(page.getByRole('main').getByRole('radiogroup').first()).toBeVisible();
         await shoot('settings');
 
-        await page.goto('/settings/general');
+        await page.goto('/settings/backup');
         await page.getByTestId('image-cache-row').scrollIntoViewIfNeeded();
         await expect(page.getByTestId('image-cache-row').getByTestId('image-cache-size')).toBeVisible();
-        await shoot('settings-general');
+        await shoot('settings-backup');
 
         // Run 3 C7: the tour's first step and What's new, opened by hand (the automatic ones are seen).
         await page.goto('/settings/about');

@@ -31,6 +31,12 @@ function card(page: Page, name: string) {
   return page.getByTestId('source-card').filter({ has: page.getByTestId('source-name').filter({ hasText: name }) });
 }
 
+/** Remove, from the card's More actions menu. */
+async function removeFromCard(page: Page, name: string): Promise<void> {
+  await card(page, name).getByRole('button', { name: `More actions for ${name}` }).click();
+  await page.getByRole('menu', { name: `More actions for ${name}` }).getByRole('menuitem', { name: 'Remove', exact: true }).click();
+}
+
 /** One visible toast (not the screen-reader live region that repeats its text). */
 function toastItem(page: Page, text: string) {
   return page.getByRole('region', { name: 'Notifications' }).getByRole('listitem').filter({ hasText: text });
@@ -56,7 +62,7 @@ test.describe('sources: cancel and undo', () => {
     const name = 'Cancel Add';
     const dialog = await openAddSourceDialog(page);
     await dialog.getByRole('tab', { name: 'M3U playlist' }).click();
-    await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill(name);
+    await dialog.getByRole('textbox', { name: /^Name/ }).fill(name);
     await dialog.getByRole('tab', { name: 'URL' }).click();
     await dialog.getByRole('textbox', { name: 'Playlist URL' }).fill(SLOW_URL);
     await page.getByTestId('add-source-submit').click();
@@ -129,7 +135,7 @@ test.describe('sources: cancel and undo', () => {
     await page.goto('/sources');
     await expect(card(page, name)).toBeVisible();
 
-    await card(page, name).getByTestId('source-remove').click();
+    await removeFromCard(page, name);
     await expect(card(page, name)).toHaveCount(0);
     const toast = toastItem(page, `Removed ${name}`);
     await expect(toast).toBeVisible();
@@ -155,7 +161,7 @@ test.describe('sources: cancel and undo', () => {
     await page.goto('/sources');
     await expect(card(page, name)).toBeVisible();
 
-    await card(page, name).getByTestId('source-remove').click();
+    await removeFromCard(page, name);
     await expect(card(page, name)).toHaveCount(0);
     await expect(toastItem(page, `Removed ${name}`)).toBeVisible();
     // Still there while Undo is offered.

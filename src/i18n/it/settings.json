@@ -440,7 +440,7 @@
   "imageCacheClearBodyServer": "Verranno rimossi dal server {{size}} di immagini salvate. Questo browser scaricherà di nuovo ciascuna la prossima volta che viene mostrata; gli altri browser potrebbero mostrare la propria copia ancora per una settimana.",
   "imageCacheCleared": "Cache delle immagini svuotata",
   "imageCacheClearFailed": "Impossibile svuotare la cache delle immagini",
-  "imageCacheLoadFailed": "Impossibile leggere la cache delle immagini: {{message}}",
+  "imageCacheLoadFailed": "Impossibile leggere la cache delle immagini.",
   "imageCacheUnavailable": "Questo server non ha una cache delle immagini, quindi le immagini vengono caricate direttamente da ogni provider.",
   "backupOldVersion": "Questo backup usa un formato precedente che non può essere letto. Esporta un nuovo backup e importa quello.",
   "backupImportDone": "Backup importato",

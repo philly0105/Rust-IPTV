@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test';
 
 import { favorites } from './api';
 import { expectPlaying, resumeRecord } from './media';
-import { channelButton, gotoLive, playerRegion } from './ui';
+import { channelButton, gotoLive, openAllTitlesGrid, playerRegion } from './ui';
 
 /** Steps shared by the Xtream and Stalker flows (check 6). */
 
@@ -43,7 +43,7 @@ export async function openCatchup(page: Page, pathPart: RegExp): Promise<void> {
 export async function openMovieFromGrid(page: Page, sourceId: string, title: string): Promise<void> {
   await page.goto(`/s/${sourceId}/movies`);
   await expect(page.getByTestId('vod-landing-movie')).toBeVisible();
-  await page.getByRole('region', { name: 'Categories' }).getByRole('link', { name: /^All movies/ }).click();
+  await openAllTitlesGrid(page);
   await expect(page.getByTestId('vod-grid-movie')).toBeVisible();
   await expect(page.getByTestId('page-title')).toHaveText('All movies');
   const card = page.getByTestId('vod-grid-movie').getByRole('listbox').getByRole('option', { name: new RegExp(title) }).first();
@@ -64,22 +64,33 @@ export async function playMovieOnDetail(page: Page): Promise<string> {
   return st.src;
 }
 
-/** Toggles the detail page's favorite button (aria-pressed) off and on, and checks /favorites. */
+/**
+ * Toggles the favorite from the detail page's More menu off and on, and checks /favorites. The
+ * hero keeps My List, watched and download as buttons; the favorite is a menu item whose label
+ * says which way it goes (Add to favorites, Remove from favorites).
+ */
 export async function favoriteFromDetail(page: Page, detailTestId: string, title: string): Promise<void> {
-  const button = page.getByTestId(detailTestId).getByRole('button', { name: /favorites/i }).first();
+  const more = page.getByTestId(detailTestId).getByRole('button', { name: 'More actions', exact: true });
+  const item = (name: string) => page.getByRole('menu').getByRole('menuitem', { name, exact: true });
   const isFav = async () => (await favorites(page.request)).some((f) => f.snapshot.title.includes(title));
-  await expect(button).toHaveAttribute('aria-pressed', 'false');
-  await button.click();
-  await expect(button).toHaveAttribute('aria-pressed', 'true');
-  await expect(button).toHaveAccessibleName('In favorites');
+  /** Opens the menu, checks it offers `offered` (the state the page shows), and picks it. */
+  const toggle = async (offered: string) => {
+    await more.click();
+    await expect(item(offered)).toBeVisible();
+    await item(offered).click();
+    // The menu has played its exit before the next opens.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  };
+  await toggle('Add to favorites');
   await expect.poll(isFav).toBe(true);
-  // Toggle off and back on.
-  await button.click();
-  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  // Toggle off and back on; each time the menu offers the other way.
+  await toggle('Remove from favorites');
   await expect.poll(isFav).toBe(false);
-  await button.click();
-  await expect(button).toHaveAttribute('aria-pressed', 'true');
+  await toggle('Add to favorites');
   await expect.poll(isFav).toBe(true);
+  await more.click();
+  await expect(item('Remove from favorites')).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await page.goto('/favorites');
   await expect(page.getByTestId('favorites-page')).toBeVisible();

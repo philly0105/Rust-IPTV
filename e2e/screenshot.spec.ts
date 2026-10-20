@@ -64,11 +64,13 @@ test.describe.serial('screenshots in server mode', () => {
     await expect(page.getByText(download.suggestedFilename()).first()).toBeVisible();
   });
 
-  test('the camera button in the control bar does the same', async ({ page }) => {
+  test("Take screenshot in the player's options menu does the same", async ({ page }) => {
     await playFirstLiveChannel(page, sourceId);
     const stage = playerRegion(page);
     await wakeControls(page, stage);
-    const camera = stage.getByRole('button', { name: 'Take screenshot' });
+    // A row of the options menu, with its key, since the control bar keeps only the main controls.
+    await stage.getByRole('button', { name: 'Playback options' }).click();
+    const camera = page.getByRole('menu', { name: 'Playback options' }).getByRole('menuitem', { name: 'Take screenshot' });
     await expect(camera).toBeVisible();
     await expect(camera).toHaveAttribute('aria-keyshortcuts', 'S');
     const downloading = page.waitForEvent('download');

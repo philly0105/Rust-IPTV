@@ -10,9 +10,10 @@ import { expectNoHorizontalScroll, settle } from './helpers/layout';
 // first-run tour and What's new (contract C7) against the real core.
 //
 // - A fresh data dir with no source stores `lastSeenVersion` silently and
-//   shows nothing; once the mock Xtream source exists the 3-step tour opens:
-//   Next, Back, the arrow keys and Escape work, focus stays in the card, and
-//   `tourCompleted` is true afterwards (Skip and Done store it too).
+//   shows nothing; once the mock Xtream source exists the tour opens as one
+//   coach card on search (SS-6). "Show me around" grows it into the 3-step
+//   tour: Next, Back, the arrow keys and Escape work, focus stays in the card,
+//   and `tourCompleted` is true afterwards (Got it, Skip and Done store it too).
 // - `lastSeenVersion = 0.0.1` and a reload show What's new; Got it stores the
 //   running version, and the next reload shows nothing.
 // - Under reduced motion the tour has no transitions or animations.
@@ -45,6 +46,21 @@ async function openShell(page: Page): Promise<void> {
 
 function tourCard(page: Page): Locator {
   return page.getByTestId('tour-card');
+}
+
+/** The automatic tour's one card: search and the command palette, Got it, and the way into the full tour. */
+async function expectCoach(page: Page): Promise<void> {
+  await expect(tourCard(page)).toBeVisible(SHOW);
+  await expect(page.getByTestId('tour')).toHaveAttribute('data-tour-step', 'search');
+  await expect(tourCard(page).getByRole('heading', { name: 'Your source is ready' })).toBeVisible();
+  await expect(page.getByTestId('tour-progress')).toHaveCount(0);
+  await expect(page.getByTestId('tour-next')).toHaveText('Got it');
+}
+
+/** "Show me around": the coach card becomes step 1 of the full tour. */
+async function showAround(page: Page): Promise<void> {
+  await tourCard(page).getByRole('button', { name: 'Show me around' }).click();
+  await expectStep(page, 1);
 }
 
 async function expectStep(page: Page, n: 1 | 2 | 3): Promise<void> {
@@ -83,17 +99,21 @@ test.describe.serial('first-run tour and What\'s new', () => {
     expect((await markers(request)).tourCompleted).toBe(false);
   });
 
-  test('the tour opens once a source exists: Next, Back, arrows, focus trap, Escape', async ({ page, request }) => {
+  test('the tour opens once a source exists: Show me around, Next, Back, arrows, focus trap, Escape', async ({ page, request }) => {
     await ensureSource(request, 'xtream', NAME);
     await page.setViewportSize({ width: 1280, height: 800 });
     await openShell(page);
 
     const card = tourCard(page);
-    await expect(card).toBeVisible(SHOW);
+    await expectCoach(page);
     await expect(page.getByTestId('whats-new')).toHaveCount(0);
     await expect(card).toHaveAttribute('aria-modal', 'true');
-    await expectStep(page, 1);
-    await expect(card.getByRole('heading', { name: 'Live TV' })).toBeVisible();
+    await expect(page.getByTestId('tour-next')).toBeFocused();
+    // The header's search button is the anchor at this width: it gets the spotlight.
+    await expect(page.getByTestId('tour-spotlight')).toBeVisible();
+
+    await showAround(page);
+    await expect(card.getByRole('heading', { name: 'Your sources' })).toBeVisible();
     await expect(page.getByTestId('tour-next')).toBeFocused();
 
     // A visible anchor gets the spotlight; without one the card is centred.
@@ -145,10 +165,21 @@ test.describe.serial('first-run tour and What\'s new', () => {
     await expect(page.getByTestId('whats-new')).toHaveCount(0);
   });
 
+  test('Got it on the automatic card stores tourCompleted', async ({ page, request }) => {
+    await setMarkers(request, { tourCompleted: false, lastSeenVersion: version });
+    await openShell(page);
+    await expectCoach(page);
+    await expect(tourCard(page).getByRole('button', { name: 'Skip tour' })).toHaveCount(0);
+    await tourCard(page).getByRole('button', { name: 'Got it' }).click();
+    await expect(page.getByTestId('tour')).toHaveCount(0);
+    await expect.poll(async () => (await markers(request)).tourCompleted, { timeout: 10_000 }).toBe(true);
+  });
+
   test('Skip tour stores tourCompleted', async ({ page, request }) => {
     await setMarkers(request, { tourCompleted: false, lastSeenVersion: version });
     await openShell(page);
-    await expect(tourCard(page)).toBeVisible(SHOW);
+    await expectCoach(page);
+    await showAround(page);
     await tourCard(page).getByRole('button', { name: 'Skip tour' }).click();
     await expect(page.getByTestId('tour')).toHaveCount(0);
     await expect.poll(async () => (await markers(request)).tourCompleted, { timeout: 10_000 }).toBe(true);
@@ -158,7 +189,8 @@ test.describe.serial('first-run tour and What\'s new', () => {
     await setMarkers(request, { tourCompleted: false, lastSeenVersion: version });
     await openShell(page);
     const card = tourCard(page);
-    await expect(card).toBeVisible(SHOW);
+    await expectCoach(page);
+    await showAround(page);
     await card.getByRole('button', { name: 'Next' }).click();
     await card.getByRole('button', { name: 'Next' }).click();
     await expectStep(page, 3);
@@ -173,7 +205,9 @@ test.describe.serial('first-run tour and What\'s new', () => {
     await setMarkers(request, { tourCompleted: false, lastSeenVersion: version });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await openShell(page);
-    await expect(tourCard(page)).toBeVisible(SHOW);
+    await expectCoach(page);
+    // Two moves: the coach card to step 1, and step 1 to step 2.
+    await showAround(page);
     await tourCard(page).getByRole('button', { name: 'Next' }).click();
     // The global reduced-motion rule leaves 0.01 ms on everything; anything a person could see counts.
     const moving = await page.getByTestId('tour').evaluate((root) =>
@@ -238,17 +272,25 @@ test.describe.serial('first-run tour and What\'s new', () => {
       await openShell(page);
       const failures: string[] = [];
 
-      for (const n of [1, 2, 3] as const) {
-        await expect(tourCard(page)).toBeVisible(SHOW);
-        await expectStep(page, n);
+      /** The card on screen, no sideways scroll, and no serious axe finding. */
+      const check = async (label: string) => {
         await settle(page, 300);
         const box = await tourCard(page).boundingBox();
-        expect(box, 'tour card on screen').not.toBeNull();
+        expect(box, `${label}: card on screen`).not.toBeNull();
         expect(box!.x).toBeGreaterThanOrEqual(0);
         expect(box!.x + box!.width).toBeLessThanOrEqual(vp.width);
         expect(box!.y + box!.height).toBeLessThanOrEqual(vp.height);
-        await expectNoHorizontalScroll(page, `tour step ${n} @ ${vp.width}x${vp.height}`);
-        for (const v of await seriousViolations(page, '[data-testid="tour"]')) failures.push(`tour step ${n}: ${v}`);
+        await expectNoHorizontalScroll(page, `${label} @ ${vp.width}x${vp.height}`);
+        for (const v of await seriousViolations(page, '[data-testid="tour"]')) failures.push(`${label}: ${v}`);
+      };
+
+      await expectCoach(page);
+      await check('coach card');
+      await showAround(page);
+      for (const n of [1, 2, 3] as const) {
+        await expect(tourCard(page)).toBeVisible(SHOW);
+        await expectStep(page, n);
+        await check(`tour step ${n}`);
         await tourCard(page).getByTestId('tour-next').click();
       }
 

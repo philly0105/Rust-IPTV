@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "這會從伺服器刪除已儲存的圖片，共 {{size}}。此瀏覽器會在每張圖片下次顯示時重新下載；其他瀏覽器可能在最長一週內繼續顯示各自的副本。",
   "imageCacheCleared": "已清除圖片快取",
   "imageCacheClearFailed": "無法清除圖片快取",
-  "imageCacheLoadFailed": "無法讀取圖片快取：{{message}}",
+  "imageCacheLoadFailed": "無法讀取圖片快取。",
   "imageCacheUnavailable": "此伺服器沒有圖片快取，圖片會直接從各供應商載入。",
   "backupOldVersion": "此備份使用無法讀取的舊格式。請匯出新的備份後再匯入。",
   "backupImportDone": "已匯入備份",

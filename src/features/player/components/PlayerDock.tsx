@@ -16,7 +16,7 @@ import { bindLiveProgramme } from '../nowNext';
 import { bindRemote } from '../remote';
 import { bindParentalGuard } from '../parentalGuard';
 import { exitPip, usePipStore } from '../pip';
-import { getLastStagePath, setRehome, useStageTarget } from '../stage';
+import { expandPath, setRehome, useStageTarget } from '../stage';
 import { flushProgress, reportFullscreen, usePlayerStore } from '../store';
 import { usePlaybackShortcuts } from '../usePlaybackShortcuts';
 import { bindSettingsEvents, usePlayerSettings } from '../useSettings';
@@ -106,7 +106,8 @@ function RouterExpand({ label }: { label: string }) {
     <ExpandBase
       label={label}
       onExpand={() => {
-        const path = getLastStagePath();
+        const { source, zapContext } = usePlayerStore.getState();
+        const path = expandPath(source, zapContext);
         if (path) navigate(path);
         else usePlayerStore.getState().toggleFullscreen();
       }}

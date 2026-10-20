@@ -77,8 +77,8 @@ test('main flow: channel with zap banner, a movie in My List, multi-view with tw
   await expect(page).toHaveURL(new RegExp(`/s/${source.id}/movies$`));
   await expect.poll(async () => (await rpc<WatchlistEntry[]>(request, 'watchlist.list', {})).map((e) => e.snapshot.title)).toEqual([title]);
   await page.goto('/my-list');
-  await expect(page.getByTestId('mylist-row')).toHaveCount(1);
-  await expect(page.getByTestId('mylist-row').first()).toContainText(title);
+  await expect(page.getByTestId('mylist-card')).toHaveCount(1);
+  await expect(page.getByTestId('mylist-card').first()).toContainText(title);
 
   // Multi-view: "Add to multi-view" on two channels; each add stays on the list and says so in a
   // toast whose "Open multi-view" action opens the wall.
@@ -227,10 +227,12 @@ test('main flow (Run 2): rename and hide, a two-source list, guide search and a 
   await page.goto(`/s/${xtream.id}/movies/c/all?sort=name`);
   const options = page.getByTestId('vod-grid-movie').getByRole('listbox').getByRole('option');
   await expect(options.first()).toBeVisible();
+  // Hide watched sits in the Filters panel; the decade chips stay in the toolbar.
+  await page.getByTestId('vod-filters-toggle').click();
   const hide = page.getByRole('switch', { name: 'Hide watched' });
   await hide.click();
   await expect(hide).toHaveAttribute('aria-checked', 'true');
-  await page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year', exact: true }).getByRole('button', { name: /^2020s, \d+ titles$/ }).click();
+  await page.getByTestId('vod-grid-toolbar').getByRole('group', { name: 'Year', exact: true }).getByRole('button', { name: /^2020s, \d+ titles$/ }).click();
   await expect(page).toHaveURL(/[?&]yf=2020&yt=2029/);
   await expect(options.first()).toBeVisible();
   await expect(options.filter({ hasText: MOCK_FACTS.firstMovie.title })).toHaveCount(0);

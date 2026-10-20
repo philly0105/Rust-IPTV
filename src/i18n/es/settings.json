@@ -440,7 +440,7 @@
   "imageCacheClearBodyServer": "Se eliminarán del servidor {{size}} de imágenes guardadas. Este navegador volverá a descargar cada una la próxima vez que se muestre; otros navegadores pueden seguir mostrando su propia copia hasta una semana.",
   "imageCacheCleared": "Caché de imágenes vaciada",
   "imageCacheClearFailed": "No se pudo vaciar la caché de imágenes",
-  "imageCacheLoadFailed": "No se pudo leer la caché de imágenes: {{message}}",
+  "imageCacheLoadFailed": "No se pudo leer la caché de imágenes.",
   "imageCacheUnavailable": "Este servidor no tiene caché de imágenes, así que las imágenes se cargan directamente desde cada proveedor.",
   "backupOldVersion": "Esta copia de seguridad usa un formato antiguo que no se puede leer. Exporta una copia nueva e impórtala.",
   "backupImportDone": "Copia de seguridad importada",

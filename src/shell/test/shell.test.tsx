@@ -1490,13 +1490,6 @@ describe('L1 shell polish', () => {
     expect(focusSelector(a)).toMatch(/^a\[href="/);
   });
 
-  it('a panel with drawer off has no header toggle below 1440 px', async () => {
-    renderRoutes(routes(), '/panel');
-    await screen.findByTestId('panel-toggle');
-    act(() => useShellStore.setState({ panelDrawer: false }));
-    await waitFor(() => expect(screen.queryByTestId('panel-toggle')).toBeNull());
-  });
-
   it('the dashboard hides a pending-removal source in continue watching and favourites', async () => {
     const { usePendingRemovals } = await import('@/features/sources/lib/pendingRemoval');
     act(() => usePendingRemovals.setState({ ids: new Set(['s1']) }));

@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "서버에서 저장된 이미지(총 {{size}})를 삭제합니다. 이 브라우저에서는 각 이미지가 다음에 표시될 때 다시 다운로드됩니다. 다른 브라우저에서는 최대 일주일 동안 자체 사본이 표시될 수 있습니다.",
   "imageCacheCleared": "이미지 캐시를 지웠습니다",
   "imageCacheClearFailed": "이미지 캐시를 지우지 못했습니다",
-  "imageCacheLoadFailed": "이미지 캐시를 읽지 못했습니다: {{message}}",
+  "imageCacheLoadFailed": "이미지 캐시를 읽지 못했습니다.",
   "imageCacheUnavailable": "이 서버에는 이미지 캐시가 없어 이미지를 각 제공업체에서 직접 불러옵니다.",
   "backupOldVersion": "이 백업은 읽을 수 없는 이전 형식입니다. 새 백업을 내보낸 후 가져오세요.",
   "backupImportDone": "백업을 가져왔습니다",

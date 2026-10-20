@@ -1,7 +1,7 @@
 /**
  * Settings row for the disk image cache (Run 3 contracts C1 and C3,
  * docs/architecture/image-cache.md): how much the cache holds against its
- * cap, a cap select and Clear. I-integration mounts it in General.
+ * cap, a cap select and Clear. Settings > Backup and storage shows it.
  *
  * Sizes use the cap's own units: the core counts `imageCacheMaxMb` in MiB
  * (`imagecache::max_bytes`), and the select calls 1000 of them "1 GB", so the
@@ -173,8 +173,12 @@ export function ImageCacheRow({ update: tracked }: { update?: (patch: SettingsPa
             {t('imageCacheUnavailable')}
           </p>
         ) : stats.isError ? (
-          <div role="alert" className="flex w-full flex-wrap items-center gap-3 text-sm" data-testid="image-cache-error">
-            <span className="min-w-0 flex-1 text-danger">{t('imageCacheLoadFailed', { message: stats.error.message })}</span>
+          <div role="alert" className="flex w-full flex-wrap items-start gap-3 text-sm" data-testid="image-cache-error">
+            {/* The translated failure, then the translated hint for the core's error (SS-18), as the downloads folder row says it. */}
+            <span className="min-w-0 flex-1">
+              <span className="block text-danger">{t('imageCacheLoadFailed')}</span>
+              <span className="block text-fg-muted">{errorDescription(stats.error)}</span>
+            </span>
             <Button size="sm" variant="secondary" onClick={() => void stats.refetch()}>
               {t('retry')}
             </Button>

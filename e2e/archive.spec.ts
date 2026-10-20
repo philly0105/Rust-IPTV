@@ -25,7 +25,7 @@ test('archive view shows the day picker and the selected day', async ({ page }) 
   const archive = page.getByTestId('archive-page');
   await expect(archive).toBeVisible();
 
-  const days = archive.getByRole('tablist', { name: 'Archive day' });
+  const days = archive.getByRole('tablist', { name: 'Catch-up day' });
   await expect(days).toBeVisible();
   const tabs = days.getByRole('tab');
   expect(await tabs.count()).toBeGreaterThan(1);

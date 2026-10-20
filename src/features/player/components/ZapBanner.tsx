@@ -3,7 +3,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type EpgNowNext, type ItemRef } from '@/api/types';
-import { formatClock, ms } from '@/features/live/lib/epgTime';
+import { formatClock, formatTimeRange, ms } from '@/features/live/lib/epgTime';
+import { monogramFill, monogramText } from '@/features/live/lib/monogram';
 import { useImageChain } from '@/ui/image';
 
 import { cn } from '../cn';
@@ -73,17 +74,21 @@ function useClock(active: boolean, everyMs = 5000): number {
 
 /**
  * The channel's logo: the guide's logo, else the item's own picture, each through the image
- * cache (C3) and then its original URL once; the TV icon when none loads.
+ * cache (C3) and then its original URL once. When none loads, the channel's monogram, the same
+ * tile the channel list and the guide draw (LG-14); the TV icon only for a channel with no name.
  */
 function Logo({
   urls,
   sourceId,
+  name,
   compact,
   chip = false,
   box: boxClass,
 }: {
   urls: readonly (string | undefined)[];
   sourceId: string;
+  /** The channel's name, for the monogram. */
+  name?: string;
   compact: boolean;
   chip?: boolean;
   /** Size and corner in place of the variant's (the title bar's 40 px tile). */
@@ -91,6 +96,23 @@ function Logo({
 }) {
   const logo = useImageChain(urls.map(safeImageUrl), sourceId);
   const box = boxClass ?? (chip ? 'size-6 rounded-xs' : compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10');
+  if (!logo.url && name?.trim()) {
+    return (
+      <span
+        data-testid="zap-logo-fallback"
+        data-monogram=""
+        className={cn(
+          'flex shrink-0 items-center justify-center font-display leading-none font-semibold tracking-tight text-white ring-1 ring-white/10',
+          chip ? 'text-2xs' : compact ? 'text-xs' : 'text-title-sm @max-md:text-sm',
+          box,
+        )}
+        style={{ background: monogramFill(name) }}
+        aria-hidden
+      >
+        {monogramText(name)}
+      </span>
+    );
+  }
   if (!logo.url) {
     return (
       <span
@@ -205,7 +227,7 @@ function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext 
             {current.title}
           </span>
           <span className="player-on-glass-muted font-numeric text-caption tabular-nums @max-md:hidden">
-            {formatClock(ms(current.start), lang)}–{formatClock(ms(current.end), lang)}
+            {formatTimeRange(ms(current.start), ms(current.end), lang)}
           </span>
           <span className="sr-only">, {t('zapMinutesLeft', { minutes: minutesLeft })}</span>
           <Progress share={airedShare(current, now)} className="col-[2/-1] mb-1 self-center" />
@@ -344,7 +366,7 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
           guide={guide}
           now={now}
           locked={locked}
-          logo={locked ? <LockTile compact chip /> : <Logo urls={logos} sourceId={ref.sourceId} compact chip />}
+          logo={locked ? <LockTile compact chip /> : <Logo urls={logos} sourceId={ref.sourceId} name={source.title} compact chip />}
         />
       </div>
     );
@@ -375,7 +397,7 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className={cn('flex min-w-0 items-start', compact ? 'gap-2' : 'gap-3')}>
-        {locked ? <LockTile compact={compact} /> : <Logo urls={logos} sourceId={ref.sourceId} compact={compact} />}
+        {locked ? <LockTile compact={compact} /> : <Logo urls={logos} sourceId={ref.sourceId} name={source.title} compact={compact} />}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2.5">
             {number !== undefined && (
@@ -456,7 +478,7 @@ const TITLE_CLOCK_MS = 30_000;
 
 /**
  * The channel's logo in the player's title bar, where a LIVE pill used to repeat the bar's badge
- * (PL-DUPLICATE-CHROME). The banner's own lookup and image cache; the TV glyph when none loads.
+ * (PL-DUPLICATE-CHROME). The banner's own lookup and image cache; the channel's monogram when none loads.
  */
 export function TitleLogo({ channel, posterUrl, big = false }: { channel: ItemRef; posterUrl?: string | undefined; big?: boolean }) {
   const source = usePlayerStore((s) => s.source);
@@ -465,7 +487,7 @@ export function TitleLogo({ channel, posterUrl, big = false }: { channel: ItemRe
   // 40 px beside the title, 56 in fullscreen.
   const box = big ? 'size-14 rounded-lg' : 'size-10 rounded-md';
   if (locked) return <LockTile compact box={box} />;
-  return <Logo urls={[info?.logoUrl, posterUrl]} sourceId={channel.sourceId} compact box={box} />;
+  return <Logo urls={[info?.logoUrl, posterUrl]} sourceId={channel.sourceId} name={source?.title} compact box={box} />;
 }
 
 /**

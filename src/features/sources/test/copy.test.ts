@@ -44,12 +44,8 @@ describe('copy of the sources and settings areas (SS-11)', () => {
   });
 
   it('writes "Couldn\'t" in English, never "Could not"', () => {
-    // vod's parentalOpen test asserts this heading word for word; change both together.
-    const keep = new Set(['parental.checkFailedTitle']);
     for (const ns of NAMESPACES) {
-      for (const [k, v] of Object.entries(read('en', ns))) {
-        if (!keep.has(`${ns}.${k}`)) expect(v, `${ns}.${k}`).not.toMatch(/\bcould not\b/i);
-      }
+      for (const [k, v] of Object.entries(read('en', ns))) expect(v, `${ns}.${k}`).not.toMatch(/\bcould not\b/i);
     }
   });
 

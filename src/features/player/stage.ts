@@ -2,6 +2,10 @@
 
 import { useSyncExternalStore } from 'react';
 
+import type { PlayerSource } from '@/api/types';
+
+import type { ZapContext } from './store';
+
 const targets: HTMLElement[] = [];
 const listeners = new Set<() => void>();
 let lastStagePath: string | null = null;
@@ -45,7 +49,25 @@ export function useStageTarget(): HTMLElement | null {
   return useSyncExternalStore(subscribe, current, () => null);
 }
 
-/** The route that last showed a stage; the mini player's expand button returns there. */
+/** The route that last showed a stage. */
 export function getLastStagePath(): string | null {
   return lastStagePath;
+}
+
+/**
+ * Where the mini player's Expand goes (LG-05): a live channel's or station's own page, so its row
+ * is marked and the ribbon describes it, whichever page showed the stage last. A list play opens
+ * the list, a favorites play the source's Favorites view, otherwise the source's Live TV (or
+ * Radio) in the group it was played from. Anything else (a movie, an episode, catch-up, a stream
+ * without a ref) goes back to the page that last showed the stage.
+ */
+export function expandPath(source: PlayerSource | undefined, ctx: ZapContext | undefined): string | null {
+  const ref = source?.ref;
+  if (!source?.isLive || !ref || (ref.contentType !== 'live' && ref.contentType !== 'radio')) return lastStagePath;
+  if (ctx?.listId) return `/lists/${encodeURIComponent(ctx.listId)}`;
+  // The context's group belongs to its own source: a channel of another source opens its source's top.
+  const group = ctx?.favorites ? '@favorites' : ctx?.sourceId === ref.sourceId ? ctx.categoryId : undefined;
+  const base = `/s/${encodeURIComponent(ref.sourceId)}`;
+  if (ref.contentType === 'radio') return `${base}/radio${group ? `?category=${encodeURIComponent(group)}` : ''}`;
+  return `${base}/live${group ? `/${encodeURIComponent(group)}` : ''}`;
 }

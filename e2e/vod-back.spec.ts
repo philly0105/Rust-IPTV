@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 
 import { ensureSource, resetApp } from './helpers/api';
 import { expect, test } from './helpers/fixtures';
+import { openAllTitlesGrid } from './helpers/ui';
 
 // VOD grid -> detail -> Back: one Back press returns to the grid (not the
 // category landing), with the opened title visible and the keyboard cursor on it.
@@ -15,7 +16,7 @@ let sourceId = '';
 async function openGrid(page: Page): Promise<string> {
   await page.goto(`/s/${sourceId}/movies`);
   await expect(page.getByTestId('vod-landing-movie')).toBeVisible();
-  await page.getByRole('region', { name: 'Categories' }).getByRole('link', { name: /^All movies/ }).click();
+  await openAllTitlesGrid(page);
   const grid = page.getByTestId('vod-grid-movie');
   await expect(grid.getByRole('listbox').getByRole('option').nth(OPEN_INDEX)).toBeVisible();
   return page.url();

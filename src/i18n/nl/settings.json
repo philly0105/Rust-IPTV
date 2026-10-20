@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "Hiermee verwijder je {{size}} aan bewaarde afbeeldingen van de server. Deze browser downloadt elke afbeelding opnieuw zodra die weer wordt getoond; andere browsers kunnen nog tot een week hun eigen kopie tonen.",
   "imageCacheCleared": "Afbeeldingscache gewist",
   "imageCacheClearFailed": "Kan de afbeeldingscache niet wissen",
-  "imageCacheLoadFailed": "Kan de afbeeldingscache niet lezen: {{message}}",
+  "imageCacheLoadFailed": "Kan de afbeeldingscache niet lezen.",
   "imageCacheUnavailable": "Deze server heeft geen afbeeldingscache, dus afbeeldingen worden rechtstreeks bij elke provider geladen.",
   "backupOldVersion": "Deze back-up gebruikt een ouder formaat dat niet gelezen kan worden. Exporteer een nieuwe back-up en importeer die.",
   "backupImportDone": "Back-up geïmporteerd",

@@ -83,7 +83,7 @@ Point the domain's DNS at the machine and forward ports 80 and 443 to it. Caddy 
 ## Day to day
 
 - Update: `docker compose pull && docker compose up -d`. To stay on one version, set `TSRUST_VERSION=0.2.0` (or another tag) in `.env`.
-- Data: sources, settings, the image cache, downloads and recordings are in the `tsrust-data` volume, at `/data` inside the app container. Settings > Backup in the app exports your sources and lists as a file. To copy downloads out: `docker compose cp tsrust-iptv:/data/downloads ./downloads`.
+- Data: sources, settings, the image cache, downloads and recordings are in the `tsrust-data` volume, at `/data` inside the app container. Settings > Backup and storage in the app exports your sources and lists as a file. To copy downloads out: `docker compose cp tsrust-iptv:/data/downloads ./downloads`.
 - Logs: `docker compose logs -f tsrust-iptv`. The app also writes rotating JSON logs to `/data/logs`.
 - Recording works in the container: the image includes mpv for it. Files go to `/data/downloads/recordings`.
 - On private addresses, the server only fetches from each source's own host and port. A playlist on your NAS works, but if its streams, guide or logos come from another machine on your network (a tvheadend box, say), add `IPTV_ALLOW_PRIVATE_TARGETS: "true"` under the app's `environment` in `compose.yaml`.

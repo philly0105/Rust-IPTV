@@ -45,6 +45,8 @@ export { Badge, Kbd, LivePill, MetaLine, ProgressBar, TEXT_LINK, comboKeys } fro
 export type { BadgeProps, BadgeVariant, KbdProps, LivePillProps, MetaLineProps, ProgressBarProps } from './Misc';
 export { Poster, PosterWidthContext, hueOf, initialsOf } from './Poster';
 export type { PosterAspect, PosterProps } from './Poster';
+export { SourceMonogram } from './SourceMonogram';
+export type { SourceMonogramProps } from './SourceMonogram';
 export { QUARTER_BLUR, useImageChain, whenIdle } from './image';
 export type { ImageChain } from './image';
 export { gateImage, pageIsScrolling } from './imageGate';

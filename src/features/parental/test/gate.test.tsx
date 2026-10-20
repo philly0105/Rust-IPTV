@@ -221,7 +221,7 @@ describe('ensureUnlocked', () => {
     await expect(ensureUnlocked([{ ref: channelRef('c1') }])).resolves.toBe(false);
     const toast = useToastStore.getState().toasts.at(-1);
     expect(toast?.variant).toBe('error');
-    expect(toast?.title).toBe('Could not check parental locks');
+    expect(toast?.title).toBe("Couldn't check parental locks");
   });
 
   it('lets everything through on a core without parental controls', async () => {

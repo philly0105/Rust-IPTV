@@ -346,14 +346,19 @@ Caddy passes the `Host` header through unchanged, so the guard above accepts
 it. `/manifest.webmanifest` and `/icons/*` stay outside the password because
 browsers fetch the manifest without credentials.
 
+### HTTPS and secure context
+
 HTTPS matters for more than the password. A page on plain
 `http://<lan-ip>:7180` is not a secure context, so the browser turns off the
 service worker and PWA install, `navigator.clipboard` (the copy buttons) and
 EME (ClearKey channels). `localhost` is a secure context, so none of this
-applies on the server machine itself. `Notification` is secure-context only
-too, but the UI never calls `Notification.requestPermission`: a guide reminder
-is an in-app toast, plus a browser notification only where the user already
-allowed notifications for the site (`src/features/recording/lib/fire.ts`).
+applies on the server machine itself. On a page that is not a secure context
+the app says so once per browser, in a toast that links to this section
+(`src/shell/SecureContextNotice.tsx`, localStorage
+`tsrust.insecureNoticeShown`). `Notification` is secure-context only too, but
+the UI never calls `Notification.requestPermission`: a guide reminder is an
+in-app toast, plus a browser notification only where the user already allowed
+notifications for the site (`src/features/recording/lib/fire.ts`).
 
 Safari has been reported to send no credentials on WebSocket upgrades behind
 HTTP basic authentication, which would make `/api/events` fail with 401 there. This is untested with this setup;

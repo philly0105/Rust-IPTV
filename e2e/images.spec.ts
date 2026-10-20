@@ -4,11 +4,12 @@ import type { AppInfo, ImageCacheStats, Settings, Source } from '../src/api/type
 import { ensureSource, resetApp, rpc } from './helpers/api';
 import { MOCK } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
+import { openAllTitlesGrid } from './helpers/ui';
 
 // Run 3 C2/C3: artwork loads through the server's disk image cache.
 // - Movie posters on the mock Xtream grid load from /api/img and decode.
 // - The first fetch is a miss; a browser with an empty HTTP cache gets hits.
-// - Settings > General shows a non-zero cache, and Clear empties it.
+// - Settings > Backup and storage shows a non-zero cache, and Clear empties it.
 // playwright.config.ts starts iptv-server with a fresh --data-dir, so the
 // cache starts empty; resetApp clears it as well in case E2E_KEEP_DATA is set.
 
@@ -27,7 +28,7 @@ function watchImages(page: Page): Response[] {
 async function openGridPosters(page: Page, sourceId: string): Promise<void> {
   await page.goto(`/s/${sourceId}/movies`);
   await expect(page.getByTestId('vod-landing-movie')).toBeVisible();
-  await page.getByRole('region', { name: 'Categories' }).getByRole('link', { name: /^All movies/ }).click();
+  await openAllTitlesGrid(page);
   const grid = page.getByTestId('vod-grid-movie');
   await expect(grid).toBeVisible();
   const posters = grid.locator('img[src^="/api/img?"]');
@@ -93,7 +94,7 @@ test.describe.serial('image cache', () => {
     expect(before.files).toBeGreaterThan(0);
     expect(before.bytes).toBeGreaterThan(0);
 
-    await page.goto('/settings/general');
+    await page.goto('/settings/backup');
     const row = page.getByTestId('image-cache-row');
     await row.scrollIntoViewIfNeeded();
     await expect(row.getByRole('meter', { name: 'Image cache' })).toBeVisible();
@@ -131,7 +132,7 @@ test.describe.serial('image cache', () => {
   });
 
   test('a new cap is saved', async ({ page, request }) => {
-    await page.goto('/settings/general');
+    await page.goto('/settings/backup');
     const row = page.getByTestId('image-cache-row');
     await row.scrollIntoViewIfNeeded();
     await row.getByLabel('Limit').selectOption('1000');

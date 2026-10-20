@@ -31,8 +31,12 @@ export function WatchStage({ title, subtitle, onClose, aside }: { title: string;
       </div>
       <div className="flex flex-col gap-4 xl:flex-row">
         {/* VL-watchstage-letterbox: the height cap caps the width too (16:9 of 72vh), so a wide window
-            gets no black bars inside the frame; the rest of the row stays the page's. */}
-        <PlayerStage className="aspect-video max-h-[72vh] w-full max-w-[calc(72vh*16/9)] min-w-0 flex-1 overflow-hidden rounded-lg bg-black shadow-2" />
+            gets no black bars inside the frame; the rest of the row stays the page's. The bar above
+            heads it with the title, so the player leaves out its own (PL-DUPLICATE-CHROME). */}
+        <PlayerStage
+          showTitle={false}
+          className="aspect-video max-h-[72vh] w-full max-w-[calc(72vh*16/9)] min-w-0 flex-1 overflow-hidden rounded-lg bg-black shadow-2"
+        />
         {aside}
       </div>
     </section>

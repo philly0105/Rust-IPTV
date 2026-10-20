@@ -43,11 +43,11 @@ Args are `{refs: ItemRef[]}` with 1..=500 refs; anything else returns `invalid`.
 
 ### Filter row
 
-`VodFilterBar` sits under the grid toolbar on every Movies and Series grid.
+`VodFilterBar` (`DecadeChips`, `YearRangeFields`) on every Movies and Series grid. The decade chips sit in the grid's toolbar beside the search and the sort; the exact range and Hide watched are in a panel under it that the toolbar's Filters button opens, whose badge counts the filters that are on. Below 640 px the sort and the chips fold into that panel too, so the grid starts right under the search row.
 
 - Decade chips. For m3u and Xtream sources the chips come from `catalog.yearFacets`, summed per decade. Each chip has a thin level bar showing its share of the busiest decade, and its accessible name includes the count ("1990s, 8 titles"). Stalker portals cannot report years up front, so they get fixed chips from the 1950s to the 2020s without counts. If the facet call fails, the row falls back to those fixed chips. While facets load, the row shows skeleton pills. When a catalog has no years at all and no range is set, the chip group is hidden. Clicking the active chip clears it. With Hide watched on, the facet call adds `hideWatched: true`, so the counts and level bars describe the titles the grid keeps; flipping the switch keeps the current chips until the new counts arrive.
 - Exact range. Two selects, From and To. Their first option ("From" or "To") means no bound. A reversed pick is swapped. When the range covers exactly one decade, that decade's chip shows as pressed.
-- Hide watched. A switch at the end of the row. It writes `settings.vodHideWatched` through the optimistic `useUpdateSettings`, so the choice holds across grids and restarts.
+- Hide watched. A switch at the end of the panel. It writes `settings.vodHideWatched` through the optimistic `useUpdateSettings`, so the choice holds across grids and restarts.
 
 On a phone the chips scroll sideways inside their own row, so the page never scrolls horizontally. The row uses logical properties (`ms-auto`, `start`/`end`), and its transitions sit behind `motion-safe:`.
 

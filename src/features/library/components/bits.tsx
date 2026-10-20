@@ -9,7 +9,7 @@ import { Link } from 'react-router';
 import type { ContentType, DownloadStatus, Source } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
-import { hueOf, initialsOf } from '@/ui/Poster';
+import { SourceMonogram as Monogram } from '@/ui/SourceMonogram';
 
 import { Badge, Button, Dialog } from '../deps';
 
@@ -33,16 +33,7 @@ export function SourceBadge({ source, className }: { source: Source | undefined;
 
 /** The rail's source monogram at 16 px: two initials on the source's own hue. Decorative; the name sits beside it. */
 export function SourceMonogram({ name, className }: { name: string; className?: string }) {
-  const hue = hueOf(name);
-  return (
-    <span
-      aria-hidden
-      className={cn('inline-flex size-4 shrink-0 items-center justify-center rounded-xs font-display text-[calc(8rem/15)] font-semibold leading-none text-white', className)}
-      style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
-    >
-      {initialsOf(name)}
-    </span>
-  );
+  return <Monogram name={name} className={cn('size-4 rounded-xs text-[calc(8rem/15)] leading-none', className)} />;
 }
 
 export function ContentIcon({ type, size = 16, className }: { type: ContentType; size?: number; className?: string }) {

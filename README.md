@@ -51,7 +51,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 
 1. Install the app, or start the container and open it in your browser.
 2. Add a source: paste a playlist URL (or choose an M3U file), enter an Xtream server, username and password, or a Stalker portal address and MAC.
-3. Open Live TV and pick a channel, or open the TV guide. A three-step tour shows you Live TV, My List and search.
+3. Open Live TV and pick a channel, or open the TV guide. A card points out search and the command palette; Show me around on it tours your sources, My List and search.
 
 <!-- ![The Sources page with an M3U playlist, an Xtream account and a Stalker portal](docs/screenshots/sources.png) -->
 
@@ -63,7 +63,8 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - Browse the TV guide by day and time, zoom it, and search programme titles for the next 14 days. Xtream channels without XMLTV data show the provider's own now and next.
 - Catch up on past programmes from a channel's archive, by programme or, without a guide, by the hour.
 - When a channel stops working, the player switches to the same channel on another of your sources, with Undo.
-- Make your own channel lists across sources, and rename or hide channels without changing the provider's data.
+- Favorites and Recently watched sit at the top of each source's groups, in Live TV and Radio. Type a channel number in the guide to jump to its row.
+- Make your own channel lists across sources, or add a whole group at once, and rename or hide channels without changing the provider's data.
 
 <!-- ![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png) -->
 
@@ -102,7 +103,7 @@ Record a programme or a whole series from the guide, or the next 30 minutes to 3
 ### Use a remote or a phone
 
 - A web remote in another browser tab, or on your phone after scanning a QR code in the desktop app: change channels, type a number, play, pause, seek and set the volume.
-- On phones and narrow windows, a layout with a hideable sidebar, a compact mini player and tap-to-show controls.
+- On phones, a tab bar at the bottom (Home, Live TV, Guide, Search and More), a compact mini player that stays above it, and tap-to-show controls. Narrow windows can hide the sidebar.
 
 <!-- ![The phone layout](docs/screenshots/phone.png) -->
 

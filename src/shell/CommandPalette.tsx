@@ -549,8 +549,7 @@ export function CommandPalette() {
       hideTitle
       hideClose
       size="lg"
-      // The hidden title's row keeps no padding: an empty band sat above the search field.
-      className="overflow-hidden [&>div:first-child]:p-0"
+      className="overflow-hidden"
       bodyClassName="p-0"
       testId="command-palette"
     >

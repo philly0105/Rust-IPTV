@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "Ez {{size}} mentett képet töröl a szerverről. Ez a böngésző mindegyiket újra letölti, amikor legközelebb megjelenik; más böngészők akár egy hétig még a saját másolatukat mutathatják.",
   "imageCacheCleared": "Képgyorsítótár kiürítve",
   "imageCacheClearFailed": "Nem sikerült kiüríteni a képgyorsítótárat",
-  "imageCacheLoadFailed": "Nem sikerült beolvasni a képgyorsítótárat: {{message}}",
+  "imageCacheLoadFailed": "Nem sikerült beolvasni a képgyorsítótárat.",
   "imageCacheUnavailable": "Ezen a szerveren nincs képgyorsítótár, ezért a képek közvetlenül a szolgáltatóktól töltődnek be.",
   "backupOldVersion": "Ez a biztonsági mentés régebbi formátumú, ezért nem olvasható. Exportálj új mentést, és azt importáld.",
   "backupImportDone": "Biztonsági mentés importálva",

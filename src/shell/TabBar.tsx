@@ -20,7 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
 
 import type { Source } from '@/api/types';
-import { cn, Dialog, hueOf, initialsOf } from '@/ui';
+import { cn, Dialog, SourceMonogram } from '@/ui';
 
 import { isLiveRoute, LIBRARY_LINKS, liveTabTarget, readLastSource } from './navigation';
 import { railLinks } from './railLinks';
@@ -105,20 +105,6 @@ export const TabBar = memo(function TabBar() {
   );
 });
 
-/** A source's monogram, as in the rail. */
-function Monogram({ source }: { source: Source }) {
-  const hue = hueOf(source.name);
-  return (
-    <span
-      aria-hidden
-      className="inline-flex size-9 shrink-0 items-center justify-center rounded-md font-display text-sm font-semibold text-white"
-      style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
-    >
-      {initialsOf(source.name)}
-    </span>
-  );
-}
-
 const rowClass = (active: boolean) =>
   cn(
     'flex min-h-12 items-center gap-3 rounded-md px-3 text-body font-medium',
@@ -126,8 +112,8 @@ const rowClass = (active: boolean) =>
   );
 
 /**
- * The More sheet: the kit Dialog drawn as a bottom sheet, so it keeps the dialog's focus trap,
- * Escape, scroll lock and focus return. Below sm only, like the bar.
+ * The More sheet: the kit Dialog as a bottom sheet (`sheet`), so it keeps the dialog's focus trap,
+ * Escape, scroll lock and focus return. Below sm only, like the bar, which unmounts it above.
  */
 function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClose: () => void; sources: readonly Source[]; pathname: string }) {
   const { t } = useTranslation('shell');
@@ -138,11 +124,8 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
       onClose={onClose}
       title={t('tabMore')}
       testId="more-sheet"
-      className={cn(
-        'fixed inset-x-0 bottom-0 max-w-none rounded-t-xl rounded-b-none border-x-0 border-b-0 pb-[env(safe-area-inset-bottom,0px)]',
-        'max-h-[85dvh] max-sm:max-h-[85dvh]',
-        open ? 'motion-safe:animate-sheet-in' : 'motion-safe:animate-sheet-out',
-      )}
+      sheet
+      className="max-sm:max-h-[85dvh]"
       bodyClassName="flex flex-col gap-6"
     >
       <section aria-labelledby="more-library" className="flex flex-col gap-2">
@@ -186,7 +169,7 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
             {sources.map((s) => (
               <li key={s.id} className="flex flex-col gap-2 rounded-lg border border-edge bg-surface-2 p-3">
                 <div className="flex min-w-0 items-center gap-3">
-                  <Monogram source={s} />
+                  <SourceMonogram name={s.name} className="size-9 rounded-md text-sm" />
                   <span dir="auto" title={s.name} className="min-w-0 flex-1 truncate text-body font-medium text-fg">
                     {s.name}
                   </span>

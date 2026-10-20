@@ -8,8 +8,6 @@ No version has been tagged or published yet. 0.1.0 and 0.2.0 are the versions th
 
 Work after the 0.2.0 notes were written: the redesign, fixes that followed the October 2026 audits, and what a public release needs.
 
-<!-- Integration: add the page redesigns from the saas/wp-* branches under "Changed". -->
-
 ### Added
 
 - Release builds from version tags: the Windows installer on a draft GitHub Release, and the server image for amd64 and arm64 on `ghcr.io/philly0105/tsrust-iptv`.
@@ -25,11 +23,22 @@ Work after the 0.2.0 notes were written: the redesign, fixes that followed the O
 - One brand mark, an amber tuning dial, for the app, installer, tray, favicon and web icons. The web app shows a splash while it loads, the browser bar follows the app theme, and the installed web app has shortcuts to the TV guide, Search and Favorites.
 - Switches, checkboxes, radio buttons and segmented choices look and behave the same on every screen. Icon buttons show themed tooltips with their shortcut keys instead of the browser's title box. On touch screens buttons and menu items are at least 44 px. Dialogs, menus, drawers and toasts animate out as well as in.
 - Settings, Sources, the library pages, My List, Stats, Scheduled and the archive line their content up with the page title at every window width.
+- Navigation: the side rail is grouped into Watch, Library and Sources; Library folds away, and each source remembers whether it is open. The header has one search box in the same place on every page, and "Search everything" opens the command palette. On phones a tab bar at the bottom (Home, Live TV, Guide, Search and More) replaces the side rail, and the mini player and notifications stay above it. In the browser, a strip under the header says when the server can't be reached and when it is back.
+- Home: a rotating hero of what to continue and what is new, an On now rail, and Get started tiles while the page fills. A first run shows a welcome with the three kinds of source and Import a backup, and adding a source from it stays on Home.
+- Sources: each card shows the source's mark, status and counts, with Refresh and Edit at hand and the rest in a menu. With three or more sources the list can be sorted and filtered. Pasted and uploaded playlists can be re-imported from their card, and saving new connection details refreshes the source at once. On phones the add and edit dialogs and Sort and filter open as bottom sheets.
+- The first-run tour is one card that points out search and the command palette; Show me around on it gives the full tour.
+- Settings: sections are grouped in a side list (a list of sections on phones), and rows moved to where people look for them: poster size and the Home screen rails to Appearance, the recordings folder to Recording, and the image cache and Reset settings to Backup and storage.
+- Live TV and the guide: Favorites and Recently watched sit at the top of each source's groups, a group's menu adds the whole group to a list, a list page has Add channels, and typing a channel number in the guide jumps to its row. The guide has a preview band and colours programmes by genre. Archive is now called Catch-up, and it plays in a full player on its page.
+- Player: a quieter control bar with less-used commands in its menu, an error screen whose buttons fit the failure (try another source, edit the source, play as HLS, open in MPV or VLC), and the channel's monogram when it has no logo.
+- Movies, series and the library: a source's Movies and Series pages open with rails and category chips, grids have a Filters panel, detail pages have a full-width hero, search has Top results, My List opens as posters with a list view, and My Videos has a Recordings section.
+- Ctrl+R opens Recently watched only in the desktop app; in a browser it reloads the page again.
+- In the desktop app the window's title bar follows the app's theme.
 - Rust 1.90 is the minimum version (`rust-version` in Cargo.toml). The locked Tauri 2.12 crates need it.
 - The installer no longer names a licence in its copyright line; the project licence is not chosen yet.
 
 ### Fixed
 
+- The mini player's Expand opens the playing channel's own page. Before, it could open the Live TV page of another source, whose guide strip then described the wrong channel.
 - M3U movies play and download: the core now sends their stream address and request headers, which the player and the download queue were waiting for.
 - M3U sources imported before series grouping are re-imported once at startup, pasted and uploaded playlists included, so their episodes appear as series.
 - A parental lock or hidden flag on a movie group now also covers the series group made from it.

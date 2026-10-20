@@ -15,7 +15,6 @@ export function ContextPanel({ inline }: { inline: boolean }) {
   const node = useShellStore((s) => s.contextPanel);
   const open = useShellStore((s) => s.panelOpen);
   const setOpen = useShellStore((s) => s.setPanelOpen);
-  const drawer = useShellStore((s) => s.panelDrawer);
 
   if (node === null) return null;
 
@@ -31,9 +30,6 @@ export function ContextPanel({ inline }: { inline: boolean }) {
       </aside>
     );
   }
-
-  // The page shows this content itself at this width: no drawer (and no header toggle).
-  if (!drawer) return null;
 
   return (
     <Dialog

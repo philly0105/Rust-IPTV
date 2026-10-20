@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "サーバーから保存済みの画像 {{size}} を削除します。このブラウザーでは、各画像が次に表示されるときに再ダウンロードされます。ほかのブラウザーでは、最大 1 週間それぞれのコピーが表示されることがあります。",
   "imageCacheCleared": "画像キャッシュを消去しました",
   "imageCacheClearFailed": "画像キャッシュを消去できませんでした",
-  "imageCacheLoadFailed": "画像キャッシュを読み取れませんでした: {{message}}",
+  "imageCacheLoadFailed": "画像キャッシュを読み取れませんでした。",
   "imageCacheUnavailable": "このサーバーには画像キャッシュがないため、画像は各プロバイダーから直接読み込まれます。",
   "backupOldVersion": "このバックアップは古い形式のため読み込めません。新しいバックアップを書き出して読み込んでください。",
   "backupImportDone": "バックアップを読み込みました",

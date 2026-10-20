@@ -6,7 +6,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Source } from '@/api/types';
-import { BrandMark, cn, hueOf, IconButton, initialsOf, Skeleton, Tooltip } from '@/ui';
+import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
 import { useOffline } from './connection';
 import { LIBRARY_LINKS, WATCH_LINKS, type NavLinkDef } from './navigation';
@@ -218,20 +218,11 @@ function RailGroup({
 }
 
 function SourceMark({ source, size = 'sm', errorDot }: { source: Source; size?: 'sm' | 'md'; errorDot?: boolean }) {
-  const hue = hueOf(source.name);
   return (
-    <span
-      aria-hidden
-      className={cn(
-        'relative inline-flex shrink-0 items-center justify-center rounded-sm font-display font-semibold text-white',
-        size === 'sm' ? 'h-6 w-6 text-xs' : 'h-9 w-9 text-sm',
-      )}
-      style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
-    >
-      {initialsOf(source.name)}
+    <SourceMonogram name={source.name} className={cn('relative rounded-sm', size === 'sm' ? 'h-6 w-6 text-xs' : 'h-9 w-9 text-sm')}>
       {/* The collapsed rail has no room for the status column, so the error rides on the monogram. */}
       {errorDot && <span className="absolute -top-1 -end-1 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-surface" />}
-    </span>
+    </SourceMonogram>
   );
 }
 

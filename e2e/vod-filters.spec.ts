@@ -23,12 +23,12 @@ function options(page: Page): Locator {
   return grid(page).getByRole('listbox').getByRole('option');
 }
 
-/** The decade chips (exact: the From/To group is "Year range"). */
+/** The decade chips in the grid's toolbar (exact: the From/To group is "Year range"). */
 function yearGroup(page: Page): Locator {
-  return page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year', exact: true });
+  return page.getByTestId('vod-grid-toolbar').getByRole('group', { name: 'Year', exact: true });
 }
 
-/** The From/To selects, outside the chip scroller. */
+/** The From/To selects, in the Filters panel. */
 function rangeGroup(page: Page): Locator {
   return page.getByTestId('vod-filter-bar').getByRole('group', { name: 'Year range', exact: true });
 }
@@ -38,8 +38,11 @@ async function openAllMovies(page: Page, search = ''): Promise<void> {
   await expect(grid(page)).toBeVisible();
 }
 
-/** Below 640 px the sort and the filter bar sit behind one Filters button (L2-vod-7). */
-async function openPhoneFilters(page: Page): Promise<void> {
+/**
+ * The Filters button opens the panel with the year range and Hide watched; below 640 px the sort
+ * and the decade chips fold into it as well (L2-vod-7).
+ */
+async function openFilters(page: Page): Promise<void> {
   const toggle = page.getByTestId('vod-filters-toggle');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -75,6 +78,7 @@ test.describe('VOD year filter and watched', () => {
     await expect(decade).toHaveAttribute('aria-pressed', 'true');
     await expect(options(page).first()).toBeVisible();
 
+    await openFilters(page);
     await rangeGroup(page).getByRole('combobox', { name: 'From' }).selectOption('2026');
     await rangeGroup(page).getByRole('combobox', { name: 'To' }).selectOption('2026');
     await expect(page).toHaveURL(/[?&]yf=2026&yt=2026/);
@@ -89,6 +93,7 @@ test.describe('VOD year filter and watched', () => {
 
     // A reload keeps the range.
     await page.reload();
+    await openFilters(page);
     await expect(rangeGroup(page).getByRole('combobox', { name: 'From' })).toHaveValue('2026');
     await group.getByRole('button', { name: 'All years' }).click();
     await expect(page).not.toHaveURL(/yf=/);
@@ -109,6 +114,7 @@ test.describe('VOD year filter and watched', () => {
     await expect(watchedCard.getByRole('group', { name: /, Watched/ })).toBeVisible();
     await expect(watchedCard.getByTestId('poster-watched')).toBeVisible();
 
+    await openFilters(page);
     const toggle = page.getByRole('switch', { name: 'Hide watched' });
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
@@ -154,7 +160,7 @@ test.describe('VOD year filter and watched', () => {
       const at = `${size.width} px`;
       await page.setViewportSize(size);
       await openAllMovies(page);
-      if (size.width < 640) await openPhoneFilters(page);
+      await openFilters(page);
       const chips = yearGroup(page);
       await expect(chips.getByRole('button', { name: /^1920s, / })).toBeAttached();
       await settle(page);
@@ -186,7 +192,7 @@ test.describe('VOD year filter and watched', () => {
   test('the filter row fits a phone without scrolling the page sideways', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openAllMovies(page);
-    await openPhoneFilters(page);
+    await openFilters(page);
     await expect(yearGroup(page)).toBeVisible();
     await settle(page);
     await expectNoHorizontalScroll(page, 'vod grid with filters at 390 px');

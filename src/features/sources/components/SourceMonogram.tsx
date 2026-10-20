@@ -1,22 +1,8 @@
 import type { Source } from '@/api/types';
 
-import { cn, hueOf, initialsOf } from '@/ui';
+import { cn, SourceMonogram as Monogram } from '@/ui';
 
-/**
- * A source's monogram: its initials on a gradient whose hue comes from the name. The same
- * formula as the rail's SourceMark (src/shell/Rail.tsx), so a source keeps one identity between
- * the rail and its card. Decorative: the name always sits next to it.
- */
+/** The kit's source monogram at the size of a source card, so the card and the rail show one mark. */
 export function SourceMonogram({ source, className }: { source: Pick<Source, 'name'>; className?: string }) {
-  const hue = hueOf(source.name);
-  return (
-    <span
-      aria-hidden
-      data-testid="source-monogram"
-      className={cn('inline-flex size-11 shrink-0 items-center justify-center rounded-lg font-display text-body font-semibold text-white shadow-1', className)}
-      style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
-    >
-      {initialsOf(source.name)}
-    </span>
-  );
+  return <Monogram name={source.name} testId="source-monogram" className={cn('size-11 rounded-lg text-body shadow-1', className)} />;
 }

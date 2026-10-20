@@ -440,7 +440,7 @@
   "imageCacheClearBodyServer": "Cela supprime du serveur {{size}} d'images enregistrées. Ce navigateur téléchargera de nouveau chacune la prochaine fois qu'elle s'affichera ; les autres navigateurs peuvent encore afficher leur propre copie pendant une semaine au plus.",
   "imageCacheCleared": "Cache d'images vidé",
   "imageCacheClearFailed": "Impossible de vider le cache d'images",
-  "imageCacheLoadFailed": "Impossible de lire le cache d'images : {{message}}",
+  "imageCacheLoadFailed": "Impossible de lire le cache d'images.",
   "imageCacheUnavailable": "Ce serveur n'a pas de cache d'images : les images se chargent directement depuis chaque fournisseur.",
   "backupOldVersion": "Cette sauvegarde utilise un ancien format illisible. Exportez une nouvelle sauvegarde et importez-la.",
   "backupImportDone": "Sauvegarde importée",

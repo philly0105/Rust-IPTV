@@ -69,13 +69,7 @@ export function useDiscardGuard({ open, dirty, onClose, title }: { open: boolean
 }
 
 /**
- * Below sm a source dialog becomes a bottom sheet (SS-13): it spans the screen's width, rises
- * from the bottom edge, keeps clear of the home indicator, and gives its fields the room the
- * floating card's margins took. Passed as the Dialog's panel `className`; the layer's
- * `data-state` picks the sheet's enter or exit animation.
+ * Below sm a source dialog is a bottom sheet (SS-13, the Dialog's `sheet`), and its body gives the
+ * fields the room the floating card's margins took.
  */
-export const PHONE_SHEET =
-  'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:max-w-none max-sm:max-h-[calc(100dvh-1.5rem)] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[env(safe-area-inset-bottom)] max-sm:motion-safe:in-data-[state=open]:animate-sheet-in max-sm:motion-safe:in-data-[state=closed]:animate-sheet-out';
-
-/** The sheet's body padding on phones. */
 export const PHONE_SHEET_BODY = 'max-sm:px-4';

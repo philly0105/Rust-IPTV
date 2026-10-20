@@ -49,7 +49,7 @@
   "unlockUntilRestart": "Locked content stays open until the app restarts, or until you lock it again.",
   "unlockSettingsText": "Unlocking opens all locked content and lets you change these settings without the PIN.",
   "unlock": "Unlock",
-  "checkFailedTitle": "Could not check parental locks",
+  "checkFailedTitle": "Couldn't check parental locks",
   "checkFailedText": "Locked content cannot open until the check works. Try again in a moment.",
   "minutes_one": "{{count}} minute",
   "minutes_other": "{{count}} minutes",

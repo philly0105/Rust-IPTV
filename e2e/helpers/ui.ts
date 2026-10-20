@@ -42,9 +42,9 @@ export async function submitAndWaitForImport(page: Page, dialog: Locator, name: 
   return source;
 }
 
-/** Name first: the URL field suggests a name on blur only while the name is untouched. */
+/** Name first: the URL field suggests a name on blur only while the name is untouched. Its label also says "optional". */
 async function fillName(dialog: Locator, name: string): Promise<void> {
-  await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill(name);
+  await dialog.getByRole('textbox', { name: /^Name/ }).fill(name);
 }
 
 export async function addM3uFromUrl(page: Page, name: string, url: string = M3U_URL): Promise<Source> {
@@ -126,6 +126,16 @@ export async function gotoLive(page: Page, sourceId: string, categoryId?: string
   await page.goto(categoryId ? `/s/${sourceId}/live/${categoryId}` : `/s/${sourceId}/live`);
   await expect(page.getByTestId('live-page')).toBeVisible();
   await expect(channelList(page).getByRole('listitem').first()).toBeVisible();
+}
+
+/**
+ * From a source's Movies or Series landing, opens the "All movies" (or "All series") grid. The
+ * landing leads with rails; the full category index waits folded under them, and the chip row's
+ * "All categories" opens it.
+ */
+export async function openAllTitlesGrid(page: Page, kind: 'movie' | 'series' = 'movie'): Promise<void> {
+  await page.getByRole('navigation', { name: 'Categories' }).getByRole('button', { name: /^All categories/ }).click();
+  await page.getByRole('list', { name: 'Categories' }).getByRole('link', { name: kind === 'movie' ? /^All movies/ : /^All series/ }).click();
 }
 
 /** Moves focus off any control so global single-key shortcuts reach the shell registry. */

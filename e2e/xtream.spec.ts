@@ -41,7 +41,10 @@ test.describe.serial('xtream flow', () => {
 
   test('movies: grid, detail page, and playback', async ({ page }) => {
     await openMovieFromGrid(page, source.id, MOCK_FACTS.firstMovie.title);
-    await expect(page.getByTestId('vod-movie-detail').getByRole('heading', { name: 'Cast' })).toBeVisible();
+    // The provider's cast. With TMDB off there are no pictures, so it is one line of names, not chips under a heading.
+    const cast = page.getByTestId('vod-movie-detail').getByTestId('vod-cast-line');
+    await expect(cast).toBeVisible();
+    await expect(cast).toContainText('Cast');
     const src = await playMovieOnDetail(page);
     expect(src).toContain(`/xtream/movie/demo/secret/${MOCK_FACTS.firstMovie.id}.mp4`);
   });

@@ -6,9 +6,10 @@ import { expect, test } from './helpers/fixtures';
 import { expectNoHorizontalScroll, settle } from './helpers/layout';
 
 // Phone width (390x844). The dashboard hero fits the page: its slide column shrinks instead of
-// pushing the page sideways (L2-visual-5). In Arabic the header's palette and theme buttons stay
-// on screen next to a labelled page action, which gives way first (L2-visual-4: on /my-videos
-// both used to sit at x < 0).
+// pushing the page sideways (L2-visual-5). Below 640 px the bottom tab bar carries navigation and
+// search (CB-PHONE-NAV), so the header keeps only the page title and its actions. In Arabic the
+// title and the tab bar stay on screen beside a labelled page action, which gives way first
+// (L2-visual-4: on /my-videos the header's own buttons used to sit at x < 0).
 
 // Long enough that the hero's "New in <source>" line must truncate at phone width.
 const NAME = 'Phone Xtream with a name far longer than a phone screen is wide';
@@ -32,6 +33,7 @@ async function expectInViewport(page: Page, testId: string, label: string): Prom
   expect(box, `${label}: ${testId} is laid out`).not.toBeNull();
   expect(box!.x, `${label}: ${testId} left edge`).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width, `${label}: ${testId} right edge`).toBeLessThanOrEqual(PHONE.width);
+  expect(box!.y + box!.height, `${label}: ${testId} bottom edge`).toBeLessThanOrEqual(PHONE.height);
 }
 
 test.describe.serial('phone layout at 390x844', () => {
@@ -63,19 +65,24 @@ test.describe.serial('phone layout at 390x844', () => {
     expect(await offScreenControls(hero), 'hero buttons off screen').toEqual([]);
   });
 
-  test('in Arabic the palette and theme buttons stay on screen beside a page action', async ({ page }) => {
+  test('in Arabic the page title and the tab bar stay on screen beside a page action', async ({ page }) => {
     await rpc<Settings>(page.request, 'settings.update', { patch: { language: 'ar' } });
     await page.setViewportSize(PHONE);
-    // Open queue and Open My videos stay in the header (icon only on a phone); Recent moves Clear history to a bar above the list there.
     for (const path of ['/my-videos', '/recent', '/downloads']) {
       await page.goto(path);
       await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
       await expect(page.getByTestId('page-title')).not.toBeEmpty();
-      await expect(page.getByTestId('open-palette')).toBeVisible();
+      // The phone header has no palette or theme button: the tab bar and its More sheet stand in.
+      const tabs = page.getByTestId('tab-bar');
+      await expect(tabs).toBeVisible();
+      await expect(page.getByTestId('open-palette')).toHaveCount(0);
+      await expect(page.getByTestId('theme-toggle')).toHaveCount(0);
       await settle(page);
 
-      await expectInViewport(page, 'open-palette', path);
-      await expectInViewport(page, 'theme-toggle', path);
+      await expectInViewport(page, 'page-title', path);
+      await expectInViewport(page, 'tab-bar', path);
+      // Every tab, More included, is inside the screen.
+      expect(await offScreenControls(tabs), `${path}: tabs off screen`).toEqual([]);
       await expectNoHorizontalScroll(page, `${path} @ 390px (ar)`);
     }
   });

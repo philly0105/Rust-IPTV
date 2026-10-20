@@ -12,7 +12,9 @@ import { expectNoHorizontalScroll, settle } from './helpers/layout';
 // its page, find it on the dashboard rail, then on /my-list filter, reorder
 // by keyboard, remove with Undo, and check axe and layout from phone to wide
 // desktop. Needs the integration wiring: the /my-list route, the dashboard
-// rail and MyListButton on the movie page.
+// rail and MyListButton on the movie page. The page opens as a poster grid;
+// the ranked rows with their move buttons are its List view, which the
+// reorder and layout tests choose (`mylist.view`, a UI preference).
 
 const NAME = 'My List Xtream';
 let sourceId = '';
@@ -34,6 +36,11 @@ async function clearList(request: APIRequestContext): Promise<void> {
 async function save(request: APIRequestContext, ref: ItemRef, title: string): Promise<void> {
   const { inList } = await rpc<{ inList: boolean }>(request, 'watchlist.toggle', { ref, snapshot: { title, contentType: ref.contentType } });
   expect(inList, `${title} was saved`).toBe(true);
+}
+
+/** Opens /my-list in its List view from the first load, as a user who picked it once would. */
+async function useListView(page: Page): Promise<void> {
+  await page.addInitScript(() => localStorage.setItem('mylist.view', 'list'));
 }
 
 /** The /my-list rows in the order on screen (titles only). */
@@ -93,7 +100,13 @@ test.describe('My List', () => {
     await expect(rail.getByTestId('mylist-rail-count')).toHaveText('1 title');
     await rail.getByRole('link', { name: 'See all' }).click();
     await expect(page).toHaveURL(/\/my-list$/);
+    // Posters first; the View switch turns them into ranked rows and is remembered.
+    await expect(page.getByTestId('mylist-page')).toHaveAttribute('data-view', 'grid');
+    await expect(page.getByTestId('mylist-card')).toHaveCount(1);
+    await page.getByTestId('mylist-view').getByRole('radio', { name: 'List' }).click();
     await expect(page.getByTestId('mylist-row')).toHaveCount(1);
+    await page.reload();
+    await expect(page.getByTestId('mylist-page')).toHaveAttribute('data-view', 'list');
 
     // Pressing the button again takes it out, with Undo.
     await page.goto(`/s/${sourceId}/movie/${id}`);
@@ -106,6 +119,7 @@ test.describe('My List', () => {
   });
 
   test('filter, reorder by keyboard, remove with Undo; the order survives a reload', async ({ page, request }) => {
+    await useListView(page);
     const [a, b, c] = movies as [VodItem, VodItem, VodItem];
     // Each save goes to the top, so this order lists c, series, b, a.
     await save(request, a.ref, a.title);
@@ -153,6 +167,7 @@ test.describe('My List', () => {
   });
 
   test('designed empty state, then axe and layout from phone to wide desktop', async ({ page, request }) => {
+    await useListView(page);
     await page.goto('/my-list');
     await expect(page.getByTestId('mylist-empty')).toBeVisible();
     await expect(page.getByTestId('mylist-empty-browse')).toHaveAttribute('href', `/s/${sourceId}/movies`);

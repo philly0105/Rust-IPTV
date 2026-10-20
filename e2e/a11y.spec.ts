@@ -6,6 +6,7 @@ import { ensureSource, resetApp, rpc } from './helpers/api';
 import { MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
 import { expectNoHorizontalScroll, settle } from './helpers/layout';
+import { openAllTitlesGrid } from './helpers/ui';
 
 // SC5: axe serious/critical = 0 and no horizontal scrollbar at 800x600 and
 // 2560x1440 on the main screens: dashboard, sources, live, movies landing,
@@ -13,7 +14,7 @@ import { expectNoHorizontalScroll, settle } from './helpers/layout';
 // (empty and with two tiles), My List and the parental controls section.
 // Run 2 (check 12): a custom list page, watch stats, the guide with its
 // search panel open, and the hidden-channels and rename dialogs.
-// Run 3 (check 11): the image cache row in Settings > General (loaded, not its skeleton), the
+// Run 3 (check 11): the image cache row in Settings > Backup and storage (loaded, not its skeleton), the
 // first-run tour (each of its three steps) and the What's new dialog, both opened from About.
 // Check 14: under reduced motion the dashboard hero does not rotate.
 // Also the screens no other sweep reached: Scheduled with a reminder, a channel's catch-up
@@ -89,7 +90,7 @@ test.describe('accessibility and layout', () => {
         name: 'movies grid',
         path: `/s/${id}/movies`,
         ready: async (p) => {
-          await p.getByRole('region', { name: 'Categories' }).getByRole('link', { name: /^All movies/ }).click();
+          await openAllTitlesGrid(p);
           await expect(p.getByTestId('vod-grid-movie').getByRole('listbox').getByRole('option').first()).toBeVisible();
         },
       },
@@ -103,7 +104,7 @@ test.describe('accessibility and layout', () => {
       },
       {
         name: 'settings',
-        path: '/settings/general',
+        path: '/settings/backup',
         ready: async (p) => {
           await expect(p.getByRole('main')).toBeVisible();
           // Run 3: the image cache row with its numbers, not the loading skeleton.
@@ -139,7 +140,7 @@ test.describe('accessibility and layout', () => {
         path: `/live/archive/${encodeURIComponent(id)}/${encodeURIComponent(archived.ref.itemId)}`,
         ready: async (p) => {
           const archive = p.getByTestId('archive-page');
-          await expect(archive.getByRole('tablist', { name: 'Archive day' })).toBeVisible();
+          await expect(archive.getByRole('tablist', { name: 'Catch-up day' })).toBeVisible();
           // The day settles into a programme list or the designed empty state.
           await expect(archive.getByTestId('archive-programs').or(archive.getByText('Nothing listed for this day')).first()).toBeVisible();
         },

@@ -18,7 +18,7 @@ test.describe.serial('account warnings', () => {
   test('an expiring subscription shows on its source card', async ({ page }) => {
     const dialog = await openAddSourceDialog(page);
     await dialog.getByRole('tab', { name: 'Xtream Codes' }).click();
-    await dialog.getByRole('textbox', { name: 'Name', exact: true }).fill(NAME);
+    await dialog.getByRole('textbox', { name: /^Name/ }).fill(NAME);
     await dialog.getByRole('textbox', { name: 'Server URL' }).fill(XTREAM.serverUrl);
     await dialog.getByRole('textbox', { name: 'Username', exact: true }).fill('expiring');
     await dialog.getByRole('textbox', { name: 'Password', exact: true }).fill(XTREAM.password);

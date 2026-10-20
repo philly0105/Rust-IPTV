@@ -148,7 +148,7 @@ describe('movie page parental gate (Ask mode)', () => {
       throw new Error('database is locked');
     };
     renderMovie();
-    await screen.findByRole('heading', { name: 'Could not check parental locks' });
+    await screen.findByRole('heading', { name: "Couldn't check parental locks" });
     expect(screen.queryByText('A film for grown-ups.')).toBeNull();
     rpcMock.handlers['parental.check'] = () => [];
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));

@@ -19,7 +19,6 @@ import { sourceHomePath } from '@/shell/railLinks';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
-import { PHONE_SHEET } from './components/DiscardGuard';
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
 import { RemoveAllDialog } from './components/RemoveAllDialog';
@@ -728,7 +727,7 @@ export function SourcesPage() {
         onClose={() => setViewSheetOpen(false)}
         title={t('viewControls')}
         size="sm"
-        className={PHONE_SHEET}
+        sheet
         testId="sources-view-sheet"
         footer={
           <>

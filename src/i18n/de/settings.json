@@ -434,7 +434,7 @@
   "imageCacheClearBodyServer": "Dadurch werden {{size}} gespeicherte Bilder vom Server entfernt. Dieser Browser lädt jedes Bild beim nächsten Anzeigen neu; andere Browser zeigen bis zu eine Woche lang noch ihre eigene Kopie.",
   "imageCacheCleared": "Bild-Cache geleert",
   "imageCacheClearFailed": "Bild-Cache konnte nicht geleert werden",
-  "imageCacheLoadFailed": "Bild-Cache konnte nicht gelesen werden: {{message}}",
+  "imageCacheLoadFailed": "Bild-Cache konnte nicht gelesen werden.",
   "imageCacheUnavailable": "Dieser Server hat keinen Bild-Cache. Bilder werden direkt vom jeweiligen Anbieter geladen.",
   "backupOldVersion": "Diese Sicherung hat ein älteres Format, das nicht gelesen werden kann. Exportiere eine neue Sicherung und importiere diese.",
   "backupImportDone": "Sicherung importiert",

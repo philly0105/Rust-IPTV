@@ -142,7 +142,8 @@ pub struct ScheduleResult {
 pub struct Capabilities {
     /// Recording can be scheduled here.
     pub supported: bool,
-    /// mpv was found (it records HLS too; without it only plain streams work).
+    /// mpv was found. On the desktop it records HLS too; without it, and
+    /// always in server mode, only plain streams can be recorded.
     pub mpv: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -731,12 +732,13 @@ fn insert_scheduled(c: &rusqlite::Connection, insert: &RecordingRow) -> CoreResu
     Ok(overlapping + 1)
 }
 
-/// Without mpv only plain streams can be recorded (the HTTP copy). Refuses
-/// up front a channel whose stream is HLS or DASH, instead of failing at
-/// start time with the user away. A stream that cannot be resolved now is
-/// let through (it is checked again when the recording starts).
+/// Without mpv, and always in server mode ([`engine::recorder_mpv`]), only
+/// plain streams can be recorded (the HTTP copy). Refuses up front a
+/// channel whose stream is HLS or DASH, instead of failing at start time
+/// with the user away. A stream that cannot be resolved now is let through
+/// (it is checked again when the recording starts).
 async fn check_engine(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<()> {
-    if engine::mpv_path(state).is_some() {
+    if engine::recorder_mpv(state).is_some() {
         return Ok(());
     }
     let resolved = tokio::time::timeout(Duration::from_secs(10), resolve_source(state, r)).await;
@@ -1464,7 +1466,7 @@ async fn record(
                 if failed
                     && !http_failed
                     && engine == engine::Engine::Http
-                    && engine::mpv_path(state).is_some()
+                    && engine::recorder_mpv(state).is_some()
                 {
                     // The copy could not record this stream (a provider that
                     // refuses the TS variant, or a manifest behind a plain

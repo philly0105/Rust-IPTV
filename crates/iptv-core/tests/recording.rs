@@ -509,23 +509,46 @@ async fn status_of(env: &Env, id: &str) -> recording::Recording {
 }
 
 /// R-recording-F1: in server mode the recording engine goes through the
-/// same fetch guard as the stream proxy: private addresses, loopback and
-/// non-http schemes are refused before mpv would ever start.
+/// same fetch guard as the stream proxy: private addresses and loopback are
+/// refused before anything is fetched. The server never records through
+/// mpv, which would follow redirects and fetch segments past the guard, so
+/// a stream the HTTP copy cannot take (RTSP, HLS) is refused when
+/// scheduling, even with mpv installed.
 #[tokio::test]
 async fn server_mode_refuses_private_and_non_http_recordings() {
     let env = env().await;
     let private = channel(&env, "http://127.0.0.1:9/live/a.ts").await;
     let metadata = channel(&env, "http://169.254.169.254/latest/meta-data").await;
     let rtsp = channel(&env, "rtsp://10.0.0.5/cam").await;
+    let hls = channel(&env, "http://example.com/live/a.m3u8").await;
     iptv_core::http::ServerMode::install(&env.state, false).expect("server mode");
-    // An mpv that does not exist: if the guard let a URL through, the
-    // failure would read "could not start mpv" instead.
+    // An mpv that does not exist: had it been picked, the failure would
+    // read "could not start mpv" instead.
     force_engine(
         &env.state,
         Some(Engine::Mpv(env.dir.path().join("no-mpv.exe"))),
     );
+    for item in [rtsp, hls] {
+        let err = recording::schedule(
+            &env.state,
+            ScheduleRequest {
+                item_ref: item,
+                channel_name: "Alpha".into(),
+                title: None,
+                start: None,
+                end: None,
+                duration_minutes: Some(1),
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(err, iptv_core::error::CoreError::Unsupported(_)),
+            "{err:?}"
+        );
+    }
     let mut ids = Vec::new();
-    for item in [private, metadata, rtsp] {
+    for item in [private, metadata] {
         let res = recording::schedule(
             &env.state,
             ScheduleRequest {
@@ -551,6 +574,40 @@ async fn server_mode_refuses_private_and_non_http_recordings() {
         );
         assert!(row.file_names.is_empty());
     }
+}
+
+/// In server mode a plain stream is copied over HTTP even when mpv is
+/// installed (here a forced one that does not exist).
+#[tokio::test]
+async fn server_mode_records_over_http_even_with_mpv() {
+    let env = env().await;
+    let item = channel(&env, "http://127.0.0.1:9/live/a.ts").await;
+    // Loopback is allowed here, so the guard lets the copy try.
+    iptv_core::http::ServerMode::install(&env.state, true).expect("server mode");
+    force_engine(
+        &env.state,
+        Some(Engine::Mpv(env.dir.path().join("no-mpv.exe"))),
+    );
+    let res = recording::schedule(
+        &env.state,
+        ScheduleRequest {
+            item_ref: item,
+            channel_name: "Alpha".into(),
+            title: None,
+            start: None,
+            end: None,
+            duration_minutes: Some(1),
+        },
+    )
+    .await
+    .unwrap();
+    recording::tick(&env.state).await.unwrap();
+    let row = wait_status(&env, &res.recording.id, RecordingStatus::Recording, 10).await;
+    assert_eq!(row.engine.as_deref(), Some("http"), "{row:?}");
+    recording::cancel(&env.state, &res.recording.id)
+        .await
+        .unwrap();
+    wait_status(&env, &res.recording.id, RecordingStatus::Cancelled, 20).await;
 }
 
 /// R-recording-F3: once shutdown began, a tick neither starts a due

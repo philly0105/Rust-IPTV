@@ -41,6 +41,26 @@ Args are `{refs: ItemRef[]}` with 1..=500 refs; anything else returns `invalid`.
 
 ## UI
 
+### Landing
+
+A source's Movies and Series pages (`VodLandingPage`) open with rails, the way a media library does, and keep every category one click from the top:
+
+- A row of category chips under the header (`CategoryChips`): "All categories" with the count, then up to `CATEGORY_CHIP_LIMIT` (24) categories with titles in the provider's order, locked ones marked, and Manage categories at the end. The row scrolls sideways, and the edge that hides chips fades. "All categories" opens the index below and moves focus to it.
+- Rails: Continue watching for this source and section (when something was started here; each card opens its detail page, where Resume is the primary action), Recently added, Top rated, then one rail per category for the first `CATEGORY_RAIL_LIMIT` (12) categories with titles. Locked categories get no rail, so their posters never show before the PIN. Each `CatalogRail` is the first page of its grid, asked with the grid's own arguments (sort, minimum rating, Hide watched), so See all opens on a cached page. A rail is a placeholder of its own height until it nears the viewport, so the page asks only for rails the user reaches; a rail whose grid is empty goes away.
+- The full index, folded, under the rails: "Browse all categories" is a disclosure (`aria-expanded`), and whether it is open is kept in localStorage (`vod.categoryIndexOpen`). Open, it has a filter field and the `CategoryIndex` list, which starts with All movies or All series. Back from a category restores the scroll offset and puts focus on the category that was opened.
+
+Typing in the header's search field opens the source's search page with the text so far.
+
+### Detail pages
+
+A movie or series page opens on a full-width hero (`DetailHero`): the backdrop runs across the top and fades only under the text, and the poster and the title sit on its lower edge. Under the title come the meta line, the action row (one primary button, Play or Resume, then text buttons, round icon buttons and a More menu, in two groups, so a narrow column wraps between them and never inside one), the resume bar with its time left, and the plot. Back is a pill in the hero's top corner. My Videos' detail page reuses the same hero with its own Back.
+
+Play switches the page to its watch view (`WatchStage`): the player at full content width, under a slim bar with the title, the source (or the playing episode) and a close button; Escape closes it too. The player leaves out its own title bar there, and the shell header names the section (Movies or Series) instead of repeating the title; the window and tab keep the title through the header's `documentTitle` (ui-shell.md).
+
+### Search: Top results
+
+When a search finds more than one kind of result, the search page opens on Top results (`TopResults` in `SearchPage.tsx`) instead of the first kind's tab: a section for each kind it found (movies, series, channels, programmes, in that order), each with up to 12 posters, 6 channels or 5 programmes and a See all that opens its tab. In a search across several sources, posters fold the same title from different sources into one card that says how many sources have it; the per-type tabs list every copy with its source badge. Movies and series sit side by side when each holds three titles or fewer, so channels and programmes reach the first screen. With one kind of result the page shows that kind's tab, as before.
+
 ### Filter row
 
 `VodFilterBar` (`DecadeChips`, `YearRangeFields`) on every Movies and Series grid. The decade chips sit in the grid's toolbar beside the search and the sort; the exact range and Hide watched are in a panel under it that the toolbar's Filters button opens, whose badge counts the filters that are on. Below 640 px the sort and the chips fold into that panel too, so the grid starts right under the search row.

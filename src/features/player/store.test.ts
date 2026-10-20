@@ -607,6 +607,15 @@ describe('zap', () => {
     expect(usePlayerStore.getState().source?.ref?.itemId).toBe('100');
   });
 
+  it("zaps through the source from Live's Recently watched view, which only marks the context", async () => {
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: { sourceId: 's1', view: 'recent' } });
+    handlers['catalog.neighbors'] = () => ({ next: channel(2) });
+    await zap('down');
+    expect(calls('catalog.neighbors')[0]).toEqual({ ref: channel(1).ref });
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('102');
+  });
+
   it('ignores a zap category from another source and does nothing for VOD', async () => {
     await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
     usePlayerStore.setState({ zapContext: { sourceId: 'other', categoryId: 'news' } });

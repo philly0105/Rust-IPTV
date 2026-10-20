@@ -25,6 +25,7 @@ import {
   RadioGroup,
   SectionHeader,
   SegmentedControl,
+  SourceMonogram,
   Switch,
   Tabs,
   Toggle,
@@ -33,6 +34,7 @@ import {
   useTooltip,
 } from '..';
 import { SWITCH_TONES } from '../Field';
+import { hueOf } from '../Poster';
 import { mergeShownToasts, type ToastRecord } from '../Toast';
 
 afterEach(() => {
@@ -371,6 +373,98 @@ describe('page scaffold', () => {
     expect(goBack).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(goBack).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Dialog sheet and header row', () => {
+  const classes = () => screen.getByRole('dialog').className.split(/\s+/);
+
+  it("`sheet` makes a bottom sheet below sm, and a caller's max-sm height cap wins over the sheet's", () => {
+    const { rerender } = render(
+      <Dialog open onClose={() => {}} title="Sort and filter" sheet>
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(classes()).toEqual(
+      expect.arrayContaining(['max-sm:fixed', 'max-sm:inset-x-0', 'max-sm:bottom-0', 'max-sm:rounded-b-none', 'max-sm:max-h-[calc(100dvh-1.5rem)]', 'max-sm:motion-safe:animate-sheet-in']),
+    );
+    // The floating card's phone height cap gives way to the sheet's, not the other way round.
+    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[calc(100dvh-1.5rem)]']);
+    rerender(
+      <Dialog open onClose={() => {}} title="Sort and filter" sheet className="max-sm:max-h-[70dvh]">
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[70dvh]']);
+  });
+
+  it('is a plain card without `sheet`, and a drawer ignores it', () => {
+    const { rerender } = render(
+      <Dialog open onClose={() => {}} title="Rename">
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(classes()).not.toContain('max-sm:fixed');
+    expect(classes()).toContain('motion-safe:animate-pop-in');
+    rerender(
+      <Dialog open onClose={() => {}} title="Details" placement="end" sheet>
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(classes()).not.toContain('max-sm:fixed');
+    expect(classes()).toContain('motion-safe:animate-drawer-in');
+  });
+
+  it('draws no header row with neither a visible title nor a close button, and keeps its name and description', () => {
+    render(
+      <Dialog open onClose={() => {}} title="Command palette" description="Search commands and pages" hideTitle hideClose>
+        <input aria-label="Query" />
+      </Dialog>,
+    );
+    // The command palette's name and description come from the hidden title.
+    const dialog = screen.getByRole('dialog', { name: 'Command palette' });
+    expect(document.getElementById(dialog.getAttribute('aria-describedby')!)!.textContent).toBe('Search commands and pages');
+    // The body comes first: the only element before it is the visually hidden title, with no padding.
+    const first = dialog.firstElementChild as HTMLElement;
+    expect(first.className).toBe('sr-only');
+    expect(within(first).getByRole('heading', { level: 2, name: 'Command palette' })).toBeTruthy();
+    expect(dialog.querySelector('.pt-5')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+  });
+
+  it('keeps the row, with its close button, when only the title is hidden', () => {
+    render(
+      <Dialog open onClose={() => {}} title="Rename" hideTitle>
+        <p>Body</p>
+      </Dialog>,
+    );
+    const row = screen.getByRole('dialog', { name: 'Rename' }).firstElementChild as HTMLElement;
+    expect(row.className).toContain('pt-5');
+    expect(within(row).getByRole('button', { name: 'Close' })).toBeTruthy();
+  });
+});
+
+describe('SourceMonogram', () => {
+  it("draws the source's initials on its name's hue, hidden from screen readers, with the caller's size and testId", () => {
+    render(
+      <>
+        <SourceMonogram name="Night Portal HD" className="size-9 rounded-md" testId="mark">
+          <span data-testid="error-dot" />
+        </SourceMonogram>
+        <SourceMonogram name="Night Portal HD" testId="same" />
+        <SourceMonogram name="Riverside" testId="other" />
+      </>,
+    );
+    const mark = screen.getByTestId('mark');
+    expect(mark.textContent).toBe('NP');
+    expect(screen.getByTestId('other').textContent).toBe('RI');
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(mark.className).toContain('size-9');
+    expect(within(mark).getByTestId('error-dot')).toBeTruthy();
+    // One name, one look, wherever it is drawn; another name gets its own hue.
+    expect(hueOf('Night Portal HD')).not.toBe(hueOf('Riverside'));
+    expect(mark.getAttribute('style')).toBe(screen.getByTestId('same').getAttribute('style'));
+    expect(mark.getAttribute('style')).not.toBe(screen.getByTestId('other').getAttribute('style'));
   });
 });
 

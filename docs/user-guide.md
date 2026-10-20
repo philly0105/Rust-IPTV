@@ -35,7 +35,7 @@ No channels or other content come with the app. Add a source first:
 - An Xtream Codes account: server URL, username and password. Pasting a full `get.php` link fills in the fields for you.
 - A Stalker (Ministra) portal: the portal address ending in `/c/` and the MAC address registered with your provider.
 
-After the first source is added, a card points out search and the command palette. Got it closes it; Show me around turns it into a three-step tour of your sources, My List (movies and series) and search (Next, Back, Skip; Esc skips). After an update, What's new lists what changed since the version you last used. Both show once; "Take the tour" and "What's new" in the command palette (Ctrl+K) and Settings > About open them again. See [onboarding.md](architecture/onboarding.md).
+On first start, Home shows the three kinds side by side; pick one to open its form. Once the first source has imported, the app opens its live channels (or its movies or series if it has no channels), and a card points out search and the command palette. Got it closes it; Show me around turns it into a three-step tour of your sources, My List (movies and series) and search (Next, Back, Skip; Esc skips). After an update, What's new lists what changed since the version you last used. Both show once; "Take the tour" and "What's new" in the command palette (Ctrl+K) and Settings > About open them again. See [onboarding.md](architecture/onboarding.md).
 
 ## Sources
 

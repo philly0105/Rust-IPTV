@@ -171,10 +171,10 @@ export function SourcesPage() {
       setEditing(target);
     }
   }, [accountParam, query.data, params, setParams]);
-  // `&from=<path>`: the page that sent the user here to add a source (Home's first-run welcome).
-  // After a successful add they go back there, to the content they came for. The very first
-  // source opens on its own content instead (SS-6): Home has nothing to show a live-only playlist
-  // yet, while its channels are one click from playing.
+  // `&from=<path>`: the page that sent the user here to add a source. No page in the app sends it
+  // now (Home's first-run welcome opens the dialog in place and does the same itself), but a link
+  // can. After a successful add they go back there, to the content they came for. The very first
+  // source opens on its own content instead (SS-6): its channels are one click from playing.
   const returnTo = safeReturnPath(params.get('from'));
   const addedRef = useRef<{ source: Source; first: boolean } | null>(null);
   const closeAdd = () => {

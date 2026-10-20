@@ -15,13 +15,14 @@ export function DigitOsd({ state }: { state: ZapFeedback | null }) {
       role="status"
       aria-live="assertive"
       data-testid="digit-osd"
-      // The zap banner's look (LG-15): glass, and the number in the dial's amber, so the readout and
-      // the banner that follows it read as one control.
+      // The zap banner's look (LG-15): glass, and the number in plain on-glass ink like the banner's
+      // channel number (the banner keeps the accent for programme progress), so the readout and the
+      // banner that follows it read as one control.
       className="pointer-events-none absolute top-4 end-4 z-30 flex min-w-24 flex-col items-end rounded-xl border border-glass-border bg-glass-strong px-4 py-2.5 text-on-glass shadow-2 glass-blur"
     >
       {state.kind === 'typing' ? (
         <>
-          <span className="font-numeric text-5xl leading-none tabular-nums tracking-wide text-glass-accent">
+          <span className="font-numeric text-5xl leading-none tabular-nums tracking-wide text-on-glass">
             {state.digits}
             <span className="motion-safe:animate-pulse">_</span>
           </span>

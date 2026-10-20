@@ -237,6 +237,10 @@ function DashboardBody() {
 
   const sources = useVisibleSources();
   const hasSources = (sources.data?.length ?? 0) > 0;
+  // The welcome stays while its add dialog is open: the core announces a new source before its
+  // import runs, and the dashboard taking over then would unmount the dialog with its progress,
+  // its Cancel button and the move to the new source's page.
+  const [welcomeAdding, setWelcomeAdding] = useState(false);
   // Home plays streams: with something to play, warm hls.js and mpegts.js once the browser is idle
   // (preloadEngines waits for it), so the first play from here does not fetch them after the click.
   // Behind import(), like playItem below (performance audit SH-2): Rollup puts the small
@@ -449,10 +453,10 @@ function DashboardBody() {
   }, [heroSlides.length, heroAnswered]);
 
   // First run: nothing to show yet.
-  if (sources.isSuccess && !hasSources) {
+  if ((sources.isSuccess && !hasSources) || welcomeAdding) {
     return (
       <Suspense fallback={null}>
-        <Welcome />
+        <Welcome onAddingChange={setWelcomeAdding} />
       </Suspense>
     );
   }

@@ -33,7 +33,14 @@ describe('expandPath (LG-05: the mini player opens the playing channel, not the 
     expect(expandPath(live('A', '7'), { sourceId: 'A', categoryId: 'news 1' })).toBe('/s/A/live/news%201');
     expect(expandPath(live('A', '7'), { sourceId: 'A', listId: 'list-7' })).toBe('/lists/list-7');
     expect(expandPath(live('A', '7'), { sourceId: 'A', favorites: {} })).toBe('/s/A/live/%40favorites');
-    expect(expandPath(live('A', '7'), { sourceId: 'A', categoryId: '@recent' })).toBe('/s/A/live/%40recent');
+  });
+
+  it('goes back to Recently watched, which LivePage marks on the context without a group', () => {
+    // What LivePage sets on /s/A/live/@recent: no categoryId, so zapping still walks the source.
+    expect(expandPath(live('A', '7'), { sourceId: 'A', view: 'recent' })).toBe('/s/A/live/%40recent');
+    expect(expandPath(live('A', '9', 'radio'), { sourceId: 'A', view: 'recent' })).toBe('/s/A/radio?category=%40recent');
+    // Another source's view does not carry over, as a group does not.
+    expect(expandPath(live('B', '7'), { sourceId: 'A', view: 'recent' })).toBe('/s/B/live');
   });
 
   it('opens a radio station on the Radio page', () => {

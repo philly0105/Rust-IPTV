@@ -214,6 +214,13 @@ describe('Favorites and Recently watched (LG-12)', () => {
     expect(await screen.findByText('Nothing watched yet')).toBeTruthy();
     expect(calls('recent.list')).toContainEqual({ sourceId: 'src1', limit: 100 });
   });
+
+  it("Recently watched marks the zap context for the mini player's Expand, with no group to zap through", async () => {
+    renderAt('/s/src1/live/@recent', LIVE);
+    await screen.findByText('Nothing watched yet');
+    // '@recent' as a categoryId would reach catalog.neighbors and break channel up and down.
+    expect(fakes.usePlayerStore.getState().zapContext).toEqual({ sourceId: 'src1', view: 'recent' });
+  });
 });
 
 describe('the scope picker (LG-11)', () => {

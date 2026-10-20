@@ -29,6 +29,7 @@ export function BackupSection({ update }: SectionProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const chooseFileRef = useRef<HTMLButtonElement>(null);
   const chooseAnotherRef = useRef<HTMLButtonElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
   const fileHintId = useId();
   const summaryId = useId();
   const [includeSecrets, setIncludeSecrets] = useState(false);
@@ -131,8 +132,15 @@ export function BackupSection({ update }: SectionProps) {
     try {
       // A merge returns once the sources are written; the ones that still need a catalog load afterwards.
       const r = await rpc('backup.import', { json: picked.text, mode, background: mode === 'merge' });
-      setResult(r);
-      setPicked(null);
+      // The file's card goes, and with it the Import button that had focus, which would drop focus
+      // to <body> and send the next Tab back to the top of the page. Focus goes to the result
+      // instead, so a screen reader reads it and Tab goes on from there.
+      flushSync(() => {
+        setResult(r);
+        setPicked(null);
+      });
+      const active = document.activeElement;
+      if (!active || active === document.body) resultRef.current?.focus();
       // Everything may have changed: sources, catalog, favorites, settings.
       await queryClient.invalidateQueries();
       const refreshing = r.refreshing?.length ?? 0;
@@ -362,7 +370,13 @@ export function BackupSection({ update }: SectionProps) {
       ) : null}
 
       {result ? (
-        <div className="flex flex-col gap-3 rounded-lg border border-edge bg-surface p-4" aria-live="polite" data-testid="backup-result">
+        <div
+          ref={resultRef}
+          tabIndex={-1}
+          className="flex flex-col gap-3 rounded-lg border border-edge bg-surface p-4 outline-none"
+          aria-live="polite"
+          data-testid="backup-result"
+        >
           <p className="flex items-center gap-2 font-medium text-fg">
             <CircleCheck aria-hidden size={18} className="shrink-0 text-success" />
             {t('backupResult', { imported: formatCount(result.imported, lang), skipped: formatCount(result.skipped, lang) })}

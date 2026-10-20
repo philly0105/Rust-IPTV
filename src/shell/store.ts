@@ -18,6 +18,11 @@ export interface HeaderSearch {
 
 export interface HeaderState {
   title: string;
+  /**
+   * The window and tab title, when it is not `title`: a movie's watch view names its section in
+   * the header, since the stage below shows the title, while the window keeps the title's name.
+   */
+  documentTitle?: string;
   subtitle?: string;
   actions?: ReactNode;
   search?: HeaderSearch;

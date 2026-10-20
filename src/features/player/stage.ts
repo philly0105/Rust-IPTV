@@ -58,15 +58,16 @@ export function getLastStagePath(): string | null {
  * Where the mini player's Expand goes (LG-05): a live channel's or station's own page, so its row
  * is marked and the ribbon describes it, whichever page showed the stage last. A list play opens
  * the list, a favorites play the source's Favorites view, otherwise the source's Live TV (or
- * Radio) in the group it was played from. Anything else (a movie, an episode, catch-up, a stream
- * without a ref) goes back to the page that last showed the stage.
+ * Radio) in the group or Recently watched view it was played from. Anything else (a movie, an
+ * episode, catch-up, a stream without a ref) goes back to the page that last showed the stage.
  */
 export function expandPath(source: PlayerSource | undefined, ctx: ZapContext | undefined): string | null {
   const ref = source?.ref;
   if (!source?.isLive || !ref || (ref.contentType !== 'live' && ref.contentType !== 'radio')) return lastStagePath;
   if (ctx?.listId) return `/lists/${encodeURIComponent(ctx.listId)}`;
   // The context's group belongs to its own source: a channel of another source opens its source's top.
-  const group = ctx?.favorites ? '@favorites' : ctx?.sourceId === ref.sourceId ? ctx.categoryId : undefined;
+  const own = ctx?.sourceId === ref.sourceId;
+  const group = ctx?.favorites ? '@favorites' : own && ctx.view === 'recent' ? '@recent' : own ? ctx.categoryId : undefined;
   const base = `/s/${encodeURIComponent(ref.sourceId)}`;
   if (ref.contentType === 'radio') return `${base}/radio${group ? `?category=${encodeURIComponent(group)}` : ''}`;
   return `${base}/live${group ? `/${encodeURIComponent(group)}` : ''}`;

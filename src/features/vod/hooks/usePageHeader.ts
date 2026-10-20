@@ -4,6 +4,8 @@ import { useShell, type HeaderSearch } from '@/shell';
 
 export interface PageHeader {
   title: string;
+  /** The window and tab title when it is not `title` (HeaderState.documentTitle). */
+  documentTitle?: string;
   subtitle?: string;
   actions?: ReactNode;
   search?: HeaderSearch;
@@ -21,6 +23,7 @@ export function usePageHeader(header: PageHeader, deps: readonly unknown[]): voi
   useEffect(() => {
     const h = headerRef.current;
     const out: Parameters<typeof shell.setHeader>[0] = { title: h.title };
+    if (h.documentTitle) out.documentTitle = h.documentTitle;
     if (h.subtitle) out.subtitle = h.subtitle;
     if (h.actions) out.actions = h.actions;
     if (h.search) out.search = h.search;

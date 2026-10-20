@@ -313,6 +313,21 @@ describe('Backup (review)', () => {
     expect(document.activeElement).toBe(within(screen.getByTestId('backup-dropzone')).getByRole('button', { name: 'Choose backup file' }));
   });
 
+  it('moves focus to the result after an import, not to <body> with the Import button that went', async () => {
+    rpcMock.handlers['sources.list'] = () => [];
+    rpcMock.handlers['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
+    rpcMock.handlers['backup.import'] = () => ({ imported: 1, skipped: 0, warnings: [] });
+    renderAt(settingsRoutes, '/settings/backup');
+    await screen.findByTestId('backup-dropzone');
+    pick(body);
+    const importButton = await screen.findByTestId('backup-import');
+    importButton.focus();
+    fireEvent.click(importButton);
+    const result = await screen.findByTestId('backup-result');
+    expect(screen.queryByTestId('backup-import')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(result));
+  });
+
   it('leaves focus alone for a file dropped with the pointer', async () => {
     rpcMock.handlers['sources.list'] = () => [];
     renderAt(settingsRoutes, '/settings/backup');

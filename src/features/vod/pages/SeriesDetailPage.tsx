@@ -197,8 +197,10 @@ export function SeriesDetailPage() {
   const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'series', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
     categoryId: item?.categoryId,
   });
-  // The header title is also the window and tab title, so it stays the series' name (see MovieDetailPage).
-  usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
+  // The header title is also the window and tab title, so it stays the series' name; watching, the
+  // stage's bar names it, the header names the section and the window keeps the name (see MovieDetailPage).
+  const header = watch.active ? { title: t('series'), documentTitle: pageTitle } : { title: pageTitle, subtitle: source.data?.name };
+  usePageHeader(header, [watch.active, pageTitle, source.data?.name]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).

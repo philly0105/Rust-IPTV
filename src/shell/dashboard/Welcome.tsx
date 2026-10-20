@@ -3,24 +3,30 @@
  * and the three ways in, which are the Sources page's own onboarding tiles (M3U, Xtream Codes,
  * Stalker portal, each saying what the user needs) with its "Import a backup" link. A tile
  * opens the Add source dialog right here, on the kind it names, so cancelling leaves the user
- * on Home (SH-cancel-returns) and a successful add turns this page into the dashboard. It used
- * to be a stock empty state centred in the void, whose one button led to a dialog opened over
- * the Sources page's better onboarding.
+ * on Home (SH-cancel-returns). The first source, once added, opens on its own channels (or its
+ * movies or series when it has none; SS-6), one click from playing, and the tour's coach mark
+ * finds search there. It used to be a stock empty state centred in the void, whose one button
+ * led to a dialog opened over the Sources page's better onboarding.
  */
 
 import { lazy, Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 
 import { isDesktop } from '@/api/transport';
 import type { SourceKind } from '@/api/types';
 import { Onboarding } from '@/features/sources/components/Onboarding';
 import { BrandMark, Page } from '@/ui';
 
+import { sourceHomePath } from '../railLinks';
+
 // The add flow (forms, import progress) loads when a tile is picked, not with Home's chunk.
 const AddSourceDialog = lazy(() => import('@/features/sources/components/AddSourceDialog').then((m) => ({ default: m.AddSourceDialog })));
 
-export function Welcome() {
+/** `onAddingChange`: the add dialog opened or closed (Home keeps the welcome up while it is open). */
+export function Welcome({ onAddingChange }: { onAddingChange?: (adding: boolean) => void }) {
   const { t } = useTranslation('shell');
+  const navigate = useNavigate();
   // The kind the dialog opened on; kept while it closes, so its exit shows the same form.
   const [kind, setKind] = useState<SourceKind>('m3u');
   const [open, setOpen] = useState(false);
@@ -29,6 +35,11 @@ export function Welcome() {
     setKind(k);
     setRequested(true);
     setOpen(true);
+    onAddingChange?.(true);
+  };
+  const close = () => {
+    setOpen(false);
+    onAddingChange?.(false);
   };
   return (
     <div className="@container relative flex min-h-full flex-col" data-testid="dashboard-welcome">
@@ -55,7 +66,14 @@ export function Welcome() {
       </Page>
       {requested && (
         <Suspense fallback={null}>
-          <AddSourceDialog open={open} initial={{ kind }} onClose={() => setOpen(false)} />
+          <AddSourceDialog
+            open={open}
+            initial={{ kind }}
+            onClose={close}
+            onAdded={(source, first) => {
+              if (first) navigate(sourceHomePath(source));
+            }}
+          />
         </Suspense>
       )}
     </div>

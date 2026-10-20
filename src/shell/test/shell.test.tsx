@@ -562,6 +562,34 @@ describe('DashboardPage', () => {
     expect(screen.getByTestId('dashboard-welcome')).toBeTruthy();
   });
 
+  it("the first source added from the welcome opens on its channels, and the dialog outlasts the core's early 'added' news (SS-6)", async () => {
+    baseHandlers({ sources: 0 });
+    const { queryClient } = await import('@/api/query');
+    let finishImport: (s: unknown) => void = () => {};
+    rpcMock.handlers['sources.add'] = () => new Promise((resolve) => (finishImport = resolve));
+    const added = makeSource('new', { kind: 'm3u', name: 'Sample', channelCount: 12, movieCount: 0 });
+    const { router } = renderRoutes(routes(), '/dashboard');
+    fireEvent.click(await screen.findByTestId('onboard-m3u', {}, { timeout: 3000 }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add a source' }, { timeout: 3000 });
+    const type = (label: RegExp, value: string) => fireEvent.change(within(dialog).getByLabelText(label, { selector: 'input,textarea' }), { target: { value } });
+    type(/^Name/, 'Sample');
+    type(/^Playlist URL/, 'lists.example.com/tv.m3u');
+    fireEvent.click(within(dialog).getByTestId('add-source-submit'));
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'sources.add')).toBe(true));
+
+    // The core says sources.changed (added) before the import runs: sources.list now has the source.
+    rpcMock.handlers['sources.list'] = () => [added];
+    await act(() => queryClient.invalidateQueries({ queryKey: ['sources.list'] }));
+    // The rail has the new list, so Home has had it too.
+    await screen.findByTestId('rail-sources');
+    // The welcome, and the dialog showing the import, stay until the import ends.
+    expect(screen.getByRole('dialog', { name: 'Add a source' })).toBeTruthy();
+    expect(screen.getByTestId('dashboard-welcome')).toBeTruthy();
+
+    await act(async () => finishImport(added));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/s/new/live'));
+  });
+
   it('warms the playback engines at idle once there is something to play (XB2-14)', async () => {
     const { __setEngineLoadersForTests } = await import('@/features/player/enginePreload');
     const hls = vi.fn(async () => ({}));
@@ -1569,6 +1597,21 @@ describe('L2 shell header', () => {
     const subtitle = screen.getByTestId('page-subtitle');
     expect(subtitle.className).toContain('basis-0');
     expect(subtitle.getAttribute('title')).toBe('Recordings and downloads');
+  });
+
+  it("a page's documentTitle names the window while the header shows its title (a VOD watch view)", async () => {
+    function WatchPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({ title: 'Movies', documentTitle: 'The Copper Meridian' });
+      }, [shell]);
+      return <Page>watching</Page>;
+    }
+    const shellRoute = routes()[0]!;
+    renderRoutes([{ ...shellRoute, children: [...shellRoutes, { path: 'watch', element: <WatchPage /> }] }], '/watch');
+    await screen.findByText('watching');
+    await waitFor(() => expect(screen.getByTestId('page-title').textContent).toBe('Movies'));
+    await waitFor(() => expect(document.title).toBe('The Copper Meridian · Tsrust IPTV'));
   });
 
   it("the header search passes keys to the page's onKeyDown, and a claimed key skips its own Escape (XB2-23)", async () => {

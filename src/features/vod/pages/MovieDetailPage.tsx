@@ -139,10 +139,12 @@ export function MovieDetailPage() {
   const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'movie', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
     categoryId: item?.categoryId,
   });
-  // The header title is also the window and tab title (and the history entry), so it is the
-  // title's own name even while the hero shows it large (VL-hero-chrome waits for a shell header
-  // that can say the section on screen and the title to the window).
-  usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
+  // The header title is also the window and tab title (and the history entry), so while browsing
+  // it is the title's own name, even with the hero showing it large. Watching, the stage's own bar
+  // names the title and the source right under the header, so the header names the section and
+  // the window keeps the title (documentTitle).
+  const header = watching ? { title: t('movies'), documentTitle: pageTitle } : { title: pageTitle, subtitle: source.data?.name };
+  usePageHeader(header, [watching, pageTitle, source.data?.name]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'movie'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).

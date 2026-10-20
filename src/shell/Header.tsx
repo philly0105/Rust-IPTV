@@ -42,13 +42,13 @@ export const Header = memo(function Header({
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);
   const { resolved, toggle } = useTheme();
-  const title = header?.title;
+  const windowTitle = header?.documentTitle || header?.title;
   const appName = t('appName');
 
-  // The window/tab title follows the page title.
+  // The window/tab title follows the page title, or the window title the page set (documentTitle).
   useEffect(() => {
-    document.title = title ? `${title} · ${appName}` : appName;
-  }, [title, appName]);
+    document.title = windowTitle ? `${windowTitle} · ${appName}` : appName;
+  }, [windowTitle, appName]);
 
   return (
     <header

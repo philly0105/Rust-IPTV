@@ -370,10 +370,14 @@ describe('MovieDetailPage', () => {
     expect(played).toHaveLength(1);
     // The watch stage's title is now the page's single h1 (the hero is gone).
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Dune: Part Two']);
+    // The header right above it names the section, not the title a second time; the window keeps the title.
+    const { useShellStore } = await import('@/shell/store');
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Movies', documentTitle: 'Dune: Part Two' }));
     act(() => {
       fireEvent.keyDown(document.body, { key: 'Escape' });
     });
     await waitFor(() => expect(screen.queryByTestId('player-stage')).toBeNull());
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Dune: Part Two', subtitle: 'Alpha IPTV' }));
   });
 
   it('B4-vod-D20: a Stalker movie (not in the local catalog) never asks catalog.sameTitle and shows no other sources', async () => {
@@ -425,6 +429,10 @@ describe('SeriesDetailPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Play S02E01 Episode 2.1' }));
     await waitFor(() => expect(played).toHaveLength(1));
     expect(played[0]).toMatchObject({ ref: sref, episodeId: 'e21' });
+    // Watching, the stage's bar names the series; the header names the section, the window the series.
+    await screen.findByTestId('player-stage');
+    const { useShellStore } = await import('@/shell/store');
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Series', documentTitle: 'Severance' }));
   });
 });
 

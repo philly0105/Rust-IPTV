@@ -49,6 +49,12 @@ export interface ZapContext {
    * source's (`sourceId`, as `/s/:id/favorites` lists them) or every source's (`/favorites`).
    */
   favorites?: { sourceId?: string };
+  /**
+   * Live's or Radio's Recently watched view was open (`@recent`): the mini player's Expand goes
+   * back to it (expandPath). Zapping ignores it and walks the source, since the view's order
+   * changes with every play.
+   */
+  view?: 'recent';
 }
 
 export interface PlayerState {

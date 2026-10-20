@@ -80,7 +80,8 @@ pub struct SearchRequest {
 }
 
 /// One `epg.search` result: a programme on one channel of the source.
-/// Times in `program` are raw guide times, as in `epg.programs`.
+/// Times in `program` are moved by the channel's guide shift, as in
+/// `epg.programs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuideSearchHit {
@@ -595,22 +596,29 @@ fn hit_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
 /// start time at which the limit is reached (every channel of a guide
 /// channel counts), and only the channels that can make the result are
 /// read beyond the channel scan.
+///
+/// The window is read on the guide's clock: moved back by `source_secs`,
+/// the source's guide shift, which moves every channel of the source alike
+/// (so the start order holds too). A channel's own shift or `tvg-shift` is
+/// applied by [`finish`].
 fn candidates(
     conn: &Connection,
     rt: &EpgRuntime,
     dir: &ChannelDirectory,
     q: &Query,
     hide: Option<Hide>,
+    source_secs: i64,
 ) -> CoreResult<(Vec<Candidate>, bool)> {
     let want = q.limit;
     if q.words.is_empty() {
         return Ok((Vec::new(), false));
     }
+    let (from, to) = (q.from - source_secs, q.to - source_secs);
     let used_index = index_ready(conn)?;
     let mut hits: Vec<Hit> = Vec::new();
     let channels = if used_index {
         let mut stmt = conn.prepare_cached(FTS_SQL)?;
-        let mut rows = stmt.query(params![fts_expression(&q.words), q.from, q.to])?;
+        let mut rows = stmt.query(params![fts_expression(&q.words), from, to])?;
         let Some(first) = rows.next()? else {
             return Ok((Vec::new(), true));
         };
@@ -643,7 +651,7 @@ fn candidates(
             return Ok((Vec::new(), false));
         }
         let mut stmt = conn.prepare_cached(SCAN_SQL)?;
-        let mut rows = stmt.query(params![q.from, q.to, STAGING_ORIGIN])?;
+        let mut rows = stmt.query(params![from, to, STAGING_ORIGIN])?;
         while let Some(r) = rows.next()? {
             let Some(&guide) = channels.by_guide.get(text(r, 1)?.unwrap_or_default()) else {
                 continue;
@@ -746,15 +754,21 @@ fn candidates(
 }
 
 /// Reads titles, descriptions, categories and icons, applies custom channel
-/// names (C2), and moves each hit by its channel's `tvg-shift` as the grid
-/// does (L1-core-11).
-fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearchHit>> {
+/// names (C2), and moves each hit by its channel's guide shift as the grid
+/// does (L1-core-11): the source's `source_secs`, which [`candidates`] read
+/// the window with, plus the channel's own shift or `tvg-shift`. A hit that
+/// the channel's part moves out of the window is dropped.
+fn finish(
+    conn: &Connection,
+    found: Vec<Candidate>,
+    q: &Query,
+    source_secs: i64,
+) -> CoreResult<Vec<GuideSearchHit>> {
     let mut details = conn.prepare_cached(
         "SELECT title, description, category, icon FROM epg_programs WHERE rowid = ?1",
     )?;
     let mut names: HashMap<String, Option<String>> = HashMap::new();
     let mut shifts: HashMap<String, i64> = HashMap::new();
-    let mut source_shifts: HashMap<String, i64> = HashMap::new();
     let mut out = Vec::with_capacity(found.len());
     for c in found {
         type Details = (String, Option<String>, Option<String>, Option<String>);
@@ -770,13 +784,15 @@ fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearc
         let shift = match shifts.get(&key) {
             Some(s) => *s,
             None => {
-                let r = &c.channel.item_ref;
-                let source = query::cached_source_shift(conn, &mut source_shifts, &r.source_id)?;
-                let s = query::item_shift_with(conn, r, source)?;
+                let s = query::item_shift_with(conn, &c.channel.item_ref, source_secs)?;
                 shifts.insert(key.clone(), s);
                 s
             }
         };
+        let (start, stop) = (c.start + shift, c.stop + shift);
+        if stop <= q.from || start >= q.to {
+            continue;
+        }
         let custom = match names.get(&key) {
             Some(n) => n.clone(),
             None => {
@@ -786,7 +802,7 @@ fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearc
             }
         };
         out.push((
-            c.start + shift,
+            start,
             GuideSearchHit {
                 item_ref: c.channel.item_ref.clone(),
                 channel_name: custom.unwrap_or_else(|| c.channel.name.clone()),
@@ -795,8 +811,8 @@ fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearc
                 category_id: Some(c.channel.category_id.clone()).filter(|s| !s.is_empty()),
                 program: EpgProgram {
                     channel_id: c.channel_id.to_string(),
-                    start: query::to_rfc3339(c.start + shift),
-                    end: query::to_rfc3339(c.stop + shift),
+                    start: query::to_rfc3339(start),
+                    end: query::to_rfc3339(stop),
                     title,
                     description: description.filter(|s| !s.trim().is_empty()),
                     category: category.filter(|s| !s.trim().is_empty()),
@@ -841,8 +857,9 @@ pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<Guid
             // One read snapshot: a guide refresh that commits between the
             // statements cannot hand a hit's rowid to another programme.
             let tx = c.transaction()?;
-            let (found, used_index) = candidates(&tx, &rt, &dir, &q, hide)?;
-            let hits = finish(&tx, found)?;
+            let source_secs = query::source_shift(&tx, &q.source_id)?;
+            let (found, used_index) = candidates(&tx, &rt, &dir, &q, hide, source_secs)?;
+            let hits = finish(&tx, found, &q, source_secs)?;
             tx.commit()?;
             Ok((hits, used_index))
         })

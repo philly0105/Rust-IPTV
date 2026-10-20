@@ -86,4 +86,14 @@ describe('expandPath (LG-05: the mini player opens the playing channel, not the 
     expect(expandPath(file('file:///rec-2.ts'), undefined)).toBeNull();
     expect(expandPath(undefined, undefined)).toBeNull();
   });
+
+  it("keeps the first page that showed a stream with no ref, not the guide's preview band it moved into later", () => {
+    const file: PlayerSource = { url: 'file:///rec-3.ts', kind: 'file', title: 'Recording', isLive: false, isRadio: false };
+    stageOn('/my-videos/3');
+    noteStageShown(file.url);
+    pop?.();
+    stageOn('/epg');
+    noteStageShown(file.url);
+    expect(expandPath(file, undefined)).toBe('/my-videos/3');
+  });
 });

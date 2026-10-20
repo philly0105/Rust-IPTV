@@ -186,8 +186,13 @@ function BarStatusLine({ subtitle }: { subtitle: string | undefined }) {
   const ended = usePlayerStore(selectEnded);
   const text = status === 'error' ? t('errorTitle') : status === 'loading' ? t('loading') : ended ? t('playbackFinished') : subtitle;
   if (!text) return null;
+  // dir="auto" truncates a Latin programme at its own end; text-match-parent keeps it on the name's side in RTL.
   return (
-    <p dir="auto" data-testid="mini-bar-status" className={cn('truncate text-caption', status === 'error' ? 'text-danger' : 'text-fg-muted')}>
+    <p
+      dir="auto"
+      data-testid="mini-bar-status"
+      className={cn('truncate text-caption text-match-parent', status === 'error' ? 'text-danger' : 'text-fg-muted')}
+    >
       {text}
     </p>
   );

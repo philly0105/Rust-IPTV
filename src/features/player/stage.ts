@@ -52,14 +52,16 @@ export function useStageTarget(): HTMLElement | null {
 
 /**
  * The dock showed `url` in a stage: the player moved into one, or a new stream started in one. A
- * stream with no page of its own goes back to that page on Expand, and only that stream, since
- * the next one has another URL.
+ * stream with no page of its own goes back to the first page that showed it on Expand, and only
+ * that stream, since the next one has another URL. A stage it moved into later (the guide's
+ * preview band, which shows whatever plays) does not take its place.
  */
 export function noteStageShown(url: string): void {
-  if (typeof window !== 'undefined') lastStage = { path: window.location.pathname + window.location.search, url };
+  if (typeof window === 'undefined' || lastStage?.url === url) return;
+  lastStage = { path: window.location.pathname + window.location.search, url };
 }
 
-/** The page that last showed `source` in a stage, if one did. */
+/** The page that first showed `source` in a stage, if one did. */
 function stagePathOf(source: PlayerSource): string | null {
   return lastStage?.url === source.url ? lastStage.path : null;
 }
@@ -71,8 +73,8 @@ function stagePathOf(source: PlayerSource): string | null {
  * watched view it was played from, so its row is marked and the ribbon describes it (LG-05); a
  * list play opens the list, a favorites play the source's Favorites view. A movie or an episode
  * (a download too, by its catalog ref) opens its detail page, catch-up its channel's archive. A
- * stream with no ref (a recording file) goes back to the page that showed it in a stage, if one
- * did; otherwise null, and Expand goes fullscreen.
+ * stream with no ref (a recording file) goes back to the page that first showed it in a stage, if
+ * one did; otherwise null, and Expand goes fullscreen.
  */
 export function expandPath(source: PlayerSource | undefined, ctx: ZapContext | undefined): string | null {
   if (!source) return null;

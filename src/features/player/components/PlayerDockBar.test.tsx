@@ -113,6 +113,16 @@ describe('the mini player on a phone', () => {
     expect(host.querySelector('button')).toBeNull();
   });
 
+  it("keeps a Latin programme line on the name's side in a right-to-left layout", () => {
+    // dir="auto" alone aligned 'Politics Tonight' to its own left, away from the name, in Arabic.
+    phone(true);
+    playing(live);
+    render(<PlayerDock />);
+    const line = screen.getByTestId('mini-bar-status');
+    expect(line.getAttribute('dir')).toBe('auto');
+    expect(line.className).toContain('text-match-parent');
+  });
+
   it('keeps the floating window from sm up', () => {
     phone(false);
     playing(live);

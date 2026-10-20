@@ -1,6 +1,7 @@
 //! Recording engines: a direct HTTP copy for plain TS/HTTP streams, or a
 //! headless mpv with `--stream-record` for HLS, DASH and other streams (and
-//! when the copy fails).
+//! when the copy fails). Server mode only uses the HTTP copy
+//! ([`recorder_mpv`]).
 //!
 //! An engine writes one part file and returns when the stream ends, fails,
 //! the stop time passes, or the stop signal fires. Retrying with a new part
@@ -57,6 +58,17 @@ pub fn mpv_path(state: &AppState) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// The mpv a recording may run: [`mpv_path`], but never in server mode. The
+/// fetch guard sees only the first URL, and mpv follows redirects and
+/// fetches HLS and DASH segments and keys on its own, so the server records
+/// through the guarded HTTP copy only.
+pub fn recorder_mpv(state: &AppState) -> Option<PathBuf> {
+    if crate::http::is_server_mode(state) {
+        return None;
+    }
+    mpv_path(state)
+}
+
 /// True for a stream the HTTP copy can record: an http(s) URL that is not
 /// an HLS or DASH manifest.
 pub fn is_plain_http(source: &PlayerSource) -> bool {
@@ -97,6 +109,9 @@ pub fn xtream_ts_variant(source: &PlayerSource, kind: SourceKind) -> Option<Play
 /// Message for a stream no engine can record.
 pub const ENGINE_MISSING_MESSAGE: &str = "Recording this stream needs mpv. Install mpv or set its path in Settings > Player, then schedule the recording again.";
 
+/// Message for a stream server mode cannot record (see [`recorder_mpv`]).
+pub const SERVER_HTTP_ONLY_MESSAGE: &str = "The server records only plain HTTP streams, and this channel's stream is HLS, DASH or another protocol. Record it in the desktop app instead.";
+
 /// The source the HTTP copy records, when it can record `source`: a plain
 /// stream as is, an Xtream live HLS URL as its TS variant.
 fn http_source(source: &PlayerSource, kind: SourceKind) -> Option<PlayerSource> {
@@ -112,13 +127,16 @@ fn http_source(source: &PlayerSource, kind: SourceKind) -> Option<PlayerSource> 
 /// without decoding them; mpv for anything else, and instead of the copy
 /// when `http_failed` (a part copied over HTTP failed: a provider that
 /// refuses the TS variant, or an address that answers with a manifest);
-/// else `engine_missing`. Returns the source to record.
+/// else `engine_missing`. Server mode never picks mpv, not even a forced
+/// one, and refuses what the copy cannot take as `unsupported`. Returns the
+/// source to record.
 pub fn choose(
     state: &AppState,
     source: PlayerSource,
     kind: SourceKind,
     http_failed: bool,
 ) -> CoreResult<(Engine, PlayerSource)> {
+    let server = crate::http::is_server_mode(state);
     let forced = state
         .ext::<ForcedEngine>(FORCED_KEY)
         .and_then(|f| f.0.clone());
@@ -129,8 +147,13 @@ pub fn choose(
                 xtream_ts_variant(&source, kind).unwrap_or(source),
             ));
         }
-        Some(Engine::Mpv(mpv)) => return Ok((Engine::Mpv(mpv), source)),
-        None => {}
+        Some(Engine::Mpv(mpv)) if !server => return Ok((Engine::Mpv(mpv), source)),
+        _ => {}
+    }
+    if server {
+        return http_source(&source, kind)
+            .map(|http| (Engine::Http, http))
+            .ok_or_else(|| CoreError::Unsupported(SERVER_HTTP_ONLY_MESSAGE.into()));
     }
     pick(source, kind, http_failed, || mpv_path(state))
 }

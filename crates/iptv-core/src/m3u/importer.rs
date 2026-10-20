@@ -5,7 +5,7 @@
 
 use super::body::{sniff, too_large_error, MinRate, MAX_PLAYLIST_BYTES, SNIFF_BYTES};
 use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
-use super::series::{LegacyEpisode, SeriesGrouper};
+use super::series::{EpisodeAt, LegacyEpisode, SeriesGrouper};
 use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
 use crate::db::now_rfc3339;
 use crate::error::{CoreError, CoreResult};
@@ -48,12 +48,79 @@ pub fn cached_playlist_path(data_dir: &Path, source_id: &str) -> PathBuf {
 }
 
 /// Where `sources.update` stages large new text until its transaction
-/// commits; it is renamed over [`cached_playlist_path`] then. A copy left by
-/// a crash is swept as an orphan at start-up.
+/// commits; it is renamed over [`cached_playlist_path`] then. The transaction
+/// also writes a mark ([`mark_staged`]), so a committed text whose rename
+/// failed or was cut short by a crash is moved by the next import of the
+/// source or at start-up ([`finish_staged`]). A copy without a mark (an
+/// update that never committed) is swept as an orphan at start-up.
 pub fn staged_playlist_path(data_dir: &Path, source_id: &str) -> PathBuf {
     data_dir
         .join("playlists")
         .join(format!("{source_id}.update.m3u"))
+}
+
+/// `app_state` key of the mark of [`mark_staged`] (dropped with the source).
+fn staged_key(source_id: &str) -> String {
+    format!("m3u_staged:{source_id}")
+}
+
+/// Records, inside the `sources.update` transaction, that the text at
+/// [`staged_playlist_path`] is the source's text once that transaction
+/// commits.
+pub fn mark_staged(conn: &Connection, source_id: &str) -> CoreResult<()> {
+    conn.execute(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, '1', CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at",
+        [staged_key(source_id)],
+    )?;
+    Ok(())
+}
+
+/// Moves the text of a committed `sources.update` ([`mark_staged`]) over
+/// the cached copy and drops the mark. Nothing happens without a mark. A
+/// mark whose staged file is gone (moved, then a crash kept the mark) is
+/// dropped. A failed move keeps both, for the next try.
+pub fn finish_staged(conn: &Connection, data_dir: &Path, source_id: &str) -> CoreResult<()> {
+    let key = staged_key(source_id);
+    let marked = conn
+        .prepare_cached("SELECT 1 FROM app_state WHERE key = ?1")?
+        .exists([&key])?;
+    if !marked {
+        return Ok(());
+    }
+    let staged = staged_playlist_path(data_dir, source_id);
+    if staged.is_file() {
+        let dest = cached_playlist_path(data_dir, source_id);
+        std::fs::rename(&staged, &dest).map_err(|e| {
+            CoreError::Io(std::io::Error::new(
+                e.kind(),
+                format!("cannot store the playlist at {}: {e}", dest.display()),
+            ))
+        })?;
+    }
+    conn.execute("DELETE FROM app_state WHERE key = ?1", [&key])?;
+    Ok(())
+}
+
+/// [`finish_staged`] for every source with a mark. The start-up sweep runs
+/// it before it deletes staged files without one. A failed move is logged
+/// and tried again at the next import of the source; the staged files of
+/// those moves are returned, so the sweep keeps them.
+pub fn finish_all_staged(conn: &Connection, data_dir: &Path) -> CoreResult<Vec<PathBuf>> {
+    let mut stmt = conn.prepare(
+        "SELECT substr(key, length('m3u_staged:') + 1) FROM app_state WHERE key LIKE 'm3u_staged:%'",
+    )?;
+    let ids = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut waiting = Vec::new();
+    for id in ids {
+        if let Err(err) = finish_staged(conn, data_dir, &id) {
+            tracing::warn!(%err, source_id = %id, "could not move a playlist update into place");
+            waiting.push(staged_playlist_path(data_dir, &id));
+        }
+    }
+    Ok(waiting)
 }
 
 /// Stores playlist text that arrived in memory (a backup restore) the way an
@@ -133,8 +200,9 @@ pub fn stored_text(
 /// and the startup pass re-imports every source below it once, auto-refresh
 /// or not, pasted text included ([`stale_imports`],
 /// `sources::schedule::startup`). Bump it whenever a change alters the rows
-/// an import writes.
-pub const IMPORT_VERSION: u32 = 3;
+/// an import writes. 3: series grouping. 4: country tags in the series key,
+/// a plain tvg-name as the show, episode ids independent of playlist order.
+pub const IMPORT_VERSION: u32 = 4;
 
 /// `app_state` key holding the [`IMPORT_VERSION`] that wrote a source's
 /// catalog (dropped with the source, see `sources::store::delete`).
@@ -267,8 +335,49 @@ pub struct RowBuilder {
     channel_counter: i64,
     position: i64,
     series: SeriesGrouper,
-    /// Movie ids user state refers to (see [`RowBuilder::keep_legacy`]).
-    legacy_watch: HashSet<String>,
+    /// Movie rows user state refers to (see [`RowBuilder::keep_legacy`]).
+    legacy: Legacy,
+}
+
+/// The movie rows of earlier imports that user state refers to, and the
+/// episodes of this import that were stored as one of them.
+#[derive(Default)]
+struct Legacy {
+    /// Their ids.
+    ids: HashSet<String>,
+    /// Identity (`remap::identity`) -> id, for rows no other old row shares
+    /// their identity with.
+    keys: HashMap<String, String>,
+    /// Movie entries of this playlist with each identity of `keys`.
+    counts: HashMap<String, u32>,
+    /// Ids that an entry of this playlist still has.
+    claimed: HashSet<String>,
+    /// Episodes matched by identity only: `(identity, old id, episode)`.
+    candidates: Vec<(String, String, EpisodeAt)>,
+}
+
+impl Legacy {
+    /// The identity and old id of movie entry `e` when an old row has its
+    /// identity; counts the entry under it.
+    fn match_key(&mut self, e: &M3uEntry) -> Option<(String, String)> {
+        if self.keys.is_empty() {
+            return None;
+        }
+        let category_id = group_id(e.group.as_deref().unwrap_or_default());
+        let key = super::remap::identity("movie", e.tvg_id.as_deref(), &e.name, &category_id);
+        let old = self.keys.get(&key)?.clone();
+        *self.counts.entry(key.clone()).or_default() += 1;
+        Some((key, old))
+    }
+
+    /// Whether user state refers to movie id `id`, which an entry has now.
+    fn claim(&mut self, id: &str) -> bool {
+        if !self.ids.contains(id) {
+            return false;
+        }
+        self.claimed.insert(id.to_string());
+        true
+    }
 }
 
 impl RowBuilder {
@@ -281,15 +390,24 @@ impl RowBuilder {
             channel_counter: 0,
             position: 0,
             series: SeriesGrouper::default(),
-            legacy_watch: HashSet::new(),
+            legacy: Legacy::default(),
         }
     }
 
-    /// Movie ids that user state refers to (read before the import writes).
-    /// An episode whose id as a movie is among them is reported by
-    /// [`RowBuilder::take_series`], so its state can follow it.
-    pub fn keep_legacy(&mut self, ids: HashSet<String>) {
-        self.legacy_watch = ids;
+    /// Movie ids that user state refers to (read before the import writes),
+    /// and `keys`: the identity of each such old row that no other old row
+    /// shares (`remap::Remapper::movie_identities`). An episode whose id as a
+    /// movie is among the ids is reported by
+    /// [`RowBuilder::take_series`], so its state can follow it. So is an
+    /// episode whose URL changed since (rotated tokens), when it is the only
+    /// movie entry with the identity of one of those rows and no entry still
+    /// has that row's id.
+    pub fn keep_legacy(&mut self, ids: HashSet<String>, keys: HashMap<String, String>) {
+        self.legacy = Legacy {
+            ids,
+            keys,
+            ..Legacy::default()
+        };
     }
 
     /// The id of an entry: its hash, with a suffix for an exact duplicate.
@@ -346,25 +464,44 @@ impl RowBuilder {
         if ct != ContentType::Movie {
             return Some(self.row_as(e, ct));
         }
+        let matched = self.legacy.match_key(&e);
         let Some(found) = super::series::detect(&e) else {
-            return Some(self.row_as(e, ct));
+            let row = self.row_as(e, ct);
+            self.legacy.claim(&row.item_id);
+            return Some(row);
         };
         // Every entry still takes the id it had as a movie, so the duplicate
         // suffixes of the movies around it stay what they were.
         let movie_id = self.unique_id(&e.url, &e.name);
-        let legacy = self.legacy_watch.contains(&movie_id).then_some(movie_id);
+        let same_id = self.legacy.claim(&movie_id);
+        let legacy = same_id.then_some(movie_id);
         let group = e.group.clone().unwrap_or_default();
         let cat_id = self.category(ContentType::Series, &group);
-        if self.series.add(cat_id, self.position, found, e, legacy) {
+        let (started, at) = self.series.add(cat_id, self.position, found, e, legacy);
+        if started {
             self.position += 1;
+        }
+        if let Some((key, old)) = matched.filter(|_| !same_id) {
+            // Its URL changed since the old row was written: decided once
+            // the whole playlist is known (`take_series`).
+            self.legacy.candidates.push((key, old, at));
         }
         None
     }
 
     /// The series rows of every episode [`RowBuilder::push`] held back, and
     /// the episodes earlier imports stored as movies that user state refers to.
+    /// An episode matched by identity only takes the old row when it was the
+    /// only movie entry with that identity and no entry kept the old id.
     pub fn take_series(&mut self) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
-        std::mem::take(&mut self.series).into_rows(&self.source_id)
+        let mut series = std::mem::take(&mut self.series);
+        for (key, old, at) in std::mem::take(&mut self.legacy.candidates) {
+            let unique = self.legacy.counts.get(&key) == Some(&1);
+            if unique && !self.legacy.claimed.contains(&old) {
+                series.adopt(at, old);
+            }
+        }
+        series.into_rows(&self.source_id)
     }
 
     /// The row of one entry, as a movie, channel or radio station (never
@@ -612,6 +749,15 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     // A downloaded body, and its HTTP validators (stored once it is in).
     let mut fetched = false;
     let mut validators: Option<Validators> = None;
+
+    // New text of a `sources.update` whose move into place failed goes in
+    // place first, whatever the origin is now (the import holds the source's
+    // lock, as the update does).
+    let sid = source_id.clone();
+    let data_dir = state.data_dir.clone();
+    state
+        .db_call(move |c| finish_staged(c, &data_dir, &sid))
+        .await?;
 
     // 1. Acquire bytes + sha256.
     let (payload, sha) = match cfg.origin {
@@ -914,8 +1060,11 @@ fn write_catalog(
     if remapper.old_rows > 0 {
         // The writer deletes the previous rows first (L3-perf-core-4).
         sources::progress_step(state, source_id, sources::SaveStep::Replacing, 0);
-        // Episodes earlier imports stored as movies: their state follows them.
-        builder.keep_legacy(super::series::referenced_movie_ids(&tx, source_id)?);
+        // Episodes earlier imports stored as movies: their state follows
+        // them, by movie id or, after a URL change, by identity.
+        let ids = super::series::referenced_movie_ids(&tx, source_id)?;
+        let keys = remapper.movie_identities(&ids);
+        builder.keep_legacy(ids, keys);
     }
     // Movie groups whose episodes become a series category keep their
     // hidden flag and parental lock there (read before the writer deletes).
@@ -1940,7 +2089,7 @@ mod tests {
             .all(|r| r.content_type == ContentType::Movie));
 
         let mut b = RowBuilder::new("s");
-        b.keep_legacy(HashSet::from([before[2].item_id.clone()]));
+        b.keep_legacy(HashSet::from([before[2].item_id.clone()]), HashMap::new());
         let rows: Vec<ItemRow> = entries.into_iter().filter_map(|e| b.push(e)).collect();
         assert_eq!(
             rows.iter().map(|r| r.content_type).collect::<Vec<_>>(),
@@ -1972,6 +2121,75 @@ mod tests {
         };
         assert_eq!(names(ContentType::Movie), ["Films"]);
         assert_eq!(names(ContentType::Series), ["Drama"]);
+    }
+
+    /// Token rotation before the first import that grouped episodes: an
+    /// episode takes the state of the movie row an earlier import wrote for
+    /// it by identity (name and group) when its URL, and so its movie id,
+    /// changed since. Not when two entries share the identity, nor when
+    /// another entry still has the old row's id.
+    #[test]
+    fn legacy_episodes_match_by_identity_after_a_url_change() {
+        let line = |group: &str, name: &str, token: &str, n: u32| {
+            format!("#EXTINF:-1 group-title=\"{group}\",{name}\nhttp://h/series/{token}/{n}.mkv\n")
+        };
+        let old = format!(
+            "#EXTM3U\n{}{}",
+            line("Drama", "Dark S01 E01", "OLD", 1),
+            line("Drama", "Dark S01 E02", "OLD", 2)
+        );
+        let mut v2 = RowBuilder::new("s");
+        let before: Vec<ItemRow> = parse_str(&old).0.into_iter().map(|e| v2.row(e)).collect();
+        let ids: HashSet<String> = before.iter().map(|r| r.item_id.clone()).collect();
+        let keys: HashMap<String, String> = before
+            .iter()
+            .map(|r| {
+                let key = crate::m3u::remap::identity("movie", None, &r.title, &r.category_id);
+                (key, r.item_id.clone())
+            })
+            .collect();
+        let adopt = |text: &str| {
+            let mut b = RowBuilder::new("s");
+            b.keep_legacy(ids.clone(), keys.clone());
+            for e in parse_str(text).0 {
+                assert!(b.push(e).is_none(), "an episode");
+            }
+            b.take_series()
+        };
+
+        let rotated = format!(
+            "#EXTM3U\n{}{}",
+            line("Drama", "Dark S01 E01", "NEW", 1),
+            line("Drama", "Dark S01 E02", "NEW", 2)
+        );
+        let (series, legacy) = adopt(&rotated);
+        let eps = crate::m3u::series::stored_episodes(&series[0].extra);
+        assert_eq!(legacy.len(), 2);
+        assert_eq!(legacy[0].movie_id, before[0].item_id);
+        assert_eq!(legacy[0].episode_id, eps[0].id);
+        assert_eq!(legacy[1].movie_id, before[1].item_id);
+        assert_eq!(legacy[1].episode_id, eps[1].id);
+
+        // Two entries with the first episode's identity: neither takes it.
+        let twice = format!("{rotated}{}", line("Drama", "Dark S01 E01", "NEW", 9));
+        let (_, legacy) = adopt(&twice);
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].movie_id, before[1].item_id);
+
+        // An entry in another group still has the first row's id: it keeps
+        // the state, and the entry with the old identity does not take it.
+        let kept = format!("{rotated}{}", line("Other", "Dark S01 E01", "OLD", 1));
+        let (series, legacy) = adopt(&kept);
+        let first: Vec<&LegacyEpisode> = legacy
+            .iter()
+            .filter(|l| l.movie_id == before[0].item_id)
+            .collect();
+        assert_eq!(first.len(), 1);
+        let other = series
+            .iter()
+            .find(|r| r.category_id == group_id("Other"))
+            .unwrap();
+        assert_eq!(first[0].series_id, other.item_id);
     }
 
     /// L1-core-13: a playlist generator that takes longer than the generic

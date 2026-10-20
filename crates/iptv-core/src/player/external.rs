@@ -9,7 +9,7 @@
 //! the previous external player this app started, so zapping does not pile
 //! up player windows.
 
-use super::args::{mpv_external_args, validate_play_url, vlc_external_args};
+use super::args::{mpv_external_args, vlc_external_args};
 use super::detect::{find_mpv, find_vlc, DetectEnv};
 use crate::error::{CoreError, CoreResult};
 use crate::model::PlayerSource;
@@ -141,7 +141,6 @@ pub async fn open_external(
 ) -> CoreResult<u32> {
     let local = super::with_local_file(state, source).await?;
     let source = &local;
-    validate_play_url(source)?;
     let settings = state.settings_snapshot();
     let configured = match player {
         ExternalPlayer::Mpv => settings.mpv_path.clone(),

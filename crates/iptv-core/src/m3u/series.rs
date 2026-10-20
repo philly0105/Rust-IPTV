@@ -16,7 +16,7 @@ use crate::model::{
 use crate::state::AppState;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -111,14 +111,17 @@ pub fn detect(e: &M3uEntry) -> Option<Detected> {
             title: name.to_string(),
         });
     };
+    let rest = clean_rest(&e.name[m.end..]);
     let mut show = clean_show(&e.name[..m.start]);
     if show.is_empty() {
-        // `S01E02 - Pilot`: the show is in tvg-name or, failing that, the group.
+        // `S01E02 - Pilot`: the show is in tvg-name (before its own marker,
+        // when it has one) or, failing that, the group. A tvg-name that only
+        // repeats the episode title does not name the show.
         show = e
             .tvg_name
             .as_deref()
-            .and_then(|t| marker(t).map(|tm| clean_show(&t[..tm.start])))
-            .filter(|s| !s.is_empty())
+            .map(|t| clean_show(marker(t).map_or(t, |tm| &t[..tm.start])))
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case(rest))
             .or_else(|| {
                 e.group
                     .as_deref()
@@ -128,7 +131,6 @@ pub fn detect(e: &M3uEntry) -> Option<Detected> {
             })
             .unwrap_or_else(|| name.to_string());
     }
-    let rest = clean_rest(&e.name[m.end..]);
     Some(Detected {
         show,
         numbers: Some((m.season, m.episode)),
@@ -165,7 +167,9 @@ pub struct StoredEpisode {
 /// a movie row, and where it goes now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegacyEpisode {
-    /// The movie id earlier imports gave the entry (the same as now).
+    /// The movie id earlier imports gave the entry: the one it would have
+    /// now, or, when its URL changed since, the one of the old row with its
+    /// identity (see `RowBuilder::keep_legacy`).
     pub movie_id: String,
     pub series_id: String,
     pub episode_id: String,
@@ -187,8 +191,10 @@ struct Show {
     category_id: String,
     poster_url: Option<String>,
     position: i64,
+    /// Ids are set by [`SeriesGrouper::into_rows`] ([`episode_ids`]).
     episodes: Vec<StoredEpisode>,
-    episode_ids: HashSet<String>,
+    /// `(id seed, entry name)` of each episode, in episode order.
+    id_seeds: Vec<(String, String)>,
     /// `(old movie id, index in episodes)` for entries with saved state.
     legacy: Vec<(String, usize)>,
     /// Episodes without numbers so far (they are numbered in playlist order).
@@ -202,21 +208,81 @@ pub struct SeriesGrouper {
     shows: Vec<Show>,
 }
 
-/// Grouping key of a show: its group plus the normalized base title and year,
-/// so `EN - Dark (2017)` and `Dark (2017)` in one group are one show.
-fn show_key(category_id: &str, base: &str, year: Option<i64>) -> String {
-    let norm = base
+/// Where [`SeriesGrouper::add`] put an episode, for [`SeriesGrouper::adopt`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpisodeAt {
+    show: usize,
+    episode: usize,
+}
+
+/// Grouping key of a show: its group plus the normalized base title, the
+/// country tags of `show` and its year, so `EN - Dark (2017)` and
+/// `Dark (2017)` in one group are one show, and `The Office [US]` and
+/// `The Office [UK]` two (`[US]` keys like `(US)`, which `title_base` keeps).
+fn show_key(category_id: &str, show: &str, base: &str, year: Option<i64>) -> String {
+    let mut norm = base
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
+    for tag in catalog::country_tags(show) {
+        norm.push_str(" (");
+        norm.push_str(&tag.to_lowercase());
+        norm.push(')');
+    }
     format!("{category_id}\u{1}{norm}\u{1}{}", year.unwrap_or(0))
+}
+
+/// The ids of a show's episodes from their `(seed, entry name)`, in the same
+/// order. Not the URL: a provider that rotates tokens keeps the ids, so
+/// positions and downloads stay attached. The seed is the series id with
+/// `S<n>E<n>` (or the entry name when there is no marker). An episode alone
+/// with its seed has the seed's hash. Versions of one episode are told apart
+/// by name, not by playlist order, so a playlist that reorders them keeps
+/// each version's id: in name order the first has the seed's hash, the
+/// others hash their name with it, and a repeated name adds `#2`, `#3` in
+/// playlist order.
+fn episode_ids(seeds: &[(String, String)]) -> Vec<String> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut groups: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, (seed, _)) in seeds.iter().enumerate() {
+        let members = groups.entry(seed.as_str()).or_default();
+        if members.is_empty() {
+            order.push(seed.as_str());
+        }
+        members.push(i);
+    }
+    let mut ids = vec![String::new(); seeds.len()];
+    let mut used: HashSet<String> = HashSet::new();
+    for seed in order {
+        let mut members = groups.remove(seed).unwrap_or_default();
+        members.sort_by_key(|i| &seeds[*i].1);
+        let first = members.first().map(|i| seeds[*i].1.as_str());
+        for i in members {
+            let name = seeds[i].1.as_str();
+            let own = if first == Some(name) {
+                seed.to_string()
+            } else {
+                format!("{seed}\n{name}")
+            };
+            let mut id = hash16(&own);
+            let mut n = 2u32;
+            while used.contains(&id) {
+                id = hash16(&format!("{own}\n#{n}"));
+                n += 1;
+            }
+            used.insert(id.clone());
+            ids[i] = id;
+        }
+    }
+    ids
 }
 
 impl SeriesGrouper {
     /// Adds episode `e` of group `category_id`. `legacy_id` is the movie id of
     /// the entry when user state refers to it. Returns true when the entry
-    /// started a new show, which then takes playlist position `position`.
+    /// started a new show, which then takes playlist position `position`, and
+    /// where the episode went.
     pub fn add(
         &mut self,
         category_id: String,
@@ -224,9 +290,9 @@ impl SeriesGrouper {
         found: Detected,
         e: M3uEntry,
         legacy_id: Option<String>,
-    ) -> bool {
+    ) -> (bool, EpisodeAt) {
         let (base, year) = catalog::title_base(&found.show);
-        let key = show_key(&category_id, &base, year);
+        let key = show_key(&category_id, &found.show, &base, year);
         let existing = self.index.get(&key).copied();
         let started = existing.is_none();
         let at = match existing {
@@ -241,7 +307,7 @@ impl SeriesGrouper {
                     poster_url: None,
                     position,
                     episodes: Vec::new(),
-                    episode_ids: HashSet::new(),
+                    id_seeds: Vec::new(),
                     legacy: Vec::new(),
                     unnumbered: 0,
                 });
@@ -257,19 +323,15 @@ impl SeriesGrouper {
                 (1, show.unnumbered)
             }
         };
-        // Not the URL: a provider that rotates tokens keeps the episode ids,
-        // so positions and downloads stay attached.
-        let base_id = match found.numbers {
+        let seed = match found.numbers {
             Some((s, n)) => format!("{}\nS{s}E{n}", show.id),
             None => format!("{}\n{}", show.id, e.name),
         };
-        let mut id = hash16(&base_id);
-        let mut n = 2u32;
-        while show.episode_ids.contains(&id) {
-            id = hash16(&format!("{base_id}\n#{n}"));
-            n += 1;
-        }
-        show.episode_ids.insert(id.clone());
+        let added = EpisodeAt {
+            show: at,
+            episode: show.episodes.len(),
+        };
+        show.id_seeds.push((seed, e.name));
         if show.poster_url.is_none() {
             show.poster_url = e.tvg_logo.clone();
         }
@@ -282,10 +344,10 @@ impl SeriesGrouper {
             origin: e.origin,
         };
         if let Some(old) = legacy_id {
-            show.legacy.push((old, show.episodes.len()));
+            show.legacy.push((old, added.episode));
         }
         show.episodes.push(StoredEpisode {
-            id,
+            id: String::new(),
             season,
             episode,
             title: found.title,
@@ -298,7 +360,15 @@ impl SeriesGrouper {
                 .map(|d| d.min(1e9) as i64),
             headers: (!headers.is_empty()).then_some(headers),
         });
-        started
+        (started, added)
+    }
+
+    /// Gives the episode at `at` the state saved on old movie row `movie_id`
+    /// (an episode matched to that row once the whole playlist is known).
+    pub fn adopt(&mut self, at: EpisodeAt, movie_id: String) {
+        if let Some(show) = self.shows.get_mut(at.show) {
+            show.legacy.push((movie_id, at.episode));
+        }
     }
 
     /// One series row per show, in first-seen order, and the movie ids whose
@@ -306,7 +376,11 @@ impl SeriesGrouper {
     pub fn into_rows(self, source_id: &str) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
         let mut rows = Vec::with_capacity(self.shows.len());
         let mut legacy = Vec::new();
-        for show in self.shows {
+        for mut show in self.shows {
+            let ids = episode_ids(&show.id_seeds);
+            for (ep, id) in show.episodes.iter_mut().zip(ids) {
+                ep.id = id;
+            }
             for (movie_id, i) in &show.legacy {
                 let ep = &show.episodes[*i];
                 legacy.push(LegacyEpisode {
@@ -566,14 +640,23 @@ pub(crate) fn adopt_movie_state(
             l.series_title,
             no_subtitle
         ];
-        for table in ["favorites", "recent"] {
-            conn.prepare_cached(&format!(
-                "UPDATE OR IGNORE {table} SET content_type = 'series', item_id = ?3,
-                   snapshot_json = {SNAPSHOT_SQL}
-                 WHERE source_id = ?1 AND content_type = 'movie' AND item_id = ?2"
-            ))?
-            .execute(series_only)?;
-        }
+        conn.prepare_cached(&format!(
+            "UPDATE OR IGNORE favorites SET content_type = 'series', item_id = ?3,
+               snapshot_json = {SNAPSHOT_SQL}
+             WHERE source_id = ?1 AND content_type = 'movie' AND item_id = ?2"
+        ))?
+        .execute(series_only)?;
+        // History keeps the show's newest view, whichever episode it was.
+        conn.prepare_cached(&format!(
+            "INSERT INTO recent (source_id, content_type, item_id, viewed_at, snapshot_json)
+               SELECT source_id, 'series', ?3, viewed_at, {SNAPSHOT_SQL} FROM recent
+               WHERE source_id = ?1 AND content_type = 'movie' AND item_id = ?2
+             ON CONFLICT(source_id, content_type, item_id) DO UPDATE SET
+               viewed_at = excluded.viewed_at, snapshot_json = excluded.snapshot_json
+               WHERE COALESCE(julianday(excluded.viewed_at) > julianday(recent.viewed_at),
+                              excluded.viewed_at > recent.viewed_at)"
+        ))?
+        .execute(series_only)?;
         conn.prepare_cached(
             "UPDATE OR IGNORE watchlist SET content_type = 'series', item_id = ?3, title = ?4, subtitle = NULL
              WHERE source_id = ?1 AND content_type = 'movie' AND item_id = ?2",
@@ -613,6 +696,14 @@ pub(crate) fn adopt_movie_state(
             .execute(params![source_id, l.movie_id])?;
         }
     }
+    // Episodes that arrive watched can complete their series: it gets the
+    // mark `watched::sync_series_mark` sets after an episode write.
+    let mut series_ids: Vec<&str> = legacy.iter().map(|l| l.series_id.as_str()).collect();
+    series_ids.sort_unstable();
+    series_ids.dedup();
+    for series_id in series_ids {
+        mark_if_complete(conn, source_id, series_id)?;
+    }
     if !legacy.is_empty() {
         tracing::info!(
             source_id,
@@ -621,6 +712,41 @@ pub(crate) fn adopt_movie_state(
         );
     }
     Ok(legacy.len())
+}
+
+/// Sets the series-level watched mark of `series_id` when it is missing and
+/// every episode the series row lists has a watched episode row.
+fn mark_if_complete(conn: &Connection, source_id: &str, series_id: &str) -> CoreResult<()> {
+    let r = ItemRef::new(source_id, ContentType::Series, series_id);
+    let marked = crate::userstate::watched::watched_contains(conn, std::slice::from_ref(&r))?;
+    if !marked.is_empty() {
+        return Ok(());
+    }
+    let extra: Option<String> = conn
+        .query_row(
+            "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = 'series' AND item_id = ?2",
+            params![source_id, series_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let episodes = extra
+        .and_then(|x| serde_json::from_str::<serde_json::Value>(&x).ok())
+        .map(|x| stored_episodes(&x))
+        .unwrap_or_default();
+    if episodes.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT episode_id FROM playback_positions
+         WHERE source_id = ?1 AND content_type = 'series' AND item_id = ?2 AND episode_id <> '' AND watched = 1",
+    )?;
+    let watched = stmt
+        .query_map([source_id, series_id], |row| row.get::<_, String>(0))?
+        .collect::<Result<HashSet<_>, _>>()?;
+    if episodes.iter().all(|e| watched.contains(&e.id)) {
+        crate::userstate::set_watched(conn, &r, None, true)?;
+    }
+    Ok(())
 }
 
 /// Category ids of one source and content type that match `filter` (SQL).
@@ -776,6 +902,24 @@ mod tests {
         assert_eq!((d.show.as_str(), d.title.as_str()), ("Dark", "S01E01"));
     }
 
+    /// A tvg-name without a marker names the show too, rather than the
+    /// group; one that only repeats the episode title does not.
+    #[test]
+    fn plain_tvg_name_names_the_show() {
+        let e = entry(
+            "#EXTINF:-1 tvg-name=\"Dark (2017)\" group-title=\"Drama\",S01E01 - Secrets\nhttp://h/series/u/p/1.mp4",
+        );
+        assert_eq!(detect(&e).unwrap().show, "Dark (2017)");
+        let e = entry(
+            "#EXTINF:-1 tvg-name=\"Secrets\" group-title=\"Drama\",S01E01 - Secrets\nhttp://h/series/u/p/1.mp4",
+        );
+        assert_eq!(detect(&e).unwrap().show, "Drama");
+        let e = entry(
+            "#EXTINF:-1 tvg-name=\" \" group-title=\"Drama\",S01E01 - Secrets\nhttp://h/series/u/p/1.mp4",
+        );
+        assert_eq!(detect(&e).unwrap().show, "Drama");
+    }
+
     fn group(text: &str) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
         let (entries, _, _) = parse_str(text);
         let mut g = SeriesGrouper::default();
@@ -853,6 +997,55 @@ mod tests {
             [(1, 1), (1, 2)]
         );
         assert_ne!(eps[0].id, eps[1].id);
+    }
+
+    /// Local versions of a show (`[US]`, `[UK]`) stay apart; `[US]` and
+    /// `(US)` are one show, whatever language prefix or quality tag is added.
+    #[test]
+    fn country_tags_keep_local_versions_apart() {
+        let (rows, _) = group(
+            "#EXTM3U\n\
+             #EXTINF:-1 group-title=\"Comedy\",The Office [US] S01E01\nhttp://h/series/u/p/1.mkv\n\
+             #EXTINF:-1 group-title=\"Comedy\",The Office [UK] S01E01\nhttp://h/series/u/p/2.mkv\n\
+             #EXTINF:-1 group-title=\"Comedy\",The Office (US) S01E02\nhttp://h/series/u/p/3.mkv\n\
+             #EXTINF:-1 group-title=\"Comedy\",EN - The Office [US] [4K] S01E03\nhttp://h/series/u/p/4.mkv\n",
+        );
+        let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(titles, ["The Office [US]", "The Office [UK]"]);
+        assert_eq!(stored_episodes(&rows[0].extra).len(), 3);
+        assert_eq!(stored_episodes(&rows[1].extra).len(), 1);
+        assert_eq!(rows[0].title_base.as_deref(), Some("The Office"));
+    }
+
+    /// `(season, episode, title) -> id` of the one series of `text`.
+    fn ids_of(text: &str) -> HashMap<(i64, i64, String), String> {
+        let (rows, _) = group(text);
+        assert_eq!(rows.len(), 1);
+        stored_episodes(&rows[0].extra)
+            .into_iter()
+            .map(|e| ((e.season, e.episode, e.title), e.id))
+            .collect()
+    }
+
+    /// Versions of one episode keep their ids when the playlist reorders
+    /// them, and when a version other than the first by name leaves (the
+    /// first keeps the id of the episode alone).
+    #[test]
+    fn episode_ids_do_not_follow_playlist_order() {
+        let en = "#EXTINF:-1 group-title=\"D\",EN - Dark S01E02\nhttp://h/series/1.mkv\n";
+        let de = "#EXTINF:-1 group-title=\"D\",DE - Dark S01E02\nhttp://h/series/2.mkv\n";
+        let fr = "#EXTINF:-1 group-title=\"D\",FR - Dark S01E02\nhttp://h/series/3.mkv\n";
+        let all = ids_of(&format!("#EXTM3U\n{en}{de}{fr}"));
+        let unique: HashSet<&String> = all.values().collect();
+        assert_eq!(unique.len(), 3);
+        assert_eq!(ids_of(&format!("#EXTM3U\n{fr}{en}{de}")), all, "reordered");
+        for rest in [format!("{en}{de}"), format!("{fr}{de}"), de.to_string()] {
+            let left = ids_of(&format!("#EXTM3U\n{rest}"));
+            assert_eq!(left.len(), rest.matches("#EXTINF").count());
+            for (key, id) in &left {
+                assert_eq!(all.get(key), Some(id), "{key:?}");
+            }
+        }
     }
 
     #[test]

@@ -1031,7 +1031,7 @@ struct Running {
 
 type InflightMap = DashMap<String, Arc<Running>>;
 
-/// Registers a full import for [`join_running_import`]; [`Self::finish`]
+/// Registers a full import that a [`refresh`] can join; [`Self::finish`]
 /// hands its result to the refreshes that joined it, and dropping it
 /// unregisters the run.
 struct Inflight {
@@ -1056,6 +1056,42 @@ impl Inflight {
         }
     }
 
+    /// Joins the full import of `id` that is running or that another
+    /// refresh queued, or reserves one, in one step under the map's lock.
+    /// The reservation is made before the refresh waits for the import
+    /// lock, so refreshes queued behind a partial sync, a remove or another
+    /// import import once between them. An entry whose run was cancelled
+    /// (an edit or a remove) is not joined but replaced.
+    fn admit(state: &AppState, id: &str) -> Admission {
+        let map =
+            state.ext_or_insert_with::<InflightMap>(INFLIGHT_KEY, || Arc::new(DashMap::new()));
+        let (tx, result) = tokio::sync::watch::channel(None);
+        let running = Arc::new(Running {
+            token: current_token(state, id),
+            result,
+        });
+        let current = map
+            .entry(id.to_string())
+            .and_modify(|r| {
+                if r.token.is_cancelled() {
+                    *r = Arc::clone(&running);
+                }
+            })
+            .or_insert_with(|| Arc::clone(&running))
+            .value()
+            .clone();
+        if Arc::ptr_eq(&current, &running) {
+            Admission::Run(Self {
+                map,
+                id: id.to_string(),
+                running,
+                tx,
+            })
+        } else {
+            Admission::Join(current.result.clone())
+        }
+    }
+
     fn finish(&self, result: &CoreResult<(Source, ImportSummary)>) {
         let copy = match result {
             Ok(done) => Ok(done.clone()),
@@ -1072,24 +1108,21 @@ impl Drop for Inflight {
     }
 }
 
-/// Waits for the full import of `id` that is running and returns a copy of
-/// its result. `None` when there is none to join: nothing runs, a partial
-/// sync holds the lock, the run was already cancelled, or it ended without
-/// a result (dropped).
-async fn join_running_import(
-    state: &AppState,
-    id: &str,
+/// What a [`refresh`] does about the full import of its source
+/// ([`Inflight::admit`]).
+enum Admission {
+    /// One is running, or queued by another refresh: wait for its result.
+    Join(tokio::sync::watch::Receiver<Joined>),
+    /// None is: this refresh imports, and the refreshes after it join.
+    Run(Inflight),
+}
+
+/// Waits for the full import `result` belongs to and returns a copy of its
+/// result; `None` when it ended without one (dropped).
+async fn import_result(
+    mut result: tokio::sync::watch::Receiver<Joined>,
 ) -> Option<CoreResult<(Source, ImportSummary)>> {
-    let running = state
-        .ext::<InflightMap>(INFLIGHT_KEY)?
-        .get(id)
-        .map(|r| Arc::clone(r.value()))?;
-    if running.token.is_cancelled() {
-        return None;
-    }
-    let mut rx = running.result.clone();
-    drop(running);
-    let done = rx.wait_for(Option::is_some).await.ok()?;
+    let done = result.wait_for(Option::is_some).await.ok()?;
     let joined: Joined = (*done).clone();
     drop(done);
     let shared = joined?;
@@ -1340,7 +1373,7 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
 /// `import.progress` `phase: "cancelled"` and records no `lastError`.
 pub async fn run_import(state: Arc<AppState>, id: &str) -> CoreResult<(Source, ImportSummary)> {
     let guard = lock_for(&state, id).lock_owned().await;
-    run_import_locked(state, id, guard).await
+    run_import_locked(state, id, guard, None).await
 }
 
 /// [`run_import`] unless an import, refresh, partial sync or remove of `id`
@@ -1352,17 +1385,19 @@ pub async fn try_run_import(
     id: &str,
 ) -> Option<CoreResult<(Source, ImportSummary)>> {
     let guard = lock_for(&state, id).try_lock_owned().ok()?;
-    Some(run_import_locked(state, id, guard).await)
+    Some(run_import_locked(state, id, guard, None).await)
 }
 
+/// `reserved`: the entry a [`refresh`] made before it waited for the lock.
 async fn run_import_locked(
     state: Arc<AppState>,
     id: &str,
     guard: tokio::sync::OwnedMutexGuard<()>,
+    reserved: Option<Inflight>,
 ) -> CoreResult<(Source, ImportSummary)> {
     let token = current_token(&state, id);
     // A refresh of this source while it runs joins it (ST-2).
-    let inflight = Inflight::new(&state, id, token.clone());
+    let inflight = reserved.unwrap_or_else(|| Inflight::new(&state, id, token.clone()));
     let result = run_import_inner(state, id, guard, token).await;
     inflight.finish(&result);
     result
@@ -1776,8 +1811,11 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let data_dir = state.data_dir.clone();
     // Large new text waits next to the cached copy until the transaction
     // commits, so a refused update leaves the stored playlist as it was.
+    // `pending` is true while this update's staged text is not committed.
     let staged = crate::m3u::staged_playlist_path(&data_dir, id);
     let staged_in = staged.clone();
+    let pending = Arc::new(AtomicBool::new(false));
+    let pending_in = pending.clone();
     let result = state
         .db_call(move |c| {
             let mut config_changed = false;
@@ -1789,7 +1827,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                             "this is not an M3U playlist (no channels found); paste the playlist text".into(),
                         ));
                     }
-                    Some(crate::m3u::place_raw_text_at(&staged_in, t)?)
+                    // A committed earlier text still staged goes in place
+                    // first, so staging this one cannot overwrite it.
+                    crate::m3u::importer::finish_staged(c, &data_dir, &sid)?;
+                    let raw = crate::m3u::place_raw_text_at(&staged_in, t)?;
+                    pending_in.store(raw.is_empty(), Ordering::SeqCst);
+                    Some(raw)
                 }
                 None => None,
             };
@@ -1804,6 +1847,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                      ON CONFLICT(source_id) DO UPDATE SET raw = excluded.raw",
                     rusqlite::params![sid, raw, crate::db::now_rfc3339()],
                 )?;
+            }
+            if text_staged {
+                // From the commit on the staged text is the source's: should
+                // the move below fail or be cut short, the next import or
+                // start-up finishes it.
+                crate::m3u::importer::mark_staged(&tx, &sid)?;
             }
             if let Some(cfg) = &claim {
                 if let Some((_, other)) = store::find_same(&tx, cfg, Some(&sid))? {
@@ -1845,9 +1894,13 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 rusqlite::params![sid, crate::db::now_rfc3339()],
             )?;
             tx.commit()?;
+            pending_in.store(false, Ordering::SeqCst);
             if text_staged {
-                let dest = crate::m3u::cached_playlist_path(&data_dir, &sid);
-                std::fs::rename(&staged_in, dest)?;
+                // The update is stored either way; a failed move keeps the
+                // text and its mark for the next try.
+                if let Err(err) = crate::m3u::importer::finish_staged(c, &data_dir, &sid) {
+                    tracing::warn!(source_id = %sid, %err, "could not move the new playlist text into place; the next refresh retries");
+                }
             }
             if let Some(p) = position {
                 store::move_to(c, &sid, p)?;
@@ -1855,8 +1908,8 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             Ok((store::get(c, &sid)?, config_changed, text_inline))
         })
         .await;
-    if result.is_err() {
-        // Refused or failed: the staged text (if any) never counts.
+    if pending.load(Ordering::SeqCst) {
+        // Refused or failed before the commit: the staged text never counts.
         let _ = std::fs::remove_file(&staged);
     }
     let (updated, config_changed, text_inline) = result?;
@@ -1951,16 +2004,27 @@ pub async fn reorder(state: &AppState, ids: Vec<String>) -> CoreResult<()> {
 /// the importer directly and keep the background 10 s and retries.
 ///
 /// A source that is importing already is not imported twice (ST-2): the
-/// refresh waits for that import and returns its result. A run that an
+/// refresh waits for that import and returns its result. The same goes for
+/// a refresh queued behind the import lock (a partial sync, for example):
+/// the refreshes after it join it (`Inflight::admit`). A run that an
 /// edit or a remove stopped does not count; the refresh then imports again
 /// (with the new settings) as before.
 pub async fn refresh(state: Arc<AppState>, id: &str) -> CoreResult<Source> {
-    match join_running_import(&state, id).await {
-        Some(Err(err)) if is_cancelled_error(&err) && !is_user_cancel(&err) => {}
-        Some(joined) => return joined.map(|(source, _)| source),
-        None => {}
-    }
-    Ok(crate::http::interactive(run_import(state, id)).await?.0)
+    let inflight = loop {
+        match Inflight::admit(&state, id) {
+            Admission::Run(inflight) => break inflight,
+            Admission::Join(result) => match import_result(result).await {
+                Some(Err(err)) if is_cancelled_error(&err) && !is_user_cancel(&err) => {}
+                Some(joined) => return joined.map(|(source, _)| source),
+                None => {}
+            },
+        }
+    };
+    let run = async {
+        let guard = lock_for(&state, id).lock_owned().await;
+        run_import_locked(Arc::clone(&state), id, guard, Some(inflight)).await
+    };
+    Ok(crate::http::interactive(run).await?.0)
 }
 
 /// `sources.refreshAll`: re-imports every auto-refresh source, one at a time.

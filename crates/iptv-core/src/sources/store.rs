@@ -411,6 +411,11 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
         "DELETE FROM app_state WHERE key = 'm3u_import_version:' || ?1",
         [id],
     )?;
+    // m3u: a committed `sources.update` text not yet moved into place.
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'm3u_staged:' || ?1",
+        [id],
+    )?;
     tx.commit()?;
     Ok(())
 }

@@ -126,6 +126,40 @@ async fn open_external_and_load_refuse_non_media_schemes() {
     }
 }
 
+/// A playlist line naming a `file:` URL or a network path never reaches a
+/// player: on Windows, opening one logs in to that server. The UI marks a
+/// line without a scheme as `kind: file`.
+#[tokio::test]
+async fn open_external_and_load_refuse_file_urls_and_network_paths() {
+    let (_d, state, _rx) = app().await;
+    let r = router();
+    for (url, kind) in [
+        ("file:///C:/Windows/win.ini", "direct"),
+        ("file://host/share/pwn.ts", "direct"),
+        (r"\\host\share\pwn.ts", "file"),
+        ("//host/share/pwn.ts", "file"),
+    ] {
+        let src =
+            json!({"url": url, "kind": kind, "title": "x", "isLive": false, "isRadio": false});
+        let err = r
+            .dispatch(
+                Arc::clone(&state),
+                "player.openExternal",
+                json!({"player": "mpv", "source": src}),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, RpcErrorCode::Invalid, "{url}");
+        if cfg!(windows) {
+            let err = r
+                .dispatch(Arc::clone(&state), "mpv.load", json!({"source": src}))
+                .await
+                .unwrap_err();
+            assert_eq!(err.code, RpcErrorCode::Invalid, "mpv.load {url}");
+        }
+    }
+}
+
 #[test]
 fn registers_exactly_the_c4_names() {
     let r = router();

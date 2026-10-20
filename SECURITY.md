@@ -32,7 +32,7 @@ Security fixes go into the newest release only. Update to it before reporting, i
 
 ## Security model in brief
 
-Tsrust IPTV plays streams from sources the user adds. Playlists, guides and provider answers are untrusted input. They are parsed as streams, downloads that stall or trickle are dropped, and player launches reject URLs that start with `-` or use schemes outside a fixed list.
+Tsrust IPTV plays streams from sources the user adds. Playlists, guides and provider answers are untrusted input. They are parsed as streams, downloads that stall or trickle are dropped, and player launches reject URLs that start with `-`, use schemes outside a fixed list, or name a `file:` URL or a network path.
 
 ### Server mode (`iptv-server`, the Docker image)
 

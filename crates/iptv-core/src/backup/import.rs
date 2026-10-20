@@ -1888,7 +1888,10 @@ fn apply_tsrust_state(
         let Some(minutes) = i_field(m, "shiftMinutes") else {
             continue;
         };
-        if minutes == 0 || minutes.abs() > i64::from(crate::epg::query::MAX_SHIFT_MINUTES) {
+        // A range check, not `abs()`: an out-of-range number or string
+        // saturates to i64::MIN, whose absolute value overflows.
+        let max = i64::from(crate::epg::query::MAX_SHIFT_MINUTES);
+        if minutes == 0 || !(-max..=max).contains(&minutes) {
             continue;
         }
         conn.execute(

@@ -114,15 +114,18 @@ pub fn mpv_header_fields(headers: Option<&RequestHeaders>) -> Option<String> {
     Some(format!("Origin:{}", escape_mpv_list_value(origin)))
 }
 
-/// URL schemes a player may be handed. Anything else (`av://`, `edl://`,
-/// `memory://`, a bare `--option`, ...) is refused before mpv or VLC sees it.
+/// URL schemes a player may be handed. Anything else (`file:`, `av://`,
+/// `edl://`, `memory://`, a bare `--option`, ...) is refused before mpv or
+/// VLC sees it. `file:` is out because a playlist line could use it to open
+/// a local file or, on Windows, a network share.
 pub const ALLOWED_URL_SCHEMES: &[&str] = &[
-    "http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms", "file",
+    "http", "https", "rtmp", "rtmps", "rtsp", "udp", "rtp", "mms",
 ];
 
 /// Refuses stream URLs a player could misread as an option or as one of its
 /// special protocols (playlist lines are untrusted input). Accepts the
-/// [`ALLOWED_URL_SCHEMES`] and, for `kind: file`, a local absolute path.
+/// [`ALLOWED_URL_SCHEMES`] and, for `kind: file`, a local absolute path that
+/// is not a network path.
 pub fn validate_play_url(source: &PlayerSource) -> CoreResult<()> {
     let url = source.url.trim();
     if url.is_empty() {
@@ -157,15 +160,16 @@ pub fn validate_play_url(source: &PlayerSource) -> CoreResult<()> {
     }
 }
 
-/// `C:\x`, `C:/x`, `\\server\share\x` (Windows) or `/x` (Unix).
+/// `C:\x`, `C:/x` (Windows) or `/x` (Unix), never a network path such as
+/// `\\server\share\x` or `//server/share/x`: Windows opens one by connecting
+/// to that server with the user's credentials, and the UI marks a playlist
+/// line without a scheme as `kind: file`.
 fn is_local_absolute_path(s: &str) -> bool {
     let b = s.as_bytes();
-    let drive = b.len() >= 3
-        && b[0].is_ascii_alphabetic()
-        && b[1] == b':'
-        && (b[2] == b'\\' || b[2] == b'/');
-    let unc = s.len() > 2 && s.starts_with(r"\\");
-    drive || unc || (cfg!(unix) && s.starts_with('/'))
+    let sep = |c: u8| c == b'\\' || c == b'/';
+    let drive = b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && sep(b[2]);
+    let network = b.len() >= 2 && sep(b[0]) && sep(b[1]);
+    !network && (drive || (cfg!(unix) && s.starts_with('/')))
 }
 
 /// Arguments for an external mpv (SPEC C4):

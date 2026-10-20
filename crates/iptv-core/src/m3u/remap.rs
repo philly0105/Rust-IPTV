@@ -38,7 +38,12 @@ const REF_TABLES: [&str; 14] = [
 type Ref = (String, String);
 
 /// Identity of an item that survives a URL change.
-fn identity(content_type: &str, tvg_id: Option<&str>, title: &str, category_id: &str) -> String {
+pub(super) fn identity(
+    content_type: &str,
+    tvg_id: Option<&str>,
+    title: &str,
+    category_id: &str,
+) -> String {
     match tvg_id.map(str::trim).filter(|t| !t.is_empty()) {
         Some(tvg) => format!("{content_type}\u{1}t\u{1}{tvg}\u{1}{title}"),
         None => format!("{content_type}\u{1}g\u{1}{category_id}\u{1}{title}"),
@@ -170,6 +175,20 @@ impl Remapper {
             }
         }
         Ok(me)
+    }
+
+    /// [`identity`] -> id of each old movie row among `ids` whose identity no
+    /// other old row has. An episode that earlier imports stored as one of
+    /// these rows answers to it by identity after its URL changed (rotated
+    /// tokens), when the movie id it would have now is another.
+    pub fn movie_identities(&self, ids: &HashSet<String>) -> HashMap<String, String> {
+        self.referenced
+            .iter()
+            .filter(|((ct, id), (_, key_hash))| {
+                ct == "movie" && ids.contains(id) && self.old_counts.get(key_hash) == Some(&1)
+            })
+            .map(|((_, id), (key, _))| (key.clone(), id.clone()))
+            .collect()
     }
 
     /// True when nothing references the old catalog (no work to do).

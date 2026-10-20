@@ -378,6 +378,190 @@ async fn state_saved_on_episodes_imported_as_movies_moves_to_the_series() {
     assert_eq!(secs, 90, "the two episodes' time adds up under the series");
 }
 
+/// The rows of `sql` (the source id as `?1`), three text columns each.
+async fn rows3(env: &Env, sql: &'static str, source_id: &str) -> Vec<[String; 3]> {
+    let sid = source_id.to_string();
+    env.state
+        .db_call(move |c| {
+            let mut st = c.prepare(sql)?;
+            let rows = st
+                .query_map(params![sid], |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?]))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap()
+}
+
+const POSITIONS: &str = "SELECT content_type || '/' || item_id, episode_id, CAST(watched AS TEXT)
+     FROM playback_positions WHERE source_id = ?1 ORDER BY 1, 2";
+
+const ITEM_LOCKS: &str = "SELECT content_type, target_id, kind FROM parental_locks
+     WHERE source_id = ?1 AND kind = 'item'";
+
+/// The provider rotated the token in every URL between the last import that
+/// stored episodes as movies and the first that groups them: their movie ids
+/// changed, so the saved state finds them by identity (name and group) in the
+/// movie rows that import wrote. Favorites, positions and parental item locks
+/// move to the series.
+#[tokio::test]
+async fn state_on_episodes_follows_them_through_a_token_rotation() {
+    let env = env().await;
+    let src = add_text(&env.state, "Plus", PLAYLIST).await;
+    let ep1 = iptv_core::m3u::item_id(EP1_URL, EP1_NAME);
+    let ep2 = iptv_core::m3u::item_id(EP2_URL, EP2_NAME);
+    let drama = iptv_core::m3u::group_id("EN | Drama");
+    let sid = src.id.clone();
+    env.state
+        .db_call(move |c| {
+            // The catalog that import wrote: the episodes as movie rows.
+            c.execute(
+                "DELETE FROM items WHERE source_id = ?1 AND content_type = 'series'",
+                params![sid],
+            )?;
+            for (id, title) in [(&ep1, EP1_NAME), (&ep2, EP2_NAME)] {
+                c.execute(
+                    "INSERT INTO items (source_id, content_type, item_id, category_id, title)
+                     VALUES (?1, 'movie', ?2, ?3, ?4)",
+                    params![sid, id, drama, title],
+                )?;
+            }
+            c.execute(
+                "INSERT INTO favorites (source_id, content_type, item_id, snapshot_json)
+                 VALUES (?1, 'movie', ?2, '{\"title\":\"Old\"}')",
+                params![sid, ep1],
+            )?;
+            c.execute(
+                "INSERT INTO playback_positions (source_id, content_type, item_id, position_seconds, duration_seconds, watched)
+                 VALUES (?1, 'movie', ?2, 2000, 2100, 1)",
+                params![sid, ep1],
+            )?;
+            c.execute(
+                "INSERT INTO parental_locks (source_id, content_type, kind, target_id, name, created_at)
+                 VALUES (?1, 'movie', 'item', ?2, 'Old', '2026-01-01T00:00:00Z')",
+                params![sid, ep2],
+            )?;
+            // The next import reads new URLs.
+            c.execute(
+                "UPDATE m3u_raw SET raw = ?2, sha256 = 'v2' WHERE source_id = ?1",
+                params![sid, PLAYLIST.replace("/u/p/", "/u/NEW/")],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+
+    let (series_ref, detail) = dark(&env, &src.id).await;
+    let series_id = series_ref["itemId"].as_str().unwrap().to_string();
+    let e1 = detail["seasons"][0]["episodes"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let play = call(
+        &env,
+        "m3u.streamUrl",
+        json!({ "ref": series_ref, "episodeId": e1 }),
+    )
+    .await;
+    assert_eq!(play["url"], "http://h:8080/series/u/NEW/5001.mkv");
+    assert_eq!(
+        refs(&env, "favorites", &src.id).await,
+        [("series".to_string(), series_id.clone())]
+    );
+    assert_eq!(
+        rows3(&env, POSITIONS, &src.id).await,
+        [[format!("series/{series_id}"), e1, "1".to_string()]]
+    );
+    assert_eq!(
+        rows3(&env, ITEM_LOCKS, &src.id).await,
+        [["series".to_string(), series_id, "item".to_string()]]
+    );
+}
+
+const RECENT: &str = "SELECT content_type || '/' || item_id, viewed_at,
+       json_extract(snapshot_json, '$.posterUrl') FROM recent WHERE source_id = ?1";
+
+/// Two episodes in history, stored as movies by imports before grouping,
+/// leave one series entry with the newer view and its snapshot, whichever
+/// of them comes first in the playlist.
+#[tokio::test]
+async fn migrated_history_keeps_the_newest_episode_view() {
+    for newer_first in [true, false] {
+        let env = env().await;
+        let src = add_text(&env.state, "Plus", PLAYLIST).await;
+        let ep1 = iptv_core::m3u::item_id(EP1_URL, EP1_NAME);
+        let ep2 = iptv_core::m3u::item_id(EP2_URL, EP2_NAME);
+        let (old, new) = ("2026-01-01T10:00:00.000Z", "2026-01-02T10:00:00.000Z");
+        let views = if newer_first {
+            [(ep1, new), (ep2, old)]
+        } else {
+            [(ep1, old), (ep2, new)]
+        };
+        let sid = src.id.clone();
+        env.state
+            .db_call(move |c| {
+                // The snapshot's poster names the view it belongs to.
+                for (id, at) in views {
+                    c.execute(
+                        "INSERT INTO recent (source_id, content_type, item_id, viewed_at, snapshot_json)
+                         VALUES (?1, 'movie', ?2, ?3, json_object('title', 'Old', 'posterUrl', ?3))",
+                        params![sid, id, at],
+                    )?;
+                }
+                c.execute(STALE_SHA, params![sid])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        sources::refresh(env.state.clone(), &src.id).await.unwrap();
+        let (series_ref, _) = dark(&env, &src.id).await;
+        let series = format!("series/{}", series_ref["itemId"].as_str().unwrap());
+        assert_eq!(
+            rows3(&env, RECENT, &src.id).await,
+            [[series, new.to_string(), new.to_string()]],
+            "newer first: {newer_first}"
+        );
+    }
+}
+
+/// Episodes imported as movies and watched there: a series whose every
+/// episode comes in watched gets the series mark that finishing its last
+/// episode sets; one with an episode left does not.
+#[tokio::test]
+async fn migrated_watched_episodes_mark_a_complete_series() {
+    let env = env().await;
+    let src = add_text(&env.state, "Plus", GROUPS).await;
+    let sid = src.id.clone();
+    env.state
+        .db_call(move |c| {
+            for (url, name, watched) in [
+                ("http://h:8080/series/u/p/9001.mp4", "Bluey S01E01", 1),
+                ("http://h:8080/series/u/p/9002.mp4", "Bluey S01E02", 1),
+                ("http://h:8080/series/u/p/9101.mp4", "Planet Earth S01E01", 0),
+            ] {
+                c.execute(
+                    "INSERT INTO playback_positions (source_id, content_type, item_id, position_seconds, watched)
+                     VALUES (?1, 'movie', ?2, 300, ?3)",
+                    params![sid, iptv_core::m3u::item_id(url, name), watched],
+                )?;
+            }
+            c.execute(STALE_SHA, params![sid])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+
+    let page = call(&env, "catalog.series", json!({ "sourceId": src.id })).await;
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{page}");
+    for item in items {
+        let watched = series_watched(&env, &item["ref"]).await;
+        assert_eq!(watched, item["title"] == "Bluey", "{item}");
+    }
+}
+
 /// FW-M3U-MOVIE-URL: `catalog.item` gives an M3U movie the playlist's link
 /// and its own headers, which playback and downloads need. Lists stay
 /// without links, and a movie of another source kind never gets one.

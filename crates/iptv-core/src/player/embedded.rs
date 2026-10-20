@@ -13,7 +13,7 @@
 //! Every operation is serialized by the manager's op lock, so attach, load,
 //! and detach never interleave.
 
-use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name, validate_play_url};
+use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name};
 use super::detect::{find_mpv, DetectEnv};
 use super::ipc::MpvClient;
 use super::mpv_state::OBSERVED_PROPERTIES;
@@ -552,7 +552,6 @@ pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()
     ensure_platform()?;
     let local = super::with_local_file(state, source).await?;
     let source = &local;
-    validate_play_url(source)?;
     let mgr = manager(state);
     let _op = mgr.op.lock().await;
     let s = current(&mgr).ok_or_else(not_attached)?;

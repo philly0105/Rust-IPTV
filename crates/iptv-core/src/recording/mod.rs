@@ -1013,6 +1013,9 @@ pub fn error_code(message: &str) -> Option<&'static str> {
     if message.contains(engine::ENGINE_MISSING_MESSAGE) {
         return Some("engineMissing");
     }
+    if message.contains(engine::SERVER_HTTP_ONLY_MESSAGE) {
+        return Some("serverHttpOnly");
+    }
     Some(match message {
         MISSED_MESSAGE => "missedNotRunning",
         STOPPED_SHUTDOWN_MESSAGE => "stoppedShutdown",
@@ -1992,6 +1995,7 @@ mod tests {
             (SOURCE_REMOVED_MESSAGE, "sourceRemoved"),
             (STREAM_DROPPED_MESSAGE, "streamDropped"),
             (engine::ENGINE_MISSING_MESSAGE, "engineMissing"),
+            (engine::SERVER_HTTP_ONLY_MESSAGE, "serverHttpOnly"),
             (STREAM_GAPS_MESSAGE, "streamGaps"),
             (STREAM_NOT_FOUND_MESSAGE, "streamNotFound"),
             (STREAM_REJECTED_MESSAGE, "streamRejected"),
@@ -2007,6 +2011,8 @@ mod tests {
         assert_eq!(error_code(&reconnecting), Some("reconnecting"));
         let missing = CoreError::EngineMissing(engine::ENGINE_MISSING_MESSAGE.into()).to_string();
         assert_eq!(error_code(&missing), Some("engineMissing"));
+        let server = CoreError::Unsupported(engine::SERVER_HTTP_ONLY_MESSAGE.into()).to_string();
+        assert_eq!(error_code(&server), Some("serverHttpOnly"));
         assert_eq!(error_code("example.com answered 403"), None);
     }
 

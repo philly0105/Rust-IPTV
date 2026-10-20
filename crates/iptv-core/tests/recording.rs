@@ -610,6 +610,33 @@ async fn server_mode_records_over_http_even_with_mpv() {
     wait_status(&env, &res.recording.id, RecordingStatus::Cancelled, 20).await;
 }
 
+/// A server-mode recording whose stream is HLS when it starts (the channel
+/// changed after scheduling) fails with a coded note the UI can translate.
+#[tokio::test]
+async fn server_mode_codes_a_stream_it_cannot_copy() {
+    let env = env().await;
+    let item = channel(&env, "http://example.com/live/a.m3u8").await;
+    iptv_core::http::ServerMode::install(&env.state, false).expect("server mode");
+    // Inserted directly: scheduling would refuse this stream up front.
+    let t = now();
+    insert(
+        &env,
+        row(
+            "a",
+            &item,
+            t - 1,
+            t + 600,
+            RecordingStatus::Scheduled,
+            vec![],
+        ),
+    )
+    .await;
+    recording::tick(&env.state).await.unwrap();
+    let a = wait_status(&env, "a", RecordingStatus::Failed, 10).await;
+    assert_eq!(a.error_code.as_deref(), Some("serverHttpOnly"), "{a:?}");
+    assert!(a.file_names.is_empty());
+}
+
 /// R-recording-F3: once shutdown began, a tick neither starts a due
 /// recording nor resumes a `recording` row that has no engine.
 #[tokio::test]

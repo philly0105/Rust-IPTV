@@ -1776,8 +1776,11 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let data_dir = state.data_dir.clone();
     // Large new text waits next to the cached copy until the transaction
     // commits, so a refused update leaves the stored playlist as it was.
+    // `pending` is true while this update's staged text is not committed.
     let staged = crate::m3u::staged_playlist_path(&data_dir, id);
     let staged_in = staged.clone();
+    let pending = Arc::new(AtomicBool::new(false));
+    let pending_in = pending.clone();
     let result = state
         .db_call(move |c| {
             let mut config_changed = false;
@@ -1789,7 +1792,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                             "this is not an M3U playlist (no channels found); paste the playlist text".into(),
                         ));
                     }
-                    Some(crate::m3u::place_raw_text_at(&staged_in, t)?)
+                    // A committed earlier text still staged goes in place
+                    // first, so staging this one cannot overwrite it.
+                    crate::m3u::importer::finish_staged(c, &data_dir, &sid)?;
+                    let raw = crate::m3u::place_raw_text_at(&staged_in, t)?;
+                    pending_in.store(raw.is_empty(), Ordering::SeqCst);
+                    Some(raw)
                 }
                 None => None,
             };
@@ -1804,6 +1812,12 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                      ON CONFLICT(source_id) DO UPDATE SET raw = excluded.raw",
                     rusqlite::params![sid, raw, crate::db::now_rfc3339()],
                 )?;
+            }
+            if text_staged {
+                // From the commit on the staged text is the source's: should
+                // the move below fail or be cut short, the next import or
+                // start-up finishes it.
+                crate::m3u::importer::mark_staged(&tx, &sid)?;
             }
             if let Some(cfg) = &claim {
                 if let Some((_, other)) = store::find_same(&tx, cfg, Some(&sid))? {
@@ -1845,9 +1859,13 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
                 rusqlite::params![sid, crate::db::now_rfc3339()],
             )?;
             tx.commit()?;
+            pending_in.store(false, Ordering::SeqCst);
             if text_staged {
-                let dest = crate::m3u::cached_playlist_path(&data_dir, &sid);
-                std::fs::rename(&staged_in, dest)?;
+                // The update is stored either way; a failed move keeps the
+                // text and its mark for the next try.
+                if let Err(err) = crate::m3u::importer::finish_staged(c, &data_dir, &sid) {
+                    tracing::warn!(source_id = %sid, %err, "could not move the new playlist text into place; the next refresh retries");
+                }
             }
             if let Some(p) = position {
                 store::move_to(c, &sid, p)?;
@@ -1855,8 +1873,8 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
             Ok((store::get(c, &sid)?, config_changed, text_inline))
         })
         .await;
-    if result.is_err() {
-        // Refused or failed: the staged text (if any) never counts.
+    if pending.load(Ordering::SeqCst) {
+        // Refused or failed before the commit: the staged text never counts.
         let _ = std::fs::remove_file(&staged);
     }
     let (updated, config_changed, text_inline) = result?;

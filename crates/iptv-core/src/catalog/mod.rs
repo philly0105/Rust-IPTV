@@ -18,7 +18,7 @@ mod title;
 // vod: year range and "Hide watched" filters (Run 2 C4).
 pub mod vodfilter;
 
-pub use title::title_base;
+pub use title::{country_tags, title_base};
 pub use vodfilter::VodFilter;
 
 use crate::channeledit;

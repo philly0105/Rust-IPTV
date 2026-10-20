@@ -43,6 +43,13 @@ static TRAILING_QUALITY: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)[\s._|-]+(?:4k|uhd|fhd|hd|sd|hdr|hdr10|1080p|720p|2160p|480p|hevc|x26[45]|h\.?26[45]|multi(?:[- ]?sub)?|vostfr|vost|dual|imax|3d)\s*$").unwrap()
 });
 static SPACES: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+").unwrap());
+/// A short bracketed code: `[US]`, `[uk]`.
+static CODE_TAG: Lazy<Regex> = Lazy::new(|| Regex::new(r"\[\s*([A-Za-z]{2,3})\s*\]").unwrap());
+
+/// Countries whose tag marks a local version of a show (`The Office [US]`,
+/// `The Office [UK]`). English-speaking markets only: other codes (`[DE]`,
+/// `[FR]`) mark a dub's language as often as a country.
+const COUNTRY_TAGS: &[&str] = &["US", "USA", "UK", "GB", "AU", "AUS", "CA", "NZ", "IE"];
 
 /// Upper bound for a plausible release year (current year + 2).
 fn max_year() -> i64 {
@@ -126,9 +133,23 @@ pub fn title_base(title: &str) -> (String, Option<i64>) {
     }
 }
 
+/// The country tags of a title that [`title_base`] drops with the other
+/// bracketed tags (`The Office [US]` -> `["US"]`), upper-cased, in title
+/// order. A tag that starts the title is a language or region prefix and does
+/// not count.
+pub fn country_tags(title: &str) -> Vec<String> {
+    CODE_TAG
+        .captures_iter(title.trim())
+        .filter(|c| c.get(0).is_some_and(|m| m.start() > 0))
+        .filter_map(|c| c.get(1))
+        .map(|m| m.as_str().to_ascii_uppercase())
+        .filter(|code| COUNTRY_TAGS.contains(&code.as_str()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::title_base;
+    use super::{country_tags, title_base};
 
     fn tb(s: &str) -> (String, Option<i64>) {
         title_base(s)
@@ -174,5 +195,17 @@ mod tests {
         assert_eq!(tb("HD"), ("HD".into(), None));
         assert_eq!(tb("  "), ("".into(), None));
         assert_eq!(tb("Movie (3000)").1, None);
+    }
+
+    #[test]
+    fn country_tags_are_the_bracketed_countries_after_the_start() {
+        assert_eq!(country_tags("The Office [US]"), ["US"]);
+        assert_eq!(country_tags("EN - The Office [uk] [4K]"), ["UK"]);
+        assert_eq!(country_tags("Shameless [ US ] (2011)"), ["US"]);
+        // A prefix, a dub's language and a quality tag are not countries.
+        assert!(country_tags("[US] The Office").is_empty());
+        assert!(country_tags("Dark [DE]").is_empty());
+        assert!(country_tags("Dark [4K]").is_empty());
+        assert!(country_tags("The Office (US)").is_empty());
     }
 }

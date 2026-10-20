@@ -193,6 +193,78 @@ async fn refused_large_update_keeps_the_stored_copy() {
     assert_eq!(raw_row(&env.state, &src.id).await.0, 0);
 }
 
+/// Rows of the mark a committed `sources.update` leaves until its staged
+/// text is in place.
+async fn staged_marks(state: &iptv_core::AppState, id: &str) -> i64 {
+    let key = format!("m3u_staged:{id}");
+    state
+        .db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT count(*) FROM app_state WHERE key = ?1",
+                [&key],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+/// A committed large update whose text cannot be moved into place keeps the
+/// staged text and its mark instead of losing them: the next refresh moves
+/// and imports it, and after a crash between the commit and the move the
+/// start-up sweep moves it rather than deleting it as an orphan.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn committed_large_update_survives_a_failed_move() {
+    let env = env().await;
+    let src = add_text(&env.state, "Small", &gen_m3u(5, 1)).await;
+    let path = cache(&env.state.data_dir, &src.id);
+    let staged = iptv_core::m3u::staged_playlist_path(&env.state.data_dir, &src.id);
+    let text = big_text();
+    let patch = sources::SourcePatch {
+        text: Some(text.clone()),
+        ..Default::default()
+    };
+
+    // A directory where the copy goes makes the move after the commit fail.
+    std::fs::create_dir_all(&path).unwrap();
+    sources::update(&env.state, &src.id, patch).await.unwrap();
+    assert_eq!(raw_row(&env.state, &src.id).await.0, 0);
+    assert_eq!(std::fs::read_to_string(&staged).unwrap(), text);
+    assert_eq!(staged_marks(&env.state, &src.id).await, 1);
+
+    // The next refresh moves the text into place and imports it.
+    std::fs::remove_dir(&path).unwrap();
+    let refreshed = sources::refresh(env.state.clone(), &src.id).await.unwrap();
+    assert_eq!(refreshed.channel_count, 2000);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    assert!(!staged.exists());
+    assert_eq!(staged_marks(&env.state, &src.id).await, 0);
+
+    // A crash between the commit and the move left the text and its mark;
+    // an update that never committed left a staged file without one.
+    let renamed = text.replace("Channel ", "Renamed ");
+    std::fs::write(&staged, &renamed).unwrap();
+    let sid = src.id.clone();
+    env.state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO app_state (key, value) VALUES ('m3u_staged:' || ?1, '1')",
+                [&sid],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let other = add_text(&env.state, "Other", &gen_m3u(3, 1)).await;
+    let orphan = iptv_core::m3u::staged_playlist_path(&env.state.data_dir, &other.id);
+    std::fs::write(&orphan, "#EXTM3U\n").unwrap();
+    iptv_core::m3u::init(env.state.clone()).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), renamed);
+    assert!(!staged.exists());
+    assert!(!orphan.exists());
+    assert_eq!(staged_marks(&env.state, &src.id).await, 0);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn replace_import_and_boot_sweep_remove_orphan_copies() {
     let env = env().await;

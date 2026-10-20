@@ -41,14 +41,18 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
 
 /// Deletes `playlists/<id>.m3u` files without a `sources` row (left by a
 /// crash, a DB quarantine or an older Replace import) and interrupted
-/// `.m3u.part` writes.
+/// `.m3u.part` writes. First moves the staged text of every committed
+/// `sources.update` into place ([`importer::finish_all_staged`]), so only
+/// staged text that never committed is swept.
 async fn sweep_playlists(state: &AppState) -> CoreResult<()> {
     let dir = state.data_dir.join("playlists");
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    if !dir.is_dir() {
         return Ok(());
-    };
+    }
+    let data_dir = state.data_dir.clone();
     let ids: std::collections::HashSet<String> = state
-        .db_call(|c| {
+        .db_call(move |c| {
+            importer::finish_all_staged(c, &data_dir)?;
             let mut stmt = c.prepare("SELECT id FROM sources")?;
             let ids = stmt
                 .query_map([], |r| r.get(0))?
@@ -56,6 +60,9 @@ async fn sweep_playlists(state: &AppState) -> CoreResult<()> {
             Ok(ids)
         })
         .await?;
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let orphan = name.ends_with(".m3u.part")

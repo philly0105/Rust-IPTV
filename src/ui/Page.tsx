@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 
 import { buttonClass } from './Button';
 import { cn } from './cn';
+import { GLASS_FOCUS } from './focus';
 
 /**
  * Page widths (DS-PAGE-FRAME), in rem against the 15 px root so they follow the UI scale:
@@ -142,7 +143,7 @@ export function BackButton({ to, onClick, label, tone = 'default', className, ..
     'sm',
     cn(
       'gap-1.5 ps-2',
-      tone === 'glass' && 'border border-glass-border bg-glass text-on-glass shadow-1 glass-blur hover:bg-glass-strong hover:text-on-glass active:bg-glass-strong',
+      tone === 'glass' && cn('border border-glass-border bg-glass text-on-glass shadow-1 glass-blur hover:bg-glass-strong hover:text-on-glass active:bg-glass-strong', GLASS_FOCUS),
       className,
     ),
   );

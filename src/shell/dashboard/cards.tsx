@@ -215,7 +215,7 @@ function PosterCardView({
           {badge && <span className="absolute top-2 start-2">{badge}</span>}
           {progress !== undefined && progress > 0 && (
             <span className="absolute inset-x-2 bottom-2">
-              <ProgressBar value={Math.min(1, progress) * 100} size="xs" tone="glass" className="bg-black/50" />
+              <ProgressBar value={Math.min(1, progress) * 100} size="xs" tone="glass" />
             </span>
           )}
           {artCorner}
@@ -420,8 +420,8 @@ function EdgeProgress({ value }: { value: number }) {
   return (
     // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
     <span className="absolute inset-x-0 bottom-0" aria-hidden>
-      {/* The glass tone: the bright dial amber in every theme, as everything drawn on artwork. */}
-      <ProgressBar value={Math.min(1, value) * 100} size="xs" tone="glass" className="h-1 rounded-none bg-black/50 [&>div]:rounded-none" />
+      {/* The glass tone: the bright dial amber on the dark glass track in every theme, as everything drawn on artwork. */}
+      <ProgressBar value={Math.min(1, value) * 100} size="xs" tone="glass" className="h-1 rounded-none [&>div]:rounded-none" />
     </span>
   );
 }

@@ -36,6 +36,7 @@ import {
 import { SWITCH_TONES } from '../Field';
 import { hueOf } from '../Poster';
 import { mergeShownToasts, type ToastRecord } from '../Toast';
+import { TOOLTIP_CLOSE_MS } from '../Tooltip';
 
 afterEach(() => {
   cleanup();
@@ -185,6 +186,8 @@ describe('IconButton tooltip', () => {
     // It repeats the accessible name, so it does not describe the button a second time.
     expect(button.hasAttribute('aria-describedby')).toBe(false);
     fireEvent.mouseLeave(button);
+    // It stays a moment, so the pointer can reach it (WCAG 1.4.13), then goes.
+    act(() => vi.advanceTimersByTime(TOOLTIP_CLOSE_MS));
     expect(screen.queryByRole('tooltip')).toBeNull();
   });
 

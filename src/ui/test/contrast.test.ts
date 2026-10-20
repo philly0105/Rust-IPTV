@@ -14,6 +14,9 @@ import { describe, expect, it } from 'vitest';
 import { ACCENTS } from '@/api/types';
 
 import { SWITCH_TONES } from '../Field';
+import { GLASS_FOCUS } from '../focus';
+import { PROGRESS_TRACK } from '../Misc';
+import { SEGMENT_TONES, segmentClass } from '../Segmented';
 
 const STYLES = join(__dirname, '..', '..', 'styles');
 const tokensCss = readFileSync(join(STYLES, 'tokens.css'), 'utf8');
@@ -96,6 +99,13 @@ function restingToken(classes: string, prefix: 'bg' | 'border'): string {
   const hit = classes.split(/\s+/).find((c) => c.startsWith(`${prefix}-`));
   if (!hit) throw new Error(`no resting ${prefix}- class in "${classes}"`);
   return hit.slice(prefix.length + 1);
+}
+
+/** The colour token of a `ring-x` class (not the width `ring-1` or `ring-inset`). */
+function ringToken(classes: string): string {
+  const hit = classes.split(/\s+/).find((c) => /^ring-(?!\d|inset\b|offset)/.test(c));
+  if (!hit) throw new Error(`no ring colour in "${classes}"`);
+  return hit.slice('ring-'.length);
 }
 
 /** The token names one Switch state draws: track fill and outline, knob fill. */
@@ -193,6 +203,21 @@ for (const [name, c] of Object.entries(THEMES)) {
       const { track, knob } = switchTokens(state);
       expect(contrast(tok(knob.bg), tok(track.bg)), `knob ${knob.bg} on track ${track.bg}`).toBeGreaterThanOrEqual(3);
       for (const s of SURFACES) expect(contrast(tok(track.border), tok(s)), `track edge ${track.border} on ${s}`).toBeGreaterThanOrEqual(3);
+    });
+
+    // segment-selection-contrast: the raised thumb alone was 1.24:1 (dark) and 1.09:1 (light) on
+    // its track, so the chosen segment (SegmentedControl, pill Tabs) carries a ring, read from
+    // SEGMENT_TONES, that keeps 3:1 against the track around it and the thumb inside it.
+    it('the chosen segment: its ring reaches 3:1 on the track and on the thumb (WCAG 1.4.11)', () => {
+      const { track, thumb } = SEGMENT_TONES.default;
+      const ring = tok(ringToken(thumb));
+      expect(contrast(ring, tok(restingToken(track, 'bg'))), `segment ring on track ${restingToken(track, 'bg')}`).toBeGreaterThanOrEqual(3);
+      expect(contrast(ring, tok(restingToken(thumb, 'bg'))), `segment ring on thumb ${restingToken(thumb, 'bg')}`).toBeGreaterThanOrEqual(3);
+      expect(segmentClass(true)).toContain(SEGMENT_TONES.default.thumb.split(' ').at(-1)!);
+    });
+
+    it('a progress fill reaches 3:1 on the track ProgressBar draws', () => {
+      expect(contrast(tok('accent-mark'), tok(restingToken(PROGRESS_TRACK.theme, 'bg'))), 'mark on progress track').toBeGreaterThanOrEqual(3);
     });
 
     it('every text colour reaches 4.5:1 on bg and every surface', () => {
@@ -417,6 +442,91 @@ describe('glass tokens (C8)', () => {
       }
     });
   }
+
+  /** A see-through white layer as Tailwind writes it (`bg-white/6`). */
+  const whiteLayer = (token: string): number => {
+    const m = /^white\/(\d+)$/.exec(token);
+    if (!m) throw new Error(`expected a white layer, got ${token}`);
+    return Number(m[1]) / 100;
+  };
+  const glassAccent = (accent: string): Rgb => {
+    const own = accent === 'amber' ? blocks.dark : blockBody(new RegExp(String.raw`:root\[data-accent='${accent}'\]\s*\{([^}]*)\}`));
+    const fill = /--color-glass-accent:\s*(#[0-9a-f]{6})\s*;/i.exec(own)?.[1];
+    if (!fill) throw new Error(`${accent}: --color-glass-accent missing`);
+    return hex(fill);
+  };
+  /** Every glass panel a glass control can sit in, in every theme, over black and over white. */
+  const panels = (): [string, Rgb][] =>
+    Object.entries(blocks).flatMap(([name, body]) =>
+      ['glass', 'glass-strong'].flatMap((surface) => {
+        const { rgb, alpha } = rgbaToken(body, surface);
+        return [
+          [`${name} ${surface} over black`, over(rgb, alpha, BLACK)],
+          [`${name} ${surface} over white`, over(rgb, alpha, WHITE)],
+        ] as [string, Rgb][];
+      }),
+    );
+
+  // segment-selection-contrast, glass tone: the chosen segment's ring against the glass track.
+  it('a chosen glass segment: its ring reaches 3:1 on the track, on every glass panel', () => {
+    const { track, thumb } = SEGMENT_TONES.glass;
+    const layer = whiteLayer(restingToken(track, 'bg'));
+    for (const [name, body] of Object.entries(blocks)) {
+      const ringName = ringToken(thumb);
+      const text = name === 'oled' ? THEMES['dark']! : THEMES[name]!;
+      const ring = text[ringName];
+      if (!ring) throw new Error(`${name}: --color-${ringName} missing`);
+      for (const surface of ['glass', 'glass-strong']) {
+        const { rgb, alpha } = rgbaToken(body, surface);
+        for (const [under, label] of [
+          [BLACK, 'black'],
+          [WHITE, 'white'],
+        ] as const) {
+          const trackFill = over(WHITE, layer, over(rgb, alpha, under));
+          expect(contrast(ring, trackFill), `${name} ${surface} over ${label}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    }
+  });
+
+  // glass-segment-focus: glass segments (and the glass BackButton) draw focus in the glass accent,
+  // because the theme's focus is a deep shade in light (2.81:1 and 1.91:1 on glass).
+  it('glass controls focus in the glass accent, which reaches 3:1 on the glass track and panel for every accent', () => {
+    expect(GLASS_FOCUS).toContain('[--color-focus:var(--color-glass-accent)]');
+    expect(GLASS_FOCUS).toMatch(/\[--color-glow:[^\]]*var\(--color-glass-accent\)/);
+    for (const selected of [true, false]) expect(segmentClass(selected, 'glass')).toContain('[--color-focus:var(--color-glass-accent)]');
+    expect(segmentClass(true, 'default')).not.toContain('--color-glass-accent');
+    const layer = whiteLayer(restingToken(SEGMENT_TONES.glass.track, 'bg'));
+    for (const accent of ACCENTS) {
+      const focus = glassAccent(accent);
+      for (const [label, panel] of panels()) {
+        expect(contrast(focus, panel), `${accent} focus on ${label}`).toBeGreaterThanOrEqual(3);
+        // Glass segments sit in strong glass: the player's menus and the wall's toolbar.
+        if (label.includes('glass-strong')) {
+          expect(contrast(focus, over(WHITE, layer, panel)), `${accent} focus on the segment track, ${label}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    }
+  });
+
+  // glass-progress-contrast: the glass bar's track was on-glass at 20 %, so on pale art the
+  // fill stood at about 1.3:1 against it. The track ProgressBar draws is read from PROGRESS_TRACK.
+  it('a glass progress fill reaches 3:1 on its track over black and over white, for every accent', () => {
+    const track = restingToken(PROGRESS_TRACK.glass, 'bg');
+    for (const accent of ACCENTS) {
+      const fill = glassAccent(accent);
+      for (const [name, body] of Object.entries(blocks)) {
+        const { rgb, alpha } = rgbaToken(body, track);
+        expect(alpha, `${name} ${track} alpha`).toBeGreaterThanOrEqual(0.85);
+        for (const [under, label] of [
+          [BLACK, 'black'],
+          [WHITE, 'white'],
+        ] as const) {
+          expect(contrast(fill, over(rgb, alpha, under)), `${accent} fill on ${name} ${track} over ${label}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    }
+  });
 
   it('the light theme keeps the bright glass accent: no light block overrides it', () => {
     expect(blocks.light).not.toMatch(/--color-glass-accent/);

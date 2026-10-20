@@ -18,7 +18,7 @@ import {
   type Ref,
   type RefCallback,
 } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 
 import { cn } from './cn';
 import { Kbd } from './Misc';
@@ -59,6 +59,13 @@ const MARGIN = 8;
 /** After a tooltip hides, the next one within this window shows without the hover delay. */
 const WARM_MS = 500;
 let lastHiddenAt = 0;
+/**
+ * How long a tooltip stays after the pointer leaves its trigger (or the tooltip itself), so the
+ * pointer can cross the gap onto it and rest there (WCAG 1.4.13, hoverable). Exported for tests.
+ */
+export const TOOLTIP_CLOSE_MS = 150;
+/** The hide of the tooltip waiting out TOOLTIP_CLOSE_MS: the next tooltip to show closes it at once. */
+let leaving: (() => void) | null = null;
 /**
  * The pointer type of the last pointerenter. A tap fires compatibility mouse events after the
  * touch, and a tooltip popping up under the finger only hides what was tapped, so a mouseenter
@@ -151,10 +158,11 @@ export interface TooltipTriggerProps {
 
 /**
  * Tooltip behaviour for any trigger: shown on hover (after `delay`) and on keyboard focus;
- * Escape, a pointer press, blur, or scrolling hides it. Returns the props for the trigger and
- * the tooltip node (portaled, so it can sit anywhere in the tree). Moving between tooltipped
- * controls skips the delay so a toolbar reads quickly. With no content it returns inert props
- * and no node.
+ * Escape, a pointer press, blur, or scrolling hides it. It stays while the pointer is on the
+ * trigger or on the tooltip, and closes a moment after it leaves both (TOOLTIP_CLOSE_MS).
+ * Returns the props for the trigger and the tooltip node (portaled, so it can sit anywhere in the
+ * tree). Moving between tooltipped controls skips the delay so a toolbar reads quickly. With no
+ * content it returns inert props and no node.
  */
 export function useTooltip({
   content,
@@ -174,31 +182,63 @@ export function useTooltip({
   const tipRef = useRef<HTMLDivElement>(null);
   /** Shown because keyboard focus reached the trigger (it then follows focus), not by the pointer. */
   const viaFocus = useRef(false);
+  /** The pointer has left the trigger and the tooltip: `timer` closes it after TOOLTIP_CLOSE_MS. */
+  const closing = useRef(false);
 
-  const show = (immediate: boolean) => {
-    if (!enabled) return;
-    if (timer.current) clearTimeout(timer.current);
-    const run = () => {
-      if (anchor.current?.isConnected) setRect(anchor.current.getBoundingClientRect());
-    };
-    if (immediate || Date.now() - lastHiddenAt < WARM_MS) run();
-    else timer.current = setTimeout(run, delay);
-  };
-  const hide = () => {
+  // Reads only refs and the state setter, so it is the same function for the life of the
+  // component: `leaving` is compared against it.
+  const hide = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     viaFocus.current = false;
+    closing.current = false;
+    if (leaving === hide) leaving = null;
     setRect((r) => {
       if (r) lastHiddenAt = Date.now();
       return null;
     });
+  }, []);
+  /** The pointer is back on the trigger or on the tooltip: it stays. */
+  const stay = () => {
+    if (!closing.current) return;
+    closing.current = false;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    if (leaving === hide) leaving = null;
+  };
+  /** The pointer left the trigger or the tooltip: close soon, or drop a show still waiting. */
+  const leave = () => {
+    if (!rect) {
+      hide();
+      return;
+    }
+    if (timer.current) clearTimeout(timer.current);
+    closing.current = true;
+    // The next tooltip within WARM_MS shows at once, as after a hide, and closes this one.
+    lastHiddenAt = Date.now();
+    leaving = hide;
+    timer.current = setTimeout(hide, TOOLTIP_CLOSE_MS);
+  };
+  const show = (immediate: boolean) => {
+    if (!enabled) return;
+    stay();
+    if (timer.current) clearTimeout(timer.current);
+    const run = () => {
+      if (!anchor.current?.isConnected) return;
+      // One tooltip at a time: the one still closing goes now.
+      if (leaving && leaving !== hide) leaving();
+      setRect(anchor.current.getBoundingClientRect());
+    };
+    if (immediate || Date.now() - lastHiddenAt < WARM_MS) run();
+    else timer.current = setTimeout(run, delay);
   };
 
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
+      if (leaving === hide) leaving = null;
     },
-    [],
+    [hide],
   );
 
   // The content went away while shown (the control no longer has a tooltip): hide it too.
@@ -222,11 +262,17 @@ export function useTooltip({
   // a field, another control), and claims that press, so it does not also close the dialog under
   // it or go Back on a page that listens for Escape (useEscapeBack); the next press does that. A
   // window capture listener hears the key before anything else. A tooltip that follows keyboard
-  // focus is left to the trigger's onKeyDown, which hides it and lets the press go on.
+  // focus is left to the trigger's onKeyDown, which hides it and lets the press go on. One the
+  // pointer has already left is only closing: it goes at once and the press goes on, removed
+  // before the listeners after this one look for a tooltip on the page (useEscapeBack does).
   useEffect(() => {
     if (!rect) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key !== 'Escape' || e.isComposing || viaFocus.current) return;
+      if (closing.current) {
+        flushSync(hide);
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       hide();
@@ -270,7 +316,7 @@ export function useTooltip({
       if (!(viaFocus.current && rect)) viaFocus.current = false;
       show(false);
     },
-    onMouseLeave: hide,
+    onMouseLeave: leave,
     onPointerDown: hide,
     onFocus: (e) => {
       if ((e.target as HTMLElement).matches?.(':focus-visible')) {
@@ -286,17 +332,23 @@ export function useTooltip({
       // cost an extra press per tooltipped control (and the X of a dialog, whose tooltip says
       // Esc, did not close on Esc). A tooltip the pointer brought up claims the press, so
       // dismissing it does not also close the dialog under it.
+      // The keyboard tooltip is removed before the press goes on: a page that goes Back on Escape
+      // (useEscapeBack) stands aside while a tooltip is on the page, and would wait a second press.
       if (e.key === 'Escape' && rect && !e.nativeEvent.isComposing) {
         if (!e.currentTarget.matches?.(':focus-visible')) {
           e.preventDefault();
           e.stopPropagation();
-        }
-        hide();
+          hide();
+        } else flushSync(hide);
       }
     },
   };
 
   const style: CSSProperties = pos ? { left: pos.left, top: pos.top } : { left: 0, top: 0, visibility: 'hidden' };
+  // The tooltip takes the pointer (WCAG 1.4.13: the pointer can rest on it), but it is only text:
+  // a press closes it, and its events stop here, so they never reach the trigger's ancestors in
+  // the React tree (a player surface that toggles playback on click, a clickable card).
+  const inert = (e: { stopPropagation(): void }) => e.stopPropagation();
   const tooltip = shown
     ? createPortal(
         <div
@@ -306,8 +358,21 @@ export function useTooltip({
           data-side={pos?.side ?? side}
           data-tone={tone}
           style={style}
+          onMouseEnter={stay}
+          onMouseLeave={() => {
+            // A tooltip that follows keyboard focus stays while focus does.
+            if (!viaFocus.current) leave();
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            hide();
+          }}
+          onMouseDown={inert}
+          onClick={inert}
+          onDoubleClick={inert}
+          onContextMenu={inert}
           className={cn(
-            'pointer-events-none fixed z-[70] flex max-w-64 items-center gap-2 rounded-sm px-2 py-1 text-caption font-medium shadow-2 motion-safe:animate-fade-in',
+            'fixed z-[70] flex max-w-64 items-center gap-2 rounded-sm px-2 py-1 text-caption font-medium shadow-2 motion-safe:animate-fade-in',
             tone === 'glass'
               ? // Over video the tooltip is glass like the chrome it labels; its key caps go glass too.
                 'border border-glass-border bg-glass-strong text-on-glass [&_kbd]:border-glass-border [&_kbd]:bg-white/10 [&_kbd]:text-on-glass-muted'

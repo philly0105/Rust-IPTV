@@ -3,11 +3,12 @@ import type { Page } from '@playwright/test';
 import type { ChannelEdit, GuideSearchHit, RecordingCapabilities, RecordingRule, Source } from '../src/api/types';
 import { ensureSource, resetApp, rpc } from './helpers/api';
 import { expect, test } from './helpers/fixtures';
+import { expectPlaying, resumeRecord } from './helpers/media';
 import { blurFocus } from './helpers/ui';
 
 // Run 2 C5 guide UI against the mock M3U and its XMLTV (three days of programmes whose
 // titles repeat across slots and channels): the URL-backed window with back and forward,
-// Jump to date and time, guide search, and Record series from a search hit.
+// Jump to date and time, guide search, Record series from a search hit, and the preview band.
 
 const NAME = 'Guide M3U';
 
@@ -33,6 +34,9 @@ test.describe.serial('guide: window, jump, search, series', () => {
   const labelOf = async (page: Page) => ((await windowLabel(page).textContent()) ?? '').trim();
 
   test('the window lives in the URL: Later, Jump, back and forward', async ({ page }) => {
+    // The live window's label moves on at every :00 and :30; a test that crossed one would
+    // compare two different "now" windows. Timers keep running.
+    await page.clock.setFixedTime(Date.now());
     await gotoGuide(page);
     const label0 = await labelOf(page);
     expect(atOf(page.url())).toBeNull();
@@ -227,5 +231,67 @@ test.describe.serial('guide: window, jump, search, series', () => {
     await expect(menu).toBeHidden();
 
     await rpc(request, 'channels.reset', { sourceId: source.id });
+  });
+
+  // CB-GUIDE-PREVIEW: the band above the grid shows the programme under the keyboard cursor and
+  // plays its channel. Under 1000 px tall it starts hidden; the toolbar opens it, and the choice
+  // lasts across reloads. It needs 768 px of width and 700 px of height, and has no toggle below.
+  test('the preview band follows the cursor, plays the channel and remembers being open', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoGuide(page);
+    const band = page.getByTestId('guide-preview');
+    const toggle = page.getByTestId('guide-preview-toggle');
+    await expect(band).toHaveCount(0);
+    await expect(toggle).toHaveAccessibleName('Show preview');
+    await toggle.click();
+    await expect(band).toBeVisible();
+    await expect(band).toHaveAccessibleName('Programme preview');
+    await expect(toggle).toHaveAccessibleName('Hide preview');
+
+    // The keyboard cursor on the second channel's current programme; the pointer stays off the grid.
+    await page.mouse.move(1, 1);
+    const channel = ((await page.locator('[data-channel-row="1"] span.truncate').textContent()) ?? '').trim();
+    expect(channel).not.toBe('');
+    const cell = page.locator('button[data-cell-row="1"][aria-label*=", on now"]');
+    await expect(cell).toHaveCount(1);
+    const title = (await cell.getAttribute('title')) ?? '';
+    await cell.focus();
+    await expect(band.getByTestId('guide-preview-title')).toHaveText(title);
+    await expect(band).toContainText(channel);
+    // The XMLTV description of that programme.
+    await expect(band.getByTestId('guide-preview-description')).not.toBeEmpty();
+
+    // Watch live plays that channel in the band.
+    await band.getByRole('button', { name: 'Watch live', exact: true }).click();
+    await expect(band.locator('video')).toHaveCount(1);
+    await expectPlaying(page, { advance: 1 });
+    const rec = await resumeRecord(page);
+    expect(rec?.source.isLive).toBe(true);
+    expect(rec?.source.title).toBe(channel);
+    await expect(page.locator('[data-channel-row="1"]').getByTestId('guide-playing-mark')).toBeVisible();
+
+    // Open survives a reload; hidden does too.
+    await page.reload();
+    await expect(band).toBeVisible();
+    await toggle.click();
+    await expect(band).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByTestId('epg-grid')).toBeVisible();
+    await expect(band).toHaveCount(0);
+    await expect(toggle).toHaveAccessibleName('Show preview');
+
+    // Opened, the band still gives way on a narrow or short window, and the toggle goes with it.
+    await toggle.click();
+    await expect(band).toBeVisible();
+    for (const size of [
+      { width: 760, height: 800 },
+      { width: 1280, height: 690 },
+    ]) {
+      await page.setViewportSize(size);
+      await expect(band, `${size.width}x${size.height}`).toHaveCount(0);
+      await expect(toggle, `${size.width}x${size.height}`).toHaveCount(0);
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await expect(band).toBeVisible();
+    }
   });
 });

@@ -53,6 +53,17 @@ async function seed(request: APIRequestContext): Promise<void> {
   await rpc(request, 'stats.record', { ref: movieRef(), title: MOCK_FACTS.firstMovie.title, seconds: 300, day: localDay(FILM_DAYS_AGO) });
 }
 
+/**
+ * The total tile reads as one sentence to a screen reader and is drawn as a number over its label
+ * (both aria-hidden), so the tile's own text holds all three. Check the sentence and the two drawn parts.
+ */
+async function expectTotal(page: Page, time: string, days: 7 | 30): Promise<void> {
+  const tile = page.getByTestId('stats-total');
+  await expect(tile.locator('span.sr-only')).toHaveText(`${time} watched in the last ${days} days`);
+  const drawn = tile.locator('span[aria-hidden]');
+  await expect(drawn).toHaveText([time, `Watched in the last ${days} days`]);
+}
+
 /** The visible toast with this text (the sr-only live region repeats it outside the list). */
 function toastWith(page: Page, text: string) {
   return page.getByRole('region', { name: 'Notifications' }).getByRole('listitem').filter({ hasText: text });
@@ -86,7 +97,7 @@ test.describe('Watch stats', () => {
     await page.goto('/stats');
     await expect(page.getByTestId('stats-page')).toBeVisible();
     await expect(page.getByRole('heading', { level: 1, name: 'Watch stats' })).toBeAttached();
-    await expect(page.getByTestId('stats-total')).toHaveText('2 hr 25 min watched in the last 7 days');
+    await expectTotal(page, '2 hr 25 min', 7);
 
     // The chart: today is picked; arrows move, the readout follows.
     const slider = page.getByRole('slider', { name: 'Watch time per day' });
@@ -117,7 +128,7 @@ test.describe('Watch stats', () => {
     // Range: tabs and the 7/3 keys, kept in the URL across a reload.
     await page.getByRole('tab', { name: '30 days' }).click();
     await expect(page).toHaveURL(/\/stats\?range=30$/);
-    await expect(page.getByTestId('stats-total')).toHaveText('2 hr 25 min watched in the last 30 days');
+    await expectTotal(page, '2 hr 25 min', 30);
     await expect(page.getByTestId('stats-bars').locator(':scope > div')).toHaveCount(30);
     await page.reload();
     await expect(page.getByRole('tab', { name: '30 days' })).toHaveAttribute('aria-selected', 'true');
@@ -153,7 +164,7 @@ test.describe('Watch stats', () => {
     await expect(page.getByText('Nothing played in the last 7 days.')).toBeVisible();
     await page.getByTestId('stats-show-month').click();
     await expect(page).toHaveURL(/range=30/);
-    await expect(page.getByTestId('stats-total')).toHaveText('10 min watched in the last 30 days');
+    await expectTotal(page, '10 min', 30);
     await page.getByRole('tab', { name: '7 days' }).click();
     await expect(page.getByText('Nothing played in the last 7 days.')).toBeVisible();
   });

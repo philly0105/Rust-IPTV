@@ -40,7 +40,7 @@ Server mode has no login and no TLS of its own. Its defaults keep it local, and 
 
 - It binds 127.0.0.1 unless `--host` says otherwise. The Docker image binds all interfaces inside the container; publish its port on loopback or only to the proxy.
 - `/api` answers only when the `Host` header is `localhost`, an IP address, or a name in `IPTV_ALLOWED_HOSTS`. This blocks DNS rebinding.
-- State-changing requests and WebSocket upgrades from another origin, and any request the browser marks `Sec-Fetch-Site: cross-site`, get 403. No CORS headers are sent.
+- State-changing requests and WebSocket upgrades from another origin (scheme, host or port), and any request the browser marks `Sec-Fetch-Site: cross-site`, get 403. No CORS headers are sent. A reverse proxy that serves HTTPS has to send `X-Forwarded-Proto`, which Caddy does by default.
 - The stream proxy and the server's own fetches refuse loopback, private, link-local (cloud metadata included) and other non-public addresses, except the source's own host and port, unless `--allow-private-targets` is set. The exception covers that exact port only: the same host name on another port is fetched like any other address. Names are checked again when the connection is made, so they cannot rebind to a private address.
 - Clients cannot make the server read or write its own files: file sources, `file://` URLs and a custom downloads folder are refused.
 - The interface is served with a restrictive Content-Security-Policy, `X-Frame-Options: SAMEORIGIN` and `nosniff`.

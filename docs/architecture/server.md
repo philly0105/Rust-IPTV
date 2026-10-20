@@ -296,8 +296,14 @@ Server mode has no login. Defaults keep it local:
   nocookie frames for trailers, `object-src 'none'`, `frame-ancestors 'self'`)
   and `Referrer-Policy: same-origin`.
 - State-changing `/api` requests and WebSocket upgrades are refused (403) when
-  `Origin` names another host or `Sec-Fetch-Site` is `cross-site`. This blocks
-  CSRF through `text/plain` form posts and cross-site WebSocket hijacking.
+  `Origin` is not the request's own origin or `Sec-Fetch-Site` is
+  `cross-site`. This blocks CSRF through `text/plain` form posts and
+  cross-site WebSocket hijacking. The Origin must match the request's scheme,
+  host and port. The scheme is `X-Forwarded-Proto` from a reverse proxy, else
+  `http` (what the server speaks), and a `Host` without a port means that
+  scheme's default port, never the port the Origin names. A proxy that serves
+  HTTPS must therefore send `X-Forwarded-Proto` (Caddy, Traefik and Tailscale
+  Serve do; nginx needs `proxy_set_header X-Forwarded-Proto $scheme`).
   `X-Forwarded-Host` is accepted as an alternative match for reverse proxies.
 - No CORS headers are sent: same-origin only.
 - Request tracing logs method and path only; proxy query strings (which carry
@@ -351,8 +357,8 @@ Caddy terminates TLS (`tls internal` for a LAN name or IP address, or a Let's
 Encrypt certificate for a public domain), asks for a password with
 `basic_auth`, and proxies to the app, which publishes no port of its own.
 Compose sets `IPTV_ALLOWED_HOSTS` to the same host name Caddy serves, and
-Caddy passes the `Host` header through unchanged, so the guard above accepts
-it. `/manifest.webmanifest` and `/icons/*` stay outside the password because
+Caddy passes the `Host` header through unchanged and adds
+`X-Forwarded-Proto: https`, so the guard above accepts both. `/manifest.webmanifest` and `/icons/*` stay outside the password because
 browsers fetch the manifest without credentials.
 
 ### HTTPS and secure context

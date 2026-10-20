@@ -815,6 +815,28 @@ async fn cross_origin_writes_are_refused() {
         .await
         .unwrap();
     assert_eq!(r.status(), 200);
+    // GPT review (origin-port-wildcard): a Host without a port is the
+    // scheme's default port, not whatever port the Origin names, and the
+    // scheme comes from X-Forwarded-Proto (else http).
+    for (proto, origin, status) in [
+        (None, "http://localhost:8443", 403),
+        (None, "https://localhost", 403),
+        (None, "http://localhost", 200),
+        (Some("https"), "https://localhost:8443", 403),
+        (Some("https"), "http://localhost", 403),
+        (Some("https"), "https://localhost", 200),
+    ] {
+        let mut req = h
+            .http
+            .post(&url)
+            .header(header::HOST, "localhost")
+            .header(header::ORIGIN, origin);
+        if let Some(p) = proto {
+            req = req.header("x-forwarded-proto", p);
+        }
+        let r = req.send().await.unwrap();
+        assert_eq!(r.status(), status, "{proto:?} {origin}");
+    }
     // Reads without an Origin stay open (curl, health probes).
     let r = h
         .http

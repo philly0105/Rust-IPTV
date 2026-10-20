@@ -302,6 +302,22 @@ describe('list page', () => {
       expect(rpc.callsOf('parental.locks')).toContainEqual({});
     });
 
+    it("Ask mode keeps a locked channel's programme off the idle card, as off its row (review round 3)", async () => {
+      h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN, ARTE])]);
+      stubLiveExtras();
+      onAir(BBC, CNN, ARTE);
+      status('ask');
+      rpc.handlers['parental.locks'] = () => [lock('src2', '2')];
+      // CNN was watched last: the idle card offers it.
+      rpc.handlers['recent.list'] = () => [{ ref: CNN.ref, snapshot: { title: 'CNN', contentType: 'live' }, viewedAt: new Date().toISOString() }];
+      rpc.handlers['catalog.item'] = () => CNN;
+      h.renderAt('/lists/L1', routes);
+      const card = await screen.findByTestId('stage-idle');
+      await waitFor(() => expect(within(card).getByTestId('stage-resume').textContent).toContain('CNN'));
+      await waitFor(() => expect(within(card).queryByTestId('stage-idle-locked')).toBeTruthy());
+      expect(card.textContent).not.toContain('CNN Tonight');
+    });
+
     it('Ask mode reads the adult groups of each source in the list', async () => {
       h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
       stubLiveExtras();

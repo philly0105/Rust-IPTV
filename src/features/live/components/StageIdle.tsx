@@ -1,4 +1,4 @@
-import { Play, Radio, Tv } from 'lucide-react';
+import { Lock, Play, Radio, Tv } from 'lucide-react';
 import { useCallback, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -19,6 +19,12 @@ export interface StageIdleProps {
    * the list the card follows the cursor (as the ribbon under it does), says so, and offers Play.
    */
   highlighted?: boolean;
+  /**
+   * The channel asks for the PIN (parental Ask mode, no session unlock): what is on it waits for
+   * the PIN, as on its row and the ribbon. The page resolves it from its locks, so the card hides
+   * the programme again when an unlock runs out.
+   */
+  locked?: boolean;
   now: number;
   stripPrefix?: boolean;
   epgOffsetMinutes?: number;
@@ -39,11 +45,11 @@ export interface StageIdleProps {
  * The stage is dark in every theme, so from md up the text takes the glass colours; on a phone
  * the idle stage is a slim bar on the theme's surface above the list, with theme colours.
  */
-export function StageIdle({ kind, last, highlighted = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
+export function StageIdle({ kind, last, highlighted = false, locked = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
   const channel = last?.channel;
   const name = channel ? displayChannelName(channel.name, stripPrefix) : '';
-  const shifted = channel ? shiftNowNext(last?.nowNext, epgOffsetMinutes) : undefined;
+  const shifted = channel && !locked ? shiftNowNext(last?.nowNext, epgOffsetMinutes) : undefined;
   const cur = shifted?.now && isValidProgram(shifted.now) && programWhen(shifted.now, now) === 'now' ? shifted.now : undefined;
   // A soft glow in the hue of the tile above it: the logo's own colour once it has loaded (the
   // monogram's for a channel without one), slate while it loads, for a logo with no colour to
@@ -76,7 +82,12 @@ export function StageIdle({ kind, last, highlighted = false, now, stripPrefix, e
             <p dir="auto" className="max-w-full truncate text-title-sm text-on-glass max-md:text-body-sm max-md:font-medium max-md:text-fg">
               {name}
             </p>
-            {cur ? (
+            {locked ? (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-body-sm text-on-glass-muted max-md:mt-0 max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-locked">
+                <Lock aria-hidden className="size-3.5 shrink-0" />
+                {t('locked')}
+              </p>
+            ) : cur ? (
               <div className="mt-1 flex w-80 max-w-full flex-col gap-1.5 max-md:mt-0 max-md:w-full max-md:gap-1">
                 <p dir="auto" className="truncate text-body-sm text-on-glass-muted max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-now">
                   {t('idleNowOn', { title: cur.title, left: t('minutesLeft', { count: minutesLeft(cur, now) }) })}

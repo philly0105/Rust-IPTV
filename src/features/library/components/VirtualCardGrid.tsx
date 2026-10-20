@@ -189,6 +189,12 @@ export function VirtualCardGrid<T>({
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>, index: number, item: T) => {
     if (e.target !== e.currentTarget) return;
+    if (e.altKey || e.ctrlKey || e.metaKey) {
+      // Modified keys belong to page shortcuts (My List's Alt+arrow reorder), as in VirtualRows:
+      // taking them as plain arrow moves would mark them handled and the shortcut would never run.
+      onCardKeyDown?.(item, e);
+      return;
+    }
     // Arrows follow the screen: an RTL grid flows right to left, so ArrowLeft moves forward.
     const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
     const moves: Record<string, number> = {

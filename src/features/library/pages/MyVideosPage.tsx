@@ -2,7 +2,7 @@
 
 import { k } from '../lib/keys';
 import { HardDriveDownload, ListOrdered } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 
@@ -12,7 +12,7 @@ import { buttonClass } from '@/ui/Button';
 import { CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades, type TabsProps } from '../deps';
 import { moveInRail } from '../components/ContinueRail';
 import { CARD_CAPTION_HEIGHT, LibraryCard } from '../components/LibraryCard';
 import { RecordingCard } from '../components/RecordingCard';
@@ -149,12 +149,12 @@ export function MyVideosPage() {
       })
     : undefined;
   // In the page's toolbar beside the tabs, not the header, so the header search keeps its place
-  // from page to page. The count says what is moving now.
+  // from page to page. The count says what is moving now. On a phone the tabs take the whole row
+  // and the link goes under them, with its label (there is room for it there).
   const queueLink = (
-    <Link to="/downloads" className={buttonClass('ghost', 'sm', 'ms-auto shrink-0')} title={t('openQueue')} data-testid="my-videos-queue">
+    <Link to="/downloads" className={buttonClass('ghost', 'sm', 'shrink-0 sm:ms-auto max-sm:-ms-3')} data-testid="my-videos-queue">
       <ListOrdered size={16} aria-hidden />
-      {/* Icon only on a phone, so the tabs keep their room. */}
-      <span className="max-sm:sr-only">{t('openQueue')}</span>
+      <span>{t('openQueue')}</span>
       {active.active > 0 ? (
         <span className="tabular rounded-full bg-surface-3 px-1.5 text-xs text-fg-muted" data-testid="my-videos-queue-count">
           <span className="sr-only">, </span>
@@ -263,10 +263,8 @@ export function MyVideosPage() {
       <PageTitle>{title}</PageTitle>
       {/* An empty library shows its empty state alone: tabs of zeros and a second queue link add nothing. */}
       {libraryEmpty ? null : (
-        <div className="flex min-w-0 items-center gap-3">
-          <Tabs
-            variant="pill"
-            className="w-fit min-w-0"
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+          <FadingTabs
             label={t('filterLabel')}
             value={showRecordings ? 'recordings' : filter}
             onChange={setFilter}
@@ -293,6 +291,24 @@ export function MyVideosPage() {
 }
 
 export default MyVideosPage;
+
+/**
+ * The filter tabs as a pill strip that fits its content, and on a phone takes the whole row. When
+ * the tabs still do not fit (a phone, a long locale, the Missing tab), the strip scrolls sideways
+ * and the edge that hides tabs fades out, so a cut tab reads as more this way rather than as the
+ * end; a mouse wheel scrolls it too. The fade is drawn on the wrapper, which has the strip's box.
+ */
+function FadingTabs({ items, ...props }: Pick<TabsProps, 'items' | 'value' | 'onChange' | 'label'>) {
+  const { i18n } = useTranslation('library');
+  const fades = useEdgeFades(`${items.map((i) => i.id).join(',')}|${i18n.language}`);
+  const { ref } = fades;
+  const attach = useCallback((el: HTMLDivElement | null) => ref(el?.querySelector<HTMLElement>('[role="tablist"]') ?? null), [ref]);
+  return (
+    <div ref={attach} style={fades.style} className="min-w-0 max-sm:w-full" data-testid="my-videos-tabs">
+      <Tabs variant="pill" className="w-fit min-w-0" items={items} {...props} />
+    </div>
+  );
+}
 
 /**
  * The recordings in All (and Missing): a sideways rail of wide cards with its own heading. Each

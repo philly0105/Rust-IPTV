@@ -5,6 +5,11 @@ export interface ScrollSpot {
   scrollTop: number;
   /** Grid index (or category index) of the item the user opened. */
   index?: number;
+  /**
+   * The section that numbers `index` where a page holds several lists, each counting from 0
+   * (search's Top results: movies, series, channels, programmes).
+   */
+  section?: string;
 }
 
 const MAX_SPOTS = 64;
@@ -21,7 +26,12 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null;
 function isSpot(v: unknown): v is ScrollSpot {
   if (typeof v !== 'object' || v === null) return false;
   const o = v as Record<string, unknown>;
-  return typeof o['scrollTop'] === 'number' && Number.isFinite(o['scrollTop']) && (o['index'] === undefined || (typeof o['index'] === 'number' && Number.isInteger(o['index'])));
+  return (
+    typeof o['scrollTop'] === 'number' &&
+    Number.isFinite(o['scrollTop']) &&
+    (o['index'] === undefined || (typeof o['index'] === 'number' && Number.isInteger(o['index']))) &&
+    (o['section'] === undefined || typeof o['section'] === 'string')
+  );
 }
 
 /** Reads the stored memory once; anything malformed is ignored. */
@@ -72,8 +82,11 @@ export function rememberSpot(key: string, patch: Partial<ScrollSpot>): void {
   load();
   const prev = spots.get(key);
   const next: ScrollSpot = { scrollTop: patch.scrollTop ?? prev?.scrollTop ?? 0 };
+  // The section belongs to the index: a new index brings its own (or none).
   const index = 'index' in patch ? patch.index : prev?.index;
+  const section = 'index' in patch ? patch.section : prev?.section;
   if (index !== undefined) next.index = index;
+  if (index !== undefined && section !== undefined) next.section = section;
   spots.delete(key);
   spots.set(key, next);
   // Oldest first in insertion order: trim from the front.

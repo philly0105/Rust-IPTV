@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { MyListKey, useMyListKeyFocus, type MyListTarget } from '../hooks/useMyListKey';
@@ -98,7 +98,8 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
     setEdges(railEdges(el.scrollLeft, el.clientWidth, el.scrollWidth));
   }, []);
 
-  useEffect(() => {
+  // Measured before paint, so step buttons for a rail that does not scroll never flash in.
+  useLayoutEffect(() => {
     updateEdges();
     const el = scroller.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -116,6 +117,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
   };
 
   if (!loading && items.length === 0 && !empty) return null;
+  const scrolls = items.length > 0 && !(edges.start && edges.end);
 
   const rail = (
     <section aria-labelledby={headingId} className={cn('min-w-0', className)}>
@@ -135,11 +137,12 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
         seeAll={seeAll}
         className="mb-3"
         action={
-          action || items.length > 0 ? (
+          action || scrolls ? (
             <>
               {action}
-              {items.length > 0 && (
+              {scrolls && (
                 // Touch screens swipe the track; the step buttons are for a mouse (no sideways wheel) and the keyboard.
+                // A rail whose cards all fit has none: two disabled arrows would only be noise.
                 <span className="flex items-center gap-1 pointer-coarse:hidden">
                   <IconButton
                     size="sm"

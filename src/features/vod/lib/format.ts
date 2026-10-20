@@ -58,6 +58,18 @@ export function isResumable(pos: ProgressInput | undefined | null): boolean {
   return pos.positionSeconds < pos.durationSeconds * 0.95;
 }
 
+/**
+ * Where a downloaded movie or episode resumes when it plays from the file, in seconds, or
+ * undefined to start at the beginning. The title's saved position leads: it is what the detail
+ * page's Resume label and progress bar show, and streaming and the file both save it, while only
+ * the file saves the download's own spot (a download that finished while you streamed sits at 0).
+ * With no saved row (`null` or `undefined`) the download's own resume point stands in.
+ */
+export function offlineResumeSeconds(saved: ProgressInput | null | undefined, ownResume: number | undefined): number | undefined {
+  if (!saved) return ownResume;
+  return isResumable(saved) ? saved.positionSeconds : undefined;
+}
+
 // In its own module so Home can format ratings without this module's player import (SH-2).
 export { formatRating } from './rating';
 

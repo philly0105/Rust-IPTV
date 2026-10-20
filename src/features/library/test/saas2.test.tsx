@@ -240,6 +240,24 @@ describe('My Videos toolbar and the offline detail page', () => {
     expect(within(screen.getByTestId('fake-header')).queryByRole('link', { name: /download queue/i })).toBeNull();
   });
 
+  it('gives the tabs the whole row on a phone, and fades the edge that hides tabs', async () => {
+    rpc.handlers['myvideos.list'] = () => [makeDownload({ id: 1, status: 'completed', fileAvailable: true, completedAt: '2026-10-14T00:00:00Z' })];
+    renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
+    const strip = await screen.findByTestId('my-videos-tabs');
+    // Below sm the strip spans the row, so the queue link wraps under it instead of squeezing it.
+    expect(strip.className).toContain('max-sm:w-full');
+    expect(strip.parentElement!.className).toContain('flex-wrap');
+    expect(screen.getByTestId('my-videos-queue').className).toContain('sm:ms-auto');
+    const tablist = within(strip).getByRole('tablist');
+    expect(within(tablist).getByRole('tab', { name: /Recordings/ })).toBeTruthy();
+    expect(strip.getAttribute('style') ?? '').not.toContain('mask');
+    // 376 px of tabs in a 286 px row (a phone): the end that hides Recordings fades.
+    Object.defineProperty(tablist, 'clientWidth', { configurable: true, value: 286 });
+    Object.defineProperty(tablist, 'scrollWidth', { configurable: true, value: 376 });
+    fireEvent.scroll(tablist);
+    await waitFor(() => expect(strip.getAttribute('style') ?? '').toMatch(/mask-image: linear-gradient\(to right, #000 0, #000 calc\(100% - 2rem\), transparent 100%\)/));
+  });
+
   it('shows an offline movie in the detail hero, with its facts and the title in its source', async () => {
     rpc.handlers['myvideos.list'] = () => [
       makeDownload({

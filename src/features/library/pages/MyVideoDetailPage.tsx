@@ -30,7 +30,6 @@ import {
   PlayerStage,
   SectionHeader,
   Toggle,
-  useHeroTitleInView,
   useShortcut,
   useToast,
   usePlayerStore,
@@ -189,20 +188,16 @@ export function MyVideoDetailPage() {
     setRemoveTarget(null);
   };
 
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const browsing = !!entry && !watching && !query.isLoading;
-  // VL-hero-chrome, as on the catalogue's detail pages: the header says "My Videos" while the
-  // hero's own title is on screen, and the title once it scrolls away, so it never shows twice.
-  const heroTitleInView = useHeroTitleInView(scrollRef, browsing, `${entry?.key ?? ''}:${browsing}`);
+  // The header title is also the window and tab title, so it is the title's own name, as on the
+  // catalogue's detail pages.
   const pageTitle = entry?.title ?? t('myVideosTitle');
-  const headerTitle = browsing && heroTitleInView ? t('myVideosTitle') : pageTitle;
   // While watching, Back sits in the header (the hero and its Back pill are gone); browsing, it is
   // the hero's frosted pill, the one Back pattern of every detail page.
   const backAction = useMemo(
     () => (watching ? <BackButton to={back} onClick={goBack} label={t('backToLibrary')} /> : undefined),
     [back, goBack, t, watching],
   );
-  usePageHeader(headerTitle, entry && headerTitle === pageTitle ? t(entry.kind === 'movie' ? 'movie' : 'series') : undefined, backAction);
+  usePageHeader(pageTitle, entry ? t(entry.kind === 'movie' ? 'movie' : 'series') : undefined, backAction);
 
   useShortcut('backspace', goBack, { description: t('backToLibrary'), area: t('myVideosTitle') });
 
@@ -448,7 +443,7 @@ export function MyVideoDetailPage() {
   }
 
   return (
-    <div ref={scrollRef} className="isolate min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-12" data-state="browse">
+    <div className="isolate min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-12" data-state="browse">
       <DetailHero
         model={heroModel(entry)}
         sourceId={artSourceId}

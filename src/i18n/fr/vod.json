@@ -225,6 +225,7 @@
   "continueWatching": "Reprendre",
   "topRated": "Les mieux notés",
   "browseAllCategories": "Parcourir toutes les catégories",
+  "allCategories": "Toutes les catégories",
   "streamInstead": "Lire en streaming",
   "moreInCategory": "Plus dans {{category}}",
   "moreFromSource": "Plus sur {{source}}",

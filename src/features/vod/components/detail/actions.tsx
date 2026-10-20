@@ -1,4 +1,5 @@
 import { Check, CircleAlert, CircleCheck, Download as DownloadIcon, Heart, LoaderCircle, Pause } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -237,7 +238,38 @@ export function DownloadButton({
   );
 }
 
-/** Round variant of {@link DownloadButton}: one 48 px circle whose icon and tooltip carry the state. */
+/**
+ * The progress ring of the round download button: a track and an arc for the share downloaded,
+ * drawn inside the button's edge from 12 o'clock. The arc takes the accent while bytes move
+ * (progress) and is neutral while paused or waiting in the queue. `pathLength` makes the dash
+ * pattern a percentage.
+ */
+function DownloadRing({ percent, moving }: { percent: number; moving: boolean }) {
+  return (
+    <svg aria-hidden viewBox="0 0 36 36" className="pointer-events-none absolute inset-0 size-full -rotate-90" data-testid="vod-download-ring">
+      <circle cx="18" cy="18" r="16" fill="none" strokeWidth="2.5" className="stroke-surface-3" />
+      <circle
+        cx="18"
+        cy="18"
+        r="16"
+        fill="none"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        pathLength={100}
+        strokeDasharray={`${percent} 100`}
+        className={cn(moving ? 'stroke-accent' : 'stroke-fg-muted', 'motion-safe:transition-[stroke-dasharray] motion-safe:duration-(--duration-base)')}
+        data-testid="vod-download-ring-fill"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Round variant of {@link DownloadButton}: one 48 px circle whose icon and tooltip carry the state.
+ * While the file comes in, a ring around the download glyph shows how much has (VL-hero-actions),
+ * so the state reads without the tooltip, which touch never shows; only a download of unknown
+ * size falls back to the spinner.
+ */
 function RoundDownloadButton({
   download,
   pending,
@@ -251,7 +283,7 @@ function RoundDownloadButton({
 }) {
   const { t } = useTranslation('vod');
   const status = download?.status;
-  const round = buttonClass('secondary', 'lg', 'w-12 rounded-full px-0');
+  const round = buttonClass('secondary', 'lg', 'relative w-12 rounded-full px-0');
   if (status === 'completed' || status === 'downloading' || status === 'queued' || status === 'paused') {
     const pct = download ? downloadPercent(download) : undefined;
     const text =
@@ -264,14 +296,17 @@ function RoundDownloadButton({
             : status === 'queued'
               ? t('downloadQueuedShort')
               : t('downloading');
-    const icon =
-      status === 'completed' ? (
-        <Check aria-hidden size={18} className="text-success" />
-      ) : status === 'paused' ? (
-        <Pause aria-hidden size={18} />
-      ) : (
-        <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" />
+    let icon: ReactNode;
+    if (status === 'completed') icon = <Check aria-hidden size={18} className="text-success" />;
+    else if (pct !== undefined) {
+      icon = (
+        <>
+          <DownloadRing percent={pct} moving={status === 'downloading'} />
+          {status === 'paused' ? <Pause aria-hidden size={16} /> : <DownloadIcon aria-hidden size={16} />}
+        </>
       );
+    } else if (status === 'paused') icon = <Pause aria-hidden size={18} />;
+    else icon = <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" />;
     return (
       <Tooltip content={text} describe={false}>
         <Link to={status === 'completed' ? downloadedHref : '/downloads'} aria-label={text} className={round} data-testid="vod-download-button">

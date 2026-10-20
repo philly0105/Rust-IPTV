@@ -15,7 +15,7 @@ import type { Category, ItemRef, Page, PageQuery, Settings, VodItem } from '@/ap
 import { forgetSpots, rememberSpot } from '../hooks/useScrollMemory';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { currentLocation, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { currentLocation, findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -170,7 +170,7 @@ describe('L1-vod-10: Escape on a grid', () => {
   it('opened from the landing, Escape steps back through history (POP)', async () => {
     localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     renderWithHistory(['/s/src1/movies']);
-    fireEvent.click(await screen.findByRole('link', { name: /Action/ }));
+    fireEvent.click(await findIndexLink(/Action/));
     await screen.findByText('Film 0');
     expect(locState).toEqual({ fromLanding: true });
     fireEvent.keyDown(screen.getByTestId('vod-grid'), { key: 'Escape' });
@@ -266,7 +266,7 @@ describe('L1-vod-9: the grid comes back to its spot only on a return', () => {
     rememberSpot('/s/src1/movies/c/c1', { scrollTop: 0, index: 3 });
     localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     renderWithHistory(['/s/src1/movies']);
-    fireEvent.click(await screen.findByRole('link', { name: /Action/ }));
+    fireEvent.click(await findIndexLink(/Action/));
     await screen.findByText('Film 3');
     expect(navType).toBe('PUSH');
     expect(optionAt(3)?.getAttribute('data-active')).not.toBe('true');

@@ -83,6 +83,14 @@ const WRAPPER_HOVER_ART = 'group-hover/poster:shadow-2 group-hover/poster:ring-f
 const WRAPPER_HOVER_LAYER =
   'motion-safe:transition-[translate] motion-safe:duration-150 motion-safe:ease-out motion-safe:group-hover/poster:-translate-y-0.5 motion-safe:group-has-[a:active]/poster:translate-y-0';
 
+/**
+ * A My List corner that only hover brings up never shows on a screen without hover (Tailwind's
+ * hover variants apply only where the device can hover), so there it must not take taps either:
+ * an invisible target on a third of a phone poster would save or remove the title instead of
+ * opening it. Touch screens save from the poster's menu (long press) or the title's page.
+ */
+export const CORNER_TOUCH_INERT = '[@media(hover:none)]:pointer-events-none';
+
 /** The My List target for a catalog movie or series. */
 export function myListTarget(item: VodItem | SeriesItem): { itemRef: ItemRef; snapshot: ItemSnapshot } {
   const snapshot: ItemSnapshot = { title: item.titleBase || item.title, contentType: item.ref.contentType };
@@ -385,7 +393,9 @@ function PosterCardBody({
       // on the top-end corner, and touch screens save from the title's page. Outside a shared list
       // the card cannot draw that chip, so there a saved title keeps its corner up.
       'pointer-events-auto absolute end-1.5 opacity-0 group-hover/poster:opacity-100 focus-visible:opacity-100 group-has-[a:focus-visible]/poster:opacity-100',
-      !list && 'data-in-list:opacity-100',
+      // Keyboard focus still reaches it; only taps pass through to the poster while it is hidden.
+      CORNER_TOUCH_INERT,
+      !list && 'data-in-list:opacity-100 [@media(hover:none)]:data-in-list:pointer-events-auto',
       'motion-safe:transition-[opacity,background-color,color,transform]',
       hasProgress ? 'bottom-5' : 'bottom-1.5',
     ),
@@ -395,8 +405,9 @@ function PosterCardBody({
       {link}
       {/*
         A layer with the artwork's box (2:3 at the card's width), so the toggle sits on the poster's
-        corner while staying beside the link, not inside it. It shows on hover, on keyboard focus, on
-        touch screens, and always once the title is saved.
+        corner while staying beside the link, not inside it. It shows on hover and on keyboard
+        focus; outside a shared list (no saved chip) a saved title keeps it up. Hidden on a screen
+        without hover, it lets taps through to the poster.
       */}
       <div className={cn('pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]', WRAPPER_HOVER_LAYER)}>
         {list ? <MyListButtonView {...cornerProps} state={list} t={list.text.tm} /> : <MyListButton {...cornerProps} />}
@@ -511,6 +522,8 @@ function GridMyListToggle({
         // Up on hover or under the keyboard cursor only; the saved state stays visible as the chip on
         // the top-end corner. Touch screens save from the poster's menu (long press) or the title's page.
         'opacity-0 group-hover/card:opacity-100',
+        // Under the keyboard cursor it is up, so a tap there is aimed; otherwise taps open the title.
+        !shown && CORNER_TOUCH_INERT,
         saved
           ? 'border-glass-border bg-glass-strong text-on-glass hover:bg-glass'
           : cn('border-glass-border bg-glass text-on-glass group-hover/card:glass-blur hover:bg-glass-strong', shown && 'glass-blur'),

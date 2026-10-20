@@ -40,14 +40,13 @@ import {
   useTwinProbe,
 } from '../hooks/queries';
 import { useFormatRuntime } from '../hooks/useFormatRuntime';
-import { useHeroTitleInView } from '../hooks/useHeroTitleInView';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useSourcePin } from '../hooks/useSourcePin';
 import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
-import { formatClock, isResumable, isWatched } from '../lib/format';
+import { formatClock, isResumable, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { mergeMovieDetail, youtubeKey } from '../lib/merge';
 import { ALL_CATEGORIES, effectiveMinRating } from '../lib/paging';
@@ -140,11 +139,10 @@ export function MovieDetailPage() {
   const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'movie', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
     categoryId: item?.categoryId,
   });
-  // VL-hero-chrome: while the hero's own large title is on screen the header names the section, so
-  // the title shows once; once it scrolls away the header takes it over.
-  const heroTitleShown = useHeroTitleInView(detailScrollRef, gate.state === 'open' && !!model && !watching, `${pageTitle}|${watching}`);
-  const headerTitle = heroTitleShown ? t('movies') : pageTitle;
-  usePageHeader({ title: headerTitle, subtitle: source.data?.name }, [headerTitle, source.data?.name]);
+  // The header title is also the window and tab title (and the history entry), so it is the
+  // title's own name even while the hero shows it large (VL-hero-chrome waits for a shell header
+  // that can say the section on screen and the title to the window).
+  usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'movie'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
@@ -228,21 +226,27 @@ export function MovieDetailPage() {
   const sourceName = source.data?.name ?? sourceId;
   const listSnapshot = snapshot;
   // VL-offline-play: a finished download whose file is on disk plays from the file, so Play works
-  // offline and past a provider's connection limit. Its own saved spot is where it resumes.
+  // offline and past a provider's connection limit. It resumes where the title's saved position
+  // says (what the label and the bar show; streaming never moves the download's own spot), and
+  // from the download's own spot only when the title has no saved row.
   const offline = download?.status === 'completed' && download.fileAvailable !== false ? download : undefined;
-  const offlineResume = offline ? resumePoint(offline, item.durationSeconds) : undefined;
+  const offlineResume = offline ? offlineResumeSeconds(position.data, resumePoint(offline, item.durationSeconds)) : undefined;
   const myVideoHref = offline ? `/my-videos/${offline.id}` : '/my-videos';
-  const playOffline = () => {
+  const playOffline = (fromStart = false) => {
     if (!offline) return;
-    playDownload(offline).catch((err: unknown) => toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' }));
+    playDownload(offline, fromStart ? { fromStart: true } : { resumeSeconds: offlineResume ?? 0 }).catch((err: unknown) =>
+      toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' }),
+    );
   };
-  const showResume = !offline && resumable && !!position.data && !pinnedTarget;
+  // Where Play resumes, if it does: the file's start point offline, else the stream's saved spot
+  // (not for a copy pinned from another source, which has a position of its own).
+  const resumeAt = offline ? offlineResume : resumable && position.data && !pinnedTarget ? position.data.positionSeconds : undefined;
   const duration = position.data?.durationSeconds ?? item.durationSeconds;
   const progress =
-    showResume && position.data && duration
+    resumeAt !== undefined && duration
       ? {
-          fraction: Math.min(1, position.data.positionSeconds / duration),
-          label: t('minutesLeft', { count: Math.max(1, Math.round((duration - position.data.positionSeconds) / 60)) }),
+          fraction: Math.min(1, resumeAt / duration),
+          label: t('minutesLeft', { count: Math.max(1, Math.round((duration - resumeAt) / 60)) }),
         }
       : undefined;
 
@@ -276,7 +280,10 @@ export function MovieDetailPage() {
 
   // VL-hero-actions: what is not Play, Trailer or one of the three icon buttons waits in More.
   const moreItems: MenuItem[] = [
-    ...(showResume ? [{ id: 'start-over', label: t('startOver'), icon: <RotateCcw aria-hidden size={16} />, onSelect: () => play(true) }] : []),
+    // Offline as well: the file from its beginning.
+    ...(resumeAt !== undefined
+      ? [{ id: 'start-over', label: t('startOver'), icon: <RotateCcw aria-hidden size={16} />, onSelect: () => (offline ? playOffline(true) : play(true)) }]
+      : []),
     // Offline, the stream is still one choice away (a newer copy, a file that will not play).
     ...(offline ? [{ id: 'stream', label: t('streamInstead'), icon: <Play aria-hidden size={16} />, onSelect: () => play(false) }] : []),
     favoriteItem,
@@ -295,16 +302,10 @@ export function MovieDetailPage() {
           variant="primary"
           icon={<Play aria-hidden size={18} className="fill-current" />}
           aria-describedby="vod-detail-title"
-          onClick={offline ? playOffline : () => play(false)}
+          onClick={() => (offline ? playOffline() : play(false))}
           className="max-sm:flex-1"
         >
-          {offline
-            ? offlineResume
-              ? t('resumeAt', { time: formatClock(offlineResume) })
-              : t('play')
-            : showResume && position.data
-              ? t('resumeAt', { time: formatClock(position.data.positionSeconds) })
-              : t('play')}
+          {resumeAt !== undefined ? t('resumeAt', { time: formatClock(resumeAt) }) : t('play')}
         </Button>
         {trailer ? (
           <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>

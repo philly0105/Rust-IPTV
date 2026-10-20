@@ -216,6 +216,7 @@
   "continueWatching": "Continue watching",
   "topRated": "Top rated",
   "browseAllCategories": "Browse all categories",
+  "allCategories": "All categories",
   "streamInstead": "Stream instead",
   "moreInCategory": "More in {{category}}",
   "moreFromSource": "More from {{source}}",

@@ -25,7 +25,7 @@ import {
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { installDomStubs, makeSource, openHeroMenu, played, renderAt, settings, usePlayerStore } from './harness';
+import { findIndexLink, installDomStubs, makeSource, openHeroMenu, played, renderAt, settings, usePlayerStore } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -387,10 +387,10 @@ describe('VodLandingPage (B4-vod-D11)', () => {
     rpcMock.handlers['catalog.recentlyAdded'] = () => [];
     localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     renderAt('/s/src1/movies', [{ path: '/s/:sourceId/movies', element: <VodLandingPage kind="movie" /> }]);
-    await screen.findByRole('link', { name: /Action/ });
+    await findIndexLink(/Action/);
     fireEvent.change(screen.getByPlaceholderText('Filter categories'), { target: { value: 'zzz' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Clear filter' }));
-    expect(await screen.findByRole('link', { name: /Action/ })).toBeTruthy();
+    expect(await findIndexLink(/Action/)).toBeTruthy();
   });
 });
 

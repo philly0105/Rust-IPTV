@@ -66,6 +66,17 @@ describe('Start over (L1-guide-library-3)', () => {
     await playDownload(watched);
     expect(fakePlayer.played.at(-1)?.resumeSeconds).toBe(600);
   });
+
+  it('starts where the caller says when it names a point, and still from 0 for Start over', async () => {
+    rpc.handlers['myvideos.playSource'] = () => ({ url: 'file:///x.mp4', kind: 'vod', title: 'X' });
+    // The download never moved (streamed before it finished); the title's saved spot is 30 min.
+    const fresh = makeDownload({ id: 8, status: 'completed', positionSeconds: 0 });
+    expect(downloadStartSeconds(fresh, { resumeSeconds: 1800 })).toBe(1800);
+    expect(downloadStartSeconds(watched, { resumeSeconds: 0 })).toBe(0);
+    expect(downloadStartSeconds(watched, { fromStart: true, resumeSeconds: 1800 })).toBe(0);
+    await playDownload(fresh, { resumeSeconds: 1800 });
+    expect(fakePlayer.played.at(-1)?.resumeSeconds).toBe(1800);
+  });
 });
 
 describe('DialProgress (L1-guide-library-6)', () => {

@@ -254,6 +254,25 @@ describe('stats page', () => {
     expect(played.list[1]).toMatchObject({ ref: NEWS, posterUrl: 'http://img/bbc.png', isRadio: false });
   });
 
+  it('puts both lists on one row template, so ranks and meters line up across the columns', async () => {
+    await loaded();
+    const channels = within(screen.getByTestId('stats-top-channels')).getAllByTestId('stats-channel');
+    const titles = within(screen.getByTestId('stats-top-titles')).getAllByTestId('stats-title');
+    await waitFor(() => expect(within(screen.getByTestId('stats-top-channels')).getAllByTestId('stats-play')).toHaveLength(2));
+    // One row height for both (the channel row also carries `group` for its Play reveal).
+    const rowOf = (el: HTMLElement) => el.className.split(/\s+/).filter((c) => c !== 'group').join(' ');
+    expect(new Set([...channels, ...titles].map(rowOf)).size).toBe(1);
+    // The same artwork frame holds a logo and a poster.
+    const frame = (row: HTMLElement) => row.querySelector('[data-testid="stats-meter"]')!.closest('li')!.querySelector('span.shrink-0.items-center')!.className;
+    expect(frame(channels[0]!)).toBe(frame(titles[0]!));
+    // Every row ends in the same trailing column: Play, its stand-in where the source is gone, or the title's chevron.
+    const trailing = (row: HTMLElement) => (row.querySelector('[data-testid="stats-open"]') ?? row).lastElementChild!;
+    expect(trailing(channels[2]!).tagName).toBe('SPAN');
+    expect(trailing(channels[2]!).className).toContain('w-8');
+    expect(trailing(titles[0]!).className).toContain('w-8');
+    expect(trailing(channels[0]!).getAttribute('data-testid')).toBe('stats-play');
+  });
+
   it('lists top titles that open their page', async () => {
     await loaded();
     const list = screen.getByTestId('stats-top-titles');

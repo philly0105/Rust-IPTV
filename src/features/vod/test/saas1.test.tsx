@@ -4,7 +4,7 @@
  * play (VL-offline-play), "More in <category>" without TMDB (VL-detail-empty-no-tmdb), TMDB titles
  * resolved against the catalog (VL-tmdb-deadend), the search zero state and search locks.
  */
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Category, Download, ItemRef, Page, PageQuery, PlaybackPosition, VodDetail, VodItem } from '@/api/types';
@@ -238,38 +238,17 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     expect(callsOf('catalog.movies')[0]).toMatchObject({ sourceId: 'src1', categoryId: 'c1' });
   });
 
-  it('names the section in the header while the hero title is on screen, and the title once it scrolls away', async () => {
-    // Each observer remembers what it watches; the test reports on the one watching the hero's h1.
-    const observers: { cb: IntersectionObserverCallback; targets: Element[] }[] = [];
-    vi.stubGlobal(
-      'IntersectionObserver',
-      class {
-        private entry: { cb: IntersectionObserverCallback; targets: Element[] };
-        constructor(cb: IntersectionObserverCallback) {
-          this.entry = { cb, targets: [] };
-          observers.push(this.entry);
-        }
-        observe(el: Element) {
-          this.entry.targets.push(el);
-        }
-        unobserve() {}
-        disconnect() {}
-        takeRecords() {
-          return [];
-        }
-      },
-    );
-    const report = (visible: boolean) => {
-      const o = observers.filter((x) => x.targets.some((t) => t.id === 'vod-detail-title')).at(-1);
-      o?.cb([{ isIntersecting: visible } as IntersectionObserverEntry], {} as IntersectionObserver);
-    };
+  it('keeps the title in the header, so the window and tab title name it while the hero shows it', async () => {
+    // Every observed element reports on screen at once: the hero's h1 is in view.
+    vi.stubGlobal('IntersectionObserver', EagerObserver);
     const { useShellStore } = await import('@/shell/store');
     renderAt('/s/src1/movie/m7', route);
     await screen.findByRole('heading', { name: 'Dune: Part Two', level: 1 });
-    act(() => report(true));
-    await waitFor(() => expect(useShellStore.getState().header?.title).toBe('Movies'));
-    act(() => report(false));
+    // The shell's document title follows the header title, so the section name there would put
+    // "Movies" on every movie's window, tab and history entry.
     await waitFor(() => expect(useShellStore.getState().header?.title).toBe('Dune: Part Two'));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(useShellStore.getState().header?.title).toBe('Dune: Part Two');
   });
 });
 

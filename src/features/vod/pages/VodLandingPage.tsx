@@ -1,5 +1,5 @@
-import { ChevronRight, Clapperboard, ListFilter, SearchX, Tv } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { ChevronRight, Clapperboard, LayoutList, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
@@ -11,13 +11,14 @@ import { preloadEngines } from '@/features/player/enginePreload';
 import { snapshotTitle } from '@/lib/title';
 
 import { CatalogRail } from '../components/CatalogRail';
-import { CategoryIndex, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
+import { CategoryIndex, FROM_LANDING, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { itemLanguage } from '../lib/language';
 import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { resumeKey, useRecentlyAdded, useResumeMap, useSectionContinue, useSettings, useSource } from '../hooks/queries';
+import { useEdgeFades } from '../hooks/useEdgeFades';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
@@ -25,11 +26,14 @@ import { useVodLocks } from '../hooks/useVodLocks';
 import { loadSearchPage } from '../routes';
 import { ALL_CATEGORIES, effectiveMinRating, type GridQueryInput, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
-import { Button, EmptyState, ErrorState, Page, SearchInput, Skeleton, buttonClass, cn } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, Page, SearchInput, Skeleton, buttonClass, cn } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 /** Category rails under the top rails; the rest of the categories are one click away in the index. */
 export const CATEGORY_RAIL_LIMIT = 12;
+
+/** Category chips in the row under the header; "All categories" at its start opens the whole index. */
+export const CATEGORY_CHIP_LIMIT = 24;
 
 /** Whether "Browse all categories" is open, kept between visits (a UI preference, so localStorage). */
 export const CATEGORY_INDEX_KEY = 'vod.categoryIndexOpen';
@@ -64,6 +68,21 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     setIndexOpenState(open);
   };
   const indexId = useId();
+  // "All categories" in the chip row opens the index under the rails and takes you there.
+  const indexToggleRef = useRef<HTMLButtonElement>(null);
+  const [indexVisits, setIndexVisits] = useState(0);
+  const showIndex = () => {
+    setIndexOpen(true);
+    setIndexVisits((n) => n + 1);
+  };
+  useEffect(() => {
+    const toggle = indexToggleRef.current;
+    if (!indexVisits || !toggle) return;
+    // The heading at the top of the view, and focus on its disclosure (now expanded), so Tab
+    // goes on to the filter and the list.
+    toggle.scrollIntoView({ block: 'start' });
+    toggle.focus({ preventScroll: true });
+  }, [indexVisits]);
   const source = useSource(sourceId);
   const settings = useSettings();
   const contentType = kind;
@@ -175,6 +194,17 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     [shownCats, sourceKind, locks],
   );
 
+  // The chip row: the shown categories with titles in the provider's order, locked ones marked.
+  const chipCats = useMemo(
+    () =>
+      (shownCats ?? [])
+        .filter((c) => c.itemCount > 0 || sourceKind === 'stalker')
+        .slice(0, CATEGORY_CHIP_LIMIT)
+        .map((c) => ({ id: c.id, name: c.name, locked: locks.categoryLocked(c.id) })),
+    [shownCats, sourceKind, locks],
+  );
+  const manageLabel = hiddenCount > 0 ? t('manageCategoriesHidden', { count: hiddenCount }) : t('manageCategories');
+
   const card = useCallback(
     (item: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean) => (
       <PosterCard
@@ -250,6 +280,15 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
           />
         ) : (
           <>
+            {/* The categories one press from the top: the index itself waits under the rails. */}
+            <CategoryChips
+              cats={chipCats}
+              total={shownCats?.length}
+              loading={allCats.isPending}
+              hrefFor={hrefFor}
+              onShowAll={showIndex}
+              manage={<IconButton label={manageLabel} icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0" />}
+            />
             {/* CB-VOD-LANDING: rails first, the way Plex and Apple TV open a library. */}
             {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} />}
             <PosterRail<VodItem | SeriesItem>
@@ -287,6 +326,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <h2 id="vod-categories-heading" className="text-title-sm text-fg">
                   <button
+                    ref={indexToggleRef}
                     type="button"
                     aria-expanded={indexOpen}
                     aria-controls={indexId}
@@ -303,7 +343,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
                     <SearchInput value={filter} onChange={setFilter} size="sm" placeholder={t('filterCategories')} className="w-56 max-sm:w-full" />
                   )}
                   <Button size="sm" variant="ghost" icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)}>
-                    {hiddenCount > 0 ? t('manageCategoriesHidden', { count: hiddenCount }) : t('manageCategories')}
+                    {manageLabel}
                   </Button>
                 </div>
               </div>
@@ -340,6 +380,74 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
       </Page>
       <HiddenCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
     </div>
+  );
+}
+
+const CHIP =
+  'inline-flex h-8 max-w-[16rem] shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 text-sm whitespace-nowrap text-fg-muted hover:bg-surface-3 hover:text-fg active:bg-pressed motion-safe:transition-colors';
+
+/**
+ * The row of category chips under the header: "All categories" (with the count) opens the full
+ * index under the rails and moves there, then the first categories in the provider's order, each
+ * opening its grid, and Manage categories at the end. A provider with hundreds of groups reaches
+ * any of them from the top of the page, not past a dozen rails. The row scrolls sideways; the
+ * edge that hides chips fades out and a vertical wheel moves it.
+ */
+function CategoryChips({
+  cats,
+  total,
+  loading,
+  hrefFor,
+  onShowAll,
+  manage,
+}: {
+  cats: readonly { id: string; name: string; locked: boolean }[];
+  total: number | undefined;
+  loading: boolean;
+  hrefFor: (id: string) => string;
+  onShowAll: () => void;
+  manage: ReactNode;
+}) {
+  const { t, i18n } = useTranslation('vod');
+  const fades = useEdgeFades(`${loading}|${cats.map((c) => c.id).join(',')}|${i18n.language}`);
+  const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
+  return (
+    <nav aria-label={t('categories')} className="-mb-4 flex min-w-0 items-center gap-2 max-sm:-mb-2" data-testid="vod-category-chips">
+      {/* Room for the focus halo, which the scroller would clip. */}
+      <ul ref={fades.ref} style={fades.style} className="-m-1.5 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto p-1.5 scrollbar-none">
+        <li className="shrink-0">
+          <button
+            type="button"
+            onClick={onShowAll}
+            aria-label={total !== undefined ? `${t('allCategories')}, ${t('categoryCount', { count: total })}` : undefined}
+            className={cn(CHIP, 'font-medium text-fg')}
+            data-testid="vod-chip-all"
+          >
+            <LayoutList aria-hidden size={14} className="shrink-0" />
+            {t('allCategories')}
+            {total !== undefined && <span className="tabular text-xs font-normal text-fg-subtle">{fmt.format(total)}</span>}
+          </button>
+        </li>
+        {loading
+          ? [0, 1, 2, 3, 4].map((i) => (
+              <li key={i} aria-hidden className="shrink-0">
+                <Skeleton className="h-8 w-24 rounded-full" />
+              </li>
+            ))
+          : cats.map((c) => (
+              <li key={c.id} className="shrink-0">
+                <Link to={hrefFor(c.id)} state={FROM_LANDING} className={CHIP} data-testid="vod-category-chip">
+                  {c.locked && <Lock aria-hidden size={12} className="shrink-0" />}
+                  <span dir="auto" className="truncate">
+                    {c.name}
+                  </span>
+                  {c.locked && <span className="sr-only">, {t('locked')}</span>}
+                </Link>
+              </li>
+            ))}
+      </ul>
+      {manage}
+    </nav>
   );
 }
 

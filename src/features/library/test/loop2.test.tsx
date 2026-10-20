@@ -134,10 +134,11 @@ describe('My Videos All includes recordings (L2-guide-library-8)', () => {
     expect(within(grid).getAllByTestId('library-card').map((c) => c.dataset['kind'])).toEqual(['recording']);
   });
 
-  it('keeps the queue link label for screen readers when it is hidden on a phone (L2-visual-4)', async () => {
+  it('names the queue link with its label, which shows on a phone too (L2-visual-4)', async () => {
     renderAt('/my-videos', libraryRoutes);
     const link = await screen.findByRole('link', { name: 'Open download queue' });
-    expect(within(link).getByText('Open download queue').className).toContain('max-sm:sr-only');
+    // On a phone the link sits on its own line under the tabs, with room for its label.
+    expect(within(link).getByText('Open download queue').className).not.toContain('sr-only');
   });
 });
 

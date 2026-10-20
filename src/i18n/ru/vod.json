@@ -234,6 +234,7 @@
   "continueWatching": "Продолжить просмотр",
   "topRated": "С высоким рейтингом",
   "browseAllCategories": "Все категории",
+  "allCategories": "Все категории",
   "streamInstead": "Смотреть из источника",
   "moreInCategory": "Ещё в «{{category}}»",
   "moreFromSource": "Ещё из {{source}}",

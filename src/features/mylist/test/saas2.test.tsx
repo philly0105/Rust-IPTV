@@ -81,6 +81,23 @@ describe('My List grid view', () => {
     expect(await screen.findByText('movie page')).toBeTruthy();
   });
 
+  it('moves the focused card with Alt+ArrowDown / Alt+ArrowUp and keeps focus on it', async () => {
+    const core = h.installCore(rpc, [ARRIVAL, DARK, HEAT]);
+    open();
+    await screen.findAllByTestId('mylist-card');
+    itemOf('Arrival').focus();
+    fireEvent.keyDown(itemOf('Arrival'), { key: 'ArrowDown', code: 'ArrowDown', altKey: true });
+    await waitFor(() => expect(rpc.callsOf('watchlist.reorder')).toHaveLength(1));
+    await waitFor(() => expect(h.titles(core.entries)).toEqual(['Dark', 'Arrival', 'Heat']));
+    // The card moved, and focus went with it rather than to the card now in its old place.
+    await waitFor(() => expect(document.activeElement).toBe(itemOf('Arrival')));
+    fireEvent.keyDown(itemOf('Arrival'), { key: 'ArrowUp', code: 'ArrowUp', altKey: true });
+    await waitFor(() => expect(h.titles(core.entries)).toEqual(['Arrival', 'Dark', 'Heat']));
+    // A plain arrow still only moves focus.
+    press(itemOf('Arrival'), 'ArrowRight');
+    expect(rpc.callsOf('watchlist.reorder')).toHaveLength(2);
+  });
+
   it('removes with the card button without opening the title', async () => {
     const core = h.installCore(rpc, [ARRIVAL, DARK]);
     open();

@@ -5,6 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { rpcKey } from '@/api/query';
 import type { Category, Page, PageQuery, SeriesDetail, TmdbMovie, VodDetail, VodItem } from '@/api/types';
 
+import { CORNER_TOUCH_INERT } from '../components/PosterCard';
 import { ActorPage } from '../pages/ActorPage';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
@@ -186,6 +187,8 @@ describe('CategoryGridPage', () => {
     // VL-poster-chips: the toggle is never forced up on every card (touch screens save from the
     // poster's menu); a saved title carries the small glass chip on its top-end corner instead.
     expect(resting).not.toContain('[@media(hover:none)]:opacity-100');
+    // Hidden, it is not a tap target there either: a tap on the corner opens the title.
+    expect(resting).toContain(CORNER_TOUCH_INERT);
     expect(marker(/^Movie 1 \(/)!.className.split(/\s+/)).toContain('opacity-0');
     expect(within(screen.getByRole('group', { name: /^Movie 1 \(/ })).getByTestId('poster-saved')).toBeTruthy();
     expect(within(screen.getByRole('group', { name: /^Movie 0 \(/ })).queryByTestId('poster-saved')).toBeNull();
@@ -221,6 +224,8 @@ describe('CategoryGridPage', () => {
     fireEvent.keyDown(grid, { key: 'ArrowRight' });
     // The cursor's card shows its toggle (S acts on it).
     expect(screen.getByRole('group', { name: /^Movie 1 \(/ }).querySelector('[data-testid="mylist-grid-toggle"]')!.className).toContain('opacity-100');
+    // Up under the cursor, it takes taps again.
+    expect(screen.getByRole('group', { name: /^Movie 1 \(/ }).querySelector('[data-testid="mylist-grid-toggle"]')!.className).not.toContain(CORNER_TOUCH_INERT);
     // An unsaved corner under the cursor is up on that one card, so it may blur.
     fireEvent.keyDown(grid, { key: 'ArrowRight' });
     fireEvent.keyDown(grid, { key: 'ArrowRight' });

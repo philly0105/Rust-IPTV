@@ -8,7 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { ItemRef, TmdbBrief, VodItem } from '@/api/types';
 
-import { myListTarget, PosterCard } from '../components/PosterCard';
+import { CORNER_TOUCH_INERT, myListTarget, PosterCard } from '../components/PosterCard';
 import { PosterRail } from '../components/PosterRail';
 import { TmdbRail } from '../components/TmdbRail';
 import { SearchPage } from '../pages/SearchPage';
@@ -110,6 +110,9 @@ describe('L1-vod-5: a poster rail is one Tab stop', () => {
     const corners = within(list).getAllByRole('button');
     expect(corners).toHaveLength(movies.length);
     for (const b of corners) expect(b.tabIndex).toBe(-1);
+    // Hidden until hover, a corner takes no taps on a screen without hover: a tap on the poster's
+    // corner opens the title instead of silently saving it.
+    for (const b of corners) expect(b.className.split(/\s+/)).toContain(CORNER_TOUCH_INERT);
   });
 
   it('moves with the arrow keys and keeps the Tab stop on the card last focused', async () => {

@@ -38,13 +38,12 @@ import {
   useTmdbTv,
   useTwinProbe,
 } from '../hooks/queries';
-import { useHeroTitleInView } from '../hooks/useHeroTitleInView';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { recallSeason, rememberSeason, useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
-import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
+import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
 import { effectiveMinRating } from '../lib/paging';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
@@ -52,6 +51,7 @@ import { Button, EmptyState, ErrorState, IconButton, Menu, Page, Skeleton, Toolt
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
+import { resumePoint } from '@/features/library/lib/myvideos';
 import { playDownload } from '@/features/library/lib/playDownload';
 import { seriesWatchedTargets, seriesWatchedWrite, watchedToastId, watchedUndoAll } from '../lib/seriesWatched';
 
@@ -197,10 +197,8 @@ export function SeriesDetailPage() {
   const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'series', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
     categoryId: item?.categoryId,
   });
-  // VL-hero-chrome: the section name in the header while the hero's large title shows, the title after.
-  const heroTitleShown = useHeroTitleInView(scrollRef, gate.state === 'open' && !!model && !watch.active, `${pageTitle}|${watch.active}`);
-  const headerTitle = heroTitleShown ? t('series') : pageTitle;
-  usePageHeader({ title: headerTitle, subtitle: source.data?.name }, [headerTitle, source.data?.name]);
+  // The header title is also the window and tab title, so it stays the series' name (see MovieDetailPage).
+  usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
@@ -217,9 +215,13 @@ export function SeriesDetailPage() {
     const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), fromStart };
     // VL-offline-play, per episode: a finished download whose file is on disk plays from the file
     // (offline, and past a provider's connection limit); the episodes after it still queue as streams.
+    // It resumes at the episode's saved position, the one the Resume label and the row show.
     const file = offlineDownload(downloads.get(ep.id));
     const started = file
-      ? playDownload(file, fromStart ? { fromStart: true } : undefined).catch((err: unknown) => {
+      ? playDownload(
+          file,
+          fromStart ? { fromStart: true } : { resumeSeconds: offlineResumeSeconds(positions.get(ep.id), resumePoint(file, ep.durationSeconds)) ?? 0 },
+        ).catch((err: unknown) => {
           toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' });
           throw err;
         })

@@ -34,7 +34,7 @@ const MIN_COL = 260;
 const GAP = 8;
 const ROW_H = 48;
 /** Location state on the landing's category links (the grid's Escape steps back through history). */
-const FROM_LANDING = { fromLanding: true } as const;
+export const FROM_LANDING = { fromLanding: true } as const;
 
 /**
  * The category index: a dial-like list of category names with their item

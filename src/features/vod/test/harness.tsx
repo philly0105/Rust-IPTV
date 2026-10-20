@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import i18next from 'i18next';
 import type { ReactNode } from 'react';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
@@ -157,6 +157,14 @@ export async function openHeroMenu(): Promise<HTMLElement> {
 export async function openCategoryIndex(): Promise<void> {
   const toggle = await screen.findByRole('button', { name: i18n.t('vod:browseAllCategories') });
   if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+
+/**
+ * A category's link in the landing's index. The chip row above the rails links the first
+ * categories too, so a name alone matches two links.
+ */
+export async function findIndexLink(name: RegExp): Promise<HTMLElement> {
+  return within(await screen.findByRole('list', { name: i18n.t('vod:categories') })).findByRole('link', { name });
 }
 
 /** A test wrapper with a fresh query client, for components rendered alone that read a query (a rail reads the cover size). */

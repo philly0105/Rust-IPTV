@@ -425,3 +425,49 @@ describe('glass tokens (C8)', () => {
     expect(theme).toMatch(/--blur-glass:/);
   });
 });
+
+// ==== Guide genre colours (CB-GUIDE-GENRE) ==== begin
+// The block at the end of tokens.css: stripes and chip dots are marks (WCAG 1.4.11), so each
+// keeps 3:1 against every surface, the selected fill and the airing cell (the active layer over
+// the page), in every theme. Dark blocks also serve OLED, which only darkens the surfaces.
+describe('guide genre stripes (CB-GUIDE-GENRE)', () => {
+  const section = /==== Guide genre colours \(CB-GUIDE-GENRE\) ==== begin([\s\S]*?)==== Guide genre colours ==== end/.exec(tokensCss)?.[1] ?? '';
+  const genreBlock = (sel: RegExp) => {
+    const body = sel.exec(section)?.[1] ?? '';
+    const out: Record<string, Rgb> = {};
+    for (const m of body.matchAll(/--color-genre-([\w-]+):\s*(#[0-9a-f]{6})\s*;/gi)) out[m[1]!] = hex(m[2]!);
+    return out;
+  };
+  const GENRE_NAMES = ['movie', 'sports', 'news', 'kids', 'series'];
+  const genres = {
+    dark: genreBlock(/:root,\s*:root\[data-theme='dark'\]\s*\{([^}]*)\}/),
+    light: genreBlock(/:root\[data-theme='light'\]\s*\{([^}]*)\}/),
+  };
+  const activeOf = {
+    dark: blockBody(/:root,\s*:root\[data-theme='dark'\]\s*\{([^}]*)\}/),
+    light: blockBody(/:root\[data-theme='light'\]\s*\{([^}]*)\}/),
+    oled: blockBody(/:root\[data-oled\]:not\(\[data-theme='light'\]\)\s*\{([^}]*)\}/),
+  };
+
+  it('defines every bucket for dark and light, and nothing else in the block', () => {
+    expect(section).not.toBe('');
+    for (const theme of ['dark', 'light'] as const) expect(Object.keys(genres[theme]).sort()).toEqual([...GENRE_NAMES].sort());
+    expect(section).not.toMatch(/--color-(?!genre-)[\w-]+:/);
+  });
+
+  for (const [name, c] of Object.entries(THEMES)) {
+    it(`${name}: every genre mark reaches 3:1 on the guide's fills`, () => {
+      const g = name.startsWith('light') ? genres.light : genres.dark;
+      const layer = rgbaToken(activeOf[name.startsWith('light') ? 'light' : name.startsWith('oled') ? 'oled' : 'dark'], 'active');
+      const fills: [string, Rgb][] = [
+        ...SURFACES.map((s) => [s, c[s]!] as [string, Rgb]),
+        ['selected', c.selected!],
+        ['airing cell', over(layer.rgb, layer.alpha, c.bg!)],
+      ];
+      for (const genre of GENRE_NAMES) {
+        for (const [fill, rgb] of fills) expect(contrast(g[genre]!, rgb), `${genre} on ${fill}`).toBeGreaterThanOrEqual(3);
+      }
+    });
+  }
+});
+// ==== Guide genre colours ==== end

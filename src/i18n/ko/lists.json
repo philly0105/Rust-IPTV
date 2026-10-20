@@ -62,7 +62,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "지금 제공되는 채널이 하나도 없습니다",
   "listEmptyTitle": "이 목록은 비어 있습니다",
-  "listEmptyHint": "라이브 TV에서 채널을 선택하고 L을 누르거나 마우스 오른쪽 버튼으로 클릭한 다음 목록에 추가를 선택하세요.",
+  "listEmptyHint": "라이브 TV에서 채널 메뉴(⋮, 길게 누르기 또는 마우스 오른쪽 클릭)를 열고 목록에 추가를 고르세요. 키보드에서는 L을 누르세요.",
   "browseChannels": "채널 둘러보기",
   "notFoundTitle": "목록을 찾을 수 없습니다",
   "notFoundHint": "삭제되었을 수 있습니다.",

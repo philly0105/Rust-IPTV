@@ -166,7 +166,7 @@ describe('list page', () => {
     stubLiveExtras();
     h.renderAt('/lists/L1', routes);
     expect(await screen.findByText('This list is empty')).toBeTruthy();
-    expect(screen.getByText(/press L on a channel/)).toBeTruthy();
+    expect(screen.getByText(/choose Add to list\. With a keyboard, press L/)).toBeTruthy();
     // Browse channels opens Live TV, not `/` (which restores the saved screen: this one).
     await waitFor(() => expect(screen.getByTestId('list-browse-channels').getAttribute('href')).toBe('/s/src1/live'));
   });
@@ -203,9 +203,11 @@ describe('list page', () => {
       rpc.handlers['lists.items'] = () => new Promise(() => undefined);
       h.renderAt('/lists/L1', routes);
       const stage = await screen.findByTestId('list-stage');
-      // The phone prompt is a 56 px bar, not a black 16:9 box; md and up keep the stage.
+      // The phone prompt is a 56 px bar, not a black 16:9 box; md and up keep the stage, a 16:9
+      // screen as on Live, not the tall black box around a letterboxed picture (LG-07).
       expect(stage.hasAttribute('data-idle')).toBe(true);
-      expect(stage.className.split(' ')).toEqual(expect.arrayContaining(['max-md:h-14', 'md:flex-1']));
+      expect(stage.className.split(' ')).toEqual(expect.arrayContaining(['max-md:h-14', 'md:aspect-video']));
+      expect(stage.className.split(' ')).not.toContain('md:flex-1');
       expect(stage.className.split(' ')).not.toContain('aspect-video');
       expect(within(stage).getByText('Pick a channel from the list.')).toBeTruthy();
       expect(phoneHidden('list-ribbon')).toBe(true);

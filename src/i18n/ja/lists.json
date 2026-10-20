@@ -62,7 +62,7 @@
   "countWithUnavailable": "{{channels}}、{{unavailable}}",
   "allUnavailableTitle": "これらのチャンネルは現在どれも提供されていません",
   "listEmptyTitle": "このリストは空です",
-  "listEmptyHint": "ライブTVでチャンネル上で L を押すか右クリックし、「リストに追加」を選んでください。",
+  "listEmptyHint": "ライブTVでチャンネルのメニュー（⋮、長押し、または右クリック）を開き、「リストに追加」を選んでください。キーボードでは L を押します。",
   "browseChannels": "チャンネルを見る",
   "notFoundTitle": "リストが見つかりません",
   "notFoundHint": "削除された可能性があります。",

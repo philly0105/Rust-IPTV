@@ -256,11 +256,13 @@ describe('clock ticks (LV-8)', () => {
       rtl: false,
       kind: 'm3u',
       highlighted: false,
+      playing: false,
+      genreFilter: null,
       cursorStart: null,
       lang: 'en',
       stripCountryPrefix: false,
       schedule: buildScheduleIndex(),
-      handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(), fitText: vi.fn(), press: vi.fn() },
+      handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(), fitText: vi.fn(), press: vi.fn(), hover: vi.fn() },
     };
     let setNow: (n: number) => void = () => undefined;
     function Host() {

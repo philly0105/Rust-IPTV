@@ -445,3 +445,27 @@
   --panel-width: calc(316px * var(--ui-scale));
   --rail-item-height: 2.125rem;
 }
+
+/* ==== Guide genre colours (CB-GUIDE-GENRE) ==== begin
+ * The stripe at a guide cell's inline start and the dot on its filter chip, one per programme
+ * bucket (src/features/live/guide/genre.ts). Marks, not text: each keeps 3:1 against every
+ * surface, the selected fill and the airing cell in dark, light and OLED
+ * (src/ui/test/contrast.test.ts, "guide genre stripes"). Read as var(--color-genre-*), so no
+ * @theme mapping. Muted in dark so a column of stripes does not shout; deep in light.
+ */
+:root,
+:root[data-theme='dark'] {
+  --color-genre-movie: #a68cf2;
+  --color-genre-sports: #47bd80;
+  --color-genre-news: #519ceb;
+  --color-genre-kids: #ec85c0;
+  --color-genre-series: #39bdbe;
+}
+:root[data-theme='light'] {
+  --color-genre-movie: #6d45e0;
+  --color-genre-sports: #15804a;
+  --color-genre-news: #1f63c6;
+  --color-genre-kids: #b8307f;
+  --color-genre-series: #0b767c;
+}
+/* ==== Guide genre colours ==== end */

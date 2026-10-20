@@ -62,7 +62,7 @@
   "countWithUnavailable": "{{channels}}，{{unavailable}}",
   "allUnavailableTitle": "这些频道目前都不再提供",
   "listEmptyTitle": "此列表为空",
-  "listEmptyHint": "在直播电视中，选中频道后按 L 或右键单击它，然后选择“添加到列表”。",
+  "listEmptyHint": "在直播电视中打开频道菜单（⋮、长按或右键），然后选择“添加到列表”。使用键盘时按 L。",
   "browseChannels": "浏览频道",
   "notFoundTitle": "找不到列表",
   "notFoundHint": "它可能已被删除。",

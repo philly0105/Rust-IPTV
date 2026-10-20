@@ -564,11 +564,13 @@ describe('ribbon live button', () => {
 });
 
 describe('channel row in RTL', () => {
-  it('truncates only the next title, in its own direction, with the clock outside it', () => {
+  // LG-03 took the next programme off the rows (the stage column's Up next has it); the airing
+  // programme's line is built the same way and keeps what this protected.
+  it('truncates only the programme title, in its own direction, with the time left outside it', () => {
     const now = Date.now();
     const nn: EpgNowNext = {
-      now: program('الأخبار', now - 10 * MINUTE, now + 20 * MINUTE),
-      next: program('World News Today', now + 20 * MINUTE, now + 80 * MINUTE),
+      now: program('World News Today', now - 10 * MINUTE, now + 20 * MINUTE),
+      next: program('الأخبار', now + 20 * MINUTE, now + 80 * MINUTE),
     };
     render(
       <I18nextProvider i18n={i18n}>
@@ -588,16 +590,18 @@ describe('channel row in RTL', () => {
         </div>
       </I18nextProvider>,
     );
-    const title = screen.getByTestId('row-next-title');
+    const title = screen.getByTestId('row-now-title');
     expect(title.textContent).toBe('World News Today');
     expect(title.getAttribute('dir')).toBe('auto');
     expect(title.className).toContain('truncate');
     expect(title.className).toContain('min-w-0');
-    // The clock is a sibling, not inside the truncating span.
-    const line = screen.getByTestId('row-next');
+    // The time left is a sibling, not inside the truncating span.
+    const line = screen.getByTestId('row-now');
     expect(line.className).not.toContain('truncate');
     expect(line.textContent).not.toBe(title.textContent);
     expect(screen.getByText('BBC World').getAttribute('dir')).toBe('auto');
+    // Three lines: no next-programme line.
+    expect(screen.queryByText('الأخبار')).toBeNull();
   });
 });
 

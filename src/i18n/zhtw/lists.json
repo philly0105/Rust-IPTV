@@ -62,7 +62,7 @@
   "countWithUnavailable": "{{channels}}，{{unavailable}}",
   "allUnavailableTitle": "這些頻道目前都不再提供",
   "listEmptyTitle": "此清單是空的",
-  "listEmptyHint": "在直播電視中，選取頻道後按 L 或按右鍵，然後選擇「加入清單」。",
+  "listEmptyHint": "在直播電視中開啟頻道選單（⋮、長按或按右鍵），然後選擇「加入清單」。使用鍵盤時按 L。",
   "browseChannels": "瀏覽頻道",
   "notFoundTitle": "找不到清單",
   "notFoundHint": "可能已被刪除。",

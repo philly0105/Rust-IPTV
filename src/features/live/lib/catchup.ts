@@ -79,6 +79,34 @@ export function isM3uCatchupSupported(channel: CatchupChannel | undefined): bool
   return m3uCatchupMode(channel) !== null;
 }
 
+/** A template token that bounds the archive: its end time or its length. */
+const END_TOKEN = /\$?\{(?:utcend|end|duration)(?::[^}]*)?\}/i;
+
+/**
+ * True when an M3U channel's archive URL names where the programme ends, so a download of it
+ * stops by itself (FW-ARCHIVE-DOWNLOAD-UNBOUNDED). `shift` (`?utc=<start>&lutc=<now>`, the
+ * default for a playlist that names no catch-up type) and Flussonic's MPEG-TS
+ * `timeshift_abs-<start>.ts` both play on from the start into the live stream: a download of
+ * either would never end. Xtream-style paths carry the length; a template or an appended source
+ * does when it has an end or duration token.
+ */
+export function m3uCatchupEnds(channel: CatchupChannel | undefined): boolean {
+  switch (m3uCatchupMode(channel)) {
+    case 'xc':
+      return true;
+    case 'template':
+    case 'append':
+      return END_TOKEN.test(channel?.catchup?.source ?? '');
+    case 'flussonic': {
+      // The HLS form names its length (`index-<start>-<duration>.m3u8`); the MPEG-TS one does not.
+      const m = FLUSSONIC_RE.exec(channel?.url?.trim() ?? '');
+      return !!m && m[4] !== 'mpegts';
+    }
+    default:
+      return false;
+  }
+}
+
 const pad = (n: number, w = 2) => String(n).padStart(w, '0');
 
 function formatUtc(t: number, fmt: string): string {

@@ -22,6 +22,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -57,6 +58,7 @@ import { registerCommands, useShell, useShortcut } from '@/shell';
 import { intlLocale } from '@/lib/intl';
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
+import { useLastChannel } from '../hooks/useLastChannel';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
@@ -74,14 +76,15 @@ import { archivePath, canBrowseArchive } from '../lib/archive';
 import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelList } from './ChannelList';
-import { ChannelLogo } from './ChannelLogo';
 import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from './ChannelRow';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
 import { EpgRibbon } from './EpgRibbon';
 import { HiddenChannelsButton } from './HiddenChannelsButton';
+import { LiveStageColumn } from './LiveStageColumn';
 import { ManageCategoriesDialog } from './ManageCategoriesDialog';
+import { StageIdle } from './StageIdle';
 
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
@@ -436,7 +439,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     digits.push(e.key);
   }, { description: t('shortcutDigits'), area: shortcutArea });
 
-  const guideHref = `/epg?source=${encodeURIComponent(sourceId)}`;
+  // LG-01: the guide opens on this group, at the channel playing here (or the list's cursor).
+  const guideFocus = playingRef?.itemId ?? activeChannel?.ref.itemId;
+  const guideHref = guideLink(sourceId, isRadio ? undefined : categoryId, isRadio ? undefined : guideFocus);
   useEffect(
     () =>
       registerCommands([
@@ -450,11 +455,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const shell = useShell();
   const title = source.data?.name ?? '';
   const subtitle = category?.name ?? (isRadio ? t('allStations') : t('allChannels'));
+  const countText = paged.total !== undefined ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
+  // The group and its count once, in the header: the list no longer repeats them over its rows.
+  const headerSubtitle = countText ? t('groupWithCount', { group: subtitle, count: countText }) : subtitle;
   useEffect(() => {
     if (!title) return;
     shell.setHeader({
       title,
-      subtitle,
+      subtitle: headerSubtitle,
       actions: (
         <Link
           to={guideHref}
@@ -467,7 +475,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         </Link>
       ),
     });
-  }, [title, subtitle, guideHref, i18n.language]);
+  }, [title, headerSubtitle, guideHref, i18n.language]);
   useEffect(() => () => shell.setHeader({ title: '' }), []);
 
   // ---- remote control -----------------------------------------------------
@@ -675,6 +683,27 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       },
     });
   }, [t]);
+
+  // ---- idle stage ---------------------------------------------------------
+  // CB-AUTOPLAY-LAST without autoplay: the stage offers the channel last watched on this source.
+  const last = useLastChannel({
+    contentType,
+    sourceId,
+    accept: (r) => r.sourceId === sourceId,
+    enabled: !!sourceId && !stageBusy,
+    epgOffsetMinutes: prefs.epgOffsetMinutes,
+  });
+  const lastChannel = last?.channel;
+  const idle = (
+    <StageIdle
+      kind={isRadio ? 'radio' : 'live'}
+      last={lastChannel ? { channel: lastChannel, nowNext: last?.nowNext } : undefined}
+      now={now}
+      stripPrefix={prefs.stripCountryPrefix}
+      epgOffsetMinutes={prefs.epgOffsetMinutes}
+      onResume={onPlayLive}
+    />
+  );
 
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
@@ -884,59 +913,40 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             label={t(isRadio ? 'searchStations' : 'searchChannels')}
           />
         </div>
-        <div className="flex items-baseline justify-between px-3 pt-2 pb-1 text-xs text-fg-subtle">
-          <span className="truncate">{subtitle}</span>
-          <span className="tabular-nums" aria-live="polite">
-            {paged.total !== undefined ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : ''}
-          </span>
-        </div>
+        {/* The count is in the header; screen readers hear it change as a search narrows the list. */}
+        <p className="sr-only" aria-live="polite">
+          {countText}
+        </p>
         {listBody}
       </section>
 
-      {/* stage: on top on a phone, as wide as the screen. Beside the list it keeps about 300 px for
-          the player's controls; the list gives way first, down to 240 px (XB2-16). */}
-      <section aria-label={t('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:order-none md:min-w-[min(300px,40%)] md:flex-1">
-        {isRadio ? (
-          <RadioStage channel={playingChannel} stripPrefix={prefs.stripCountryPrefix} />
-        ) : (
-          <>
-            {/* On a phone nothing playing is a slim prompt above the list, not a black 16:9 box (L2-visual-13).
-                Beside the list the stage is a 16:9 screen with the guide ribbon under it, not a tall box of
-                black around a small picture (L3-player-4); when the column is too short for both, the
-                screen gives way and the ribbon keeps its height. */}
-            <div
-              data-testid="live-stage"
-              data-idle={stageBusy ? undefined : ''}
-              className={`relative min-h-0 bg-black md:aspect-video md:shrink ${stageBusy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2'}`}
-            >
-              <PlayerStage className={stageBusy ? 'h-full w-full' : 'h-full w-full max-md:bg-transparent'}>
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-white/70 max-md:flex-row max-md:justify-start max-md:gap-3 max-md:px-4 max-md:text-start max-md:text-fg-muted">
-                  <Tv className="size-8 max-md:size-5 max-md:shrink-0" aria-hidden />
-                  <div className="flex min-w-0 flex-col gap-2 max-md:gap-0">
-                    <p className="text-sm max-md:truncate max-md:font-medium max-md:text-fg">{t('stageIdle')}</p>
-                    <p className="text-xs text-white/50 max-md:truncate max-md:text-fg-subtle">{t('stageIdleHint')}</p>
-                  </div>
-                </div>
-              </PlayerStage>
-              <DigitOsd state={osd} />
-            </div>
-            {/* On a phone the ribbon comes with a channel playing; until then the list starts near the top.
-                Beside the list the ribbon's surface runs on to the bottom of the column. */}
-            <div className={`${stageBusy ? 'max-md:contents' : 'max-md:hidden'} md:flex md:min-h-0 md:shrink-0 md:grow md:flex-col md:bg-surface`}>
-              <MemoRibbon
-                channel={ribbon.channel}
-                sourceKind={ribbon.channel && source.data?.id === ribbon.channel.ref.sourceId ? kind : undefined}
-                watchingLive={ribbon.watchingLive}
-                watchingArchive={ribbon.watchingArchive}
-                onPlayLive={onPlayLive}
-                onMapEpg={setMapping}
-                guideHref={guideHref}
-              />
-            </div>
-          </>
-        )}
-        {isRadio ? <DigitOsd state={osd} /> : null}
-      </section>
+      {isRadio ? (
+        <section aria-label={t('stage')} className="order-first flex min-w-0 shrink-0 flex-col md:order-none md:min-w-[min(300px,40%)] md:flex-1">
+          <RadioStage idle={idle} />
+          <DigitOsd state={osd} />
+        </section>
+      ) : (
+        <LiveStageColumn
+          label={t('stage')}
+          busy={stageBusy}
+          idle={idle}
+          overlay={<DigitOsd state={osd} />}
+          stageTestId="live-stage"
+          ribbonOnPhone={stageBusy}
+          ribbon={
+            <MemoRibbon
+              channel={ribbon.channel}
+              sourceKind={ribbon.channel && source.data?.id === ribbon.channel.ref.sourceId ? kind : undefined}
+              watchingLive={ribbon.watchingLive}
+              watchingArchive={ribbon.watchingArchive}
+              onPlayLive={onPlayLive}
+              onMapEpg={setMapping}
+              guideHref={guideHref}
+              details
+            />
+          }
+        />
+      )}
 
       <MemoContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
       {/* C2: a group's menu only has entries while parental controls are on. */}
@@ -952,24 +962,26 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   );
 }
 
-function RadioStage({ channel, stripPrefix }: { channel?: Channel; stripPrefix: boolean }) {
-  const { t } = useTranslation('live');
+/** Radio's stage: the station's player while one plays, else the shared idle stage. */
+function RadioStage({ idle }: { idle: ReactNode }) {
   const playingRadio = usePlayerStore((st) => !!st.source?.isRadio);
   return (
-    <div className="relative flex min-h-56 flex-1 flex-col bg-black md:min-h-0" data-testid="radio-stage">
+    <div className="relative flex min-h-14 flex-1 flex-col bg-black max-md:min-h-0 md:min-h-0" data-testid="radio-stage">
       {playingRadio ? (
         // The running player moves into this slot (the dock draws the station's stage view and owns
         // the audio), so the page shows one player, not this one plus the floating mini dock.
         <PlayerStage className="min-h-56 flex-1 md:min-h-0" />
       ) : (
-        <div className="flex flex-1 items-center justify-center bg-surface">
-          <EmptyState
-            icon={channel ? <ChannelLogo src={channel.logoUrl} name={displayChannelName(channel.name, stripPrefix)} size={72} sourceId={channel.ref.sourceId} /> : <RadioIcon className="size-8" />}
-            title={t('radioIdle')}
-            description={t('radioIdleHint')}
-          />
-        </div>
+        <div className="relative flex-1 max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2">{idle}</div>
       )}
     </div>
   );
+}
+
+/** The guide's address for a source, opened on a group at a channel's row (LG-01). */
+export function guideLink(sourceId: string, categoryId?: string, focusItemId?: string): string {
+  const q = new URLSearchParams({ source: sourceId });
+  if (categoryId) q.set('category', categoryId);
+  if (focusItemId) q.set('focus', focusItemId);
+  return `/epg?${q.toString()}`;
 }

@@ -109,7 +109,7 @@ describe('the no-data notice (F-GUIDE-NOMATCH)', () => {
     await openGuide();
     const notice = await screen.findByTestId('guide-no-data');
     expect(notice.textContent).toContain('None of these channels matches a loaded guide');
-    expect(within(notice).queryByRole('link', { name: 'EPG settings' })).toBeNull();
+    expect(within(notice).queryByRole('link', { name: 'Add guide' })).toBeNull();
     fireEvent.click(within(notice).getByTestId('guide-no-match-map'));
     expect(await screen.findByRole('dialog', { name: 'Guide data for Channel 0' })).toBeTruthy();
   });
@@ -119,7 +119,8 @@ describe('the no-data notice (F-GUIDE-NOMATCH)', () => {
     await openGuide();
     const notice = await screen.findByTestId('guide-no-data');
     await waitFor(() => expect(notice.textContent).toContain('Add an XMLTV address'));
-    expect(within(notice).getByRole('link', { name: 'EPG settings' })).toBeTruthy();
+    // LG-10: no guide at all is an empty state with the way to add one, not a pill at the foot.
+    expect(within(notice).getByRole('link', { name: 'Add guide' }).getAttribute('href')).toBe('/settings/epg');
   });
 });
 

@@ -64,7 +64,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Geen van deze kanalen wordt nu aangeboden",
   "listEmptyTitle": "Deze lijst is leeg",
-  "listEmptyHint": "Druk in Live tv op L op een kanaal of klik er met de rechtermuisknop op en kies Toevoegen aan lijst.",
+  "listEmptyHint": "Open in Live tv het menu van een zender (⋮, lang indrukken of rechtsklikken) en kies Toevoegen aan lijst. Met het toetsenbord druk je op L.",
   "browseChannels": "Kanalen bekijken",
   "notFoundTitle": "Lijst niet gevonden",
   "notFoundHint": "Mogelijk is hij verwijderd.",

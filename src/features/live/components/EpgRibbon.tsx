@@ -1,4 +1,4 @@
-import { CalendarClock, ChartGantt, CircleAlert, History, LayoutList, Link2, Lock, Radio, RotateCcw } from 'lucide-react';
+import { CalendarClock, ChartGantt, ChevronDown, CircleAlert, History, LayoutList, Link2, Lock, Radio, RotateCcw, Undo2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -9,7 +9,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
-import { Button, IconButton, LivePill, Skeleton, Tooltip, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { Button, cn, IconButton, LivePill, Skeleton, TEXT_LINK, Tooltip, useImageChain, useListVirtualizer, useToast, errorDescription } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -41,6 +41,7 @@ import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../
 // recording:
 import { RibbonActions, ScheduleMark } from '@/features/recording';
 import { listSeparator } from '@/lib/intl';
+import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;
 const AHEAD = 12 * HOUR;
@@ -63,7 +64,16 @@ export interface EpgRibbonProps {
   onPlayLive(channel: Channel): void;
   onMapEpg(channel: Channel): void;
   guideHref?: string;
+  /**
+   * The stage column's full ribbon (Live and custom lists, LG-02): from md up the header is a
+   * Now card (programme art, a progress bar, three lines of description) and Up next fills the
+   * column under the timeline. Below md the ribbon folds to one line until it is opened (LG-17).
+   */
+  details?: boolean;
 }
+
+/** After the pointer leaves the timeline, the header waits this long before it goes back (LG-06). */
+export const RIBBON_PREVIEW_LINGER_MS = 300;
 
 export function EpgRibbon(props: EpgRibbonProps) {
   const { t, i18n } = useTranslation('live');
@@ -89,12 +99,36 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const list = useMemo(() => shiftPrograms(programs.programs, prefs.epgOffsetMinutes), [programs.programs, prefs.epgOffsetMinutes]);
   const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
-  const [focused, setFocused] = useState<EpgProgram | undefined>(undefined);
-  useEffect(() => setFocused(undefined), [channel?.ref.itemId]);
+  // LG-06: the pointer previews (the header follows a hovered block and goes back once the pointer
+  // leaves the timeline); a click, Enter or keyboard focus picks (the header stays on it, the
+  // block is ringed, and "Back to now" returns). A zap clears both.
+  const [hovered, setHovered] = useState<EpgProgram | undefined>(undefined);
+  const [pinned, setPinned] = useState<EpgProgram | undefined>(undefined);
+  const lingerTimer = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    window.clearTimeout(lingerTimer.current);
+    setHovered(undefined);
+    setPinned(undefined);
+  }, [channel?.ref.itemId]);
+  useEffect(() => () => window.clearTimeout(lingerTimer.current), []);
+  const preview = useCallback((p: EpgProgram | undefined) => {
+    window.clearTimeout(lingerTimer.current);
+    if (p) setHovered(p);
+    else lingerTimer.current = window.setTimeout(() => setHovered(undefined), RIBBON_PREVIEW_LINGER_MS);
+  }, []);
+  const pick = useCallback((p: EpgProgram | undefined) => {
+    window.clearTimeout(lingerTimer.current);
+    setHovered(undefined);
+    setPinned(p);
+  }, []);
   // Ask mode: a locked channel's programmes stay back until the PIN, like its stream.
   const locks = useParentalLocks(channel?.ref.sourceId, channel?.ref.contentType === 'radio' ? 'radio' : 'live');
   const locked = locks.channelLocked(channel);
-  const shown = locked ? undefined : (focused ?? current);
+  const chosen = pinned && !(current && samePrograms(pinned, current)) ? pinned : undefined;
+  const shown = locked ? undefined : (hovered ?? chosen ?? current);
+  const awayFromNow = !!shown && !!current && !samePrograms(shown, current);
+  // LG-17: below md the ribbon is one line until it is opened, so a phone keeps room for the list.
+  const [phoneOpen, setPhoneOpen] = useState(false);
 
   const setMode = async (m: Mode) => {
     setLocalMode(m);
@@ -122,61 +156,85 @@ export function EpgRibbon(props: EpgRibbonProps) {
         }
         return;
       }
-      setFocused(p);
+      pick(p);
     },
-    [channel, channelName, now, props, sourceKind, t, toast],
+    [channel, channelName, now, props, sourceKind, t, toast, pick],
   );
 
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
+  const details = !!props.details;
+  const shownWhen = shown ? programWhen(shown, now) : undefined;
   const header = (
     // Below 480 px the programme lines take the full width and the buttons wrap under them, so the
     // time range and title are not cut to "01:45 AM – 0…" beside five buttons (L2-live-15).
-    <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1 px-4 pt-3 pb-2" data-testid="ribbon-header">
-      {/* Three lines tall with or without a programme (time, title, description), so a zap never moves the video. */}
-      <div className="flex min-h-[3.25rem] min-w-0 flex-1 flex-col justify-center max-[480px]:basis-full">
-        {shown ? (
-          <>
-            {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
-            <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
-              {programWhen(shown, now) === 'now' ? (
-                <LivePill size="sm" dot="none" />
-              ) : null}
-              <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
-                {programWhen(shown, now) !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ?`${formatDay(ms(shown.start), i18n.language)} ` : ''}
-                {formatRange(shown, i18n.language)}
-              </span>
-              {programWhen(shown, now) === 'now' ? (
-                <span className="min-w-0 truncate whitespace-nowrap" data-testid="ribbon-remaining" title={t('minutesLeft', { count: minutesLeft(shown, now) })}>
-                  {t('minutesLeft', { count: minutesLeft(shown, now) })}
+    <div
+      className={cn('flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1 px-4 pt-3 pb-2', details && !phoneOpen && 'max-md:hidden')}
+      data-testid="ribbon-header"
+    >
+      {/* Three lines tall with or without a programme (time, title, description), so a zap never
+          moves what is under it. The Now card (details, md up) keeps its own fixed height. */}
+      <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3 max-[480px]:basis-full', details && 'md:min-h-[7.25rem]')}>
+        {details && shown?.icon ? <ProgrammeArt src={shown.icon} sourceId={channel?.ref.sourceId} /> : null}
+        <div className="flex min-w-0 flex-1 flex-col justify-center">
+          {shown ? (
+            <>
+              {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
+              <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
+                {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
+                <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
+                  {shownWhen !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ? `${formatDay(ms(shown.start), i18n.language)} ` : ''}
+                  {formatRange(shown, i18n.language)}
                 </span>
-              ) : null}
-              {/* The category is the first thing to go: below 1440 px the pane is too narrow for it to be more than "Ne…". */}
-              {shown.category ? (
-                <span className="hidden min-w-0 truncate text-fg-subtle min-[1440px]:block" data-testid="ribbon-category">
-                  {shown.category}
-                </span>
-              ) : null}
-              {/* guide: the provider's short guide, not XMLTV. */}
-              {shown.fromProvider ? (
-                <span className="min-w-0 truncate whitespace-nowrap text-fg-subtle" data-testid="ribbon-from-provider">
-                  {t('fromProvider')}
-                </span>
-              ) : null}
-            </p>
-            <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg">
-              {shown.title}
-            </p>
-            {shown.description ? (
-              <p dir="auto" className="line-clamp-1 text-match-parent text-xs text-fg-muted">
-                {shown.description}
+                {shownWhen === 'now' ? (
+                  <span
+                    className="min-w-0 truncate whitespace-nowrap"
+                    data-testid="ribbon-remaining"
+                    title={t('minutesLeft', { count: minutesLeft(shown, now) })}
+                  >
+                    {t('minutesLeft', { count: minutesLeft(shown, now) })}
+                  </span>
+                ) : null}
+                {/* The category is the first thing to go: below 1440 px the pane is too narrow for it to be more than "Ne…". */}
+                {shown.category ? (
+                  <span className="hidden min-w-0 truncate text-fg-subtle min-[1440px]:block" data-testid="ribbon-category">
+                    {shown.category}
+                  </span>
+                ) : null}
+                {/* guide: the provider's short guide, not XMLTV. */}
+                {shown.fromProvider ? (
+                  <span className="min-w-0 truncate whitespace-nowrap text-fg-subtle" data-testid="ribbon-from-provider">
+                    {t('fromProvider')}
+                  </span>
+                ) : null}
+                {awayFromNow ? (
+                  // LG-06: the header is on another programme than the airing one; this brings it back.
+                  <button type="button" onClick={() => pick(undefined)} className={cn(TEXT_LINK, 'ms-auto inline-flex shrink-0 items-center gap-1 text-xs')} data-testid="ribbon-back-to-now">
+                    <Undo2 className="size-3" aria-hidden />
+                    {t('guideBackToNow')}
+                  </button>
+                ) : null}
               </p>
-            ) : null}
-          </>
-        ) : (
-          <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg" data-testid="ribbon-channel-name">
-            {channelName || t('guide')}
-          </p>
-        )}
+              <p dir="auto" className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:mt-0.5 md:text-title-sm')}>
+                {shown.title}
+              </p>
+              {details ? (
+                // The airing programme's progress; the row keeps its height for the others.
+                <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full max-w-sm overflow-hidden rounded-full bg-surface-3 md:block', shownWhen !== 'now' && 'md:invisible')}>
+                  <span className="absolute inset-y-0 start-0 rounded-full bg-accent" style={{ width: `${shownWhen === 'now' ? programProgress(shown, now) * 100 : 0}%` }} />
+                </span>
+              ) : null}
+              {shown.description ? (
+                <p dir="auto" className={cn('line-clamp-1 text-match-parent text-xs text-fg-muted', details && 'md:line-clamp-3 md:text-body-sm')} data-testid="ribbon-description">
+                  {shown.description}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg" data-testid="ribbon-channel-name">
+              {channelName || t('guide')}
+            </p>
+          )}
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-1 max-[480px]:ms-auto">
         {/* recording: */}
@@ -226,9 +284,38 @@ export function EpgRibbon(props: EpgRibbonProps) {
             </Link>
           </Tooltip>
         ) : null}
+        {details ? (
+          <IconButton
+            size="sm"
+            label={t('hideRibbon')}
+            aria-expanded
+            icon={<ChevronDown className="size-4 rotate-180" />}
+            onClick={() => setPhoneOpen(false)}
+            className="md:hidden"
+          />
+        ) : null}
       </div>
     </div>
   );
+  // LG-17: a phone's folded ribbon, one line: what is on, the time left, and a hairline of progress.
+  const phoneLine =
+    details && !phoneOpen ? (
+      <div className="relative flex min-h-11 items-center gap-2 ps-4 pe-2 md:hidden" data-testid="ribbon-phone-line">
+        {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
+        <p dir="auto" className="min-w-0 flex-1 truncate text-match-parent text-body-sm font-medium text-fg">
+          {shown?.title ?? (channelName || t('guide'))}
+        </p>
+        {shown && shownWhen === 'now' ? (
+          <span className="shrink-0 text-caption tabular-nums text-fg-muted">{t('minutesLeftShort', { count: minutesLeft(shown, now) })}</span>
+        ) : null}
+        <IconButton size="sm" label={t('showRibbon')} aria-expanded={false} icon={<ChevronDown className="size-4" />} onClick={() => setPhoneOpen(true)} />
+        {shown && shownWhen === 'now' ? (
+          <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-surface-3">
+            <span className="block h-full bg-accent" style={{ width: `${programProgress(shown, now) * 100}%` }} />
+          </span>
+        ) : null}
+      </div>
+    ) : null;
 
   let body;
   if (!channel) {
@@ -308,20 +395,55 @@ export function EpgRibbon(props: EpgRibbonProps) {
         watchingLive={props.watchingLive}
         resetKey={channel.ref.itemId}
         onActivate={activate}
-        onFocusProgram={setFocused}
+        onFocusProgram={pick}
+        onPreview={preview}
+        pinned={chosen}
       />
     );
   } else {
-    body = <ProgramList programs={list} now={now} channel={channel} kind={sourceKind} watchingLive={props.watchingLive} onActivate={activate} onFocusProgram={setFocused} />;
+    body = <ProgramList programs={list} now={now} channel={channel} kind={sourceKind} watchingLive={props.watchingLive} onActivate={activate} onFocusProgram={pick} />;
   }
 
+  const showUpNext = details && !!channel && !locked && !programs.error && !programs.isLoading && list.length > 0;
   return (
-    <section aria-label={t('guide')} data-testid="epg-ribbon" className="flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface">
+    <section
+      aria-label={t('guide')}
+      data-testid="epg-ribbon"
+      className={cn('flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface', details && 'md:flex-1')}
+    >
+      {phoneLine}
       {header}
-      <div className={`${BODY_HEIGHT[mode]} overflow-hidden`} data-testid="ribbon-body">
+      <div className={cn(BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
         {body}
       </div>
+      {showUpNext ? <UpNext programs={list} now={now} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
     </section>
+  );
+}
+
+/** Same programme: the guide can answer the same airing as two objects. */
+function samePrograms(a: EpgProgram, b: EpgProgram): boolean {
+  return a.start === b.start && a.title === b.title;
+}
+
+/**
+ * The programme's own picture in the Now card, when the guide has one (XMLTV `<icon>`): through
+ * the image cache, and gone when it fails, never a placeholder.
+ */
+function ProgrammeArt({ src, sourceId }: { src: string; sourceId?: string }) {
+  const image = useImageChain([src], sourceId, 128);
+  if (!image.url) return null;
+  return (
+    <img
+      key={image.url}
+      src={image.url}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onError={image.onError}
+      data-testid="ribbon-art"
+      className="hidden aspect-video w-32 shrink-0 self-center rounded-md bg-surface-3 object-cover ring-1 ring-edge md:block"
+    />
   );
 }
 
@@ -373,7 +495,17 @@ interface ViewProps {
   onFocusProgram(p: EpgProgram | undefined): void;
 }
 
-function Timeline(props: ViewProps & { from: number; to: number; resetKey: string }) {
+function Timeline(
+  props: ViewProps & {
+    from: number;
+    to: number;
+    resetKey: string;
+    /** The pointer is over a block (undefined: it left the timeline): the header previews it. */
+    onPreview(p: EpgProgram | undefined): void;
+    /** The block the header was set to by a click or a key: it is ringed. */
+    pinned?: EpgProgram;
+  },
+) {
   const { t, i18n } = useTranslation('live');
   const { programs, from, to, now, channel, kind } = props;
   const scroller = useRef<HTMLDivElement>(null);
@@ -444,6 +576,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         ref={scroller}
         onScroll={onScroll}
         onKeyDown={onKeyDown}
+        onPointerLeave={() => props.onPreview(undefined)}
         tabIndex={scrollerTabbable ? 0 : undefined}
         data-testid="ribbon-timeline"
         className="relative h-full overflow-x-auto overflow-y-hidden pb-2 outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
@@ -480,8 +613,10 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
               watchingLive={props.watchingLive}
               rtl={rtl}
               tabbable={b === tabStop}
+              pinned={!!props.pinned && props.pinned.start === b.program.start && props.pinned.title === b.program.title}
               onActivate={props.onActivate}
               onFocusProgram={props.onFocusProgram}
+              onPreview={props.onPreview}
             />
           ))}
         </div>
@@ -490,7 +625,8 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         <button
           type="button"
           onClick={() => scrollToNow(true)}
-          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-live-solid px-3 py-1 text-xs font-semibold text-white shadow-2 hover:brightness-110 active:brightness-95"
+          // A way back, not a live mark (LG-15): the accent's filled control, not the LIVE red.
+          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-accent-solid px-3 py-1 text-xs font-semibold text-accent-solid-fg shadow-2 outline-none hover:bg-accent-solid-hover focus-visible:ring-2 focus-visible:ring-focus active:bg-accent-solid-pressed"
         >
           <RotateCcw className="size-3" aria-hidden />
           {t('jumpToNow')}
@@ -510,8 +646,10 @@ const TimelineBlock = memo(function TimelineBlock({
   watchingLive,
   rtl,
   tabbable,
+  pinned,
   onActivate,
   onFocusProgram,
+  onPreview,
 }: {
   block: Block;
   /** The text's width cap while the block began before the visible edge (cellTextMaxPx). */
@@ -522,8 +660,10 @@ const TimelineBlock = memo(function TimelineBlock({
   watchingLive: boolean;
   rtl: boolean;
   tabbable: boolean;
+  pinned: boolean;
   onActivate(p: EpgProgram): void;
   onFocusProgram(p: EpgProgram | undefined): void;
+  onPreview(p: EpgProgram | undefined): void;
 }) {
   const { t, i18n } = useTranslation('live');
   const p = block.program;
@@ -556,11 +696,15 @@ const TimelineBlock = memo(function TimelineBlock({
       tabIndex={tabbable ? 0 : -1}
       aria-label={label}
       title={p.description ? `${p.title}\n${p.description}` : p.title}
+      aria-current={pinned ? 'true' : undefined}
       onClick={() => onActivate(p)}
-      onMouseEnter={() => onFocusProgram(p)}
+      onMouseEnter={() => onPreview(p)}
       onFocus={() => onFocusProgram(p)}
       // overflow-clip, not hidden: the block is then no scroll container, so its text can stick.
-      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus ${tone}`}
+      // A picked block (the header describes it, LG-06) carries a ring in the text colour.
+      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus ${tone} ${
+        pinned ? 'ring-2 ring-fg-muted ring-inset' : ''
+      }`}
       style={{ ...inlineStart(block.left + 1, rtl), width: Math.max(2, block.width - 2) }}
     >
       {block.when === 'now' ? (
@@ -655,7 +799,7 @@ function ProgramList(props: ViewProps) {
                   </span>
                   {when === 'now' ? (
                     <span className="mt-1 h-[3px] w-full max-w-48 overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                      <span className="block h-full bg-live" style={{ width: `${programProgress(p, now) * 100}%` }} />
+                      <span className="block h-full bg-accent" style={{ width: `${programProgress(p, now) * 100}%` }} />
                     </span>
                   ) : p.description ? (
                     <span dir="auto" className="truncate text-match-parent text-xs text-fg-muted">

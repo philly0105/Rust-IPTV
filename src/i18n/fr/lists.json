@@ -66,7 +66,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Aucune de ces chaînes n'est proposée actuellement",
   "listEmptyTitle": "Cette liste est vide",
-  "listEmptyHint": "Dans TV en direct, appuyez sur L sur une chaîne ou faites un clic droit dessus, puis choisissez Ajouter à une liste.",
+  "listEmptyHint": "Dans TV en direct, ouvrez le menu d'une chaîne (⋮, un appui long ou un clic droit) et choisissez Ajouter à une liste. Au clavier, appuyez sur L.",
   "browseChannels": "Parcourir les chaînes",
   "notFoundTitle": "Liste introuvable",
   "notFoundHint": "Elle a peut-être été supprimée.",

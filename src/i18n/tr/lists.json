@@ -64,7 +64,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Bu kanalların hiçbiri şu anda sunulmuyor",
   "listEmptyTitle": "Bu liste boş",
-  "listEmptyHint": "Canlı TV'de bir kanalın üzerindeyken L tuşuna basın veya kanala sağ tıklayın, ardından Listeye ekle'yi seçin.",
+  "listEmptyHint": "Canlı TV'de bir kanalın menüsünü açın (⋮, uzun basma veya sağ tık) ve Listeye ekle'yi seçin. Klavyeyle L tuşuna basın.",
   "browseChannels": "Kanallara göz at",
   "notFoundTitle": "Liste bulunamadı",
   "notFoundHint": "Silinmiş olabilir.",

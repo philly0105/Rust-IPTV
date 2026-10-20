@@ -64,7 +64,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "None of these channels are offered now",
   "listEmptyTitle": "This list is empty",
-  "listEmptyHint": "In Live, press L on a channel or right-click it, then choose Add to list.",
+  "listEmptyHint": "In Live TV, open a channel's menu (⋮, a long press or a right click) and choose Add to list. With a keyboard, press L.",
   "browseChannels": "Browse channels",
   "notFoundTitle": "List not found",
   "notFoundHint": "It may have been deleted.",

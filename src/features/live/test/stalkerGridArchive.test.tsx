@@ -111,7 +111,7 @@ describe('EpgGridPage on a Stalker portal without XMLTV', () => {
 
     // The past programme offers catch-up, through the portal.
     fireEvent.click(morning);
-    fireEvent.click(await screen.findByRole('button', { name: 'Watch recording' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Play from catch-up' }));
     await waitFor(() => expect(fakes.recorded.playSource.length).toBe(1));
     expect(rpcMock.calls.find((c) => c.cmd === 'stalker.catchupUrl')?.args).toMatchObject({ ref: makeChannel(0).ref });
     expect(fakes.recorded.playSource[0]).toMatchObject({ url: 'http://portal/archive.ts', isLive: false });

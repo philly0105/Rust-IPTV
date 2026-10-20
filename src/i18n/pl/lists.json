@@ -68,7 +68,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Żaden z tych kanałów nie jest teraz dostępny",
   "listEmptyTitle": "Ta lista jest pusta",
-  "listEmptyHint": "W Telewizji na żywo naciśnij L na kanale lub kliknij go prawym przyciskiem myszy, a potem wybierz Dodaj do listy.",
+  "listEmptyHint": "W telewizji na żywo otwórz menu kanału (⋮, długie naciśnięcie lub prawy przycisk myszy) i wybierz Dodaj do listy. Na klawiaturze naciśnij L.",
   "browseChannels": "Przeglądaj kanały",
   "notFoundTitle": "Nie znaleziono listy",
   "notFoundHint": "Mogła zostać usunięta.",

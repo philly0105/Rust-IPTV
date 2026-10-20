@@ -64,7 +64,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Keiner dieser Sender wird derzeit angeboten",
   "listEmptyTitle": "Diese Liste ist leer",
-  "listEmptyHint": "Drücken Sie in Live-TV auf einem Sender L oder klicken Sie ihn mit der rechten Maustaste an und wählen Sie dann „Zu einer Liste hinzufügen“.",
+  "listEmptyHint": "Öffnen Sie in Live-TV das Menü eines Senders (⋮, langes Drücken oder Rechtsklick) und wählen Sie „Zu einer Liste hinzufügen“. Mit der Tastatur drücken Sie L.",
   "browseChannels": "Sender durchsuchen",
   "notFoundTitle": "Liste nicht gefunden",
   "notFoundHint": "Sie wurde möglicherweise gelöscht.",

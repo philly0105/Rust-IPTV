@@ -64,7 +64,7 @@
   "countWithUnavailable": "{{channels}}, {{unavailable}}",
   "allUnavailableTitle": "Ezek közül egyik csatorna sem érhető el most",
   "listEmptyTitle": "Ez a lista üres",
-  "listEmptyHint": "Az Élő tévéadásban nyomja meg az L billentyűt egy csatornán, vagy kattintson rá a jobb gombbal, majd válassza a Hozzáadás listához lehetőséget.",
+  "listEmptyHint": "Az élő tévéadásban nyissa meg egy csatorna menüjét (⋮, hosszú érintés vagy jobb kattintás), és válassza a Hozzáadás listához lehetőséget. Billentyűzettel nyomja meg az L-t.",
   "browseChannels": "Csatornák böngészése",
   "notFoundTitle": "A lista nem található",
   "notFoundHint": "Lehet, hogy törölték.",

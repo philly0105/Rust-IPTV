@@ -14,7 +14,7 @@ import { Link } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { GuideSearchHit } from '@/api/types';
-import { ProgramActionsView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
+import { ProgramActionsView, ScheduleMarkView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
 import { buttonClass, cn, EmptyState, ErrorState, IconButton, SearchInput, Skeleton } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
@@ -416,13 +416,18 @@ const HitRow = memo(function HitRow({
       >
         {/* Wide enough for a 12-hour "05:00 AM" on one line; a longer local format widens it, never wraps it. */}
         <span className="flex min-w-[4.5rem] shrink-0 flex-col items-start">
-          <span className={cn('font-numeric text-[calc(14rem/15)] leading-tight font-semibold whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg')}>{time}</span>
+          {/* The title leads; the time is a quieter readout beside it. */}
+          <span className={cn('font-numeric text-[calc(14rem/15)] leading-tight whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg-muted')}>{time}</span>
           {airing ? <span className="text-[calc(10rem/15)] leading-tight text-live">{t('airingNow')}</span> : null}
         </span>
         <ChannelLogo src={hit.logoUrl} name={name} size={28} sourceId={hit.ref.sourceId} />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span dir="auto" className="truncate text-sm font-medium text-match-parent">
-            {program.title}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span dir="auto" className="truncate text-sm font-medium text-match-parent">
+              {program.title}
+            </span>
+            {/* recording: what is set shows at rest; the buttons that change it come on hover. */}
+            <ScheduleMarkView index={shared.index} channelRef={hit.ref} program={program} />
           </span>
           <span className="flex min-w-0 gap-1.5 text-xs text-fg-muted">
             {hit.channelNumber !== undefined ? <span className="shrink-0 tabular-nums text-fg-subtle">{hit.channelNumber}</span> : null}
@@ -436,7 +441,11 @@ const HitRow = memo(function HitRow({
         {airing ? (
           <IconButton size="sm" label={t('watchNow', { channel: name })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(hit)} data-testid="guide-search-watch" />
         ) : null}
-        <ProgramActionsView channelRef={hit.ref} channelName={name} program={program} now={now} variant="icons" shared={shared} />
+        {/* A column of record and remind buttons on every hit read as a list of alerts: they
+            come with hover or focus (always on touch). */}
+        <span className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100" data-testid="guide-search-actions">
+          <ProgramActionsView channelRef={hit.ref} channelName={name} program={program} now={now} variant="icons" shared={shared} />
+        </span>
       </span>
     </li>
   );

@@ -128,9 +128,55 @@ pub fn stored_text(
 /// Version of the parse + classify rules. It is hashed into every stored
 /// playlist sha ([`playlist_hasher`]), so bumping it makes the next refresh of
 /// every M3U source (URL, file and pasted text) re-import an unchanged
-/// playlist once and pick up parser and classifier fixes. Bump it whenever a
-/// change alters the rows an import writes.
+/// playlist once and pick up parser and classifier fixes. Each import also
+/// records the version that wrote the catalog ([`record_import_version`]),
+/// and the startup pass re-imports every source below it once, auto-refresh
+/// or not, pasted text included ([`stale_imports`],
+/// `sources::schedule::startup`). Bump it whenever a change alters the rows
+/// an import writes.
 pub const IMPORT_VERSION: u32 = 3;
+
+/// `app_state` key holding the [`IMPORT_VERSION`] that wrote a source's
+/// catalog (dropped with the source, see `sources::store::delete`).
+fn import_version_key(source_id: &str) -> String {
+    format!("m3u_import_version:{source_id}")
+}
+
+/// Records that this [`IMPORT_VERSION`] wrote (or confirmed, for an
+/// unchanged playlist) the catalog of `source_id`. A no-op when the source
+/// is gone.
+pub fn record_import_version(conn: &Connection, source_id: &str) -> CoreResult<()> {
+    let key = import_version_key(source_id);
+    let version = IMPORT_VERSION.to_string();
+    conn.execute(
+        "INSERT INTO app_state(key, value, updated_at)
+         SELECT ?1, ?2, CURRENT_TIMESTAMP FROM sources WHERE id = ?3
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![key, version, source_id],
+    )?;
+    Ok(())
+}
+
+/// Ids of the M3U sources (in list order) whose catalog an older
+/// [`IMPORT_VERSION`] wrote, or a build that did not record the version:
+/// sources with a stored playlist and a good refresh, of any origin. Only
+/// `only` when it is given. The startup pass re-imports them once.
+pub fn stale_imports(conn: &Connection, only: Option<&str>) -> CoreResult<Vec<String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT s.id FROM sources s
+         JOIN m3u_raw r ON r.source_id = s.id
+         LEFT JOIN app_state a ON a.key = 'm3u_import_version:' || s.id
+         WHERE s.kind = 'm3u' AND s.last_refresh_at IS NOT NULL
+           AND coalesce(CAST(a.value AS INTEGER), 0) < ?1
+           AND (?2 IS NULL OR s.id = ?2)
+         ORDER BY s.position, s.id",
+    )?;
+    let version = i64::from(IMPORT_VERSION);
+    let ids = stmt
+        .query_map(params![version, only], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
 
 /// sha256 state for a playlist body, seeded with [`IMPORT_VERSION`]. Every
 /// `m3u_raw.sha256` is computed this way (64 hex chars).
@@ -811,6 +857,9 @@ async fn keep_unchanged(state: &Arc<AppState>, source_id: &str) -> CoreResult<Im
                 "UPDATE m3u_raw SET fetched_at = ?2 WHERE source_id = ?1",
                 params![sid, now_rfc3339()],
             )?;
+            // The sha (or the validators of a 304) carries IMPORT_VERSION:
+            // this version wrote the catalog that is kept.
+            record_import_version(c, &sid)?;
             catalog::source_counts(c, &sid)
         })
         .await?;
@@ -866,6 +915,9 @@ fn write_catalog(
         // Episodes earlier imports stored as movies: their state follows them.
         builder.keep_legacy(super::series::referenced_movie_ids(&tx, source_id)?);
     }
+    // Movie groups whose episodes become a series category keep their
+    // hidden flag and parental lock there (read before the writer deletes).
+    let groups = super::series::GroupCarry::before(&tx, source_id)?;
     let (header, stats, summary) = {
         let mut writer = CatalogWriter::begin(&tx, source_id, &M3U_TYPES, cancel.clone())?;
         let reader: Box<dyn std::io::BufRead + '_> = match &payload {
@@ -955,6 +1007,8 @@ fn write_catalog(
             unchanged: false,
         };
         writer.finish(&builder.categories())?;
+        let series_groups = builder.categories_from(ContentType::Series, 0);
+        groups.carry_over(&tx, source_id, series_groups)?;
         (header, stats, summary)
     };
 
@@ -1017,6 +1071,8 @@ fn write_catalog(
             params![source_id, serde_json::to_string(&epg)?],
         )?;
     }
+    // The startup pass re-imports catalogs an older version wrote.
+    record_import_version(&tx, source_id)?;
     // Last check: a cancelled run never commits.
     check_cancel()?;
     tx.commit()?;

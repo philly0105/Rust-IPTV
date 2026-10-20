@@ -179,6 +179,9 @@ pub fn vod_item(
         genres: genres(v),
         tmdb_id: n(v, "tmdb_id").or_else(|| n(v, "tmdb")).filter(|x| *x > 0),
         title: t,
+        // The play link comes from `stalker.streamUrl` (create_link).
+        url: None,
+        headers: None,
     })
 }
 

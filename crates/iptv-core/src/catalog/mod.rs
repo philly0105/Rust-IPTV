@@ -345,6 +345,9 @@ impl From<ItemRow> for VodItem {
             plot,
             genres,
             tmdb_id,
+            // Only `catalog.item` on an M3U source sets them (NamedRow::into_m3u_vod).
+            url: None,
+            headers: None,
         }
     }
 }
@@ -390,6 +393,18 @@ impl NamedRow {
         let name = self.category_name;
         let mut v = VodItem::from(self.row);
         v.category_name = name;
+        v
+    }
+    /// [`NamedRow::into_vod`] with the row's stream URL and own request
+    /// headers, which the player and downloads need for an M3U movie. Only
+    /// for rows of M3U sources: the caller checks the kind
+    /// ([`is_m3u_source`]), so an Xtream or Stalker row never carries a link.
+    pub fn into_m3u_vod(self) -> VodItem {
+        let url = self.row.url.clone();
+        let headers = self.row.headers();
+        let mut v = self.into_vod();
+        v.url = url;
+        v.headers = headers;
         v
     }
     pub fn into_series(self) -> SeriesItem {
@@ -1585,6 +1600,17 @@ pub fn get_named(conn: &Connection, r: &ItemRef) -> CoreResult<Option<NamedRow>>
         .optional()?)
 }
 
+/// True when `source_id` is an M3U source (false when there is no such
+/// source). M3U rows keep the playlist's stream URL; see
+/// [`NamedRow::into_m3u_vod`].
+pub fn is_m3u_source(conn: &Connection, source_id: &str) -> CoreResult<bool> {
+    let kind: Option<String> = conn
+        .prepare_cached("SELECT kind FROM sources WHERE id = ?1")?
+        .query_row([source_id], |r| r.get(0))
+        .optional()?;
+    Ok(kind.as_deref() == Some(SourceKind::M3u.as_str()))
+}
+
 /// False when parental hide mode (`hide`) drops the catalog item `r`: an item
 /// lock, a lock on its category, or (with `autoAdult`) an adult category
 /// name. Also false when the item does not exist.
@@ -2259,6 +2285,39 @@ mod tests {
             "inputstream.adaptive.license_type": "clearkey",
         } });
         assert_eq!(row.clear_key(), None);
+    }
+
+    /// FW-M3U-MOVIE-URL: only `into_m3u_vod` puts the row's link and own
+    /// headers on a movie, and `is_m3u_source` tells the source kinds apart.
+    #[test]
+    fn only_m3u_movies_carry_their_link() {
+        let mut row = item("1", "a", "Heat (1995)", 0);
+        row.content_type = ContentType::Movie;
+        row.url = Some("http://h/movie/u/p/1.mkv".into());
+        row.extra = serde_json::json!({ "headers": { "userAgent": "UA/1", "referrer": " " } });
+        let named = NamedRow {
+            row,
+            category_name: Some("Films".into()),
+        };
+        let plain = named.clone().into_vod();
+        assert_eq!((plain.url, plain.headers), (None, None));
+        let m3u = named.into_m3u_vod();
+        assert_eq!(m3u.url.as_deref(), Some("http://h/movie/u/p/1.mkv"));
+        assert_eq!(m3u.category_name.as_deref(), Some("Films"));
+        let headers = m3u.headers.unwrap();
+        assert_eq!(headers.user_agent.as_deref(), Some("UA/1"));
+        assert_eq!(headers.referrer, None, "blank values are dropped");
+
+        let (_d, pool) = conn();
+        let c = pool.get().unwrap();
+        c.execute(
+            "INSERT INTO sources(id, kind, name, config_json) VALUES ('x', 'xtream', 'X', '{}')",
+            [],
+        )
+        .unwrap();
+        assert!(is_m3u_source(&c, "s").unwrap());
+        assert!(!is_m3u_source(&c, "x").unwrap());
+        assert!(!is_m3u_source(&c, "gone").unwrap());
     }
 
     #[test]

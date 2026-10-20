@@ -249,6 +249,8 @@ pub fn build_vod_detail(r: &ItemRef, item: Option<NamedRow>, raw: RawVodInfo) ->
                 plot: None,
                 genres: None,
                 tmdb_id: None,
+                url: None,
+                headers: None,
             }
         }
     };

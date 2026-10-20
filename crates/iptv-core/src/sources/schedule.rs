@@ -27,6 +27,13 @@
 //!   remove) is not a failure; the source waits a full interval.
 //!
 //! Pasted m3u text has nothing to fetch and is never scheduled.
+//!
+//! The startup pass also re-imports, once, every M3U source whose catalog an
+//! older `m3u::importer::IMPORT_VERSION` wrote (`stale_imports`), whatever
+//! its `autoRefresh` and age, pasted text included (it re-imports from the
+//! stored text, without the network). That is how a parser or classifier
+//! change, such as series grouping, reaches catalogs nobody refreshes. A
+//! failed or cancelled attempt is tried again at the next launch.
 
 use super::{get, is_cancelled_error, is_import_running, list, try_run_import};
 use crate::error::{CoreError, CoreResult};
@@ -231,9 +238,16 @@ async fn pass(
     let mem = memory(state);
     mem.retain(|id, _| sources.iter().any(|s| &s.id == id));
     let candidates: Vec<Candidate> = sources.iter().map(Candidate::from_source).collect();
-    let due = plan(clock.now(), &candidates, interval, |id| {
+    let mut due = plan(clock.now(), &candidates, interval, |id| {
         mem.get(id).map(|a| a.clone())
     });
+    if startup {
+        for id in stale_imports(state, None).await {
+            if !due.contains(&id) {
+                due.push(id);
+            }
+        }
+    }
     for (i, id) in due.iter().enumerate() {
         if i > 0 && !stagger.is_zero() {
             tokio::time::sleep(stagger).await;
@@ -248,14 +262,20 @@ async fn pass(
         let attempt = mem.get(id).map(|a| a.clone());
         let still_due = next_due(&Candidate::from_source(&source), interval, attempt.as_ref())
             .is_some_and(|at| at <= clock.now());
-        if !still_due {
+        // Checked again: a manual refresh during the stagger re-imports too.
+        let stale = startup && !still_due && is_stale_import(state, id).await;
+        if !still_due && !stale {
             continue;
         }
         if is_import_running(state, id) {
             report.busy.push(id.clone());
             continue;
         }
-        tracing::info!(source_id = %id, "scheduled refresh");
+        if stale {
+            tracing::info!(source_id = %id, "re-import for the current playlist rules");
+        } else {
+            tracing::info!(source_id = %id, "scheduled refresh");
+        }
         let outcome = try_run_import(state.clone(), id).await;
         // An unchanged playlist sent `done` + "unchanged" instead of
         // `sources.changed` (clients refetch `sources.*` on it, which covers
@@ -302,6 +322,25 @@ async fn pass(
         }
     }
     report
+}
+
+/// The M3U sources whose catalog an older import version wrote
+/// (`m3u::importer::stale_imports`), all of them or only `only`. Empty when
+/// the lookup fails: the regular rules still apply.
+async fn stale_imports(state: &AppState, only: Option<&str>) -> Vec<String> {
+    let only = only.map(str::to_owned);
+    let found = state
+        .db_call(move |c| crate::m3u::importer::stale_imports(c, only.as_deref()))
+        .await;
+    found.unwrap_or_else(|err| {
+        tracing::warn!(%err, "startup re-import: could not list outdated M3U catalogs");
+        Vec::new()
+    })
+}
+
+/// True when an older import version wrote the catalog of `id`.
+async fn is_stale_import(state: &AppState, id: &str) -> bool {
+    !stale_imports(state, Some(id)).await.is_empty()
 }
 
 /// Runs [`tick`] after `first`, then every [`TICK`], until the app state is

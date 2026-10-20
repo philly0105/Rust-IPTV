@@ -399,6 +399,16 @@ pub struct VodItem {
     pub genres: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmdb_id: Option<i64>,
+    /// Stream URL of an M3U movie, as the playlist lists it. Only
+    /// `catalog.item` sets it, and only on M3U sources: Xtream and Stalker
+    /// links carry the account and come from `xtream.streamUrl` and
+    /// `stalker.streamUrl` at play time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The M3U movie's own request headers (`#EXTVLCOPT`, `url|User-Agent=`);
+    /// set with `url`. The playlist's headers apply under them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<RequestHeaders>,
 }
 
 /// A series (show).

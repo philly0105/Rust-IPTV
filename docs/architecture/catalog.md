@@ -80,7 +80,7 @@ All of it happens inside the import transaction: readers keep the previous catal
 | `durationSeconds` | number | `VodItem.durationSeconds` |
 | `tmdbId` | number | `tmdbId` |
 | `catchup` | object `{type, days?, source?}` | `Channel.catchup`; turns on `Channel.archive` when the type is usable (`catchup_usable`, case-insensitive: default, append, shift, xc and flussonic, plus the aliases in `CATCHUP_TYPES` in `catchup/m3u.rs`: timeshift is handled as shift; flussonic-hls, flussonic-ts and fs as flussonic), as does `archive_hours > 0` |
-| `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped); the player merges them over the source-level headers |
+| `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped), and `VodItem.headers` of an M3U movie in `catalog.item`; the player merges them over the source-level headers |
 
 The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`, and on the series rows it groups from playlist episodes `episodes`, the stored episode list that `m3u.seriesDetail` and `m3u.streamUrl` read (m3u.md, Series). Readers pass unknown keys through untouched.
 
@@ -118,6 +118,6 @@ Stalker sources are the exception: their VOD and series are not stored, so `upda
 
 ## rpc
 
-`catalog.categories` (`includeHidden?` for category management, `includeLocked?` for the parental Lock groups dialog, see parental.md), `setCategoryHidden` (NotFound for an unknown id), `setCategoriesHidden` (the list replaces the hidden set), `channels` (`radio: true` lists radio), `movies`, `series`, `item` (shape follows the content type), `channelByNumber` (`contentType?: 'live' | 'radio'`; null when none), `neighbors`, `search` (default 30 per type, max 1001 so the UI can probe its 1000-row step with one extra row; radio is returned in `live`), `recentlyAdded` (movie or series only), `sameTitle`, `allLiveChannels`.
+`catalog.categories` (`includeHidden?` for category management, `includeLocked?` for the parental Lock groups dialog, see parental.md), `setCategoryHidden` (NotFound for an unknown id), `setCategoriesHidden` (the list replaces the hidden set; for live groups both refill the phone remote's channel list, see remote-control.md), `channels` (`radio: true` lists radio), `movies`, `series`, `item` (shape follows the content type; an M3U movie also carries its stream `url` and own `headers`, see m3u.md, Movies), `channelByNumber` (`contentType?: 'live' | 'radio'`; null when none), `neighbors`, `search` (default 30 per type, max 1001 so the UI can probe its 1000-row step with one extra row; radio is returned in `live`), `recentlyAdded` (movie or series only), `sameTitle`, `allLiveChannels`.
 
 `live.alternates {ref}` (module `live`, failover slice) reads the catalog too: the same live or radio channel on other sources (and duplicates in the same one), found through `idx_items_epg`, `epg_channel_map` and `items_fts`. See `failover.md`.

@@ -657,3 +657,78 @@ async fn published_source_fills_the_list_from_the_catalog_and_after_a_restart() 
     remote::stop(again).await.unwrap();
     remote::stop(f.state.clone()).await.unwrap();
 }
+
+/// Waits up to 5 s for the remote's channel list to read `want`.
+async fn wait_for_names(http: &reqwest::Client, base: &str, want: &[&str]) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let names = channel_names(http, base).await;
+        if names == want {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "list is {names:?}, want {want:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// FW-REMOTE-LIST-STALE: hiding a live group and turning on English only
+/// fill the published list again, as catalog and parental changes do.
+#[tokio::test]
+async fn hidden_groups_and_english_only_refill_the_list() {
+    use iptv_core::model::{M3uOrigin, SourceKind};
+    use iptv_core::settings;
+    use iptv_core::sources::{AddSourceArgs, M3uAddInput};
+
+    let f = fixture().await;
+    iptv_core::m3u::init(f.state.clone()).await.unwrap();
+    let text = "#EXTM3U\n\
+        #EXTINF:-1 group-title=\"News\",Alpha\nhttp://s.example/a.ts\n\
+        #EXTINF:-1 group-title=\"Sport\",Beta\nhttp://s.example/b.ts\n\
+        #EXTINF:-1 group-title=\"RU | Новости\",Первый канал\nhttp://s.example/c.ts\n";
+    let foreign = Some("RU | Новости");
+    assert!(iptv_core::catalog::language::is_non_english("Первый канал", foreign));
+    let src = iptv_core::sources::add(
+        f.state.clone(),
+        AddSourceArgs {
+            kind: SourceKind::M3u,
+            name: "Pasted".into(),
+            auto_refresh: None,
+            m3u: Some(M3uAddInput {
+                origin: Some(M3uOrigin::Text),
+                text: Some(text.into()),
+                ..Default::default()
+            }),
+            xtream: None,
+            stalker: None,
+        },
+    )
+    .await
+    .map_err(|e| e.error)
+    .unwrap();
+    let mut router = RpcRouter::new();
+    remote::rpc::register(&mut router);
+    iptv_core::catalog::rpc::register(&mut router);
+    let publish = json!({ "sourceId": src.id });
+    router
+        .dispatch(f.state.clone(), "remote.publishSource", publish)
+        .await
+        .unwrap();
+    let all = ["Alpha", "Beta", "Первый канал"];
+    assert_eq!(channel_names(&f.http, &f.base).await, all);
+
+    let sport = iptv_core::m3u::group_id("Sport");
+    let hide = json!({ "sourceId": src.id, "contentType": "live", "hiddenIds": [sport] });
+    router
+        .dispatch(f.state.clone(), "catalog.setCategoriesHidden", hide)
+        .await
+        .unwrap();
+    wait_for_names(&f.http, &f.base, &["Alpha", "Первый канал"]).await;
+
+    let english = json!({ "englishOnly": true });
+    settings::update(&f.state, english).await.unwrap();
+    wait_for_names(&f.http, &f.base, &["Alpha"]).await;
+    remote::stop(f.state.clone()).await.unwrap();
+}

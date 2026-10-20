@@ -197,6 +197,10 @@ export interface VodItem {
   plot?: string;
   genres?: string[];
   tmdbId?: number;
+  /** M3U movies in `catalog.item` only: the playlist's stream URL (Xtream and Stalker use their streamUrl). */
+  url?: string;
+  /** With `url`: the entry's own request headers, applied over the playlist's. */
+  headers?: RequestHeaders;
 }
 
 export interface SeriesItem {

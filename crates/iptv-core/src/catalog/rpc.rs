@@ -234,11 +234,17 @@ pub async fn set_category_hidden(
     state: Arc<AppState>,
     a: SetCategoryHiddenArgs,
 ) -> Result<(), RpcError> {
+    let source_id = a.source_id.clone();
+    let live = a.content_type == ContentType::Live;
     state
         .db_write(move |c| {
             super::set_category_hidden(c, &a.source_id, a.content_type, &a.category_id, a.hidden)
         })
         .await?;
+    if live {
+        // The phone remote lists the channels of visible live groups only.
+        crate::remote::channels_may_have_changed(&state, Some(source_id.as_str()));
+    }
     Ok(())
 }
 
@@ -246,11 +252,17 @@ pub async fn set_categories_hidden(
     state: Arc<AppState>,
     a: SetCategoriesHiddenArgs,
 ) -> Result<(), RpcError> {
+    let source_id = a.source_id.clone();
+    let live = a.content_type == ContentType::Live;
     state
         .db_write(move |c| {
             super::set_categories_hidden(c, &a.source_id, a.content_type, &a.hidden_ids)
         })
         .await?;
+    if live {
+        // The phone remote lists the channels of visible live groups only.
+        crate::remote::channels_may_have_changed(&state, Some(source_id.as_str()));
+    }
     Ok(())
 }
 
@@ -337,7 +349,15 @@ pub async fn item(state: Arc<AppState>, a: RefArgs) -> Result<AnyItem, RpcError>
                     return Ok((None, true));
                 }
             }
-            let mut item = to_any(named);
+            // An M3U movie plays and downloads from the playlist's own link;
+            // Xtream and Stalker movies get theirs from their streamUrl.
+            let mut item = if named.row.content_type == ContentType::Movie
+                && super::is_m3u_source(c, &r.source_id)?
+            {
+                AnyItem::Vod(named.into_m3u_vod())
+            } else {
+                to_any(named)
+            };
             // guide: M3U catch-up overrides are applied on read.
             if let AnyItem::Channel(ch) = &mut item {
                 crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;

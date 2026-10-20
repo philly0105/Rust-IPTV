@@ -399,6 +399,16 @@ pub struct VodItem {
     pub genres: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmdb_id: Option<i64>,
+    /// Stream URL of an M3U movie, as the playlist lists it. Only
+    /// `catalog.item` sets it, and only on M3U sources: Xtream and Stalker
+    /// links carry the account and come from `xtream.streamUrl` and
+    /// `stalker.streamUrl` at play time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The M3U movie's own request headers (`#EXTVLCOPT`, `url|User-Agent=`);
+    /// set with `url`. The playlist's headers apply under them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<RequestHeaders>,
 }
 
 /// A series (show).
@@ -826,7 +836,11 @@ pub struct PlayerSource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub episode_id: Option<String>,
     /// Whole seconds; the UI may send the player position as a fraction (8.967).
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_whole_seconds")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_opt_whole_seconds"
+    )]
     pub resume_seconds: Option<i64>,
     #[serde(default)]
     pub is_live: bool,
@@ -835,7 +849,9 @@ pub struct PlayerSource {
 }
 
 fn de_opt_whole_seconds<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
-    Ok(Option::<f64>::deserialize(d)?.filter(|s| s.is_finite()).map(|s| s.trunc() as i64))
+    Ok(Option::<f64>::deserialize(d)?
+        .filter(|s| s.is_finite())
+        .map(|s| s.trunc() as i64))
 }
 
 /// Configured playback backend.

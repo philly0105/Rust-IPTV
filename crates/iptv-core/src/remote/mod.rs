@@ -526,9 +526,10 @@ pub async fn refresh_channels(state: &Arc<AppState>) -> CoreResult<usize> {
 }
 
 /// Refills the list in the background when it may be stale: parental
-/// controls changed (`source_id` `None`), or the catalog or channel edits of
-/// `source_id` changed. Only while the server runs and a source is published;
-/// does nothing outside a Tokio runtime.
+/// controls or the English only setting changed (`source_id` `None`), or the
+/// catalog, channel edits or hidden live groups of `source_id` changed. Only
+/// while the server runs and a source is published; does nothing outside a
+/// Tokio runtime.
 pub fn channels_may_have_changed(state: &AppState, source_id: Option<&str>) {
     let Some(hub) = state.ext::<RemoteHub>(EXT_KEY) else {
         return;

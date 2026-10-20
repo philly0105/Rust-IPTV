@@ -1,15 +1,22 @@
 //! F-M3U-SERIES: an m3u_plus playlist's episodes import as series with
 //! seasons (`catalog.series`, `m3u.seriesDetail`, `m3u.streamUrl`), the
 //! series' watched mark follows its episodes, and state that earlier imports
-//! saved on episodes stored as movies moves to the series.
+//! saved on episodes stored as movies moves to the series, with the hidden
+//! flag and parental lock of their movie group. The startup pass re-imports
+//! catalogs an older import version wrote, and `catalog.item` gives an M3U
+//! movie its stream URL.
 
 #[path = "m3u_support.rs"]
 mod support;
 
+use iptv_core::catalog::{self, CategoryRow, ItemRow};
+use iptv_core::m3u::importer::{playlist_sha, IMPORT_VERSION};
+use iptv_core::model::ContentType;
 use iptv_core::rpc::build_router;
-use iptv_core::sources;
+use iptv_core::sources::{self, schedule};
 use rusqlite::params;
 use serde_json::{json, Value};
+use std::time::Duration;
 use support::*;
 
 const EP1_URL: &str = "http://h:8080/series/u/p/5001.mkv";
@@ -369,4 +376,297 @@ async fn state_saved_on_episodes_imported_as_movies_moves_to_the_series() {
         .await
         .unwrap();
     assert_eq!(secs, 90, "the two episodes' time adds up under the series");
+}
+
+/// FW-M3U-MOVIE-URL: `catalog.item` gives an M3U movie the playlist's link
+/// and its own headers, which playback and downloads need. Lists stay
+/// without links, and a movie of another source kind never gets one.
+#[tokio::test]
+async fn catalog_item_gives_an_m3u_movie_its_stream_url() {
+    let env = env().await;
+    let text = "#EXTM3U\n\
+        #EXTINF:-1 group-title=\"Films\",Heat (1995)\n\
+        #EXTVLCOPT:http-user-agent=MovieUA/1\n\
+        http://h:8080/movie/u/p/1001.mkv\n\
+        #EXTINF:-1 group-title=\"Films\",Up (2009)\n\
+        http://h/films/up.mp4\n";
+    let src = add_text(&env.state, "Films", text).await;
+    let movies = call(&env, "catalog.movies", json!({ "sourceId": src.id })).await;
+    let items = movies["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{movies}");
+    for m in items {
+        assert!(m.get("url").is_none(), "lists carry no links: {m}");
+        let item = call(&env, "catalog.item", json!({ "ref": m["ref"] })).await;
+        if m["title"] == "Heat (1995)" {
+            assert_eq!(item["url"], "http://h:8080/movie/u/p/1001.mkv");
+            assert_eq!(item["headers"], json!({ "userAgent": "MovieUA/1" }));
+            assert_eq!(item["containerExtension"], "mkv");
+        } else {
+            assert_eq!(item["url"], "http://h/films/up.mp4");
+            assert!(item.get("headers").is_none(), "{item}");
+        }
+    }
+
+    // An Xtream movie row that holds a link (as rows once did) stays without
+    // one: its link carries the account and comes from xtream.streamUrl.
+    env.state
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES ('xt', 'xtream', 'X', '{}')",
+                [],
+            )?;
+            let row = ItemRow {
+                source_id: "xt".into(),
+                content_type: ContentType::Movie,
+                item_id: "1".into(),
+                category_id: "c".into(),
+                title: "Heat".into(),
+                url: Some("http://x:8080/movie/user/pass/1.mkv".into()),
+                ..Default::default()
+            };
+            let cat = CategoryRow {
+                category_id: "c".into(),
+                name: "Films".into(),
+                position: 0,
+            };
+            let mut rows = vec![row].into_iter();
+            catalog::replace_catalog(c, "xt", ContentType::Movie, &[cat], &mut rows)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let xt_ref = json!({ "sourceId": "xt", "contentType": "movie", "itemId": "1" });
+    let xt = call(&env, "catalog.item", json!({ "ref": xt_ref })).await;
+    assert_eq!(xt["title"], "Heat");
+    assert!(xt.get("url").is_none(), "{xt}");
+    assert!(xt.get("headers").is_none(), "{xt}");
+}
+
+/// The stored `(sha256, recorded import version)` of a source.
+async fn import_record(env: &Env, source_id: &str) -> (String, Option<String>) {
+    let sid = source_id.to_string();
+    env.state
+        .db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT r.sha256, a.value FROM m3u_raw r
+                 LEFT JOIN app_state a ON a.key = 'm3u_import_version:' || r.source_id
+                 WHERE r.source_id = ?1",
+                params![sid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+/// Stores a sha no import of this version writes, as an older version's
+/// import did: the next import rewrites the catalog.
+const STALE_SHA: &str = "UPDATE m3u_raw SET sha256 = 'v2' WHERE source_id = ?1";
+
+/// Runs `sql` with the source id as `?1`.
+async fn exec_one(env: &Env, sql: &'static str, source_id: &str) {
+    let sid = source_id.to_string();
+    env.state
+        .db_call(move |c| {
+            c.execute(sql, params![sid])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// The sources the startup pass re-imported (none may fail).
+async fn startup_refreshed(env: &Env) -> Vec<String> {
+    let r = schedule::startup(&env.state, &schedule::SystemClock, Duration::ZERO).await;
+    assert!(r.failed.is_empty(), "{r:?}");
+    r.refreshed
+}
+
+/// FW-M3U-SERIES-MIGRATION: the startup pass re-imports, once, an M3U
+/// source whose catalog an older import version wrote, pasted text with
+/// auto-refresh off included, and one whose version was never recorded.
+#[tokio::test]
+async fn startup_re_imports_catalogs_an_older_import_version_wrote() {
+    let env = env().await;
+    let src = add_text(&env.state, "Plus", PLAYLIST).await;
+    let sha = playlist_sha(PLAYLIST.as_bytes());
+    let recorded = (sha.clone(), Some(IMPORT_VERSION.to_string()));
+    assert_eq!(import_record(&env, &src.id).await, recorded);
+    assert!(startup_refreshed(&env).await.is_empty(), "nothing to do");
+
+    // What an import before series grouping left: version 2, its own sha.
+    for sql in [
+        "UPDATE app_state SET value = '2' WHERE key = 'm3u_import_version:' || ?1",
+        STALE_SHA,
+        "UPDATE sources SET auto_refresh = 0 WHERE id = ?1",
+    ] {
+        exec_one(&env, sql, &src.id).await;
+    }
+    assert_eq!(startup_refreshed(&env).await, [src.id.clone()]);
+    // Re-imported from the stored text: this version's sha and record.
+    assert_eq!(import_record(&env, &src.id).await, recorded);
+    let (_, detail) = dark(&env, &src.id).await;
+    assert_eq!(detail["seasons"].as_array().unwrap().len(), 2);
+    assert!(startup_refreshed(&env).await.is_empty(), "only once");
+
+    // A build that recorded no version: one re-import, which finds the text
+    // unchanged and records the version.
+    let forget = "DELETE FROM app_state WHERE key = 'm3u_import_version:' || ?1";
+    exec_one(&env, forget, &src.id).await;
+    assert_eq!(import_record(&env, &src.id).await, (sha, None));
+    assert_eq!(startup_refreshed(&env).await, [src.id.clone()]);
+    assert_eq!(import_record(&env, &src.id).await, recorded);
+
+    // Removing the source drops the record.
+    sources::remove(&env.state, &src.id).await.unwrap();
+    let left: i64 = env
+        .state
+        .db_call(|c| {
+            Ok(c.query_row(
+                "SELECT count(*) FROM app_state WHERE key LIKE 'm3u_import_version:%'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}
+
+const PIN: &str = "2468";
+
+const GROUPS: &str = "#EXTM3U\n\
+#EXTINF:-1 group-title=\"Kids\",Bluey S01E01\nhttp://h:8080/series/u/p/9001.mp4\n\
+#EXTINF:-1 group-title=\"Kids\",Bluey S01E02\nhttp://h:8080/series/u/p/9002.mp4\n\
+#EXTINF:-1 group-title=\"Docs\",Planet Earth S01E01\nhttp://h:8080/series/u/p/9101.mp4\n\
+#EXTINF:-1 group-title=\"Action\",Heat (1995)\nhttp://h:8080/movie/u/p/1001.mkv\n";
+
+/// `parental.setLocked` args for the category lock on group `group`.
+fn group_lock(source_id: &str, content_type: &str, group: &str, locked: bool) -> Value {
+    json!({
+        "target": {
+            "sourceId": source_id,
+            "contentType": content_type,
+            "kind": "category",
+            "targetId": group,
+            "name": "Kids",
+        },
+        "locked": locked,
+        "pin": PIN,
+    })
+}
+
+/// `(category_id, hidden)` of the source's series categories, by id.
+async fn series_categories(env: &Env, source_id: &str) -> Vec<(String, i64)> {
+    let sid = source_id.to_string();
+    env.state
+        .db_call(move |c| {
+            let mut st = c.prepare(
+                "SELECT category_id, hidden FROM categories
+                 WHERE source_id = ?1 AND content_type = 'series' ORDER BY category_id",
+            )?;
+            let rows = st
+                .query_map(params![sid], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap()
+}
+
+/// `(content_type, target_id)` of the source's parental category locks.
+async fn category_locks(env: &Env, source_id: &str) -> Vec<(String, String)> {
+    let sid = source_id.to_string();
+    env.state
+        .db_call(move |c| {
+            let mut st = c.prepare(
+                "SELECT content_type, target_id FROM parental_locks
+                 WHERE source_id = ?1 AND kind = 'category' ORDER BY content_type",
+            )?;
+            let rows = st
+                .query_map(params![sid], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap()
+}
+
+/// FW-M3U-SERIES-PARENTAL: the import that groups a movie group's episodes
+/// into a series category gives that category the group's parental lock and
+/// hidden flag, so a locked show stays hidden. Later imports keep what the
+/// user set on the series group.
+#[tokio::test]
+async fn a_movie_group_lock_and_hidden_flag_follow_its_episodes_into_series() {
+    let env = env().await;
+    let src = add_text(&env.state, "Plus", GROUPS).await;
+    let kids = iptv_core::m3u::group_id("Kids");
+    let docs = iptv_core::m3u::group_id("Docs");
+
+    // The catalog an import before grouping left: both groups were movie
+    // categories (Docs hidden, Kids locked) and no series existed.
+    for sql in [
+        "DELETE FROM items WHERE source_id = ?1 AND content_type = 'series'",
+        "DELETE FROM categories WHERE source_id = ?1 AND content_type = 'series'",
+        STALE_SHA,
+    ] {
+        exec_one(&env, sql, &src.id).await;
+    }
+    let (sid, k, d) = (src.id.clone(), kids.clone(), docs.clone());
+    env.state
+        .db_call(move |c| {
+            for (id, name, hidden) in [(k, "Kids", 0), (d, "Docs", 1)] {
+                c.execute(
+                    "INSERT INTO categories (source_id, content_type, category_id, name, hidden, position, item_count)
+                     VALUES (?1, 'movie', ?2, ?3, ?4, 9, 0)",
+                    params![sid, id, name, hidden],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let lock = group_lock(&src.id, "movie", &kids, true);
+    call(&env, "parental.setLocked", lock).await;
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+
+    let mut want = [(docs, 1), (kids.clone(), 0)];
+    want.sort();
+    assert_eq!(series_categories(&env, &src.id).await, want);
+    let movie_lock = ("movie".to_string(), kids.clone());
+    let series_lock = ("series".to_string(), kids.clone());
+    assert_eq!(
+        category_locks(&env, &src.id).await,
+        [movie_lock.clone(), series_lock]
+    );
+
+    // Docs is hidden; Kids is listed until a PIN makes its lock count.
+    let page = call(&env, "catalog.series", json!({ "sourceId": src.id })).await;
+    assert_eq!(page["total"], 1, "{page}");
+    assert_eq!(page["items"][0]["title"], "Bluey");
+    let bluey = page["items"][0]["ref"].clone();
+    call(&env, "parental.setPin", json!({ "newPin": PIN })).await;
+    let page = call(&env, "catalog.series", json!({ "sourceId": src.id })).await;
+    assert_eq!(page["total"], 0, "{page}");
+    let err = build_router()
+        .dispatch(
+            env.state.clone(),
+            "m3u.seriesDetail",
+            json!({ "ref": bluey }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, iptv_core::RpcErrorCode::NotFound);
+
+    // The user unlocks and shows the series groups again; the next import
+    // keeps that, although the movie lock is still there.
+    let unlock = group_lock(&src.id, "series", &kids, false);
+    call(&env, "parental.setLocked", unlock).await;
+    let show = json!({ "sourceId": src.id, "contentType": "series", "hiddenIds": [] });
+    call(&env, "catalog.setCategoriesHidden", show).await;
+    exec_one(&env, STALE_SHA, &src.id).await;
+    sources::refresh(env.state.clone(), &src.id).await.unwrap();
+    let shown: Vec<(String, i64)> = want.into_iter().map(|(id, _)| (id, 0)).collect();
+    assert_eq!(series_categories(&env, &src.id).await, shown);
+    assert_eq!(category_locks(&env, &src.id).await, [movie_lock]);
 }

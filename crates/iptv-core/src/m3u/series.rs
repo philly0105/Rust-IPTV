@@ -620,6 +620,90 @@ pub(crate) fn adopt_movie_state(
     Ok(legacy.len())
 }
 
+/// Category ids of one source and content type that match `filter` (SQL).
+fn category_ids(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    filter: &str,
+) -> CoreResult<HashSet<String>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT category_id FROM categories WHERE source_id = ?1 AND content_type = ?2{filter}"
+    ))?;
+    let ct = content_type.as_str();
+    let ids = stmt
+        .query_map(params![source_id, ct], |r| r.get::<_, String>(0))?
+        .collect::<Result<HashSet<_>, _>>()?;
+    Ok(ids)
+}
+
+/// Group settings that follow a group's episodes from Movies to Series. A
+/// series category has the id of its group, like the movie category the
+/// episodes sat in before grouping, but parental locks and hidden flags are
+/// stored per content type. So the import that first writes a series
+/// category gives it the hidden flag and the category lock of the movie
+/// category with the same id. Later imports leave it alone: a series group
+/// the user has unhidden or unlocked since stays that way.
+pub(crate) struct GroupCarry {
+    /// Movie categories hidden before the import.
+    movie_hidden: HashSet<String>,
+    /// Series categories that existed before the import.
+    series_before: HashSet<String>,
+}
+
+impl GroupCarry {
+    /// Read inside the import transaction, before the catalog writer deletes
+    /// the categories.
+    pub(crate) fn before(conn: &Connection, source_id: &str) -> CoreResult<Self> {
+        Ok(Self {
+            movie_hidden: category_ids(conn, source_id, ContentType::Movie, " AND hidden = 1")?,
+            series_before: category_ids(conn, source_id, ContentType::Series, "")?,
+        })
+    }
+
+    /// Copies the hidden flag and the parental category lock of each movie
+    /// group to the series category of the same id when this import created
+    /// it (`series`: the series categories just written). Returns how many
+    /// series categories got either.
+    pub(crate) fn carry_over(
+        &self,
+        conn: &Connection,
+        source_id: &str,
+        series: &[catalog::CategoryRow],
+    ) -> CoreResult<usize> {
+        let mut set_hidden = conn.prepare_cached(
+            "UPDATE categories SET hidden = 1
+             WHERE source_id = ?1 AND content_type = 'series' AND category_id = ?2",
+        )?;
+        let mut copy_lock = conn.prepare_cached(
+            "INSERT OR IGNORE INTO parental_locks (source_id, content_type, kind, target_id, name, created_at)
+             SELECT source_id, 'series', kind, target_id, name, created_at FROM parental_locks
+             WHERE source_id = ?1 AND content_type = 'movie' AND kind = 'category' AND target_id = ?2",
+        )?;
+        let mut carried = 0;
+        for c in series {
+            if self.series_before.contains(&c.category_id) {
+                continue;
+            }
+            let mut changed = copy_lock.execute(params![source_id, c.category_id])?;
+            if self.movie_hidden.contains(&c.category_id) {
+                changed += set_hidden.execute(params![source_id, c.category_id])?;
+            }
+            if changed > 0 {
+                carried += 1;
+            }
+        }
+        if carried > 0 {
+            tracing::info!(
+                source_id,
+                carried,
+                "m3u groups that became series kept their hidden flag or parental lock"
+            );
+        }
+        Ok(carried)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

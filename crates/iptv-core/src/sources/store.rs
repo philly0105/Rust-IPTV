@@ -406,6 +406,11 @@ pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
         "DELETE FROM app_state WHERE key = 'm3u_validators:' || ?1",
         [id],
     )?;
+    // m3u: the import version that wrote the catalog.
+    tx.execute(
+        "DELETE FROM app_state WHERE key = 'm3u_import_version:' || ?1",
+        [id],
+    )?;
     tx.commit()?;
     Ok(())
 }

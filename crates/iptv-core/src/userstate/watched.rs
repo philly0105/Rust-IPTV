@@ -159,7 +159,12 @@ async fn episode_ids(
             .seasons
         }
         // The importer stored the episodes in the series row.
-        "m3u" => crate::m3u::series::series_detail(state, r).await.ok()?.seasons,
+        "m3u" => {
+            crate::m3u::series::series_detail(state, r)
+                .await
+                .ok()?
+                .seasons
+        }
         _ => return None,
     };
     let ids: Vec<String> = seasons

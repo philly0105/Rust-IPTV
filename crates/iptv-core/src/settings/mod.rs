@@ -265,6 +265,10 @@ async fn store(state: &AppState, next: Settings) -> CoreResult<Settings> {
     if !only_last_route_changed(&previous, &next) {
         state.emit("settings.changed", for_client(state, next.clone()));
     }
+    if previous.english_only != next.english_only {
+        // The phone remote's channel list follows English only.
+        crate::remote::channels_may_have_changed(state, None);
+    }
     Ok(next)
 }
 

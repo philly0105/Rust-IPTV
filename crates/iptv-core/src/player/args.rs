@@ -395,8 +395,14 @@ mod loadfile_tests {
     /// Movies and episodes refill a few seconds after a stall; live keeps zapping fast.
     #[test]
     fn vod_items_buffer_ahead_and_live_items_do_not() {
-        assert_eq!(loadfile_options(&source(false))["cache-pause-wait"], json!("5"));
-        assert_eq!(loadfile_options(&source(false))["demuxer-readahead-secs"], json!("120"));
+        assert_eq!(
+            loadfile_options(&source(false))["cache-pause-wait"],
+            json!("5")
+        );
+        assert_eq!(
+            loadfile_options(&source(false))["demuxer-readahead-secs"],
+            json!("120")
+        );
         assert!(!loadfile_options(&source(true)).contains_key("cache-pause-wait"));
     }
 }

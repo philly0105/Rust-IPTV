@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "ライブTV",
-  "tourLiveText": "チャンネルをグループ別に表示。放送中と次の番組、番組表も確認できます。",
+  "tourLiveTitle": "ソース",
+  "tourLiveText": "ここでソースを開くと、ライブチャンネル、番組表、映画、シリーズが見られます。",
   "tourVodTitle": "映画、シリーズ、マイリスト",
   "tourVodText": "各ソースの映画やシリーズをポスターで眺めて年代で絞り込み、作品をマイリストに保存して一か所にまとめられます。",
   "tourSearchTitle": "すべてを検索",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "最大化や全画面で起動",
   "noteWindowStartText": "ウィンドウの開き方を設定で選べます。",
   "noteFixesTitle": "数百件の修正",
-  "noteFixesText": "インポート、番組表、再生、録画、ダウンロード、バックアップの信頼性が向上しました。"
+  "noteFixesText": "インポート、番組表、再生、録画、ダウンロード、バックアップの信頼性が向上しました。",
+  "tourCoachTitle": "ソースの準備ができました",
+  "tourCoachText": "検索ですべてのソースのチャンネル、映画、シリーズが見つかります。そのほかの場所へはコマンドパレットから移動できます。",
+  "tourShowAround": "ツアーを見る",
+  "tourGotIt": "OK"
 }

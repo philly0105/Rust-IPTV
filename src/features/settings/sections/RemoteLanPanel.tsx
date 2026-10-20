@@ -13,6 +13,15 @@ import { SettingsGroup, SwitchRow } from '../components';
 import { addressLabel, deviceLabel, lanView, nextReveal, pickAddress, qrViewBox, type Reveal } from '../lib/remoteLan';
 import type { SectionProps } from './types';
 
+/** The operating system's own words for a network problem (English), small and under the translated sentence (SS-18). */
+function RawMessage({ text }: { text: string }) {
+  return text ? (
+    <span className="block text-caption break-words text-fg-subtle" dir="auto" data-error-message="">
+      {text}
+    </span>
+  ) : null;
+}
+
 /** How often the pairing code and device list refresh while shown. */
 const REFRESH_MS = 5_000;
 
@@ -30,13 +39,16 @@ export function RemoteLanPanel({ settings, update, status }: Props) {
   const lanEnabled = settings.remoteLanEnabled === true;
   const view = lanView(isDesktop, lanEnabled, status);
 
+  // Server mode has nothing to set here: a short callout, not a group with one paragraph in it.
   if (view.kind === 'server') {
     return (
-      <SettingsGroup title={t('remoteLanTitle')}>
-        <p className="px-4 py-4 text-sm text-fg-muted" data-testid="remote-lan-server">
-          {t('remoteLanServerMode')}
-        </p>
-      </SettingsGroup>
+      <div className="flex items-start gap-3 rounded-lg bg-surface-2/60 px-4 py-3" data-testid="remote-lan-server">
+        <Smartphone aria-hidden size={16} className="mt-0.5 shrink-0 text-fg-subtle" />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className="text-body-sm font-medium text-fg">{t('remoteLanTitle')}</p>
+          <p className="text-body-sm text-fg-muted">{t('remoteLanServerMode')}</p>
+        </div>
+      </div>
     );
   }
 
@@ -82,8 +94,11 @@ export function RemoteLanPanel({ settings, update, status }: Props) {
             {t('remoteLanNeedsRemote')}
           </p>
         ) : view.kind === 'error' ? (
-          <div role="alert" className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm" data-testid="remote-lan-error">
-            <span className="min-w-0 flex-1 text-warning">{t('remoteLanUnavailable', { message: view.message })}</span>
+          <div role="alert" className="flex flex-wrap items-start gap-3 px-4 py-3 text-body-sm" data-testid="remote-lan-error">
+            <span className="min-w-0 flex-1">
+              <span className="block text-warning">{t('remoteLanUnavailable')}</span>
+              <RawMessage text={view.message} />
+            </span>
             <Button size="sm" variant="secondary" loading={busy} onClick={() => void run(() => rpc('remote.start'))}>
               {t('retry')}
             </Button>
@@ -226,8 +241,9 @@ function PairingCard({ addresses, warning }: { addresses: RemoteLanAddress[]; wa
             <path d={shown.qr.path} fill="currentColor" />
           </svg>
         ) : error ? (
-          <div className="flex size-48 items-center justify-center rounded-md border border-edge p-3 text-center text-sm text-danger" role="alert">
-            {t('remoteLanPairingFailed', { message: error.message })}
+          <div className="flex size-48 flex-col items-center justify-center gap-1 rounded-md border border-edge p-3 text-center text-body-sm" role="alert">
+            <span className="text-danger">{t('remoteLanPairingFailed')}</span>
+            <span className="text-fg-muted">{errorDescription(error)}</span>
           </div>
         ) : (
           <Skeleton className="size-48 rounded-md" />
@@ -266,7 +282,12 @@ function PairingCard({ addresses, warning }: { addresses: RemoteLanAddress[]; wa
             </Button>
           </div>
         ) : null}
-        {warning ? <p className="text-sm text-warning">{t('remoteLanUnavailable', { message: warning })}</p> : null}
+        {warning ? (
+          <div className="text-body-sm">
+            <p className="text-warning">{t('remoteLanUnavailable')}</p>
+            <RawMessage text={warning} />
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -305,8 +326,11 @@ function DeviceList() {
   }
   if (devices.isError) {
     return (
-      <div role="alert" className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm" data-testid="remote-devices-error">
-        <span className="min-w-0 flex-1 text-danger">{t('remoteDevicesFailed', { message: devices.error.message })}</span>
+      <div role="alert" className="flex flex-wrap items-start gap-3 px-4 py-3 text-body-sm" data-testid="remote-devices-error">
+        <span className="min-w-0 flex-1">
+          <span className="block text-danger">{t('remoteDevicesFailed')}</span>
+          <span className="block text-fg-muted">{errorDescription(devices.error)}</span>
+        </span>
         <Button size="sm" variant="secondary" onClick={() => void devices.refetch()}>
           {t('retry')}
         </Button>

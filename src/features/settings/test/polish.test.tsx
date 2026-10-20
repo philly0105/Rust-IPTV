@@ -150,7 +150,8 @@ describe('Backup import errors', () => {
     await screen.findByTestId('settings-backup');
     pick('not json');
     expect(await screen.findByText("This file isn't valid JSON.")).toBeTruthy();
-    expect((screen.getByTestId('backup-import') as HTMLButtonElement).disabled).toBe(true);
+    // Nothing valid was picked, so there is nothing to import: the button only appears with a file.
+    expect(screen.queryByTestId('backup-import')).toBeNull();
     expect(rpcMock.callsOf('backup.import')).toHaveLength(0);
   });
 

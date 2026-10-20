@@ -182,5 +182,12 @@
   "discardText": "Les groupes cochés ou décochés ici ne seront pas enregistrés.",
   "keepEditing": "Continuer",
   "discard": "Ignorer",
-  "pinNoRecovery": "Un code PIN oublié ne peut pas être réinitialisé. Conservez-le en lieu sûr."
+  "pinNoRecovery": "Un code PIN oublié ne peut pas être réinitialisé. Conservez-le en lieu sûr.",
+  "offBenefitLockTitle": "Verrouillez ce que vous voulez",
+  "offBenefitLockText": "Des groupes entiers, des chaînes, des films ou des séries.",
+  "offBenefitModeTitle": "Masquer ou demander",
+  "offBenefitModeText": "Les éléments verrouillés disparaissent, ou demandent le code PIN à l'ouverture.",
+  "offBenefitAdultTitle": "Groupes pour adultes",
+  "offBenefitAdultText": "Les groupes marqués pour adultes peuvent se verrouiller automatiquement.",
+  "offPinNote": "Vous choisissez quoi verrouiller après avoir défini le code PIN."
 }

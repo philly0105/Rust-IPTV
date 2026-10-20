@@ -27,19 +27,28 @@ export function SourceKindTiles({ onPick, className }: { onPick: (kind: SourceKi
             type="button"
             onClick={() => onPick(kind)}
             data-testid={`onboard-${kind}`}
-            className="group flex h-full w-full flex-col gap-3 rounded-lg border border-edge bg-surface p-5 text-start shadow-1 hover:border-border hover:bg-surface-2 active:bg-pressed motion-safe:transition-colors"
+            // One column (a phone, a narrow window): the icon sits beside the name, with the badge
+            // above the name, so the three cards stay short. From @3xl, three columns: the icon
+            // row with the badge at its end, then name, text and the footer.
+            className="group grid h-full w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 rounded-lg border border-edge bg-surface p-4 text-start shadow-1 hover:border-border hover:bg-surface-2 active:bg-pressed motion-safe:transition-colors @3xl:flex @3xl:flex-col @3xl:items-stretch @3xl:gap-3 @3xl:p-5"
           >
-            <span className="flex items-center justify-between gap-3">
-              <span aria-hidden className="flex size-10 items-center justify-center rounded-lg border border-edge bg-surface-2 text-fg group-hover:bg-surface-3">
+            <span className="contents @3xl:flex @3xl:items-center @3xl:justify-between @3xl:gap-3">
+              <span
+                aria-hidden
+                className={cn(
+                  'col-start-1 row-start-1 flex size-10 items-center justify-center rounded-lg border border-edge bg-surface-2 text-fg group-hover:bg-surface-3',
+                  kind === 'xtream' && 'row-span-2',
+                )}
+              >
                 <Icon size={18} />
               </span>
-              {kind === 'xtream' ? <Badge>{t('onboardMostCommon')}</Badge> : null}
+              {kind === 'xtream' ? <Badge className="col-start-2 row-start-1 justify-self-start">{t('onboardMostCommon')}</Badge> : null}
             </span>
-            <span className="flex flex-col gap-1">
+            <span className={cn('col-start-2 flex flex-col gap-1', kind === 'xtream' ? 'row-start-2' : 'row-start-1')}>
               <span className="text-title-sm text-fg">{t(title)}</span>
               <span className="text-body-sm text-fg-muted">{t(body)}</span>
             </span>
-            <span className="mt-auto flex items-end justify-between gap-3 border-t border-divider pt-3">
+            <span className="col-span-full mt-1 flex items-end justify-between gap-3 border-t border-divider pt-3 @3xl:mt-auto">
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="text-caption text-fg-subtle">{t('onboardYouNeed')}</span>
                 <span className="text-body-sm text-fg">{t(needs)}</span>

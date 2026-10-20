@@ -182,5 +182,12 @@
   "discardText": "Los grupos que marcaste o desmarcaste aquí no se guardarán.",
   "keepEditing": "Seguir editando",
   "discard": "Descartar",
-  "pinNoRecovery": "Un PIN olvidado no se puede restablecer. Guárdalo en un lugar seguro."
+  "pinNoRecovery": "Un PIN olvidado no se puede restablecer. Guárdalo en un lugar seguro.",
+  "offBenefitLockTitle": "Bloquea lo que elijas",
+  "offBenefitLockText": "Grupos enteros, canales sueltos, películas o series.",
+  "offBenefitModeTitle": "Ocultar o preguntar",
+  "offBenefitModeText": "Lo bloqueado desaparece o pide el PIN al abrirlo.",
+  "offBenefitAdultTitle": "Grupos para adultos",
+  "offBenefitAdultText": "Los grupos marcados para adultos se pueden bloquear solos.",
+  "offPinNote": "Eliges qué bloquear después de crear el PIN."
 }

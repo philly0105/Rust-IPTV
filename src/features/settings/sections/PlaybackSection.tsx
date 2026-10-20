@@ -7,7 +7,7 @@ import type { Settings, StreamFormat, VideoPlayer } from '@/api/types';
 import { BackgroundChoice, ColorChoice, PositionSlider, SizeChoice, SubtitlePreview } from '@/features/player/components/SubtitleStyleFields';
 import { styleFromSettings } from '@/features/player/subtitles/style';
 
-import { Button, RadioGroup } from '@/ui';
+import { Badge, Button, RadioGroup, errorDescription } from '@/ui';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
 
@@ -135,27 +135,42 @@ export function PlaybackSection({ settings, update }: SectionProps) {
         <div className="flex flex-col p-2">
           {caps.isError ? (
             <div role="alert" className="m-2 flex flex-wrap items-center gap-3 rounded-md bg-danger/10 px-3 py-2 text-sm" data-testid="player-caps-error">
-              <span className="min-w-0 flex-1 text-danger">{t('capabilitiesFailed', { message: caps.error.message })}</span>
+              <span className="min-w-0 flex-1 text-danger">
+                {t('capabilitiesFailed')} {errorDescription(caps.error)}
+              </span>
               <Button size="sm" variant="secondary" onClick={() => void caps.refetch()}>
                 {t('retry')}
               </Button>
             </div>
           ) : null}
-          <RadioGroup<VideoPlayer>
-            label={t('player')}
-            name="settings-player"
-            value={current}
-            onValueChange={(player) => void update({ player })}
-            options={players.map((p) => ({
-              value: p.value,
-              label: p.label,
-              description: p.hint,
-              note: p.note,
-              // The saved choice stays selectable even when its player has gone missing.
-              disabled: !p.available && current !== p.value,
-              testId: `player-${p.value}`,
-            }))}
-          />
+          {players.length === 1 ? (
+            // A browser has the built-in player only: one radio with nothing to choose reads as
+            // broken, so it is a plain line saying what plays, with where the others live.
+            <div className="flex items-start gap-3 px-2 py-1.5" data-testid="player-only">
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-body font-medium text-fg">{players[0]!.label}</span>
+                <span className="text-body-sm text-fg-muted">{players[0]!.hint}</span>
+                <span className="text-caption text-fg-subtle">{t('playerDesktopOnlyNote')}</span>
+              </span>
+              <Badge className="mt-0.5">{t('playerInUse')}</Badge>
+            </div>
+          ) : (
+            <RadioGroup<VideoPlayer>
+              label={t('player')}
+              name="settings-player"
+              value={current}
+              onValueChange={(player) => void update({ player })}
+              options={players.map((p) => ({
+                value: p.value,
+                label: p.label,
+                description: p.hint,
+                note: p.note,
+                // The saved choice stays selectable even when its player has gone missing.
+                disabled: !p.available && current !== p.value,
+                testId: `player-${p.value}`,
+              }))}
+            />
+          )}
         </div>
       </SettingsGroup>
 

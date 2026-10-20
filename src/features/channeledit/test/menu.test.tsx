@@ -108,7 +108,7 @@ describe('useChannelEditMenuItems', () => {
     renderUi(<Menu channel={bbc} />, queryClient);
     fireEvent.click(screen.getByRole('button', { name: 'Hide channel' }));
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
-    expect(lastToast()?.title).toBe('Could not hide BBC One');
+    expect(lastToast()?.title).toBe("Couldn't hide BBC One");
     expect(lastToast()?.description).toBe('The provider no longer lists this channel.');
   });
 

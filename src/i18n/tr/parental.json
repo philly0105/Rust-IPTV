@@ -171,5 +171,12 @@
   "discardText": "Burada işaretlediğiniz veya işaretini kaldırdığınız gruplar kaydedilmeyecek.",
   "keepEditing": "Düzenlemeye devam et",
   "discard": "At",
-  "pinNoRecovery": "Unutulan PIN sıfırlanamaz. Güvenli bir yerde saklayın."
+  "pinNoRecovery": "Unutulan PIN sıfırlanamaz. Güvenli bir yerde saklayın.",
+  "offBenefitLockTitle": "Seçtiklerinizi kilitleyin",
+  "offBenefitLockText": "Tüm gruplar, tek tek kanallar, filmler veya diziler.",
+  "offBenefitModeTitle": "Gizle veya sor",
+  "offBenefitModeText": "Kilitli öğeler kaybolur veya açılırken PIN ister.",
+  "offBenefitAdultTitle": "Yetişkin grupları",
+  "offBenefitAdultText": "Yetişkin olarak işaretli gruplar otomatik kilitlenebilir.",
+  "offPinNote": "Neyin kilitleneceğini PIN'i belirledikten sonra seçersiniz."
 }

@@ -203,7 +203,8 @@ describe('renames-only sources reach Reset all edits (SS-3)', () => {
     renderAt(routes(), '/sources');
     await screen.findByTestId('source-card');
     chooseCardAction('Hidden and renamed channels');
-    const reset = await screen.findByRole('button', { name: 'Reset all edits' });
+    // The dialog is a lazy chunk: allow for a busy machine.
+    const reset = await screen.findByRole('button', { name: 'Reset all edits' }, { timeout: 5000 });
     expect(reset).toBeTruthy();
   });
 });

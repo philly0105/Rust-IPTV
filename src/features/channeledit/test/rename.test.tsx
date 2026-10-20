@@ -216,7 +216,7 @@ describe('rename dialog', () => {
     core.drop(bbc.ref);
     type('My News');
     fireEvent.click(save());
-    expect(await screen.findByText('Could not rename. The provider no longer lists this channel.')).toBeTruthy();
+    expect(await screen.findByText("Couldn't rename. The provider no longer lists this channel.")).toBeTruthy();
   });
 
   it('closes with Cancel and Escape without a call', async () => {

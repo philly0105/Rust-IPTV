@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "直播電視",
-  "tourLiveText": "頻道依群組排列，可查看目前和下一個節目，以及完整的節目表。",
+  "tourLiveTitle": "你的播放來源",
+  "tourLiveText": "在這裡開啟播放來源，查看其直播頻道、電視節目表、電影和影集。",
   "tourVodTitle": "電影、影集和我的片單",
   "tourVodText": "瀏覽每個來源的電影和影集海報、依年代篩選，並將作品加入我的片單，集中在一處。",
   "tourSearchTitle": "搜尋全部內容",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "以最大化或全螢幕啟動",
   "noteWindowStartText": "在設定中選擇視窗的開啟方式。",
   "noteFixesTitle": "數百項修正",
-  "noteFixesText": "匯入、節目表、播放、錄影、下載和備份都更可靠了。"
+  "noteFixesText": "匯入、節目表、播放、錄影、下載和備份都更可靠了。",
+  "tourCoachTitle": "播放來源已就緒",
+  "tourCoachText": "搜尋可在所有播放來源中尋找頻道、電影和影集。其他任何地方都可透過命令面板前往。",
+  "tourShowAround": "帶我看看",
+  "tourGotIt": "我知道了"
 }

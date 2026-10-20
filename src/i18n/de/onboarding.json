@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "Live-TV",
-  "tourLiveText": "Sender nach Gruppen sortiert, mit laufender und nächster Sendung und vollständigem Programmführer.",
+  "tourLiveTitle": "Ihre Quellen",
+  "tourLiveText": "Öffnen Sie hier eine Quelle für ihre Live-Sender, den TV-Guide, Filme und Serien.",
   "tourVodTitle": "Filme, Serien und Meine Liste",
   "tourVodText": "Poster der Filme und Serien jeder Quelle durchstöbern, nach Jahrzehnt filtern und Titel in Meine Liste speichern, um sie an einem Ort zu haben.",
   "tourSearchTitle": "Alles durchsuchen",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Maximiert oder im Vollbild starten",
   "noteWindowStartText": "Legen Sie in den Einstellungen fest, wie sich das Fenster öffnet.",
   "noteFixesTitle": "Hunderte Korrekturen",
-  "noteFixesText": "Importe, Programmführer, Wiedergabe, Aufnahmen, Downloads und Sicherungen laufen zuverlässiger."
+  "noteFixesText": "Importe, Programmführer, Wiedergabe, Aufnahmen, Downloads und Sicherungen laufen zuverlässiger.",
+  "tourCoachTitle": "Ihre Quelle ist bereit",
+  "tourCoachText": "Die Suche findet Sender, Filme und Serien in allen Quellen. Die Befehlspalette bringt Sie überallhin.",
+  "tourShowAround": "Rundgang starten",
+  "tourGotIt": "Verstanden"
 }

@@ -123,8 +123,9 @@ function Highlight({ item }: { item: ReleaseNoteItem }) {
   const { t } = useOnboardingStrings();
   const Icon = item.icon;
   return (
-    <li className="flex flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4" data-testid="whats-new-item" data-highlight="">
-      <span aria-hidden className="inline-flex size-9 items-center justify-center rounded-md border border-edge bg-surface text-fg">
+    // On a phone the three cards stack: the icon moves beside the text, so they stay short.
+    <li className="flex items-start gap-3 rounded-lg border border-edge bg-surface-2 p-4 sm:flex-col" data-testid="whats-new-item" data-highlight="">
+      <span aria-hidden className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-edge bg-surface text-fg">
         <Icon size={18} />
       </span>
       <div className="flex min-w-0 flex-col gap-1">
@@ -228,7 +229,8 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
       open
       onClose={() => close()}
       title={t('whatsNewTitle')}
-      description={version ? t('whatsNewVersion', { version }) : undefined}
+      // With several releases listed each has its own version badge, so the header does not say it again.
+      description={version && releases.length <= 1 ? t('whatsNewVersion', { version }) : undefined}
       size="lg"
       testId="whats-new"
       // The list scrolls inside its own region (a Tab stop while it overflows), not the dialog body.

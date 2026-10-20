@@ -250,6 +250,25 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   const next = s.autoRefresh && props.schedule && !busy ? nextRefreshText(props.schedule, lang, t) : undefined;
   const origin = sourceOrigin(s, t);
 
+  const times = [
+    // With an error and no good refresh yet, the error strip says it all; "Not refreshed yet" beside it reads as a contradiction.
+    refreshed || !s.lastError ? (
+      <span key="refreshed" className="whitespace-nowrap" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
+        {refreshed ? t('refreshedAgo', { when: refreshed }) : t('neverRefreshed')}
+      </span>
+    ) : null,
+    failed ? (
+      <span key="failed" className="whitespace-nowrap text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
+        {t('failedAgo', { when: failed })}
+      </span>
+    ) : null,
+    next ? (
+      <span key="next" className="whitespace-nowrap text-fg-subtle" title={absoluteTime(props.schedule?.nextRefreshAt, lang)} data-testid="source-next-refresh">
+        {next}
+      </span>
+    ) : null,
+  ].filter((x) => x !== null);
+
   const phone = useMediaQuery(PHONE_QUERY);
   const refreshLabel = t(text ? 'reimportSource' : 'refreshSource', { name: s.name });
   const menu: MenuItem[] = [];
@@ -333,30 +352,26 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
             {!s.autoRefresh && !text ? <Badge data-testid="source-manual-refresh">{t('manualRefreshBadge')}</Badge> : null}
             <AccountBadges status={props.account} warnDays={props.warnDays ?? 0} />
           </div>
-          <MetaLine
-            className="col-span-full row-start-2 text-body-sm"
-            items={[
-              <span key="origin" className="block max-w-full truncate" dir="auto" title={origin} data-testid="source-origin">
-                {origin}
-              </span>,
-              // With an error and no good refresh yet, the error strip says it all; "Not refreshed yet" beside it reads as a contradiction.
-              refreshed || !s.lastError ? (
-                <span key="refreshed" className="whitespace-nowrap" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
-                  {refreshed ? t('refreshedAgo', { when: refreshed }) : t('neverRefreshed')}
+          {/*
+            Where it comes from, then when it refreshed. A narrow card gives the address its own
+            line, so a long one truncates there and the times never wrap with a separator left
+            hanging at the start of a line; from @3xl the two share one line.
+          */}
+          <div className="col-span-full row-start-2 flex min-w-0 flex-col gap-y-0.5 text-body-sm text-fg-muted @3xl:flex-row @3xl:items-center @3xl:gap-x-1.5">
+            <span className="block min-w-0 truncate" dir="auto" title={origin} data-testid="source-origin">
+              {origin}
+            </span>
+            {times.length > 0 ? (
+              <>
+                <span aria-hidden className="hidden text-fg-subtle @3xl:inline">
+                  ·
                 </span>
-              ) : null,
-              failed ? (
-                <span key="failed" className="whitespace-nowrap text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
-                  {t('failedAgo', { when: failed })}
-                </span>
-              ) : null,
-              next ? (
-                <span key="next" className="whitespace-nowrap text-fg-subtle" title={absoluteTime(props.schedule?.nextRefreshAt, lang)} data-testid="source-next-refresh">
-                  {next}
-                </span>
-              ) : null,
-            ]}
-          />
+                <span className="sr-only">, </span>
+                {/* Narrow: one time per line, no separators to hang at a line's end. */}
+                <MetaLine as="span" className="shrink-0 text-body-sm @max-3xl:flex-col @max-3xl:items-start @max-3xl:[&>[aria-hidden]]:hidden" items={times} />
+              </>
+            ) : null}
+          </div>
           {/* Narrow cards: the counts as one line of text. */}
           <dl className="col-span-full row-start-3 flex flex-wrap gap-x-4 gap-y-0.5 @3xl:hidden">
             {stats.map((st) => (

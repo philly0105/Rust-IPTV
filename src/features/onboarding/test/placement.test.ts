@@ -2,7 +2,7 @@
 // above and inline-start, clamped into the window; centred when nothing fits.
 import { describe, expect, it } from 'vitest';
 
-import { CARD_GAP, centred, placeCard, spotlightBox, SPOTLIGHT_PAD, VIEWPORT_MARGIN } from '../tour/placement';
+import { ARROW_INSET, CARD_GAP, centred, placeCard, spotlightBox, SPOTLIGHT_PAD, VIEWPORT_MARGIN } from '../tour/placement';
 
 const CARD = { width: 352, height: 232 };
 
@@ -92,5 +92,37 @@ describe('spotlightBox', () => {
     const far = spotlightBox({ top: 760, left: 1240, width: 80, height: 80 }, 1280, 800);
     expect(far.left + far.width).toBeLessThanOrEqual(1280);
     expect(far.top + far.height).toBeLessThanOrEqual(800);
+  });
+});
+
+describe('the card arrow', () => {
+  it('sits on the edge that faces the anchor and points at its middle', () => {
+    const anchor = { top: 200, left: 8, width: 56, height: 44 };
+    const p = placeCard(anchor, CARD, 1280, 800);
+    expect(p.arrow?.edge).toBe('left');
+    // The card is centred on the anchor, so the tip is half way down the card.
+    expect(p.top + p.arrow!.offset).toBe(222);
+  });
+
+  it('points at an anchor the card had to be clamped away from, but stays clear of the corners', () => {
+    const anchor = { top: 4, left: 8, width: 56, height: 20 };
+    const p = placeCard(anchor, CARD, 1280, 800);
+    expect(p.top).toBe(VIEWPORT_MARGIN);
+    expect(p.arrow).toEqual({ edge: 'left', offset: ARROW_INSET });
+  });
+
+  it('uses the right edge in right-to-left and the top or bottom edge below or above', () => {
+    expect(placeCard({ top: 200, left: 1216, width: 56, height: 44 }, CARD, 1280, 800, true).arrow?.edge).toBe('right');
+    const below = placeCard({ top: 10, left: 180, width: 36, height: 36 }, CARD, 390, 800);
+    expect(below.side).toBe('bottom');
+    expect(below.arrow?.edge).toBe('top');
+    expect(below.left + below.arrow!.offset).toBe(198);
+    const above = placeCard({ top: 780, left: 180, width: 36, height: 36 }, CARD, 390, 840);
+    expect(above.side).toBe('top');
+    expect(above.arrow?.edge).toBe('bottom');
+  });
+
+  it('is absent on a centred card', () => {
+    expect(centred(CARD, 1280, 800).arrow).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "TV ao vivo",
-  "tourLiveText": "Canais organizados em grupos, com o que passa agora e a seguir e um guia de TV completo.",
+  "tourLiveTitle": "Suas fontes",
+  "tourLiveText": "Abra uma fonte aqui para ver os canais ao vivo, o guia, os filmes e as séries dela.",
   "tourVodTitle": "Filmes, séries e Minha lista",
   "tourVodText": "Navegue pelos pôsteres de filmes e séries de cada fonte, filtre por década e salve títulos na Minha lista para tê-los em um só lugar.",
   "tourSearchTitle": "Pesquisar em tudo",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Iniciar maximizado ou em tela cheia",
   "noteWindowStartText": "Escolha nas Configurações como a janela abre.",
   "noteFixesTitle": "Centenas de correções",
-  "noteFixesText": "Importações, guia de TV, reprodução, gravação, downloads e backups estão mais confiáveis."
+  "noteFixesText": "Importações, guia de TV, reprodução, gravação, downloads e backups estão mais confiáveis.",
+  "tourCoachTitle": "Sua fonte está pronta",
+  "tourCoachText": "A busca encontra canais, filmes e séries em todas as suas fontes. A paleta de comandos leva você a qualquer outro lugar.",
+  "tourShowAround": "Fazer o tour",
+  "tourGotIt": "Entendi"
 }

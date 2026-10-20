@@ -28,6 +28,13 @@ export const TOUR_STEPS: readonly TourStep[] = [
   { anchor: 'search', icon: Search, titleKey: 'tourSearchTitle', textKey: 'tourSearchText' },
 ];
 
+/**
+ * The tour that opens by itself after the first source is added (SS-6): one coach mark on search
+ * and the command palette, the two things the screen does not show on its own. The new source's
+ * page is already on screen behind it; the full tour stays one press away on the card.
+ */
+export const COACH_STEPS: readonly TourStep[] = [{ anchor: 'search', icon: Search, titleKey: 'tourCoachTitle', textKey: 'tourCoachText' }];
+
 /** CSS selector of a step's anchor. */
 export function anchorSelector(anchor: TourAnchor): string {
   return `[data-tour="${anchor}"]`;

@@ -165,8 +165,8 @@ function AccentPicker({ value, onChange, tone }: { value: Accent; onChange: (a: 
   return (
     <div className="flex flex-col gap-3 px-4 py-4">
       <div className="flex flex-col gap-0.5">
-        <span className="font-medium text-fg">{t('accent')}</span>
-        <p id={hintId} className="text-sm text-fg-muted">
+        <span className="text-body font-medium text-fg">{t('accent')}</span>
+        <p id={hintId} className="text-body-sm text-fg-muted">
           {t('accentHint')}
         </p>
       </div>
@@ -192,10 +192,9 @@ function AccentPicker({ value, onChange, tone }: { value: Accent; onChange: (a: 
               data-testid={`accent-${a}`}
               onClick={() => onChange(a)}
               onKeyDown={onKeyDown}
-              className={clsx(
-                'group flex min-w-0 flex-col items-center gap-2 rounded-md px-1 py-2.5 motion-safe:transition-colors',
-                selected ? 'bg-selected' : 'hover:bg-hover active:bg-active',
-              )}
+              // Selection is the ring and the check on the swatch itself, as on the theme cards; no tile behind it.
+              className="group flex min-w-0 flex-col items-center gap-2 rounded-md px-1 py-2.5 hover:bg-hover active:bg-active motion-safe:transition-colors"
+
             >
               <span
                 aria-hidden
@@ -203,12 +202,12 @@ function AccentPicker({ value, onChange, tone }: { value: Accent; onChange: (a: 
                 style={{
                   background: swatch.solid,
                   // Ring in the swatch's own colour, separated by a gap the colour of the card.
-                  boxShadow: selected ? `0 0 0 2px var(--color-selected), 0 0 0 4px ${swatch.solid}` : 'inset 0 0 0 1px rgb(0 0 0 / 0.12)',
+                  boxShadow: selected ? `0 0 0 2px var(--color-surface), 0 0 0 4px ${swatch.solid}` : 'inset 0 0 0 1px rgb(0 0 0 / 0.12)',
                 }}
               >
                 {selected ? <Check size={18} strokeWidth={2.75} style={{ color: swatch.solidFg }} /> : null}
               </span>
-              <span className={clsx('max-w-full truncate text-xs', selected ? 'font-semibold text-fg' : 'text-fg-muted group-hover:text-fg')}>
+              <span className={clsx('max-w-full truncate text-caption', selected ? 'font-medium text-fg' : 'text-fg-muted group-hover:text-fg')}>
                 {t(ACCENT_LABEL_KEYS[a])}
               </span>
             </button>
@@ -227,7 +226,7 @@ function AppearanceSample() {
   const { t } = useTranslation(['settings', 'shell']);
   return (
     <div className="flex flex-col gap-3 px-4 py-4" data-testid="appearance-sample">
-      <span className="text-xs font-medium text-fg-subtle">{t('previewLabel')}</span>
+      <span className="text-caption font-medium text-fg-subtle">{t('previewLabel')}</span>
       <div inert aria-hidden className="flex flex-wrap items-stretch gap-4 rounded-md border border-divider bg-bg p-3">
         <div className="flex w-40 shrink-0 flex-col gap-1 rounded-md bg-surface p-2">
           <span className="tuning-tick flex h-(--rail-item-height) items-center gap-2 rounded-md bg-selected ps-3 text-sm font-medium text-fg">
@@ -423,29 +422,38 @@ export function AppearanceSection({ settings, update }: SectionProps) {
           {options.map((o) => {
             const selected = o.value === current;
             return (
+              // One selection language on the page: the chosen card (like the chosen swatch) gets
+              // the accent outline and a check badge. The radio stays, visually hidden, for its
+              // semantics and arrow keys; the card draws its focus ring.
               <label
                 key={o.value}
                 className={clsx(
-                  'flex cursor-pointer flex-col gap-3 rounded-md border p-3 hover:bg-hover active:bg-active motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus',
-                  selected ? 'border-accent bg-surface-2' : 'border-edge',
+                  'relative flex cursor-pointer flex-col gap-3 rounded-lg border p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
+                  selected ? 'border-accent bg-surface-2' : 'border-edge hover:border-border hover:bg-hover active:bg-active',
                 )}
               >
                 <ThemePreview mode={o.value} oled={oledBlack} accent={accent} />
-                <span className="flex items-start gap-2">
-                  <RadioInput
-                    name="settings-theme"
-                    value={o.value}
-                    checked={selected}
-                    onChange={() => choose(o.value)}
-                    // The card draws the focus ring.
-                    className="focus-visible:shadow-none focus-visible:outline-none"
-                    wrapperClassName="mt-0.5"
-                    data-testid={`theme-${o.value}`}
-                  />
-                  <span className="flex flex-col">
-                    <span className="font-medium text-fg">{o.label}</span>
-                    <span className="text-sm text-fg-muted">{o.hint}</span>
+                {selected ? (
+                  <span
+                    aria-hidden
+                    className="absolute top-1.5 end-1.5 flex size-5 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-1"
+                    data-testid="theme-check"
+                  >
+                    <Check size={12} strokeWidth={3} />
                   </span>
+                ) : null}
+                <RadioInput
+                  name="settings-theme"
+                  value={o.value}
+                  checked={selected}
+                  onChange={() => choose(o.value)}
+                  className="focus-visible:shadow-none focus-visible:outline-none"
+                  wrapperClassName="sr-only"
+                  data-testid={`theme-${o.value}`}
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-body font-medium text-fg">{o.label}</span>
+                  <span className="text-body-sm text-fg-muted">{o.hint}</span>
                 </span>
               </label>
             );

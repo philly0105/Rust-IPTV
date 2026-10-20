@@ -13,12 +13,13 @@ import { HiddenChannelsDialog } from '@/features/channeledit';
 import { useStable } from '@/features/live/guide/useStable';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
-import { Button, EmptyState, ErrorState, Menu, Page, Select, Skeleton, TEXT_LINK, useToast, errorDescription } from '@/ui';
+import { Badge, Button, Dialog, EmptyState, ErrorState, Menu, Page, Select, Skeleton, TEXT_LINK, Tooltip, useToast, errorDescription } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
 import { sourceHomePath } from '@/shell/railLinks';
 import { useMediaQuery } from '@/shell/useMediaQuery';
 import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
+import { PHONE_SHEET } from './components/DiscardGuard';
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
 import { RemoveAllDialog } from './components/RemoveAllDialog';
@@ -42,6 +43,7 @@ import {
 } from './lib/listView';
 import { isRemovalPending, scheduleRemoval, usePendingRemovals } from './lib/pendingRemoval';
 import { beginImport, cancelImport, isRunningPhase, useImportProgressFeed, useImportProgressStore, wasCancelled } from './lib/progress';
+import { formatCount } from './lib/format';
 import { redactText } from './lib/redact';
 import { dropSourcesFromLists } from './lib/userLists';
 import { applyOrder, moveItem } from './lib/reorder';
@@ -128,6 +130,7 @@ export function SourcesPage() {
   // On a phone Refresh all waits in the More menu, so Add a source and More share one row; it comes
   // out as a button while it runs, to show its progress and Stop.
   const phone = useMediaQuery('(max-width: 639.98px)');
+  const [viewSheetOpen, setViewSheetOpen] = useState(false);
   const activeView = compact ? DEFAULT_VIEW : view;
   const manual = isManualView(activeView);
   const shown = useMemo(() => applyView(sources, activeView, i18n.language), [sources, activeView, i18n.language]);
@@ -514,6 +517,44 @@ export function SourcesPage() {
   const sortOptions = SORTS.map((v) => ({ value: v, label: t(`sort_${v}`) }));
   const kindOptions = KIND_FILTERS.map((v) => ({ value: v, label: v === 'all' ? t('filterKindAll') : t(`kindLabel_${v}`) }));
   const statusOptions = STATUS_FILTERS.map((v) => ({ value: v, label: t(`filterStatus_${v}`) }));
+  // How many of the three differ from the default (the phone button's count).
+  const viewChanges = (view.sort !== DEFAULT_VIEW.sort ? 1 : 0) + (view.kind !== DEFAULT_VIEW.kind ? 1 : 0) + (view.status !== DEFAULT_VIEW.status ? 1 : 0);
+  // The same three selects in the toolbar (compact, sized to their text) and in the phone sheet
+  // (labelled, full width).
+  const viewSelects = (className: string, labelled = false) => (
+    <>
+      <Select
+        wrapperClassName="min-w-0"
+        className={className}
+        label={labelled ? t('sortLabel') : undefined}
+        aria-label={labelled ? undefined : t('sortLabel')}
+        value={view.sort}
+        options={sortOptions}
+        onValueChange={(v) => setView({ sort: v as SourceSort })}
+        data-testid="sources-sort"
+      />
+      <Select
+        wrapperClassName="min-w-0"
+        className={className}
+        label={labelled ? t('filterKindLabel') : undefined}
+        aria-label={labelled ? undefined : t('filterKindLabel')}
+        value={view.kind}
+        options={kindOptions}
+        onValueChange={(v) => setView({ kind: v as KindFilter })}
+        data-testid="sources-filter-kind"
+      />
+      <Select
+        wrapperClassName="min-w-0"
+        className={className}
+        label={labelled ? t('filterStatusLabel') : undefined}
+        aria-label={labelled ? undefined : t('filterStatusLabel')}
+        value={view.status}
+        options={statusOptions}
+        onValueChange={(v) => setView({ status: v as StatusFilter })}
+        data-testid="sources-filter-status"
+      />
+    </>
+  );
 
   let body: ReactNode;
   if (query.isPending) body = <SourcesSkeleton />;
@@ -523,39 +564,10 @@ export function SourcesPage() {
     body = (
       <div className="flex flex-col gap-4">
         <div className={clsx('flex flex-wrap items-center gap-3', compact ? 'justify-end' : 'justify-between')}>
-          {/* Phones: sort spans the row and the two filters share the next one at equal widths. */}
-          {compact ? null : (
-            <div
-              className="grid w-full grid-cols-2 gap-2 @md:flex @md:w-auto @md:flex-wrap @md:items-center"
-              role="group"
-              aria-label={t('viewControls')}
-              data-testid="sources-view"
-            >
-              <ListFilter aria-hidden className="size-4 text-fg-subtle @max-md:hidden" />
-              <Select
-                wrapperClassName="min-w-0 @max-md:col-span-2"
-                aria-label={t('sortLabel')}
-                value={view.sort}
-                options={sortOptions}
-                onValueChange={(v) => setView({ sort: v as SourceSort })}
-                data-testid="sources-sort"
-              />
-              <Select
-                wrapperClassName="min-w-0"
-                aria-label={t('filterKindLabel')}
-                value={view.kind}
-                options={kindOptions}
-                onValueChange={(v) => setView({ kind: v as KindFilter })}
-                data-testid="sources-filter-kind"
-              />
-              <Select
-                wrapperClassName="min-w-0"
-                aria-label={t('filterStatusLabel')}
-                value={view.status}
-                options={statusOptions}
-                onValueChange={(v) => setView({ status: v as StatusFilter })}
-                data-testid="sources-filter-status"
-              />
+          {compact || phone ? null : (
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('viewControls')} data-testid="sources-view">
+              <ListFilter aria-hidden size={16} className="text-fg-subtle" />
+              {viewSelects('h-9 w-auto')}
             </div>
           )}
           {/* Add and its More menu stay together; on phones the buttons fill their row. */}
@@ -586,6 +598,23 @@ export function SourcesPage() {
               </Button>
             ) : null}
             <div className="flex gap-2 @max-md:flex-1">
+              {phone && !compact ? (
+                // Phones: the sort and filters sit behind one button on the Add row, with the number
+                // of active choices, and open in a bottom sheet (no three selects above the cards).
+                <Tooltip content={t('viewControls')} describe={false}>
+                  <Button
+                    variant="secondary"
+                    icon={<ListFilter aria-hidden size={16} />}
+                    onClick={() => setViewSheetOpen(true)}
+                    aria-haspopup="dialog"
+                    className="shrink-0"
+                    data-testid="sources-view-button"
+                  >
+                    <span className="sr-only">{t('viewControls')}</span>
+                    {viewChanges > 0 ? <Badge data-testid="sources-view-count">{formatCount(viewChanges, i18n.language)}</Badge> : null}
+                  </Button>
+                </Tooltip>
+              ) : null}
               <Button variant="primary" className="@max-md:flex-1" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
                 {t('addSource')}
               </Button>
@@ -693,6 +722,29 @@ export function SourcesPage() {
       <EditSourceDialog source={editing} initialTab={editTab} onClose={() => setEditing(null)} onRefresh={(s) => void refreshOne(s)} />
 
       <HiddenChannelsDialog sourceId={editsFor ?? ''} open={editsFor !== null} onOpenChange={(open) => !open && setEditsFor(null)} />
+
+      <Dialog
+        open={viewSheetOpen && phone && !compact}
+        onClose={() => setViewSheetOpen(false)}
+        title={t('viewControls')}
+        size="sm"
+        className={PHONE_SHEET}
+        testId="sources-view-sheet"
+        footer={
+          <>
+            {viewChanges > 0 ? (
+              <Button variant="ghost" onClick={() => setView(DEFAULT_VIEW)} data-testid="sources-view-sheet-reset">
+                {t('showYourOrder')}
+              </Button>
+            ) : null}
+            <Button variant="primary" onClick={() => setViewSheetOpen(false)} data-testid="sources-view-sheet-done">
+              {t('viewDone')}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">{viewSelects('w-full', true)}</div>
+      </Dialog>
 
       <RemoveAllDialog
         open={removeAllOpen}

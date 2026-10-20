@@ -160,5 +160,12 @@
   "discardText": "ここでチェックを付けたり外したりしたグループは保存されません。",
   "keepEditing": "編集を続ける",
   "discard": "破棄",
-  "pinNoRecovery": "PINを忘れるとリセットできません。安全な場所に控えておいてください。"
+  "pinNoRecovery": "PINを忘れるとリセットできません。安全な場所に控えておいてください。",
+  "offBenefitLockTitle": "選んだものをロック",
+  "offBenefitLockText": "グループ全体、個別のチャンネル、映画、シリーズ。",
+  "offBenefitModeTitle": "非表示か確認か",
+  "offBenefitModeText": "ロックした項目は非表示になるか、開くときにPINを求めます。",
+  "offBenefitAdultTitle": "成人向けグループ",
+  "offBenefitAdultText": "成人向けのグループは自動でロックできます。",
+  "offPinNote": "ロックする対象はPINを設定したあとで選べます。"
 }

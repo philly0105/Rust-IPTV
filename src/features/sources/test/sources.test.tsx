@@ -270,7 +270,7 @@ describe('Guide (EPG) loads after add and edit', () => {
     renderAt(routes(), '/sources');
     const row = await screen.findByTestId('guide-progress');
     expect(row.textContent).toContain('Loading guide');
-    expect(row.textContent).toContain('1,234 programs');
+    expect(row.textContent).toContain('1,234 programmes');
   });
 
   it('edit: a new manual guide URL is saved and loaded at once', async () => {

@@ -171,5 +171,12 @@
   "discardText": "Die hier an- oder abgehakten Gruppen werden nicht gespeichert.",
   "keepEditing": "Weiter bearbeiten",
   "discard": "Verwerfen",
-  "pinNoRecovery": "Eine vergessene PIN lässt sich nicht zurücksetzen. Bewahren Sie sie sicher auf."
+  "pinNoRecovery": "Eine vergessene PIN lässt sich nicht zurücksetzen. Bewahren Sie sie sicher auf.",
+  "offBenefitLockTitle": "Sperren, was Sie wählen",
+  "offBenefitLockText": "Ganze Gruppen, einzelne Sender, Filme oder Serien.",
+  "offBenefitModeTitle": "Ausblenden oder nachfragen",
+  "offBenefitModeText": "Gesperrte Inhalte verschwinden oder verlangen beim Öffnen die PIN.",
+  "offBenefitAdultTitle": "Gruppen für Erwachsene",
+  "offBenefitAdultText": "Als für Erwachsene markierte Gruppen lassen sich automatisch sperren.",
+  "offPinNote": "Was gesperrt wird, wählen Sie nach dem Festlegen der PIN."
 }

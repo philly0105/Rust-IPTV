@@ -171,5 +171,12 @@
   "discardText": "Az itt bejelölt vagy kijelölésből kivett csoportok nem lesznek mentve.",
   "keepEditing": "Szerkesztés folytatása",
   "discard": "Elvetés",
-  "pinNoRecovery": "Az elfelejtett PIN nem állítható vissza. Tartsa biztonságos helyen."
+  "pinNoRecovery": "Az elfelejtett PIN nem állítható vissza. Tartsa biztonságos helyen.",
+  "offBenefitLockTitle": "Zárolja, amit szeretne",
+  "offBenefitLockText": "Teljes csoportok, egyes csatornák, filmek vagy sorozatok.",
+  "offBenefitModeTitle": "Elrejtés vagy kérdés",
+  "offBenefitModeText": "A zárolt elemek eltűnnek, vagy megnyitáskor PIN-kódot kérnek.",
+  "offBenefitAdultTitle": "Felnőtt csoportok",
+  "offBenefitAdultText": "A felnőttnek jelölt csoportok automatikusan zárolhatók.",
+  "offPinNote": "Azt, hogy mit zárol, a PIN-kód beállítása után választja ki."
 }

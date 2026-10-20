@@ -1,11 +1,28 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Kbd } from '@/ui';
-import { useShortcutList } from '@/shell';
+import { useShortcutList, type ShortcutInfo } from '@/shell';
 import { shortcutReference } from '@/shell/ShortcutOverlay';
 import { SettingsGroup, SettingsSection } from '../components';
 import type { SectionProps } from './types';
+
+/**
+ * One row per action: keys that do the same thing ("Shift+F10" and "Menu" both open the channel
+ * menu) share a row, "Shift F10 or Menu", instead of repeating the sentence. Order is kept.
+ */
+export function mergeByDescription(items: readonly ShortcutInfo[]): { description: string; combos: string[] }[] {
+  const out: { description: string; combos: string[] }[] = [];
+  const at = new Map<string, number>();
+  for (const s of items) {
+    const i = at.get(s.description);
+    if (i === undefined) {
+      at.set(s.description, out.length);
+      out.push({ description: s.description, combos: [s.combo] });
+    } else if (!out[i]!.combos.includes(s.combo)) out[i]!.combos.push(s.combo);
+  }
+  return out;
+}
 
 /**
  * The full shortcut reference: registered shortcuts merged with the documented
@@ -18,7 +35,7 @@ export function ShortcutsSection(_props: SectionProps) {
   const { t } = useTranslation('settings');
   const { t: ts } = useTranslation('shell');
   const registered = useShortcutList();
-  const groups = useMemo(() => shortcutReference(registered, ts), [registered, ts]);
+  const groups = useMemo(() => shortcutReference(registered, ts).map(([area, items]) => [area, mergeByDescription(items)] as const), [registered, ts]);
 
   return (
     <SettingsSection title={t('sectionShortcuts')} description={t('sectionShortcutsLead')} testId="settings-shortcuts">
@@ -39,10 +56,20 @@ export function ShortcutsSection(_props: SectionProps) {
             <SettingsGroup key={area} title={area}>
               <dl className="flex flex-col divide-y divide-divider" data-testid="shortcut-group">
                 {items.map((s) => (
-                  <div key={`${s.combo}|${s.description}`} data-combo={s.combo} className="flex items-center justify-between gap-4 px-4 py-2.5">
-                    <dt className="text-fg">{s.description}</dt>
-                    <dd className="shrink-0">
-                      <Kbd combo={s.combo} />
+                  <div
+                    key={`${s.combos.join(' ')}|${s.description}`}
+                    data-combo={s.combos[0]}
+                    data-combos={s.combos.join(' ')}
+                    className="flex min-h-11 items-center justify-between gap-4 px-4 py-2"
+                  >
+                    <dt className="text-body-sm text-fg">{s.description}</dt>
+                    <dd className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                      {s.combos.map((combo, i) => (
+                        <Fragment key={combo}>
+                          {i > 0 ? <span className="text-caption text-fg-subtle">{t('shortcutsOr')}</span> : null}
+                          <Kbd combo={combo} />
+                        </Fragment>
+                      ))}
                     </dd>
                   </div>
                 ))}

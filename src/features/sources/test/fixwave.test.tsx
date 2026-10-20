@@ -195,7 +195,7 @@ describe('Account panel', () => {
     await screen.findByTestId('source-card');
     chooseCardAction('Subscription details');
     const alert = await within(dialog()).findByRole('alert');
-    expect(alert.textContent).toContain('Could not load the account details');
+    expect(alert.textContent).toContain("Couldn't load the account details");
     fail = false;
     fireEvent.click(within(alert).getByRole('button'));
     const status = await within(dialog()).findByTestId('account-status');
@@ -305,7 +305,7 @@ describe('Sort, filter and remove all', () => {
     expect(names()).toHaveLength(3);
   });
 
-  it('removes all playlists only after typing the word', async () => {
+  it('removes all sources only after typing the word', async () => {
     let sources = list();
     rpcMock.handlers['sources.list'] = () => sources;
     rpcMock.handlers['sources.removeAll'] = () => {
@@ -315,9 +315,9 @@ describe('Sort, filter and remove all', () => {
     renderAt(routes(), '/sources');
     await screen.findAllByTestId('source-card');
     fireEvent.click(screen.getByRole('button', { name: 'More source actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Remove all playlists/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Remove all sources/ }));
     const confirm = screen.getByTestId('sources-remove-all-confirm') as HTMLButtonElement;
-    expect(within(dialog()).getByRole('heading').textContent).toContain('Remove all 3 playlists?');
+    expect(within(dialog()).getByRole('heading').textContent).toContain('Remove all 3 sources?');
     expect(confirm.disabled).toBe(true);
     fireEvent.change(screen.getByTestId('sources-remove-all-input'), { target: { value: 'nope' } });
     expect(confirm.disabled).toBe(true);

@@ -20,10 +20,22 @@ export interface Box {
 
 export type CardSide = 'end' | 'bottom' | 'top' | 'start' | 'center';
 
+/**
+ * The card's pointer: which physical edge of the card it sits on (facing the anchor) and how far
+ * along that edge its tip is, in px from the card's top (left and right edges) or left (top and
+ * bottom edges). Kept clear of the rounded corners.
+ */
+export interface CardArrow {
+  edge: 'left' | 'right' | 'top' | 'bottom';
+  offset: number;
+}
+
 export interface CardPlacement {
   top: number;
   left: number;
   side: CardSide;
+  /** Absent for a centred card, which points at nothing. */
+  arrow?: CardArrow;
 }
 
 /** Space between the spotlight ring and the card. */
@@ -32,6 +44,8 @@ export const CARD_GAP = 16;
 export const VIEWPORT_MARGIN = 12;
 /** Extra room the spotlight leaves around its anchor. */
 export const SPOTLIGHT_PAD = 6;
+/** Least distance between the arrow's tip and a corner of the card (its radius plus the arrow's half width). */
+export const ARROW_INSET = 24;
 
 const clamp = (v: number, lo: number, hi: number) => (hi < lo ? lo : Math.min(Math.max(v, lo), hi));
 
@@ -68,18 +82,26 @@ export function placeCard(
   const alongY = clamp(Math.round(midY - card.height / 2), m, vh - card.height - m);
   const alongX = clamp(Math.round(midX - card.width / 2), m, vw - card.width - m);
 
+  // The arrow points at the anchor's middle, wherever clamping left the card along that axis.
+  const arrowY = clamp(Math.round(midY - alongY), ARROW_INSET, card.height - ARROW_INSET);
+  const arrowX = clamp(Math.round(midX - alongX), ARROW_INSET, card.width - ARROW_INSET);
+
   const beside = (toRight: boolean, side: 'end' | 'start'): CardPlacement | null => {
     const left = toRight ? right + CARD_GAP : anchor.left - CARD_GAP - card.width;
     const fits = toRight ? left + card.width <= vw - m : left >= m;
-    return fits && card.height <= vh - 2 * m ? { left: Math.round(left), top: alongY, side } : null;
+    return fits && card.height <= vh - 2 * m
+      ? { left: Math.round(left), top: alongY, side, arrow: { edge: toRight ? 'left' : 'right', offset: arrowY } }
+      : null;
   };
   const below = (): CardPlacement | null => {
     const top = bottom + CARD_GAP;
-    return top + card.height <= vh - m && card.width <= vw - 2 * m ? { left: alongX, top: Math.round(top), side: 'bottom' } : null;
+    return top + card.height <= vh - m && card.width <= vw - 2 * m
+      ? { left: alongX, top: Math.round(top), side: 'bottom', arrow: { edge: 'top', offset: arrowX } }
+      : null;
   };
   const above = (): CardPlacement | null => {
     const top = anchor.top - CARD_GAP - card.height;
-    return top >= m && card.width <= vw - 2 * m ? { left: alongX, top: Math.round(top), side: 'top' } : null;
+    return top >= m && card.width <= vw - 2 * m ? { left: alongX, top: Math.round(top), side: 'top', arrow: { edge: 'bottom', offset: arrowX } } : null;
   };
 
   // Inline-end is the right in LTR and the left in RTL.

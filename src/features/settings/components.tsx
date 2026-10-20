@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { Check } from 'lucide-react';
+import { Check, Info } from 'lucide-react';
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -57,7 +57,7 @@ export function SettingsSection({ title, description, children, testId }: { titl
           </h2>
           {fb.rowId === null && fb.state !== 'idle' ? <SavedMark state={fb.state} /> : null}
         </div>
-        {description ? <p className="text-body-sm text-fg-muted">{description}</p> : null}
+        {description ? <p className="text-body-sm text-pretty text-fg-muted">{description}</p> : null}
       </header>
       {children}
     </section>
@@ -94,7 +94,7 @@ export function SettingsGroup({
                 {title}
               </h3>
             ) : null}
-            {description ? <p className="text-body-sm text-fg-muted">{description}</p> : null}
+            {description ? <p className="text-body-sm text-pretty text-fg-muted">{description}</p> : null}
           </div>
           {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
         </div>
@@ -115,7 +115,7 @@ function RowLabel({ htmlFor, label, description, descId, rowId }: { htmlFor: str
         <RowMark rowId={rowId} />
       </span>
       {description ? (
-        <p id={descId} className="max-w-[38rem] text-body-sm text-fg-muted">
+        <p id={descId} className="max-w-[38rem] text-body-sm text-pretty text-fg-muted">
           {description}
         </p>
       ) : null}
@@ -134,6 +134,7 @@ export function SettingsRow({
   error,
   children,
   stack,
+  dimmed,
 }: {
   label: ReactNode;
   description?: ReactNode;
@@ -141,13 +142,19 @@ export function SettingsRow({
   children: (ids: { id: string; describedBy?: string; invalid?: boolean }) => ReactNode;
   /** Control below the label at every width (long inputs). */
   stack?: boolean;
+  /** The row's setting does nothing right now (its feature is off): the whole row dims, as a disabled SwitchRow does. The control still needs its own `disabled`. */
+  dimmed?: boolean;
 }) {
   const id = useId();
   const descId = `${id}-desc`;
   const errId = `${id}-err`;
   const describedBy = [error ? errId : null, description ? descId : null].filter(Boolean).join(' ') || undefined;
   return (
-    <div data-settings-row={id} className="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3.5">
+    <div
+      data-settings-row={id}
+      data-dimmed={dimmed || undefined}
+      className={clsx('flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3.5 motion-safe:transition-opacity', dimmed && 'opacity-60')}
+    >
       <RowLabel htmlFor={id} label={label} description={description} descId={descId} rowId={id} />
       <div className={clsx('flex min-w-0 max-w-full flex-col gap-1.5', stack ? 'basis-full' : '@max-md:basis-full @md:items-end')}>
         {children({ id, describedBy, invalid: error ? true : undefined })}
@@ -190,6 +197,16 @@ export function SwitchRow({
         data-testid={testId}
       />
     </div>
+  );
+}
+
+/** A quiet line inside a group (what a feature that is off would need, a server-mode note): an info icon and muted text, no control. */
+export function SettingsNote({ children, testId }: { children: ReactNode; testId?: string }) {
+  return (
+    <p className="flex items-start gap-2 px-4 py-3 text-body-sm text-fg-muted" data-testid={testId}>
+      <Info aria-hidden size={16} className="mt-0.5 shrink-0 text-fg-subtle" />
+      <span className="min-w-0">{children}</span>
+    </p>
   );
 }
 

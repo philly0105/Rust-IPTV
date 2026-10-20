@@ -122,6 +122,8 @@ export function OnboardingHost(): JSX.Element | null {
       {overlay.kind === 'tour' ? (
         <Tour
           key={seq}
+          // The automatic first-run tour is one coach mark; by hand (About, the palette) all three steps.
+          coach={overlay.auto}
           onClose={() => {
             closeOverlay();
             // Finishing and skipping both count: the tour does not come back on its own.

@@ -215,5 +215,12 @@
   "discardText": "لن تُحفظ المجموعات التي حددتها أو ألغيت تحديدها هنا.",
   "keepEditing": "متابعة التعديل",
   "discard": "تجاهل",
-  "pinNoRecovery": "لا يمكن إعادة تعيين رمز PIN إذا نسيته. احتفظ به في مكان آمن."
+  "pinNoRecovery": "لا يمكن إعادة تعيين رمز PIN إذا نسيته. احتفظ به في مكان آمن.",
+  "offBenefitLockTitle": "اقفل ما تختاره",
+  "offBenefitLockText": "مجموعات كاملة أو قنوات منفردة أو أفلام أو مسلسلات.",
+  "offBenefitModeTitle": "إخفاء أو سؤال",
+  "offBenefitModeText": "تختفي العناصر المقفلة، أو تطلب رمز PIN عند فتحها.",
+  "offBenefitAdultTitle": "مجموعات البالغين",
+  "offBenefitAdultText": "يمكن قفل المجموعات المصنّفة للبالغين تلقائيًا.",
+  "offPinNote": "تختار ما تقفله بعد تعيين رمز PIN."
 }

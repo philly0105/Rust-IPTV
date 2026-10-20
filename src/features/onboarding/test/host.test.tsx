@@ -99,6 +99,27 @@ describe('OnboardingHost', () => {
     seed({ lastSeenVersion: h.VERSION, tourCompleted: false, sources: 1 });
     mount();
     await waitFor(() => expect(tour()).toBeTruthy(), SHOW);
+    // The automatic tour is one coach mark (SS-6): Got it finishes it.
+    expect(screen.getByTestId('tour-next').textContent).toBe('Got it');
+    fireEvent.click(screen.getByTestId('tour-next'));
+    expect(tour()).toBeNull();
+    await waitFor(() => expect(core.state.settings.tourCompleted).toBe(true));
+  });
+
+  it('SS-6: the automatic tour is a single coach mark on search, which grows into the full tour on request', async () => {
+    seed({ lastSeenVersion: h.VERSION, tourCompleted: false, sources: 1 });
+    mount();
+    await waitFor(() => expect(tour()).toBeTruthy(), SHOW);
+    expect(screen.getByTestId('tour').getAttribute('data-tour-step')).toBe('search');
+    expect(screen.getByRole('dialog', { name: 'Your source is ready' })).toBeTruthy();
+    // One card: no step count, no dots, no Skip.
+    expect(screen.queryByTestId('tour-progress')).toBeNull();
+    expect(screen.queryByTestId('tour-dots')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Skip tour' })).toBeNull();
+    fireEvent.click(screen.getByTestId('tour-show-around'));
+    expect(screen.getByRole('dialog', { name: 'Your sources' })).toBeTruthy();
+    expect(screen.getByTestId('tour-progress').textContent).toBe('Step 1 of 3');
+    expect(document.activeElement).toBe(screen.getByTestId('tour-next'));
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByTestId('tour-next'));
     expect(tour()).toBeNull();
     await waitFor(() => expect(core.state.settings.tourCompleted).toBe(true));
@@ -135,7 +156,7 @@ describe('OnboardingHost', () => {
     mount();
     await waitFor(() => expect(tour()).toBeTruthy(), SHOW);
     expect(whatsNew()).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Skip tour' }));
+    fireEvent.keyDown(screen.getByTestId('tour-card'), { key: 'Escape' });
     await waitFor(() => expect(whatsNew()).toBeTruthy(), SHOW);
     expect(tour()).toBeNull();
     fireEvent.click(await screen.findByTestId('whats-new-close'));
@@ -175,7 +196,7 @@ describe('OnboardingHost', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mount();
     await waitFor(() => expect(tour()).toBeTruthy(), SHOW);
-    fireEvent.click(screen.getByRole('button', { name: 'Skip tour' }));
+    fireEvent.keyDown(screen.getByTestId('tour-card'), { key: 'Escape' });
     await waitFor(() => expect(warn).toHaveBeenCalled());
     // A refetch brings back the stored (unchanged) settings.
     await act(() => queryClient.invalidateQueries({ queryKey: rpcKey('settings.get') }));

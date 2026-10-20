@@ -5,10 +5,11 @@
  * Pattern: the WAI-ARIA "auto-rotating carousel with tabs for slide control".
  * A small on-screen-display pill holds the rotation toggle, previous/next and
  * one dial tick per slide (a tablist: arrows move and choose, Home/End jump):
- * beside the button row from lg up, in the top corner below it. On a touch
- * screen a sideways swipe over the hero turns the slide too, and the pill's
- * buttons grow to 44 px; a phone drops previous/next for that room. Rotation
- * pauses while the pointer is over the hero or focus is inside it, while the
+ * beside the button row from lg up, in the top corner below it. On a phone
+ * there is no pill: the toggle and the ticks are a plain row centred under the
+ * buttons, and previous/next go (a sideways swipe turns the slide). On a touch
+ * screen the toggle and the ticks grow to 44 px targets; the drawn dots stay
+ * small. Rotation pauses while the pointer is over the hero or focus is inside it, while the
  * window is hidden, unfocused or the hero is scrolled away, and never starts
  * under prefers-reduced-motion. It also rests after
  * HERO_IDLE_ROUNDS full rounds without any pointer, key or wheel input in the
@@ -658,10 +659,16 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
 
       {count > 1 && (
         // Top corner on smaller screens, beside the button row from lg up (the copy column has
-        // the room then). On a phone the chevrons go, so the ticks keep 44 px each: a swipe
-        // over the hero moves (onPointerUp on the section) and the ticks choose.
+        // the room then). On a phone the capsule goes: a 270 px dark pill of six dots over the
+        // artwork read as a broken field and outweighed the title. There the toggle and the dots
+        // are a plain row under the buttons (HERO_BODY leaves the room), the chevrons go, and the
+        // ticks keep 44 px each: a swipe over the hero moves (onPointerUp on the section) and the
+        // ticks choose. The toggle stays: a rotation that runs by itself needs a way to stop it.
         <div
-          className="absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-14"
+          className={cn(
+            'absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-14',
+            'max-sm:inset-x-0 max-sm:top-auto max-sm:bottom-1 max-sm:justify-center max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:p-0 max-sm:shadow-none',
+          )}
           data-testid="hero-controls"
         >
           {canRotate && (

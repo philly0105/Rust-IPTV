@@ -33,12 +33,19 @@ vi.mock('@/features/player', () => ({
   PlayerDock: () => null,
   ExternalPlaybackFooter: () => null,
 }));
+const queue = vi.hoisted(() => ({ calls: [] as unknown[] }));
+vi.mock('@/features/vod/lib/episodeQueue', () => ({
+  queueSeriesFrom: async (args: unknown) => {
+    queue.calls.push(args);
+  },
+}));
 
 const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');
 const { queryClient } = await import('@/api/query');
 const { useConnectionStore } = await import('../../connection');
-const { liveCandidates, onNowItems, trendingMatch } = await import('../DashboardPage');
+const { firstProgrammeEnd, liveCandidates, onNowItems, trendingMatch } = await import('../DashboardPage');
+const { splitEpisodeLine } = await import('../cards');
 const { useToastStore } = await import('@/ui');
 
 function routes() {
@@ -102,6 +109,7 @@ beforeEach(() => {
   queryClient.clear();
   localStorage.clear();
   playerMock.playItem.mockClear();
+  queue.calls.length = 0;
   useToastStore.setState({ toasts: [] });
   useConnectionStore.setState({ offline: false, backOnline: false });
 });
@@ -116,10 +124,36 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
     const rail = await screen.findByTestId('dashboard-rail-continue-watching');
     const card = await within(rail).findByRole('button', { name: 'Resume Harbor Nine' });
     expect(card.querySelector('.aspect-video')).toBeTruthy();
-    // The episode moved off the artwork into the caption.
-    expect(within(card).getByText('S2 E4 · Calm Before')).toBeTruthy();
+    // The episode moved off the artwork into the caption, its code and title split so every
+    // separator in the line is MetaLine's drawn dot (spoken as a comma), none typed in the text.
+    expect(within(card).getByText('S2 E4')).toBeTruthy();
+    expect(within(card).getByText('Calm Before')).toBeTruthy();
     expect(within(card).getByText('60 minutes left')).toBeTruthy();
+    const caption = within(card).getByText('Calm Before').closest('span.flex')!;
+    expect(caption.textContent).toBe('S2 E4·, Calm Before·, 60 minutes left');
+    expect(caption.querySelectorAll('[aria-hidden]')).toHaveLength(2);
     expect(within(rail).getByRole('link', { name: 'See all' }).getAttribute('href')).toBe('/recent');
+  });
+
+  it('splits the episode line into its code and title', () => {
+    expect(splitEpisodeLine('S2 E4 · Calm Before')).toEqual(['S2 E4', 'Calm Before']);
+    expect(splitEpisodeLine('S01E02')).toEqual(['S01E02', undefined]);
+    expect(splitEpisodeLine('Calm Before')).toEqual([undefined, 'Calm Before']);
+    expect(splitEpisodeLine(undefined)).toEqual([undefined, undefined]);
+  });
+
+  it('a series resumed from its card or the hero gets the series queue, so the next episode follows', async () => {
+    home({ continue: cards });
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-continue-watching');
+    fireEvent.click(await within(rail).findByRole('button', { name: 'Resume Harbor Nine' }));
+    await waitFor(() => expect(queue.calls).toHaveLength(1));
+    expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: series, episodeId: 'e4' }));
+    expect(queue.calls[0]).toEqual({ ref: series, sourceKind: 'xtream', title: 'Harbor Nine', episodeId: 'e4' });
+    // A movie has no queue to start.
+    fireEvent.click(within(rail).getByRole('button', { name: 'Resume The Long Signal' }));
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledTimes(2));
+    expect(queue.calls).toHaveLength(1);
   });
 
   it('right click, Shift+F10 and the card button open Go to details, Mark watched and Remove', async () => {
@@ -295,6 +329,34 @@ describe('On now (CB-PROGRAM-ART)', () => {
     expect(within(rail).getByRole('button', { name: 'Play Sport 1' })).toBeTruthy();
     expect(within(rail).getByRole('link', { name: 'See all' }).getAttribute('href')).toBe('/s/s1/live');
     expect(screen.queryByText('Nothing to show yet')).toBeNull();
+  });
+});
+
+describe('the guide refresh on Home', () => {
+  it('asks epg.nowNext only while the live rails are on', async () => {
+    const favorite: FavoriteEntry = { ref: sport, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: { title: 'Sport 1', contentType: 'live' } };
+    home({ channels: [channel(news, 'News 24')], favorites: [favorite], nowNext: { 's1|live|c1': onAir('Morning Bulletin') } });
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, liveFavorites: false } });
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'favorites.list')).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext')).toHaveLength(0);
+  });
+
+  it('knows when its answer goes out of date: the first programme to end, with the guide offset', () => {
+    const at = (iso: string) => Date.parse(iso);
+    const answer: Record<string, EpgNowNext> = {
+      a: { now: { channelId: 'a', title: 'A', start: '2026-10-20T18:00:00Z', end: '2026-10-20T19:00:00Z' } },
+      b: { now: { channelId: 'b', title: 'B', start: '2026-10-20T18:00:00Z', end: '2026-10-20T18:30:00Z' } },
+      // Nothing on: it goes out of date when the next programme starts.
+      c: { next: { channelId: 'c', title: 'C', start: '2026-10-20T18:20:00Z', end: '2026-10-20T19:00:00Z' } },
+      d: {},
+    };
+    expect(firstProgrammeEnd(answer)).toBe(at('2026-10-20T18:20:00Z'));
+    expect(firstProgrammeEnd(answer, 60)).toBe(at('2026-10-20T19:20:00Z'));
+    expect(firstProgrammeEnd({ d: {} })).toBeUndefined();
+    expect(firstProgrammeEnd(undefined)).toBeUndefined();
   });
 });
 

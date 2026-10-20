@@ -250,8 +250,6 @@
   "insecureLink": "Come configurare HTTPS",
   "welcomeHeading": "Benvenuto in Tsrust IPTV",
   "welcomeLead": "TV in diretta, film e serie dalle tue playlist e dai tuoi provider, con una guida TV completa.",
-  "welcomePrivacyDesktop": "Le tue sorgenti, la cronologia e le impostazioni restano su questo computer.",
-  "welcomePrivacyServer": "Le tue sorgenti, la cronologia e le impostazioni restano sul tuo server Tsrust.",
   "moreActionsFor": "Altre azioni per {{title}}",
   "goToDetails": "Vai ai dettagli",
   "removeFromContinue": "Rimuovi da Continua a guardare",

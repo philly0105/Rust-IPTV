@@ -245,8 +245,6 @@
   "insecureLink": "如何設定 HTTPS",
   "welcomeHeading": "歡迎使用 Tsrust IPTV",
   "welcomeLead": "來自播放清單和供應商的直播電視、電影和影集，並附完整電視節目表。",
-  "welcomePrivacyDesktop": "您的播放來源、觀看記錄和設定都保留在這台電腦上。",
-  "welcomePrivacyServer": "您的播放來源、觀看記錄和設定都保留在您的 Tsrust 伺服器上。",
   "moreActionsFor": "{{title}} 的更多動作",
   "goToDetails": "前往詳細資訊",
   "removeFromContinue": "從繼續觀看中移除",

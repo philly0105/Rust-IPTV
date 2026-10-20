@@ -245,8 +245,6 @@
   "insecureLink": "HTTPS 설정 방법",
   "welcomeHeading": "Tsrust IPTV에 오신 것을 환영합니다",
   "welcomeLead": "재생 목록과 제공업체의 라이브 TV, 영화, 시리즈를 전체 TV 편성표와 함께.",
-  "welcomePrivacyDesktop": "소스, 기록, 설정은 이 컴퓨터에 저장됩니다.",
-  "welcomePrivacyServer": "소스, 기록, 설정은 내 Tsrust 서버에 저장됩니다.",
   "moreActionsFor": "{{title}} 추가 작업",
   "goToDetails": "세부 정보로 이동",
   "removeFromContinue": "이어서 시청에서 제거",

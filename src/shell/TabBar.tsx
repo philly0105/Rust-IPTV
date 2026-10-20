@@ -15,7 +15,7 @@
  */
 
 import { CalendarRange, ChevronRight, House, LayoutGrid, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
 
@@ -23,7 +23,7 @@ import type { Source } from '@/api/types';
 import { cn, Dialog, SourceMonogram } from '@/ui';
 
 import { isLiveRoute, LIBRARY_LINKS, liveTabTarget, readLastSource } from './navigation';
-import { railLinks } from './railLinks';
+import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useVisibleSources } from './useVisibleSources';
 
 /** The bar's own height, in rem against the 15 px root: it follows the UI scale, not density. */
@@ -56,10 +56,26 @@ export const TabBar = memo(function TabBar() {
   const sources = useVisibleSources();
   const { pathname, key } = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreOpenRef = useRef(moreOpen);
+  moreOpenRef.current = moreOpen;
+  // The sheet closed because one of its links moved on: focus goes to the new page, not back to More.
+  const leftFromSheet = useRef(false);
   // A tab or a link in the sheet moved on: the sheet belongs to the page it opened over.
-  useEffect(() => setMoreOpen(false), [key]);
+  useEffect(() => {
+    if (!moreOpenRef.current) return;
+    leftFromSheet.current = true;
+    setMoreOpen(false);
+  }, [key]);
+  // Runs after the sheet's own focus return (its layout effect), which put focus back on More.
+  useEffect(() => {
+    if (moreOpen || !leftFromSheet.current) return;
+    leftFromSheet.current = false;
+    document.getElementById('main')?.focus({ preventScroll: true });
+  }, [moreOpen]);
 
-  const live = liveTabTarget(sources.data, readLastSource());
+  // The source on show first: the remembered one is written in an effect after this render, so
+  // reading only that left the tab on the previous source until the next navigation.
+  const live = liveTabTarget(sources.data, routeSourceId(pathname) ?? readLastSource());
   const tabs: Tab[] = [
     { id: 'home', to: '/dashboard', label: t('tabHome'), icon: House, active: pathname === '/dashboard' },
     // No sources yet: the tab leads to adding one, as Home does.
@@ -91,6 +107,8 @@ export const TabBar = memo(function TabBar() {
             type="button"
             aria-haspopup="dialog"
             aria-expanded={moreOpen}
+            // The page on show lives in the sheet: More is the current tab, said as well as drawn.
+            aria-current={moreActive ? 'true' : undefined}
             data-tab="more"
             onClick={() => setMoreOpen(true)}
             className={tabClass(moreActive)}
@@ -170,7 +188,8 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
               <li key={s.id} className="flex flex-col gap-2 rounded-lg border border-edge bg-surface-2 p-3">
                 <div className="flex min-w-0 items-center gap-3">
                   <SourceMonogram name={s.name} className="size-9 rounded-md text-sm" />
-                  <span dir="auto" title={s.name} className="min-w-0 flex-1 truncate text-body font-medium text-fg">
+                  {/* text-match-parent: a Latin name in an RTL layout stays beside its monogram (as in the rail). */}
+                  <span dir="auto" title={s.name} className="min-w-0 flex-1 truncate text-match-parent text-body font-medium text-fg">
                     {s.name}
                   </span>
                 </div>
@@ -180,7 +199,7 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
                   {railLinks(s, { hasRadio: (s.radioCount ?? 0) > 0 })
                     .filter((l) => l.id !== 'favorites' && l.id !== 'recent')
                     .map((l) => {
-                    const active = current(l.to);
+                    const active = railLinkCurrent(l, pathname);
                     return (
                       <li key={l.id}>
                         <NavLink

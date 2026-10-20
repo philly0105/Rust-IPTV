@@ -547,8 +547,10 @@ describe('DashboardPage', () => {
     expect(welcome.querySelector('svg')).toBeTruthy();
     for (const kind of ['m3u', 'xtream', 'stalker']) expect(within(welcome).getByTestId(`onboard-${kind}`)).toBeTruthy();
     expect(within(welcome).getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
-    // The browser build keeps its data on the server.
-    expect(within(welcome).getByText(/stay on your Tsrust server/)).toBeTruthy();
+    // The browser build keeps its logins on the server, said once: the onboarding's line, with no
+    // second privacy sentence of the welcome's own under it.
+    expect(within(welcome).getByText(/kept on the server that runs this app/)).toBeTruthy();
+    expect(within(welcome).queryByText(/stay on your Tsrust server/)).toBeNull();
     // One call to action: the rail shows no add row of its own beside the welcome.
     expect(screen.queryByTestId('rail-add-source')).toBeNull();
 
@@ -841,7 +843,10 @@ describe('polish pass (B7)', () => {
     expect(within(overlay).getByText('Back 10 seconds')).toBeTruthy();
     expect(within(overlay).getByText('Exit picture in picture')).toBeTruthy();
     expect(within(overlay).getByText('Search channels')).toBeTruthy();
-    expect(within(overlay).getAllByText('In the search box: move to the list')).toHaveLength(2);
+    // Enter and Down do the same there: one row with both keys.
+    const toList = within(overlay).getAllByText('In the search box: move to the list');
+    expect(toList).toHaveLength(1);
+    expect(toList[0]!.closest('[data-combos]')!.getAttribute('data-combos')).toBe('enter arrowdown');
     for (const section of overlay.querySelectorAll('section')) {
       const ids = section.getAttribute('aria-labelledby')!.split(/\s+/);
       expect(ids).toHaveLength(1);

@@ -44,7 +44,7 @@ import { usePageHeader } from '../hooks/usePageHeader';
 import { useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useSourcePin } from '../hooks/useSourcePin';
-import { useDetailEscapeBack } from '../hooks/useBackKey';
+import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { formatClock, isResumable, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
@@ -126,7 +126,10 @@ export function MovieDetailPage() {
   const pinnedWatch = useWatchState(pinnedOther?.ref ?? ref);
   const watching = ownWatch.active || (!!pinnedOther && pinnedWatch.active);
   useEscapeToClose(watching, playback.stop);
-  useDetailEscapeBack(!watching, `/s/${encodeURIComponent(sourceId)}/movies`);
+  const moviesHref = `/s/${encodeURIComponent(sourceId)}/movies`;
+  useDetailEscapeBack(!watching, moviesHref);
+  // The header's Back does what Escape does: back where you came from, or to the movies landing.
+  const goBack = useGoBack(moviesHref);
   // Back from an actor or a similar title: the page opens where you left it.
   const { pathname } = useLocation();
   useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item });
@@ -140,11 +143,14 @@ export function MovieDetailPage() {
     categoryId: item?.categoryId,
   });
   // The header title is also the window and tab title (and the history entry), so while browsing
-  // it is the title's own name, even with the hero showing it large. Watching, the stage's own bar
-  // names the title and the source right under the header, so the header names the section and
-  // the window keeps the title (documentTitle).
-  const header = watching ? { title: t('movies'), documentTitle: pageTitle } : { title: pageTitle, subtitle: source.data?.name };
-  usePageHeader(header, [watching, pageTitle, source.data?.name]);
+  // it is the title's own name. On screen the header leads with Back and names the section while
+  // the hero shows the title large; the title fades into the header once the hero's h1 scrolls
+  // away (section). Watching, the stage's own bar names the title and the source right under the
+  // header, so the header names the section and the window keeps the title (documentTitle).
+  const header = watching
+    ? { title: t('movies'), documentTitle: pageTitle }
+    : { title: pageTitle, subtitle: source.data?.name, section: t('movies'), back: { onClick: goBack } };
+  usePageHeader(header, [watching, pageTitle, source.data?.name, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'movie'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).

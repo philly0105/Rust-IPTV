@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { Fragment, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isDesktop } from '@/api/transport';
@@ -161,25 +161,30 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'mod+k', descKey: 'scTourReplay', area: 'Tour' },
 ];
 
+/**
+ * The order of the groups: what every screen shares, then playback (the most used), live TV and
+ * the guide, the other pages, the keys of lists and dialogs, and the rare ones last (parental
+ * controls, then the tour, whose replay row closes the reference).
+ */
 const AREA_ORDER = [
   'Global',
-  'Parental controls',
-  'Navigation',
+  'Playback',
+  'Seek bar',
   'Live',
   'Guide',
-  'Lists',
   'Multi-view',
   'Vod',
   'Search',
+  'Navigation',
+  'Lists',
   'My List',
-  'Sources',
   'Favorites',
+  'Sources',
   'Downloads',
   'My videos',
   'Stats',
-  'Playback',
-  'Seek bar',
   'Dialogs and lists',
+  'Parental controls',
   'Tour',
 ];
 /**
@@ -263,6 +268,24 @@ export function shortcutReference(registered: ShortcutInfo[], t: (key: string) =
   return groupShortcuts(registered, documented, label);
 }
 
+/**
+ * One row per action: keys that do the same thing in an area (Enter and Down both move from the
+ * search box to the list) share a row, "Enter or Down", instead of the sentence twice. Order is
+ * kept. Settings > Shortcuts merges its rows the same way.
+ */
+export function mergeShortcutRows(items: readonly ShortcutInfo[]): { description: string; combos: string[] }[] {
+  const out: { description: string; combos: string[] }[] = [];
+  const at = new Map<string, number>();
+  for (const s of items) {
+    const i = at.get(s.description);
+    if (i === undefined) {
+      at.set(s.description, out.length);
+      out.push({ description: s.description, combos: [s.combo] });
+    } else if (!out[i]!.combos.includes(s.combo)) out[i]!.combos.push(s.combo);
+  }
+  return out;
+}
+
 /** Text the overlay filter matches: the description, the combo, and its printed keys ("Ctrl", "PgUp"). */
 export function shortcutHaystack(s: ShortcutInfo): string {
   return `${s.description} ${s.combo} ${comboKeys(s.combo).join(' ')}`.toLowerCase();
@@ -322,20 +345,26 @@ function OpenShortcutOverlay() {
           {groups.map(([area, list], gi) => (
             // Area names have spaces; an IDREF must not, so the id comes from useId plus the index.
             <section key={area} aria-labelledby={`${idBase}-area-${gi}`} className="mb-7 min-w-0 break-inside-avoid">
-              {/* Quiet group labels: the accent marks actions, not headings. */}
-              <h3 id={`${idBase}-area-${gi}`} className="mb-1.5 text-caption font-semibold tracking-wider text-fg-subtle uppercase">
+              {/* Quiet group labels in sentence case, as the rail, the palette and the More sheet label their groups. */}
+              <h3 id={`${idBase}-area-${gi}`} className="mb-1.5 text-caption font-medium text-fg-subtle">
                 {area}
               </h3>
               <dl className="flex flex-col">
-                {list.map((s) => (
+                {mergeShortcutRows(list).map((s) => (
                   <div
-                    key={`${s.combo}|${s.description}`}
-                    data-combo={s.combo}
+                    key={`${s.combos.join(' ')}|${s.description}`}
+                    data-combo={s.combos[0]}
+                    data-combos={s.combos.join(' ')}
                     className="flex min-h-10 items-center justify-between gap-4 border-b border-divider py-1.5 last:border-b-0"
                   >
                     <dt className="text-body-sm text-fg">{s.description}</dt>
-                    <dd className="shrink-0">
-                      <Kbd combo={s.combo} />
+                    <dd className="flex shrink-0 items-center gap-1.5">
+                      {s.combos.map((combo, i) => (
+                        <Fragment key={combo}>
+                          {i > 0 && <span className="text-caption text-fg-subtle">{t('settings:shortcutsOr')}</span>}
+                          <Kbd combo={combo} />
+                        </Fragment>
+                      ))}
                     </dd>
                   </div>
                 ))}

@@ -350,7 +350,10 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
   const rows = (n: number) =>
     Array.from({ length: n }, (_, i) => (
       <div key={i} className={cn('flex h-(--rail-item-height) items-center gap-3', collapsed ? 'justify-center' : 'px-3')}>
-        <Skeleton className="size-[calc(18rem/15)] shrink-0 rounded-sm" />
+        {/* The rail's 20 px glyph box, so the label bars start where the labels will. */}
+        <span className="inline-flex size-5 shrink-0 items-center justify-center">
+          <Skeleton className="size-[calc(18rem/15)] rounded-sm" />
+        </span>
         {!collapsed && <Skeleton className={cn('h-3', i % 3 === 0 ? 'w-24' : i % 3 === 1 ? 'w-20' : 'w-28')} />}
       </div>
     ));

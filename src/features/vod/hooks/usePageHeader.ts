@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-import { useShell, type HeaderSearch } from '@/shell';
+import { useShell, type HeaderBack, type HeaderSearch } from '@/shell';
 
 export interface PageHeader {
   title: string;
@@ -9,11 +9,16 @@ export interface PageHeader {
   subtitle?: string;
   actions?: ReactNode;
   search?: HeaderSearch;
+  /** The header's Back control (HeaderState.back). */
+  back?: HeaderBack;
+  /** What the header names until the page's own title scrolls away (HeaderState.section). */
+  section?: string;
 }
 
 /**
  * Publishes the page header to the shell (C16). The latest header is pushed
- * whenever one of `deps` changes; the shell clears it on unmount.
+ * whenever one of `deps` changes; the shell clears it on unmount. The Back
+ * control always runs the page's latest handler, so it needs no deps of its own.
  */
 export function usePageHeader(header: PageHeader, deps: readonly unknown[]): void {
   const shell = useShell();
@@ -27,6 +32,8 @@ export function usePageHeader(header: PageHeader, deps: readonly unknown[]): voi
     if (h.subtitle) out.subtitle = h.subtitle;
     if (h.actions) out.actions = h.actions;
     if (h.search) out.search = h.search;
+    if (h.back) out.back = { ...h.back, onClick: () => headerRef.current.back?.onClick() };
+    if (h.section) out.section = h.section;
     shell.setHeader(out);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shell, ...deps]);

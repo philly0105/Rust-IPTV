@@ -377,7 +377,10 @@ describe('MovieDetailPage', () => {
       fireEvent.keyDown(document.body, { key: 'Escape' });
     });
     await waitFor(() => expect(screen.queryByTestId('player-stage')).toBeNull());
-    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Dune: Part Two', subtitle: 'Alpha IPTV' }));
+    // Browsing again, the header leads with Back and names the section until the hero's title scrolls away.
+    await waitFor(() =>
+      expect(useShellStore.getState().header).toEqual({ title: 'Dune: Part Two', subtitle: 'Alpha IPTV', section: 'Movies', back: { onClick: expect.any(Function) } }),
+    );
   });
 
   it('B4-vod-D20: a Stalker movie (not in the local catalog) never asks catalog.sameTitle and shows no other sources', async () => {

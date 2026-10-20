@@ -21,7 +21,7 @@ import {
   Tv,
   type LucideIcon,
 } from 'lucide-react';
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
@@ -43,6 +43,8 @@ import { cn, Dialog, Kbd, Poster, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
 import { ALL_NAV_LINKS } from './navigation';
+import { playFromShell, type PlayItemArgs } from './playFromShell';
+import { railFadeMask } from './Rail';
 import { railLinks } from './railLinks';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
@@ -105,7 +107,8 @@ interface PaletteItem {
   group: string;
   icon?: LucideIcon;
   /** A picture instead of the icon: a channel's logo. */
-  image?: { src: string; sourceId: string };
+  /** A channel logo (fitted into the tile), or with `poster` a title's poster (cropped to fill it). */
+  image?: { src: string; sourceId: string; poster?: boolean };
   shortcut?: string;
   keywords?: string[];
   /** Quiet trailing text: a favourite's or recent item's kind, then its source when there are several. */
@@ -219,10 +222,9 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
     if (!empty) return [];
     const sourceById = new Map((sources.data ?? []).map((s) => [s.id, s]));
     const many = sourceById.size > 1;
-    const play = (args: Parameters<typeof import('@/features/player').playItem>[0], title: string) => () =>
-      void import('@/features/player')
-        .then(({ playItem }) => playItem(args))
-        .catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title }), description: errorDescription(err) }));
+    // A series episode resumes with its series queue, so the next episode follows (playFromShell).
+    const play = (args: PlayItemArgs, title: string) => () =>
+      void playFromShell(args).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title }), description: errorDescription(err) }));
     const items: PaletteItem[] = [];
     const seen = new Set<string>();
     const channels = t('groupRecentChannels');
@@ -257,6 +259,8 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
         title,
         group: continuing,
         icon: p.ref.contentType === 'series' ? Layers : Clapperboard,
+        // The title's poster, as the channel rows above show their logos; the glyph only without one.
+        image: p.snapshot.posterUrl ? { src: p.snapshot.posterUrl, sourceId: p.ref.sourceId, poster: true } : undefined,
         detail: p.snapshot.subtitle ? [p.snapshot.subtitle] : undefined,
         run: play(
           { ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot.subtitle, posterUrl: p.snapshot.posterUrl, isLive: false, isRadio: false, sourceKind: source.kind },
@@ -528,6 +532,24 @@ export function CommandPalette() {
     return () => cancelAnimationFrame(raf);
   }, [query]);
 
+  // The list fades out at its bottom edge while more of it is below, so the row the edge cuts
+  // reads as continuing, not as a layout fault (the shortcut reference fades the same way).
+  const [moreBelow, setMoreBelow] = useState(false);
+  useEffect(() => {
+    const list = listRef.current;
+    if (!open || !list) return;
+    const update = () => setMoreBelow(list.scrollHeight - list.clientHeight - list.scrollTop > 1);
+    update();
+    list.addEventListener('scroll', update, { passive: true });
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    ro?.observe(list);
+    if (list.firstElementChild) ro?.observe(list.firstElementChild);
+    return () => {
+      list.removeEventListener('scroll', update);
+      ro?.disconnect();
+    };
+  }, [open, ranked]);
+
   const close = () => {
     setOpen(false);
     setQuery('');
@@ -569,7 +591,13 @@ export function CommandPalette() {
           />
           <Kbd combo="escape" className="pointer-coarse:hidden" />
         </div>
-        <Cmdk.List ref={listRef} className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-contain p-2">
+        <Cmdk.List
+          ref={listRef}
+          data-fade-bottom={moreBelow || undefined}
+          style={railFadeMask(false, moreBelow)}
+          // Tall enough on a 900 px window for the first suggested action to show whole.
+          className="max-h-[min(64vh,32rem)] overflow-y-auto overscroll-contain p-2"
+        >
           <Cmdk.Empty className="px-4 py-10 text-center text-sm text-fg-muted">{t('paletteEmpty')}</Cmdk.Empty>
           {ranked.map(([group, list]) => (
             <Cmdk.Group key={group} heading={group}>
@@ -578,7 +606,9 @@ export function CommandPalette() {
                 return (
                   <Cmdk.Item key={it.id} value={`${it.title}${VALUE_SEP}${it.id}`} keywords={it.keywords} onSelect={() => run(it.run)} className={row}>
                     <span aria-hidden className={iconTile}>
-                      {it.image ? (
+                      {it.image?.poster ? (
+                        <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" className="size-full after:hidden" rounded="sm" />
+                      ) : it.image ? (
                         <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" fit="contain" kind="live" className="bg-transparent after:hidden [&_img]:p-0.5" rounded="sm" />
                       ) : (
                         Icon && <Icon size={16} />

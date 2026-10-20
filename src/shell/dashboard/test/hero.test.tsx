@@ -346,6 +346,22 @@ describe('HeroCarousel', () => {
     expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
   });
 
+  it('on a phone the controls are a plain dot row under the buttons, with the pause toggle kept', async () => {
+    const { HERO_BODY } = await import('../HeroSkeleton');
+    renderHero();
+    const controls = screen.getByTestId('hero-controls');
+    // No capsule below sm: no fill, edge or shadow, centred along the bottom of the hero.
+    for (const c of ['max-sm:bg-transparent', 'max-sm:border-0', 'max-sm:shadow-none', 'max-sm:top-auto', 'max-sm:bottom-1', 'max-sm:inset-x-0', 'max-sm:justify-center']) {
+      expect(controls.className, c).toContain(c);
+    }
+    // The copy leaves room for that row under its buttons.
+    expect(HERO_BODY).toMatch(/(^| )pb-14( |$)/);
+    // A rotation that runs by itself keeps its pause control on every width (WCAG 2.2.2).
+    expect(within(controls).getByTestId('hero-rotation').className).not.toContain('max-sm:hidden');
+    // The drawn dots stay small; only their hit areas grow under touch.
+    expect(within(controls).getAllByRole('tab')[1]!.firstElementChild!.className).toContain('w-1.5');
+  });
+
   it('never rotates under reduced motion, and the controls still move by hand', () => {
     stubReducedMotion(true);
     vi.useFakeTimers();

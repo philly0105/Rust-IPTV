@@ -2,8 +2,8 @@
  * Shell hooks (SPEC C16) and the layout route component (C7).
  */
 
-export { useShell, useShellHeader, useShellStore } from './store';
-export type { HeaderSearch, HeaderState, ShellApi } from './store';
+export { useHeaderTitleAnchor, useShell, useShellHeader, useShellStore } from './store';
+export type { HeaderBack, HeaderSearch, HeaderState, ShellApi } from './store';
 export { registerCommands, useCommands, useCommandList, commandRegistry } from './commands';
 export type { Command } from './commands';
 export { useShortcut, useShortcutList, shortcutRegistry, parseCombo, normalizeCombo, matches as comboMatches } from './shortcuts';

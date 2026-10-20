@@ -8,7 +8,7 @@ import { MyListButton, canSave, useInMyList } from '@/features/mylist';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { intlLocale, listSeparator } from '@/lib/intl';
-import { CARD_ART, CARD_ROOT, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, initialsOf, useImageChain } from '@/ui';
+import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, initialsOf, useImageChain } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 import { sourceHomePath } from '../railLinks';
@@ -568,6 +568,17 @@ function CardMenuButton({ label, tabIndex, onOpen }: { label: string; tabIndex: 
   );
 }
 
+/**
+ * "S2 E4 · Calm Before" as its code and its title. A line without the separator is a title
+ * alone, unless it is only a code ("S2 E4"). Exported for tests.
+ */
+export function splitEpisodeLine(line: string | undefined): [code: string | undefined, title: string | undefined] {
+  if (!line) return [undefined, undefined];
+  const at = line.indexOf(' · ');
+  if (at >= 0) return [line.slice(0, at).trim() || undefined, line.slice(at + 3).trim() || undefined];
+  return /^S\d+\s*E\d+$/i.test(line.trim()) ? [line.trim(), undefined] : [undefined, line];
+}
+
 export interface ContinueCardProps {
   rail: RailCardProps;
   title: string;
@@ -596,6 +607,7 @@ export function ContinueCard({ rail, title, episode, left, progress, posterUrl, 
   const { t } = useTranslation('shell');
   const openMenu = useContext(CardMenuContext);
   const open = openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, label: title, items: menu }) : undefined;
+  const [episodeCode, episodeTitle] = splitEpisodeLine(episode);
   return (
     <div className="group/wide relative min-w-0">
       <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(open)} aria-label={ariaLabel} className={cardRoot}>
@@ -617,15 +629,26 @@ export function ContinueCard({ rail, title, episode, left, progress, posterUrl, 
           {title}
         </span>
         {(episode || left) && (
-          <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
-            {episode && (
-              <span dir="auto" title={episode} className="min-w-0 truncate text-match-parent">
-                {episode}
-              </span>
-            )}
-            {episode && left && <span aria-hidden className="shrink-0 text-fg-subtle">·</span>}
-            {left && <span className={cn('tabular', episode ? 'shrink-0' : 'truncate')}>{left}</span>}
-          </span>
+          // One line, every separator MetaLine's drawn dot: the episode line's own "·" (the snapshot
+          // subtitle, "S2 E4 · Calm Before") is split into its code and its title. Only the
+          // episode title gives way, so the code and the time left always show whole.
+          <MetaLine
+            as="span"
+            className="flex-nowrap whitespace-nowrap [&>span]:shrink-0 [&>span:has(>[data-shrink])]:shrink"
+            items={[
+              episodeCode,
+              episodeTitle && (
+                <span data-shrink="" dir="auto" title={episodeTitle} className="block truncate text-match-parent">
+                  {episodeTitle}
+                </span>
+              ),
+              left && (
+                <span data-shrink={episode ? undefined : ''} className={cn('tabular', !episode && 'block truncate')}>
+                  {left}
+                </span>
+              ),
+            ]}
+          />
         )}
       </button>
       {open && <CardMenuButton label={t('moreActionsFor', { title })} tabIndex={rail.tabIndex} onOpen={(el) => open(buttonMenuAnchor(el))} />}

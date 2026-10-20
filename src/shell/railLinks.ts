@@ -82,6 +82,25 @@ export function railLinks(source: RailLinkSource & Pick<Source, 'id'>, opts: Rai
   return railLinkIds(source, opts).map((id) => ({ id, to: `${base}/${id}`, ...DEFS[id] }));
 }
 
+/** Whether `pathname` is `path` or a page under it. */
+function under(pathname: string, path: string): boolean {
+  return pathname === path || pathname.startsWith(`${path}/`);
+}
+
+/**
+ * Whether a source's link stands for the page on show. Its own path and the pages under it count
+ * (`/s/:id/series/:itemId`), and so do the pages that sit beside it: a movie's detail and player
+ * at `/s/:id/movie/:itemId` belong to Movies, and the catch-up archive at `/live/archive/:id/...`
+ * to Live TV. A plain prefix match marked nothing on either.
+ */
+export function railLinkCurrent(link: Pick<RailLink, 'id' | 'to'>, pathname: string): boolean {
+  if (under(pathname, link.to)) return true;
+  const base = link.to.slice(0, link.to.length - link.id.length - 1);
+  if (link.id === 'movies') return under(pathname, `${base}/movie`);
+  if (link.id === 'live') return under(pathname, `/live/archive/${base.slice('/s/'.length)}`);
+  return false;
+}
+
 /**
  * Where a source opens (`/s/:id`, the add toast, the source cards): its live channels, or, when
  * an import found none, the first section that holds something (movies, series, radio).

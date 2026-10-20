@@ -1,6 +1,6 @@
 // Loop 1 VOD fixes: series and episode watched marks stay in step (L1-vod-1), one named watched
 // toast per series (L1-vod-14), a fresh visit opens the Resume season (L1-vod-11), a Back control
-// on the detail hero (L1-vod-2) and a designed state for a removed source (L1-vod-13).
+// for the detail page, in the shell header (L1-vod-2), and a designed state for a removed source (L1-vod-13).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
@@ -8,7 +8,8 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ItemRef, PlaybackPosition, SeriesDetail, VodDetail } from '@/api/types';
-import { useToastStore } from '@/ui';
+import { useShellStore } from '@/shell';
+import { BackButton, useToastStore } from '@/ui';
 
 import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
@@ -174,6 +175,12 @@ describe('SeriesDetailPage season on entry (L1-vod-11)', () => {
 });
 
 describe('Detail Back control (L1-vod-2)', () => {
+  /** The shell header's Back, as the page publishes it (the header itself is tested in the shell). */
+  function HeaderBack() {
+    const back = useShellStore((s) => s.header?.back);
+    return back ? <BackButton onClick={back.onClick} label={back.label} /> : null;
+  }
+
   function renderMovie(entries: string[]) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     return render(
@@ -185,6 +192,7 @@ describe('Detail Back control (L1-vod-2)', () => {
               <Route path="/s/:sourceId/movies" element={<div data-testid="landing" />} />
               <Route path="/s/:sourceId/movies/c/:categoryId" element={<div data-testid="grid" />} />
             </Routes>
+            <HeaderBack />
           </MemoryRouter>
         </I18nextProvider>
       </QueryClientProvider>,
@@ -199,7 +207,15 @@ describe('Detail Back control (L1-vod-2)', () => {
 
   it('opened cold, it goes to the movies landing', async () => {
     renderAt('/s/src1/movie/m7', [
-      { path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> },
+      {
+        path: '/s/:sourceId/movie/:itemId',
+        element: (
+          <>
+            <MovieDetailPage />
+            <HeaderBack />
+          </>
+        ),
+      },
       { path: '/s/:sourceId/movies', element: <div data-testid="landing" /> },
     ]);
     fireEvent.click(await screen.findByRole('button', { name: 'Back' }));

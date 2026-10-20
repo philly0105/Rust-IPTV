@@ -41,7 +41,7 @@ import {
 import { usePageHeader } from '../hooks/usePageHeader';
 import { recallSeason, rememberSeason, useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
-import { useDetailEscapeBack } from '../hooks/useBackKey';
+import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched, offlineResumeSeconds } from '../lib/format';
 import { itemLanguage, languageName } from '../lib/language';
@@ -181,7 +181,10 @@ export function SeriesDetailPage() {
   const playback = usePlayback(target);
   const downloads = useItemDownloads(ref, playback.canDownload);
   useEscapeToClose(watch.active, playback.stop);
-  useDetailEscapeBack(!watch.active, `/s/${encodeURIComponent(sourceId)}/series`);
+  const seriesHref = `/s/${encodeURIComponent(sourceId)}/series`;
+  useDetailEscapeBack(!watch.active, seriesHref);
+  // The header's Back does what Escape does: back where you came from, or to the series landing.
+  const goBack = useGoBack(seriesHref);
   // Back from an actor or a similar title: the page opens where you left it.
   const { pathname } = useLocation();
   useScrollMemory({ key: pathname, getScroller: () => scrollRef.current, ready: !!model && !!item });
@@ -197,10 +200,13 @@ export function SeriesDetailPage() {
   const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'series', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
     categoryId: item?.categoryId,
   });
-  // The header title is also the window and tab title, so it stays the series' name; watching, the
-  // stage's bar names it, the header names the section and the window keeps the name (see MovieDetailPage).
-  const header = watch.active ? { title: t('series'), documentTitle: pageTitle } : { title: pageTitle, subtitle: source.data?.name };
-  usePageHeader(header, [watch.active, pageTitle, source.data?.name]);
+  // The header title is also the window and tab title, so it stays the series' name; on screen the
+  // header names the section until the hero's h1 scrolls away. Watching, the stage's bar names it,
+  // the header names the section and the window keeps the name (see MovieDetailPage).
+  const header = watch.active
+    ? { title: t('series'), documentTitle: pageTitle }
+    : { title: pageTitle, subtitle: source.data?.name, section: t('series'), back: { onClick: goBack } };
+  usePageHeader(header, [watch.active, pageTitle, source.data?.name, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).

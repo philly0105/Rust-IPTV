@@ -2,12 +2,14 @@ import { CircleAlert, Star } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useGoBack } from '../../hooks/useBackKey';
+// The store module, not the barrel: pages that mock '@/shell' in their tests still render the hero.
+import { useHeaderTitleAnchor } from '@/shell/store';
+
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
-import { BackButton, MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, useImageChain } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, useImageChain } from '@/ui';
 import { formatList } from '@/lib/intl';
 import { CastRow } from './CastRow';
 
@@ -18,11 +20,15 @@ const HERO_GRID =
 
 /**
  * Space above the poster: room for the artwork when there is a backdrop, little when there is none.
- * On a phone the poster sits just under the Back pill, so the first screen holds the title, Play
- * and the plot rather than a band of empty gradient (critique: phone detail).
+ * Back lives in the shell header, so nothing sits in that space: on a phone the poster starts a
+ * little way into the artwork, so the first screen holds the title, Play and the plot rather than
+ * a band of empty gradient (critique: phone detail).
  */
-const HERO_TOP_WITH_ART = 'pt-[clamp(88px,20vh,240px)] max-sm:pt-20';
-const HERO_TOP_PLAIN = 'pt-[clamp(56px,9vh,112px)] max-sm:pt-20';
+const HERO_TOP_WITH_ART = 'pt-[clamp(88px,20vh,240px)] max-sm:pt-10';
+const HERO_TOP_PLAIN = 'pt-10 max-sm:pt-6';
+/** The same with a Back pill of the page's own in the hero's top corner (`back`). */
+const HERO_TOP_WITH_ART_BACK = 'pt-[clamp(88px,20vh,240px)] max-sm:pt-20';
+const HERO_TOP_PLAIN_BACK = 'pt-[clamp(56px,9vh,112px)] max-sm:pt-20';
 
 export interface DetailHeroProps {
   model: DetailModel;
@@ -45,8 +51,8 @@ export interface DetailHeroProps {
   /** Cast names link to their actor pages only when TMDB can show them (VL-tmdb-deadend). */
   castLinks?: boolean;
   /**
-   * The Back control in the hero's top corner, for a page that is not a catalogue title (My Videos'
-   * detail goes back to the library). Default: back in history, else to the movies or series landing.
+   * A Back control of the page's own in the hero's top corner. The catalogue pages put Back in the
+   * shell header instead (usePageHeader `back`), so by default the hero has none.
    */
   back?: ReactNode;
 }
@@ -65,6 +71,9 @@ export function DetailHero({ model, sourceId, actions, progress, chips, note, no
   const rating = formatRating(model.rating, i18n.language);
   const language = model.language ? languageName(model.language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined;
   const plotLong = (model.plot?.length ?? 0) > 360;
+  // The header names the section until this h1 scrolls away, then fades the title in.
+  const titleRef = useHeaderTitleAnchor();
+  const top = model.backdropUrl ? (back ? HERO_TOP_WITH_ART_BACK : HERO_TOP_WITH_ART) : back ? HERO_TOP_PLAIN_BACK : HERO_TOP_PLAIN;
 
   return (
     // Not `isolate`: the backdrop's -z-10 must resolve against the page's
@@ -73,11 +82,8 @@ export function DetailHero({ model, sourceId, actions, progress, chips, note, no
     // An isolated hero would paint its bleed over the season tabs below.
     <section className="relative" aria-labelledby="vod-detail-title">
       <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} />
-      {/* L1-vod-2: the window has no browser chrome, so Back is on the page. */}
-      <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">
-        {back ?? <DetailBack fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />}
-      </div>
-      <div className={cn(HERO_GRID, model.backdropUrl ? HERO_TOP_WITH_ART : HERO_TOP_PLAIN)}>
+      {back && <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">{back}</div>}
+      <div className={cn(HERO_GRID, top)}>
         <div
           className="self-end overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:row-span-2 sm:self-start"
           data-testid="vod-detail-poster"
@@ -87,7 +93,7 @@ export function DetailHero({ model, sourceId, actions, progress, chips, note, no
         </div>
         <div className="flex min-w-0 flex-col gap-2 self-end">
           {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
-          <h1 id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-title">
+          <h1 ref={titleRef} id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-title">
             {model.titleBase ?? model.title}
           </h1>
           <MetaLine
@@ -171,19 +177,12 @@ export function HeroActionGroup({ children, className }: { children: ReactNode; 
 export const HERO_MENU_TRIGGER =
   'h-12 w-12 rounded-full border border-edge bg-surface-2 text-fg hover:bg-surface-3 hover:text-fg active:bg-pressed active:text-fg';
 
-/** The hero's Back pill: the kit back button on a frosted page surface (pass it with `back`). */
-export const HERO_BACK = 'border border-edge bg-surface/80 text-fg shadow-1 glass-blur hover:bg-surface hover:text-fg active:bg-surface-2';
-
 /**
- * Back to where you came from (the grid or search restores its place), or to the
- * movies/series landing when the page was opened cold. The kit back button on a
- * frosted page surface: it reads on any backdrop, and in the light theme it is a
- * light pill instead of a dark glass capsule over pale artwork (critique: light detail).
+ * The hero's Back pill, for a page that passes its own `back`: the kit back button on a frosted
+ * page surface, so it reads on any backdrop, and in the light theme it is a light pill instead of
+ * a dark glass capsule over pale artwork (critique: light detail).
  */
-function DetailBack({ fallbackHref }: { fallbackHref: string }) {
-  const goBack = useGoBack(fallbackHref);
-  return <BackButton onClick={goBack} className={HERO_BACK} data-testid="vod-detail-back" />;
-}
+export const HERO_BACK = 'border border-edge bg-surface/80 text-fg shadow-1 glass-blur hover:bg-surface hover:text-fg active:bg-surface-2';
 
 function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; posterUrl?: string; sourceId: string }) {
   const image = useImageChain([backdropUrl, posterUrl], sourceId);

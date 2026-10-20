@@ -10,7 +10,7 @@ import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/
 
 import { useOffline } from './connection';
 import { LIBRARY_LINKS, WATCH_LINKS, type NavLinkDef } from './navigation';
-import { railLinks, routeSourceId } from './railLinks';
+import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { kindShortKey } from './sourceKind';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
@@ -30,6 +30,9 @@ const itemClass = (active: boolean, collapsed: boolean, dim = false) =>
       ? 'tuning-tick bg-selected text-fg active:bg-active'
       : cn(dim ? 'text-fg-subtle' : 'text-fg-muted', 'hover:bg-hover hover:text-fg active:bg-active'),
   );
+
+/** The leading glyph's box: the 18 px icons and the source monograms both sit in it. */
+const RAIL_GLYPH = 'inline-flex size-5 shrink-0 items-center justify-center';
 
 function RailNavLink({
   to,
@@ -53,7 +56,10 @@ function RailNavLink({
       >
         {({ isActive }) => (
           <>
-            <Icon aria-hidden size={18} className={cn('shrink-0', isActive && 'text-accent')} />
+            {/* One 20 px box for every leading glyph (icons and source monograms), so the labels share a column. */}
+            <span aria-hidden className={RAIL_GLYPH}>
+              <Icon size={18} className={cn(isActive && 'text-accent')} />
+            </span>
             {!collapsed && <span className="truncate">{label}</span>}
           </>
         )}
@@ -93,7 +99,16 @@ function GroupLabel({
     );
   }
   return (
-    <div className={cn('flex h-8 items-center justify-between pe-1 pt-2', disclosure ? 'ps-1' : 'ps-3')}>
+    // Sticky inside the scrolling block, so "Library" and "Sources" stay readable while their
+    // links scroll under them; each label gives way to the next group's (it sticks within its group).
+    // A short fade under it softens the row coming out from beneath it.
+    <div
+      className={cn(
+        'sticky top-0 z-[1] flex h-8 items-center justify-between bg-surface pe-1 pt-2',
+        'after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1.5 after:bg-linear-to-b after:from-surface after:to-transparent',
+        disclosure ? 'ps-1' : 'ps-3',
+      )}
+    >
       {/*
         With a disclosure the button's label truncates, not the heading: the heading's overflow
         clip cut the button's focus ring off on three sides.
@@ -106,7 +121,8 @@ function GroupLabel({
             aria-controls={disclosure.controls}
             onClick={disclosure.onToggle}
             data-rail-group-toggle=""
-            className="group/label flex h-6 max-w-full items-center gap-1 rounded-sm px-2 text-match-parent hover:text-fg-muted motion-safe:transition-colors"
+            // At least 24 CSS px tall at every UI scale (WCAG 2.5.8 target size); h-6 is 22.5 px at the 15 px root.
+            className="group/label flex h-[max(1.5rem,24px)] max-w-full items-center gap-1 rounded-sm px-2 text-match-parent hover:text-fg-muted motion-safe:transition-colors"
           >
             <span className="truncate">{label}</span>
             {/* Shown while folded (the state), and on hover or focus (the way to fold it). */}
@@ -219,7 +235,8 @@ function RailGroup({
 
 function SourceMark({ source, size = 'sm', errorDot }: { source: Source; size?: 'sm' | 'md'; errorDot?: boolean }) {
   return (
-    <SourceMonogram name={source.name} className={cn('relative rounded-sm', size === 'sm' ? 'h-6 w-6 text-xs' : 'h-9 w-9 text-sm')}>
+    // sm fills the rail's 20 px glyph box (RAIL_GLYPH), so source names start on the nav labels' line.
+    <SourceMonogram name={source.name} className={cn('relative rounded-sm', size === 'sm' ? 'size-5 text-2xs' : 'h-9 w-9 text-sm')}>
       {/* The collapsed rail has no room for the status column, so the error rides on the monogram. */}
       {errorDot && <span className="absolute -top-1 -end-1 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-surface" />}
     </SourceMonogram>
@@ -278,55 +295,56 @@ function useRailMenu(want: boolean): [MenuComponent | null, () => void] {
 }
 
 /**
- * Which sources the user opened or closed in the rail, by id, kept across launches (SH-rail-ia):
- * a user who keeps one of three sources open finds it open next time. A UI preference, so in
- * localStorage, not the core's settings. Only a press writes it; a source opened because its page
- * is showing is not remembered as opened.
+ * The sources are an accordion: one open at a time, so expanding a second one never pushes the
+ * Library links and the group labels out of the rail. Which one the user left open (its id, or ''
+ * after closing it) is kept across launches (SH-rail-ia): a user who keeps one of three sources
+ * open finds it open next time. A UI preference, so in localStorage, not the core's settings. Only
+ * a press writes it; a source opened because its page is showing is not remembered as opened.
  */
-const RAIL_SOURCES_KEY = 'tsrust.railSources';
-/** Entries kept: the most recently pressed, so deleted sources age out. */
-const RAIL_SOURCES_MAX = 32;
+const RAIL_SOURCE_KEY = 'tsrust.railSource';
 
-function readRailSources(): Record<string, boolean> {
+/** The source the user left open: its id, '' when they closed it, null when they never pressed one. */
+function readRailSource(): string | null {
   try {
-    const v: unknown = JSON.parse(localStorage.getItem(RAIL_SOURCES_KEY) ?? '{}');
-    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, boolean>) : {};
+    return localStorage.getItem(RAIL_SOURCE_KEY);
   } catch {
-    return {};
+    return null;
   }
 }
 
-/** The source's remembered state, or undefined when the user never pressed it. */
-function railSourceOpen(id: string): boolean | undefined {
-  const v = readRailSources()[id];
-  return typeof v === 'boolean' ? v : undefined;
-}
-
-function rememberRailSource(id: string, open: boolean): void {
-  const all = readRailSources();
-  delete all[id];
-  all[id] = open;
-  const ids = Object.keys(all);
-  for (const old of ids.slice(0, Math.max(0, ids.length - RAIL_SOURCES_MAX))) delete all[old];
+function rememberRailSource(id: string | null): void {
   try {
-    localStorage.setItem(RAIL_SOURCES_KEY, JSON.stringify(all));
+    localStorage.setItem(RAIL_SOURCE_KEY, id ?? '');
   } catch {
     // storage blocked: the rail still opens and closes, it just forgets
   }
+}
+
+/**
+ * The open source before the user presses one this session and while no source's page shows:
+ * the one they left open, else the only source (Live TV, Movies and Series one click away), else
+ * none. Exported for tests.
+ */
+export function defaultOpenSource(sources: readonly Pick<Source, 'id'>[], remembered: string | null): string | null {
+  if (remembered === '') return null;
+  if (remembered && sources.some((s) => s.id === remembered)) return remembered;
+  return sources.length === 1 ? sources[0]!.id : null;
 }
 
 function SourceEntry({
   source,
   collapsed,
   active,
-  only = false,
+  expanded,
+  onToggle,
   tour,
 }: {
   source: Source;
   collapsed: boolean;
   active: boolean;
-  /** The only source: it opens expanded, so Live TV, Movies and Series are one click away (SH-rail-ia). */
-  only?: boolean;
+  /** Its links show (the rail's accordion decides; collapsed, the entry is a menu instead). */
+  expanded: boolean;
+  onToggle: () => void;
   tour?: 'live';
 }) {
   const { t } = useTranslation('shell');
@@ -346,17 +364,6 @@ function SourceEntry({
   }, [RailMenu]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  // Collapsed, the entry is a menu and has nothing to expand (nor a radio probe to start). The
-  // source of the page on show opens; otherwise the user's last press, else the only source opens.
-  const [expanded, setExpanded] = useState(() => active || (!collapsed && (railSourceOpen(source.id) ?? only)));
-  // Opening a source from a card or the palette expands its entry in the same render, not in an
-  // effect a commit later: the rail's scroll effect runs once per route, and it must find the
-  // active sub-link already on the page to bring it into view.
-  const [wasActive, setWasActive] = useState(active);
-  if (active !== wasActive) {
-    setWasActive(active);
-    if (active) setExpanded(true);
-  }
   // The collapsed rail's menu lists Radio only once the m3u radio probe has answered: hovering
   // or focusing the monogram starts it, so a narrow window pays for no probe it never opens.
   const [warm, setWarm] = useState(false);
@@ -417,7 +424,7 @@ function SourceEntry({
             tooltip={label}
             tooltipSide="inline-end"
             items={links.map((l) => {
-              const current = pathname === l.to || pathname.startsWith(`${l.to}/`);
+              const current = railLinkCurrent(l, pathname);
               return {
                 id: l.id,
                 label: t(l.labelKey),
@@ -469,8 +476,7 @@ function SourceEntry({
         data-tour={tour}
         onClick={() => {
           revealOnExpand.current = !expanded;
-          rememberRailSource(source.id, !expanded);
-          setExpanded(!expanded);
+          onToggle();
         }}
         className={cn(
           'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
@@ -495,29 +501,28 @@ function SourceEntry({
           className={cn('shrink-0 text-fg-subtle motion-safe:transition-transform', expanded ? 'rotate-0' : '-rotate-90 rtl:rotate-90')}
         />
       </button>
-      {/* The sublinks hang off a line through the middle of the source mark: px-3 plus half its w-6. */}
+      {/* The sublinks hang off a line through the middle of the source mark: px-3 plus half its size-5. */}
       {expanded && (
-        <ul id={listId} className="mt-0.5 mb-1 ms-6 flex flex-col gap-0.5 border-s border-divider ps-2">
-          {links.map((l) => (
-            <li key={l.id}>
-              <NavLink
-                to={l.to}
-                className={({ isActive }) =>
-                  cn(
+        <ul id={listId} className="mt-0.5 mb-1 ms-[1.375rem] flex flex-col gap-0.5 border-s border-divider ps-2">
+          {links.map((l) => {
+            // A movie's page and the catch-up archive count too (railLinkCurrent), which NavLink's prefix match missed.
+            const current = railLinkCurrent(l, pathname);
+            return (
+              <li key={l.id}>
+                <Link
+                  to={l.to}
+                  aria-current={current ? 'page' : undefined}
+                  className={cn(
                     'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-150',
-                    isActive ? 'tuning-tick bg-selected font-medium text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
-                  )
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <l.icon aria-hidden size={15} className={cn('shrink-0', isActive && 'text-accent')} />
-                    <span className="truncate">{t(l.labelKey)}</span>
-                  </>
-                )}
-              </NavLink>
-            </li>
-          ))}
+                    current ? 'tuning-tick bg-selected font-medium text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
+                  )}
+                >
+                  <l.icon aria-hidden size={15} className={cn('shrink-0', current && 'text-accent')} />
+                  <span className="truncate">{t(l.labelKey)}</span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </li>
@@ -543,9 +548,13 @@ export function liveTourSource(sources: readonly Source[] | undefined): Source |
 
 /** Fade masks for the rail's scrolling list: a soft edge where links continue out of view. */
 const FADE = '24px';
-export function railFadeMask(top: boolean, bottom: boolean): CSSProperties | undefined {
+/**
+ * `bottomSize`: how tall the bottom fade is. The sources' block fades over about a row (3rem), so a
+ * row half under the footer divider dissolves instead of showing the top half of its name.
+ */
+export function railFadeMask(top: boolean, bottom: boolean, bottomSize = FADE): CSSProperties | undefined {
   if (!top && !bottom) return undefined;
-  const stops = [top ? `transparent, #000 ${FADE}` : '#000', bottom ? `#000 calc(100% - ${FADE}), transparent` : '#000'];
+  const stops = [top ? `transparent, #000 ${FADE}` : '#000', bottom ? `#000 calc(100% - ${bottomSize}), transparent` : '#000'];
   const image = `linear-gradient(to bottom, ${stops.join(', ')})`;
   return { maskImage: image, WebkitMaskImage: image };
 }
@@ -611,6 +620,24 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const tourSourceId = liveTourSource(sources.data)?.id;
   const sourceCount = sources.data?.length ?? 0;
   const noSources = sources.isSuccess && sourceCount === 0;
+  // The sources' accordion. Undefined until this session decides (a press, or a source's page
+  // opening); until then the remembered press, or the only source, is open.
+  const [openSource, setOpenSource] = useState<string | null | undefined>(() => activeSourceId);
+  // A source's page opening (from a card or the palette) opens its entry in the same render, not
+  // in an effect a commit later: the rail's scroll effect runs once per route, and it must find
+  // the active sub-link already on the page to bring it into view.
+  const [lastActive, setLastActive] = useState(activeSourceId);
+  if (activeSourceId !== lastActive) {
+    setLastActive(activeSourceId);
+    if (activeSourceId) setOpenSource(activeSourceId);
+  }
+  const [remembered] = useState(readRailSource);
+  const openId = openSource !== undefined ? openSource : defaultOpenSource(sources.data ?? [], remembered);
+  const toggleSource = (id: string) => {
+    const next = openId === id ? null : id;
+    rememberRailSource(next);
+    setOpenSource(next);
+  };
   // Collapsed, each source is a menu: start its chunk now, while the sources still load.
   useEffect(() => {
     if (collapsed) void loadRailMenu().catch(() => {});
@@ -662,7 +689,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
             source={s}
             collapsed={collapsed}
             active={activeSourceId === s.id}
-            only={sourceCount === 1}
+            expanded={!collapsed && openId === s.id}
+            onToggle={() => toggleSource(s.id)}
             // The tour's "Live TV" step points at a source whose channels are there to watch.
             tour={s.id === tourSourceId ? 'live' : undefined}
           />
@@ -734,7 +762,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           data-testid="rail-scroll"
           data-fade-top={fade.top || undefined}
           data-fade-bottom={fade.bottom || undefined}
-          style={railFadeMask(fade.top, fade.bottom)}
+          // No fade at the top: the sticky group label is that edge, and a fade would dim it.
+          style={railFadeMask(false, fade.bottom, '3rem')}
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
         >
           {/* With no sources every Library page opens empty: the group steps back (SH-welcome-generic). */}

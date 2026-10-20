@@ -1,7 +1,7 @@
 // Icons Home already shares with the shell: a lucide glyph that the player also uses (Trash2) was
 // grouped into a chunk with player code, which put the player store in Home's first render.
 import { CalendarRange, CircleCheck, Clapperboard, CloudOff, Info, Layers, Search, Tv, X, type LucideIcon } from 'lucide-react';
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, type NavigateFunction } from 'react-router';
@@ -34,6 +34,7 @@ import { snapshotTitle } from '@/lib/title';
 import { Badge, EmptyState, ErrorState, useToast, errorDescription, whenIdle } from '@/ui';
 
 import { useOffline } from '../connection';
+import { playFromShell } from '../playFromShell';
 import { sourceBasePath, sourceHomePath } from '../railLinks';
 import { useShell } from '../store';
 import { useVisibleSources } from '../useVisibleSources';
@@ -125,6 +126,22 @@ function programmeProgress(start?: string, end?: string, offsetMinutes = 0, now 
   const e = Date.parse(end);
   if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return undefined;
   return Math.max(0, Math.min(1, (now - offsetMinutes * 60_000 - s) / (e - s)));
+}
+
+/**
+ * When a now/next answer first goes out of date (epoch ms, with the guide offset applied): the
+ * earliest end of a programme on now, or start of the next one on a channel with nothing on.
+ * Undefined when it lists neither; a guide that arrives later comes in through epg.changed.
+ * Exported for tests.
+ */
+export function firstProgrammeEnd(nowNext: Readonly<Record<string, EpgNowNext>> | undefined, offsetMinutes = 0): number | undefined {
+  let first: number | undefined;
+  for (const entry of Object.values(nowNext ?? {})) {
+    const at = entry.now ? entry.now.end : entry.next?.start;
+    const t = at ? Date.parse(at) : NaN;
+    if (Number.isFinite(t) && (first === undefined || t < first)) first = t;
+  }
+  return first === undefined ? undefined : first + offsetMinutes * 60_000;
 }
 
 /** Whole minutes until `end` (at least 1), with the guide offset applied; undefined without an end. */
@@ -338,12 +355,14 @@ function DashboardBody() {
     [liveOn, recentLiveOn, liveFavorites, recentLive, fillChannels],
   );
   // The favourites rail shows its programmes from the same answer, so it is in the list first.
+  // Only while Home's live rails are on: with them off nothing here shows a programme.
   const nowRefs = useMemo(() => {
+    if (!liveOn) return [];
     const refs = new Map<string, ItemRef>();
     for (const f of liveFavorites) refs.set(itemKey(f.ref), f.ref);
     for (const c of candidates) if (refs.size < NOW_NEXT_LIMIT) refs.set(itemKey(c.ref), c.ref);
     return [...refs.values()];
-  }, [liveFavorites, candidates]);
+  }, [liveOn, liveFavorites, candidates]);
   const epgOffset = settings.data?.epgOffsetMinutes ?? 0;
   // One call once the lists it asks about have all answered, so it is not made again with each.
   // The cards read only the programme's title and times: no descriptions, about half the bytes
@@ -360,17 +379,21 @@ function DashboardBody() {
   const favoriteNowSig = JSON.stringify(liveFavorites.map((f) => nowNext.data?.[itemKey(f.ref)]?.now ?? null));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const favoriteNowNext = useMemo(() => nowNext.data, [favoriteNowSig]);
-  // A minute tick while the window shows: the guide is asked again (a programme ended, the
-  // next one started) and the progress bars move on. One timer a minute, nothing while hidden.
+  // A minute tick while the window shows moves the progress bars on. The guide is asked again
+  // only once a programme in the answer has ended (most change on the hour and the half hour),
+  // not every minute. One timer a minute, nothing while hidden.
   const [minute, setMinute] = useState(() => Math.floor(Date.now() / 60_000));
   const refetchNowNext = nowNext.refetch;
   const nowNextOn = nowRefs.length > 0;
+  const nextChange = useMemo(() => firstProgrammeEnd(nowNext.data, epgOffset), [nowNext.data, epgOffset]);
+  const nextChangeRef = useRef(nextChange);
+  nextChangeRef.current = nextChange;
   useEffect(() => {
     if (!nowNextOn) return;
     const id = setInterval(() => {
       if (document.visibilityState === 'hidden') return;
       setMinute(Math.floor(Date.now() / 60_000));
-      void refetchNowNext();
+      if (nextChangeRef.current !== undefined && Date.now() >= nextChangeRef.current) void refetchNowNext();
     }, 60_000);
     return () => clearInterval(id);
   }, [nowNextOn, refetchNowNext]);
@@ -412,18 +435,15 @@ function DashboardBody() {
       }
       const isLive = args.ref.contentType === 'live' || args.ref.contentType === 'radio';
       // The player loads on the click (as the command palette does), not with Home's chunk (SH-2).
-      import('@/features/player')
-        .then(({ playItem }) =>
-          playItem({
-            ...args,
-            isLive,
-            isRadio: args.ref.contentType === 'radio',
-            sourceKind: source.kind,
-          }),
-        )
-        .catch((err: unknown) => {
-          toast({ variant: 'error', title: t('playFailed', { title: args.title }), description: errorDescription(err) });
-        });
+      // A series episode (Continue watching, the hero's Resume) also gets its series queue.
+      playFromShell({
+        ...args,
+        isLive,
+        isRadio: args.ref.contentType === 'radio',
+        sourceKind: source.kind,
+      }).catch((err: unknown) => {
+        toast({ variant: 'error', title: t('playFailed', { title: args.title }), description: errorDescription(err) });
+      });
     },
     [sourceById, toast, t],
   );

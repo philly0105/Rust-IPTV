@@ -10,11 +10,11 @@ export const HERO_FRAME = 'relative isolate overflow-hidden bg-glass-strong';
 /**
  * The hero's content box. Tall enough to be the page's opening shot (about half the window),
  * capped by the width so a short, wide window still shows the rails under it; taller on phones,
- * where the artwork takes the top and the copy the bottom. The copy starts on the page gutter,
- * on the header title's line.
+ * where the artwork takes the top and the copy the bottom, with room under the buttons for the
+ * slide dots (HeroCarousel). The copy starts on the page gutter, on the header title's line.
  */
 export const HERO_BODY =
-  'relative flex min-h-[clamp(26rem,70vh,34rem)] items-end px-(--page-gutter) pt-20 pb-8 sm:min-h-[clamp(22rem,min(56vh,44vw),38rem)] sm:pb-12';
+  'relative flex min-h-[clamp(26rem,70vh,34rem)] items-end px-(--page-gutter) pt-20 pb-14 sm:min-h-[clamp(22rem,min(56vh,44vw),38rem)] sm:pb-12';
 
 /**
  * The fade from the hero into the page under it. In the dark themes the stage melts into the

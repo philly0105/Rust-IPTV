@@ -245,8 +245,6 @@
   "insecureLink": "HTTPS nasıl kurulur",
   "welcomeHeading": "Tsrust IPTV'ye hoş geldiniz",
   "welcomeLead": "Oynatma listelerinizden ve sağlayıcılarınızdan canlı TV, filmler ve diziler, tam TV rehberiyle.",
-  "welcomePrivacyDesktop": "Kaynaklarınız, geçmişiniz ve ayarlarınız bu bilgisayarda kalır.",
-  "welcomePrivacyServer": "Kaynaklarınız, geçmişiniz ve ayarlarınız Tsrust sunucunuzda kalır.",
   "moreActionsFor": "{{title}} için diğer işlemler",
   "goToDetails": "Ayrıntılara git",
   "removeFromContinue": "İzlemeye devam et listesinden kaldır",

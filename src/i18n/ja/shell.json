@@ -245,8 +245,6 @@
   "insecureLink": "HTTPS の設定方法",
   "welcomeHeading": "Tsrust IPTV へようこそ",
   "welcomeLead": "プレイリストやプロバイダーのライブTV、映画、シリーズを、番組表と一緒に。",
-  "welcomePrivacyDesktop": "ソース、履歴、設定はこのコンピューターに保存されます。",
-  "welcomePrivacyServer": "ソース、履歴、設定はあなたの Tsrust サーバーに保存されます。",
   "moreActionsFor": "{{title}} のその他の操作",
   "goToDetails": "詳細を見る",
   "removeFromContinue": "「視聴を再開」から削除",

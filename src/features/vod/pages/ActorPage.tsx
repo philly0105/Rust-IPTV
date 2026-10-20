@@ -5,12 +5,14 @@ import { Link, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type SeriesItem, type TmdbBrief, type VodItem } from '@/api/types';
+import { useHeaderTitleAnchor } from '@/shell/store';
 
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { PosterRail } from '../components/PosterRail';
 import { TmdbErrorState } from '../components/TmdbErrorState';
 import { TmdbAttribution } from '../components/TmdbAttribution';
 import { useSettings, useSource } from '../hooks/queries';
+import { useGoBack } from '../hooks/useBackKey';
 import { useCatalogMatches } from '../hooks/useCatalogMatches';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
@@ -45,7 +47,11 @@ export function ActorPage() {
   const loaded = settings.tmdb.enabled && valid && !person.isError && !!person.data;
   // The person's name once known; before that "Cast", the row the page was opened from.
   const pageTitle = loaded && person.data ? person.data.name : t('cast');
-  usePageHeader({ title: pageTitle }, [pageTitle]);
+  // Back to the title the person was opened from, or the movies landing when opened cold. The
+  // header names the cast until the name's own h1 scrolls away, so the name is not shown twice.
+  const goBack = useGoBack(`/s/${encodeURIComponent(sourceId)}/movies`);
+  usePageHeader({ title: pageTitle, section: t('cast'), back: { onClick: goBack } }, [pageTitle, t]);
+  const nameRef = useHeaderTitleAnchor();
   const knownFor = person.data?.knownFor ?? NO_BRIEFS;
   const movieBriefs = useMemo(() => knownFor.filter((b) => b.mediaType === 'movie'), [knownFor]);
   const tvBriefs = useMemo(() => knownFor.filter((b) => b.mediaType === 'tv'), [knownFor]);
@@ -97,7 +103,7 @@ export function ActorPage() {
             <Poster src={p.profileUrl} alt={p.name} aspect="poster" eager />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <h1 id="vod-actor-name" className="text-display text-fg">
+            <h1 ref={nameRef} id="vod-actor-name" className="text-display text-fg">
               {p.name}
             </h1>
             {(born || p.placeOfBirth) && (

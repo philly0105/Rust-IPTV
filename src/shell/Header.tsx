@@ -1,19 +1,21 @@
-import { ListTree, Moon, PanelLeftOpen, Search, Sun } from 'lucide-react';
+import { Command, ListTree, Moon, PanelLeftOpen, Search, Sun } from 'lucide-react';
 import { memo, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { IconButton, Kbd, SearchInput, cn } from '@/ui';
+import { BackButton, IconButton, Kbd, SearchInput, cn } from '@/ui';
 
-import { useShellStore } from './store';
+import { useShellStore, type HeaderState } from './store';
 import { useTheme } from './theme';
 
 /**
- * The header's search slot (SH-header-search): one width on every page, so the field neither
+ * The header's search slot (SH-header-search): one box on every page, so the field neither
  * moves nor resizes between Home, a source's Movies and the search page. A page that searches
- * its own content puts its field here in the same box; otherwise the slot is the trigger that
- * opens the command palette. In rem, so it follows the UI scale. 15rem at the least: "Search
- * everything" and its Ctrl K hint fit whole in it, which at 14rem they did not on a 900 px window.
+ * its own content puts its field here; otherwise the slot is the trigger that opens the command
+ * palette. Both wear the same fill, control border and trailing key hint (Ctrl K for the palette,
+ * Ctrl F for the page's field), so the slot reads as one object. In rem, so it follows the UI
+ * scale. 15rem at the least: "Search everything" and its Ctrl K hint fit whole in it, which at
+ * 14rem they did not on a 900 px window.
  */
 export const HEADER_SEARCH_WIDTH = 'w-[clamp(15rem,24vw,22rem)]';
 /** The same width for a page's own field, from sm up (below sm it folds into an icon). Literal, for Tailwind's scanner. */
@@ -41,9 +43,15 @@ export const Header = memo(function Header({
   const panelOpen = useShellStore((s) => s.panelOpen);
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);
+  const titleScrolledAway = useShellStore((s) => s.titleScrolledAway);
   const { resolved, toggle } = useTheme();
   const windowTitle = header?.documentTitle || header?.title;
+  // A detail page names its section until its own large title scrolls away, then the title.
+  const showSection = !!header?.section && !titleScrolledAway;
+  const shownTitle = showSection ? header?.section : header?.title;
   const appName = t('appName');
+
+  const searchField = header?.search ? <HeaderField search={header.search} phone={phone} /> : null;
 
   // The window/tab title follows the page title, or the window title the page set (documentTitle).
   useEffect(() => {
@@ -69,6 +77,10 @@ export const Header = memo(function Header({
           data-testid="rail-show"
         />
       )}
+      {header?.back && (
+        // -ms-2: the arrow, not the button's padding, sits on the page gutter, as the content's edge does.
+        <BackButton onClick={header.back.onClick} label={header.back.label} className="-ms-2 shrink-0" data-testid="header-back" />
+      )}
       {/* Below sm the title gives way to the page search while it is in use (focused or holding a query). */}
       <div
         className={cn(
@@ -78,21 +90,29 @@ export const Header = memo(function Header({
           'max-sm:group-has-[[data-shell-search]:focus]/header:hidden max-sm:group-has-[[data-shell-search]:not(:placeholder-shown)]/header:hidden',
         )}
       >
-        {header?.title ? (
+        {shownTitle ? (
           <>
             {/*
               Not a heading: each page owns its single <h1> (C16), so the
               header title stays a styled paragraph to avoid two h1s. A long
-              title truncates; hovering it shows the whole name.
+              title truncates; hovering it shows the whole name. Keyed by what
+              it shows, so a detail page's title fades in as its h1 scrolls away
+              (and the section fades back as it returns).
             */}
-            <p dir="auto" title={header.title} className="truncate text-title" data-testid="page-title">
-              {header.title}
+            <p
+              key={header?.section ? (showSection ? 'section' : 'title') : 'title'}
+              dir="auto"
+              title={shownTitle}
+              className={cn('truncate text-title', header?.section && 'motion-safe:animate-fade-in')}
+              data-testid="page-title"
+            >
+              {shownTitle}
             </p>
             {/*
               The subtitle only takes the room the title leaves (flex-basis 0), so it truncates
               first and the title keeps its whole name for as long as it fits.
             */}
-            {header.subtitle && (
+            {header?.subtitle && (
               <p dir="auto" title={header.subtitle} className="hidden min-w-0 flex-1 basis-0 truncate text-sm text-fg-muted md:block" data-testid="page-subtitle">
                 {header.subtitle}
               </p>
@@ -127,37 +147,31 @@ export const Header = memo(function Header({
         />
       )}
 
-      {header?.search && (
-        <SearchInput
-          className={cn(
-            HEADER_FIELD_WIDTH,
-            /*
-              Below sm a fixed-width field would squeeze the page title to its first
-              letter, so the search folds into a search-icon button: the same input,
-              only narrow and borderless, so a click, Tab or Ctrl+F still lands in it.
-              Focused or holding a query, it unfolds over the title's space.
-            */
-            'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0',
-            'max-sm:focus-within:flex-1 max-sm:has-[input:not(:placeholder-shown)]:flex-1',
-            'max-sm:[&:not(:focus-within):has(input:placeholder-shown)>svg]:start-[calc(50%-8px)]',
-            'max-sm:[&:not(:focus-within)>input:placeholder-shown]:cursor-pointer max-sm:[&:not(:focus-within)>input:placeholder-shown]:border-transparent max-sm:[&:not(:focus-within)>input:placeholder-shown]:bg-transparent',
-            'max-sm:[&:not(:focus-within)>input:placeholder-shown:hover]:bg-surface-2 max-sm:[&:not(:focus-within)>input::placeholder]:text-transparent',
-          )}
-          size="sm"
-          value={header.search.value}
-          onChange={header.search.onChange}
-          onSubmit={header.search.onSubmit}
-          onKeyDown={header.search.onKeyDown}
-          placeholder={header.search.placeholder}
-          data-shell-search=""
-          // On a phone the tab bar's Search tab is the tour's search step.
-          data-tour={phone ? undefined : 'search'}
-        />
-      )}
+      {phone && searchField}
 
       {!phone && (
         <div className="flex shrink-0 items-center gap-1">
-          {!header?.search && (
+          {searchField && (
+            // The page's field takes the trigger's place; the palette keeps a small button before
+            // it, so the slot itself stays put (the same box and edges as on every other page).
+            <IconButton
+              label={t('commandPalette')}
+              shortcut="mod+k"
+              icon={<Command size={18} />}
+              aria-haspopup="dialog"
+              onClick={() => setPaletteOpen(true)}
+              data-testid="header-palette"
+            />
+          )}
+          {searchField ? (
+            <div className="group/search relative me-1 flex">
+              {searchField}
+              <Kbd
+                combo="mod+f"
+                className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 pointer-coarse:hidden group-has-[input:focus]/search:hidden group-has-[input:not(:placeholder-shown)]/search:hidden"
+              />
+            </div>
+          ) : (
             <button
               type="button"
               // One way in: the palette searches favourites, history, the guide and commands, and
@@ -168,9 +182,9 @@ export const Header = memo(function Header({
               data-testid="open-palette"
               className={cn(
                 HEADER_SEARCH_WIDTH,
-                // Looks like a field but opens the palette: a quiet edge that firms up to the field border on hover.
-                'me-1 flex h-8 items-center gap-2 rounded-md border border-edge bg-surface-2 ps-3 pe-1.5 text-sm text-fg-subtle',
-                'hover:border-border hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
+                // Looks like the page's field (its fill and control border) but opens the palette.
+                'me-1 flex h-8 items-center gap-2 rounded-md border border-border bg-surface-2 ps-3 pe-1.5 text-sm text-fg-subtle',
+                'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
               )}
             >
               <Search aria-hidden size={16} className="shrink-0" />
@@ -190,3 +204,38 @@ export const Header = memo(function Header({
     </header>
   );
 });
+
+/** The page's own search field in the header slot (header.search). */
+function HeaderField({ search, phone }: { search: NonNullable<HeaderState['search']>; phone: boolean }) {
+  return (
+    <SearchInput
+      className={cn(
+        HEADER_FIELD_WIDTH,
+        // The palette trigger's fill, under the field's own control border.
+        '[&>input]:bg-surface-2',
+        // Room for the Ctrl F hint while the field rests empty.
+        !phone && '[&>input:placeholder-shown:not(:focus)]:pe-16',
+        /*
+          Below sm a fixed-width field would squeeze the page title to its first
+          letter, so the search folds into a search-icon button: the same input,
+          only narrow and borderless, so a click, Tab or Ctrl+F still lands in it.
+          Focused or holding a query, it unfolds over the title's space.
+        */
+        'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0',
+        'max-sm:focus-within:flex-1 max-sm:has-[input:not(:placeholder-shown)]:flex-1',
+        'max-sm:[&:not(:focus-within):has(input:placeholder-shown)>svg]:start-[calc(50%-8px)]',
+        'max-sm:[&:not(:focus-within)>input:placeholder-shown]:cursor-pointer max-sm:[&:not(:focus-within)>input:placeholder-shown]:border-transparent max-sm:[&:not(:focus-within)>input:placeholder-shown]:bg-transparent',
+        'max-sm:[&:not(:focus-within)>input:placeholder-shown:hover]:bg-surface-2 max-sm:[&:not(:focus-within)>input::placeholder]:text-transparent',
+      )}
+      size="sm"
+      value={search.value}
+      onChange={search.onChange}
+      onSubmit={search.onSubmit}
+      onKeyDown={search.onKeyDown}
+      placeholder={search.placeholder}
+      data-shell-search=""
+      // On a phone the tab bar's Search tab is the tour's search step.
+      data-tour={phone ? undefined : 'search'}
+    />
+  );
+}

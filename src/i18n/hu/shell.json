@@ -245,8 +245,6 @@
   "insecureLink": "A HTTPS beállítása",
   "welcomeHeading": "Üdvözli a Tsrust IPTV",
   "welcomeLead": "Élő tévéadás, filmek és sorozatok a lejátszási listáiból és szolgáltatóitól, teljes műsorújsággal.",
-  "welcomePrivacyDesktop": "A források, az előzmények és a beállítások ezen a számítógépen maradnak.",
-  "welcomePrivacyServer": "A források, az előzmények és a beállítások a saját Tsrust-kiszolgálóján maradnak.",
   "moreActionsFor": "További műveletek: {{title}}",
   "goToDetails": "Ugrás a részletekhez",
   "removeFromContinue": "Eltávolítás a folytatandók közül",

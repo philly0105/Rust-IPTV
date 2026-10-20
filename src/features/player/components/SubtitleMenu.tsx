@@ -13,11 +13,12 @@ import type { Settings } from '@/api/types';
 import { toast } from '@/ui/Toast';
 import { errorDescription } from '@/ui/States';
 
+import { cn } from '../cn';
 import { useMediaStore } from '../media';
 import { peekSettings, setSettingsCache } from '../store';
 import { styleFromSettings } from '../subtitles/style';
 import { usePlayerSettings } from '../useSettings';
-import { MenuChoice, MenuRow } from './Controls';
+import { MENU_ITEM, MenuChoice, MenuRow, MenuSeparator } from './Controls';
 import { BackgroundChoice, ColorChoice, PositionSlider, SizeChoice } from './SubtitleStyleFields';
 
 /** Off, every track, then loading a file and the style view. `onDone` closes the menu. */
@@ -63,11 +64,11 @@ export function SubtitleTrackMenu({ onDone, onStyle }: { onDone(): void; onStyle
         <MenuChoice key={a.id} label={a.label} selected={a.selected} onClick={() => pick(a.id)} />
       ))}
       {tracks.length === 0 && (
-        <p className="player-on-glass-muted px-3 pt-0.5 pb-1.5 ps-9 text-xs" data-testid="subtitle-menu-empty">
+        <p className="player-on-glass-muted px-3 pt-0.5 pb-1.5 ps-9 text-caption" data-testid="subtitle-menu-empty">
           {t('subtitleNoTracks')}
         </p>
       )}
-      <div role="separator" className="mx-2 my-1 h-px bg-white/10" />
+      <MenuSeparator />
       <button
         type="button"
         role="menuitem"
@@ -75,7 +76,7 @@ export function SubtitleTrackMenu({ onDone, onStyle }: { onDone(): void; onStyle
         aria-busy={loading || undefined}
         onClick={load}
         data-testid="subtitle-load"
-        className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-start text-sm text-white hover:bg-white/10 aria-disabled:cursor-progress aria-disabled:text-white/70"
+        className={cn(MENU_ITEM, 'gap-2 aria-disabled:cursor-progress aria-disabled:text-on-glass-muted')}
       >
         {loading ? <LoaderCircle className="size-4 shrink-0 motion-safe:animate-spin" aria-hidden /> : <FileUp className="size-4 shrink-0" aria-hidden />}
         <span className="truncate">{loading ? t('subtitleLoading') : t('subtitleLoad')}</span>
@@ -110,7 +111,7 @@ export function SubtitleStyleMenu() {
   const settings = usePlayerSettings();
   if (!settings) {
     return (
-      <p role="status" className="player-on-glass-muted flex items-center gap-2 px-3 py-3 text-sm" data-testid="subtitle-style-loading">
+      <p role="status" className="player-on-glass-muted flex items-center gap-2 px-3 py-3 text-body-sm" data-testid="subtitle-style-loading">
         <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden />
         {t('subtitleStyle.loading')}
       </p>
@@ -118,7 +119,7 @@ export function SubtitleStyleMenu() {
   }
   const style = styleFromSettings(settings);
   const save = (patch: Partial<Settings>): void => saveSubtitleSettings(patch, t('subtitleStyle.saveFailed'));
-  const label = 'player-on-glass-muted px-1 text-xs';
+  const label = 'player-on-glass-muted px-1 text-caption';
   return (
     <div className="flex flex-col gap-2.5 px-2 pt-1 pb-2" data-testid="subtitle-style-menu">
       <div className="flex flex-col gap-1">

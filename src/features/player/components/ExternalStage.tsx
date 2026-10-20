@@ -7,6 +7,7 @@ import { stopExternalPlayback } from '../external';
 import { useMediaStore } from '../media';
 import { usePlayerStore } from '../store';
 import { usePlayerSettings } from '../useSettings';
+import { glassButton } from './glassButton';
 import { ScreenshotButton } from './lazyParts';
 
 export const PLAYER_NAMES = { mpv: 'MPV', vlc: 'VLC' } as const;
@@ -44,45 +45,38 @@ export function ExternalStage() {
   return (
     <div
       data-testid="external-stage"
-      className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#070b12] px-6 text-center text-white"
+      className="player-chrome player-stage-dark absolute inset-0 flex flex-col items-center justify-center gap-5 overflow-y-auto px-6 py-8 text-center"
     >
-      <span className="flex size-12 items-center justify-center rounded-full bg-white/8 ring-1 ring-white/15">
-        {failed ? <AlertTriangle className="size-5 text-warning" aria-hidden /> : <ExternalLink className="size-5 text-accent" aria-hidden />}
+      <span aria-hidden className="flex size-14 shrink-0 items-center justify-center rounded-full bg-white/8 ring-1 ring-white/15">
+        {failed ? <AlertTriangle className="size-6 text-warning" /> : <ExternalLink className="size-6" />}
       </span>
-      <div className="max-w-[min(36rem,100%)]" role={failed ? 'alert' : 'status'}>
-        <p className="text-sm text-white/70">
+      <div className="flex max-w-[min(36rem,100%)] flex-col gap-1" role={failed ? 'alert' : 'status'}>
+        <p className="text-body-sm text-on-glass-muted">
           {failed ? t('externalFailed') : launching ? t('externalOpening', { player: name }) : t('externalPlaying', { player: name })}
         </p>
-        <h2 className="mt-1 truncate font-display text-xl" title={source.title}>
+        <h2 dir="auto" className="truncate text-title" title={source.title}>
           {source.title}
         </h2>
-        {source.subtitle && <p className="truncate text-sm text-white/60">{source.subtitle}</p>}
-        {failed && error && <p className="mt-2 text-sm break-words text-white/70">{error}</p>}
+        {source.subtitle && (
+          <p dir="auto" className="truncate text-body-sm text-on-glass-muted">
+            {source.subtitle}
+          </p>
+        )}
+        {failed && error && <p className="mt-1 text-body-sm break-words text-on-glass-muted">{error}</p>}
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <button
-          type="button"
-          onClick={reopen}
-          disabled={launching}
-          className="inline-flex items-center gap-1.5 rounded-md bg-accent-solid px-3 py-1.5 text-sm font-medium text-accent-solid-fg hover:bg-accent-solid-hover disabled:opacity-50"
-        >
-          <RotateCcw className="size-4" aria-hidden />
+        <button type="button" onClick={reopen} disabled={launching} className={glassButton('primary')}>
+          <RotateCcw aria-hidden />
           {failed ? t('retry') : t('externalReopen', { player: name })}
         </button>
-        <button
-          type="button"
-          onClick={stop}
-          disabled={stopping}
-          aria-busy={stopping || undefined}
-          className="inline-flex items-center gap-1.5 rounded-md border border-white/25 px-3 py-1.5 text-sm hover:bg-white/10 disabled:opacity-50"
-        >
-          <Square className="size-3.5 fill-current" aria-hidden />
+        <button type="button" onClick={stop} disabled={stopping} aria-busy={stopping || undefined} className={glassButton('secondary')}>
+          <Square className="fill-current" aria-hidden />
           {t('stop')}
         </button>
         {/* Screenshot (C6): disabled here, with the reason (the external player has its own key). */}
         <ScreenshotButton stage />
       </div>
-      {!failed && <p className="text-xs text-white/50">{t('externalStopHint', { player: name })}</p>}
+      {!failed && <p className="max-w-md text-caption text-on-glass-muted">{t('externalStopHint', { player: name })}</p>}
     </div>
   );
 }

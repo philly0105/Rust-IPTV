@@ -117,20 +117,41 @@ describe('Controls options menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
     // In the submenu, the header's Back carries the view's name.
     fireEvent.click(screen.getByRole('menuitem', { name: /playback speed/i }));
-    expect(screen.getByRole('menuitem', { name: /^sync/i })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /^picture/i })).toBeTruthy();
     fireEvent.keyDown(menu()!, { key: 'Escape' });
     expect(menu()).toBeNull();
   });
 
-  it('Sync with nothing to adjust keeps focus in the menu, and Escape only leaves the view', () => {
+  it('leaves Sync out while nothing in it can be changed, and the browser has no audio row (PL-SYNC-DEAD-ROW)', () => {
     render(<Controls variant="dock" visible />);
     openMenu();
+    // Built-in player in the browser, no subtitles: no Sync row that opens on disabled rows.
+    expect(screen.queryByRole('menuitem', { name: /^sync/i })).toBeNull();
+    // A subtitle track (the stream's or a loaded file) brings it back, with the subtitle row only:
+    // audio delay needs embedded mpv, which the browser cannot run.
+    act(() => {
+      useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: true }] } });
+    });
     fireEvent.click(screen.getByRole('menuitem', { name: /^sync/i }));
-    // Built-in player, no subtitles: every step button is disabled; focus goes to Back.
+    expect(screen.getByTestId('sync-sub')).toBeTruthy();
+    expect(screen.queryByTestId('sync-audio')).toBeNull();
+    expect(screen.queryByText('Audio delay works only in the MPV player')).toBeNull();
+  });
+
+  it('a view with nothing to focus keeps focus in the menu on Back, and Escape only leaves the view', async () => {
+    act(() => {
+      useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: true }] } });
+    });
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^subtitles/i }));
+    // The style view holds fields, not menu items: focus goes to its Back.
+    fireEvent.click(await screen.findByRole('menuitem', { name: /subtitle style/i }));
+    await screen.findByRole('dialog', { name: 'Subtitle style' });
     expect(document.activeElement?.hasAttribute('data-menu-back')).toBe(true);
     fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(menu()).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: /playback speed/i })).toBeTruthy();
+    expect(await screen.findByRole('menuitem', { name: /subtitle style/i })).toBeTruthy();
   });
 
   // The step buttons carry kit tooltips that show at once on keyboard focus. Escape hides the

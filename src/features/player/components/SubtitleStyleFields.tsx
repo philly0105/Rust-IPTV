@@ -163,7 +163,7 @@ export function BackgroundChoice(props: {
               <span aria-hidden className="inline-flex h-6 items-center rounded-xs bg-black/70 px-1" style={varsOf({ size: 'medium', color: props.color, background: v, position: 0 })}>
                 <span className={cn('rounded-[2px] px-0.5 text-xs leading-tight font-semibold', SAMPLE_CLASS)}>Aa</span>
               </span>
-              <span className={props.tone === 'glass' ? 'text-xs' : undefined}>{label}</span>
+              <span className={props.tone === 'glass' ? 'text-caption' : undefined}>{label}</span>
             </>
           ),
           className: props.tone === 'page' ? 'px-2.5' : 'px-1.5',
@@ -215,7 +215,7 @@ export function PositionSlider({
           htmlFor={id}
           aria-live="polite"
           data-testid="subtitle-position-value"
-          className={cn('tabular-nums', tone === 'page' ? 'font-display text-lg font-semibold text-fg' : 'text-xs text-white/80')}
+          className={cn('tabular-nums', tone === 'page' ? 'font-display text-lg font-semibold text-fg' : 'text-caption text-on-glass-muted')}
         >
           {readout(draft)}
         </output>

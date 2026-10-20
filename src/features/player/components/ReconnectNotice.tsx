@@ -28,8 +28,8 @@ export function ReconnectNotice({ compact }: { compact: boolean }) {
         aria-live="polite"
         data-testid="reconnect-notice"
         className={cn(
-          'player-glass-strong inline-flex max-w-[90%] items-center rounded-full border px-3 py-1',
-          compact ? 'text-xs' : 'text-sm',
+          'player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border px-3 py-1',
+          compact ? 'text-caption' : 'text-body-sm',
         )}
       >
         <span className="truncate">{label}</span>

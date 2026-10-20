@@ -101,3 +101,25 @@ describe('plain copy for what the provider said (L2-player-13)', () => {
     }
   });
 });
+
+describe('copy that names only the ways out the screen offers (PL-ERROR-DEAD-ENDS)', () => {
+  it('without an external player to hand the stream to, the hints leave MPV and VLC out', () => {
+    const strings = en as Record<string, string>;
+    const cases: [StreamErrorClass, string | undefined, string][] = [
+      ['unsupported', 'codec not supported', 'errorUnsupportedBrowser'],
+      ['unsupported', NO_VIDEO_MESSAGE, 'errorNoVideoBrowser'],
+      ['media', undefined, 'errorMediaBrowser'],
+      ['generic', undefined, 'errorGenericBrowser'],
+    ];
+    for (const [cls, message, hint] of cases) {
+      expect(errorCopyKeys(cls, { message, external: 'none' }).hint).toBe(hint);
+      expect(strings[hint], hint).toBeTruthy();
+      expect(strings[hint]).not.toMatch(/MPV|VLC|external player/);
+      // The desktop app (MPV, VLC) and a shareable link keep the hints that name them.
+      expect(errorCopyKeys(cls, { message, external: 'app' }).hint).not.toBe(hint);
+      expect(errorCopyKeys(cls, { message, external: 'link' }).hint).not.toBe(hint);
+    }
+    // Hints that name no external player are the same everywhere.
+    expect(errorCopyKeys('auth', { external: 'none' }).hint).toBe('errorAuth');
+  });
+});

@@ -381,3 +381,112 @@ describe('PL-DUPLICATE-CHROME: a stage that heads itself', () => {
     expect(screen.getAllByTestId('live-badge')).toHaveLength(1);
   });
 });
+
+describe('stage 2 polish: the chrome around errors, menus and the zap banner', () => {
+  it('over a failed stream the bar lays no scrim over the error screen’s buttons', () => {
+    const { rerender } = render(<Controls variant="overlay" visible />);
+    const root = (): HTMLElement => document.querySelector<HTMLElement>('[data-player-controls]')!;
+    expect(root().className).toContain('player-scrim-bottom');
+    act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 404' }));
+    rerender(<Controls variant="overlay" visible />);
+    expect(root().className).not.toContain('player-scrim-bottom');
+  });
+
+  it('opening the options menu takes the zap banner down', async () => {
+    const { showZapBanner, useZapBanner } = await import('../zapBanner');
+    act(() => usePlayerStore.setState({ source: { ...vod, isLive: true, url: 'http://h/live.m3u8', ref: liveRef }, durationSeconds: undefined }));
+    handlers['settings.get'] = () => ({});
+    handlers['epg.nowNext'] = () => ({});
+    handlers['catalog.item'] = () => ({});
+    render(<PlayerSurface compact={false} channelPanelAvailable={false} />);
+    act(() => showZapBanner());
+    expect(useZapBanner.getState().visible).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Playback options' }));
+    expect(useZapBanner.getState().visible).toBe(false);
+  });
+
+  it('a submenu opens at its top, whatever the root view was scrolled to', () => {
+    render(<Controls variant="overlay" visible />);
+    fireEvent.click(screen.getByRole('button', { name: 'Playback options' }));
+    const menu = screen.getByTestId('player-options-menu');
+    menu.scrollTop = 120;
+    fireEvent.click(screen.getByRole('menuitem', { name: /^picture/i }));
+    expect(menu.scrollTop).toBe(0);
+  });
+
+  it('a menu cut short by a short stage fades out along its bottom edge until scrolled to its end', () => {
+    render(<Controls variant="overlay" visible />);
+    fireEvent.click(screen.getByRole('button', { name: 'Playback options' }));
+    const menu = screen.getByTestId('player-options-menu');
+    // jsdom has no layout: say the rows run 200 px past the bottom edge.
+    Object.defineProperty(menu, 'scrollHeight', { configurable: true, value: 420 });
+    Object.defineProperty(menu, 'clientHeight', { configurable: true, value: 220 });
+    fireEvent.scroll(menu);
+    expect(screen.getByTestId('menu-more')).toBeTruthy();
+    menu.scrollTop = 200;
+    fireEvent.scroll(menu);
+    expect(screen.queryByTestId('menu-more')).toBeNull();
+  });
+});
+
+describe('PL-TOUCH-ERGONOMICS: the seek bar under a coarse pointer', () => {
+  it('grows its hit area to 36 px and its thumb to 16 px around the same 4 px track', async () => {
+    const { SeekBar } = await import('./SeekBar');
+    render(<SeekBar min={0} max={600} value={100} buffered={[]} onSeek={() => undefined} />);
+    const slider = screen.getByRole('slider', { name: 'Seek' });
+    expect(slider.className).toContain('h-6');
+    expect(slider.className).toContain('pointer-coarse:h-9');
+    expect(screen.getByTestId('seek-thumb').className).toContain('pointer-coarse:size-4');
+    // The track itself stays 4 px (it thickens to 6 px under the pointer, not under the finger's hit area).
+    expect((slider.firstElementChild as HTMLElement).className).toMatch(/(^| )h-1( |$)/);
+  });
+});
+
+describe('short players: Up next and the end of a movie fit above the bar', () => {
+  /** A phone's 16:9 player: 320 x 180. */
+  const phoneSized = (): void => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(320);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(180);
+  };
+  afterEach(() => vi.restoreAllMocks());
+
+  it('Up next is one line across the top that still names the episode', () => {
+    phoneSized();
+    act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 600, durationSeconds: 600 }));
+    render(<PlayerSurface compact={false} channelPanelAvailable={false} />);
+    const episode = { ...vod, url: 'http://h/e2.mp4', title: 'Harbor Lights', subtitle: 'S01E02 · Low Tide' };
+    act(() => useMediaStore.setState({ upNext: { source: episode, deadline: Date.now() + 10_000 } }));
+    const card = screen.getByTestId('up-next');
+    expect(card.className).toContain('top-0');
+    expect(card.className).not.toContain('bottom-28');
+    expect(screen.getByTestId('up-next-title').textContent).toBe('S01E02 · Low Tide');
+    expect(screen.getByRole('button', { name: 'Play now' })).toBeTruthy();
+  });
+
+  it('the replay disc drops its label and sits under the title bar', () => {
+    phoneSized();
+    act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 600, durationSeconds: 600 }));
+    render(<PlayerSurface compact={false} channelPanelAvailable={false} />);
+    const overlay = screen.getByTestId('ended-overlay');
+    // Under the title bar (z-10), over the click layer (z-[5]).
+    expect(overlay.className).toContain('z-[8]');
+    const replay = overlay.querySelector('button')!;
+    expect(replay.getAttribute('aria-label')).toBe('Replay');
+    expect(replay.textContent).toBe('');
+  });
+});
+
+describe('a short player gives its end of item the whole height', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('hides its title bar while the replay disc or Up next is up', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(320);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(180);
+    render(<PlayerSurface compact={false} channelPanelAvailable={false} />);
+    const title = (): string => screen.getByTestId('player-titlebar').className;
+    act(() => usePlayerStore.setState({ status: 'paused', positionSeconds: 100 }));
+    expect(title()).not.toContain('opacity-0');
+    act(() => usePlayerStore.setState({ positionSeconds: 600 }));
+    expect(title()).toContain('opacity-0');
+  });
+});

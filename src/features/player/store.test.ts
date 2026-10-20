@@ -1388,3 +1388,33 @@ describe('saved titles (L2-fix-app-library)', () => {
     queryClient.clear();
   });
 });
+
+describe('replayFromRef: the item again, its stream looked up anew (PL-ERROR-DEAD-ENDS)', () => {
+  it('a live channel is read again from the catalog, not from the row this session held', async () => {
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'm3u' });
+    handlers['epg.nowNext'] = () => ({});
+    // The row the session learned first carries the old address.
+    await playChannel(channel(1, { url: 'http://h/old/101.m3u8' }), 'm3u');
+    expect(usePlayerStore.getState().source?.url).toBe('http://h/old/101.m3u8');
+    handlers['catalog.item'] = () => channel(1, { url: 'http://h/new/101.m3u8' });
+    await expect(store.replayFromRef()).resolves.toBe(true);
+    expect(usePlayerStore.getState().source?.url).toBe('http://h/new/101.m3u8');
+  });
+
+  it('a movie keeps its queue and resumes where it was', async () => {
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/movie/9.m3u8', kind: 'hls', title: 'srv', isLive: false, isRadio: false });
+    handlers['positions.get'] = () => ({ ref: { sourceId: 's1', contentType: 'movie', itemId: '9' }, positionSeconds: 600, durationSeconds: 3000, updatedAt: '' });
+    const next = vod('10');
+    await usePlayerStore.getState().play(vod('9', { url: 'http://x/movie/9.ts' }), { queue: [next] });
+    await expect(store.replayFromRef()).resolves.toBe(true);
+    const s = usePlayerStore.getState();
+    expect(s.source?.url).toBe('http://x/movie/9.m3u8');
+    expect(s.source?.resumeSeconds).toBe(600);
+    expect(s.queue).toEqual([next]);
+  });
+
+  it('without a ref there is nothing to look up', async () => {
+    await usePlayerStore.getState().play({ url: 'http://h/a.mp4', kind: 'direct', title: 'A', isLive: false, isRadio: false });
+    await expect(store.replayFromRef()).resolves.toBe(false);
+  });
+});

@@ -286,3 +286,18 @@ describe('fullscreen channel panel button', () => {
     expect(button()).toBeTruthy();
   });
 });
+
+describe('fullscreen channel panel empty states (PL-COPY-I18N)', () => {
+  it('a search that finds nothing names what it looked for; an empty group says so plainly', async () => {
+    play(5);
+    // An empty group, and nothing for any search.
+    rpcMock.handlers['catalog.channels'] = (a) => {
+      const { offset, limit } = (a as { query: { offset: number; limit: number } }).query;
+      return { items: [], total: 0, offset, limit };
+    };
+    mount();
+    expect(await screen.findByText('No channels to show')).toBeTruthy();
+    fireEvent.change(search(), { target: { value: 'zzz' } });
+    expect(await screen.findByText('No channels match “zzz”')).toBeTruthy();
+  });
+});

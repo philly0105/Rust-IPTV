@@ -14,7 +14,7 @@ import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { MenuAction, MenuChoice, MenuRow, MenuSeparator, MenuToggle, PictureRows, SpeedRows, usePictureSummary } from './Controls';
 import { SleepMenu, SleepRowValue } from './SleepTimer';
 import { SubtitleStyleMenu, SubtitleTrackMenu } from './SubtitleMenu';
-import { SyncRows, useSyncSummary } from './SyncMenu';
+import { SyncRows, useSyncAvailable, useSyncSummary } from './SyncMenu';
 
 /** Gap kept between the menu and the window edges, in CSS px. */
 const EDGE = 8;
@@ -55,6 +55,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   const pipActive = usePipStore((s) => s.active);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const syncSummary = useSyncSummary();
+  const syncAvailable = useSyncAvailable();
   const pictureValue = usePictureSummary();
   const rate = useMediaStore((s) => s.rate);
 
@@ -71,9 +72,10 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   }, [at.x, at.y, view]);
 
   useEffect(() => {
-    // Sync rows may all be disabled and the style view has no items: the first enabled item, else
-    // Back, so focus stays in the menu.
+    // A new view starts at its top (the frame is the same element). The style view has no
+    // items: the first enabled item, else Back, so focus stays in the menu.
     const menu = ref.current;
+    if (menu) menu.scrollTop = 0;
     (
       menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back])') ??
       menu?.querySelector<HTMLElement>('[data-menu-back]')
@@ -216,7 +218,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           {isVod && (
             <MenuRow label={t('speed')} value={rate === 1 ? t('speedNormal') : t('speedValue', { speed: rate })} onClick={() => setView('speed')} />
           )}
-          <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
+          {syncAvailable && <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />}
           <MenuRow label={t('picture')} value={pictureValue} onClick={() => setView('picture')} />
           {/* Sleep timer (C5), as in the options menu. */}
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />

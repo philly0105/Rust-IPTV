@@ -55,25 +55,25 @@ function OpenPanel({ className }: { className?: string }) {
       onDoubleClick={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       className={cn(
-        'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-30 w-64 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-white motion-safe:animate-pop-in',
+        'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-30 w-64 max-w-[calc(100%-1rem)] overflow-y-auto rounded-lg border text-on-glass motion-safe:animate-pop-in',
         className,
       )}
     >
       <header className="flex items-center gap-1 border-b border-white/10 ps-3 pe-1">
-        <h2 className="min-w-0 flex-1 truncate py-1.5 text-sm font-medium">{t('streamInfo')}</h2>
+        <h2 className="min-w-0 flex-1 truncate py-1.5 text-body-sm font-medium">{t('streamInfo')}</h2>
         <Tooltip content={t('streamInfoClose')} shortcut="i" tone="glass" describe={false}>
           <button
             type="button"
             aria-label={t('streamInfoClose')}
             onClick={() => useStreamInfoStore.setState({ open: false })}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-10"
           >
             <X className="size-4" aria-hidden />
           </button>
         </Tooltip>
       </header>
       {stats ? (
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 px-3 py-2 text-xs">
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-3 py-2.5 text-caption">
           {statsRows(stats, url, t, i18n.language).map(([label, value]) => (
             <div key={label} className="contents">
               <dt className="player-on-glass-muted">{label}</dt>
@@ -84,7 +84,7 @@ function OpenPanel({ className }: { className?: string }) {
           ))}
         </dl>
       ) : (
-        <p role="status" className="player-on-glass-muted px-3 py-3 text-xs">
+        <p role="status" className="player-on-glass-muted px-3 py-3 text-caption">
           {t('streamInfoWaiting')}
         </p>
       )}

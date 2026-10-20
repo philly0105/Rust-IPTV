@@ -55,6 +55,8 @@ export interface MediaState {
   commands: MediaCommands | null;
   /** Shift+C asked the control bar to open its Subtitles submenu (ms epoch); the bar clears it. */
   subtitleMenuAt?: number;
+  /** The error screen's "Other sources" asked the bar for its Alternate sources view (ms epoch); the bar clears it. */
+  sourcesMenuAt?: number;
   /**
    * The RPC error code behind the current `status: 'error'`, when the failure came from the
    * core (resolving a stream URL, `mpv.load`). Classifies the error copy before message matching.

@@ -7,7 +7,8 @@ import { cn } from '../cn';
 import { playAlternate, rankAlternates, useAlternatesStore } from '../failover';
 import { useLivePin } from '../livePins';
 import { usePlayerStore } from '../store';
-import { MenuRow } from './Controls';
+import { MENU_ITEM, MenuRow, MenuSeparator } from './Controls';
+import { InlineSpinner } from './InlineSpinner';
 
 const QUALITY_LABEL: Record<ChannelQuality, string> = { sd: 'SD', hd: 'HD', fhd: 'FHD', uhd: '4K' };
 
@@ -27,7 +28,7 @@ export function AlternatesRow({ onOpen }: { onOpen(): void }) {
 
 function QualityTag({ quality }: { quality: ChannelQuality }) {
   return (
-    <span className="shrink-0 rounded-sm border border-white/30 px-1 text-2xs leading-4 font-semibold text-white/80">
+    <span className="shrink-0 rounded-xs border border-white/25 px-1 text-2xs leading-4 font-semibold text-on-glass-muted">
       {QUALITY_LABEL[quality]}
     </span>
   );
@@ -41,11 +42,11 @@ function AlternateItem({ alt, pinned, onPick }: { alt: LiveAlternate; pinned: bo
       role="menuitem"
       onClick={onPick}
       data-testid="alternate-source"
-      className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-start text-white hover:bg-white/10 focus-visible:bg-white/10"
+      className={cn(MENU_ITEM, 'gap-2')}
     >
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm">{alt.channel.name}</span>
-        <span className="flex min-w-0 items-center gap-1 text-xs text-white/60">
+        <span className="truncate">{alt.channel.name}</span>
+        <span className="flex min-w-0 items-center gap-1 text-caption text-on-glass-muted">
           {pinned && <Pin className="size-3 shrink-0" aria-label={t('preferredSource')} />}
           <span className="truncate">{alt.sourceName}</span>
         </span>
@@ -68,7 +69,12 @@ export function AlternatesMenu({ onDone }: { onDone(): void }) {
   const ref = source?.ref;
 
   if (status === 'loading') {
-    return <p className="px-3 py-2 text-sm text-white/70">{t('loading')}</p>;
+    return (
+      <p role="status" className="flex items-center gap-2 px-3 py-2 text-body-sm text-on-glass-muted">
+        <InlineSpinner />
+        {t('alternateSourcesLoading')}
+      </p>
+    );
   }
   const list = data ? rankAlternates(data) : [];
   const pinnedHere = !!pin && !!ref && pin.sourceId === ref.sourceId;
@@ -76,7 +82,7 @@ export function AlternatesMenu({ onDone }: { onDone(): void }) {
   return (
     <>
       {list.length === 0 ? (
-        <p className="px-3 py-2 text-sm text-white/70">{t('alternateSourcesNone')}</p>
+        <p className="px-3 py-2 text-body-sm text-on-glass-muted">{t('alternateSourcesNone')}</p>
       ) : (
         list.map((alt) => (
           <AlternateItem
@@ -91,20 +97,21 @@ export function AlternatesMenu({ onDone }: { onDone(): void }) {
         ))
       )}
       {ref && data && (
-        <button
-          type="button"
-          role="menuitemcheckbox"
-          aria-checked={pinnedHere}
-          data-testid="prefer-source"
-          onClick={() => setPin(pinnedHere ? null : ref)}
-          className={cn(
-            'mt-1 flex w-full items-center gap-2 rounded-sm border-t border-white/10 px-3 py-2 text-start text-sm hover:bg-white/10 focus-visible:bg-white/10',
-            pinnedHere ? 'text-white dark:text-accent-hover' : 'text-white',
-          )}
-        >
-          <Pin className={cn('size-4 shrink-0', !pinnedHere && 'opacity-50')} aria-hidden />
-          <span className="min-w-0 flex-1">{t('preferSource', { channel: source.title })}</span>
-        </button>
+        <>
+          <MenuSeparator />
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={pinnedHere}
+            data-testid="prefer-source"
+            onClick={() => setPin(pinnedHere ? null : ref)}
+            className={cn(MENU_ITEM, 'gap-2')}
+          >
+            {/* On: a filled pin in the accent's indicator tone, like the menus' check marks. */}
+            <Pin className={cn('size-4 shrink-0', pinnedHere ? 'fill-current text-accent' : 'text-on-glass-muted')} aria-hidden />
+            <span className="min-w-0 flex-1">{t('preferSource', { channel: source.title })}</span>
+          </button>
+        </>
       )}
     </>
   );

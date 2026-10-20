@@ -92,9 +92,33 @@ export function qualityLabels(levels: { height?: number; width?: number; bitrate
   });
 }
 
+const bitrateFormats = new Map<string, Intl.NumberFormat>();
+
+/**
+ * A bitrate in the app's language (PL-COPY-I18N): "4.5 Mb/s", de "4,5 Mbit/s". Megabits with one
+ * decimal from 1 Mb/s, whole kilobits below.
+ */
 export function formatBitrate(bps: number): string {
-  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbps`;
-  return `${Math.round(bps / 1000)} kbps`;
+  const mega = bps >= 1_000_000;
+  const locale = intlLocale(i18next.language);
+  const key = `${locale}|${mega}`;
+  let fmt = bitrateFormats.get(key);
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(locale, {
+      style: 'unit',
+      unit: mega ? 'megabit-per-second' : 'kilobit-per-second',
+      unitDisplay: 'short',
+      maximumFractionDigits: mega ? 1 : 0,
+      minimumFractionDigits: mega ? 1 : 0,
+    });
+    bitrateFormats.set(key, fmt);
+  }
+  return fmt.format(mega ? bps / 1_000_000 : Math.round(bps / 1000));
+}
+
+/** "Audio 2", "Subtitle 1" for a track with neither a name nor a language, in the app's language. */
+function trackFallback(kind: 'audio' | 'text', index: number): string {
+  return i18next.t(kind === 'audio' ? 'audioFallback' : 'subtitleFallback', { ns: 'player', index });
 }
 
 const trackNames = new Map<string, Intl.DisplayNames>();
@@ -351,7 +375,7 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks, wa
     if (audioTracks && audioTracks.length > 1) {
       for (let i = 0; i < audioTracks.length; i++) {
         const t = audioTracks[i];
-        if (t) audio.push({ id: String(i), label: langLabel(t.language, t.label, `Audio ${i + 1}`), selected: t.enabled });
+        if (t) audio.push({ id: String(i), label: langLabel(t.language, t.label, trackFallback('audio', i + 1)), selected: t.enabled });
       }
     }
     const text: TrackOption[] = [];
@@ -360,7 +384,7 @@ function nativeEngine(el: HTMLMediaElement, url: string, cb: EngineCallbacks, wa
       // Loaded subtitle files are listed by the player as `ext:<n>` (subtitles/tracks.ts).
       if (t && !isExternalTrack(t) && (t.kind === 'subtitles' || t.kind === 'captions')) {
         // A track the player draws itself is `hidden` while on screen (subtitles/inline.ts).
-        text.push({ id: String(i), label: langLabel(t.language, t.label, `Subtitle ${i + 1}`), selected: isShownTrack(t) });
+        text.push({ id: String(i), label: langLabel(t.language, t.label, trackFallback('text', i + 1)), selected: isShownTrack(t) });
       }
     }
     const first = text[0];
@@ -503,13 +527,13 @@ async function hlsEngine(
       hls.audioTracks.length > 1
         ? hls.audioTracks.map((t, i) => ({
             id: String(i),
-            label: langLabel(t.lang, t.name, `Audio ${i + 1}`),
+            label: langLabel(t.lang, t.name, trackFallback('audio', i + 1)),
             selected: hls.audioTrack === i,
           }))
         : [];
     const text: TrackOption[] = hls.subtitleTracks.map((t, i) => ({
       id: String(i),
-      label: langLabel(t.lang, t.name, `Subtitle ${i + 1}`),
+      label: langLabel(t.lang, t.name, trackFallback('text', i + 1)),
       selected: textOn && hls.subtitleTrack === i,
     }));
     cb.onTracks({ qualities, qualityAuto: manualLevel < 0, audio, text });

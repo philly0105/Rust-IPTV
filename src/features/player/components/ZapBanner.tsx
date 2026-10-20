@@ -146,7 +146,7 @@ function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext 
   const lang = i18n.language;
   if (locked) {
     return (
-      <p data-testid="zap-locked" className={cn('player-on-glass-muted flex items-center gap-1.5 text-sm', compact ? 'mt-1' : 'mt-2')}>
+      <p data-testid="zap-locked" className={cn('player-on-glass-muted flex items-center gap-1.5 text-body-sm', compact ? 'mt-1' : 'mt-2')}>
         <Lock aria-hidden className="size-3.5 shrink-0" />
         {t('zapLocked')}
       </p>
@@ -168,7 +168,7 @@ function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext 
   const { current, upcoming } = airingPair(guide, now);
   if (!current && !upcoming) {
     return (
-      <p data-testid="zap-no-guide" className={cn('player-on-glass-muted text-sm', compact ? 'mt-1' : 'mt-2')}>
+      <p data-testid="zap-no-guide" className={cn('player-on-glass-muted text-body-sm', compact ? 'mt-1' : 'mt-2')}>
         {t('zapNoGuide')}
       </p>
     );
@@ -180,11 +180,11 @@ function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext 
     const shown = (current ?? upcoming)!;
     return (
       <div className="mt-1" data-testid="zap-now">
-        <div className="flex min-w-0 items-baseline gap-2 text-xs">
+        <div className="flex min-w-0 items-baseline gap-2 text-caption">
           <span className="min-w-0 flex-1 truncate" title={shown.title}>
             {shown.title}
           </span>
-          <span className="player-on-glass-muted shrink-0 tabular-nums">
+          <span className="player-on-glass-muted shrink-0 font-numeric tabular-nums">
             {current ? t('zapMinutesLeft', { minutes: minutesLeft }) : formatClock(ms(shown.start), lang)}
           </span>
         </div>
@@ -197,14 +197,14 @@ function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext 
   // banner (a phone) drops the times column so the titles keep the room; the bar still says
   // how far in, and the minutes left stay for screen readers (out of the grid flow).
   return (
-    <div className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1 text-sm @max-md:grid-cols-[auto_minmax(0,1fr)]">
+    <div className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1 text-body-sm @max-md:grid-cols-[auto_minmax(0,1fr)]">
       {current && (
         <>
-          <span className="player-on-glass-muted text-xs font-medium">{t('zapNow')}</span>
-          <span data-testid="zap-now" className="truncate" title={current.title}>
+          <span className="player-on-glass-muted text-caption font-medium">{t('zapNow')}</span>
+          <span data-testid="zap-now" className="truncate font-medium" title={current.title}>
             {current.title}
           </span>
-          <span className="player-on-glass-muted text-xs tabular-nums @max-md:hidden">
+          <span className="player-on-glass-muted font-numeric text-caption tabular-nums @max-md:hidden">
             {formatClock(ms(current.start), lang)}–{formatClock(ms(current.end), lang)}
           </span>
           <span className="sr-only">, {t('zapMinutesLeft', { minutes: minutesLeft })}</span>
@@ -213,11 +213,11 @@ function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext 
       )}
       {upcoming && (
         <>
-          <span className="player-on-glass-muted text-xs font-medium">{t('zapNext')}</span>
+          <span className="player-on-glass-muted text-caption font-medium">{t('zapNext')}</span>
           <span data-testid="zap-next" className="player-on-glass-muted truncate" title={upcoming.title}>
             {upcoming.title}
           </span>
-          <span className="player-on-glass-muted text-xs tabular-nums @max-md:hidden">{formatClock(ms(upcoming.start), lang)}</span>
+          <span className="player-on-glass-muted font-numeric text-caption tabular-nums @max-md:hidden">{formatClock(ms(upcoming.start), lang)}</span>
         </>
       )}
     </div>
@@ -260,22 +260,22 @@ function ZapChip({
       <div className="flex min-w-0 items-center gap-2">
         {logo}
         {number !== undefined && (
-          <span data-testid="zap-number" className="shrink-0 font-numeric text-base leading-none text-white tabular-nums dark:text-accent-hover">
+          <span data-testid="zap-number" className="shrink-0 font-numeric text-body leading-none text-on-glass-muted tabular-nums">
             {number}
           </span>
         )}
-        <span data-testid="zap-title" className="max-w-[60%] shrink-0 truncate font-display text-sm leading-tight" title={title}>
+        <span data-testid="zap-title" className="max-w-[60%] shrink-0 truncate text-body-sm leading-tight font-medium" title={title}>
           {title}
         </span>
         {locked ? (
-          <span data-testid="zap-locked" className="player-on-glass-muted min-w-0 flex-1 truncate text-xs">
+          <span data-testid="zap-locked" className="player-on-glass-muted min-w-0 flex-1 truncate text-caption">
             {t('zapLocked')}
           </span>
         ) : guide === undefined ? (
           <span data-testid="zap-guide-loading" aria-hidden className="h-2.5 w-16 shrink self-center rounded-sm bg-white/10 motion-safe:animate-pulse" />
         ) : (
           current && (
-            <span data-testid="zap-now" className="player-on-glass-muted min-w-0 flex-1 truncate text-xs" title={current.title}>
+            <span data-testid="zap-now" className="player-on-glass-muted min-w-0 flex-1 truncate text-caption" title={current.title}>
               {current.title}
             </span>
           )
@@ -379,20 +379,18 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-baseline gap-2.5">
             {number !== undefined && (
-              // The tuner digit: the dial's accent on the dark themes, glass white on the light one.
+              // The tuner digit: a quieter partner to the name, as channel numbers are in the lists;
+              // the accent stays for the progress under what airs.
               <span
                 data-testid="zap-number"
-                className={cn(
-                  'shrink-0 font-numeric leading-none text-white tabular-nums dark:text-accent-hover',
-                  compact ? 'text-lg' : 'text-3xl @max-md:text-2xl',
-                )}
+                className={cn('shrink-0 font-numeric leading-none text-on-glass-muted tabular-nums', compact ? 'text-body' : 'text-title @max-md:text-title-sm')}
               >
                 {number}
               </span>
             )}
             <span
               data-testid="zap-title"
-              className={cn('min-w-0 truncate font-display leading-tight', compact ? 'text-sm' : 'text-lg')}
+              className={cn('min-w-0 truncate leading-tight', compact ? 'text-body-sm font-medium' : 'text-title-sm')}
               title={source.title}
             >
               {source.title}
@@ -421,26 +419,34 @@ export function ZapHeaderLine({ title }: { title: string }) {
   const { current } = airingPair(guide, now);
   const number = shown ? info?.number : undefined;
   return (
-    <span data-testid="mini-zap-line" className="flex min-w-0 flex-1 items-baseline gap-1.5">
-      {number !== undefined && (
-        <span data-testid="zap-number" className="shrink-0 font-numeric text-sm leading-none text-accent tabular-nums motion-safe:animate-fade-in">
-          {number}
+    // A size container: a phone's mini player (under 14rem of header) keeps the number and the name
+    // and leaves what airs out, rather than cut both down to a few letters.
+    <span data-testid="mini-zap-line" className="@container flex min-w-0 flex-1">
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        {number !== undefined && (
+          <span data-testid="zap-number" className="shrink-0 font-numeric text-body-sm leading-none text-fg-muted tabular-nums motion-safe:animate-fade-in">
+            {number}
+          </span>
+        )}
+        <span className={cn('min-w-0 truncate', shown && current && 'max-w-[60%] shrink-0 @max-[14rem]:max-w-none @max-[14rem]:shrink')} title={title}>
+          {title}
         </span>
-      )}
-      <span className={cn('min-w-0 truncate', shown && current && 'max-w-[60%] shrink-0')} title={title}>
-        {title}
+        {locked && (
+          <span data-testid="zap-locked" className="flex shrink-0 self-center text-fg-muted motion-safe:animate-fade-in">
+            <Lock aria-hidden className="size-3.5" />
+            <span className="sr-only">{t('zapLocked')}</span>
+          </span>
+        )}
+        {shown && current && (
+          <span
+            data-testid="zap-now"
+            className="min-w-0 flex-1 truncate text-caption font-normal text-fg-muted motion-safe:animate-fade-in @max-[14rem]:hidden"
+            title={current.title}
+          >
+            {current.title}
+          </span>
+        )}
       </span>
-      {locked && (
-        <span data-testid="zap-locked" className="flex shrink-0 self-center text-fg-muted motion-safe:animate-fade-in">
-          <Lock aria-hidden className="size-3.5" />
-          <span className="sr-only">{t('zapLocked')}</span>
-        </span>
-      )}
-      {shown && current && (
-        <span data-testid="zap-now" className="min-w-0 flex-1 truncate text-xs font-normal text-fg-muted motion-safe:animate-fade-in" title={current.title}>
-          {current.title}
-        </span>
-      )}
     </span>
   );
 }

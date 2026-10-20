@@ -21,6 +21,8 @@ import {
   useSleepTimerExtras,
 } from '../sleepTimer';
 import { selectEnded, usePlayerStore } from '../store';
+import { MENU_ITEM } from './Controls';
+import { glassButton } from './glassButton';
 import { InlineSpinner } from './InlineSpinner';
 
 export { sleepLeftText };
@@ -68,9 +70,9 @@ export function SleepChip({ compact, expanded = false, menuId, onOpen }: { compa
         onClick={onOpen}
         className={cn(
           'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors pointer-coarse:min-h-9',
-          compact ? 'h-6 gap-1 px-1.5 text-[calc(11rem/15)]' : 'h-7 gap-1.5 px-2 text-xs',
-          // The last minute lights up: the dial's accent on the dark themes, a brighter edge on the light one.
-          last ? 'bg-white/10 text-white ring-white/70 dark:text-accent-hover dark:ring-accent/70' : 'text-white ring-white/25 hover:ring-white/45',
+          compact ? 'h-6 gap-1 px-1.5 text-[calc(11rem/15)]' : 'h-7 gap-1.5 px-2.5 text-caption',
+          // The last minute lights up in the accent, which over the picture is the bright glass one in every theme (player.css).
+          last ? 'bg-white/10 text-accent ring-accent/70' : 'text-on-glass ring-white/25 hover:ring-white/45',
           fading && 'player-sleep-fading',
         )}
       >
@@ -112,14 +114,12 @@ function SleepChoice({
       aria-checked={selected}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        'flex w-full items-center gap-2 rounded-sm px-3 py-2 text-start text-sm hover:bg-white/10 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent',
-        selected ? 'text-white dark:text-accent-hover' : 'text-white',
-      )}
+      // The menus' choice row: the check in the accent marks the pick, the text stays neutral.
+      className={cn(MENU_ITEM, 'gap-2 disabled:cursor-default')}
     >
-      <Check className={cn('size-4 shrink-0', !selected && 'invisible')} aria-hidden />
+      <Check className={cn('size-4 shrink-0 text-accent', !selected && 'invisible')} aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {value !== undefined && <span className="player-on-glass-muted flex shrink-0 items-center gap-1 text-xs tabular-nums">{value}</span>}
+      {value !== undefined && <span className="player-on-glass-muted flex shrink-0 items-center gap-1 text-caption tabular-nums">{value}</span>}
     </button>
   );
 }
@@ -221,7 +221,7 @@ export function SleepMenu({ onDone }: { onDone(): void }) {
         />
       )}
       {target && endsAt !== null && (
-        <p role="none" className="player-on-glass-muted mt-1 border-t border-white/10 px-3 pt-2 pb-1 text-xs">
+        <p role="none" className="player-on-glass-muted mt-1 border-t border-white/10 px-3 pt-2 pb-1 text-caption">
           {t('sleepStopsAt', { time: formatClock(endsAt, lang) })}
         </p>
       )}
@@ -310,7 +310,7 @@ export function SleepPrompt({ small = false, className }: { small?: boolean; cla
       data-mpv-overlay=""
       data-mpv-reserved=""
       className={cn(
-        'player-glass player-glass-edge glass-blur pointer-events-auto absolute inset-x-0 z-30 mx-auto w-fit max-w-[calc(100%-1.5rem)] border text-white motion-safe:animate-pop-in',
+        'player-glass player-glass-edge glass-blur pointer-events-auto absolute inset-x-0 z-30 mx-auto w-fit max-w-[calc(100%-1.5rem)] border text-on-glass motion-safe:animate-pop-in',
         small ? 'rounded-md px-2.5 py-2' : 'rounded-lg px-4 py-3',
         className,
       )}
@@ -319,25 +319,21 @@ export function SleepPrompt({ small = false, className }: { small?: boolean; cla
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className={cn('flex items-center', small ? 'gap-2' : 'gap-3')}>
-        <Moon className={cn('shrink-0 text-white dark:text-accent-hover', small ? 'size-4' : 'size-5')} aria-hidden />
-        <p role="status" className={cn('min-w-0 tabular-nums', small ? 'text-xs' : 'text-sm')}>
+        <Moon className={cn('shrink-0 text-accent', small ? 'size-4' : 'size-5')} aria-hidden />
+        <p role="status" className={cn('min-w-0 tabular-nums', small ? 'text-caption' : 'text-body-sm')}>
           {!small && <span className="me-1.5 font-medium">{t('sleepWarningTitle')}.</span>}
           <span className="player-on-glass-muted">{t('sleepWarningIn', { time: left })}</span>
         </p>
       </div>
       <div className={cn('flex flex-wrap justify-end gap-2', small ? 'mt-1.5' : 'mt-2.5')}>
-        <button
-          type="button"
-          onClick={() => useSleepTimer.getState().cancel()}
-          className={cn('rounded-md text-white hover:bg-white/10', small ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm')}
-        >
+        <button type="button" onClick={() => useSleepTimer.getState().cancel()} className={glassButton('ghost', small ? 'xs' : 'sm')}>
           {t('sleepCancel')}
         </button>
         <button
           ref={keepRef}
           type="button"
           onClick={() => useSleepTimer.getState().extend(SLEEP_EXTEND_MINUTES)}
-          className={cn('rounded-md bg-accent-solid font-medium text-accent-solid-fg hover:bg-accent-solid-hover', small ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm')}
+          className={glassButton('primary', small ? 'xs' : 'sm')}
         >
           {t('sleepKeepWatching', { minutes: SLEEP_EXTEND_MINUTES })}
         </button>

@@ -187,16 +187,52 @@ function classifyBase(input: StreamErrorInput, status: number | undefined): Stre
   }
 }
 
+/** A `notFound` that is parental controls hiding the item, not a missing stream. */
+export function isParentalRefusal(message: string | undefined): boolean {
+  return PARENTAL_LOCKED.test(message ?? '');
+}
+
+/**
+ * Where the stream can go when this player cannot show it: `app` an external player the desktop
+ * app launches (MPV, VLC), `link` a link the browser copies for one, `none` neither (the browser,
+ * with a link that carries the login and is never handed out). See the error UI's actions.
+ */
+export type ExternalRoute = 'app' | 'link' | 'none';
+
+/**
+ * Hints that send the user to an external player, and the browser's words in their place when
+ * there is none to send them to (PL-ERROR-DEAD-ENDS): copy never names a way out the screen does
+ * not offer.
+ */
+const WITHOUT_EXTERNAL: Readonly<Record<string, string>> = {
+  errorUnsupportedCodec: 'errorUnsupportedBrowser',
+  errorNoVideo: 'errorNoVideoBrowser',
+  errorMedia: 'errorMediaBrowser',
+  errorGeneric: 'errorGenericBrowser',
+};
+
 /**
  * i18n keys (namespace `player`) for a class: the headline and what to do next. `params`
- * (account: the connection counts) go to both keys when present.
+ * (account: the connection counts) go to both keys when present. `external`: where an
+ * undecodable stream can go (`ExternalRoute`); with `none`, hints that name MPV or VLC give way to
+ * the browser's own.
  */
 export function errorCopyKeys(
   cls: StreamErrorClass,
   input?: Pick<StreamErrorInput, 'connections' | 'message'> & {
     /** A live channel: a missing stream is the channel being unavailable, not a removed file. */
     live?: boolean | undefined;
+    external?: ExternalRoute | undefined;
   },
+): { title: string; hint: string; params?: Record<string, number> } {
+  const keys = copyKeysFor(cls, input);
+  const browser = input?.external === 'none' ? WITHOUT_EXTERNAL[keys.hint] : undefined;
+  return browser ? { ...keys, hint: browser } : keys;
+}
+
+function copyKeysFor(
+  cls: StreamErrorClass,
+  input?: Pick<StreamErrorInput, 'connections' | 'message'> & { live?: boolean | undefined },
 ): { title: string; hint: string; params?: Record<string, number> } {
   switch (cls) {
     case 'engineMissing':

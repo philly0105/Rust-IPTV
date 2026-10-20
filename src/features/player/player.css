@@ -1,5 +1,9 @@
 /* Player-only styles that Tailwind utilities cannot express cleanly. */
 
+/*
+ * The level sliders over the picture (volume, the subtitle position): a white fill and thumb, as
+ * on Apple TV. A level is not progress, so it leaves the accent to the seek bar and the live marks.
+ */
 .player-range {
   appearance: none;
   height: 20px;
@@ -9,12 +13,12 @@
 .player-range::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--color-accent) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+  background: linear-gradient(to right, var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
 }
 .player-range::-moz-range-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--color-accent) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+  background: linear-gradient(to right, var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
 }
 .player-range::-webkit-slider-thumb {
   appearance: none;
@@ -161,6 +165,15 @@
 html[data-reduced-motion='true'] .player-osd {
   animation-timing-function: step-end;
   animation-duration: 2.4s !important;
+}
+
+/*
+ * The dark stage behind what has no picture (a radio station, a stream playing in an external
+ * player): near black, a touch lighter in the middle. Dark in every theme, like the video it
+ * stands in for, so the chrome on it uses the glass text colours (`player-chrome`).
+ */
+.player-stage-dark {
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, #111827, #05080d 75%);
 }
 
 /* Radio signal meter. */

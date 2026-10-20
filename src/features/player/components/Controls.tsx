@@ -70,7 +70,7 @@ import {
   SubtitleTrackMenu,
 } from './lazyParts';
 import { SeekBar } from './SeekBar';
-import { SyncRows, useSyncSummary } from './SyncMenu';
+import { SyncRows, useSyncAvailable, useSyncSummary } from './SyncMenu';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -377,7 +377,7 @@ export function BarReadout({
 type MenuView = 'root' | 'quality' | 'audio' | 'text' | 'subStyle' | 'speed' | 'sync' | 'sources' | 'sleep' | 'picture'; // failover: + 'sources'
 
 /** Menu rows: a state layer on glass, 44 px tall under a coarse pointer (PL-TOUCH-ERGONOMICS). */
-const MENU_ITEM =
+export const MENU_ITEM =
   'flex w-full items-center rounded-md px-3 py-2 text-start text-body-sm text-on-glass hover:bg-white/10 active:bg-white/15 pointer-coarse:min-h-[calc(44rem/15)] disabled:opacity-50 disabled:hover:bg-transparent';
 
 /** A row that opens a submenu (shared with the video's context menu). */
@@ -597,6 +597,7 @@ function OptionsMenu({
   const commands = useMediaStore((s) => s.commands);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const syncSummary = useSyncSummary();
+  const syncAvailable = useSyncAvailable();
   const pictureValue = usePictureSummary();
   const ref = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState<number | null>(null);
@@ -618,10 +619,34 @@ function OptionsMenu({
     };
   }, [view]);
 
-  useEffect(() => {
-    // The first item that can take focus (Sync rows may all be disabled, Sources may still be
-    // loading), else the header's Back: focus must stay in the menu for its arrow keys and Escape.
+  /**
+   * More rows below the fold (a short stage caps the menu's height): a fade along the bottom
+   * edge says the list goes on. Followed on scroll, on every render, and as rows come and go
+   * (a lazy view arriving, the alternates loading).
+   */
+  const [more, setMore] = useState(false);
+  const updateMore = (): void => {
     const menu = ref.current;
+    setMore(!!menu && menu.scrollHeight - menu.scrollTop - menu.clientHeight > 2);
+  };
+  useEffect(updateMore);
+  useEffect(() => {
+    const menu = ref.current;
+    if (!menu || typeof MutationObserver === 'undefined') return;
+    const rows = new MutationObserver(updateMore);
+    rows.observe(menu, { childList: true, subtree: true });
+    return () => rows.disconnect();
+    // `updateMore` reads the menu through its ref and sets state: the first render's copy does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // A new view starts at its top: the frame is the same element, and the scroll the last view
+    // was left at would hide the new one's header.
+    const menu = ref.current;
+    if (menu) menu.scrollTop = 0;
+    // The first item that can take focus (Sources may still be loading, the style view holds
+    // fields), else the header's Back: focus must stay in the menu for its arrow keys and Escape.
     (menu?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled):not([data-menu-back]):not([data-menu-close])') ?? menu?.querySelector<HTMLElement>('[data-menu-back]'))?.focus();
   }, [view]);
 
@@ -707,6 +732,7 @@ function OptionsMenu({
         }
       }}
       style={room !== null ? { maxHeight: `min(70vh, 420px, ${room}px)` } : undefined}
+      onScroll={updateMore}
       className="player-glass-strong player-glass-edge glass-blur max-h-[min(70vh,420px)] w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
@@ -728,7 +754,7 @@ function OptionsMenu({
               onClick={() => setView('speed')}
             />
           )}
-          <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
+          {syncAvailable && <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />}
           <MenuRow label={t('picture')} value={pictureValue} onClick={() => setView('picture')} />
           {/* Sleep timer (C5): the countdown as its value while on. */}
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
@@ -806,6 +832,19 @@ function OptionsMenu({
           <SpeedRows onDone={() => setView(null)} />
         </>
       )}
+      {more && <MoreBelow />}
+    </div>
+  );
+}
+
+/**
+ * The fade over the last visible rows of a menu that scrolls on. A zero-height marker stuck to the
+ * bottom edge, the fade drawn up from it, so showing it never moves a row.
+ */
+function MoreBelow() {
+  return (
+    <div aria-hidden data-testid="menu-more" className="pointer-events-none sticky -bottom-1.5 h-0">
+      <div className="absolute -inset-x-1.5 bottom-0 h-8 bg-linear-to-t from-glass-strong to-transparent" />
     </div>
   );
 }
@@ -1223,6 +1262,16 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
       setMenu('text');
     }
   }, [subtitleMenuAt]);
+  // The error screen's "Other sources" (PL-ERROR-DEAD-ENDS): the channel's other copies, to pick from.
+  const sourcesMenuAt = useMediaStore((s) => s.sourcesMenuAt);
+  useEffect(() => {
+    if (sourcesMenuAt === undefined || compact) return;
+    useMediaStore.setState({ sourcesMenuAt: undefined });
+    if (Date.now() - sourcesMenuAt < 1000) {
+      setOpener('options');
+      setMenu('sources');
+    }
+  }, [sourcesMenuAt]);
 
   // The history popover (also opened by Shift+B) keeps the chrome up like a menu, and only one
   // of them is open at a time.
@@ -1404,12 +1453,14 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
         data-big={big ? '' : undefined}
         className={cn(
           'player-chrome relative',
+          // Over a failed stream the error screen has darkened the picture already: no scrim
+          // rising over its buttons (a short player's error sits right above the bar).
           variant === 'overlay'
             ? compact
-              ? 'player-scrim-bottom player-scrim-compact px-1 pt-8'
+              ? cn('px-1', failed ? 'pt-1' : 'player-scrim-bottom player-scrim-compact pt-8')
               : big
-                ? 'player-scrim-bottom player-scrim-big px-4 pt-24 pb-4 sm:px-10 sm:pb-8'
-                : 'player-scrim-bottom px-2 pt-16 pb-1.5 sm:px-4 sm:pb-3'
+                ? cn('px-4 pb-4 sm:px-10 sm:pb-8', failed ? 'pt-4' : 'player-scrim-bottom player-scrim-big pt-24')
+                : cn('px-2 pb-1.5 sm:px-4 sm:pb-3', failed ? 'pt-2' : 'player-scrim-bottom pt-16')
             : cn('player-glass-strong border-t py-1.5', big ? 'px-6' : 'px-3'),
           variant === 'overlay' && 'motion-safe:transition-opacity motion-safe:duration-(--duration-base)',
           // The scrim's padding is only shade: the pointer goes through it to what is under it (a

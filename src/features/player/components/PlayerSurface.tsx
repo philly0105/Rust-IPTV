@@ -24,6 +24,8 @@ import { useStreamInfoStore } from '../streamInfo';
 import { hideZapBanner } from '../zapBanner';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { BarReadout, Controls, CtlButton, InlineSpinner, retryPlayback } from './Controls';
+import { ErrorActions } from './ErrorActions';
+import { glassButton } from './glassButton';
 import { InlinePlayer } from './InlinePlayer';
 import { FullscreenChannelPanel, LiveProgrammeLine, RadioPlayer, SleepPrompt, StreamInfoPanel, TitleLogo, VideoContextMenu, ZapBanner } from './lazyParts';
 import { MpvSurface } from './MpvSurface';
@@ -143,7 +145,7 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
         )}
         {primary}
       </div>
-      {secondary && <div className="mt-1 line-clamp-2 text-lg">{secondary}</div>}
+      {secondary && <div className="mt-1 line-clamp-2 text-title-sm">{secondary}</div>}
     </div>
   );
 }
@@ -152,7 +154,7 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
  * "Next episode" card with a 10 s countdown; Play now or Cancel.
  * `strip` lays it out in flow (embedded mpv: nothing may float over the native window).
  */
-function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overlay' | 'strip'; compact?: boolean }) {
+function UpNextCard({ variant = 'overlay', compact = false, short = false }: { variant?: 'overlay' | 'strip'; compact?: boolean; short?: boolean }) {
   const { t } = useTranslation('player');
   const upNext = useMediaStore((s) => s.upNext);
   // Clear of the bar, which is taller in fullscreen.
@@ -180,8 +182,11 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
   const series = episode ? upNext.source.title : undefined;
   const lead = episode ?? upNext.source.title;
   const name = series ? `${lead} · ${series}` : lead;
-  // The mini player is too narrow for the card: a bar across its bottom edge instead.
+  // The mini player is too narrow for the card: a bar across its bottom edge instead. A short
+  // player (a phone's 16:9) has no height for it above the bar: the strip's one line, across the top.
   const tight = compact && variant === 'overlay';
+  const topStrip = short && !compact && variant === 'overlay';
+  const inline = variant === 'strip' || topStrip;
   return (
     <div
       role="status"
@@ -192,12 +197,14 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
         'player-glass-strong overflow-hidden text-on-glass',
         tight
           ? 'absolute inset-x-0 bottom-0 z-30 border-t'
-          : variant === 'overlay'
-            ? cn(
-                'player-glass-edge glass-blur absolute z-30 w-72 max-w-[calc(100%-2rem)] rounded-lg border motion-safe:animate-pop-in',
-                fullscreen ? 'end-10 bottom-44' : 'end-4 bottom-28',
-              )
-            : 'shrink-0 border-t',
+          : topStrip
+            ? 'absolute inset-x-0 top-0 z-30 border-b motion-safe:animate-fade-in'
+            : variant === 'overlay'
+              ? cn(
+                  'player-glass-edge glass-blur absolute z-30 w-72 max-w-[calc(100%-2rem)] rounded-lg border motion-safe:animate-pop-in',
+                  fullscreen ? 'end-10 bottom-44' : 'end-4 bottom-28',
+                )
+              : 'shrink-0 border-t',
       )}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
@@ -211,53 +218,46 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
       <div className="h-0.5 bg-white/10">
         <div className="h-full bg-accent motion-safe:transition-[width] motion-safe:duration-300" style={{ width: `${progress * 100}%` }} />
       </div>
-      <div className={variant === 'overlay' && !tight ? 'p-3' : 'flex items-center gap-2 px-3 py-2'}>
+      <div className={variant === 'overlay' && !tight && !topStrip ? 'p-3.5' : 'flex items-center gap-3 px-3 py-2'}>
         <div className="min-w-0 flex-1">
-          <p className="player-on-glass-muted text-xs">{t('nextEpisodeIn', { count: left })}</p>
-          {!tight && variant === 'overlay' && (
+          <p className="text-caption text-on-glass-muted tabular-nums">{t('nextEpisodeIn', { count: left })}</p>
+          {!tight && !inline && (
             <>
-              <p data-testid="up-next-title" className="mt-0.5 truncate font-display text-base" title={name}>
+              <p data-testid="up-next-title" className="mt-1 truncate text-body font-medium" title={name}>
                 {lead}
               </p>
               {series && (
-                <p data-testid="up-next-series" className="player-on-glass-muted truncate text-sm">
+                <p data-testid="up-next-series" className="player-on-glass-muted truncate text-body-sm">
                   {series}
                 </p>
               )}
             </>
           )}
-          {!tight && variant === 'strip' && (
+          {inline && (
             <p className="mt-0.5 truncate" title={name}>
-              <span data-testid="up-next-title" className="font-display text-base">
+              <span data-testid="up-next-title" className="text-body-sm font-medium">
                 {lead}
               </span>
               {series && (
-                <span data-testid="up-next-series" className="player-on-glass-muted ms-2 text-sm">
+                <span data-testid="up-next-series" className="player-on-glass-muted ms-2 text-body-sm">
                   {series}
                 </span>
               )}
             </p>
           )}
         </div>
-        <div className={cn('flex shrink-0 gap-2', variant === 'overlay' && !tight && 'mt-3')}>
+        <div className={cn('flex shrink-0 gap-2', !tight && !inline && 'mt-3')}>
           <button
             ref={playNowRef}
             type="button"
             onClick={playUpNextNow}
             title={tight ? name : undefined}
-            className={cn(
-              'inline-flex items-center gap-1.5 rounded-md bg-accent-solid font-medium text-accent-solid-fg hover:bg-accent-solid-hover',
-              tight ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm',
-            )}
+            className={glassButton('primary', tight || inline ? 'xs' : 'sm')}
           >
-            <Play className={cn('fill-current', tight ? 'size-3.5' : 'size-4')} aria-hidden />
+            <Play className="fill-current" aria-hidden />
             {t('playNow')}
           </button>
-          <button
-            type="button"
-            onClick={cancelUpNext}
-            className={cn('rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass', tight ? 'px-2 py-1 text-caption' : 'px-3 py-1.5 text-body-sm')}
-          >
+          <button type="button" onClick={cancelUpNext} className={glassButton('ghost', tight || inline ? 'xs' : 'sm')}>
             {t('cancel')}
           </button>
         </div>
@@ -266,15 +266,25 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
   );
 }
 
-/** Over the DOM video once a VOD item finished: one big replay button (the controls stay usable). */
-function EndedOverlay({ compact }: { compact: boolean }) {
+/**
+ * Over the DOM video once a VOD item finished: one big replay button (the controls stay usable).
+ * Under the title bar, and centred in the room above the control bar; a short player (a phone's
+ * 16:9) gets the small disc without its label, which the bar's own Replay already names.
+ */
+function EndedOverlay({ compact, short = false }: { compact: boolean; short?: boolean }) {
   const { t } = useTranslation('player');
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
+  const fullscreen = usePlayerStore((s) => s.isFullscreen);
   if (!ended || upNext) return null;
+  const small = compact || short;
   return (
     <div
-      className="absolute inset-0 z-[15] flex items-center justify-center bg-black/55 motion-safe:animate-fade-in"
+      data-testid="ended-overlay"
+      className={cn(
+        'absolute inset-0 z-[8] flex items-center justify-center bg-black/55 motion-safe:animate-fade-in',
+        compact ? 'pb-8' : short ? 'pb-12' : fullscreen ? 'pb-36' : 'pb-20',
+      )}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
@@ -286,13 +296,13 @@ function EndedOverlay({ compact }: { compact: boolean }) {
       >
         <span
           className={cn(
-            'flex items-center justify-center rounded-full bg-white/12 ring-1 ring-white/25 group-hover:bg-accent-solid group-hover:text-accent-solid-fg group-hover:ring-transparent motion-safe:transition-colors',
-            compact ? 'size-11' : 'size-16',
+            'flex items-center justify-center rounded-full bg-glass-strong ring-1 ring-white/20 group-hover:bg-accent-solid group-hover:text-accent-solid-fg group-hover:ring-transparent group-active:bg-accent-solid-pressed motion-safe:transition-colors',
+            small ? 'size-11' : fullscreen ? 'size-20' : 'size-16',
           )}
         >
-          <RotateCcw className={compact ? 'size-5' : 'size-7'} aria-hidden />
+          <RotateCcw className={small ? 'size-5' : fullscreen ? 'size-9' : 'size-7'} aria-hidden />
         </span>
-        {!compact && <span className="text-sm font-medium">{t('replay')}</span>}
+        {!small && <span className="text-body-sm font-medium [text-shadow:0_1px_3px_rgb(0_0_0/0.6)]">{t('replay')}</span>}
       </button>
     </div>
   );
@@ -324,6 +334,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   const { t } = useTranslation('player');
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
+  const source = usePlayerStore((s) => s.source);
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
   const mpv = useMediaStore((s) => s.mpv);
@@ -362,25 +373,25 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
             </p>
           </details>
         )}
-        <button
-          ref={retryRef}
-          type="button"
-          data-ctl="retry"
-          onClick={retryPlayback}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent-solid px-2.5 py-1 text-xs font-medium text-accent-solid-fg hover:bg-accent-solid-hover"
+        <ErrorActions
+          view={view}
+          source={source}
+          onRetry={retryPlayback}
+          size="xs"
+          max={compact ? 1 : 2}
+          primaryRef={retryRef}
+          className="flex shrink-0 flex-wrap items-center gap-2"
         >
-          <RotateCcw className="size-3.5" aria-hidden />
-          {t('retry')}
-        </button>
-        {!compact && (
-          <button
-            type="button"
-            onClick={() => usePlayerStore.setState({ mode: 'inline', status: 'loading', error: undefined })}
-            className="shrink-0 rounded-md border border-white/25 px-2.5 py-1 text-xs hover:bg-white/10"
-          >
-            {t('useBuiltInPlayer')}
-          </button>
-        )}
+          {!compact && (
+            <button
+              type="button"
+              onClick={() => usePlayerStore.setState({ mode: 'inline', status: 'loading', error: undefined })}
+              className={glassButton('secondary', 'xs')}
+            >
+              {t('useBuiltInPlayer')}
+            </button>
+          )}
+        </ErrorActions>
       </div>
     );
   }
@@ -388,12 +399,8 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
     return (
       <div role="status" data-mpv-reserved="" className={strip}>
         <span className="min-w-0 flex-1 truncate text-on-glass-muted">{t('playbackFinished')}</span>
-        <button
-          type="button"
-          onClick={replay}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent-solid px-2.5 py-1 text-xs font-medium text-accent-solid-fg hover:bg-accent-solid-hover"
-        >
-          <RotateCcw className="size-3.5" aria-hidden />
+        <button type="button" onClick={replay} className={glassButton('primary', 'xs')}>
+          <RotateCcw aria-hidden />
           {t('replay')}
         </button>
       </div>
@@ -774,6 +781,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   /** Short (any width): a stream error packs into the room the bar leaves, over the title. */
   const shortPlayer = useNarrow(rootEl, Number.POSITIVE_INFINITY, SHORT_PLAYER_PX);
   const shortError = shortPlayer && !compact && status === 'error';
+  const endedNow = usePlayerStore(selectEnded);
+  const upNextShown = useMediaStore((s) => !!s.upNext);
 
   const playing = status === 'playing';
   // A small player has no room for both the zap chip and the bar: after a zap the chip shows alone
@@ -810,6 +819,12 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
     };
   }, [source?.url]);
 
+  // A menu or the channel history opening takes the zap banner down: they share the picture's top
+  // corners in a short stage, and the banner only repeats what the title bar says.
+  useEffect(() => {
+    if (menuOpen) hideZapBanner();
+  }, [menuOpen]);
+
   // Expose the idle state for cursor hiding in fullscreen (player.css).
   useEffect(() => {
     const host = rootRef.current?.closest<HTMLElement>('[data-player-host]');
@@ -830,7 +845,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
 
   if (mode === 'radio') {
     return (
-      <div className="relative h-full w-full bg-[#070b12]">
+      <div className="player-stage-dark relative h-full w-full">
         <RadioPlayer variant={compact ? 'bar' : 'stage'} />
         <InlinePlayer as="audio" className="pointer-events-none absolute! inset-0 bg-transparent!" />
       </div>
@@ -921,8 +936,9 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   };
 
   // The title bar fades with the chrome; the zap banner takes its corner while it is up (it says
-  // all the title says), and a short player's stream error starts up there.
-  const titleHidden = !chromeVisible || zapShown || shortError;
+  // all the title says), and a short player's stream error starts up there. A short player's end
+  // of item (Up next across the top, the replay disc in the middle) has the height to itself too.
+  const titleHidden = !chromeVisible || zapShown || shortError || (shortPlayer && (endedNow || upNextShown));
   const liveRef = source.isLive ? source.ref : undefined;
 
   return (
@@ -985,7 +1001,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
                 data-testid="player-title"
                 dir="auto"
                 className={cn(
-                  'w-fit max-w-full truncate font-display [text-shadow:0_1px_3px_rgb(0_0_0/0.5)]',
+                  'w-fit max-w-full truncate [text-shadow:0_1px_3px_rgb(0_0_0/0.5)]',
                   isFullscreen ? 'text-title' : 'text-title-sm',
                   chromeVisible && 'pointer-events-auto',
                 )}
@@ -1036,8 +1052,8 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
       )}
       {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
       {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : isFullscreen ? 'bottom-44' : 'bottom-32'} />}
-      <EndedOverlay compact={compact} />
-      <UpNextCard compact={compact} />
+      <EndedOverlay compact={compact} short={shortPlayer} />
+      <UpNextCard compact={compact} short={shortPlayer} />
 
       <div
         data-testid="overlay-chrome"

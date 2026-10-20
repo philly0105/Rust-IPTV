@@ -54,9 +54,9 @@ describe('stream error overlay', () => {
     render(<InlinePlayer />);
     fail('HTTP 403');
     const alert = screen.getByRole('alert');
-    // pt-14 clears the title and subtitle lines; m-auto, unlike justify-center, never pushes an
-    // overflowing block above the scroll top, under the title.
-    expect(alert.className).toContain('pt-14');
+    // pt-16 clears the title bar (the logo, the name and what airs with its bar); m-auto, unlike
+    // justify-center, never pushes an overflowing block above the scroll top, under the title.
+    expect(alert.className).toContain('pt-16');
     expect(alert.className).not.toContain('justify-center');
     expect((alert.firstElementChild as HTMLElement).className).toContain('m-auto');
   });
@@ -64,7 +64,8 @@ describe('stream error overlay', () => {
   it('keeps clear of the control bar, which stays up over an error (L3-player-7)', () => {
     render(<InlinePlayer />);
     fail('HTTP 403');
-    expect(screen.getByRole('alert').className).toContain('pb-16');
+    // The bar: the seek row, the 48 px play button and its padding (PL-BAR-HIERARCHY).
+    expect(screen.getByRole('alert').className).toContain('pb-24');
   });
 
   it('packs into a short player: one-line headline, two lines of hint, the details in a tooltip (L3-player-7)', () => {
@@ -93,7 +94,8 @@ describe('stream error overlay', () => {
   it('without a stream URL there is no link to copy or hand to another player', () => {
     render(<InlinePlayer />);
     fail('HTTP 404');
-    expect(screen.queryByRole('button', { name: /copy/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /copy stream link/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /open in/i })).toBeNull();
   });
 
   it.each([

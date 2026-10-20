@@ -1477,6 +1477,38 @@ export async function refreshPlayingChannel(sourceId?: string): Promise<void> {
   if (title !== cur.title) usePlayerStore.setState({ source: { ...cur, title } });
 }
 
+/**
+ * Starts the playing item again from its ref, asking for its stream anew: what a plain retry
+ * cannot do, since that reloads the same URL. For the error screen's actions that change what
+ * the lookup answers (a refreshed source, the Xtream stream format switched to HLS). A channel
+ * row this session holds may carry the old URL, so it is read again from the catalog. Keeps the
+ * queue; false when there is no ref to look up or the lookup fails.
+ */
+export async function replayFromRef(): Promise<boolean> {
+  const s = usePlayerStore.getState();
+  const src = s.source;
+  const ref = src?.ref;
+  if (!src || !ref) return false;
+  try {
+    const kind = await sourceKindOf(ref.sourceId);
+    if (src.isLive && (ref.contentType === 'live' || ref.contentType === 'radio')) {
+      knownChannels.delete(itemKey(ref));
+      const item = await rpc('catalog.item', { ref });
+      if (!('isRadio' in item)) return false;
+      await playChannel(item, kind, { keepList: !!s.zapContext?.listId });
+      return true;
+    }
+    const args: PlayItemArgs = { ref, title: src.title, isLive: src.isLive, isRadio: src.isRadio, sourceKind: kind };
+    if (src.episodeId) args.episodeId = src.episodeId;
+    if (src.subtitle) args.subtitle = src.subtitle;
+    if (src.posterUrl) args.posterUrl = src.posterUrl;
+    await startItem(args, s.queue.length ? { queue: s.queue } : undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface TuneOptions {
   /** The play steps through the current channel list (a zap, the channel panel). */
   keepList?: boolean;

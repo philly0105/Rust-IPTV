@@ -459,7 +459,7 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
             onMouseDown={pressKeepsFocus}
             // Fades with the controls; hidden, it lets the pointer through like the rest of the chrome.
             className={cn(
-              'player-glass glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-on-glass hover:bg-white/12 pointer-coarse:size-11',
+              'player-glass player-glass-edge glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border text-on-glass hover:bg-white/12 pointer-coarse:size-11',
               'motion-safe:transition-opacity motion-safe:duration-200',
               !chromeVisible && 'pointer-events-none opacity-0',
             )}
@@ -486,7 +486,7 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
         aria-hidden={!open}
         inert={!open}
         className={cn(
-          'player-glass-strong glass-blur absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-white shadow-2',
+          'player-glass-strong glass-blur absolute inset-y-0 start-0 z-40 flex w-[min(360px,85vw)] flex-col border-e text-on-glass shadow-2',
           'motion-safe:transition-transform motion-safe:duration-200',
           open ? 'translate-x-0' : '-translate-x-full rtl:translate-x-full',
         )}
@@ -518,16 +518,18 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
             aria-label={t('searchChannels')}
             // Its own border colour outranks the base focus rule (a utility beats @layer base), so
             // it names the focus border itself; --color-focus is the glass accent over the player.
-            className="min-w-0 flex-1 rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-white/50 focus-visible:border-focus"
+            className="h-9 min-w-0 flex-1 rounded-md border border-white/15 bg-white/6 px-3 text-body-sm text-on-glass placeholder:text-on-glass-muted focus-visible:border-focus pointer-coarse:h-11"
           />
-          <button
-            type="button"
-            aria-label={t('close')}
-            onClick={() => setOpen(false)}
-            className="inline-flex size-8 items-center justify-center rounded-full hover:bg-white/10"
-          >
-            <X className="size-4" />
-          </button>
+          <Tooltip content={t('close')} tone="glass" describe={false}>
+            <button
+              type="button"
+              aria-label={t('close')}
+              onClick={() => setOpen(false)}
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-11"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
+          </Tooltip>
         </div>
         <div
           ref={scrollRef}
@@ -538,13 +540,22 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
           onKeyDown={onListKeyDown}
         >
           {error ? (
-            <p className="p-4 text-sm text-white/70">{t('channelsFailed')}</p>
+            <p role="status" className="px-4 py-6 text-center text-body-sm text-on-glass-muted">
+              {t('channelsFailed')}
+            </p>
           ) : cache.total === 0 ? (
-            <p className="p-4 text-sm text-white/70">{t('noChannels')}</p>
+            // A search that found nothing says what it looked for; an empty list says so plainly.
+            <p role="status" className="px-4 py-6 text-center text-body-sm [overflow-wrap:anywhere] text-on-glass-muted">
+              {searching ? t('noChannelsMatch', { query: debounced }) : t('noChannelsInList')}
+            </p>
           ) : cache.total === null ? (
-            <div className="space-y-2 p-3" aria-busy>
+            <div className="space-y-1 p-2" aria-busy>
               {Array.from({ length: 8 }, (_, i) => (
-                <div key={i} className="h-10 rounded-md bg-white/8 motion-safe:animate-pulse" />
+                <div key={i} className="flex h-12 items-center gap-3 px-2">
+                  <span className="h-3 w-8 rounded-xs bg-white/8 motion-safe:animate-pulse" />
+                  <span className="size-8 rounded-sm bg-white/8 motion-safe:animate-pulse" />
+                  <span className="h-3 flex-1 rounded-xs bg-white/8 motion-safe:animate-pulse" />
+                </div>
               ))}
             </div>
           ) : (
@@ -571,26 +582,27 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
                         }}
                         onClick={() => void playChannel(c, undefined, inList ? { keepList: true } : undefined).catch(() => undefined)}
                         className={cn(
-                          'flex h-[48px] w-full items-center gap-3 rounded-md px-2 text-start hover:bg-white/10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white/70',
-                          isCurrent(c) && 'bg-white/10 text-white dark:text-accent-hover',
+                          'flex h-[48px] w-full items-center gap-3 rounded-md px-2 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus',
+                          // The playing channel: the rail's tick on a neutral fill, never an amber wash.
+                          isCurrent(c) ? 'tuning-tick bg-white/12' : 'hover:bg-white/8',
                         )}
                       >
-                        <span className="w-10 shrink-0 text-end font-numeric text-sm text-white/70 tabular-nums">
+                        <span className="w-10 shrink-0 text-end font-numeric text-body-sm text-on-glass-muted tabular-nums">
                           {c.number ?? ''}
                         </span>
                         <RowLogo url={c.logoUrl} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />
                         {/* guide: name over the programme on now. */}
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <span dir="auto" className="truncate text-sm text-match-parent">{c.name}</span>
+                          <span dir="auto" className={cn('truncate text-body-sm text-match-parent', isCurrent(c) && 'font-medium')}>{c.name}</span>
                           {nowFor(c.ref) ? (
-                            <span dir="auto" className="truncate text-xs text-white/60 text-match-parent" data-testid="panel-now">
+                            <span dir="auto" className="truncate text-caption text-on-glass-muted text-match-parent" data-testid="panel-now">
                               {nowFor(c.ref)?.title}
                             </span>
                           ) : null}
                         </span>
                       </button>
                     ) : (
-                      <div className="mt-1 h-10 rounded-md bg-white/6" aria-hidden />
+                      <div className="mt-1 h-10 rounded-md bg-white/6 motion-safe:animate-pulse" aria-hidden />
                     )}
                   </div>
                 );

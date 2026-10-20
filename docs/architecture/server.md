@@ -324,9 +324,10 @@ dirs (`.*-data/`) keeps the build context small.
 
 The runtime stage carries OCI labels (title, description, source, and
 `org.opencontainers.image.version` from the `VERSION` build arg; no licence
-label until the project licence is chosen). When the build context holds a
-`THIRD_PARTY_NOTICES.md` (written by `tools/third-party-notices.mjs`), it is
-copied to `/usr/share/doc/tsrust-iptv/`.
+label until the project licence is chosen). `NOTICE` (IPTVnator's copyright
+and MIT licence) is always copied to `/usr/share/doc/tsrust-iptv/`, and so is
+`THIRD_PARTY_NOTICES.md` (written by `tools/third-party-notices.mjs`) when the
+build context holds it.
 
 Released images are on `ghcr.io/philly0105/tsrust-iptv` for linux/amd64 and
 linux/arm64. The version tag is pushed when the release is built

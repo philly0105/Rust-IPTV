@@ -122,7 +122,7 @@ Tsrust IPTV has no telemetry, analytics, crash reporting, ads or account, and it
 - TMDB, only after you turn it on in Settings > Metadata with your own API key. TMDB then receives your key, your interface language, and the titles and years of the movies and series you open or point at, plus requests for its trending list. Posters and backdrops come from TMDB's image server.
 - YouTube's privacy-enhanced player (youtube-nocookie.com), only when you play a trailer.
 
-Everything else stays on your computer or your server: sources and their logins, favorites, history, watch stats, settings, the image cache and the logs, in which secrets are redacted. Backups leave passwords out unless you ask for them.
+Everything else stays on your computer or your server: sources and their logins, favorites, history, watch stats, settings, the image cache and the logs, in which secrets are redacted. By default, exports omit the separate Xtream and Stalker password fields and Stalker signature keys. Playlist and guide URLs, playlist contents, and Stalker MAC addresses remain and may contain credentials. Treat every backup as private.
 
 ## Self-hosting
 
@@ -152,7 +152,7 @@ pnpm check       # typecheck, unit tests, cargo test, clippy and rustfmt
 
 ## Credits
 
-Tsrust IPTV was rebuilt from [IPTVnator](https://github.com/4gray/iptvnator) by 4gray. IPTVnator's copyright and MIT licence notice is in [NOTICE](NOTICE). Each release also includes `THIRD_PARTY_NOTICES.md` with the licences of IPTVnator and of the npm packages and Rust crates the app is built from.
+Tsrust IPTV was rebuilt from [IPTVnator](https://github.com/4gray/iptvnator) by 4gray. IPTVnator's copyright and MIT licence notice is in [NOTICE](NOTICE), which the installer puts beside the app and the Docker image keeps in `/usr/share/doc/tsrust-iptv/`. Each release also includes `THIRD_PARTY_NOTICES.md` with the licences of IPTVnator and of the npm packages and Rust crates the app is built from.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 

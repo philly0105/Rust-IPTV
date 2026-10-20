@@ -119,7 +119,7 @@ Every other settings field is in `backup::APP_SETTING_EXCLUDED` with its reason,
 
 The remote pairing token is a secret and never appears in a backup.
 
-Secrets (the Xtream password, and the Stalker password and signatures) are written only when `includeSecrets` is true. Nothing in this module logs a connection or a secret. Log lines carry counts and source ids only.
+Secrets (the Xtream password, and the Stalker password and signatures) are written only when `includeSecrets` is true. The rest stays in every backup, and some of it can carry credentials: M3U and guide URLs, the raw playlist text, Stalker MAC addresses and device ids. Settings > Backup says so on every export and asks the user to keep the file private. Nothing in this module logs a connection or a secret. Log lines carry counts and source ids only.
 
 ## Import
 

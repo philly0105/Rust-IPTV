@@ -15,7 +15,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSP
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { cn, fieldClass, usePresence } from '@/ui';
+import { cn, fieldClass, TOUCH_TARGET, usePresence } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 import { intlLocale } from '@/lib/intl';
 
@@ -55,6 +55,18 @@ export interface ScopePickerProps {
 
 /** Options drawn at once with no filter typed; typing reaches the rest. Keeps a 3000-group source quick. */
 export const PICKER_RENDER_CAP = 400;
+/**
+ * cmdk's item value for an option whose value is empty ("All channels" is `''`): cmdk never
+ * highlights an empty value, so the arrow keys found nothing to stop on and Enter picked nothing
+ * while it was the current choice. Only the cmdk side sees it; `onChange` still gets `''`.
+ */
+const EMPTY_ITEM = '\u2063scope-all';
+const itemValue = (v: string) => (v === '' ? EMPTY_ITEM : v);
+
+/** A touch screen: the picker then opens without focusing the filter, so no keyboard covers the list. */
+function coarsePointer(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+}
 const GAP = 4;
 const MARGIN = 8;
 
@@ -78,6 +90,7 @@ export function ScopePicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const { present, closing } = usePresence(open, popRef);
 
@@ -130,9 +143,14 @@ export function ScopePicker({
 
   // Focus goes into the popover's field once it is up. A short list has no visible filter: the
   // field is then visually hidden and read-only, and still holds focus so the arrow keys move
-  // and screen readers follow the highlighted option (aria-activedescendant).
+  // and screen readers follow the highlighted option (aria-activedescendant). On a touch screen
+  // the list takes focus instead: a focused field would raise the on-screen keyboard over it, and
+  // a tap on the filter still brings the keyboard up to type. The list, not the cmdk root: cmdk
+  // moves focus to its field whenever the highlight changes while the root has it.
   useLayoutEffect(() => {
-    if (open) inputRef.current?.focus({ preventScroll: true });
+    if (!open) return;
+    if (coarsePointer()) listRef.current?.focus({ preventScroll: true });
+    else inputRef.current?.focus({ preventScroll: true });
   }, [open]);
 
   useEffect(() => {
@@ -226,7 +244,7 @@ export function ScopePicker({
                 label={filterable ? (filterLabel ?? t('filterGroups')) : label}
                 shouldFilter={false}
                 loop
-                defaultValue={value}
+                defaultValue={itemValue(value)}
                 vimBindings={false}
                 className="flex min-h-0 flex-col"
               >
@@ -240,7 +258,14 @@ export function ScopePicker({
                     className={fieldClass('sm', 'bg-surface-2')}
                   />
                 </div>
-                <Cmdk.List id={listId} aria-label={label} className="min-h-0 overflow-y-auto overscroll-contain p-1" style={{ maxHeight: place.maxHeight }}>
+                <Cmdk.List
+                  ref={listRef}
+                  id={listId}
+                  tabIndex={-1}
+                  aria-label={label}
+                  className="min-h-0 overflow-y-auto overscroll-contain p-1"
+                  style={{ maxHeight: place.maxHeight }}
+                >
                   {shownCount === 0 ? <div className="px-3 py-6 text-center text-sm text-fg-muted">{t('noGroupsMatch', { query: query.trim() })}</div> : null}
                   {shown.map((s) => (
                     <Cmdk.Group key={s.id} heading={s.heading}>
@@ -249,10 +274,10 @@ export function ScopePicker({
                         return (
                           <Cmdk.Item
                             key={o.value}
-                            value={o.value}
+                            value={itemValue(o.value)}
                             onSelect={() => pick(o.value)}
                             data-chosen={chosen || undefined}
-                            className="flex h-9 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm text-fg-muted hover:bg-hover"
+                            className={cn('flex h-9 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm text-fg-muted hover:bg-hover', TOUCH_TARGET)}
                           >
                             <span aria-hidden className="flex w-4 shrink-0 justify-center text-fg-muted">
                               {o.icon ?? null}

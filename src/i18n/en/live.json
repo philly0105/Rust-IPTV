@@ -205,6 +205,7 @@
   "mappingShiftSaved": "Time shift saved",
   "favorite": "Favorite",
   "channelMenu": "Channel options",
+  "groupMenu": "Group options",
   "lastWatched": "Last watched",
   "lastStation": "Last played",
   "idleNowOn": "Now: {{title}} · {{left}}",

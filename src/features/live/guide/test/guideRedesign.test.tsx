@@ -15,7 +15,7 @@ import { defaultStart, EpgGridPage, PREVIEW_HOVER_MS, slotLabels } from '../../c
 import { formatClock, HOUR, MINUTE } from '../../lib/epgTime';
 import { genreOf } from '../genre';
 import { __resetGuideSourceForTests } from '../lastSource';
-import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, settings } from './harness';
+import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
 vi.mock('@/api/transport', async (orig) => ({
@@ -294,5 +294,98 @@ describe('the ruler and the row menu (stage 2)', () => {
     // The desktop app offers the external players here too, as on Live.
     expect(within(menu).getByRole('menuitem', { name: 'Play in MPV' })).toBeTruthy();
     expect(within(menu).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes
+
+describe('focus links, Go to playing and views (LG-01)', () => {
+  const groups = [
+    { id: 'g1', sourceId: 'src1', contentType: 'live', name: 'News', hidden: false, itemCount: 30, position: 0 },
+    { id: 'g2', sourceId: 'src1', contentType: 'live', name: 'Sports', hidden: false, itemCount: 30, position: 1 },
+  ];
+
+  it('a group picked after a focus link starts at its top and does not go back to the linked channel', async () => {
+    rpc.handlers['catalog.categories'] = () => groups;
+    renderGuide({ path: '/epg?source=src1&category=g1&focus=c7', routes: GRID });
+    await waitFor(() => expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/^c7 P0,/));
+    expect(rpc.of('catalog.item')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('combobox', { name: 'Group' }));
+    fireEvent.click(screen.getByRole('option', { name: /^Sports/ }));
+    await waitFor(() => expect(router.location?.search).toContain('category=g2'));
+    expect(router.location?.search).not.toContain('focus=');
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    await new Promise((r) => setTimeout(r, 200));
+    // No second lookup of c7 (nor a scan of Sports for it).
+    expect(rpc.of('catalog.item')).toHaveLength(1);
+  });
+
+  it('offers Go to playing only for a channel of the group on screen', async () => {
+    rpc.handlers['catalog.categories'] = () => groups;
+    fakes.usePlayerStore.setState({ source: { url: 'x', kind: 'hls', title: 'Channel 25', ref: makeChannel(25).ref, isLive: true, isRadio: false } } as never);
+    // Channel 25 is in News (g1); the rows below come from the same pages whatever the group.
+    renderGuide({ path: '/epg?source=src1&category=g2', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    await waitFor(() => expect(rpc.of('catalog.item')).toContainEqual({ ref: makeChannel(25).ref }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('guide-go-to-playing')).toBeNull();
+
+    cleanup();
+    renderGuide({ path: '/epg?source=src1&category=g1', routes: GRID });
+    expect(await screen.findByTestId('guide-go-to-playing')).toBeTruthy();
+  });
+
+  it('the Favorites view finds a favorite far down its list: a focus link opens there, a typed number stays in the view', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => makeChannel(i));
+    rpc.handlers['favorites.list'] = () => many.map((c, i) => ({ ref: c.ref, position: i, addedAt: '', snapshot: { title: c.name, contentType: 'live' } }));
+    rpc.handlers['catalog.channelByNumber'] = (a) => many[(a as { number: number }).number - 1] ?? null;
+    const scrolls = vi.spyOn(Element.prototype, 'scrollTo');
+    // jsdom has no layout: give the grid room to scroll, or every scroll is clamped to the top.
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(100_000);
+    renderGuide({ path: '/epg?source=src1&view=favorites&focus=c55', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    // Only the favorites near the top are fetched, yet row 55 is scrolled to.
+    const scrolledFar = () => scrolls.mock.calls.some(([o]) => typeof o === 'object' && ((o as ScrollToOptions).top ?? 0) > 40 * 56);
+    await waitFor(() => expect(scrolledFar()).toBe(true));
+    fireEvent.keyDown(window, { key: '5' });
+    fireEvent.keyDown(window, { key: '1' });
+    await waitFor(() => expect(rpc.of('catalog.channelByNumber')).toContainEqual({ sourceId: 'src1', number: 51, contentType: 'live' }), { timeout: 6000 });
+    await new Promise((r) => setTimeout(r, 100));
+    // Favorite #51 is in the view: it does not open All channels.
+    expect(router.location?.search).toContain('view=favorites');
+  });
+});
+
+describe('the preview band and the pointer (LG-06)', () => {
+  it('keeps the hovered programme while the pointer is on the band, for its buttons', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(media as never);
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const band = await screen.findByTestId('guide-preview');
+    const title = () => within(band).getByTestId('guide-preview-title').textContent;
+    await waitFor(() => expect(title()).toBe('c0 P0'));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const cell = screen.getByRole('button', { name: /^c3 P1,/ });
+    fireEvent.mouseEnter(cell);
+    act(() => vi.advanceTimersByTime(PREVIEW_HOVER_MS + 10));
+    expect(title()).toBe('c3 P1');
+    // On its way up to Record the pointer leaves the grid, then reaches the band.
+    fireEvent.mouseLeave(cell);
+    fireEvent.pointerEnter(band);
+    act(() => vi.advanceTimersByTime(PREVIEW_HOVER_MS * 3));
+    expect(title()).toBe('c3 P1');
+    fireEvent.pointerLeave(band);
+    act(() => vi.advanceTimersByTime(PREVIEW_HOVER_MS + 10));
+    expect(title()).toBe('c0 P0');
+    vi.useRealTimers();
+  });
+
+  it('keeps its height: the description has two lines and gives way before the title', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(media as never);
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const band = await screen.findByTestId('guide-preview');
+    expect(band.className).toContain('h-[13.5rem]');
+    await waitFor(() => expect(within(band).getByTestId('guide-preview-title').className).toContain('shrink-0'));
+    expect(within(band).getByTestId('guide-preview-actions').className).toContain('shrink-0');
   });
 });

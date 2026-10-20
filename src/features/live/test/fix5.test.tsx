@@ -305,7 +305,8 @@ describe('R6 round 2: layout fixes', () => {
   it('the ribbon live button keeps its name when the label is hidden on narrow panes', async () => {
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     const btn = await screen.findByTestId('ribbon-back-to-live');
-    expect(btn.getAttribute('aria-label')).toBe('Watch live');
+    // The name starts with the label's words (and names the channel it starts).
+    expect(btn.getAttribute('aria-label')).toMatch(/^Watch live, /);
     expect(btn.querySelector('span.hidden')?.textContent).toBe('Watch live');
   });
 

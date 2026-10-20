@@ -17,6 +17,7 @@ import { ContextMenu, tidyEntries, type MenuEntry } from '../components/ContextM
 import { LivePage } from '../components/LivePage';
 import { ScopePicker } from '../components/ScopePicker';
 import { StageIdle } from '../components/StageIdle';
+import { LONG_PRESS_MS } from '../hooks/useLongPress';
 import { liveViewOf } from '../hooks/useLiveViewChannels';
 import { HOUR, MINUTE } from '../lib/epgTime';
 import { i18n, installDomStubs, makeChannel, program, renderAt, settings } from './harness';
@@ -158,6 +159,27 @@ describe("Live's channel menu (LG-13)", () => {
       group: { sourceId: 'src1', contentType: 'live', categoryId: 'g1', name: 'News', count: 20 },
     });
   });
+
+  it('a touch screen reaches the group menu by a long press or its ⋮ button; the link itself only navigates', async () => {
+    renderAt('/s/src1/live', LIVE);
+    const group = await screen.findByRole('link', { name: /^News/ });
+    // The link navigates: no popup is announced on it. The ⋮ beside it (touch only) has the menu.
+    expect(group.hasAttribute('aria-haspopup')).toBe(false);
+    const button = screen.getByRole('button', { name: 'Group options' });
+    expect(button.getAttribute('aria-haspopup')).toBe('menu');
+    expect(button.className).toContain('pointer-coarse:inline-flex');
+    fireEvent.click(button);
+    expect(await screen.findByRole('menu', { name: 'News' })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('menu', { name: 'News' }), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'News' })).toBeNull());
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.pointerDown(group, { pointerType: 'touch', isPrimary: true, clientX: 30, clientY: 40 });
+    act(() => vi.advanceTimersByTime(LONG_PRESS_MS + 10));
+    fireEvent.pointerUp(group);
+    vi.useRealTimers();
+    expect(await screen.findByRole('menu', { name: 'News' })).toBeTruthy();
+  });
 });
 
 describe('Favorites and Recently watched (LG-12)', () => {
@@ -220,6 +242,57 @@ describe('the scope picker (LG-11)', () => {
     fireEvent.keyDown(filter, { key: 'Enter' });
     expect(onChange).toHaveBeenCalledWith('g11');
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('on All channels (an empty value) the arrows still move and Enter picks', () => {
+    const onChange = vi.fn();
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ScopePicker label="Group" value="" sections={sections} onChange={onChange} />
+      </I18nextProvider>,
+    );
+    const trigger = screen.getByRole('combobox', { name: 'Group' });
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(screen.getByRole('option', { name: /^All channels/ }).getAttribute('aria-selected')).toBe('true');
+    const filter = screen.getByRole('combobox', { name: 'Filter groups' });
+    fireEvent.keyDown(filter, { key: 'ArrowDown' });
+    fireEvent.keyDown(filter, { key: 'ArrowDown' });
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')?.getAttribute('data-value')).toBe('g1');
+    fireEvent.keyDown(filter, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('g1');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+    // Back to All channels from the keyboard: the empty value is picked as `''`.
+    onChange.mockClear();
+    cleanup();
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ScopePicker label="Group" value="g3" sections={sections} onChange={onChange} />
+      </I18nextProvider>,
+    );
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Group' }), { key: 'Enter' });
+    const field = screen.getByRole('combobox', { name: 'Filter groups' });
+    fireEvent.keyDown(field, { key: 'ArrowUp', metaKey: true });
+    expect(screen.getByRole('option', { name: /^All channels/ }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('');
+  });
+
+  it('on a touch screen it opens without focusing the filter, and its options are touch sized', () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (q: string) => ({ matches: q.includes('coarse'), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as never,
+    );
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ScopePicker label="Group" value="" sections={sections} onChange={() => undefined} />
+      </I18nextProvider>,
+    );
+    fireEvent.click(screen.getByRole('combobox', { name: 'Group' }));
+    const list = screen.getByRole('listbox');
+    expect(document.activeElement).toBe(list);
+    expect(document.activeElement).not.toBe(screen.getByRole('combobox', { name: 'Filter groups' }));
+    for (const o of screen.getAllByRole('option')) expect(o.className).toContain('pointer-coarse:min-h-');
+    vi.restoreAllMocks();
   });
 
   it('Escape clears the filter first, then closes and gives focus back', () => {

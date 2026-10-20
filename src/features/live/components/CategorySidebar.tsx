@@ -1,12 +1,13 @@
-import { EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
+import { EllipsisVertical, EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
 
-import { Button, ErrorState, IconButton, SearchInput, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
+import { Button, cn, ErrorState, IconButton, SearchInput, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+import { useLongPress } from '../hooks/useLongPress';
 import { documentIsRtl } from '../lib/rtl';
 
 /** A group row's slot at 100 %. */
@@ -289,33 +290,30 @@ export function CategorySidebar(props: CategorySidebarProps) {
               const active = props.activeId === c.id;
               const locked = props.isLocked?.(c.id) ?? false;
               return (
-                <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}>
-                  <Link
+                <div
+                  key={c.id}
+                  className="flex min-w-0 items-center"
+                  style={{ position: 'absolute', top: 0, left: 0, right: 0, height: v.size, transform: `translateY(${v.start}px)` }}
+                >
+                  <GroupLink
+                    category={c}
+                    index={v.index}
                     to={props.hrefFor(c.id)}
-                    onClick={props.onNavigate}
+                    active={active}
+                    locked={locked}
+                    tabbable={v.index === tabStop}
+                    count={fmt.format(c.itemCount)}
+                    onNavigate={props.onNavigate}
                     onFocus={() => setCursor(v.index)}
-                    data-cat-index={v.index}
-                    tabIndex={v.index === tabStop ? 0 : -1}
-                    aria-current={active ? 'page' : undefined}
-                    aria-haspopup={props.onGroupMenu ? 'menu' : undefined}
-                    onContextMenu={
+                    onMenu={
                       props.onGroupMenu
-                        ? (e) => {
-                            e.preventDefault();
+                        ? (pos) => {
                             setCursor(v.index);
-                            props.onGroupMenu?.({ x: e.clientX, y: e.clientY }, c);
+                            props.onGroupMenu?.(pos, c);
                           }
                         : undefined
                     }
-                    className={linkClass(active)}
-                    title={locked ? `${c.name} (${t('locked')})` : c.name}
-                  >
-                    <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
-                    {locked ? (
-                      <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={t('locked')} />
-                    ) : null}
-                    <span className={countClass(active)}>{fmt.format(c.itemCount)}</span>
-                  </Link>
+                  />
                 </div>
               );
             })}
@@ -333,5 +331,85 @@ export function CategorySidebar(props: CategorySidebarProps) {
         </button>
       ) : null}
     </nav>
+  );
+}
+
+/**
+ * A group's row: its link, and its menu (LG-13) from a right click, the context-menu key (the
+ * list's own handler), a long press, or on touch a ⋮ button. iOS Safari fires no `contextmenu` on
+ * a long press, so "Add all to list…" and "Open in TV guide" were out of reach on an iPhone or
+ * iPad. The button, not the link, says it opens a menu: the link navigates.
+ */
+function GroupLink({
+  category: c,
+  index,
+  to,
+  active,
+  locked,
+  tabbable,
+  count,
+  onNavigate,
+  onFocus,
+  onMenu,
+}: {
+  category: Category;
+  index: number;
+  to: string;
+  active: boolean;
+  locked: boolean;
+  tabbable: boolean;
+  count: string;
+  onNavigate?(): void;
+  onFocus(): void;
+  onMenu?(pos: { x: number; y: number }): void;
+}) {
+  const { t } = useTranslation('live');
+  const longPress = useLongPress((x, y) => onMenu?.({ x, y }));
+  // Inside the row's slot (a flex row): the link, then the touch screen's ⋮.
+  return (
+    <>
+      <Link
+        to={to}
+        onClick={onNavigate}
+        onFocus={onFocus}
+        data-cat-index={index}
+        tabIndex={tabbable ? 0 : -1}
+        aria-current={active ? 'page' : undefined}
+        onContextMenu={
+          onMenu
+            ? (e) => {
+                e.preventDefault();
+                onMenu({ x: e.clientX, y: e.clientY });
+              }
+            : undefined
+        }
+        {...(onMenu ? longPress : undefined)}
+        // No callout or text selection on a long press (iOS would offer to open the link).
+        className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
+        title={locked ? `${c.name} (${t('locked')})` : c.name}
+      >
+        <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
+        {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={t('locked')} /> : null}
+        <span className={countClass(active)}>{count}</span>
+      </Link>
+      {onMenu ? (
+        <IconButton
+          size="sm"
+          tabIndex={-1}
+          label={t('groupMenu')}
+          aria-haspopup="menu"
+          icon={<EllipsisVertical size={16} />}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            // Under the button from its inline start, as a channel row's ⋮ opens.
+            onMenu({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 });
+          }}
+          // Touch only, as tall as the row (a mouse has the right click). 44 px wide; the row's own
+          // height, so it never reaches into the next row.
+          className="hidden h-full shrink-0 pointer-coarse:inline-flex pointer-coarse:min-h-0"
+          data-testid="group-menu-button"
+        />
+      ) : null}
+    </>
   );
 }

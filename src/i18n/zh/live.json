@@ -205,6 +205,7 @@
   "mappingShiftSaved": "时间偏移已保存",
   "favorite": "已收藏",
   "channelMenu": "频道选项",
+  "groupMenu": "分组选项",
   "lastWatched": "上次观看",
   "lastStation": "上次收听",
   "idleNowOn": "正在播出：{{title}} · {{left}}",

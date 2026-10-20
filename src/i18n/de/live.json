@@ -205,6 +205,7 @@
   "mappingShiftSaved": "Zeitverschiebung gespeichert",
   "favorite": "Favorit",
   "channelMenu": "Senderoptionen",
+  "groupMenu": "Gruppenoptionen",
   "lastWatched": "Zuletzt gesehen",
   "lastStation": "Zuletzt gehört",
   "idleNowOn": "Jetzt: {{title}} · {{left}}",

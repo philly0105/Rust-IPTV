@@ -37,9 +37,10 @@ export interface UpNextProps {
 
 /**
  * The next few programmes under the guide ribbon (LG-02): time, title, length, and Remind and
- * Record on hover or focus (always on touch). It fills the stage column's free height and shows
- * only as many rows as fit, none on a short window: the box is measured, not scrolled, so a row
- * is never cut in half. Choosing a row puts it in the ribbon's header.
+ * Record on hover or focus. It fills the stage column's free height and shows only as many rows
+ * as fit, none on a short window: the box is measured, not scrolled, so a row is never cut in
+ * half. Choosing a row puts it in the ribbon's header, whose bell and record menu act on it; that
+ * is how a touch screen reaches them, as three 44 px buttons per row cut the titles to "Busines…".
  */
 export function UpNext({ programs, now, channel, channelName, shown, onSelect }: UpNextProps) {
   const { t, i18n } = useTranslation('live');
@@ -95,11 +96,14 @@ export function UpNext({ programs, now, channel, channelName, shown, onSelect }:
                       </span>
                       {/* recording: what is set shows at rest; the buttons that set it come on hover. */}
                       <ScheduleMarkView index={shared.index} channelRef={channel.ref} program={p} />
-                      <span className="shrink-0 text-caption tabular-nums text-fg-subtle group-hover/next:hidden group-focus-within/next:hidden pointer-coarse:hidden">
+                      <span className="shrink-0 text-caption tabular-nums text-fg-subtle not-pointer-coarse:group-hover/next:hidden not-pointer-coarse:group-focus-within/next:hidden">
                         {t('durationMinutes', { count: durationMinutes(p) })}
                       </span>
                     </button>
-                    <span className="hidden shrink-0 items-center pe-1 group-hover/next:flex group-focus-within/next:flex pointer-coarse:flex" data-testid="up-next-actions">
+                    <span
+                      className="hidden shrink-0 items-center pe-1 not-pointer-coarse:group-hover/next:flex not-pointer-coarse:group-focus-within/next:flex"
+                      data-testid="up-next-actions"
+                    >
                       <ProgramActionsView channelRef={channel.ref} channelName={channelName} program={p} now={now} variant="icons" shared={shared} />
                     </span>
                   </li>

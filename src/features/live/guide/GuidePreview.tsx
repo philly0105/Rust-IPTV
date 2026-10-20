@@ -11,11 +11,12 @@
  */
 
 import { CalendarClock, History, Play, Radio, Tv } from 'lucide-react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 import { PlayerStage } from '@/features/player';
-import { Button, LivePill, MetaLine, Skeleton } from '@/ui';
+import { Button, cn, LivePill, MetaLine, Skeleton, useScaledPx } from '@/ui';
 // recording:
 import { ProgramActions } from '@/features/recording';
 
@@ -26,6 +27,12 @@ import { genreColor, genreOf } from './genre';
 import { useProgramDescription } from './programDescription';
 
 const PREVIEW_KEY = 'guide.preview';
+/**
+ * Below this details width (px at 100 %) Remind, Record and Record series are icons, so the
+ * actions stay on one line: on a tablet they wrapped to two and pushed the title and the
+ * description out of the band, whose height is fixed (the grid under it never moves).
+ */
+const PREVIEW_LABELLED_ACTIONS_PX = 520;
 
 /** Whether the band is open (UI preference; open unless the user hid it). */
 export function storedPreviewOpen(): boolean {
@@ -55,17 +62,44 @@ export interface GuidePreviewProps {
   offsetMs: number;
   onWatch(channel: Channel): void;
   onCatchup(channel: Channel, program: EpgProgram): void;
+  /**
+   * The pointer came onto or left the band: a hovered cell's programme stays in it while the
+   * pointer is on its way to these buttons (EpgGridPage).
+   */
+  onPointerEnter?(): void;
+  onPointerLeave?(): void;
+}
+
+/** True while the element is narrower than `px` (false until it is measured, and in tests). */
+function useNarrowerThan(px: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => setWidth(entries[0]?.contentRect.width ?? 0));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width > 0 && width < px] as const;
 }
 
 export function GuidePreview(props: GuidePreviewProps) {
   const { t } = useTranslation('guide');
   const { channel, program } = props;
   const name = channel ? displayChannelName(channel.name, props.stripPrefix) : '';
+  const [detailsRef, narrow] = useNarrowerThan(useScaledPx(PREVIEW_LABELLED_ACTIONS_PX));
   return (
+    // One height whatever the programme says, so the grid under it never moves as the cursor goes;
+    // a little more on touch, where the buttons are 44 px tall.
     <section
       aria-label={t('previewTitle')}
       data-testid="guide-preview"
-      className="flex h-[13.5rem] shrink-0 gap-4 border-b border-divider bg-surface px-3 py-3"
+      onPointerEnter={props.onPointerEnter}
+      onPointerLeave={props.onPointerLeave}
+      className="flex h-[13.5rem] shrink-0 gap-4 border-b border-divider bg-surface px-3 py-3 pointer-coarse:h-[14rem]"
     >
       <div className="relative aspect-video h-full shrink-0 overflow-hidden rounded-lg bg-black shadow-1 ring-1 ring-edge">
         <PlayerStage className="h-full w-full">
@@ -84,9 +118,9 @@ export function GuidePreview(props: GuidePreviewProps) {
           </div>
         </PlayerStage>
       </div>
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div ref={detailsRef} className="flex min-w-0 flex-1 flex-col">
         {channel && program ? (
-          <PreviewDetails {...props} channel={channel} program={program} name={name} />
+          <PreviewDetails {...props} channel={channel} program={program} name={name} narrow={narrow} />
         ) : (
           <div className="flex h-full flex-col justify-center gap-1 text-fg-muted">
             <CalendarClock size={18} aria-hidden className="text-fg-subtle" />
@@ -98,9 +132,13 @@ export function GuidePreview(props: GuidePreviewProps) {
   );
 }
 
-function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: EpgProgram; name: string }) {
+/**
+ * Everything but the description keeps its height (shrink-0); the description has two lines and
+ * gives way first, so the title is never cut in half.
+ */
+function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: EpgProgram; name: string; narrow: boolean }) {
   const { t, i18n } = useTranslation('live');
-  const { channel, program, now, kind, name } = props;
+  const { channel, program, now, kind, name, narrow } = props;
   const lang = i18n.language;
   const when = programWhen(program, now);
   const catchupOk = canCatchUp(program, channel, kind, now);
@@ -109,18 +147,18 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
   const start = ms(program.start);
   return (
     <>
-      <p className="flex min-w-0 items-center gap-2 text-caption text-fg-muted">
+      <p className="flex min-w-0 shrink-0 items-center gap-2 text-caption text-fg-muted">
         <ChannelLogo src={channel.logoUrl} name={name} size={20} sourceId={channel.ref.sourceId} />
         {channel.number !== undefined ? <span className="font-numeric tabular-nums">{channel.number}</span> : null}
         <span dir="auto" className="min-w-0 truncate">
           {name}
         </span>
       </p>
-      <h2 dir="auto" className="mt-1 truncate text-title-sm text-match-parent text-fg" data-testid="guide-preview-title">
+      <h2 dir="auto" title={program.title} className="mt-1 shrink-0 truncate text-title-sm text-match-parent text-fg" data-testid="guide-preview-title">
         {program.title}
       </h2>
       <MetaLine
-        className="mt-1"
+        className="mt-1 shrink-0"
         items={[
           when === 'now' ? <LivePill key="live" size="sm" dot="none" /> : null,
           <span key="time" className="tabular-nums">
@@ -137,21 +175,22 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
         ]}
       />
       {when === 'now' ? (
-        <span aria-hidden className="mt-2 block h-[3px] w-full max-w-xs overflow-hidden rounded-full bg-surface-3">
+        <span aria-hidden className="mt-2 block h-[3px] w-full max-w-xs shrink-0 overflow-hidden rounded-full bg-surface-3">
           <span className="block h-full rounded-full bg-accent" style={{ width: `${programProgress(program, now) * 100}%` }} />
         </span>
       ) : null}
       {description ? (
-        <p dir="auto" className="mt-2 line-clamp-3 max-w-prose text-body-sm text-match-parent text-fg-muted" data-testid="guide-preview-description">
+        <p dir="auto" className="mt-2 line-clamp-2 min-h-0 max-w-prose text-body-sm text-match-parent text-fg-muted" data-testid="guide-preview-description">
           {description}
         </p>
       ) : pending ? (
-        <div aria-hidden className="mt-3 flex max-w-prose flex-col gap-2">
+        <div aria-hidden className="mt-3 flex min-h-0 max-w-prose flex-col gap-2 overflow-hidden">
           <Skeleton className="h-3 w-full" />
           <Skeleton className="h-3 w-2/3" />
         </div>
       ) : null}
-      <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
+      {/* One line when narrow: the record buttons are icons and a long "Play …" label truncates. */}
+      <div className={cn('mt-auto flex shrink-0 items-center gap-2 pt-2', narrow ? 'flex-nowrap' : 'flex-wrap')} data-testid="guide-preview-actions">
         {when === 'now' ? (
           <Button size="sm" variant="primary" icon={<Radio size={14} />} onClick={() => props.onWatch(channel)}>
             {t('watchLive')}
@@ -163,12 +202,12 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
           </Button>
         ) : null}
         {when !== 'now' ? (
-          <Button size="sm" variant={catchupOk ? 'ghost' : 'secondary'} icon={<Play size={14} />} onClick={() => props.onWatch(channel)}>
-            {t('playChannel', { name })}
+          <Button size="sm" variant={catchupOk ? 'ghost' : 'secondary'} icon={<Play size={14} />} onClick={() => props.onWatch(channel)} className="min-w-0" title={narrow ? t('playChannel', { name }) : undefined}>
+            <span className="truncate">{t('playChannel', { name })}</span>
           </Button>
         ) : null}
         {/* recording: */}
-        <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} />
+        <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} variant={narrow ? 'icons' : 'buttons'} />
       </div>
     </>
   );

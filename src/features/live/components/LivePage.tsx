@@ -950,8 +950,11 @@ function RadioStage({ idle }: { idle: ReactNode }) {
     <div className="relative flex min-h-14 flex-1 flex-col bg-black max-md:min-h-0 md:min-h-0" data-testid="radio-stage">
       {playingRadio ? (
         // The running player moves into this slot (the dock draws the station's stage view and owns
-        // the audio), so the page shows one player, not this one plus the floating mini dock.
-        <PlayerStage className="min-h-56 flex-1 md:min-h-0" />
+        // the audio), so the page shows one player, not this one plus the floating mini dock. On a
+        // phone the slot is as tall as that view: its padding, gaps, title lines and buttons (about
+        // 18.5rem) and the artwork, clamp(96px, 22vh, 200px). At 14rem it cut the artwork's top and
+        // hid the play button under the list.
+        <PlayerStage className="min-h-[calc(18.5rem+clamp(96px,22vh,200px))] flex-1 md:min-h-0" />
       ) : (
         <div className="relative flex-1 max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2">{idle}</div>
       )}

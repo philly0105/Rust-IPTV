@@ -41,6 +41,7 @@ import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../
 // recording:
 import { RibbonActions, ScheduleMark } from '@/features/recording';
 import { listSeparator } from '@/lib/intl';
+import { ChannelLogo } from './ChannelLogo';
 import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;
@@ -66,8 +67,9 @@ export interface EpgRibbonProps {
   guideHref?: string;
   /**
    * The stage column's full ribbon (Live and custom lists, LG-02): from md up the header is a
-   * Now card (programme art, a progress bar, three lines of description) and Up next fills the
-   * column under the timeline. Below md the ribbon folds to one line until it is opened (LG-17).
+   * Now card (the channel, programme art, a progress bar, three lines of description) and Up next
+   * fills the column under the timeline. Below md the ribbon folds to one line until it is opened
+   * (LG-17).
    */
   details?: boolean;
 }
@@ -162,25 +164,52 @@ export function EpgRibbon(props: EpgRibbonProps) {
   );
 
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
+  // With nothing of this channel playing, the button names the channel it starts: the ribbon then
+  // follows the list's cursor, not the "Last watched" channel the idle stage offers above it.
+  const liveName = props.watchingArchive || !channelName ? liveLabel : [liveLabel, channelName].join(listSeparator(i18n.language));
   const details = !!props.details;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
   const header = (
-    // Below 480 px the programme lines take the full width and the buttons wrap under them, so the
-    // time range and title are not cut to "01:45 AM – 0…" beside five buttons (L2-live-15).
+    // Below 480 px (the Now card: below 26rem of stage column, as on a tablet) the programme
+    // lines take the full width and the buttons wrap under them, so the time range and title are
+    // not cut to "01:45 AM – 0…" beside five buttons (L2-live-15).
     <div
       className={cn('flex min-w-0 flex-wrap items-start gap-x-3 gap-y-1 px-4 pt-3 pb-2', details && !phoneOpen && 'max-md:hidden')}
       data-testid="ribbon-header"
+      // LG-06: a hovered block stays in the header while the pointer is on its way to these buttons
+      // (it went back 300 ms after the pointer left the timeline, so Record acted on the airing
+      // programme), and a press here picks it, so a menu opened from here keeps it too.
+      onPointerEnter={() => window.clearTimeout(lingerTimer.current)}
+      onPointerLeave={() => {
+        if (hovered) preview(undefined);
+      }}
+      onPointerDownCapture={() => {
+        if (hovered) pick(hovered);
+      }}
     >
       {/* Three lines tall with or without a programme (time, title, description), so a zap never
-          moves what is under it. The Now card (details, md up) keeps its own fixed height. */}
-      <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3 max-[480px]:basis-full', details && 'md:min-h-[4.5rem]')}>
+          moves what is under it. The Now card (details, md up) keeps its own fixed height: its four
+          lines (channel, time, title, progress), or the channel's name alone without a guide. */}
+      <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3', details ? '@max-[26rem]/now:basis-full md:min-h-[5.25rem]' : 'max-[480px]:basis-full')}>
         {details && shown?.icon ? <ProgrammeArt src={shown.icon} sourceId={channel?.ref.sourceId} /> : null}
         {/* A container: the meta line drops what does not fit by the pane's own width, not the window's. */}
         <div className="@container/ribbon flex min-w-0 flex-1 flex-col justify-center">
           {shown ? (
             <>
+              {details && channel ? (
+                // The card names its channel: with nothing playing it describes the list's cursor
+                // row, which is not marked while the list lacks focus (as the guide's band does).
+                <p className="mb-0.5 flex min-w-0 items-center gap-1.5 text-caption text-fg-muted" data-testid="ribbon-channel">
+                  <ChannelLogo src={channel.logoUrl} name={channelName} size={20} sourceId={channel.ref.sourceId} />
+                  {channel.number !== undefined ? <span className="shrink-0 font-numeric tabular-nums">{channel.number}</span> : null}
+                  <span dir="auto" className="min-w-0 truncate text-match-parent">
+                    {channelName}
+                  </span>
+                </p>
+              ) : null}
               {/* Clipped, never overflowing, and numbers are never cut: a narrow pane says "27m" for
-                  "27 min left" and leaves the category out (it used to read "2.. N"). */}
+                  "27 min left" and leaves the category out (it used to read "2.. N"). The Now card
+                  makes room for them first (the art goes, then the buttons wrap). */}
               <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
                 {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
@@ -213,7 +242,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   </button>
                 ) : null}
               </p>
-              <p dir="auto" className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:mt-0.5 md:text-title-sm')}>
+              <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:mt-0.5 md:text-title-sm')}>
                 {shown.title}
               </p>
               {details ? (
@@ -235,18 +264,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
           )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1 max-[480px]:ms-auto">
+      <div className={cn('flex shrink-0 items-center gap-1', details ? '@max-[26rem]/now:ms-auto' : 'max-[480px]:ms-auto')}>
         {/* recording: */}
         {channel ? <RibbonActions channel={channel} channelName={channelName} program={shown} now={now} /> : null}
         {channel && !props.watchingLive ? (
           // Icon-only below 1440 px, where the pane is too narrow for the label and the programme line together.
           // "Back to live" only means something while this channel's catch-up plays; otherwise it starts the stream.
-          <Tooltip content={liveLabel} describe={false}>
+          <Tooltip content={liveName} describe={false}>
             <Button
               size="sm"
               variant="secondary"
               icon={<Radio className="size-3.5" />}
-              aria-label={liveLabel}
+              aria-label={liveName}
               data-testid="ribbon-back-to-live"
               onClick={() => props.onPlayLive(channel)}
             >
@@ -420,7 +449,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
     <section
       aria-label={t('guide')}
       data-testid="epg-ribbon"
-      className={cn('flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface', details && 'md:flex-1')}
+      // The Now card lays itself out by the stage column's width (`now`), not the window's.
+      className={cn('flex min-h-0 shrink-0 flex-col border-t border-divider bg-surface', details && '@container/now md:flex-1')}
     >
       {phoneLine}
       {header}
@@ -453,7 +483,9 @@ function ProgrammeArt({ src, sourceId }: { src: string; sourceId?: string }) {
       decoding="async"
       onError={image.onError}
       data-testid="ribbon-art"
-      className="hidden aspect-video w-32 shrink-0 self-center rounded-md bg-surface-3 object-cover ring-1 ring-edge md:block"
+      // Only where the card has room for it beside the text and the buttons (36rem of stage column):
+      // at 1280 px it left the time and title a few letters, and a tablet's column none.
+      className="hidden aspect-video w-32 shrink-0 self-center rounded-md bg-surface-3 object-cover ring-1 ring-edge md:@[36rem]/now:block"
     />
   );
 }

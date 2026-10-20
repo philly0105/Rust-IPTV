@@ -205,6 +205,7 @@
   "mappingShiftSaved": "Időeltolás mentve",
   "favorite": "Kedvenc",
   "channelMenu": "Csatorna beállításai",
+  "groupMenu": "Csoport beállításai",
   "lastWatched": "Legutóbb nézett",
   "lastStation": "Legutóbb hallgatott",
   "idleNowOn": "Most: {{title}} · {{left}}",

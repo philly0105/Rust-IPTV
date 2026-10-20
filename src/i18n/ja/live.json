@@ -205,6 +205,7 @@
   "mappingShiftSaved": "時刻調整を保存しました",
   "favorite": "お気に入り",
   "channelMenu": "チャンネルのオプション",
+  "groupMenu": "グループのオプション",
   "lastWatched": "前回の視聴",
   "lastStation": "前回の再生",
   "idleNowOn": "放送中：{{title}}・{{left}}",

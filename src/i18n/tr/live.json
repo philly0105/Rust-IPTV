@@ -205,6 +205,7 @@
   "mappingShiftSaved": "Saat kaydırması kaydedildi",
   "favorite": "Favori",
   "channelMenu": "Kanal seçenekleri",
+  "groupMenu": "Grup seçenekleri",
   "lastWatched": "Son izlenen",
   "lastStation": "Son dinlenen",
   "idleNowOn": "Şimdi: {{title}} · {{left}}",

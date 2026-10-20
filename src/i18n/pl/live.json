@@ -215,6 +215,7 @@
   "mappingShiftSaved": "Zapisano przesunięcie czasu",
   "favorite": "Ulubiony",
   "channelMenu": "Opcje kanału",
+  "groupMenu": "Opcje grupy",
   "lastWatched": "Ostatnio oglądany",
   "lastStation": "Ostatnio słuchana",
   "idleNowOn": "Teraz: {{title}} · {{left}}",

@@ -215,6 +215,7 @@
   "mappingShiftSaved": "Сдвиг времени сохранён",
   "favorite": "В избранном",
   "channelMenu": "Действия с каналом",
+  "groupMenu": "Действия с группой",
   "lastWatched": "Последний просмотр",
   "lastStation": "Последнее прослушивание",
   "idleNowOn": "Сейчас: {{title}} · {{left}}",

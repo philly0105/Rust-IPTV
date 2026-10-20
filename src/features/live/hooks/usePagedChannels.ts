@@ -70,6 +70,12 @@ export interface PagedChannels {
    * it cannot be found in a few reads.
    */
   locate?(ref: ItemRef, number: number | undefined): Promise<number | undefined>;
+  /**
+   * The row index of a channel in a list whose every entry is known up front (the guide's
+   * favorites and custom list views), whether or not its row is loaded; undefined when it is not
+   * in the list. `loaded` holds only the favorites near the rows on screen.
+   */
+  indexOf?(ref: ItemRef): number | undefined;
 }
 
 type ChannelsArgs = RpcArgs<'catalog.channels'>;

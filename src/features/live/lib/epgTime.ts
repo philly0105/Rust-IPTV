@@ -166,20 +166,29 @@ export function floorTo(t: number, stepMs: number): number {
   return Math.floor(t / stepMs) * stepMs;
 }
 
+/**
+ * The hour form of a locale's clock: two digits on a 24-hour clock ("08:05", as de, fr, ja and
+ * the rest write it, and as wide as any other time, so the guide's columns line up), numeric on a
+ * 12-hour one ("8:05 PM", "오후 8:05": a leading zero there reads as a typo).
+ */
+function hourForm(tag: string): '2-digit' | 'numeric' {
+  const cycle = new Intl.DateTimeFormat(tag, { hour: 'numeric' }).resolvedOptions().hourCycle;
+  return cycle === 'h23' || cycle === 'h24' ? '2-digit' : 'numeric';
+}
+
 const timeFormatters = new Map<string, Intl.DateTimeFormat>();
 function clockFormatter(locale?: string): Intl.DateTimeFormat {
   const key = locale ?? '';
   let f = timeFormatters.get(key);
   if (!f) {
-    // `numeric` hours: "8:30 PM" in English, the locale's own form elsewhere ("20:30", "오후 8:30").
-    // Two-digit hours put a leading zero on every time in a 12-hour locale ("08:30 PM").
-    f = new Intl.DateTimeFormat(intlLocale(locale), { hour: 'numeric', minute: '2-digit' });
+    const tag = intlLocale(locale);
+    f = new Intl.DateTimeFormat(tag, { hour: hourForm(tag), minute: '2-digit' });
     timeFormatters.set(key, f);
   }
   return f;
 }
 
-/** Clock time in the UI language: "8:30 PM", "20:30". */
+/** Clock time in the UI language: "8:30 PM", "20:30", "08:05". */
 export function formatClock(t: number, locale?: string): string {
   return clockFormatter(locale).format(t);
 }
@@ -207,7 +216,7 @@ export function formatClockBare(t: number, locale?: string): string {
 
 /**
  * "8:00 – 8:30 PM": a time range that names a shared AM/PM once, on the side the locale puts
- * it ("오후 8:00 – 8:30" in Korean). Hours keep the locale's form; 24-hour locales are unchanged.
+ * it ("오후 8:00 – 8:30" in Korean). Hours keep the locale's form; 24-hour locales read "08:00 – 08:30".
  * Intl's own formatRange is not used: it switches some locales to longer forms ("8時00分～").
  */
 export function formatTimeRange(start: number, end: number, locale?: string): string {
@@ -235,12 +244,13 @@ export function formatDay(t: number, locale?: string): string {
 }
 
 const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
-/** Clock time with the zone's short name ("1:30 GMT+1"): tells the two 01:30s of a fall-back night apart. */
+/** Clock time with the zone's short name ("01:30 GMT+1", "1:30 AM GMT"): tells the two 01:30s of a fall-back night apart. */
 export function formatClockZone(t: number, locale?: string): string {
   const key = locale ?? '';
   let f = zoneFormatters.get(key);
   if (!f) {
-    f = new Intl.DateTimeFormat(intlLocale(locale), { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+    const tag = intlLocale(locale);
+    f = new Intl.DateTimeFormat(tag, { hour: hourForm(tag), minute: '2-digit', timeZoneName: 'short' });
     zoneFormatters.set(key, f);
   }
   return f.format(t);

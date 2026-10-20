@@ -205,6 +205,7 @@
   "mappingShiftSaved": "시간 조정을 저장했습니다",
   "favorite": "즐겨찾기",
   "channelMenu": "채널 옵션",
+  "groupMenu": "그룹 옵션",
   "lastWatched": "최근 시청",
   "lastStation": "최근 재생",
   "idleNowOn": "지금: {{title}} · {{left}}",

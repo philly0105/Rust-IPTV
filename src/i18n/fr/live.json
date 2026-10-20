@@ -210,6 +210,7 @@
   "mappingShiftSaved": "Décalage horaire enregistré",
   "favorite": "Favori",
   "channelMenu": "Options de la chaîne",
+  "groupMenu": "Options du groupe",
   "lastWatched": "Dernière chaîne regardée",
   "lastStation": "Dernière station écoutée",
   "idleNowOn": "En ce moment : {{title}} · {{left}}",

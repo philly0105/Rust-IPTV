@@ -230,19 +230,21 @@ function ArchiveBrowser({ channel, kind, name, sourceName, offsetMinutes }: Brow
 
   return (
     <>
-      <div className="flex shrink-0 flex-col gap-4 lg:sticky lg:top-0 lg:w-[min(46%,44rem)] lg:self-start">
+      <div className="@container/archive flex shrink-0 flex-col gap-4 lg:sticky lg:top-0 lg:w-[min(46%,44rem)] lg:self-start">
         <div className="flex flex-wrap items-center gap-3">
           <BackButton to={`/s/${encodeURIComponent(channel.ref.sourceId)}/live`} label={t('liveTv')} />
         </div>
-        <div className="flex items-center gap-4">
+        {/* A narrow column (a phone, the sticky column of a 1024 px window) puts Watch live under the
+            name: beside it, the name was cut to "Wildf…" and the line under it wrapped a word to a line. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
           <ChannelLogo src={channel.logoUrl} name={name} size={56} sourceId={channel.ref.sourceId} />
           <div className="min-w-0 flex-1">
-            <p dir="auto" className="truncate text-title text-fg">
+            <p dir="auto" className="truncate text-title text-fg" title={name}>
               {name}
             </p>
             <MetaLine className="mt-0.5" items={[t('archiveDays', { count }), sourceName]} />
           </div>
-          <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0">
+          <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">
             {t('watchLive')}
           </Button>
         </div>
@@ -403,7 +405,9 @@ function ProgramRow({ program, state, playing, tabIndex, buttonRef, onFocus, onP
             )}
           >
             {action.icon}
-            {action.label}
+            {/* A phone's row keeps the time and the action on one line: the icon says it there, and
+                the whole row is the button. The airing row keeps its words. */}
+            <span className={onNow ? undefined : 'max-sm:hidden'}>{action.label}</span>
           </span>
         ) : null}
       </button>

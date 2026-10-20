@@ -553,7 +553,8 @@ describe('ribbon live button', () => {
     rpcMock.handlers['epg.programs'] = () => [program('Show', Date.now() - 10 * MINUTE, Date.now() + 10 * MINUTE)];
     renderIn('/s/src1/live', LIVE);
     const btn = await screen.findByTestId('ribbon-back-to-live');
-    expect(btn.getAttribute('aria-label')).toBe('Watch live');
+    // With nothing playing it also names the channel it starts (the ribbon follows the cursor).
+    expect(btn.getAttribute('aria-label')).toBe('Watch live, Channel 0');
     cleanup();
     // A catch-up of channel 0 is playing (not live): the button takes you back to live.
     fakes.usePlayerStore.setState({

@@ -225,6 +225,7 @@
   "mappingShiftSaved": "تم حفظ إزاحة التوقيت",
   "favorite": "في المفضلة",
   "channelMenu": "خيارات القناة",
+  "groupMenu": "خيارات المجموعة",
   "lastWatched": "آخر ما شاهدته",
   "lastStation": "آخر ما استمعت إليه",
   "idleNowOn": "الآن: {{title}} · {{left}}",

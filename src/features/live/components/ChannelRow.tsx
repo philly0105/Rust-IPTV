@@ -78,7 +78,8 @@ export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
  * The actions that float over a row's end (LG-04): shown on hover, while the row has keyboard
  * focus (a click's focus does not count, or the clicked row would keep them up), and always on
  * touch screens, where nothing hovers. A mouse at rest sees a clean row; the title runs on under
- * where they appear. On touch they sit in the row's flow, so they never cover the time.
+ * where they appear. On touch they sit in the row's flow, so they never cover the time, and only
+ * the ⋮ stays: the star is one of its items.
  */
 const ROW_ACTIONS =
   'absolute inset-y-0 end-1.5 my-auto flex h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 opacity-0 shadow-2 group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 pointer-coarse:static pointer-coarse:me-1 pointer-coarse:border-transparent pointer-coarse:bg-transparent pointer-coarse:opacity-100 pointer-coarse:shadow-none';
@@ -202,9 +203,10 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           shortcut="s"
           icon={<Star size={16} className={favorite ? 'fill-current text-warning' : undefined} />}
           onClick={() => props.onToggleFavorite(channel, favorite)}
-          // A pressed toggle draws the selected fill; the filled star says enough here. A phone keeps
-          // its narrow row for the title: the ⋮ menu has Add to favorites too.
-          className="aria-pressed:bg-transparent hover:bg-hover pointer-coarse:max-sm:hidden"
+          // A pressed toggle draws the selected fill; the filled star says enough here. On touch the
+          // actions sit in the row's flow, so a 44 px star beside the ⋮ cut a tablet's narrow list to
+          // "M…": the ⋮ menu (and a long press) has Add to favorites, and the row keeps its mark.
+          className={cn('aria-pressed:bg-transparent hover:bg-hover', props.onMenuAt ? 'pointer-coarse:hidden' : 'pointer-coarse:max-sm:hidden')}
         />
         {props.onMenuAt ? (
           <IconButton

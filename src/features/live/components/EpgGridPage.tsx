@@ -325,6 +325,8 @@ export function shownChunks(view: ChunkPair, settled: ChunkPair, all: boolean, c
 /** Rows of programme lists kept per channel before the cache starts over. */
 const PROGRAMS_CACHE_MAX = 2000;
 const NO_PROGRAMS: EpgProgram[] = [];
+/** The args of a disabled `catalog.item` query (nothing playing). */
+const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 
 /**
  * How far past now the provider's short guide reaches: it holds the airing programme and the next
@@ -446,6 +448,11 @@ export function EpgGridPage() {
   // LG-01: the channel playing in the app is marked in its row.
   const playingRef = usePlayerStore((s) => s.source?.ref);
   const playingKey = playingRef && playingRef.contentType === 'live' ? itemKey(playingRef) : null;
+  // Its catalog row says whether a group on screen holds it and gives "Go to playing" its number,
+  // so the row is found in a few page reads (a view knows its entries itself).
+  const playingHere = !!playingKey && playingRef?.sourceId === sourceId;
+  const playingItem = useRpcQuery('catalog.item', { ref: playingRef ?? NO_REF }, { enabled: playingHere && !view, staleTime: 5 * 60_000 });
+  const playingChannel = playingHere && playingItem.data && 'isRadio' in playingItem.data ? (playingItem.data as Channel) : undefined;
   // CB-GUIDE-GENRE: the genre the cells are filtered to, remembered between visits.
   const [genreFilter, setGenreFilterState] = useState<Genre | null>(storedGenreFilter);
   const setGenreFilter = useStable((g: Genre | null) => {
@@ -708,6 +715,7 @@ export function EpgGridPage() {
       if (opts.category === null) {
         p.delete('category');
         p.delete('view');
+        p.delete('focus');
       }
     }, slot, false);
   });
@@ -749,6 +757,10 @@ export function EpgGridPage() {
       (p) => {
         if (value) p.set(key, value);
         else p.delete(key);
+        // `focus` (LG-01) opened the guide at a channel of the list it came with: another source,
+        // group or view starts at its top, and must not jump back to that channel (or to a channel
+        // of another source with the same id).
+        p.delete('focus');
         if (key === 'source') p.delete('category');
         // A group and a view replace each other; a view stays on another source.
         if (key === 'category') p.delete('view');
@@ -1123,14 +1135,14 @@ export function EpgGridPage() {
   }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // LG-01: Live's guide link names the channel playing there (`focus`): the guide opens at its row,
-  // on now, once per address. Its number lets the paged list find the row in a few reads.
+  // on now, once per link. Its number lets the paged list find the row in a few reads. Picking
+  // another source, group or view takes `focus` out of the address (setQuery).
   const focusParam = params.get('focus');
   const handledFocus = useRef<string | null>(null);
   useEffect(() => {
     if (!focusParam || !sourceId) return;
-    const at = `${sourceId}|${categoryId ?? ''}|${viewParam ?? ''}|${focusParam}`;
-    if (handledFocus.current === at) return;
-    handledFocus.current = at;
+    if (handledFocus.current === focusParam) return;
+    handledFocus.current = focusParam;
     const ref: ItemRef = { sourceId, contentType: 'live', itemId: focusParam };
     let cancelled = false;
     rpc('catalog.item', { ref })
@@ -1164,7 +1176,8 @@ export function EpgGridPage() {
       if (!ch) return missing();
       const time = cursorRef.current.time ?? Date.now();
       const key = itemKey(ch.ref);
-      const inView = view ? paged.loaded.some((l) => itemKey(l.channel.ref) === key) : !categoryId || ch.categoryId === categoryId;
+      // A view knows every entry, not only the rows fetched near the screen (favorite #50 is in it).
+      const inView = view ? paged.indexOf?.(ch.ref) !== undefined : !categoryId || ch.categoryId === categoryId;
       if (!inView) goTo(time, { category: null });
       setHighlight(null);
       setReveal({ key, ref: ch.ref, number: ch.number, time, channelName: displayChannelName(ch.name, prefs.stripCountryPrefix), categoryId: inView ? categoryId : undefined });
@@ -1195,12 +1208,14 @@ export function EpgGridPage() {
     let cancelled = false;
     const known = paged.loaded.find((l) => itemKey(l.channel.ref) === reveal.key)?.index;
     if (view) {
-      // A view (favorites, a list) is loaded whole: the channel is in it or not.
+      // A view (favorites, a list) knows all its entries: the channel is in it or not. Favorites
+      // fetch their channels near the rows on screen only, so the row comes from the entry list.
       setReveal(null);
-      if (known === undefined) return;
-      virtualizer.scrollToIndex(known, { align: 'center' });
-      cursorRef.current = { row: known, time: reveal.time };
-      setCursor({ row: known, time: reveal.time });
+      const index = known ?? paged.indexOf?.(reveal.ref);
+      if (index === undefined) return;
+      virtualizer.scrollToIndex(index, { align: 'center' });
+      cursorRef.current = { row: index, time: reveal.time };
+      setCursor({ row: index, time: reveal.time });
       focusPending.current = true;
       scroller.current?.focus({ preventScroll: true });
       return;
@@ -1297,6 +1312,14 @@ export function EpgGridPage() {
     window.clearTimeout(hoverTimer.current);
     hoverTimer.current = window.setTimeout(() => setHovered(program ? { channel, program } : null), PREVIEW_HOVER_MS);
   });
+  // The band keeps a hovered programme while the pointer is on it. The way from a cell up to the
+  // band's Watch, Record or Remind leaves the grid, and the band used to go back to the cursor's
+  // programme on the way, so those buttons acted on another programme than the one just shown.
+  const holdHover = useStable(() => window.clearTimeout(hoverTimer.current));
+  const releaseHover = useStable(() => {
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(() => setHovered(null), PREVIEW_HOVER_MS);
+  });
   const rowHandlers = useMemo<GuideRowHandlers>(
     () => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt, fitText, press: pressCell, hover: hoverCell }),
     [playLive, openCell, focusCell, rowMenuAt, fitText, pressCell, hoverCell],
@@ -1347,13 +1370,15 @@ export function EpgGridPage() {
   const lang = i18n.language;
   // The band describes the hovered cell, else the open popover's, else the keyboard cursor's.
   const previewSubject = hovered ?? (selection ? { channel: selection.channel, program: selection.program } : null) ?? (paged.getChannel(cursor.row) && cursorProg ? { channel: paged.getChannel(cursor.row)!, program: cursorProg } : null);
-  // LG-01: "Go to playing" while the playing channel's row is in this list but off screen.
-  const playingRow = playingKey ? paged.loaded.find((l) => itemKey(l.channel.ref) === playingKey)?.index : undefined;
+  // LG-01: "Go to playing" while the playing channel's row is in this list but off screen. Only
+  // then: offered for a channel of another group, a press read every page of this one for nothing.
+  const playingRow = playingKey ? (paged.loaded.find((l) => itemKey(l.channel.ref) === playingKey)?.index ?? (playingRef ? paged.indexOf?.(playingRef) : undefined)) : undefined;
   const playingOnScreen = playingRow !== undefined && playingRow >= first && playingRow <= last;
+  const playingInList = playingHere && (view ? playingRow !== undefined : !!playingChannel && (!categoryId || playingChannel.categoryId === categoryId));
   const goToPlaying =
-    playingKey && playingRef && playingRef.sourceId === sourceId && !playingOnScreen
+    playingKey && playingRef && playingInList && !playingOnScreen
       ? () => {
-          setReveal({ key: playingKey, ref: playingRef, number: undefined, time: Date.now(), channelName: '', categoryId, quiet: true });
+          setReveal({ key: playingKey, ref: playingRef, number: playingChannel?.number, time: Date.now(), channelName: '', categoryId, quiet: true });
           if (playingRow !== undefined) virtualizer.scrollToIndex(playingRow, { align: 'center' });
         }
       : undefined;
@@ -1402,6 +1427,8 @@ export function EpgGridPage() {
           offsetMs={offsetMs}
           onWatch={playLive}
           onCatchup={catchup}
+          onPointerEnter={holdHover}
+          onPointerLeave={releaseHover}
         />
       ) : null}
       <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={start} now={now} onJump={goTo} onNow={toNow} />

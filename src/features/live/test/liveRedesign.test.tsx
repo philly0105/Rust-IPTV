@@ -103,6 +103,14 @@ describe('clock formats (compact times)', () => {
     expect(ko.startsWith(formatClock(at(20, 0), 'ko'))).toBe(true);
     expect(ko.split(' – ')[1]).toBe('8:30');
   });
+
+  it('keeps two-digit hours on a 24-hour clock and drops the zero only on a 12-hour one', () => {
+    for (const lang of ['de', 'fr', 'ru', 'ja', 'zh']) expect(formatClock(at(8, 5), lang)).toBe('08:05');
+    expect(formatTimeRange(at(8, 0), at(9, 30), 'de')).toBe('08:00 – 09:30');
+    expect(formatClockBare(at(8, 0), 'de')).toBe('08:00');
+    expect(formatClock(at(20, 5), 'en')).toBe('8:05 PM');
+    expect(formatClock(at(8, 5), 'ko')).toBe('오전 8:05');
+  });
 });
 
 describe('channel logos (LG-14)', () => {
@@ -173,6 +181,9 @@ describe('channel rows (LG-03, LG-04)', () => {
     const actions = screen.getByTestId('row-actions');
     expect(actions.className).toContain('pointer-coarse:opacity-100');
     expect(actions.className).toContain('group-hover/row:opacity-100');
+    // Only the ⋮ in the row's flow on touch: the star is in its menu, and the title keeps the room.
+    expect(within(actions).getByRole('button', { name: 'Remove from favorites' }).className).toContain('pointer-coarse:hidden');
+    expect(within(actions).getByRole('button', { name: 'Channel options' }).className).not.toContain('pointer-coarse:hidden');
     expect(screen.getByTestId('row-favorite')).toBeTruthy();
     expect(screen.getByRole('button', { name: /^4, Channel 3, Favorite/ })).toBeTruthy();
   });
@@ -296,6 +307,43 @@ describe('the ribbon (LG-02, LG-06, LG-17)', () => {
     expect(title()).toBe('Afternoon Film');
     fireEvent.click(screen.getByTestId('ribbon-back-to-now'));
     expect(title()).toBe('Morning Report');
+  });
+
+  it('a hovered programme stays while the pointer goes up to the header, and a press there picks it', async () => {
+    ribbon();
+    const film = await screen.findByRole('button', { name: /^Afternoon Film/ });
+    fireEvent.mouseEnter(film);
+    expect(title()).toBe('Afternoon Film');
+    vi.useFakeTimers();
+    const header = screen.getByTestId('ribbon-header');
+    fireEvent.pointerLeave(screen.getByTestId('ribbon-timeline'));
+    fireEvent.pointerEnter(header);
+    act(() => vi.advanceTimersByTime(RIBBON_PREVIEW_LINGER_MS * 3));
+    // Record, Remind and Watch live there act on what the header shows.
+    expect(title()).toBe('Afternoon Film');
+    fireEvent.pointerDown(header);
+    fireEvent.pointerLeave(header);
+    act(() => vi.advanceTimersByTime(RIBBON_PREVIEW_LINGER_MS * 3));
+    expect(title()).toBe('Afternoon Film');
+    expect(film.getAttribute('aria-current')).toBe('true');
+  });
+
+  it('the Now card names its channel, Watch live names what it starts, and the card lays out by its column', async () => {
+    rpcMock.handlers['epg.programs'] = () => list;
+    renderAt('/', [
+      {
+        path: '/',
+        element: <EpgRibbon channel={makeChannel(4)} sourceKind="xtream" watchingLive={false} onPlayLive={() => undefined} onMapEpg={() => undefined} details />,
+      },
+    ]);
+    const line = await screen.findByTestId('ribbon-channel');
+    expect(within(line).getByText('5')).toBeTruthy();
+    expect(within(line).getByText('Channel 4')).toBeTruthy();
+    const live = screen.getByTestId('ribbon-back-to-live');
+    expect(live.getAttribute('aria-label')).toBe('Watch live, Channel 4');
+    // A narrow stage column (1280 px, a tablet) drops the art, then wraps the buttons under the text.
+    expect(screen.getByTestId('epg-ribbon').className).toContain('@container/now');
+    expect((screen.getByTestId('ribbon-header').firstElementChild as HTMLElement).className).toContain('@max-[26rem]/now:basis-full');
   });
 
   it('lists what comes next under the timeline, and a row puts it in the header', async () => {

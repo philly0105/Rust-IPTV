@@ -443,8 +443,10 @@ const HitRow = memo(function HitRow({
           <IconButton size="sm" label={t('watchNow', { channel: name })} icon={<Radio className="size-4 text-live" aria-hidden />} onClick={() => onWatch(hit)} data-testid="guide-search-watch" />
         ) : null}
         {/* A column of record and remind buttons on every hit read as a list of alerts: they
-            come with hover or focus (always on touch). */}
-        <span className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100" data-testid="guide-search-actions">
+            come with hover or focus. A touch screen has neither, and three 44 px buttons per hit
+            left a phone's titles "W..": a tap shows the hit in the grid, and its cell's card has
+            Remind and Record. */}
+        <span className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:hidden" data-testid="guide-search-actions">
           <ProgramActionsView channelRef={hit.ref} channelName={name} program={program} now={now} variant="icons" shared={shared} />
         </span>
       </span>

@@ -17,7 +17,7 @@ import { useToastStore } from '@/ui';
 
 import { SimilarSection } from '../components/SimilarSection';
 import { forgetSpots } from '../hooks/useScrollMemory';
-import { RECENT_SEARCHES_KEY, recentSearchList, rememberSearch, resetRecentSearchCache, setRecentSearchesPaused, useRecentSearches } from '../lib/recentSearches';
+import { RECENT_SEARCHES_KEY, forgetSearch, recentSearchList, rememberSearch, resetRecentSearchCache, setRecentSearchesPaused, useRecentSearches } from '../lib/recentSearches';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
@@ -155,6 +155,64 @@ describe('recent searches and parental controls', () => {
     renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
     expect(await screen.findByRole('button', { name: 'harbor' })).toBeTruthy();
     expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY)!)).toEqual(['harbor']);
+  });
+
+  it('the search page offers none when the parental status cannot be read (controls may be on)', async () => {
+    rpcMock.handlers['parental.status'] = () => {
+      throw new Error('core busy');
+    };
+    rememberSearch('after dark');
+    renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
+    await waitFor(() => expect(callsOf('parental.status')).toHaveLength(1));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.queryByRole('button', { name: 'after dark' })).toBeNull();
+    expect(screen.queryByText('Recent searches')).toBeNull();
+  });
+});
+
+describe('recent searches across tabs', () => {
+  /** Another tab of the app writes the list (or empties the whole storage, `key` null). */
+  const otherTab = (list: string[] | null, key: string | null = RECENT_SEARCHES_KEY) => {
+    if (key === null) localStorage.clear();
+    else if (list === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(list));
+    window.dispatchEvent(new StorageEvent('storage', { key, newValue: list ? JSON.stringify(list) : null }));
+  };
+
+  it('a clear in another tab clears them here, and the next search does not bring them back', () => {
+    rememberSearch('harbor');
+    rememberSearch('late night');
+    const { result } = renderHook(() => useRecentSearches());
+    expect(result.current).toEqual(['late night', 'harbor']);
+    act(() => otherTab(null));
+    expect(result.current).toEqual([]);
+    act(() => rememberSearch('copper'));
+    expect(result.current).toEqual(['copper']);
+    expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY)!)).toEqual(['copper']);
+  });
+
+  it('follows another tab emptying the whole storage, and its new searches', () => {
+    rememberSearch('harbor');
+    const { result } = renderHook(() => useRecentSearches());
+    act(() => otherTab(null, null));
+    expect(result.current).toEqual([]);
+    act(() => otherTab(['dune']));
+    expect(result.current).toEqual(['dune']);
+  });
+
+  it('starts every change from what is stored now, even before the other tab’s event arrives', () => {
+    rememberSearch('harbor');
+    expect(recentSearchList()).toEqual(['harbor']);
+    // Cleared in another tab; this tab has not heard of it yet.
+    localStorage.removeItem(RECENT_SEARCHES_KEY);
+    rememberSearch('copper');
+    expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY)!)).toEqual(['copper']);
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(['dune', 'copper']));
+    forgetSearch('copper');
+    expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY)!)).toEqual(['dune']);
+    expect(recentSearchList()).toEqual(['dune']);
   });
 });
 

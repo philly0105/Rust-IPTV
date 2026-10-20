@@ -188,7 +188,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
 
   // While parental controls are set, recent searches are neither kept nor offered, and setting
   // them clears the list (lib/recentSearches). Before paint, so a stored chip never flashes up;
-  // until the status is known (a cold start), the zero state offers none either.
+  // until the status says controls are off (a cold start, a status that failed to load), the
+  // zero state offers none either.
   const parental = useParentalStatus();
   const parentalOn = parental.data?.enabled;
   useLayoutEffect(() => {
@@ -436,7 +437,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       <SearchStart
         sourceId={sourceId}
         sources={allSources}
-        offerRecent={!parental.isPending}
+        offerRecent={parentalOn === false}
         onPick={(q) => {
           setDraft(q);
           rememberSearch(q);
@@ -1329,7 +1330,7 @@ function SearchStart({
 }: {
   sourceId: string | undefined;
   sources: Source[];
-  /** False until the parental status is known: with a PIN set, recent searches are not offered. */
+  /** True once the parental status says controls are off: with a PIN set, or unknown, none are offered. */
   offerRecent: boolean;
   onPick: (query: string) => void;
   /** The prompt, as a short lead above the sections (the full empty state when there are none). */

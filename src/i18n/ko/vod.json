@@ -234,5 +234,12 @@
   "removeRecentSearch": "최근 검색에서 \"{{query}}\" 삭제",
   "jumpBackIn": "최근 본 콘텐츠",
   "browseCategories": "카테고리 둘러보기",
-  "knownForNoneHere": "이 사람의 작품이 이 소스에는 없습니다."
+  "knownForNoneHere": "이 사람의 작품이 이 소스에는 없습니다.",
+  "topResults": "주요 결과",
+  "sourcesCount_one": "소스 {{count}}개",
+  "sourcesCount_other": "소스 {{count}}개",
+  "tmdbPromoLabel": "TMDB 메타데이터",
+  "tmdbPromo": "TMDB로 출연진, 예고편, 더 나은 아트워크를 추가하세요.",
+  "tmdbPromoAction": "설정에서 켜기",
+  "tmdbPromoDismiss": "닫기"
 }

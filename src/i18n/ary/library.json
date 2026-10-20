@@ -350,5 +350,16 @@
   "stopConfirmAction": "وقّف التسجيل",
   "clearFailedDownloads": "مسح اللي فشلو",
   "downloadDone": "تحمّل {{title}}",
-  "downloadFailedNamed": "ماقدرناش نحمّلو {{title}}"
+  "downloadFailedNamed": "ماقدرناش نحمّلو {{title}}",
+  "nowProgress": "فين وصل {{title}}",
+  "scheduledRec": "تسجيل",
+  "scheduledStopShort": "وقّف",
+  "scheduledPaddingAll": "التسجيلات كتبدا {{before}} دقايق بكري وكتسالي {{after}} دقايق من بعد",
+  "myVideosTitlesHeading": "الأفلام والسلاسل",
+  "aboutSource": "المصدر",
+  "aboutEpisodes": "الحلقات",
+  "aboutSize": "الحجم",
+  "aboutDownloaded": "تحمّل",
+  "aboutFile": "الملف",
+  "openInCatalogue": "حلّ ف {{source}}"
 }

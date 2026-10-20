@@ -274,5 +274,16 @@
   "removeRecentSearch": "حيّد \"{{query}}\" من آخر البحوثات",
   "jumpBackIn": "رجع لداكشي اللي كنتي كتشوف",
   "browseCategories": "تصفّح الفئات",
-  "knownForNoneHere": "حتى عمل ديال هاد الشخص ماكاين فهاد المصدر."
+  "knownForNoneHere": "حتى عمل ديال هاد الشخص ماكاين فهاد المصدر.",
+  "topResults": "أحسن النتائج",
+  "sourcesCount_zero": "{{count}} مصدر",
+  "sourcesCount_one": "مصدر واحد",
+  "sourcesCount_two": "جوج مصادر",
+  "sourcesCount_few": "{{count}} مصادر",
+  "sourcesCount_many": "{{count}} مصدر",
+  "sourcesCount_other": "{{count}} مصدر",
+  "tmdbPromoLabel": "معلومات TMDB",
+  "tmdbPromo": "زيد الممثلين والإعلانات وتصاور حسن مع TMDB.",
+  "tmdbPromoAction": "شعلو من الإعدادات",
+  "tmdbPromoDismiss": "خبّي"
 }

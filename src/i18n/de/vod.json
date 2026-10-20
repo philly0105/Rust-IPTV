@@ -234,5 +234,12 @@
   "removeRecentSearch": "„{{query}}“ aus den letzten Suchen entfernen",
   "jumpBackIn": "Zuletzt angesehen",
   "browseCategories": "Kategorien durchsuchen",
-  "knownForNoneHere": "Keiner der Titel dieser Person ist in dieser Quelle."
+  "knownForNoneHere": "Keiner der Titel dieser Person ist in dieser Quelle.",
+  "topResults": "Top-Ergebnisse",
+  "sourcesCount_one": "{{count}} Quelle",
+  "sourcesCount_other": "{{count}} Quellen",
+  "tmdbPromoLabel": "TMDB-Metadaten",
+  "tmdbPromo": "Besetzung, Trailer und bessere Bilder mit TMDB hinzufügen.",
+  "tmdbPromoAction": "In den Einstellungen einschalten",
+  "tmdbPromoDismiss": "Ausblenden"
 }

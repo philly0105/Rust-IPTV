@@ -274,5 +274,16 @@
   "removeRecentSearch": "إزالة \"{{query}}\" من عمليات البحث الأخيرة",
   "jumpBackIn": "تابع من حيث توقفت",
   "browseCategories": "تصفّح الفئات",
-  "knownForNoneHere": "لا يتوفر أي من أعمال هذا الشخص في هذا المصدر."
+  "knownForNoneHere": "لا يتوفر أي من أعمال هذا الشخص في هذا المصدر.",
+  "topResults": "أفضل النتائج",
+  "sourcesCount_zero": "{{count}} مصدر",
+  "sourcesCount_one": "مصدر واحد",
+  "sourcesCount_two": "مصدران",
+  "sourcesCount_few": "{{count}} مصادر",
+  "sourcesCount_many": "{{count}} مصدرًا",
+  "sourcesCount_other": "{{count}} مصدر",
+  "tmdbPromoLabel": "بيانات TMDB الوصفية",
+  "tmdbPromo": "أضف طاقم التمثيل والمقاطع الدعائية وصورًا أفضل عبر TMDB.",
+  "tmdbPromoAction": "فعّله من الإعدادات",
+  "tmdbPromoDismiss": "إخفاء"
 }

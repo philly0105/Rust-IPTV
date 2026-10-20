@@ -278,5 +278,16 @@
   "stopConfirmAction": "Kaydı durdur",
   "clearFailedDownloads": "Başarısızları temizle",
   "downloadDone": "{{title}} indirildi",
-  "downloadFailedNamed": "{{title}} indirilemedi"
+  "downloadFailedNamed": "{{title}} indirilemedi",
+  "nowProgress": "{{title}} ilerlemesi",
+  "scheduledRec": "Kayıt",
+  "scheduledStopShort": "Durdur",
+  "scheduledPaddingAll": "Kayıtlar {{before}} dk erken başlar, {{after}} dk geç biter",
+  "myVideosTitlesHeading": "Filmler ve diziler",
+  "aboutSource": "Kaynak",
+  "aboutEpisodes": "Bölümler",
+  "aboutSize": "Boyut",
+  "aboutDownloaded": "İndirilme tarihi",
+  "aboutFile": "Dosya",
+  "openInCatalogue": "{{source}} içinde aç"
 }

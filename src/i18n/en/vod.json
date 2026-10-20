@@ -234,5 +234,12 @@
   "removeRecentSearch": "Remove \"{{query}}\" from recent searches",
   "jumpBackIn": "Jump back in",
   "browseCategories": "Browse categories",
-  "knownForNoneHere": "None of this person's titles are in this source."
+  "knownForNoneHere": "None of this person's titles are in this source.",
+  "topResults": "Top results",
+  "sourcesCount_one": "{{count}} source",
+  "sourcesCount_other": "{{count}} sources",
+  "tmdbPromoLabel": "TMDB metadata",
+  "tmdbPromo": "Add cast, trailers and better artwork with TMDB.",
+  "tmdbPromoAction": "Turn it on in Settings",
+  "tmdbPromoDismiss": "Dismiss"
 }

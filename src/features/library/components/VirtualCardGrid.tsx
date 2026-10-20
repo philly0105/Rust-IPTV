@@ -32,6 +32,11 @@ export interface VirtualCardGridProps<T> {
   className?: string;
   testId?: string;
   /**
+   * Content above the cards inside the scroll area (a section of its own, a heading): it scrolls
+   * away with them. It is measured, so the rows start where it ends.
+   */
+  header?: ReactNode;
+  /**
    * Identifies this grid in this history entry (e.g. the location key), so
    * returning to it restores scroll and focus. Omit to always start at the top.
    */
@@ -70,9 +75,26 @@ export function VirtualCardGrid<T>({
   captionHeight = 64,
   className,
   testId,
+  header,
   restoreKey,
 }: VirtualCardGridProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const hasHeader = header !== undefined && header !== null && header !== false;
+  const [headerHeight, setHeaderHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) {
+      setHeaderHeight(0);
+      return;
+    }
+    const read = () => setHeaderHeight(el.getBoundingClientRect().height);
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasHeader]);
   // Read once: what this history entry looked like when the user left it.
   const [restore] = useState(() => (restoreKey ? saved.get(restoreKey) : undefined));
   const [width, setWidth] = useState(restore?.width ?? 1024);
@@ -111,6 +133,7 @@ export function VirtualCardGrid<T>({
     // saved offset lands on the same rows.
     initialRect: { width: restore?.width ?? 1024, height: 800 },
     initialOffset: restore?.offset ?? 0,
+    scrollMargin: headerHeight,
   });
 
   useEffect(() => {
@@ -199,6 +222,7 @@ export function VirtualCardGrid<T>({
       className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)}
       data-testid={testId}
     >
+      {hasHeader ? <div ref={headerRef}>{header}</div> : null}
       <div role="list" aria-label={label} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((vr) => {
           const start = vr.index * columns;
@@ -208,7 +232,7 @@ export function VirtualCardGrid<T>({
               key={vr.key}
               className="absolute start-0 top-0 grid w-full"
               style={{
-                transform: `translateY(${vr.start}px)`,
+                transform: `translateY(${vr.start - headerHeight}px)`,
                 gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
                 columnGap: gap,
                 height: rowHeight - gap,

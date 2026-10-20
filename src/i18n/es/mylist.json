@@ -81,5 +81,8 @@
   "playFailed": "No se pudo iniciar la reproducción",
   "minutesLeft_one": "Queda {{count}} minuto",
   "minutesLeft_many": "Quedan {{count}} minutos",
-  "minutesLeft_other": "Quedan {{count}} minutos"
+  "minutesLeft_other": "Quedan {{count}} minutos",
+  "viewLabel": "Vista",
+  "viewGrid": "Cuadrícula",
+  "viewList": "Lista"
 }

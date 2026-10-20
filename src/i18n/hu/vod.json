@@ -234,5 +234,12 @@
   "removeRecentSearch": "„{{query}}” eltávolítása a legutóbbi keresésekből",
   "jumpBackIn": "Legutóbb nézett",
   "browseCategories": "Kategóriák böngészése",
-  "knownForNoneHere": "Ennek a személynek egyik címe sincs ebben a forrásban."
+  "knownForNoneHere": "Ennek a személynek egyik címe sincs ebben a forrásban.",
+  "topResults": "Legjobb találatok",
+  "sourcesCount_one": "{{count}} forrás",
+  "sourcesCount_other": "{{count}} forrás",
+  "tmdbPromoLabel": "TMDB-metaadatok",
+  "tmdbPromo": "Szereplők, előzetesek és jobb képek a TMDB-vel.",
+  "tmdbPromoAction": "Bekapcsolás a beállításokban",
+  "tmdbPromoDismiss": "Elrejtés"
 }

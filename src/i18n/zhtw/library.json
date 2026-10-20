@@ -278,5 +278,16 @@
   "stopConfirmAction": "停止錄影",
   "clearFailedDownloads": "清除失敗的下載",
   "downloadDone": "已下載{{title}}",
-  "downloadFailedNamed": "無法下載{{title}}"
+  "downloadFailedNamed": "無法下載{{title}}",
+  "nowProgress": "{{title}} 的進度",
+  "scheduledRec": "錄影",
+  "scheduledStopShort": "停止",
+  "scheduledPaddingAll": "錄影提早 {{before}} 分鐘開始，延後 {{after}} 分鐘結束",
+  "myVideosTitlesHeading": "電影和影集",
+  "aboutSource": "播放來源",
+  "aboutEpisodes": "集數",
+  "aboutSize": "大小",
+  "aboutDownloaded": "下載日期",
+  "aboutFile": "檔案",
+  "openInCatalogue": "在 {{source}} 中開啟"
 }

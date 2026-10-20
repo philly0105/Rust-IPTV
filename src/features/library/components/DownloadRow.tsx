@@ -1,4 +1,4 @@
-/** One queue row on /downloads: artwork, title, status, dial progress, and actions. */
+/** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
 import { FolderOpen, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
@@ -13,8 +13,9 @@ import { etaSeconds, formatBytes, formatDuration, formatSpeed, percentOf } from 
 import { useLiveProgress } from '../lib/progress';
 import type { QueueAction } from '../lib/queue';
 import { SourceBadge, StatusBadge } from './bits';
+import { REVEAL_ON_FINE } from './EntryRow';
 
-export const DOWNLOAD_ROW_HEIGHT = 92;
+export const DOWNLOAD_ROW_HEIGHT = 84;
 
 const ICONS: Record<QueueAction, typeof Pause> = {
   pause: Pause,
@@ -32,6 +33,8 @@ export interface DownloadRowProps {
   /** The persisted row; the live transfer sample comes from the progress store. */
   download: Download;
   source: Source | undefined;
+  /** The page mixes sources: each row names its own. When every row shares one, none does. */
+  showSource?: boolean;
   actions: readonly QueueAction[];
   busy: boolean;
   /**
@@ -44,11 +47,12 @@ export interface DownloadRowProps {
 }
 
 /**
- * Progress track styled as a tuning dial: tick marks every 10 %, an amber
- * fill, and a needle at the current position. With no percent the track
- * stays empty, unless `indeterminate` (a transfer running with no known size)
- * sweeps a segment across it; with reduced motion that segment becomes a
- * faint full-width wash, so it never reads as a real 25 %.
+ * Progress track: a plain track with the fill, and on the active row a needle at the current
+ * position (the tuner-dial nod). The fill is amber only while bytes move; a paused or queued row
+ * is a neutral grey and a failed one a muted red, so one glance finds the transfer that is running.
+ * With no percent the track stays empty, unless `indeterminate` (a transfer running with no known
+ * size) sweeps a segment across it; with reduced motion that segment becomes a faint full-width
+ * wash, so it never reads as a real 25 %.
  */
 export function DialProgress({
   percent,
@@ -61,7 +65,7 @@ export function DialProgress({
   label: string;
   indeterminate?: boolean;
 }) {
-  const fill = tone === 'accent' ? 'bg-accent' : tone === 'danger' ? 'bg-danger/70' : 'bg-fg-subtle/60';
+  const fill = tone === 'accent' ? 'bg-accent' : tone === 'danger' ? 'bg-danger/70' : 'bg-fg-subtle/50';
   return (
     <div
       role="progressbar"
@@ -69,16 +73,8 @@ export function DialProgress({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={percent}
-      className="relative h-2 w-full overflow-hidden rounded-full bg-surface-3"
+      className="relative h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
     >
-      <div
-        aria-hidden
-        className="absolute inset-0 opacity-60"
-        style={{
-          backgroundImage:
-            'repeating-linear-gradient(to right, transparent 0, transparent calc(10% - 1px), var(--color-border) calc(10% - 1px), var(--color-border) 10%)',
-        }}
-      />
       {percent === undefined ? (
         indeterminate ? (
           <div
@@ -115,7 +111,7 @@ export function DialProgress({
   );
 }
 
-function DownloadRowImpl({ download: d, source, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
+function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
   const lang = i18n.language;
@@ -140,29 +136,34 @@ function DownloadRowImpl({ download: d, source, actions, busy, tabbable = false,
   return (
     <div
       className={cn(
-        'group flex h-full items-center gap-4 rounded-md border border-transparent px-3 py-2',
-        'hover:bg-hover focus-within:bg-hover',
-        isActive && 'bg-surface',
+        'group flex h-full items-center gap-3 rounded-md px-2 sm:gap-4',
+        'hover:bg-hover in-focus-visible:bg-hover focus-within:bg-hover motion-safe:transition-colors',
       )}
       data-testid="download-row"
       data-download-id={d.id}
       data-status={d.status}
     >
-      <div className="w-12 shrink-0">
+      <div className="w-10 shrink-0 overflow-hidden rounded-sm ring-1 ring-edge sm:w-12">
         <Poster src={d.posterUrl} sourceId={d.ref.sourceId} alt="" label={d.title} aspect="poster" />
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-fg" title={d.title}>
+          <span dir="auto" className="min-w-0 truncate text-body-sm font-medium text-fg" title={d.title}>
             {d.title}
           </span>
-          {d.subtitle && <span className="hidden truncate text-[calc(13rem/15)] text-fg-muted md:inline">{d.subtitle}</span>}
-          <StatusBadge status={d.status} className="ms-auto shrink-0" />
+          {d.subtitle && (
+            <span dir="auto" className="hidden min-w-0 truncate text-caption text-fg-muted md:inline">
+              {d.subtitle}
+            </span>
+          )}
+          {/* Below sm the detail line under the bar says the state; the badge would only squeeze the title. */}
+          <StatusBadge status={d.status} className="ms-auto shrink-0 max-sm:hidden" />
         </div>
         <DialProgress percent={pct} tone={tone} indeterminate={isActive && pct === undefined} label={t('progressFor', { title: d.title })} />
-        <div className="flex min-w-0 items-center gap-3 text-xs text-fg-muted">
-          <span className="font-display tabular-nums text-fg">{pct !== undefined ? `${pct}%` : ''}</span>
-          {sizeText && <span className="font-display tabular-nums">{sizeText}</span>}
+        {/* One line at any width: the numbers never wrap, the detail gives way first. */}
+        <div className="flex min-w-0 items-center gap-3 whitespace-nowrap text-caption text-fg-muted">
+          {pct !== undefined && <span className="shrink-0 font-medium tabular-nums text-fg">{`${pct}%`}</span>}
+          {sizeText && <span className="hidden shrink-0 tabular-nums sm:inline">{sizeText}</span>}
           <span
             className={cn('min-w-0 truncate whitespace-pre', d.status === 'failed' && 'text-danger')}
             title={detail}
@@ -170,17 +171,17 @@ function DownloadRowImpl({ download: d, source, actions, busy, tabbable = false,
           >
             {detail}
           </span>
-          <SourceBadge source={source} className="ms-auto hidden shrink-0 lg:inline-flex" />
+          {showSource && <SourceBadge source={source} className="ms-auto hidden shrink-0 lg:inline-flex" />}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      {/* Ghost icon buttons; a row that is not transferring shows them on hover or focus (fine pointers). */}
+      <div className={cn('flex shrink-0 items-center gap-0.5', !isActive && REVEAL_ON_FINE)}>
         {actions.map((a) => {
           const Icon = ICONS[a];
           return (
             <IconButton
               key={a}
               size="sm"
-              variant={a === actions[0] ? 'secondary' : 'ghost'}
               label={t(k('action', a) + 'Aria', { title: d.title })}
               tooltip={t(k('action', a))}
               shortcut={SHORTCUT_KEYS[a]?.toLowerCase()}
@@ -188,6 +189,7 @@ function DownloadRowImpl({ download: d, source, actions, busy, tabbable = false,
               disabled={busy}
               tabIndex={tabbable ? 0 : -1}
               data-action={a}
+              className={a === 'remove' || a === 'cancel' ? 'hover:text-danger' : undefined}
               onClick={() => onAction(a, d)}
             />
           );

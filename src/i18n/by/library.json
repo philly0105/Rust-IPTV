@@ -314,5 +314,16 @@
   "stopConfirmAction": "Спыніць запіс",
   "clearFailedDownloads": "Ачысціць няўдалыя",
   "downloadDone": "{{title}} спампавана",
-  "downloadFailedNamed": "Не ўдалося спампаваць {{title}}"
+  "downloadFailedNamed": "Не ўдалося спампаваць {{title}}",
+  "nowProgress": "Ход перадачы {{title}}",
+  "scheduledRec": "Запіс",
+  "scheduledStopShort": "Спыніць",
+  "scheduledPaddingAll": "Запісы пачынаюцца на {{before}} хв раней і заканчваюцца на {{after}} хв пазней",
+  "myVideosTitlesHeading": "Фільмы і серыялы",
+  "aboutSource": "Крыніца",
+  "aboutEpisodes": "Эпізоды",
+  "aboutSize": "Памер",
+  "aboutDownloaded": "Спампавана",
+  "aboutFile": "Файл",
+  "openInCatalogue": "Адкрыць у {{source}}"
 }

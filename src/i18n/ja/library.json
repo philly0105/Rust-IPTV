@@ -278,5 +278,16 @@
   "stopConfirmAction": "録画を停止",
   "clearFailedDownloads": "失敗したものをクリア",
   "downloadDone": "{{title}}をダウンロードしました",
-  "downloadFailedNamed": "{{title}}をダウンロードできませんでした"
+  "downloadFailedNamed": "{{title}}をダウンロードできませんでした",
+  "nowProgress": "{{title}} の進行状況",
+  "scheduledRec": "録画",
+  "scheduledStopShort": "停止",
+  "scheduledPaddingAll": "録画は {{before}} 分早く開始し、{{after}} 分遅く終了します",
+  "myVideosTitlesHeading": "映画とシリーズ",
+  "aboutSource": "ソース",
+  "aboutEpisodes": "エピソード",
+  "aboutSize": "サイズ",
+  "aboutDownloaded": "ダウンロード日",
+  "aboutFile": "ファイル",
+  "openInCatalogue": "{{source}} で開く"
 }

@@ -254,5 +254,14 @@
   "removeRecentSearch": "Выдаліць «{{query}}» з нядаўніх пошукаў",
   "jumpBackIn": "Вярнуцца да прагляду",
   "browseCategories": "Катэгорыі",
-  "knownForNoneHere": "Ніводнай працы гэтага чалавека няма ў гэтай крыніцы."
+  "knownForNoneHere": "Ніводнай працы гэтага чалавека няма ў гэтай крыніцы.",
+  "topResults": "Лепшыя вынікі",
+  "sourcesCount_one": "{{count}} крыніца",
+  "sourcesCount_few": "{{count}} крыніцы",
+  "sourcesCount_many": "{{count}} крыніц",
+  "sourcesCount_other": "{{count}} крыніцы",
+  "tmdbPromoLabel": "Метаданыя TMDB",
+  "tmdbPromo": "Дадайце акцёраў, трэйлеры і лепшыя вокладкі з TMDB.",
+  "tmdbPromoAction": "Уключыць у наладах",
+  "tmdbPromoDismiss": "Схаваць"
 }

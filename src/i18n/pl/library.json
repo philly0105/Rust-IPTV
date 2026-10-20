@@ -314,5 +314,16 @@
   "stopConfirmAction": "Zatrzymaj nagrywanie",
   "clearFailedDownloads": "Wyczyść nieudane",
   "downloadDone": "Pobrano {{title}}",
-  "downloadFailedNamed": "Nie udało się pobrać {{title}}"
+  "downloadFailedNamed": "Nie udało się pobrać {{title}}",
+  "nowProgress": "Postęp: {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Zatrzymaj",
+  "scheduledPaddingAll": "Nagrania zaczynają się {{before}} min wcześniej i kończą {{after}} min później",
+  "myVideosTitlesHeading": "Filmy i seriale",
+  "aboutSource": "Źródło",
+  "aboutEpisodes": "Odcinki",
+  "aboutSize": "Rozmiar",
+  "aboutDownloaded": "Pobrano",
+  "aboutFile": "Plik",
+  "openInCatalogue": "Otwórz w {{source}}"
 }

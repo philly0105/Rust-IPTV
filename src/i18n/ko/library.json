@@ -278,5 +278,16 @@
   "stopConfirmAction": "녹화 중지",
   "clearFailedDownloads": "실패한 항목 지우기",
   "downloadDone": "{{title}} 다운로드 완료",
-  "downloadFailedNamed": "{{title}}을(를) 다운로드할 수 없습니다"
+  "downloadFailedNamed": "{{title}}을(를) 다운로드할 수 없습니다",
+  "nowProgress": "{{title}} 진행 상황",
+  "scheduledRec": "녹화",
+  "scheduledStopShort": "중지",
+  "scheduledPaddingAll": "녹화는 {{before}}분 일찍 시작해 {{after}}분 늦게 끝납니다",
+  "myVideosTitlesHeading": "영화 및 시리즈",
+  "aboutSource": "소스",
+  "aboutEpisodes": "에피소드",
+  "aboutSize": "크기",
+  "aboutDownloaded": "다운로드한 날짜",
+  "aboutFile": "파일",
+  "openInCatalogue": "{{source}}에서 열기"
 }

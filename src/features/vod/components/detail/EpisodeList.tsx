@@ -1,4 +1,4 @@
-import { CircleCheck, CircleDashed, Play } from 'lucide-react';
+import { CircleCheck, CircleDashed, HardDriveDownload, Play } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -8,7 +8,7 @@ import { useScrollMargin } from '../../hooks/useContainerColumns';
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, isResumable, isWatched, progressFraction } from '../../lib/format';
 import { handleGridKeyDown } from '../../lib/gridNav';
-import { Menu, Poster, ProgressBar, Tabs, cn, useListVirtualizer } from '@/ui';
+import { MetaLine, Menu, Poster, ProgressBar, Tabs, cn, useListVirtualizer } from '@/ui';
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
@@ -58,7 +58,16 @@ export interface EpisodeListProps {
   layoutKey?: unknown;
 }
 
-/** Episodes of one season, virtualized. Each row plays on Enter/click; arrows move between rows. */
+/** A finished download of the episode whose file is on disk: the row plays it instead of streaming (VL-offline-play). */
+export function offlineDownload(d: Download | undefined): Download | undefined {
+  return d?.status === 'completed' && d.fileAvailable !== false ? d : undefined;
+}
+
+/**
+ * Episodes of one season, virtualized. Each row plays on Enter/click (from the downloaded file when
+ * there is one); arrows move between rows. A row is one surface: it lights on hover, and its facts
+ * (code, runtime, watched or progress, downloaded) read as one line above the title.
+ */
 export function EpisodeList({
   episodes,
   positions,
@@ -103,19 +112,23 @@ export function EpisodeList({
         const runtime = formatRuntime(ep.durationSeconds ?? pos?.durationSeconds);
         const code = episodeCode(ep.season, ep.episode);
         const hasActions = !!onToggleWatched || canDownload;
+        const offline = offlineDownload(downloads.get(ep.id));
         return (
           <div
             key={ep.id}
             role="listitem"
-            className="absolute start-0 w-full"
+            // The divider sits on the square list item; the row inside rounds its hover fill, so the
+            // rule never curls into the corners.
+            className="absolute start-0 w-full border-b border-divider py-1"
             style={{ top: row.start - margin, height: ROW_H }}
           >
             {/* Below sm (a phone) the episode takes the row's width and its actions wrap onto a line of
                 their own under the text, so the title keeps room to read (L3-visual-7). */}
             <div
               className={cn(
-                'group flex h-full flex-wrap content-center items-center gap-x-3 gap-y-1 border-b border-divider py-1.5 sm:flex-nowrap sm:gap-4 sm:py-2',
-                playing && 'tuning-tick ps-3',
+                '-mx-2 group flex h-full flex-wrap content-center items-center gap-x-3 gap-y-1 rounded-lg px-2 sm:flex-nowrap sm:gap-4',
+                'hover:bg-hover motion-safe:transition-colors',
+                playing && 'tuning-tick bg-selected ps-3 hover:bg-selected',
               )}
               data-testid="episode-row"
             >
@@ -123,7 +136,7 @@ export function EpisodeList({
                 type="button"
                 data-grid-index={row.index}
                 onClick={() => onPlay(ep)}
-                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}`}
+                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}${offline ? `, ${t('downloaded')}` : ''}`}
                 aria-current={playing ? 'true' : undefined}
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus max-sm:basis-full sm:gap-4"
               >
@@ -142,21 +155,45 @@ export function EpisodeList({
                     </div>
                   )}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
-                    <span className="shrink-0 font-display tabular text-sm text-fg-subtle">{code}</span>
-                    {watched && (
-                      <span className="inline-flex min-w-0 items-center gap-1 self-center text-xs text-success" data-testid="episode-watched">
-                        <CircleCheck aria-hidden size={14} className="shrink-0" />
-                        <span className="truncate">{t('watched')}</span>
-                      </span>
-                    )}
-                    {playing && <span className="min-w-0 truncate text-xs text-accent">{t('nowPlaying')}</span>}
-                    {!playing && resumable && pos && (
-                      <span className="tabular min-w-0 truncate text-xs text-fg-subtle">{t('percentWatched', { percent: Math.round(fraction * 100) })}</span>
-                    )}
-                    {runtime && <span className="tabular ms-auto shrink-0 text-xs text-fg-subtle">{runtime}</span>}
-                  </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  {/* One line of facts, one separator between them; the runtime no longer floats to the
+                      far end, where it sat on another line from the actions beside it. */}
+                  <MetaLine
+                    as="span"
+                    className="min-w-0 text-caption text-fg-subtle"
+                    items={[
+                      <span key="code" className="tabular text-fg-muted">
+                        {code}
+                      </span>,
+                      runtime && (
+                        <span key="runtime" className="tabular">
+                          {runtime}
+                        </span>
+                      ),
+                      watched && (
+                        <span key="watched" className="inline-flex items-center gap-1 text-success" data-testid="episode-watched">
+                          <CircleCheck aria-hidden size={12} className="shrink-0" />
+                          {t('watched')}
+                        </span>
+                      ),
+                      playing && (
+                        <span key="playing" className="text-accent">
+                          {t('nowPlaying')}
+                        </span>
+                      ),
+                      !playing && resumable && pos && (
+                        <span key="progress" className="tabular">
+                          {t('percentWatched', { percent: Math.round(fraction * 100) })}
+                        </span>
+                      ),
+                      offline && (
+                        <span key="offline" className="inline-flex items-center gap-1" data-testid="episode-offline">
+                          <HardDriveDownload aria-hidden size={12} className="shrink-0" />
+                          {t('downloaded')}
+                        </span>
+                      ),
+                    ]}
+                  />
                   {/* Two lines on a phone, where the plot gives way; one beside the plot from sm up. The tooltip
                       carries the whole title wherever it is clamped. */}
                   <div
@@ -167,11 +204,11 @@ export function EpisodeList({
                   >
                     {ep.title}
                   </div>
-                  {ep.plot && <p dir="auto" className="line-clamp-2 text-sm text-fg-muted text-match-parent max-sm:hidden">{ep.plot}</p>}
+                  {ep.plot && <p dir="auto" className="line-clamp-2 text-body-sm text-fg-muted text-match-parent max-sm:hidden">{ep.plot}</p>}
                 </div>
               </button>
               {hasActions && (
-                <div className="flex shrink-0 items-center gap-1 max-sm:ms-auto sm:gap-4" data-testid="episode-actions">
+                <div className="flex shrink-0 items-center gap-1 max-sm:ms-auto sm:gap-2" data-testid="episode-actions">
                   {onToggleWatched && (
                     <Menu
                       label={t('episodeActions', { code })}

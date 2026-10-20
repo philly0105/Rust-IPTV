@@ -7,18 +7,34 @@ import type { Person } from '@/api/types';
 import { useEdgeFades } from '../../hooks/useEdgeFades';
 import { handleGridKeyDown } from '../../lib/gridNav';
 import { cn, useImageChain } from '@/ui';
+import { formatList } from '@/lib/intl';
 
 const MAX_CAST = 16;
 
 /**
  * Cast chips; people with a TMDB id link to their actor page. With `links` off (TMDB off: the
- * actor page would only say so) every chip is plain text, so a name is never a dead end.
+ * actor page would only say so) every chip is plain text, so a name is never a dead end. With no
+ * picture and no link anywhere (a provider's cast list, TMDB off) the names are one line of text,
+ * like the director's: a row of initials circles read as missing photos (critique: movie detail).
  */
 export function CastRow({ cast, sourceId, links = true }: { cast: Person[]; sourceId: string; links?: boolean }) {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const people = cast.slice(0, MAX_CAST);
   const headingId = useId();
   const linked = (p: Person) => links && p.id !== undefined;
+  if (!people.some((p) => p.profileUrl || linked(p))) {
+    return (
+      <p className="text-sm text-fg-muted" data-testid="vod-cast-line">
+        <span className="text-fg-subtle">{t('cast')} </span>
+        <span dir="auto">{formatList(people.map((p) => p.name), i18n.language)}</span>
+      </p>
+    );
+  }
+  return <CastChips people={people} sourceId={sourceId} linked={linked} headingId={headingId} />;
+}
+
+function CastChips({ people, sourceId, linked, headingId }: { people: Person[]; sourceId: string; linked: (p: Person) => boolean; headingId: string }) {
+  const { t } = useTranslation('vod');
   // With no linked chip the scrolling row has nothing to focus, so the row
   // itself takes focus (named by the heading) and scrolls with the arrow keys.
   const focusableRow = !people.some(linked);

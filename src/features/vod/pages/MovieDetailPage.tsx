@@ -17,6 +17,7 @@ import { intlLocale } from '@/lib/intl';
 import { CatalogRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
 import { DownloadButton, FavoriteButton, WatchedButton, useFavoriteMenuItem } from '../components/detail/actions';
+import { TmdbPromo } from '../components/detail/TmdbPromo';
 import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup } from '../components/detail/DetailHero';
 import { OtherSourcesDialog, OtherSourcesList } from '../components/detail/OtherSourcesDialog';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
@@ -459,6 +460,8 @@ export function MovieDetailPage() {
             { label: t('detailGenres'), value: model.genres.length > 0 ? model.genres.join(', ') : undefined },
           ]}
         />
+        {/* Last, after what the provider has: an offer, not something in the way of the title. */}
+        {!tmdbOn && !watching && <TmdbPromo />}
       </Page>
 
       {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.titleBase ?? model.title} />}

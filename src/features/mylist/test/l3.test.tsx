@@ -53,6 +53,8 @@ beforeAll(h.installDomStubs);
 beforeEach(() => {
   rpc.reset();
   h.resetShared();
+  // These tests drive the list view; the poster grid (the default) has its own (saas2.test.tsx).
+  localStorage.setItem('mylist.view', 'list');
   posterRenders.count = 0;
   posterRenders.byTitle.clear();
   rpc.handlers['positions.get'] = () => null;

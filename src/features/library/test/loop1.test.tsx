@@ -72,8 +72,8 @@ describe('DialProgress (L1-guide-library-6)', () => {
   it('draws no fill without a known size, and an indeterminate segment only while downloading', () => {
     const { rerender } = render(<DialProgress percent={undefined} tone="accent" label="p" />);
     const bar = screen.getByRole('progressbar');
-    // Only the tick-mark track: no fill, no needle.
-    expect(bar.children).toHaveLength(1);
+    // Only the empty track: no fill, no needle.
+    expect(bar.children).toHaveLength(0);
     expect(within(bar).queryByTestId('dial-indeterminate')).toBeNull();
     rerender(<DialProgress percent={undefined} tone="accent" indeterminate label="p" />);
     expect(within(bar).getByTestId('dial-indeterminate')).toBeTruthy();

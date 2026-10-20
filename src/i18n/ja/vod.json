@@ -234,5 +234,12 @@
   "removeRecentSearch": "「{{query}}」を最近の検索から削除",
   "jumpBackIn": "最近見た作品",
   "browseCategories": "カテゴリーから探す",
-  "knownForNoneHere": "この人物の作品は、このソースには一つもありません。"
+  "knownForNoneHere": "この人物の作品は、このソースには一つもありません。",
+  "topResults": "上位の結果",
+  "sourcesCount_one": "{{count}} 件のソース",
+  "sourcesCount_other": "{{count}} 件のソース",
+  "tmdbPromoLabel": "TMDB メタデータ",
+  "tmdbPromo": "TMDB でキャスト、予告編、より良いアートワークを追加できます。",
+  "tmdbPromoAction": "設定でオンにする",
+  "tmdbPromoDismiss": "閉じる"
 }

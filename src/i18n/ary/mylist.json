@@ -90,5 +90,8 @@
   "minutesLeft_two": "باقي جوج دقايق",
   "minutesLeft_few": "باقي {{count}} دقايق",
   "minutesLeft_many": "باقي {{count}} دقيقة",
-  "minutesLeft_other": "باقي {{count}} د"
+  "minutesLeft_other": "باقي {{count}} د",
+  "viewLabel": "العرض",
+  "viewGrid": "شبكة",
+  "viewList": "لائحة"
 }

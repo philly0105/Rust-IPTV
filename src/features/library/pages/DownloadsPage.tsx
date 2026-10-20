@@ -48,6 +48,8 @@ export function DownloadsPage() {
   const counts = useMemo(() => queueCounts(all), [all]);
   const completedCount = useMemo(() => all.filter((d) => d.status === 'completed').length, [all]);
   const attention = useMemo(() => all.filter((d) => d.status === 'failed' || d.status === 'canceled'), [all]);
+  // Every row from one source: naming it on each row says nothing.
+  const mixedSources = useMemo(() => new Set(all.map((d) => d.ref.sourceId)).size > 1, [all]);
 
   const summary = useMemo(() => {
     const parts: string[] = [];
@@ -90,18 +92,18 @@ export function DownloadsPage() {
   useShortcut('delete', () => runFocused(() => 'remove'), { description: t('shortcutRemove'), area });
   useShortcut('o', () => runFocused(() => 'reveal'), { description: t('shortcutReveal'), area, enabled: isDesktop });
 
-  const headerActions = useMemo(() => {
-    const label = completedCount > 0 ? t('openMyVideosCount', { count: completedCount }) : t('openMyVideos');
-    return (
-      // Icon only on a phone, so neither the label nor the page title is cut (L3-visual-6).
-      <Link to="/my-videos" className={buttonClass('ghost', 'sm')} title={label}>
-        <Library size={16} aria-hidden />
-        <span className="max-sm:sr-only">{label}</span>
-      </Link>
-    );
-  }, [completedCount, t]);
+  // In the page's own toolbar line, beside the folder (as My Videos keeps its queue link beside its
+  // tabs), so the header search keeps its place from page to page.
+  const myVideosLabel = completedCount > 0 ? t('openMyVideosCount', { count: completedCount }) : t('openMyVideos');
+  const myVideosLink = (
+    // Icon only on a phone, so the folder line keeps its room (L3-visual-6).
+    <Link to="/my-videos" className={buttonClass('ghost', 'sm', 'ms-auto shrink-0')} title={myVideosLabel} data-testid="downloads-my-videos">
+      <Library size={16} aria-hidden />
+      <span className="max-sm:sr-only">{myVideosLabel}</span>
+    </Link>
+  );
   const title = t('title');
-  usePageHeader(title, summary || undefined, headerActions);
+  usePageHeader(title, summary || undefined);
 
   // The download the dialog is about as the list shows it now: it may have
   // finished since the dialog opened.
@@ -156,6 +158,7 @@ export function DownloadsPage() {
         <DownloadRow
           download={d}
           source={sources.get(d.ref.sourceId)}
+          showSource={mixedSources}
           actions={actionsFor(d.status, { canReveal: isDesktop, hasFile: !!d.filePath })}
           busy={pending.has(d.id)}
           tabbable={info.tabStop}
@@ -164,7 +167,7 @@ export function DownloadsPage() {
       );
     },
     // Each row subscribes to its own live sample (VD-4): a progress event re-renders that row only.
-    [onAction, pending, sources, t],
+    [mixedSources, onAction, pending, sources, t],
   );
 
   let body;
@@ -213,15 +216,19 @@ export function DownloadsPage() {
           if (primary) onAction(primary, d);
         }}
         testId="downloads-list"
-        className="-mx-2 px-2"
+        className="-mx-2"
+        listClassName="max-w-5xl"
       />
     );
   }
 
   return (
-    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 pb-4 pt-4">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 pb-4 pt-3">
       <PageTitle>{title}</PageTitle>
-      <FolderBar pageError={query.isError} />
+      <div className="flex min-w-0 max-w-5xl items-center gap-3">
+        <FolderBar pageError={query.isError} />
+        {myVideosLink}
+      </div>
       {body}
       <ConfirmDialog
         open={confirm !== null}

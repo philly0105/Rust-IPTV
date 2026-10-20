@@ -1,0 +1,271 @@
+/**
+ * Product redesign, stage 2 (library): Favorites and Recently watched rows say what is on air
+ * (EntryRow), Downloads names the source only when the queue mixes sources, Scheduled says the
+ * recording padding once and has a labelled Stop, My Videos keeps the queue link in its toolbar
+ * with the active count, and an offline title's page is the catalogue's detail hero with its
+ * facts and a way back to the title in its source.
+ */
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Recording } from '@/api/types';
+
+import { DownloadsPage } from '../pages/DownloadsPage';
+import { FavoritesPage } from '../pages/FavoritesPage';
+import { MyVideoDetailPage } from '../pages/MyVideoDetailPage';
+import { MyVideosPage } from '../pages/MyVideosPage';
+import { ScheduledPage, commonPadding } from '../pages/ScheduledPage';
+import { makeDownload, makeFavorite } from './fixtures';
+import { installDomStubs, renderAt } from './harness';
+
+const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
+
+vi.mock('@/api/transport', () => {
+  class RpcError extends Error {
+    code = 'internal';
+    static from(err: unknown) {
+      return err instanceof RpcError ? err : Object.assign(new RpcError(err instanceof Error ? err.message : String(err)), {});
+    }
+  }
+  return {
+    rpc: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
+    rpcRaw: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
+    isDesktop: true,
+    RpcError,
+    proxiedUrl: (s: { url: string }) => s.url,
+  };
+});
+vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
+vi.mock('@/shell', async () => (await import('./harness')).shellModule);
+vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
+
+const harness = await import('./harness');
+rpcMock.current = harness.createRpcMock();
+const rpc = rpcMock.current;
+
+const minutes = (n: number) => new Date(Date.now() + n * 60_000).toISOString();
+const sources = [
+  { id: 'src1', name: 'Northwind', kind: 'xtream' },
+  { id: 'src2', name: 'Harbor Lights', kind: 'm3u' },
+];
+
+beforeAll(installDomStubs);
+beforeEach(() => {
+  rpc.reset();
+  rpc.handlers['sources.list'] = () => sources;
+  rpc.handlers['settings.get'] = () => ({ epgOffsetMinutes: 0, coverSize: 'medium' });
+  rpc.handlers['recordings.capabilities'] = () => ({ supported: true, mpv: true });
+  rpc.handlers['downloads.dir'] = () => ({ path: '/data/downloads' });
+  rpc.handlers['recordings.library'] = () => [];
+});
+afterEach(cleanup);
+
+describe('Favorites rows say what is on air', () => {
+  it('shows the programme on now, with how far it is, for a live favorite; a movie keeps its type line', async () => {
+    rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('movie', 'm1', 1)];
+    rpc.handlers['epg.nowNext'] = () => ({
+      'src1|live|ch1': { now: { channelId: 'ch1', title: 'Evening Bulletin', start: minutes(-20), end: minutes(10) } },
+    });
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    const now = await screen.findByTestId('entry-now');
+    expect(now.textContent).toContain('Evening Bulletin');
+    expect(now.textContent).toMatch(/10 minutes left/);
+    // 20 of 30 minutes in, as a percentage (a 0..1 scale would read "1").
+    expect(within(now).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('67');
+    // Asked once for the page, titles only, and only for the channels.
+    const asked = rpc.callsOf('epg.nowNext') as { refs: { itemId: string }[]; withDescription: boolean }[];
+    expect(asked.at(-1)!.refs.map((r) => r.itemId)).toEqual(['ch1']);
+    expect(asked.at(-1)!.withDescription).toBe(false);
+    const movie = screen.getAllByTestId('entry-row').find((r) => r.dataset['contentType'] === 'movie')!;
+    expect(within(movie).queryByTestId('entry-now')).toBeNull();
+    expect(within(movie).getByText('Movie')).toBeTruthy();
+  });
+
+  it('keeps the plain type line when the guide has nothing on now', async () => {
+    rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0)];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    await screen.findByTestId('entry-row');
+    await waitFor(() => expect(rpc.callsOf('epg.nowNext')).toHaveLength(1));
+    expect(screen.queryByTestId('entry-now')).toBeNull();
+  });
+
+  it('puts the row actions on hover and focus for fine pointers, the grip after them', async () => {
+    rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('live', 'ch2', 1)];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    const row = (await screen.findAllByTestId('entry-row'))[0]!;
+    const open = row.querySelector<HTMLElement>('[data-action="open"]')!;
+    expect(open.className).toContain('pointer-fine:opacity-0');
+    expect(open.className).toContain('pointer-fine:in-focus-visible:opacity-100');
+    // The artwork leads the row, on the headings' line; the drag handle comes last.
+    expect(row.firstElementChild?.getAttribute('data-testid')).toBe('entry-artwork');
+    expect(row.lastElementChild?.getAttribute('draggable')).toBe('true');
+  });
+});
+
+describe('Downloads names a source only when the queue mixes them', () => {
+  it('leaves the source out when every row shares one, and shows it on each row when they differ', async () => {
+    rpc.handlers['downloads.list'] = () => [makeDownload({ id: 1, status: 'downloading', totalBytes: 100, bytesDownloaded: 10 }), makeDownload({ id: 2, status: 'queued' })];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    await screen.findAllByTestId('download-row');
+    expect(screen.queryAllByTestId('source-badge')).toHaveLength(0);
+    cleanup();
+
+    rpc.handlers['downloads.list'] = () => [
+      makeDownload({ id: 1, status: 'downloading', totalBytes: 100, bytesDownloaded: 10 }),
+      makeDownload({ id: 2, status: 'queued', ref: { sourceId: 'src2', contentType: 'movie', itemId: 'x' } }),
+    ];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    await screen.findAllByTestId('download-row');
+    // The name beside the source's monogram (the monogram's initials are decorative).
+    await waitFor(() => expect(screen.getAllByTestId('source-badge').map((b) => b.querySelector('.truncate')?.textContent)).toEqual(['Northwind', 'Harbor Lights']));
+  });
+
+  it('draws a paused row neutral, with its glyph, and only the running row in the accent', async () => {
+    rpc.handlers['downloads.list'] = () => [
+      makeDownload({ id: 1, status: 'downloading', totalBytes: 100, bytesDownloaded: 10 }),
+      makeDownload({ id: 2, status: 'paused', totalBytes: 100, bytesDownloaded: 40 }),
+    ];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    const rows = await screen.findAllByTestId('download-row');
+    const paused = rows.find((r) => r.dataset['status'] === 'paused')!;
+    const badge = paused.querySelector<HTMLElement>('[data-status="paused"]:not([data-testid])')!;
+    expect(badge.className).not.toContain('text-warning');
+    expect(badge.querySelector('svg')).not.toBeNull();
+    expect(within(paused).getByTestId('dial-fill').className).toContain('bg-fg-subtle/50');
+    const running = rows.find((r) => r.dataset['status'] === 'downloading')!;
+    expect(within(running).getByTestId('dial-fill').className).toContain('bg-accent');
+  });
+
+  it('shows the folder as a line of text, not a bordered panel', async () => {
+    rpc.handlers['downloads.list'] = () => [makeDownload({ id: 1, status: 'queued' })];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    const folder = await screen.findByTestId('downloads-folder');
+    expect(await within(folder).findByTestId('downloads-dir')).toBeTruthy();
+    expect(folder.className).not.toMatch(/(^|\s)border(\s|$)/);
+  });
+});
+
+function rec(over: Partial<Recording>): Recording {
+  return {
+    id: 'r1',
+    ref: { sourceId: 's1', contentType: 'live', itemId: '7' },
+    channelName: 'Alpha',
+    title: 'Film',
+    kind: 'programme',
+    start: minutes(60),
+    end: minutes(120),
+    paddingBeforeMinutes: 1,
+    paddingAfterMinutes: 5,
+    status: 'scheduled',
+    fileNames: [],
+    bytes: 0,
+    ...over,
+  };
+}
+
+describe('Scheduled says the padding once and stops with a labelled button', () => {
+  it('commonPadding picks the padding most programme recordings share', () => {
+    const entry = (r: Recording) => ({ type: 'recording' as const, id: r.id, at: Date.parse(r.start), recording: r });
+    expect(commonPadding([])).toBeUndefined();
+    expect(commonPadding([entry(rec({ paddingBeforeMinutes: 0, paddingAfterMinutes: 0 }))])).toBeUndefined();
+    expect(
+      commonPadding([entry(rec({ id: 'a' })), entry(rec({ id: 'b' })), entry(rec({ id: 'c', paddingBeforeMinutes: 2, paddingAfterMinutes: 10 }))]),
+    ).toEqual({ before: 1, after: 5 });
+  });
+
+  it('puts the shared padding beside the Upcoming heading; a row that differs keeps its own note', async () => {
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.rules'] = () => [];
+    rpc.handlers['recordings.list'] = () => [
+      rec({ id: 'a', title: 'First' }),
+      rec({ id: 'b', title: 'Second', start: minutes(130), end: minutes(160) }),
+      rec({ id: 'c', title: 'Third', start: minutes(170), end: minutes(200), paddingBeforeMinutes: 2, paddingAfterMinutes: 10 }),
+    ];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const hint = await screen.findByTestId('scheduled-upcoming-hint');
+    expect(hint.textContent).toBe('Recordings start 1 min early and end 5 min late');
+    const rows = screen.getAllByTestId('upcoming-row');
+    expect(rows.map((r) => r.textContent?.includes('Starts 2 min early, ends 10 min late'))).toEqual([false, false, true]);
+    expect(rows.some((r) => r.textContent?.includes('Starts 1 min early'))).toBe(false);
+  });
+
+  it('marks the kind once: a record dot or a bell, named for screen readers', async () => {
+    rpc.handlers['reminders.list'] = () => [{ id: 'm1', ref: rec({}).ref, channelName: 'Alpha', title: 'News', start: minutes(30), end: minutes(60), status: 'pending' }];
+    rpc.handlers['recordings.rules'] = () => [];
+    rpc.handlers['recordings.list'] = () => [rec({})];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const rows = await screen.findAllByTestId('upcoming-row');
+    const reminder = rows.find((r) => r.dataset['kind'] === 'reminder')!;
+    expect(within(reminder).getByTestId('upcoming-reminder-mark')).toBeTruthy();
+    expect(within(reminder).getByText('Reminder').className).toContain('sr-only');
+    const recording = rows.find((r) => r.dataset['kind'] === 'recording')!;
+    expect(within(recording).getByTestId('upcoming-record-mark').className).toContain('bg-live');
+  });
+
+  it('heads each day with its word and date', async () => {
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.rules'] = () => [];
+    rpc.handlers['recordings.list'] = () => [rec({ start: minutes(5), end: minutes(30) })];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const group = await screen.findByRole('group', { name: /today|tomorrow/i });
+    const heading = group.firstElementChild as HTMLElement;
+    expect(heading.firstElementChild!.className).toContain('font-semibold');
+    expect(heading.className).toContain('text-body-sm');
+    expect(heading.textContent).toMatch(/\d/);
+  });
+
+  it('labels Stop on a running recording, beside a REC mark', async () => {
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.rules'] = () => [];
+    rpc.handlers['recordings.list'] = () => [rec({ status: 'recording', start: minutes(-10), end: minutes(20), startedAt: minutes(-11), bytes: 1_000_000 })];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const stop = await screen.findByTestId('recording-stop');
+    expect(stop.textContent).toBe('Stop');
+    expect(stop.getAttribute('aria-label')).toBe('Stop recording Film');
+    expect(screen.getByTestId('recording-rec').textContent).toBe('Rec');
+  });
+});
+
+describe('My Videos toolbar and the offline detail page', () => {
+  it('keeps the download queue link beside the tabs, counting what is active', async () => {
+    rpc.handlers['myvideos.list'] = () => [makeDownload({ id: 1, status: 'completed', fileAvailable: true, completedAt: '2026-10-14T00:00:00Z' })];
+    rpc.handlers['downloads.list'] = () => [makeDownload({ id: 2, status: 'downloading' }), makeDownload({ id: 3, status: 'queued' })];
+    renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
+    const link = await screen.findByTestId('my-videos-queue');
+    expect(link.getAttribute('href')).toBe('/downloads');
+    await waitFor(() => expect(within(link).getByTestId('my-videos-queue-count').textContent).toContain('2'));
+    // Not in the shell header any more.
+    expect(within(screen.getByTestId('fake-header')).queryByRole('link', { name: /download queue/i })).toBeNull();
+  });
+
+  it('shows an offline movie in the detail hero, with its facts and the title in its source', async () => {
+    rpc.handlers['myvideos.list'] = () => [
+      makeDownload({
+        id: 7,
+        title: 'Heat',
+        status: 'completed',
+        fileAvailable: true,
+        fileName: 'Heat (1995).mkv',
+        totalBytes: 2_000_000_000,
+        bytesDownloaded: 2_000_000_000,
+        completedAt: '2026-10-14T00:00:00Z',
+        positionSeconds: 600,
+      }),
+    ];
+    renderAt('/my-videos/7', [{ path: '/my-videos/:id', element: <MyVideoDetailPage /> }]);
+    expect((await screen.findByTestId('play-offline')).textContent).toContain('10:00');
+    expect(screen.getByRole('heading', { level: 1, name: 'Heat' })).toBeTruthy();
+    expect(screen.getByTestId('vod-detail-poster')).toBeTruthy();
+    // One Back pattern: the hero's pill, back to the library.
+    expect(screen.getByRole('link', { name: 'Back to My Videos' }).getAttribute('href')).toBe('/my-videos');
+    const about = screen.getByTestId('vod-about');
+    expect(within(about).getByText('Heat (1995).mkv')).toBeTruthy();
+    expect(within(about).getByText('Northwind')).toBeTruthy();
+    expect(screen.getByTestId('myvideo-catalogue-link').getAttribute('href')).toBe('/s/src1/movie/m7');
+    // The header names the library while the hero's own title is on screen.
+    fireEvent.scroll(window);
+    expect(screen.getByTestId('page-title').textContent).toBeTruthy();
+  });
+});

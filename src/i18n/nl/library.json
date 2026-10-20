@@ -278,5 +278,16 @@
   "stopConfirmAction": "Opname stoppen",
   "clearFailedDownloads": "Mislukte wissen",
   "downloadDone": "{{title}} gedownload",
-  "downloadFailedNamed": "{{title}} kon niet worden gedownload"
+  "downloadFailedNamed": "{{title}} kon niet worden gedownload",
+  "nowProgress": "Voortgang van {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Stoppen",
+  "scheduledPaddingAll": "Opnames beginnen {{before}} min eerder en stoppen {{after}} min later",
+  "myVideosTitlesHeading": "Films en series",
+  "aboutSource": "Bron",
+  "aboutEpisodes": "Afleveringen",
+  "aboutSize": "Grootte",
+  "aboutDownloaded": "Gedownload",
+  "aboutFile": "Bestand",
+  "openInCatalogue": "Openen in {{source}}"
 }

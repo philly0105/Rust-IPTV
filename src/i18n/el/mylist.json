@@ -78,5 +78,8 @@
   "resumeTitle": "Συνέχεια {{title}}",
   "playFailed": "Δεν ήταν δυνατή η έναρξη αναπαραγωγής",
   "minutesLeft_one": "Απομένει {{count}} λεπτό",
-  "minutesLeft_other": "Απομένουν {{count}} λεπτά"
+  "minutesLeft_other": "Απομένουν {{count}} λεπτά",
+  "viewLabel": "Προβολή",
+  "viewGrid": "Πλέγμα",
+  "viewList": "Λίστα"
 }

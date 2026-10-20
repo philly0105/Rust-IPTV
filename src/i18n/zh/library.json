@@ -278,5 +278,16 @@
   "stopConfirmAction": "停止录制",
   "clearFailedDownloads": "清除失败的下载",
   "downloadDone": "已下载{{title}}",
-  "downloadFailedNamed": "无法下载{{title}}"
+  "downloadFailedNamed": "无法下载{{title}}",
+  "nowProgress": "{{title}} 的进度",
+  "scheduledRec": "录制",
+  "scheduledStopShort": "停止",
+  "scheduledPaddingAll": "录制提前 {{before}} 分钟开始，延后 {{after}} 分钟结束",
+  "myVideosTitlesHeading": "电影和剧集",
+  "aboutSource": "播放源",
+  "aboutEpisodes": "分集",
+  "aboutSize": "大小",
+  "aboutDownloaded": "下载日期",
+  "aboutFile": "文件",
+  "openInCatalogue": "在 {{source}} 中打开"
 }

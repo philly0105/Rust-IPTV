@@ -78,5 +78,8 @@
   "resumeTitle": "Devam et: {{title}}",
   "playFailed": "Oynatma başlatılamadı",
   "minutesLeft_one": "{{count}} dakika kaldı",
-  "minutesLeft_other": "{{count}} dakika kaldı"
+  "minutesLeft_other": "{{count}} dakika kaldı",
+  "viewLabel": "Görünüm",
+  "viewGrid": "Izgara",
+  "viewList": "Liste"
 }

@@ -278,5 +278,16 @@
   "stopConfirmAction": "Stop recording",
   "clearFailedDownloads": "Clear failed",
   "downloadDone": "Downloaded {{title}}",
-  "downloadFailedNamed": "Couldn't download {{title}}"
+  "downloadFailedNamed": "Couldn't download {{title}}",
+  "nowProgress": "How far {{title}} has got",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Stop",
+  "scheduledPaddingAll": "Recordings start {{before}} min early and end {{after}} min late",
+  "myVideosTitlesHeading": "Movies and series",
+  "aboutSource": "Source",
+  "aboutEpisodes": "Episodes",
+  "aboutSize": "Size",
+  "aboutDownloaded": "Downloaded",
+  "aboutFile": "File",
+  "openInCatalogue": "Open in {{source}}"
 }

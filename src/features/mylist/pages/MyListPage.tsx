@@ -1,6 +1,9 @@
 /**
  * /my-list: every saved movie and series in the user's order.
  *
+ * Two views (a UI preference kept in localStorage): a poster grid, the default, and the list with
+ * ranks, progress, Play and drag handles. The keys below work the same on a focused card or row.
+ *
  * Filter by type (pill tabs with counts), sort by the user's order, newest
  * add or title, hide watched titles, and search from the page toolbar; all
  * four live in the URL. The search stays out of the shell header so a
@@ -20,16 +23,34 @@ import { useRpcQuery } from '@/api/query';
 import { itemKey, sameRef, type ItemKey, type PlaybackPosition, type WatchlistEntry } from '@/api/types';
 import { itemPath } from '@/shell/dashboard/cards';
 import { intlLocale } from '@/lib/intl';
+import { snapshotTitle } from '@/lib/title';
 
+import { CARD_CAPTION_HEIGHT, MyListCard } from '../components/MyListCard';
 import { MyListEmpty } from '../components/MyListEmpty';
 import { MyListRow, MyListSkeleton, ROW_HEIGHT, type RowReorder } from '../components/MyListRow';
 import { MyListToolbar } from '../components/MyListToolbar';
-import { Button, EmptyState, ErrorState, Page, VirtualRows, errorDescription, usePendingRemovals, useShell, useShortcut, useToast, useVisibleSources } from '../deps';
+import {
+  Button,
+  EmptyState,
+  ErrorState,
+  Page,
+  VirtualCardGrid,
+  VirtualRows,
+  errorDescription,
+  POSTER_GAP,
+  useCoverColumn,
+  usePendingRemovals,
+  useShell,
+  useShortcut,
+  useToast,
+  useVisibleSources,
+} from '../deps';
 import { useListParams } from '../hooks/useListParams';
 import { useMyList } from '../hooks/useMyList';
 import { useMyListActions } from '../hooks/useMyListActions';
 import { readList } from '../lib/cache';
 import { buildView, moveInSubset, relativeTime } from '../lib/list';
+import { readView, writeView, type MyListView } from '../lib/view';
 
 const DRAG_MIME = 'application/x-tsrust-mylist';
 
@@ -105,6 +126,12 @@ export function MyListPage() {
   const [params, setParams] = useListParams();
   const { pending, remove, toggleWatched, reorder } = useMyListActions();
   const [drag, setDrag] = useState<{ key: string; over?: { key: string; where: 'before' | 'after' } } | null>(null);
+  const [layout, setLayoutState] = useState<MyListView>(readView);
+  const setLayout = useCallback((v: MyListView) => {
+    setLayoutState(v);
+    writeView(v);
+  }, []);
+  const column = useCoverColumn();
   const language = i18n.language;
 
   const all = query.data;
@@ -148,7 +175,8 @@ export function MyListPage() {
   const manySources = useMemo(() => new Set(view.base.map((e) => e.ref.sourceId)).size > 1, [view.base]);
 
   const title = t('title');
-  const subtitle = all ? t('count', { count: view.base.length }) : undefined;
+  // An empty list says so in the page; "0 titles" in the header adds nothing.
+  const subtitle = all && view.base.length > 0 ? t('count', { count: view.base.length }) : undefined;
   const { query: search } = params;
   const onSearch = useCallback((value: string) => setParams({ query: value }), [setParams]);
   useEffect(() => {
@@ -284,14 +312,21 @@ export function MyListPage() {
     }
   }, [language]);
 
+  /** How far a title got: 0..1 and its words ("12 minutes left", or the episode a series resumes). */
+  const progressOf = (key: string) => {
+    const saved = resumeByKey.get(key);
+    const left = saved?.durationSeconds ? Math.max(1, Math.round((saved.durationSeconds - saved.positionSeconds) / 60)) : undefined;
+    // A series names the episode it resumes; a movie, the time left.
+    const label = saved ? (saved.episodeId && saved.snapshot?.subtitle ? saved.snapshot.subtitle : left !== undefined ? t('minutesLeft', { count: left }) : undefined) : undefined;
+    const fraction = saved?.durationSeconds ? Math.min(1, saved.positionSeconds / saved.durationSeconds) : undefined;
+    return { saved, label, fraction };
+  };
+
   const renderRow = (row: Row) => {
     const e = row.entry;
     const at = Date.parse(e.addedAt);
     const ago = relativeTime(e.addedAt, language);
-    const saved = resumeByKey.get(row.key);
-    const left = saved?.durationSeconds ? Math.max(1, Math.round((saved.durationSeconds - saved.positionSeconds) / 60)) : undefined;
-    // A series names the episode it resumes; a movie, the time left.
-    const progressLabel = saved ? (saved.episodeId && saved.snapshot?.subtitle ? saved.snapshot.subtitle : left !== undefined ? t('minutesLeft', { count: left }) : undefined) : undefined;
+    const { saved, label: progressLabel, fraction } = progressOf(row.key);
     return (
       <MyListRow
         entry={e}
@@ -314,10 +349,15 @@ export function MyListPage() {
         onToggleWatched={toggleWatched}
         // A series with nothing started has no one episode to play: its page picks one.
         onPlay={e.ref.contentType === 'movie' || saved ? play : undefined}
-        progress={saved?.durationSeconds ? Math.min(1, saved.positionSeconds / saved.durationSeconds) : undefined}
+        progress={fraction}
         progressLabel={progressLabel}
       />
     );
+  };
+
+  const renderCard = (row: Row) => {
+    const { label, fraction } = progressOf(row.key);
+    return <MyListCard entry={row.entry} busy={pending.has(row.key)} progress={fraction} progressLabel={label} onRemove={remove} />;
   };
 
   let body;
@@ -366,6 +406,25 @@ export function MyListPage() {
         }
       />
     );
+  } else if (layout === 'grid') {
+    body = (
+      <VirtualCardGrid<Row>
+        items={rows}
+        itemKey={(r) => r.key}
+        label={title}
+        cardLabel={(r) => {
+          const name = snapshotTitle(r.entry.ref, r.entry.snapshot.title).title;
+          return r.entry.watched ? `${name}, ${t('watched')}` : name;
+        }}
+        render={renderCard}
+        onActivate={(r) => open(r.entry)}
+        captionHeight={CARD_CAPTION_HEIGHT}
+        minColumnWidth={column}
+        gap={POSTER_GAP}
+        className="-mx-2 px-2 pt-1"
+        testId="mylist-list"
+      />
+    );
   } else {
     body = (
       <VirtualRows
@@ -375,6 +434,8 @@ export function MyListPage() {
         isFocusable={() => true}
         renderRow={renderRow}
         testId="mylist-list"
+        // A reading width: the actions stay near the title on a wide window.
+        listClassName="max-w-5xl"
         onRowKeyDown={(row, e) => {
           // Delete, W and Alt+arrows are page shortcuts (listed in the ? overlay); Enter opens.
           if (e.key === 'Enter' && !e.altKey && !e.ctrlKey && !e.metaKey) {
@@ -389,7 +450,7 @@ export function MyListPage() {
   const showToolbar = !query.isPending && view.base.length > 0;
 
   return (
-    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-3" data-testid="mylist-page">
+    <Page width={layout === 'grid' ? 'wide' : 'default'} className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-3" data-testid="mylist-page" data-view={layout}>
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
       {showToolbar && (
@@ -406,6 +467,8 @@ export function MyListPage() {
           onFilter={(filter) => setParams({ filter })}
           onSort={(sort) => setParams({ sort })}
           onHideWatched={(hideWatched) => setParams({ hideWatched })}
+          view={layout}
+          onView={setLayout}
         />
       )}
       {body}

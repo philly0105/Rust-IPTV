@@ -470,9 +470,16 @@ describe('SearchPage', () => {
 
   it('groups global results into type tabs with source badges and portal results', async () => {
     renderAt('/search?q=dune', [{ path: '/search', element: <SearchPage /> }]);
-    // Movies come first and fill the page as a vertical grid; the other types wait behind their tabs.
-    const moviesTab = await screen.findByRole('tab', { name: /Movies\s*2/ });
-    expect(moviesTab.getAttribute('aria-selected')).toBe('true');
+    // Results of several types open on Top results: a slice of each type, each with See all.
+    const topTab = await screen.findByRole('tab', { name: 'Top results' });
+    expect(topTab.getAttribute('aria-selected')).toBe('true');
+    const top = await screen.findByTestId('search-top');
+    expect(within(top).getByRole('heading', { name: /Movies/ })).toBeTruthy();
+    expect(within(top).getByRole('heading', { name: /Channels/ })).toBeTruthy();
+    // Movies, as a tab of their own, fill the page as a vertical grid; the other types wait behind their tabs.
+    const moviesTab = screen.getByRole('tab', { name: /Movies\s*2/ });
+    fireEvent.click(moviesTab);
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Movies\s*2/ }).getAttribute('aria-selected')).toBe('true'));
     expect(screen.getByTestId('vod-search-movies')).toBeTruthy();
     expect(await screen.findByText('Movie 1')).toBeTruthy();
     expect(screen.getAllByText('Beta Portal').length).toBeGreaterThan(0);

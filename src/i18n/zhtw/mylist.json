@@ -76,5 +76,8 @@
   "resumeTitle": "繼續播放{{title}}",
   "playFailed": "無法開始播放",
   "minutesLeft_one": "剩餘 {{count}} 分鐘",
-  "minutesLeft_other": "剩餘 {{count}} 分鐘"
+  "minutesLeft_other": "剩餘 {{count}} 分鐘",
+  "viewLabel": "檢視",
+  "viewGrid": "格狀",
+  "viewList": "清單"
 }

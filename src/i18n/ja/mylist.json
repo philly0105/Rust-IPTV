@@ -76,5 +76,8 @@
   "resumeTitle": "{{title}}を続きから再生",
   "playFailed": "再生を開始できませんでした",
   "minutesLeft_one": "残り{{count}}分",
-  "minutesLeft_other": "残り{{count}}分"
+  "minutesLeft_other": "残り{{count}}分",
+  "viewLabel": "表示",
+  "viewGrid": "グリッド",
+  "viewList": "リスト"
 }

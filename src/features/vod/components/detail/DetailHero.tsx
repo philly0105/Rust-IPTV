@@ -16,9 +16,13 @@ const HERO_GRID =
   'relative grid w-full max-w-[120rem] grid-cols-[6rem_minmax(0,1fr)] gap-x-4 gap-y-5 px-(--page-gutter) pb-8 ' +
   'sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-x-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-x-8';
 
-/** Space above the poster: room for the artwork when there is a backdrop, little when there is none. */
-const HERO_TOP_WITH_ART = 'pt-[clamp(88px,20vh,240px)]';
-const HERO_TOP_PLAIN = 'pt-[clamp(56px,9vh,112px)]';
+/**
+ * Space above the poster: room for the artwork when there is a backdrop, little when there is none.
+ * On a phone the poster sits just under the Back pill, so the first screen holds the title, Play
+ * and the plot rather than a band of empty gradient (critique: phone detail).
+ */
+const HERO_TOP_WITH_ART = 'pt-[clamp(88px,20vh,240px)] max-sm:pt-20';
+const HERO_TOP_PLAIN = 'pt-[clamp(56px,9vh,112px)] max-sm:pt-20';
 
 export interface DetailHeroProps {
   model: DetailModel;
@@ -40,6 +44,11 @@ export interface DetailHeroProps {
   notice?: ReactNode;
   /** Cast names link to their actor pages only when TMDB can show them (VL-tmdb-deadend). */
   castLinks?: boolean;
+  /**
+   * The Back control in the hero's top corner, for a page that is not a catalogue title (My Videos'
+   * detail goes back to the library). Default: back in history, else to the movies or series landing.
+   */
+  back?: ReactNode;
 }
 
 /**
@@ -48,7 +57,7 @@ export interface DetailHeroProps {
  * artwork reads and the title and buttons stay legible on any image. Poster and title sit on its
  * lower edge; the title is the one large type moment on the page.
  */
-export function DetailHero({ model, sourceId, actions, progress, chips, note, notice, castLinks = true }: DetailHeroProps) {
+export function DetailHero({ model, sourceId, actions, progress, chips, note, notice, castLinks = true, back }: DetailHeroProps) {
   const { t, i18n } = useTranslation('vod');
   const [expanded, setExpanded] = useState(false);
   const formatRuntime = useFormatRuntime();
@@ -66,7 +75,7 @@ export function DetailHero({ model, sourceId, actions, progress, chips, note, no
       <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} />
       {/* L1-vod-2: the window has no browser chrome, so Back is on the page. */}
       <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">
-        <DetailBack fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />
+        {back ?? <DetailBack fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />}
       </div>
       <div className={cn(HERO_GRID, model.backdropUrl ? HERO_TOP_WITH_ART : HERO_TOP_PLAIN)}>
         <div
@@ -162,6 +171,9 @@ export function HeroActionGroup({ children, className }: { children: ReactNode; 
 export const HERO_MENU_TRIGGER =
   'h-12 w-12 rounded-full border border-edge bg-surface-2 text-fg hover:bg-surface-3 hover:text-fg active:bg-pressed active:text-fg';
 
+/** The hero's Back pill: the kit back button on a frosted page surface (pass it with `back`). */
+export const HERO_BACK = 'border border-edge bg-surface/80 text-fg shadow-1 glass-blur hover:bg-surface hover:text-fg active:bg-surface-2';
+
 /**
  * Back to where you came from (the grid or search restores its place), or to the
  * movies/series landing when the page was opened cold. The kit back button on a
@@ -170,13 +182,7 @@ export const HERO_MENU_TRIGGER =
  */
 function DetailBack({ fallbackHref }: { fallbackHref: string }) {
   const goBack = useGoBack(fallbackHref);
-  return (
-    <BackButton
-      onClick={goBack}
-      className="border border-edge bg-surface/80 text-fg shadow-1 glass-blur hover:bg-surface hover:text-fg active:bg-surface-2"
-      data-testid="vod-detail-back"
-    />
-  );
+  return <BackButton onClick={goBack} className={HERO_BACK} data-testid="vod-detail-back" />;
 }
 
 function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; posterUrl?: string; sourceId: string }) {

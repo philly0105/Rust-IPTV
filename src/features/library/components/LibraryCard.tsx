@@ -54,10 +54,10 @@ function LibraryCardImpl({ entry }: { entry: LibraryEntry }) {
         )}
       </div>
       <div className="flex min-w-0 flex-col" style={{ height: CARD_CAPTION_HEIGHT - 8 }}>
-        <span className="truncate text-sm font-medium text-fg" title={entry.title}>
+        <span dir="auto" className="truncate text-match-parent text-body-sm font-medium text-fg" title={entry.title}>
           {entry.title}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+        <span className="flex min-w-0 items-center gap-1.5 text-caption text-fg-muted">
           {missing ? (
             <Badge variant="danger" className="inline-flex items-center gap-1">
               <FileWarning size={12} aria-hidden />

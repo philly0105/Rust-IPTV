@@ -296,5 +296,16 @@
   "stopConfirmAction": "Detener grabación",
   "clearFailedDownloads": "Borrar fallidas",
   "downloadDone": "{{title}} descargado",
-  "downloadFailedNamed": "No se pudo descargar {{title}}"
+  "downloadFailedNamed": "No se pudo descargar {{title}}",
+  "nowProgress": "Progreso de {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Detener",
+  "scheduledPaddingAll": "Las grabaciones empiezan {{before}} min antes y terminan {{after}} min después",
+  "myVideosTitlesHeading": "Películas y series",
+  "aboutSource": "Fuente",
+  "aboutEpisodes": "Episodios",
+  "aboutSize": "Tamaño",
+  "aboutDownloaded": "Descargado",
+  "aboutFile": "Archivo",
+  "openInCatalogue": "Abrir en {{source}}"
 }

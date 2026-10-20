@@ -84,5 +84,8 @@
   "minutesLeft_one": "Засталася {{count}} хвіліна",
   "minutesLeft_few": "Засталіся {{count}} хвіліны",
   "minutesLeft_many": "Засталося {{count}} хвілін",
-  "minutesLeft_other": "Засталося хвілін: {{count}}"
+  "minutesLeft_other": "Засталося хвілін: {{count}}",
+  "viewLabel": "Выгляд",
+  "viewGrid": "Сетка",
+  "viewList": "Спіс"
 }

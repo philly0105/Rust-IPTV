@@ -242,14 +242,14 @@ describe('airingLabel (L2-guide-library-13)', () => {
     const today = at(16, 2, 45);
     // The list shows the day heading and the row's clock time; the rule's line joins the two.
     expect(airingLabel(today, now, 'en-US')).toBe(`${dayLabel(today, now, 'en-US')} ${clockTime(today, 'en-US')}`);
-    expect(airingLabel(today, now, 'en-US')).toBe('today 02:45 AM');
-    expect(airingLabel(at(17, 21, 0), now, 'en-US')).toBe('tomorrow 09:00 PM');
+    expect(airingLabel(today, now, 'en-US')).toBe('today 2:45 AM');
+    expect(airingLabel(at(17, 21, 0), now, 'en-US')).toBe('tomorrow 9:00 PM');
   });
 
   it('names the day in full past tomorrow, as the list heading does', () => {
     const later = at(19, 2, 45);
     expect(dayLabel(later, now, 'en-US')).toBe('Monday, October 19');
-    expect(airingLabel(later, now, 'en-US')).toMatch(/^Monday, October 19.*02:45 AM$/);
+    expect(airingLabel(later, now, 'en-US')).toMatch(/^Monday, October 19.*2:45 AM$/);
   });
 
   it('uses the locale\'s own words for today', () => {

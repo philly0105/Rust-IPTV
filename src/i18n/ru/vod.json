@@ -254,5 +254,14 @@
   "removeRecentSearch": "Удалить «{{query}}» из недавних запросов",
   "jumpBackIn": "Недавно смотрели",
   "browseCategories": "Категории",
-  "knownForNoneHere": "Ни одной работы этого человека нет в этом источнике."
+  "knownForNoneHere": "Ни одной работы этого человека нет в этом источнике.",
+  "topResults": "Лучшие результаты",
+  "sourcesCount_one": "{{count}} источник",
+  "sourcesCount_few": "{{count}} источника",
+  "sourcesCount_many": "{{count}} источников",
+  "sourcesCount_other": "{{count}} источника",
+  "tmdbPromoLabel": "Метаданные TMDB",
+  "tmdbPromo": "Добавьте актёров, трейлеры и лучшие обложки с TMDB.",
+  "tmdbPromoAction": "Включить в настройках",
+  "tmdbPromoDismiss": "Скрыть"
 }

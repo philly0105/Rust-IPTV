@@ -244,5 +244,13 @@
   "removeRecentSearch": "Quitar «{{query}}» de las búsquedas recientes",
   "jumpBackIn": "Vuelve a lo último",
   "browseCategories": "Explorar categorías",
-  "knownForNoneHere": "Ninguno de los títulos de esta persona está en esta fuente."
+  "knownForNoneHere": "Ninguno de los títulos de esta persona está en esta fuente.",
+  "topResults": "Mejores resultados",
+  "sourcesCount_one": "{{count}} fuente",
+  "sourcesCount_many": "{{count}} fuentes",
+  "sourcesCount_other": "{{count}} fuentes",
+  "tmdbPromoLabel": "Metadatos de TMDB",
+  "tmdbPromo": "Añade reparto, tráilers y mejores imágenes con TMDB.",
+  "tmdbPromoAction": "Activarlo en Ajustes",
+  "tmdbPromoDismiss": "Descartar"
 }

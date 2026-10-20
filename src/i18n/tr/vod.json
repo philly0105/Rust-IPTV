@@ -234,5 +234,12 @@
   "removeRecentSearch": "\"{{query}}\" aramasını son aramalardan kaldır",
   "jumpBackIn": "Kaldığın yere dön",
   "browseCategories": "Kategorilere göz at",
-  "knownForNoneHere": "Bu kişinin yapımlarından hiçbiri bu kaynakta yok."
+  "knownForNoneHere": "Bu kişinin yapımlarından hiçbiri bu kaynakta yok.",
+  "topResults": "En iyi sonuçlar",
+  "sourcesCount_one": "{{count}} kaynak",
+  "sourcesCount_other": "{{count}} kaynak",
+  "tmdbPromoLabel": "TMDB meta verileri",
+  "tmdbPromo": "TMDB ile oyuncu kadrosu, fragman ve daha iyi görseller ekleyin.",
+  "tmdbPromoAction": "Ayarlar'dan açın",
+  "tmdbPromoDismiss": "Kapat"
 }

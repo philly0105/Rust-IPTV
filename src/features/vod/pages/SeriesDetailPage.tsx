@@ -14,8 +14,10 @@ import { usePlayerStore } from '@/features/player';
 import { CatalogRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
 import { FavoriteButton, WatchedButton, useFavoriteMenuItem } from '../components/detail/actions';
+import { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
+import { TmdbPromo } from '../components/detail/TmdbPromo';
 import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup } from '../components/detail/DetailHero';
-import { EpisodeList, SeasonTabs } from '../components/detail/EpisodeList';
+import { EpisodeList, SeasonTabs, offlineDownload } from '../components/detail/EpisodeList';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
@@ -50,6 +52,7 @@ import { Button, EmptyState, ErrorState, IconButton, Menu, Page, Skeleton, Toolt
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
+import { playDownload } from '@/features/library/lib/playDownload';
 import { seriesWatchedTargets, seriesWatchedWrite, watchedToastId, watchedUndoAll } from '../lib/seriesWatched';
 
 export function SeriesDetailPage() {
@@ -59,6 +62,9 @@ export function SeriesDetailPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
+  // On a phone the season's actions are icon buttons beside the Episodes heading, so the heading row
+  // stays one line instead of stacking two text buttons under it.
+  const phone = useMediaQuery('(width < 40rem)', false);
   const source = useSource(sourceId);
   const detail = useSeriesDetail(source.data, ref);
   // A failed lookup may be a movie id on the series route (cold link): look it up as a movie.
@@ -209,12 +215,23 @@ export function SeriesDetailPage() {
   // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
   const playEpisode = (ep: Episode, fromStart = false) => {
     const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), fromStart };
-    void playback.play(opts).then(() => {
-      if (!target) return;
-      const ctx: Parameters<typeof startEpisodeQueue>[0] = { ref, sourceKind: target.sourceKind, title: target.title, order, positions };
-      if (target.posterUrl) ctx.posterUrl = target.posterUrl;
-      return startEpisodeQueue(ctx, ep.id);
-    });
+    // VL-offline-play, per episode: a finished download whose file is on disk plays from the file
+    // (offline, and past a provider's connection limit); the episodes after it still queue as streams.
+    const file = offlineDownload(downloads.get(ep.id));
+    const started = file
+      ? playDownload(file, fromStart ? { fromStart: true } : undefined).catch((err: unknown) => {
+          toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' });
+          throw err;
+        })
+      : playback.play(opts);
+    void started
+      .then(() => {
+        if (!target) return;
+        const ctx: Parameters<typeof startEpisodeQueue>[0] = { ref, sourceKind: target.sourceKind, title: target.title, order, positions };
+        if (target.posterUrl) ctx.posterUrl = target.posterUrl;
+        return startEpisodeQueue(ctx, ep.id);
+      })
+      .catch(() => undefined);
   };
   const downloadEpisode = (ep: Episode) =>
     void playback.download({ episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), extension: ep.containerExtension });
@@ -475,7 +492,7 @@ export function SeriesDetailPage() {
               // The season's own actions sit with its list, small, so they never outweigh the heading.
               <div className="flex flex-wrap items-center gap-1">
                 {playback.canDownload &&
-                  (watch.active ? (
+                  (watch.active || phone ? (
                     <IconButton
                       label={t('downloadSeason')}
                       icon={<Download aria-hidden size={18} />}
@@ -502,7 +519,7 @@ export function SeriesDetailPage() {
                   series={seasonWrite.series}
                   name={seasonName}
                   watched={seasonWatched}
-                  compact={watch.active}
+                  compact={watch.active || phone}
                   size="sm"
                   labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
                 />
@@ -594,6 +611,8 @@ export function SeriesDetailPage() {
             ]}
           />
         )}
+        {/* Last, after the episodes and what the provider has: an offer, not something in the way. */}
+        {!tmdbOn && !watch.active && <TmdbPromo />}
       </Page>
 
       {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.titleBase ?? model.title} />}

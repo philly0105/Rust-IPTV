@@ -234,5 +234,12 @@
   "removeRecentSearch": "\"{{query}}\" verwijderen uit recente zoekopdrachten",
   "jumpBackIn": "Verder waar je was",
   "browseCategories": "Categorieën bekijken",
-  "knownForNoneHere": "Geen van de titels van deze persoon staat in deze bron."
+  "knownForNoneHere": "Geen van de titels van deze persoon staat in deze bron.",
+  "topResults": "Topresultaten",
+  "sourcesCount_one": "{{count}} bron",
+  "sourcesCount_other": "{{count}} bronnen",
+  "tmdbPromoLabel": "TMDB-metadata",
+  "tmdbPromo": "Voeg cast, trailers en betere afbeeldingen toe met TMDB.",
+  "tmdbPromoAction": "Zet het aan in Instellingen",
+  "tmdbPromoDismiss": "Verbergen"
 }

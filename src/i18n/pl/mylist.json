@@ -84,5 +84,8 @@
   "minutesLeft_one": "Została {{count}} minuta",
   "minutesLeft_few": "Zostały {{count}} minuty",
   "minutesLeft_many": "Zostało {{count}} minut",
-  "minutesLeft_other": "Zostało {{count}} minuty"
+  "minutesLeft_other": "Zostało {{count}} minuty",
+  "viewLabel": "Widok",
+  "viewGrid": "Siatka",
+  "viewList": "Lista"
 }

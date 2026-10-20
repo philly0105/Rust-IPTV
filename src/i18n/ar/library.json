@@ -350,5 +350,16 @@
   "stopConfirmAction": "إيقاف التسجيل",
   "clearFailedDownloads": "مسح الفاشلة",
   "downloadDone": "اكتمل تنزيل {{title}}",
-  "downloadFailedNamed": "تعذّر تنزيل {{title}}"
+  "downloadFailedNamed": "تعذّر تنزيل {{title}}",
+  "nowProgress": "تقدّم {{title}}",
+  "scheduledRec": "تسجيل",
+  "scheduledStopShort": "إيقاف",
+  "scheduledPaddingAll": "تبدأ التسجيلات مبكرًا بـ {{before}} د وتنتهي متأخرة بـ {{after}} د",
+  "myVideosTitlesHeading": "الأفلام والمسلسلات",
+  "aboutSource": "المصدر",
+  "aboutEpisodes": "الحلقات",
+  "aboutSize": "الحجم",
+  "aboutDownloaded": "نُزّل في",
+  "aboutFile": "الملف",
+  "openInCatalogue": "فتح في {{source}}"
 }

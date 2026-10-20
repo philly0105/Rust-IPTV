@@ -78,5 +78,8 @@
   "resumeTitle": "{{title}} folytatása",
   "playFailed": "A lejátszás nem indult el",
   "minutesLeft_one": "Még {{count}} perc",
-  "minutesLeft_other": "Még {{count}} perc"
+  "minutesLeft_other": "Még {{count}} perc",
+  "viewLabel": "Nézet",
+  "viewGrid": "Rács",
+  "viewList": "Lista"
 }

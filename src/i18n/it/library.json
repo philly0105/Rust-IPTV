@@ -296,5 +296,16 @@
   "stopConfirmAction": "Interrompi registrazione",
   "clearFailedDownloads": "Cancella non riusciti",
   "downloadDone": "{{title}} scaricato",
-  "downloadFailedNamed": "Impossibile scaricare {{title}}"
+  "downloadFailedNamed": "Impossibile scaricare {{title}}",
+  "nowProgress": "Avanzamento di {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Ferma",
+  "scheduledPaddingAll": "Le registrazioni iniziano {{before}} min prima e finiscono {{after}} min dopo",
+  "myVideosTitlesHeading": "Film e serie",
+  "aboutSource": "Sorgente",
+  "aboutEpisodes": "Episodi",
+  "aboutSize": "Dimensione",
+  "aboutDownloaded": "Scaricato il",
+  "aboutFile": "File",
+  "openInCatalogue": "Apri in {{source}}"
 }

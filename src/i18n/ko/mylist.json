@@ -76,5 +76,8 @@
   "resumeTitle": "{{title}} 이어 보기",
   "playFailed": "재생을 시작할 수 없습니다",
   "minutesLeft_one": "{{count}}분 남음",
-  "minutesLeft_other": "{{count}}분 남음"
+  "minutesLeft_other": "{{count}}분 남음",
+  "viewLabel": "보기",
+  "viewGrid": "격자",
+  "viewList": "목록"
 }

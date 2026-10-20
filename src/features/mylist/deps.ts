@@ -8,7 +8,7 @@
  * shortcut registry and header store.
  */
 
-export { Button, EmptyState, ErrorState, IconButton, Page, Poster, ProgressBar, SearchInput, Select, Tabs, Toggle, Tooltip, buttonClass, cn, errorDescription, useToast } from '@/ui';
+export { Button, EmptyState, ErrorState, IconButton, Page, Poster, ProgressBar, SearchInput, SegmentedControl, Select, Tabs, Toggle, Tooltip, buttonClass, cn, errorDescription, useToast } from '@/ui';
 export type { MenuAction } from '@/ui';
 export { useShell } from '@/shell/store';
 export { useShortcut } from '@/shell/shortcuts';
@@ -17,5 +17,7 @@ export { useVisibleSources } from '@/shell/useVisibleSources';
 export { DashboardRail } from '@/shell/dashboard/DashboardRail';
 export { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 export { VirtualRows } from '@/features/library/components/VirtualRows';
+export { VirtualCardGrid } from '@/features/library/components/VirtualCardGrid';
+export { POSTER_GAP, useCoverColumn } from '@/features/library/hooks/useCoverColumn';
 export { captureWatched, undoWatched } from '@/features/library/lib/watchedUndo';
 export { invalidateWatched } from '@/features/vod/lib/watchedQueries';

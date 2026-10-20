@@ -1,10 +1,11 @@
 /**
- * /my-videos/:id: focused offline detail. Two states: browse (artwork, facts,
- * actions, episode list) and watch (<PlayerStage /> on top, the same list
- * below to switch episodes). Stopping playback returns to browse.
+ * /my-videos/:id: focused offline detail. Two states: browse (the catalogue's detail hero, so a
+ * downloaded film looks like the same film in Movies, then the episodes and the file's facts) and
+ * watch (<PlayerStage /> on top, the same list below to switch episodes). Stopping playback
+ * returns to browse.
  */
 
-import { ArrowLeft, FileWarning, FolderOpen, Play, RotateCcw, SearchX, Trash2 } from 'lucide-react';
+import { ArrowLeft, FileWarning, FolderOpen, Library, Play, RotateCcw, SearchX, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -13,11 +14,29 @@ import { RpcError, isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { BackButton } from '@/ui/Page';
-import { cn } from '@/ui/cn';
-import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { intlLocale } from '@/lib/intl';
 
-import { Button, EmptyState, ErrorState, Page, PlayerStage, Poster, Skeleton, Toggle, useShortcut, useToast, usePlayerStore, errorDescription } from '../deps';
+import {
+  AboutSection,
+  Button,
+  DetailHero,
+  DetailHeroSkeleton,
+  EmptyState,
+  ErrorState,
+  HERO_BACK,
+  HeroActionGroup,
+  IconButton,
+  Page,
+  PlayerStage,
+  SectionHeader,
+  Toggle,
+  useHeroTitleInView,
+  useShortcut,
+  useToast,
+  usePlayerStore,
+  errorDescription,
+  type DetailModel,
+} from '../deps';
 import { ConfirmDialog, PageTitle, SectionHeading, SourceBadge } from '../components/bits';
 import { EPISODE_ROW_HEIGHT, EpisodeRow, episodeActions, episodeCode, type EpisodeAction } from '../components/EpisodeRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -47,17 +66,18 @@ function episodeRows(entry: LibraryEntry | undefined): EpisodeListRow[] {
   return rows;
 }
 
-function DetailSkeleton() {
-  return (
-    <div className="flex gap-8 p-6" role="status" aria-busy="true">
-      <Skeleton className="aspect-[2/3] w-56 shrink-0 rounded-lg" />
-      <div className="flex flex-1 flex-col gap-4 pt-4">
-        <Skeleton className="h-8 w-2/3" />
-        <Skeleton className="h-4 w-1/3" />
-        <Skeleton className="mt-6 h-10 w-48" />
-      </div>
-    </div>
-  );
+/** The hero's model from an offline entry: title and poster; the download keeps no plot or cast. */
+function heroModel(entry: LibraryEntry): DetailModel {
+  return {
+    title: entry.title,
+    mediaType: entry.kind === 'series' ? 'tv' : 'movie',
+    genres: [],
+    backdrops: [],
+    cast: [],
+    similar: [],
+    enriched: false,
+    ...(entry.posterUrl ? { posterUrl: entry.posterUrl } : {}),
+  };
 }
 
 export function MyVideoDetailPage() {
@@ -169,23 +189,29 @@ export function MyVideoDetailPage() {
     setRemoveTarget(null);
   };
 
-  const backAction = useMemo(
-    () => (
-      <BackButton to={back} onClick={goBack} label={t('backToLibrary')} />
-    ),
-    [back, goBack, t],
-  );
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const browsing = !!entry && !watching && !query.isLoading;
+  // VL-hero-chrome, as on the catalogue's detail pages: the header says "My Videos" while the
+  // hero's own title is on screen, and the title once it scrolls away, so it never shows twice.
+  const heroTitleInView = useHeroTitleInView(scrollRef, browsing, `${entry?.key ?? ''}:${browsing}`);
   const pageTitle = entry?.title ?? t('myVideosTitle');
-  usePageHeader(pageTitle, entry ? t(entry.kind === 'movie' ? 'movie' : 'series') : undefined, backAction);
+  const headerTitle = browsing && heroTitleInView ? t('myVideosTitle') : pageTitle;
+  // While watching, Back sits in the header (the hero and its Back pill are gone); browsing, it is
+  // the hero's frosted pill, the one Back pattern of every detail page.
+  const backAction = useMemo(
+    () => (watching ? <BackButton to={back} onClick={goBack} label={t('backToLibrary')} /> : undefined),
+    [back, goBack, t, watching],
+  );
+  usePageHeader(headerTitle, entry && headerTitle === pageTitle ? t(entry.kind === 'movie' ? 'movie' : 'series') : undefined, backAction);
 
   useShortcut('backspace', goBack, { description: t('backToLibrary'), area: t('myVideosTitle') });
 
   if (query.isLoading)
     return (
-      <>
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <PageTitle>{pageTitle}</PageTitle>
-        <DetailSkeleton />
-      </>
+        <DetailHeroSkeleton />
+      </div>
     );
   if (query.isError)
     return (
@@ -230,76 +256,105 @@ export function MyVideoDetailPage() {
   const resume = primary && primary.positionSeconds > 5 ? primary.positionSeconds : 0;
   const primaryEpisode = entry.kind === 'series' && primary ? entry.episodes.find((e) => e.download.id === primary.id) : undefined;
 
-  const actionsBar = (
-    <div className="flex flex-wrap items-center gap-2">
-      {movieMissing || allMissing ? (
-        <Button
-          variant="primary"
-          size="lg"
-          icon={<RotateCcw size={18} aria-hidden />}
-          loading={entry.kind === 'movie' ? pending.has(entry.download.id) : entry.episodes.some((ep) => pending.has(ep.download.id))}
-          onClick={() => {
-            if (entry.kind === 'movie') void perform('redownload', entry.download);
-            else void redownloadSeries(entry.episodes.map((ep) => ep.download), entry.title);
-          }}
-        >
-          {t('redownload')}
-        </Button>
-      ) : (
-        primary && (
+  const unplayable = movieMissing || allMissing;
+  const heroActions = (
+    <>
+      <HeroActionGroup className="max-sm:w-full">
+        {unplayable ? (
           <Button
             variant="primary"
             size="lg"
-            icon={<Play size={18} aria-hidden />}
-            loading={starting}
-            onClick={() => void play(primary)}
-            data-testid="play-offline"
+            icon={<RotateCcw size={18} aria-hidden />}
+            loading={entry.kind === 'movie' ? pending.has(entry.download.id) : entry.episodes.some((ep) => pending.has(ep.download.id))}
+            onClick={() => {
+              if (entry.kind === 'movie') void perform('redownload', entry.download);
+              else void redownloadSeries(entry.episodes.map((ep) => ep.download), entry.title);
+            }}
+            className="max-sm:flex-1"
           >
-            {resume
-              ? t('resumeFrom', { time: formatClock(resume) })
-              : primaryEpisode
-                ? t('playEpisode', { code: episodeCode(primaryEpisode) || primaryEpisode.name })
-                : t('playOffline')}
+            {t('redownload')}
           </Button>
-        )
-      )}
-      {primary && resume > 0 && !movieMissing && (
-        <Button variant="secondary" size="lg" onClick={() => void play(primary, true)}>
-          {t('startOver')}
-        </Button>
-      )}
-      {entry.kind === 'movie' && isDesktop && !movieMissing && (
-        <Button variant="ghost" size="lg" icon={<FolderOpen size={18} aria-hidden />} onClick={() => void perform('reveal', entry.download)}>
-          {t('actionReveal')}
-        </Button>
-      )}
-      {entry.kind === 'movie' && (
-        <Button
-          variant="ghost"
-          size="lg"
-          icon={<Trash2 size={18} aria-hidden />}
-          onClick={() => {
-            setDeleteFile(false);
-            setRemoveTarget(entry.download);
-          }}
-        >
-          {t('removeFromLibrary')}
-        </Button>
-      )}
-    </div>
+        ) : (
+          primary && (
+            <Button
+              variant="primary"
+              size="lg"
+              icon={<Play size={18} aria-hidden className="fill-current" />}
+              loading={starting}
+              onClick={() => void play(primary)}
+              aria-describedby="vod-detail-title"
+              className="max-sm:flex-1"
+              data-testid="play-offline"
+            >
+              {resume
+                ? t('resumeFrom', { time: formatClock(resume) })
+                : primaryEpisode
+                  ? t('playEpisode', { code: episodeCode(primaryEpisode) || primaryEpisode.name })
+                  : t('playOffline')}
+            </Button>
+          )
+        )}
+      </HeroActionGroup>
+      <HeroActionGroup>
+        {primary && resume > 0 && !movieMissing && (
+          <IconButton size="lg" variant="secondary" className="rounded-full" label={t('startOver')} icon={<RotateCcw size={18} aria-hidden />} onClick={() => void play(primary, true)} />
+        )}
+        {entry.kind === 'movie' && isDesktop && !movieMissing && (
+          <IconButton
+            size="lg"
+            variant="secondary"
+            className="rounded-full"
+            label={t('actionReveal')}
+            icon={<FolderOpen size={18} aria-hidden />}
+            onClick={() => void perform('reveal', entry.download)}
+          />
+        )}
+        {entry.kind === 'movie' && (
+          <IconButton
+            size="lg"
+            variant="secondary"
+            className="rounded-full hover:text-danger"
+            label={t('removeFromLibrary')}
+            icon={<Trash2 size={18} aria-hidden />}
+            onClick={() => {
+              setDeleteFile(false);
+              setRemoveTarget(entry.download);
+            }}
+            data-testid="remove-offline"
+          />
+        )}
+      </HeroActionGroup>
+    </>
   );
 
+  const sizeText = totalSize > 0 ? formatBytes(totalSize, i18n.language) : '';
+  // The watch state's facts line, under the player.
   const facts = (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[calc(13rem/15)] text-fg-muted">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-body-sm text-fg-muted">
       <SourceBadge source={source} />
       {entry.kind === 'series' && <span>{t('episodeCount', { count: entry.episodes.length })}</span>}
-      {totalSize > 0 && <span className="font-display tabular-nums">{formatBytes(totalSize, i18n.language)}</span>}
+      {sizeText && <span className="tabular-nums">{sizeText}</span>}
       {completedText && <span>{t('downloadedOn', { date: completedText })}</span>}
     </div>
   );
+  // Where the title came from, as a link back to it in the catalogue while its source is there.
+  const catalogueHref =
+    source && entry.kind === 'movie'
+      ? `/s/${encodeURIComponent(source.id)}/movie/${encodeURIComponent(entry.download.ref.itemId)}`
+      : source && entry.kind === 'series'
+        ? `/s/${encodeURIComponent(source.id)}/series/${encodeURIComponent(entry.latest.ref.itemId)}`
+        : undefined;
+  const fileName = entry.kind === 'movie' ? (entry.download.fileName ?? entry.download.filePath?.split(/[\\/]/).pop()) : undefined;
+  const about = [
+    { label: t('aboutSource'), value: <SourceBadge source={source} className="text-body-sm text-fg" /> },
+    { label: t('aboutSize'), value: sizeText },
+    { label: t('aboutDownloaded'), value: completedText },
+    ...(entry.kind === 'series' ? [{ label: t('aboutEpisodes'), value: String(entry.episodes.length) }] : []),
+    ...(fileName ? [{ label: t('aboutFile'), value: <span className="font-mono text-caption break-all">{fileName}</span> }] : []),
+  ];
 
   const missingPanel = (movieMissing || (entry.kind === 'series' && entry.missingCount > 0)) && (
-    <div role="status" className="flex items-start gap-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-sm">
+    <div role="status" className="flex max-w-[72ch] items-start gap-3 rounded-lg border border-danger/40 bg-danger/10 px-4 py-3 text-body-sm">
       <FileWarning size={18} aria-hidden className="mt-0.5 shrink-0 text-danger" />
       <div className="min-w-0">
         <p className="font-medium text-fg">
@@ -312,6 +367,8 @@ export function MyVideoDetailPage() {
 
   const episodeList = entry.kind === 'series' && (
     <VirtualRows
+      // Browsing, the list lays out at its full height inside the page's own scroller.
+      className={watching ? '-mx-2 px-2' : '-mx-2 flex-none overflow-visible px-2'}
       rows={rows}
       label={t('downloadedEpisodes')}
       rowHeight={(r) => (r.kind === 'header' ? SEASON_HEADER_HEIGHT : EPISODE_ROW_HEIGHT)}
@@ -372,9 +429,9 @@ export function MyVideoDetailPage() {
         <div className="flex flex-wrap items-center gap-4">
           <div className="min-w-0 flex-1">
             {/* The h1 matches the header title (C16); a playing episode's own title sits under it. */}
-            <h1 className="truncate text-xl text-fg">{pageTitle}</h1>
+            <h1 className="truncate text-title text-fg">{pageTitle}</h1>
             {playerTitle && playerTitle !== pageTitle && (
-              <p className="truncate text-sm text-fg-muted" data-testid="now-playing-title">
+              <p className="truncate text-body-sm text-fg-muted" data-testid="now-playing-title">
                 {playerTitle}
               </p>
             )}
@@ -391,42 +448,43 @@ export function MyVideoDetailPage() {
   }
 
   return (
-    <Page width="wide" className="flex min-h-0 min-w-0 flex-1 flex-col gap-6 pb-4 pt-6" data-state="browse">
-      <div className="relative flex shrink-0 gap-6 lg:gap-10">
-        {entry.posterUrl && <PosterGlow src={entry.posterUrl} sourceId={artSourceId} />}
-        <div className={cn('relative w-32 shrink-0 md:w-44 xl:w-56', (movieMissing || allMissing) && 'opacity-60 grayscale')}>
-          <Poster src={entry.posterUrl} sourceId={artSourceId} alt={entry.title} aspect="poster" priority />
-        </div>
-        <div className="relative flex min-w-0 flex-1 flex-col justify-end gap-4 pb-1">
-          <div className="flex min-w-0 flex-col gap-2">
-            <h1 className="text-2xl text-fg lg:text-[calc(34rem/15)] lg:leading-tight">{pageTitle}</h1>
-            {facts}
-          </div>
-          {missingPanel}
-          {actionsBar}
-        </div>
-      </div>
-      {entry.kind === 'series' && <div className="flex min-h-0 flex-1 flex-col">{episodeList}</div>}
+    <div ref={scrollRef} className="isolate min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-12" data-state="browse">
+      <DetailHero
+        model={heroModel(entry)}
+        sourceId={artSourceId}
+        castLinks={false}
+        back={<BackButton to={back} onClick={goBack} label={t('backToLibrary')} className={HERO_BACK} />}
+        chips={[
+          <span key="kind">{t(entry.kind === 'movie' ? 'movie' : 'series')}</span>,
+          entry.kind === 'series' && <span key="episodes">{t('episodeCount', { count: entry.episodes.length })}</span>,
+          sizeText && (
+            <span key="size" className="tabular-nums">
+              {sizeText}
+            </span>
+          ),
+        ]}
+        note={completedText ? t('downloadedOn', { date: completedText }) : undefined}
+        actions={heroActions}
+      />
+      <Page width="wide" className="flex flex-col gap-10 pt-2">
+        {missingPanel}
+        {entry.kind === 'series' && (
+          <section aria-labelledby="myvideo-episodes" className="flex flex-col gap-2">
+            <SectionHeader id="myvideo-episodes" title={t('downloadedEpisodes')} count={entry.episodes.length} />
+            {episodeList}
+          </section>
+        )}
+        <AboutSection facts={about} />
+        {catalogueHref && (
+          <p>
+            <Link to={catalogueHref} className={buttonClass('ghost', 'sm', '-ms-3')} data-testid="myvideo-catalogue-link">
+              <Library size={16} aria-hidden />
+              {t('openInCatalogue', { source: source?.name ?? '' })}
+            </Link>
+          </p>
+        )}
+      </Page>
       {removeDialog}
-    </Page>
-  );
-}
-
-/**
- * The soft colour wash behind the header: the poster through the image cache,
- * drawn quarter-size, blurred and scaled up (C5), fading out downward. Nothing
- * at all when the picture fails, so no broken-image box shows through.
- */
-function PosterGlow({ src, sourceId }: { src: string; sourceId: string }) {
-  const image = useImageChain([src], sourceId);
-  if (!image.url) return null;
-  return (
-    <div
-      aria-hidden
-      data-testid="myvideo-poster-glow"
-      className="pointer-events-none absolute -inset-x-6 -top-6 h-72 overflow-hidden opacity-25 [mask-image:linear-gradient(to_bottom,black,transparent)]"
-    >
-      <img key={image.url} src={image.url} alt="" draggable={false} decoding="async" referrerPolicy="no-referrer" onError={image.onError} className={QUARTER_BLUR} />
     </div>
   );
 }

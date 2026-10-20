@@ -234,5 +234,12 @@
   "removeRecentSearch": "从最近搜索中移除“{{query}}”",
   "jumpBackIn": "最近看过",
   "browseCategories": "浏览分类",
-  "knownForNoneHere": "此播放源中没有此人的作品。"
+  "knownForNoneHere": "此播放源中没有此人的作品。",
+  "topResults": "热门结果",
+  "sourcesCount_one": "{{count}} 个播放源",
+  "sourcesCount_other": "{{count}} 个播放源",
+  "tmdbPromoLabel": "TMDB 元数据",
+  "tmdbPromo": "使用 TMDB 添加演员、预告片和更好的图片。",
+  "tmdbPromoAction": "在设置中开启",
+  "tmdbPromoDismiss": "关闭"
 }

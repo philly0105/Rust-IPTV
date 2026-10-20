@@ -78,5 +78,8 @@
   "resumeTitle": "{{title}} hervatten",
   "playFailed": "Afspelen kon niet starten",
   "minutesLeft_one": "Nog {{count}} minuut",
-  "minutesLeft_other": "Nog {{count}} minuten"
+  "minutesLeft_other": "Nog {{count}} minuten",
+  "viewLabel": "Weergave",
+  "viewGrid": "Raster",
+  "viewList": "Lijst"
 }

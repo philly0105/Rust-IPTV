@@ -8,7 +8,7 @@ import { useNavigate, useParams } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
-import type { PlaybackPosition, RecentEntry } from '@/api/types';
+import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, Page, SkeletonList, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
@@ -17,6 +17,7 @@ import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { usePending, useSourcesById } from '../hooks/useLibraryData';
+import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
 import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
@@ -38,7 +39,7 @@ const positionCalls: PositionCalls = {
   set: (a) => rpc('positions.set', a),
 };
 
-const HEADER_HEIGHT = 48;
+const HEADER_HEIGHT = 56;
 const RECENT_LIMIT = 500;
 const CONTINUE_LIMIT = 20;
 
@@ -73,6 +74,7 @@ export function RecentPage() {
   const continuing = useMemo(() => continueForSource(cont.data ?? [], sourceId), [cont.data, sourceId]);
   const source = sourceId ? sources.get(sourceId) : undefined;
   const count = query.data?.length ?? 0;
+  const nowOn = useNowOn(useMemo(() => (query.data ?? []).map((e) => e.ref), [query.data]));
 
   const remove = useCallback(
     (e: RecentEntry) => {
@@ -219,6 +221,7 @@ export function RecentPage() {
         snapshot={e.snapshot}
         source={sources.get(e.ref.sourceId)}
         showSource={!sourceId}
+        now={nowOn.get(itemKey(e.ref))}
         time={relativeTime(e.viewedAt, i18n.language)}
         removeLabel={t('removeRecent', { title: snapshotTitle(e.ref, e.snapshot.title).title })}
         busy={pending.has(key)}
@@ -262,6 +265,10 @@ export function RecentPage() {
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         testId="recent-list"
+        // As on Favorites: the hover fill bleeds into the gutter and the rows keep a reading width.
+        // The Continue rail above lines up with the rows' content.
+        className="-mx-2"
+        listClassName="max-w-4xl"
         onRowKeyDown={(r, ev) => {
           if (r.kind !== 'item') return;
           if (ev.key === 'Enter') {

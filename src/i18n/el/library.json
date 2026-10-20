@@ -278,5 +278,16 @@
   "stopConfirmAction": "Διακοπή εγγραφής",
   "clearFailedDownloads": "Εκκαθάριση αποτυχημένων",
   "downloadDone": "Λήφθηκε: {{title}}",
-  "downloadFailedNamed": "Δεν ήταν δυνατή η λήψη: {{title}}"
+  "downloadFailedNamed": "Δεν ήταν δυνατή η λήψη: {{title}}",
+  "nowProgress": "Πρόοδος του {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Διακοπή",
+  "scheduledPaddingAll": "Οι εγγραφές ξεκινούν {{before}} λεπ. νωρίτερα και τελειώνουν {{after}} λεπ. αργότερα",
+  "myVideosTitlesHeading": "Ταινίες και σειρές",
+  "aboutSource": "Πηγή",
+  "aboutEpisodes": "Επεισόδια",
+  "aboutSize": "Μέγεθος",
+  "aboutDownloaded": "Λήφθηκε",
+  "aboutFile": "Αρχείο",
+  "openInCatalogue": "Άνοιγμα στο {{source}}"
 }

@@ -40,6 +40,8 @@ beforeAll(h.installDomStubs);
 beforeEach(() => {
   rpc.reset();
   h.resetShared();
+  // These tests drive the list view; the poster grid (the default) has its own (saas2.test.tsx).
+  localStorage.setItem('mylist.view', 'list');
   played.items.length = 0;
   rpc.handlers['positions.get'] = () => null;
   rpc.handlers['positions.forSeries'] = () => [];

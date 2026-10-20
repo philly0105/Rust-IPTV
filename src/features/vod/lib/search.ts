@@ -214,6 +214,51 @@ export function groupSearchResults(input: GroupInput): SearchGroup[] {
   return SEARCH_GROUP_ORDER.map((kind) => ({ kind, hits: groups[kind] })).filter((g) => g.hits.length > 0);
 }
 
+/** A poster hit and the other sources that carry the same title. */
+export interface GroupedHit {
+  hit: SearchHit;
+  others: SearchHit[];
+}
+
+/** A title as the duplicate check compares it: case, accents and punctuation aside. */
+function titleKey(text: string): string {
+  return text
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/**
+ * Folds movie and series hits for the same title from several sources into one (critique: search,
+ * the same film twice with two clipped source badges): same kind, the same base title and the same
+ * year (or none on both). The first, best-ranked hit leads; its detail page lists the others under
+ * "Other sources". Two copies in one source (an HD and a 4K entry) stay apart, and channels are
+ * never folded.
+ */
+export function groupDuplicateHits(hits: readonly SearchHit[]): GroupedHit[] {
+  const out: GroupedHit[] = [];
+  const byKey = new Map<string, GroupedHit>();
+  for (const h of hits) {
+    if (h.group === 'live') {
+      out.push({ hit: h, others: [] });
+      continue;
+    }
+    const item = h.item as VodItem | SeriesItem;
+    const key = `${h.group}|${titleKey(item.titleBase || h.title)}|${item.year ?? ''}`;
+    const lead = byKey.get(key);
+    if (lead && lead.hit.sourceId !== h.sourceId && !lead.others.some((o) => o.sourceId === h.sourceId)) {
+      lead.others.push(h);
+      continue;
+    }
+    const group: GroupedHit = { hit: h, others: [] };
+    if (!lead) byKey.set(key, group);
+    out.push(group);
+  }
+  return out;
+}
+
 /** One source searched on its own: the groups its facet view shows, and which of its types hit the cap. */
 export interface SourceSearch {
   groups: SearchGroup[];

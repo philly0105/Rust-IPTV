@@ -278,5 +278,16 @@
   "stopConfirmAction": "Aufnahme stoppen",
   "clearFailedDownloads": "Fehlgeschlagene entfernen",
   "downloadDone": "{{title}} heruntergeladen",
-  "downloadFailedNamed": "{{title}} konnte nicht heruntergeladen werden"
+  "downloadFailedNamed": "{{title}} konnte nicht heruntergeladen werden",
+  "nowProgress": "Fortschritt von {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Stoppen",
+  "scheduledPaddingAll": "Aufnahmen beginnen {{before}} Min. früher und enden {{after}} Min. später",
+  "myVideosTitlesHeading": "Filme und Serien",
+  "aboutSource": "Quelle",
+  "aboutEpisodes": "Folgen",
+  "aboutSize": "Größe",
+  "aboutDownloaded": "Heruntergeladen",
+  "aboutFile": "Datei",
+  "openInCatalogue": "In {{source}} öffnen"
 }

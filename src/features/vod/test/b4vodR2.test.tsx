@@ -20,8 +20,9 @@ import { i18n, installDomStubs, QueryWrapper } from './harness';
 beforeAll(installDomStubs);
 afterEach(cleanup);
 
+// With pictures, so the cast is a row of chips (with neither a picture nor a link it is one line of text).
 const people = (withIds: boolean): Person[] =>
-  ['Amy Adams', 'Jeremy Renner', 'Forest Whitaker'].map((name, i) => (withIds ? { id: i + 1, name } : { name }));
+  ['Amy Adams', 'Jeremy Renner', 'Forest Whitaker'].map((name, i) => (withIds ? { id: i + 1, name, profileUrl: `p${i}` } : { name, profileUrl: `p${i}` }));
 
 describe('B4-vod-D16: horizontally scrolling VOD rows are keyboard reachable', () => {
   it('a cast row with no linked chip is a focusable, named list with a focus ring', () => {
@@ -30,6 +31,12 @@ describe('B4-vod-D16: horizontally scrolling VOD rows are keyboard reachable', (
     expect(row.tabIndex).toBe(0);
     expect(row.className).toContain('focus-visible:ring-2');
     expect(screen.queryAllByRole('link')).toHaveLength(0);
+  });
+
+  it('names a cast with no pictures and no links in one line of text, not a row of initials', () => {
+    render(<MemoryRouter><CastRow cast={['Amy Adams', 'Jeremy Renner'].map((name) => ({ name }))} sourceId="src1" links={false} /></MemoryRouter>);
+    expect(screen.queryByRole('list', { name: 'Cast' })).toBeNull();
+    expect(screen.getByTestId('vod-cast-line').textContent).toMatch(/^Cast .*Amy Adams.*Jeremy Renner/);
   });
 
   it('with linked chips the links take focus, so the row adds no extra tab stop', () => {

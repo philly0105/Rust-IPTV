@@ -81,5 +81,8 @@
   "playFailed": "Impossibile avviare la riproduzione",
   "minutesLeft_one": "Manca {{count}} minuto",
   "minutesLeft_many": "Mancano {{count}} minuti",
-  "minutesLeft_other": "Mancano {{count}} minuti"
+  "minutesLeft_other": "Mancano {{count}} minuti",
+  "viewLabel": "Vista",
+  "viewGrid": "Griglia",
+  "viewList": "Elenco"
 }

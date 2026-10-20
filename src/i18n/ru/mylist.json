@@ -84,5 +84,8 @@
   "minutesLeft_one": "Осталась {{count}} минута",
   "minutesLeft_few": "Осталось {{count}} минуты",
   "minutesLeft_many": "Осталось {{count}} минут",
-  "minutesLeft_other": "Осталось {{count}} минуты"
+  "minutesLeft_other": "Осталось {{count}} минуты",
+  "viewLabel": "Вид",
+  "viewGrid": "Сетка",
+  "viewList": "Список"
 }

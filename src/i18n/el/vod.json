@@ -234,5 +234,12 @@
   "removeRecentSearch": "Αφαίρεση «{{query}}» από τις πρόσφατες αναζητήσεις",
   "jumpBackIn": "Συνέχισε από εκεί που έμεινες",
   "browseCategories": "Περιήγηση κατηγοριών",
-  "knownForNoneHere": "Κανένας από τους τίτλους αυτού του προσώπου δεν υπάρχει σε αυτή την πηγή."
+  "knownForNoneHere": "Κανένας από τους τίτλους αυτού του προσώπου δεν υπάρχει σε αυτή την πηγή.",
+  "topResults": "Κορυφαία αποτελέσματα",
+  "sourcesCount_one": "{{count}} πηγή",
+  "sourcesCount_other": "{{count}} πηγές",
+  "tmdbPromoLabel": "Μεταδεδομένα TMDB",
+  "tmdbPromo": "Προσθέστε ηθοποιούς, τρέιλερ και καλύτερες εικόνες με το TMDB.",
+  "tmdbPromoAction": "Ενεργοποίηση στις Ρυθμίσεις",
+  "tmdbPromoDismiss": "Απόκρυψη"
 }

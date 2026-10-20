@@ -78,5 +78,8 @@
   "resumeTitle": "Resume {{title}}",
   "playFailed": "Couldn't start playback",
   "minutesLeft_one": "{{count}} minute left",
-  "minutesLeft_other": "{{count}} minutes left"
+  "minutesLeft_other": "{{count}} minutes left",
+  "viewLabel": "View",
+  "viewGrid": "Grid",
+  "viewList": "List"
 }

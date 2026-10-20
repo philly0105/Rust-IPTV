@@ -278,5 +278,16 @@
   "stopConfirmAction": "Felvétel leállítása",
   "clearFailedDownloads": "Sikertelenek törlése",
   "downloadDone": "{{title}} letöltve",
-  "downloadFailedNamed": "{{title}} letöltése nem sikerült"
+  "downloadFailedNamed": "{{title}} letöltése nem sikerült",
+  "nowProgress": "{{title}} előrehaladása",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Leállítás",
+  "scheduledPaddingAll": "A felvételek {{before}} perccel korábban indulnak és {{after}} perccel később állnak le",
+  "myVideosTitlesHeading": "Filmek és sorozatok",
+  "aboutSource": "Forrás",
+  "aboutEpisodes": "Epizódok",
+  "aboutSize": "Méret",
+  "aboutDownloaded": "Letöltve",
+  "aboutFile": "Fájl",
+  "openInCatalogue": "Megnyitás itt: {{source}}"
 }

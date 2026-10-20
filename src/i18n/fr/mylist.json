@@ -81,5 +81,8 @@
   "playFailed": "Impossible de lancer la lecture",
   "minutesLeft_one": "{{count}} minute restante",
   "minutesLeft_many": "{{count}} minutes restantes",
-  "minutesLeft_other": "{{count}} minutes restantes"
+  "minutesLeft_other": "{{count}} minutes restantes",
+  "viewLabel": "Affichage",
+  "viewGrid": "Grille",
+  "viewList": "Liste"
 }

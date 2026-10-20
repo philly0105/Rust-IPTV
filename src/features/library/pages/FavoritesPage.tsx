@@ -12,13 +12,14 @@ import { useNavigate, useParams } from 'react-router';
 
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
-import { sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
+import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
 import { Button, EmptyState, ErrorState, Page, SkeletonList, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { usePending, useSourcesById } from '../hooks/useLibraryData';
+import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
 import {
@@ -32,7 +33,7 @@ import {
 } from '../lib/favorites';
 import { SourceGoneError, openEntry, relativeTime } from '../lib/open';
 
-const HEADER_HEIGHT = 48;
+const HEADER_HEIGHT = 56;
 const DRAG_MIME = 'application/x-tsrust-favorite';
 
 function refKey(r: ItemRef): string {
@@ -59,6 +60,7 @@ export function FavoritesPage() {
   const entries = useMemo(() => sortFavorites(query.data ?? []), [query.data]);
   const rows = useMemo(() => buildFavoriteRows(entries, search), [entries, search]);
   const source = sourceId ? sources.get(sourceId) : undefined;
+  const nowOn = useNowOn(useMemo(() => entries.map((e) => e.ref), [entries]));
 
   const commitOrder = useCallback(
     async (next: FavoriteEntry[]) => {
@@ -149,7 +151,8 @@ export function FavoritesPage() {
   useShortcut('alt+arrowdown', () => moveFocused(1), { description: t('shortcutMoveDown'), area });
 
   const title = source ? t('sourceFavoritesTitle', { source: source.name }) : t('favoritesTitle');
-  const subtitle = query.data ? t('favoritesCount', { count: entries.length }) : undefined;
+  // An empty page says so itself; "0 favorites" above it adds nothing (as on My Videos).
+  const subtitle = query.data && entries.length > 0 ? t('favoritesCount', { count: entries.length }) : undefined;
   usePageHeader(title, subtitle, undefined, { value: search, onChange: setSearch, placeholder: t('searchFavorites') });
 
   const onDragStart = (row: Extract<FavoriteRow, { kind: 'item' }>) => (e: DragEvent<HTMLElement>) => {
@@ -191,6 +194,7 @@ export function FavoritesPage() {
           snapshot={e.snapshot}
           source={sources.get(e.ref.sourceId)}
           showSource={!sourceId}
+          now={nowOn.get(itemKey(e.ref))}
           time={t('addedAgo', { time: relativeTime(e.addedAt, i18n.language) })}
           removeLabel={t('removeFavorite', { title: e.snapshot.title })}
           busy={pending.has(refKey(e.ref))}
@@ -248,6 +252,11 @@ export function FavoritesPage() {
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         testId="favorites-list"
+        // The hover fill bleeds into the gutter, so the artwork lines up with the headings and the
+        // header title; the rows keep a reading width, so the time and actions sit near the title
+        // on a wide window.
+        className="-mx-2"
+        listClassName="max-w-4xl"
         onRowKeyDown={(r, e) => {
           if (r.kind !== 'item') return;
           if (e.key === 'Enter') {

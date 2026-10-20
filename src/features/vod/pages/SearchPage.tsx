@@ -32,6 +32,7 @@ import {
   SEARCH_LIMIT,
   capSearchResult,
   detailHref,
+  groupDuplicateHits,
   groupSearchResults,
   narrowsQuery,
   nextSearchLimit,
@@ -41,12 +42,15 @@ import {
   searchTerms,
   sourceFacets,
   splitStalkerResults,
+  type GroupedHit,
+  type SearchGroup,
   type SearchGroupKind,
   type SearchHit,
   type SearchMore,
   type SourceSearch,
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
+import { useRailCardWidth } from '../hooks/useRailCardWidth';
 import { Badge, Button, EmptyState, ErrorState, IconButton, Page, Poster, SectionHeader, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
@@ -329,6 +333,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
   // VL-page-rhythm: the grids' column width at the UI scale (VirtualGrid scales its own the same way),
   // so a search poster is the size of a category poster at every scale.
   const coverWidth = useScaledPx(useCoverWidth(useSettings().coverSize), true);
@@ -337,13 +342,23 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
   // Programmes are a tab of their own, after the catalog's; the only one when nothing else matched.
   const programmeHits = programmes.hits;
-  const showProgrammes = programmeHits.length > 0 && (typeParam === 'programmes' || groups.length === 0);
+  // Top results (critique: search): when the answer spans more than one type, the page opens on a
+  // slice of each (a rail of movies, of series, the first channels and programmes), each with
+  // "See all" to its tab, instead of the first type alone and a mostly empty screen.
+  const topAvailable = groups.length + (programmeHits.length > 0 ? 1 : 0) > 1;
+  const showTop = topAvailable && (typeParam === 'top' || typeParam === null || (!groups.some((g) => g.kind === typeParam) && typeParam !== 'programmes'));
+  const showProgrammes = !showTop && programmeHits.length > 0 && (typeParam === 'programmes' || groups.length === 0);
+  /** The URL of one type's tab, for a Top results section's "See all". */
+  const typeHref = (kind: string) => {
+    const next = new URLSearchParams(params);
+    next.set('type', kind);
+    return `${location.pathname}?${next.toString()}`;
+  };
   const anyResults = groups.length > 0 || programmeHits.length > 0;
   const showBadges = !scoped && allSources.length > 1;
   const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
   // Back from a title: the results open where you left them (same query, type and source in the
   // URL), with focus on the title you opened. A link here (PUSH) is a fresh visit from the top.
-  const location = useLocation();
   const navigationType = useNavigationType();
   const memoryKey = `${location.pathname}${location.search}`;
   useScrollMemory({
@@ -448,9 +463,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         <Tabs
           label={t('search')}
           panelIdPrefix="search-results"
-          value={showProgrammes ? 'programmes' : (activeGroup?.kind ?? '')}
+          value={showTop ? 'top' : showProgrammes ? 'programmes' : (activeGroup?.kind ?? '')}
           onChange={setType}
           items={[
+            ...(topAvailable ? [{ id: 'top', label: t('topResults') }] : []),
             ...groups.map((g) => ({
               id: g.kind,
               label: t(`group_${g.kind}`),
@@ -461,7 +477,23 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
               : []),
           ]}
         />
-        {showProgrammes ? (
+        {showTop ? (
+          <div {...tabPanelProps('search-results', 'top')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            <TopResults
+              groups={groups}
+              more={capped.more}
+              programmes={programmeHits}
+              programmesMore={programmeHits.length >= PROGRAMME_LIMIT}
+              sources={allSources}
+              showBadges={showBadges}
+              stripCountryPrefix={prefs.stripCountryPrefix}
+              resume={resume}
+              locked={lockedHit}
+              typeHref={typeHref}
+              onPlayChannel={playChannel}
+            />
+          </div>
+        ) : showProgrammes ? (
           <div {...tabPanelProps('search-results', 'programmes')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
             <ProgrammeList hits={programmeHits} sources={allSources} showSource={showBadges} stripCountryPrefix={prefs.stripCountryPrefix} />
           </div>
@@ -863,6 +895,8 @@ const PosterHitCell = memo(function PosterHitCell({
   progress,
   watched,
   locked,
+  tabIndex,
+  otherSources = 0,
 }: {
   hit: SearchHit;
   index: number;
@@ -871,8 +905,12 @@ const PosterHitCell = memo(function PosterHitCell({
   progress: number | undefined;
   watched: boolean;
   locked: boolean;
+  /** A rail's roving tab index (Top results); a grid leaves it to the grid. */
+  tabIndex?: number | undefined;
+  /** More sources carry this title (groupDuplicateHits): the badge counts them instead of naming one. */
+  otherSources?: number;
 }) {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation('vod');
   const item = h.item as VodItem | SeriesItem;
   const language = useMemo(() => itemLanguage(item.title, item.categoryName), [item.title, item.categoryName]);
   const myList = useMemo(() => myListTarget(item), [item]);
@@ -885,17 +923,18 @@ const PosterHitCell = memo(function PosterHitCell({
   // A phone's posters are too narrow for the source name on the art: it collapsed to "N…" beside
   // the rating. There the source goes into the caption, after the year, in full.
   const narrow = cellWidth < POSTER_BADGE_MIN_CELL;
+  const sourceText = otherSources > 0 ? t('sourcesCount', { count: otherSources + 1 }) : h.sourceName;
   const badge = useMemo(
     () =>
       showBadges && !narrow ? (
         // Badge is inline-flex, so the ellipsis needs a block inside it (L2-visual-8).
-        <Badge variant="neutral" dir="auto" title={h.sourceName} className="bg-glass-strong text-on-glass" style={{ maxWidth: badgeWidth }}>
-          {h.sourceName}
+        <Badge variant="neutral" dir="auto" title={sourceText} className="bg-glass-strong text-on-glass" style={{ maxWidth: badgeWidth }}>
+          {sourceText}
         </Badge>
       ) : undefined,
-    [showBadges, narrow, h.sourceName, badgeWidth],
+    [showBadges, narrow, sourceText, badgeWidth],
   );
-  const meta = showBadges && narrow ? joinList([h.meta, h.sourceName], i18n.language) : h.meta;
+  const meta = showBadges && narrow ? joinList([h.meta, sourceText], i18n.language) : h.meta;
   return (
     <PosterCard
       index={index}
@@ -910,10 +949,11 @@ const PosterHitCell = memo(function PosterHitCell({
       watched={watched}
       language={language}
       badge={badge}
-      badgeLabel={showBadges && !narrow ? h.sourceName : undefined}
+      badgeLabel={showBadges && !narrow ? sourceText : undefined}
       myList={myList}
       prefetch={prefetch}
       locked={locked}
+      tabIndex={tabIndex}
     />
   );
 });
@@ -938,35 +978,174 @@ const ChannelGrid = memo(function ChannelGrid({
       rowHeight={() => CHANNEL_ROW_HEIGHT}
       scrollRef={scrollRef}
       testId="vod-search-channels"
-      renderCell={(h, i) => {
-        const c = h.item as Channel;
+      renderCell={(h, i) => <ChannelHitButton hit={h} index={i} showBadges={showBadges} onPlayChannel={onPlayChannel} />}
+    />
+  );
+});
+
+/** One channel hit; choosing it plays the channel. The source is quiet text, not an outlined chip. */
+function ChannelHitButton({
+  hit: h,
+  index,
+  showBadges,
+  onPlayChannel,
+}: {
+  hit: SearchHit;
+  index: number;
+  showBadges: boolean;
+  onPlayChannel: (c: Channel, hit: SearchHit) => void;
+}) {
+  const c = h.item as Channel;
+  return (
+    <button
+      type="button"
+      data-grid-index={index}
+      onClick={() => onPlayChannel(c, h)}
+      className="flex w-full items-center gap-3 rounded-lg border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors"
+    >
+      <div className="w-12 shrink-0">
+        {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
+        <Poster src={h.imageUrl} sourceId={c.ref.sourceId} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div dir="auto" className="truncate text-body-sm font-medium text-fg text-match-parent">
+          {h.title}
+        </div>
+        {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
+        <div className="flex min-w-0 gap-1.5 text-caption text-fg-subtle">
+          {h.meta && <span className="tabular shrink-0">{h.meta}</span>}
+          {showBadges && h.meta && <span aria-hidden>·</span>}
+          {showBadges && (
+            <span dir="auto" title={h.sourceName} className="min-w-0 truncate" data-testid="search-channel-source">
+              {h.sourceName}
+            </span>
+          )}
+        </div>
+      </div>
+      {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
+    </button>
+  );
+}
+
+/** How many of each type Top results shows before "See all". */
+const TOP_POSTERS = 12;
+const TOP_CHANNELS = 6;
+const TOP_PROGRAMMES = 5;
+
+/**
+ * The Top results view: a section per result type, in the order movies, series, channels,
+ * programmes. Posters fold the same title from several sources into one card ("2 sources"), so a
+ * film is not listed twice side by side; each section's "See all" opens its tab.
+ */
+function TopResults({
+  groups,
+  more,
+  programmes,
+  programmesMore,
+  sources,
+  showBadges,
+  stripCountryPrefix,
+  resume,
+  locked,
+  typeHref,
+  onPlayChannel,
+}: {
+  groups: SearchGroup[];
+  more: SearchMore;
+  programmes: readonly GuideSearchHit[];
+  programmesMore: boolean;
+  sources: readonly Source[];
+  showBadges: boolean;
+  stripCountryPrefix: boolean;
+  resume: Map<string, number>;
+  locked: (item: VodItem | SeriesItem) => boolean;
+  typeHref: (kind: string) => string;
+  onPlayChannel: (c: Channel, hit: SearchHit) => void;
+}) {
+  const { t } = useTranslation('vod');
+  const count = (n: number, capped: boolean | undefined) => (capped ? t('searchCountMore', { count: n }) : n);
+  return (
+    <div className="flex flex-col gap-10" data-testid="search-top">
+      {groups.map((g) =>
+        g.kind === 'live' ? (
+          <section key={g.kind} aria-labelledby="search-top-live" className="flex flex-col gap-3">
+            <SectionHeader id="search-top-live" title={t('group_live')} count={count(g.hits.length, more.live)} seeAll={{ to: typeHref('live') }} />
+            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_MIN_WIDTH}px, 1fr))` }} role="list">
+              {g.hits.slice(0, TOP_CHANNELS).map((h, i) => (
+                <div key={h.key} role="listitem" className="min-w-0">
+                  <ChannelHitButton hit={h} index={i} showBadges={showBadges} onPlayChannel={onPlayChannel} />
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <TopPosterRail key={g.kind} group={g} capped={more[g.kind]} showBadges={showBadges} resume={resume} locked={locked} seeAll={typeHref(g.kind)} />
+        ),
+      )}
+      {programmes.length > 0 && (
+        <section aria-labelledby="search-top-programmes" className="flex flex-col gap-3">
+          <SectionHeader
+            id="search-top-programmes"
+            title={t('group_programmes')}
+            count={count(programmes.length, programmesMore)}
+            seeAll={{ to: typeHref('programmes') }}
+          />
+          <ProgrammeList hits={programmes.slice(0, TOP_PROGRAMMES)} sources={sources} showSource={showBadges} stripCountryPrefix={stripCountryPrefix} />
+        </section>
+      )}
+    </div>
+  );
+}
+
+/** One Top results rail of posters, duplicates folded. */
+function TopPosterRail({
+  group,
+  capped,
+  showBadges,
+  resume,
+  locked,
+  seeAll,
+}: {
+  group: SearchGroup;
+  capped: boolean | undefined;
+  showBadges: boolean;
+  resume: Map<string, number>;
+  locked: (item: VodItem | SeriesItem) => boolean;
+  seeAll: string;
+}) {
+  const { t } = useTranslation('vod');
+  const cardWidth = useRailCardWidth();
+  const folded = useMemo(() => (showBadges ? groupDuplicateHits(group.hits) : group.hits.map((hit) => ({ hit, others: [] }))), [group.hits, showBadges]);
+  const items = useMemo(() => folded.slice(0, TOP_POSTERS), [folded]);
+  const watched = useWatchedKeys(useMemo(() => items.map((g) => g.hit.item as VodItem | SeriesItem), [items]));
+  return (
+    <PosterRail<GroupedHit>
+      title={t(`group_${group.kind}`)}
+      count={capped ? t('searchCountMore', { count: group.hits.length }) : group.hits.length}
+      seeAll={{ to: seeAll }}
+      items={items}
+      cardWidth={cardWidth}
+      bleed
+      myList={(g) => myListTarget(g.hit.item as VodItem | SeriesItem)}
+      render={(g, i, rail) => {
+        const item = g.hit.item as VodItem | SeriesItem;
         return (
-          <button
-            type="button"
-            data-grid-index={i}
-            onClick={() => onPlayChannel(c, h)}
-            className="flex w-full items-center gap-3 rounded-md border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <div className="w-12 shrink-0">
-              {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
-              <Poster src={h.imageUrl} sourceId={c.ref.sourceId} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div dir="auto" className="truncate text-sm font-medium text-fg text-match-parent">{h.title}</div>
-              <div className="tabular truncate text-xs text-fg-subtle">{h.meta}</div>
-            </div>
-            {showBadges && (
-              <Badge variant="outline" dir="auto" title={h.sourceName} className="max-w-[110px] shrink-0">
-                {h.sourceName}
-              </Badge>
-            )}
-            {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
-          </button>
+          <PosterHitCell
+            hit={g.hit}
+            index={i}
+            cellWidth={cardWidth}
+            showBadges={showBadges}
+            progress={resume.get(resumeKey(item.ref))}
+            watched={watched.has(itemKey(item.ref))}
+            locked={locked(item)}
+            tabIndex={rail.tabIndex}
+            otherSources={g.others.length}
+          />
         );
       }}
     />
   );
-});
+}
 
 function SearchSkeleton() {
   const { t } = useTranslation('vod');

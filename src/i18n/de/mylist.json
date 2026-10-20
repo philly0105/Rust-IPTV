@@ -78,5 +78,8 @@
   "resumeTitle": "{{title}} fortsetzen",
   "playFailed": "Wiedergabe konnte nicht starten",
   "minutesLeft_one": "Noch {{count}} Minute",
-  "minutesLeft_other": "Noch {{count}} Minuten"
+  "minutesLeft_other": "Noch {{count}} Minuten",
+  "viewLabel": "Ansicht",
+  "viewGrid": "Raster",
+  "viewList": "Liste"
 }

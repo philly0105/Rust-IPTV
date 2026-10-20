@@ -105,11 +105,15 @@ describe('My Videos All includes recordings (L2-guide-library-8)', () => {
     renderAt('/my-videos', libraryRoutes);
     const grid = await screen.findByTestId('my-videos-grid');
     await waitFor(() => expect(within(grid).getAllByTestId('library-card')).toHaveLength(3));
-    expect(within(grid).getAllByRole('listitem').map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Evening News, Recording', 'Heat']);
+    // Recordings are TV: a section of wide cards of their own above the poster grid, newest first in each.
+    const recordings = within(grid).getByRole('list', { name: 'Recordings' });
+    expect(within(recordings).getAllByRole('button').map((c) => c.getAttribute('aria-label'))).toEqual(['Evening News, Recording']);
+    const titles = within(grid).getByRole('list', { name: 'My Videos' });
+    expect(within(titles).getAllByRole('listitem').map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Heat']);
     expect(screen.getByRole('tab', { name: /All/ }).textContent).toContain('3');
     expect(screen.getByRole('tab', { name: /Movies/ }).textContent).toContain('2');
 
-    fireEvent.click(within(grid).getByRole('listitem', { name: 'Evening News, Recording' }));
+    fireEvent.click(within(recordings).getByRole('button', { name: 'Evening News, Recording' }));
     await waitFor(() => expect(fakePlayer.played.map((s) => s.url)).toEqual(['http://x/r.r1.0']));
   });
 

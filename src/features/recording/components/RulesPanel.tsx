@@ -55,12 +55,12 @@ export function RecordingRulesPanel() {
   }
 
   return (
-    <section aria-labelledby={headingId} data-testid="recording-rules" className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-3 px-1">
+    <section aria-labelledby={headingId} data-testid="recording-rules" className="flex flex-col gap-3">
+      <div className="flex items-baseline gap-3">
         <h2 id={headingId} className="text-title-sm text-fg">
           {t('rulesTitle')}
         </h2>
-        {rules.data ? <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{list.length}</span> : null}
+        {rules.data ? <span className="text-body-sm tabular-nums text-fg-subtle">{list.length}</span> : null}
       </div>
       <div className="overflow-hidden rounded-lg border border-edge bg-surface">{body}</div>
       <RemoveRuleDialog rule={removing} onClose={() => setRemoving(null)} />
@@ -86,14 +86,15 @@ function RuleRow({ rule, onRemove }: { rule: RecordingRule; onRemove: () => void
 
   return (
     <li className="flex items-center gap-3 px-4 py-3 sm:gap-4" data-testid="rule-row" data-rule-id={rule.id} data-enabled={enabled ? '' : undefined}>
+      {/* A neutral glyph: red read as an error, and the switch already says whether the rule is on. */}
       <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
-        <Repeat size={16} className={enabled ? 'text-live' : 'text-fg-subtle'} />
+        <Repeat size={16} className={enabled ? 'text-fg-muted' : 'text-fg-subtle'} />
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span dir="auto" className={cn('truncate text-sm font-medium', enabled ? 'text-fg' : 'text-fg-muted')}>
+        <span dir="auto" className={cn('truncate text-body-sm font-medium', enabled ? 'text-fg' : 'text-fg-muted')}>
           {rule.title}
         </span>
-        <span className="flex min-w-0 flex-wrap gap-x-3 text-xs text-fg-muted">
+        <span className="flex min-w-0 flex-wrap gap-x-3 text-caption text-fg-muted">
           <span dir="auto" className="max-w-full truncate">
             {rule.channelName}
           </span>

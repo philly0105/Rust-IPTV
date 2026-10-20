@@ -298,13 +298,14 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     }
   });
 
-  it('channel badges truncate inside the badge with the full name in the title', async () => {
+  it('channel source names truncate with the full name in the title', async () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [channel(1, 'src2'), channel(2, 'src1')], movies: [], series: [] });
     renderApp('/search?q=news');
     const grid = await screen.findByTestId('vod-search-channels');
-    const badge = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
-    expect(badge.className).toContain('max-w-[110px]');
-    expect(badge.querySelector('span')?.className).toContain('truncate');
+    // The source is quiet text in the channel's second line now (no outlined chip); it still gives way first.
+    const name = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
+    expect(name.className).toContain('truncate');
+    expect(name.className).toContain('min-w-0');
   });
 });
 

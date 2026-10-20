@@ -27,7 +27,10 @@ static SXE: Lazy<Regex> = Lazy::new(|| {
 });
 /// `1x02`, `10x115` (two or three episode digits, so `4x4` stays a title).
 static NXN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?:^|[^\p{L}\p{N}])(?P<m>(?P<s>[0-9]{1,2})[xX](?P<e>[0-9]{2,3}))(?:[^\p{L}\p{N}]|$)").unwrap()
+    Regex::new(
+        r"(?:^|[^\p{L}\p{N}])(?P<m>(?P<s>[0-9]{1,2})[xX](?P<e>[0-9]{2,3}))(?:[^\p{L}\p{N}]|$)",
+    )
+    .unwrap()
 });
 /// `Season 1 Episode 2`, `season 1, episode 2`.
 static WORDS: Lazy<Regex> = Lazy::new(|| {

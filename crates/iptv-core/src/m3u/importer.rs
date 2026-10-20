@@ -813,8 +813,10 @@ fn stored_validators(conn: &Connection, source_id: &str) -> CoreResult<Option<Va
             |r| r.get(0),
         )
         .optional()?;
-    Ok((stored.version == IMPORT_VERSION && sha.as_deref() == Some(stored.sha.as_str()))
-        .then_some(stored))
+    Ok(
+        (stored.version == IMPORT_VERSION && sha.as_deref() == Some(stored.sha.as_str()))
+            .then_some(stored),
+    )
 }
 
 /// Stores the validators of a body that is now the imported one, or drops

@@ -689,7 +689,10 @@ async fn hidden_groups_and_english_only_refill_the_list() {
         #EXTINF:-1 group-title=\"Sport\",Beta\nhttp://s.example/b.ts\n\
         #EXTINF:-1 group-title=\"RU | Новости\",Первый канал\nhttp://s.example/c.ts\n";
     let foreign = Some("RU | Новости");
-    assert!(iptv_core::catalog::language::is_non_english("Первый канал", foreign));
+    assert!(iptv_core::catalog::language::is_non_english(
+        "Первый канал",
+        foreign
+    ));
     let src = iptv_core::sources::add(
         f.state.clone(),
         AddSourceArgs {

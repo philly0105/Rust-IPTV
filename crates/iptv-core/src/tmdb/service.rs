@@ -211,9 +211,13 @@ impl Tmdb {
         let key = person_lookup_key(person_id, &ctx.language);
         let entry = self
             .cache
-            .get_or_fetch(&state.writer(), "person", key, DETAILS, move || async move {
-                fetch_person(&client, &ctx, person_id).await
-            })
+            .get_or_fetch(
+                &state.writer(),
+                "person",
+                key,
+                DETAILS,
+                move || async move { fetch_person(&client, &ctx, person_id).await },
+            )
             .await?;
         entry.payload.map(|v| typed(&v)).transpose()
     }
@@ -226,19 +230,25 @@ impl Tmdb {
         let key = trending_lookup_key(&ctx.language);
         let entry = self
             .cache
-            .get_or_fetch(&state.writer(), "trending", key, TRENDING, move || async move {
-                let page: raw::ResultPage = client
-                    .get_json(
-                        "/trending/all/week",
-                        &[("language", ctx.language.as_str())],
-                        &ctx.key,
-                    )
-                    .await?;
-                Ok(Fetched::payload(
-                    None,
-                    serde_json::to_value(map::trending_from_page(&page))?,
-                ))
-            })
+            .get_or_fetch(
+                &state.writer(),
+                "trending",
+                key,
+                TRENDING,
+                move || async move {
+                    let page: raw::ResultPage = client
+                        .get_json(
+                            "/trending/all/week",
+                            &[("language", ctx.language.as_str())],
+                            &ctx.key,
+                        )
+                        .await?;
+                    Ok(Fetched::payload(
+                        None,
+                        serde_json::to_value(map::trending_from_page(&page))?,
+                    ))
+                },
+            )
             .await?;
         Ok(entry
             .payload

@@ -260,7 +260,8 @@ describe('zapping past a locked channel (Ask mode)', () => {
     expect((await pending)?.ref.itemId).toBe('666');
     expect(usePlayerStore.getState().source?.url).toBe('http://x/live/666.m3u8');
     expect(calls('xtream.streamUrl').map((a) => (a as { ref: ItemRef }).ref.itemId)).toEqual(['101', '666']);
-  });
+    // The zap quiet runs on real timers, which a loaded two-core CI runner stretches past 5 s.
+  }, 20_000);
 
   it('stays put at the end of the list when everything past the refusal is locked', async () => {
     order = ['101', '666', '667'];

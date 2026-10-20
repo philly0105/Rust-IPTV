@@ -176,13 +176,15 @@ pub fn register(r: &mut RpcRouter) {
         Ok::<_, RpcError>(())
     });
 
-    r.add("mpv.detach", |state, _: ()| async move {
+    // Takes any args: off Windows every mpv.* call answers Unsupported before
+    // its arguments are looked at (tests/player_rpc.rs mpv_commands_without_session).
+    r.add("mpv.detach", |state, _: Value| async move {
         ensure_desktop(&state)?;
         embedded::detach(&state).await?;
         Ok::<_, RpcError>(())
     });
 
-    r.add("mpv.state", |state, _: ()| async move {
+    r.add("mpv.state", |state, _: Value| async move {
         ensure_desktop(&state)?;
         embedded::ensure_platform()?;
         Ok::<_, RpcError>(embedded::state(&state))

@@ -396,8 +396,8 @@ impl RowBuilder {
 
     /// Movie ids that user state refers to (read before the import writes),
     /// and `keys`: the identity of each such old row that no other old row
-    /// shares ([`super::remap::Remapper::movie_identities`]). An episode
-    /// whose id as a movie is among the ids is reported by
+    /// shares (`remap::Remapper::movie_identities`). An episode whose id as a
+    /// movie is among the ids is reported by
     /// [`RowBuilder::take_series`], so its state can follow it. So is an
     /// episode whose URL changed since (rotated tokens), when it is the only
     /// movie entry with the identity of one of those rows and no entry still

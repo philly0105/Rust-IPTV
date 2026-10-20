@@ -34,6 +34,12 @@ import {
 import { SourceGoneError, openEntry, relativeTime } from '../lib/open';
 
 const HEADER_HEIGHT = 56;
+/**
+ * The first heading has no group above it to keep apart from, so its row is only as tall as the
+ * heading: the list's first line then sits where the other pages' first line does, under Page's
+ * own top padding.
+ */
+const FIRST_HEADER_HEIGHT = 36;
 const DRAG_MIME = 'application/x-tsrust-favorite';
 
 function refKey(r: ItemRef): string {
@@ -248,7 +254,7 @@ export function FavoritesPage() {
       <VirtualRows
         rows={rows}
         label={title}
-        rowHeight={(r) => (r.kind === 'header' ? HEADER_HEIGHT : ENTRY_ROW_HEIGHT)}
+        rowHeight={(r) => (r.kind === 'header' ? (r === rows[0] ? FIRST_HEADER_HEIGHT : HEADER_HEIGHT) : ENTRY_ROW_HEIGHT)}
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         testId="favorites-list"
@@ -271,7 +277,7 @@ export function FavoritesPage() {
     );
 
   return (
-    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-2" data-testid="favorites-page">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="favorites-page">
       <PageTitle>{title}</PageTitle>
       {body}
     </Page>

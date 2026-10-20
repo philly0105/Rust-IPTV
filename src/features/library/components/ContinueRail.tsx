@@ -9,7 +9,7 @@ import { snapshotTitle } from '@/lib/title';
 import { CARD_ART, CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
 
-import { IconButton, Poster, ProgressBar } from '../deps';
+import { IconButton, Poster, ProgressBar, useEdgeFades } from '../deps';
 import { formatClock } from '../lib/format';
 import { watchedFraction } from '../lib/recent';
 
@@ -55,6 +55,9 @@ export function ContinueRail({
   onRemove: (p: PlaybackPosition) => void;
 }) {
   const { t } = useTranslation('library');
+  // The rail is cut by the list's reading width: the hidden end fades out, as the VOD rails and
+  // the cast row do, instead of clipping a poster hard at the edge.
+  const fades = useEdgeFades(String(positions.length));
   return (
     // pb-2: with the day heading's own top space, the gap above it matches the one between day groups.
     <section aria-labelledby="continue-heading" className="flex flex-col gap-3 px-2 pb-2">
@@ -62,7 +65,12 @@ export function ContinueRail({
         {t('continueWatching')}
       </h2>
       {/* scroll-px-1 matches px-1: snap-start then aligns the first card with the heading, not the padding edge. */}
-      <ul className="-mx-1 flex min-h-0 flex-1 snap-x scroll-px-1 gap-4 overflow-x-auto px-1 pb-2" data-testid="continue-rail">
+      <ul
+        ref={fades.ref}
+        style={fades.style}
+        className="-mx-1 flex min-h-0 flex-1 snap-x scroll-px-1 gap-4 overflow-x-auto px-1 pb-2 scrollbar-none"
+        data-testid="continue-rail"
+      >
         {positions.map((p) => {
           // Older snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
           const title = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title).title : p.ref.itemId;

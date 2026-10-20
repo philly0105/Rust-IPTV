@@ -32,7 +32,7 @@ import { GridMyListProvider, PosterCard, PosterCardSkeleton, myListTarget } from
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { DecadeChips, YearRangeFields, useYearFilter } from '../components/VodFilterBar';
 import { preloadDetailChunk, usePrefetchOnRest, type PrefetchTarget } from '../hooks/prefetch';
-import { usePlayback, type PlayTarget } from '../hooks/usePlayback';
+import { usePlayTitle, type PlayTarget } from '../hooks/usePlayTitle';
 import { resumeKey, useResumeMap, useSettings, useSource, useVodPage, useVodPagesInOrder } from '../hooks/queries';
 import { useEscapeBack } from '../hooks/useBackKey';
 import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useWatched';
@@ -62,7 +62,7 @@ import {
 } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
-import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, Toggle, Tooltip, VirtualGrid, buttonClass, cn, type VirtualItemState } from '@/ui';
+import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, Toggle, Tooltip, VirtualGrid, buttonClass, cn, filterChipClass, type VirtualItemState } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -225,12 +225,8 @@ function RatingFloorChip({ setting, on, onChange, className }: { setting: number
         aria-label={label}
         onClick={() => onChange(!on)}
         data-testid="vod-rating-filter"
-        className={cn(
-          'tabular inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-3 text-sm whitespace-nowrap',
-          className,
-          'motion-safe:transition-[color,background-color] motion-safe:duration-150',
-          on ? 'bg-fg font-medium text-bg' : 'bg-surface-2 text-fg-subtle line-through hover:bg-surface-3 hover:text-fg',
-        )}
+        // The kit's filter chip, as the decade chips beside it: inverted while it filters.
+        className={filterChipClass(on, cn('tabular gap-1 whitespace-nowrap', !on && 'text-fg-subtle line-through', className))}
       >
         <Star aria-hidden size={13} className="fill-current" />
         {`${rating}+`}
@@ -238,6 +234,9 @@ function RatingFloorChip({ setting, on, onChange, className }: { setting: number
     </Tooltip>
   );
 }
+
+/** Below this many titles a category drops its decade chips and its search field. */
+const FEW_TITLES = 12;
 
 export function CategoryGridPage({ kind }: { kind: VodKind }) {
   const { t, i18n } = useTranslation('vod');
@@ -410,6 +409,13 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     hideWatched,
   });
 
+  // A small category (a row or two of posters) needs no decade chips and no search of its own:
+  // they were most of the page for five titles. Counted from the category itself, so the toolbar
+  // does not change as filters narrow the grid, and kept while one of them is in use.
+  const fewTitles = category !== undefined && category.itemCount < FEW_TITLES;
+  const showChips = !fewTitles || yearFiltered;
+  const showSearch = !fewTitles || searchDraft !== '';
+
   const sortOptions = VOD_SORT_KEYS.map((k) => ({ value: k, label: t(`sort_${k}`) }));
   const coverWidth = useCoverWidth(settings.coverSize);
   const backHref = `/s/${encodeURIComponent(sourceId)}/${section}`;
@@ -530,13 +536,13 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   // L4-vod-4: the menu also plays the title (resuming like the detail page's Play) and marks it watched.
   const menuTitle = useMemo(() => (menu ? [menu.item] : undefined), [menu]);
   const menuWatched = useWatchedKeys(menuTitle).has(menu ? itemKey(menu.item.ref) : '');
-  const { play } = usePlayback(undefined);
+  const play = usePlayTitle();
   const playFromMenu = (item: VodItem | SeriesItem, index: number) => {
     // A series has no single thing to play from here: its details pick the episode.
     if (item.ref.contentType !== 'movie' || !input) return openTitle(item.ref, index);
     const target: PlayTarget = { ref: item.ref, sourceKind: input.sourceKind, title: item.title, categoryId: item.categoryId };
     if (item.posterUrl) target.posterUrl = item.posterUrl;
-    void play({ target });
+    void play(target);
   };
   const menuItems: MenuItem[] = menu
     ? [
@@ -624,7 +630,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             )}
             {/* Mounted from the first frame (L2-vod-5): its placeholder chips hold the row while the source loads. */}
             <div id={`${filtersId}-chips`} className={cn('min-w-0 sm:flex-1', 'max-sm:order-3 max-sm:basis-full', !filtersOpen && 'max-sm:hidden')}>
-              {sourceId && !source.isError && <DecadeChips filter={yearFilter} />}
+              {sourceId && !source.isError && showChips && <DecadeChips filter={yearFilter} />}
             </div>
             {ratingFilterSet && (
               <RatingFloorChip
@@ -634,21 +640,23 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 className="max-sm:order-2"
               />
             )}
-            <SearchInput
-              value={searchDraft}
-              onChange={setSearchDraft}
-              size="sm"
-              className="w-full max-sm:order-1 sm:w-56"
-              placeholder={t('searchInCategory')}
-              onSubmit={focusGrid}
-              onKeyDown={(e) => {
-                // ArrowDown leaves the search box for the posters.
-                if (e.key === 'ArrowDown' && getListbox()) {
-                  e.preventDefault();
-                  focusGrid();
-                }
-              }}
-            />
+            {showSearch && (
+              <SearchInput
+                value={searchDraft}
+                onChange={setSearchDraft}
+                size="sm"
+                className="w-full max-sm:order-1 sm:w-56"
+                placeholder={t('searchInCategory')}
+                onSubmit={focusGrid}
+                onKeyDown={(e) => {
+                  // ArrowDown leaves the search box for the posters.
+                  if (e.key === 'ArrowDown' && getListbox()) {
+                    e.preventDefault();
+                    focusGrid();
+                  }
+                }}
+              />
+            )}
             <div id={`${filtersId}-sort`} className={cn('flex items-center gap-1', 'max-sm:order-2', !filtersOpen && 'max-sm:hidden')}>
               <Select
                 aria-label={t('sortBy')}

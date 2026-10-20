@@ -11,7 +11,7 @@ import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonList, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonList, clearSearches, recentSearchList, rememberSearch, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
@@ -40,6 +40,8 @@ const positionCalls: PositionCalls = {
 };
 
 const HEADER_HEIGHT = 56;
+/** The first heading's row with nothing above it (see FavoritesPage). */
+const FIRST_HEADER_HEIGHT = 36;
 const RECENT_LIMIT = 500;
 const CONTINUE_LIMIT = 20;
 
@@ -161,7 +163,9 @@ export function RecentPage() {
     }
   };
 
-  const undoClear = async (entries: RecentEntry[]) => {
+  const undoClear = async (entries: RecentEntry[], searches: readonly string[]) => {
+    // Oldest first, so the newest ends up first again.
+    for (const q of [...searches].reverse()) rememberSearch(q);
     const restored = await restoreHistory(entries, (a) => rpc('recent.add', a));
     await invalidate('recent.');
     if (restored === entries.length) toast({ title: t('historyRestored'), variant: 'success' });
@@ -174,10 +178,14 @@ export function RecentPage() {
       // Kept in memory so Undo can put every entry back with its own date.
       const before = await collectHistory((a) => rpc('recent.list', a), sourceId, sources.keys());
       await rpc('recent.clear', sourceId ? { sourceId } : {});
+      // The whole history takes the search page's recent searches with it: they say what was looked
+      // for as plainly as the list says what was watched. Per source, they stay (they have no source).
+      const searches = sourceId ? [] : recentSearchList();
+      if (!sourceId) clearSearches();
       toast({
         title: t('historyCleared'),
         variant: 'success',
-        ...(before.length > 0 ? { action: { label: t('undo'), onClick: () => void undoClear(before) } } : {}),
+        ...(before.length > 0 || searches.length > 0 ? { action: { label: t('undo'), onClick: () => void undoClear(before, searches) } } : {}),
       });
     } catch (err) {
       toast({ title: t('clearFailed'), description: errorDescription(err), variant: 'error' });
@@ -259,9 +267,11 @@ export function RecentPage() {
       <VirtualRows
         rows={rows}
         label={title}
-        header={rail}
+        // The rail takes the rows' reading width, so the page has one right edge.
+        header={rail ? <div className="max-w-4xl">{rail}</div> : null}
         headerHeight={rail ? CONTINUE_RAIL_HEIGHT : 0}
-        rowHeight={(r) => (r.kind === 'header' ? HEADER_HEIGHT : ENTRY_ROW_HEIGHT)}
+        // With no rail above it, the first day's heading row is only as tall as the heading (as on Favorites).
+        rowHeight={(r) => (r.kind === 'header' ? (!rail && r === rows[0] ? FIRST_HEADER_HEIGHT : HEADER_HEIGHT) : ENTRY_ROW_HEIGHT)}
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         testId="recent-list"
@@ -283,7 +293,7 @@ export function RecentPage() {
     );
 
   return (
-    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-4" data-testid="recent-page">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="recent-page">
       <PageTitle>{title}</PageTitle>
       {phone && count > 0 && !query.isLoading && !query.isError ? (
         <div className="mb-2 flex min-h-8 items-center justify-between gap-3" data-testid="recent-phone-bar">

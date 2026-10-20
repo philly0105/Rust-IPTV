@@ -1,17 +1,22 @@
 import { Clapperboard, KeyRound } from 'lucide-react';
+import { useEffect, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { itemKey, type SeriesItem, type SourceKind, type TmdbBrief, type VodItem } from '@/api/types';
 
 import { useCatalogMatches } from '../hooks/useCatalogMatches';
+import { useNearViewport } from '../hooks/useNearViewport';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { detailHref } from '../lib/search';
-import { EmptyState, buttonClass } from '@/ui';
+import { EmptyState, buttonClass, whenIdle } from '@/ui';
 import { myListTarget, PosterCard } from './PosterCard';
 import { PosterRail } from './PosterRail';
 import { TmdbAttribution } from './TmdbAttribution';
 import { TmdbErrorState } from './TmdbErrorState';
+
+/** No scroller of its own: the window's viewport. */
+const VIEWPORT: RefObject<Element | null> = { current: null };
 
 /**
  * "More like this" on the detail pages. TMDB names the titles; only the ones this source has are
@@ -29,6 +34,7 @@ export function SimilarSection({
   onRetry,
   keyMissing,
   enriched,
+  rootRef,
 }: {
   items: TmdbBrief[];
   loading: boolean;
@@ -42,9 +48,18 @@ export function SimilarSection({
   keyMissing: boolean;
   /** True when any TMDB data took part in the page. */
   enriched: boolean;
+  /** The page's scroller: the catalog lookups wait until the section nears its view (default: the window). */
+  rootRef?: RefObject<Element | null>;
 }) {
   const { t } = useTranslation('vod');
-  const matches = useCatalogMatches(items, sourceId, kind, !keyMissing && !error);
+  // The section sits below the fold: its lookups (one per TMDB title) wait until it nears the
+  // screen and the page is idle, as Home's trending rail does, and a Stalker portal, whose VOD is
+  // not in the local catalog, asks for none (nothing could match).
+  const [nearRef, near] = useNearViewport<HTMLDivElement>(rootRef ?? VIEWPORT);
+  const [idle, setIdle] = useState(false);
+  useEffect(() => (near && !idle ? whenIdle(() => setIdle(true)) : undefined), [near, idle]);
+  const lookups = !keyMissing && !error && sourceKind !== 'stalker';
+  const matches = useCatalogMatches(items, sourceId, kind, lookups && idle);
   const watched = useWatchedKeys(matches.items);
   if (keyMissing) {
     return (
@@ -64,11 +79,11 @@ export function SimilarSection({
     );
   }
   return (
-    <div className="relative flex flex-col gap-4">
+    <div ref={nearRef} className="relative flex flex-col gap-4">
       <PosterRail<VodItem | SeriesItem>
         title={t('similar')}
         items={matches.items}
-        loading={loading || (items.length > 0 && matches.pending)}
+        loading={loading || (items.length > 0 && lookups && (!idle || matches.pending))}
         bleed
         myList={myListTarget}
         empty={

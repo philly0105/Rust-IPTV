@@ -259,7 +259,7 @@ export function MyVideosPage() {
   }
 
   return (
-    <Page width="wide" className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 pb-4 pt-4">
+    <Page width="wide" className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 pb-4">
       <PageTitle>{title}</PageTitle>
       {/* An empty library shows its empty state alone: tabs of zeros and a second queue link add nothing. */}
       {libraryEmpty ? null : (

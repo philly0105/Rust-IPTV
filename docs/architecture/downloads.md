@@ -100,9 +100,13 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 - A whole season from the series page (Download season): the season's episodes without a download, or with a failed, cancelled or missing one, one `downloads.start` after another; one toast counts what was queued and another what was not.
 - Catch-up programmes from the archive page (`ArchivePage`, finished programmes only): the portal's timeshift link or the M3U catch-up URL (`catchupDownloadArgs` in `src/features/live/lib/playback.ts`), behind the parental gate like playback. The row is the channel's ref with episode id `catchup:<start>`, title the channel, subtitle `<programme> · <day> <time>`, and the file is saved as MPEG-TS unless the URL names another container. HLS and DASH archives are refused. My Videos groups these rows under the channel.
 
+## The Downloads page
+
+`/downloads` (`DownloadsPage`) lists the queue (downloading, queued, paused) and Needs attention (failed), each under the kit's `SectionHeader` with its count, a hint and its bulk action (Clear failed) at the end of the heading line. A row's actions are ghost icon buttons in a column as wide as the most any row has (three), shown or not, so every bar, badge and button ends on one line, and the folder line above the list shares the list's box. A row that is waiting or paused shows its actions on hover or focus with a fine pointer; a downloading row and a failed one always show them, since a failed row is there to be retried or removed.
+
 ## Tests (UI)
 
-`src/features/vod/test/pages.test.tsx` (M3U movie, HLS refusal, Download season) and `src/features/live/test/guideArchive.test.tsx` (archive download). `crates/iptv-core/tests/downloads.rs` checks that a catch-up row keeps its archive URL.
+`src/features/library/test/round2.test.tsx` (a failed row's actions, the fixed actions column), `src/features/vod/test/pages.test.tsx` (M3U movie, HLS refusal, Download season) and `src/features/live/test/guideArchive.test.tsx` (archive download). `crates/iptv-core/tests/downloads.rs` checks that a catch-up row keeps its archive URL.
 
 ## Not carried over from the old app
 

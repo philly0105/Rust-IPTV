@@ -113,9 +113,10 @@ describe('Top results', () => {
     expect(films[0]!.getAttribute('aria-label')).toContain('2 sources');
     expect(within(top).getByRole('link', { name: /^Harbor Nine/ })).toBeTruthy();
     expect(within(top).getByRole('button', { name: /Harbor News/ })).toBeTruthy();
-    // See all opens the type's own tab, as a link (new tab, the URL keeps the query).
+    // See all opens the type's own tab, as a link (new tab, the URL keeps the query). The one film
+    // and one series share a rail, which has no single tab; the channels keep theirs.
     const seeAll = within(top).getAllByRole('link', { name: /See all/ });
-    expect(seeAll[0]!.getAttribute('href')).toBe('/search?q=harbor&type=movies');
+    expect(seeAll.map((a) => a.getAttribute('href'))).toEqual(['/search?q=harbor&type=live']);
   });
 
   it('keeps every copy in the type tab, each with its source', async () => {

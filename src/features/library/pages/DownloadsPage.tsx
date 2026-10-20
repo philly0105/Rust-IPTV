@@ -223,9 +223,11 @@ export function DownloadsPage() {
   }
 
   return (
-    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 pb-4 pt-3">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 pb-4">
       <PageTitle>{title}</PageTitle>
-      <div className="flex min-w-0 max-w-5xl items-center gap-3">
+      {/* The list's own box (-mx-2, max-w-5xl, rows padded px-2), so the folder line, the section
+          headings and the rows end on one line. */}
+      <div className="-mx-2 flex min-w-0 max-w-5xl items-center gap-3 px-2">
         <FolderBar pageError={query.isError} />
         {myVideosLink}
       </div>

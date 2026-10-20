@@ -7,12 +7,14 @@ import { invalidate, useRpcMutation } from '@/api/query';
 import type { Download, ItemRef, ItemSnapshot } from '@/api/types';
 
 import { captureWatched } from '@/features/library/lib/watchedUndo';
+import { intlLocale } from '@/lib/intl';
 
 import { useSetWatched } from '../../hooks/queries';
 import { seriesWatchedTargets, watchedToastId, watchedUndoAll } from '../../lib/seriesWatched';
-import { Button, IconButton, Tooltip, buttonClass, cn, useToast, errorDescription, type MenuAction } from '@/ui';
+import { Button, IconButton, Tooltip, buttonClass, cn, useToast, errorDescription } from '@/ui';
+import { HeroIcon } from './DetailHero';
 
-/** Adds the title to favorites or takes it off, with the toast; shared by the button and the hero's More menu. */
+/** Adds the title to favorites or takes it off, with the toast. */
 function useFavoriteToggle(itemRef: ItemRef, snapshot: ItemSnapshot) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
@@ -32,32 +34,33 @@ function useFavoriteToggle(itemRef: ItemRef, snapshot: ItemSnapshot) {
 }
 
 /**
- * Favorites as an item of the hero's More menu (VL-hero-actions): favorites are the Home rail and
- * the rail's Favorites page, a second list beside My List, so they sit one step back from the
- * buttons rather than as a look-alike bookmark next to My List.
+ * Favorites on or off. `round` is the detail hero's round icon button (VL-hero-actions), between
+ * My List and Watched, so the page says the title is a favourite: a toggle named "Favorite" whose
+ * pressed state is the neutral selected fill with the heart filled in (a state, never amber), and
+ * whose tooltip says what a press does.
  */
-export function useFavoriteMenuItem(itemRef: ItemRef, snapshot: ItemSnapshot, isFavorite: boolean): MenuAction {
+export function FavoriteButton({ itemRef, snapshot, isFavorite, round }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; round?: boolean }) {
   const { t } = useTranslation('vod');
   const { onClick, pending } = useFavoriteToggle(itemRef, snapshot);
-  return {
-    id: 'favorite',
-    label: isFavorite ? t('removeFromFavorites') : t('addToFavorites'),
-    icon: <Heart aria-hidden size={16} className={cn(isFavorite && 'fill-current text-live')} />,
-    onSelect: onClick,
-    disabled: pending,
-  };
-}
-
-export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; compact?: boolean }) {
-  const { t } = useTranslation('vod');
-  const { onClick, pending } = useFavoriteToggle(itemRef, snapshot);
-  const toggle = { isPending: pending };
-  const icon = <Heart aria-hidden size={18} className={cn(isFavorite && 'fill-current text-live')} />;
-  if (compact) {
-    return <IconButton label={isFavorite ? t('removeFromFavorites') : t('addToFavorites')} pressed={isFavorite} icon={icon} onClick={onClick} disabled={toggle.isPending} />;
+  if (round) {
+    return (
+      <IconButton
+        size="lg"
+        variant="secondary"
+        label={t('captionFavorite')}
+        tooltip={isFavorite ? t('removeFromFavorites') : t('addToFavorites')}
+        pressed={isFavorite}
+        icon={<Heart aria-hidden size={18} className={cn(isFavorite && 'fill-current')} />}
+        className="rounded-full"
+        onClick={onClick}
+        disabled={pending}
+        data-testid="vod-favorite-button"
+      />
+    );
   }
+  const icon = <Heart aria-hidden size={18} className={cn(isFavorite && 'fill-current text-live')} />;
   return (
-    <Button size="lg" variant="secondary" icon={icon} aria-pressed={isFavorite} loading={toggle.isPending} onClick={onClick}>
+    <Button size="lg" variant="secondary" icon={icon} aria-pressed={isFavorite} loading={pending} onClick={onClick}>
       {isFavorite ? t('inFavorites') : t('addToFavorites')}
     </Button>
   );
@@ -257,7 +260,7 @@ function DownloadRing({ percent, moving }: { percent: number; moving: boolean })
         strokeLinecap="round"
         pathLength={100}
         strokeDasharray={`${percent} 100`}
-        className={cn(moving ? 'stroke-accent' : 'stroke-fg-muted', 'motion-safe:transition-[stroke-dasharray] motion-safe:duration-(--duration-base)')}
+        className={cn(moving ? 'stroke-accent-mark' : 'stroke-fg-muted', 'motion-safe:transition-[stroke-dasharray] motion-safe:duration-(--duration-base)')}
         data-testid="vod-download-ring-fill"
       />
     </svg>
@@ -268,7 +271,8 @@ function DownloadRing({ percent, moving }: { percent: number; moving: boolean })
  * Round variant of {@link DownloadButton}: one 48 px circle whose icon and tooltip carry the state.
  * While the file comes in, a ring around the download glyph shows how much has (VL-hero-actions),
  * so the state reads without the tooltip, which touch never shows; only a download of unknown
- * size falls back to the spinner.
+ * size falls back to the spinner. It comes in its `HeroIcon`, whose phone caption is the state in
+ * a word (Download, 45 %, Paused, Downloaded).
  */
 function RoundDownloadButton({
   download,
@@ -281,7 +285,7 @@ function RoundDownloadButton({
   onStart: () => void;
   downloadedHref: string;
 }) {
-  const { t } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const status = download?.status;
   const round = buttonClass('secondary', 'lg', 'relative w-12 rounded-full px-0');
   if (status === 'completed' || status === 'downloading' || status === 'queued' || status === 'paused') {
@@ -293,6 +297,16 @@ function RoundDownloadButton({
           ? t('downloadPaused')
           : pct !== undefined
             ? t('downloadingPercent', { percent: pct })
+            : status === 'queued'
+              ? t('downloadQueuedShort')
+              : t('downloading');
+    const caption =
+      status === 'completed'
+        ? t('downloaded')
+        : status === 'paused'
+          ? t('captionPaused')
+          : pct !== undefined
+            ? new Intl.NumberFormat(intlLocale(i18n.language), { style: 'percent' }).format(pct / 100)
             : status === 'queued'
               ? t('downloadQueuedShort')
               : t('downloading');
@@ -308,27 +322,31 @@ function RoundDownloadButton({
     } else if (status === 'paused') icon = <Pause aria-hidden size={18} />;
     else icon = <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" />;
     return (
-      <Tooltip content={text} describe={false}>
-        <Link to={status === 'completed' ? downloadedHref : '/downloads'} aria-label={text} className={round} data-testid="vod-download-button">
-          {icon}
-        </Link>
-      </Tooltip>
+      <HeroIcon caption={caption}>
+        <Tooltip content={text} describe={false}>
+          <Link to={status === 'completed' ? downloadedHref : '/downloads'} aria-label={text} className={round} data-testid="vod-download-button">
+            {icon}
+          </Link>
+        </Tooltip>
+      </HeroIcon>
     );
   }
   const failed = status === 'failed';
   return (
-    <IconButton
-      size="lg"
-      variant="secondary"
-      label={failed ? t('downloadRetry') : t('download')}
-      icon={pending ? <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" /> : failed ? <CircleAlert aria-hidden size={18} className="text-danger" /> : <DownloadIcon aria-hidden size={18} />}
-      aria-busy={pending || undefined}
-      aria-disabled={pending || undefined}
-      onClick={() => {
-        if (!pending) onStart();
-      }}
-      className="rounded-full"
-      data-testid="vod-download-button"
-    />
+    <HeroIcon caption={failed ? t('captionRetry') : t('download')}>
+      <IconButton
+        size="lg"
+        variant="secondary"
+        label={failed ? t('downloadRetry') : t('download')}
+        icon={pending ? <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" /> : failed ? <CircleAlert aria-hidden size={18} className="text-danger" /> : <DownloadIcon aria-hidden size={18} />}
+        aria-busy={pending || undefined}
+        aria-disabled={pending || undefined}
+        onClick={() => {
+          if (!pending) onStart();
+        }}
+        className="rounded-full"
+        data-testid="vod-download-button"
+      />
+    </HeroIcon>
   );
 }

@@ -1,4 +1,4 @@
-import { Layers, Lock, Play, RotateCcw, MonitorPlay } from 'lucide-react';
+import { Layers, Play, RotateCcw, MonitorPlay } from 'lucide-react';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router';
@@ -16,9 +16,9 @@ import { intlLocale } from '@/lib/intl';
 
 import { CatalogRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
-import { DownloadButton, FavoriteButton, WatchedButton, useFavoriteMenuItem } from '../components/detail/actions';
+import { DownloadButton, FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { TmdbPromo } from '../components/detail/TmdbPromo';
-import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup } from '../components/detail/DetailHero';
+import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup } from '../components/detail/DetailHero';
 import { OtherSourcesDialog, OtherSourcesList } from '../components/detail/OtherSourcesDialog';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
@@ -160,7 +160,6 @@ export function MovieDetailPage() {
     contentType: 'movie' as const,
     ...(model?.year ? { subtitle: String(model.year) } : {}),
   };
-  const favoriteItem = useFavoriteMenuItem(ref, snapshot, isFavorite);
 
   const resumable = isResumable(position.data);
   const play = (fromStart = false) => void playback.play(pinnedTarget ? { target: pinnedTarget, fromStart } : { fromStart });
@@ -258,35 +257,7 @@ export function MovieDetailPage() {
         }
       : undefined;
 
-  const secondary = (
-    <>
-      <MyListButton itemRef={ref} snapshot={listSnapshot} size="sm" />
-      <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact />
-      <WatchedButton itemRef={ref} watched={watched} compact />
-      {playback.canDownload && (
-        <DownloadButton
-          download={download}
-          pending={playback.pendingDownload === ''}
-          compact
-          downloadedHref={myVideoHref}
-          onStart={() => void playback.download({ extension: item.containerExtension })}
-        />
-      )}
-      {others.length > 0 && (
-        <Button size="sm" variant="ghost" icon={<Layers aria-hidden size={18} />} onClick={() => setOthersOpen(true)}>
-          {t('otherSourcesCount', { count: others.length })}
-        </Button>
-      )}
-      {/* C2: lock or remove the lock (only while parental controls are on). */}
-      {lockItems.map((a) => (
-        <Button key={a.id} size="sm" variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>
-          {a.label}
-        </Button>
-      ))}
-    </>
-  );
-
-  // VL-hero-actions: what is not Play, Trailer or one of the three icon buttons waits in More.
+  // VL-hero-actions: what is not Play, Trailer or one of the round icon buttons waits in More.
   const moreItems: MenuItem[] = [
     // Offline as well: the file from its beginning.
     ...(resumeAt !== undefined
@@ -294,53 +265,66 @@ export function MovieDetailPage() {
       : []),
     // Offline, the stream is still one choice away (a newer copy, a file that will not play).
     ...(offline ? [{ id: 'stream', label: t('streamInstead'), icon: <Play aria-hidden size={16} />, onSelect: () => play(false) }] : []),
-    favoriteItem,
     ...(others.length > 0
       ? [{ id: 'other-sources', label: t('otherSourcesCount', { count: others.length }), icon: <Layers aria-hidden size={16} />, onSelect: () => setOthersOpen(true) }]
       : []),
     ...(lockItems.length > 0 ? [{ id: 'sep-lock', type: 'separator' as const }, ...lockItems] : []),
   ];
 
-  const heroActions = (
+  // The round icon buttons: in the hero beside Play, and under the player in watch state, so the
+  // two states share one set and one look.
+  const iconActions = (
     <>
-      <HeroActionGroup className="max-sm:w-full">
-        <Button
-          ref={playRef}
-          size="lg"
-          variant="primary"
-          icon={<Play aria-hidden size={18} className="fill-current" />}
-          aria-describedby="vod-detail-title"
-          onClick={() => (offline ? playOffline() : play(false))}
-          className="max-sm:flex-1"
-        >
-          {resumeAt !== undefined ? t('resumeAt', { time: formatClock(resumeAt) }) : t('play')}
-        </Button>
-        {trailer ? (
-          <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
-            {t('trailer')}
-          </Button>
-        ) : tmdbOn && tmdb.isLoading ? (
-          // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
-          <span data-testid="vod-trailer-slot" className="inline-flex">
-            <Skeleton className="h-12 w-32 rounded-md" />
-          </span>
-        ) : null}
-      </HeroActionGroup>
-      <HeroActionGroup>
+      <HeroIcon caption={t('captionMyList')}>
         <MyListButton itemRef={ref} snapshot={listSnapshot} variant="round" size="lg" />
+      </HeroIcon>
+      <HeroIcon caption={t('captionFavorite')}>
+        <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
+      </HeroIcon>
+      <HeroIcon caption={t('watched')}>
         <WatchedButton itemRef={ref} watched={watched} round />
-        {playback.canDownload && (
-          <DownloadButton
-            download={download}
-            pending={playback.pendingDownload === ''}
-            round
-            downloadedHref={myVideoHref}
-            onStart={() => void playback.download({ extension: item.containerExtension })}
-          />
-        )}
-        <Menu items={moreItems} triggerClassName={HERO_MENU_TRIGGER} />
-      </HeroActionGroup>
+      </HeroIcon>
+      {playback.canDownload && (
+        <DownloadButton
+          download={download}
+          pending={playback.pendingDownload === ''}
+          round
+          downloadedHref={myVideoHref}
+          onStart={() => void playback.download({ extension: item.containerExtension })}
+        />
+      )}
+      {moreItems.length > 0 && (
+        <HeroIcon caption={t('captionMore')}>
+          <Menu items={moreItems} triggerClassName={HERO_MENU_TRIGGER} />
+        </HeroIcon>
+      )}
     </>
+  );
+
+  const heroActions = (
+    <HeroActionGroup className="max-sm:w-full">
+      <Button
+        ref={playRef}
+        size="lg"
+        variant="primary"
+        icon={<Play aria-hidden size={18} className="fill-current" />}
+        aria-describedby="vod-detail-title"
+        onClick={() => (offline ? playOffline() : play(false))}
+        className="max-sm:flex-1"
+      >
+        {resumeAt !== undefined ? t('resumeAt', { time: formatClock(resumeAt) }) : t('play')}
+      </Button>
+      {trailer ? (
+        <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
+          {t('trailer')}
+        </Button>
+      ) : tmdbOn && tmdb.isLoading ? (
+        // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
+        <span data-testid="vod-trailer-slot" className="inline-flex">
+          <Skeleton className="h-12 w-32 rounded-md" />
+        </span>
+      ) : null}
+    </HeroActionGroup>
   );
 
   const categoryName = item.categoryName || categories.data?.find((c) => c.id === item.categoryId)?.name;
@@ -372,8 +356,8 @@ export function MovieDetailPage() {
       {watching ? (
         <>
           <WatchStage title={model.titleBase ?? model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
-          <section className="mt-6 flex w-full max-w-[120rem] flex-col gap-3 px-(--page-gutter)" aria-label={t('about')}>
-            <div className="flex flex-wrap items-center gap-2">{secondary}</div>
+          <section className="mt-4 flex w-full max-w-[120rem] flex-col gap-4 px-(--page-gutter)" aria-label={t('about')}>
+            <HeroIconGroup>{iconActions}</HeroIconGroup>
             {model.plot && <p dir="auto" className="max-w-[72ch] text-body leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}
           </section>
         </>
@@ -398,6 +382,7 @@ export function MovieDetailPage() {
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           progress={progress}
           actions={heroActions}
+          icons={iconActions}
         />
       )}
 
@@ -453,6 +438,7 @@ export function MovieDetailPage() {
             }}
             keyMissing={keyMissing}
             enriched={model.enriched}
+            rootRef={detailScrollRef}
           />
         )}
         <AboutSection

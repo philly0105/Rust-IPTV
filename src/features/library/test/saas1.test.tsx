@@ -190,7 +190,8 @@ describe('VL-clear-finished-copy: the clear button names what it removes and sit
     rpc.handlers['downloads.dir'] = () => ({ path: '/data' });
     rpc.handlers['sources.list'] = () => [];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
-    const heading = await screen.findByRole('heading', { name: 'Needs attention' });
+    // The kit's SectionHeader: the count is part of the heading ("Needs attention 1").
+    const heading = await screen.findByRole('heading', { name: /^Needs attention/ });
     expect(within(heading.parentElement!).getByRole('button', { name: 'Clear failed' })).toBeTruthy();
     expect(screen.queryByText('Clear finished')).toBeNull();
   });

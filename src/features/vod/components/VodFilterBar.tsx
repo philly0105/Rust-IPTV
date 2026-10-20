@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { rpcKey } from '@/api/query';
 import { rpc, type RpcError } from '@/api/transport';
 import type { YearFacet } from '@/api/types';
-import { Select, Skeleton, cn } from '@/ui';
+import { FilterChip, Select, Skeleton, cn } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { revealInRow, useEdgeFades } from '../hooks/useEdgeFades';
@@ -44,14 +44,6 @@ export interface YearFilterProps {
   /** The facets count only what "Hide watched" keeps while it is on. */
   hideWatched: boolean;
 }
-
-const CHIP =
-  'relative inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm whitespace-nowrap tabular ' +
-  'motion-safe:transition-[color,background-color,box-shadow] motion-safe:duration-150';
-// Idle chips are a quiet fill with no outline (VL-grid-toolbars); a chosen filter is neutral
-// (inverted), and amber is kept for actions and progress.
-const CHIP_IDLE = 'bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg';
-const CHIP_ON = 'bg-fg font-medium text-bg';
 
 /** Sources whose facets had years this session: their row is worth reserving while it loads. */
 const sourcesWithYears = new Set<string>();
@@ -144,30 +136,31 @@ export function DecadeChips({ filter, className }: { filter: YearFilter; classNa
       style={fades.style}
       data-testid="vod-year-filter"
     >
-      <button type="button" aria-pressed={!active} className={cn(CHIP, !active ? CHIP_ON : CHIP_IDLE)} onClick={filter.clear}>
+      {/* The kit's filter chips: idle on the quiet fill with the edge, a chosen one inverted (never amber). */}
+      <FilterChip pressed={!active} onClick={filter.clear}>
         {t('yearAll')}
-      </button>
+      </FilterChip>
       {loading
-        ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-16 shrink-0 rounded-full" />)
+        ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-7 w-16 shrink-0 rounded-full" />)
         : chips.map((c) => {
             const on = activeDecade === c.decade;
             const name = t('decade', { decade: c.decade });
             return (
-              <button
+              <FilterChip
                 key={c.decade}
-                type="button"
-                aria-pressed={on}
+                pressed={on}
                 aria-label={c.count !== undefined ? `${name}, ${t('titleCount', { count: c.count, formatted: fmt.format(c.count) })}` : undefined}
-                className={cn(CHIP, on ? CHIP_ON : CHIP_IDLE)}
                 onClick={() => filter.pickDecade(c.decade)}
+                count={
+                  c.count !== undefined ? (
+                    <span aria-hidden data-testid="decade-count">
+                      {fmt.format(c.count)}
+                    </span>
+                  ) : undefined
+                }
               >
                 {name}
-                {c.count !== undefined && (
-                  <span aria-hidden data-testid="decade-count" className={cn('text-xs', on ? 'text-bg/70' : 'text-fg-subtle')}>
-                    {fmt.format(c.count)}
-                  </span>
-                )}
-              </button>
+              </FilterChip>
             );
           })}
     </div>

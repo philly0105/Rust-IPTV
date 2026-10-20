@@ -38,7 +38,8 @@ function CastChips({ people, sourceId, linked, headingId }: { people: Person[]; 
   // With no linked chip the scrolling row has nothing to focus, so the row
   // itself takes focus (named by the heading) and scrolls with the arrow keys.
   const focusableRow = !people.some(linked);
-  // The row is cut by the column's edge: the hidden end fades out instead of clipping a name mid-word.
+  // The row runs on through the page gutter to the window's edge, as the poster rails do, and the
+  // hidden end fades out there instead of clipping a name mid-word at the column's edge.
   const fades = useEdgeFades(String(people.length));
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -49,7 +50,7 @@ function CastChips({ people, sourceId, linked, headingId }: { people: Person[]; 
         aria-labelledby={headingId}
         tabIndex={focusableRow ? 0 : undefined}
         data-testid="vod-cast-row"
-        className="-mx-1 flex gap-2 overflow-x-auto rounded-md px-1 pb-2 scrollbar-none outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="-ms-1 -me-(--page-gutter) flex gap-2 overflow-x-auto rounded-md ps-1 pe-(--page-gutter) pb-2 scrollbar-none outline-none focus-visible:ring-2 focus-visible:ring-focus"
         onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: people.length })}
       >
         {people.map((p, i) => {

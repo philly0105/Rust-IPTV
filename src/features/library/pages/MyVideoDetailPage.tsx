@@ -11,7 +11,8 @@ import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
 import { RpcError, isDesktop } from '@/api/transport';
-import type { Download } from '@/api/types';
+import { useRpcQuery } from '@/api/query';
+import type { Download, ItemRef } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { BackButton } from '@/ui/Page';
 import { intlLocale } from '@/lib/intl';
@@ -25,6 +26,7 @@ import {
   ErrorState,
   HERO_BACK,
   HeroActionGroup,
+  HeroIcon,
   IconButton,
   Page,
   PlayerStage,
@@ -65,8 +67,11 @@ function episodeRows(entry: LibraryEntry | undefined): EpisodeListRow[] {
   return rows;
 }
 
-/** The hero's model from an offline entry: title and poster; the download keeps no plot or cast. */
-function heroModel(entry: LibraryEntry): DetailModel {
+/**
+ * The hero's model from an offline entry: title and poster, and from the catalogue's own row while
+ * its source is there, the plot and the length the download does not keep.
+ */
+function heroModel(entry: LibraryEntry, catalogue: { plot?: string; durationSeconds?: number } | undefined): DetailModel {
   return {
     title: entry.title,
     mediaType: entry.kind === 'series' ? 'tv' : 'movie',
@@ -76,8 +81,12 @@ function heroModel(entry: LibraryEntry): DetailModel {
     similar: [],
     enriched: false,
     ...(entry.posterUrl ? { posterUrl: entry.posterUrl } : {}),
+    ...(catalogue?.plot ? { plot: catalogue.plot } : {}),
+    ...(entry.kind === 'movie' && catalogue?.durationSeconds ? { durationSeconds: catalogue.durationSeconds } : {}),
   };
 }
+
+const NO_REF: ItemRef = { sourceId: '', contentType: 'movie', itemId: '' };
 
 export function MyVideoDetailPage() {
   const { t, i18n } = useTranslation('library');
@@ -101,6 +110,15 @@ export function MyVideoDetailPage() {
   const library = useMemo(() => buildLibrary(query.data ?? []), [query.data]);
   const entry = useMemo(() => (Number.isFinite(id) ? findEntry(library, id) : undefined), [library, id]);
   const rows = useMemo(() => episodeRows(entry), [entry]);
+  // The title's row in the catalogue, while its source is there (a Stalker portal's VOD is not in
+  // the local catalogue and has none): the plot and the length for the hero and its resume bar.
+  const catalogueRef = entry ? (entry.kind === 'movie' ? entry.download.ref : entry.latest.ref) : undefined;
+  const catalogueSource = catalogueRef ? sources.get(catalogueRef.sourceId) : undefined;
+  const catalogue = useRpcQuery(
+    'catalog.item',
+    { ref: catalogueRef ?? NO_REF },
+    { enabled: !!catalogueRef && !!catalogueSource && catalogueSource.kind !== 'stalker', staleTime: 10 * 60_000 },
+  ).data as { plot?: string; durationSeconds?: number } | undefined;
 
   const [playing, setPlaying] = useState<{ id: number; url?: string } | null>(null);
   const [starting, setStarting] = useState(false);
@@ -252,49 +270,60 @@ export function MyVideoDetailPage() {
   const primaryEpisode = entry.kind === 'series' && primary ? entry.episodes.find((e) => e.download.id === primary.id) : undefined;
 
   const unplayable = movieMissing || allMissing;
+  // How far the film is, under Resume as on the catalogue's page, when the catalogue knows its length.
+  const length = entry.kind === 'movie' ? catalogue?.durationSeconds : undefined;
+  const progress =
+    resume > 0 && length && !movieMissing
+      ? { fraction: Math.min(1, resume / length), label: t('minutesLeft', { count: Math.max(1, Math.round((length - resume) / 60)) }) }
+      : undefined;
   const heroActions = (
-    <>
-      <HeroActionGroup className="max-sm:w-full">
-        {unplayable ? (
+    <HeroActionGroup className="max-sm:w-full">
+      {unplayable ? (
+        <Button
+          variant="primary"
+          size="lg"
+          icon={<RotateCcw size={18} aria-hidden />}
+          loading={entry.kind === 'movie' ? pending.has(entry.download.id) : entry.episodes.some((ep) => pending.has(ep.download.id))}
+          onClick={() => {
+            if (entry.kind === 'movie') void perform('redownload', entry.download);
+            else void redownloadSeries(entry.episodes.map((ep) => ep.download), entry.title);
+          }}
+          className="max-sm:flex-1"
+        >
+          {t('redownload')}
+        </Button>
+      ) : (
+        primary && (
           <Button
             variant="primary"
             size="lg"
-            icon={<RotateCcw size={18} aria-hidden />}
-            loading={entry.kind === 'movie' ? pending.has(entry.download.id) : entry.episodes.some((ep) => pending.has(ep.download.id))}
-            onClick={() => {
-              if (entry.kind === 'movie') void perform('redownload', entry.download);
-              else void redownloadSeries(entry.episodes.map((ep) => ep.download), entry.title);
-            }}
+            icon={<Play size={18} aria-hidden className="fill-current" />}
+            loading={starting}
+            onClick={() => void play(primary)}
+            aria-describedby="vod-detail-title"
             className="max-sm:flex-1"
+            data-testid="play-offline"
           >
-            {t('redownload')}
+            {resume
+              ? t('resumeFrom', { time: formatClock(resume) })
+              : primaryEpisode
+                ? t('playEpisode', { code: episodeCode(primaryEpisode) || primaryEpisode.name })
+                : t('playOffline')}
           </Button>
-        ) : (
-          primary && (
-            <Button
-              variant="primary"
-              size="lg"
-              icon={<Play size={18} aria-hidden className="fill-current" />}
-              loading={starting}
-              onClick={() => void play(primary)}
-              aria-describedby="vod-detail-title"
-              className="max-sm:flex-1"
-              data-testid="play-offline"
-            >
-              {resume
-                ? t('resumeFrom', { time: formatClock(resume) })
-                : primaryEpisode
-                  ? t('playEpisode', { code: episodeCode(primaryEpisode) || primaryEpisode.name })
-                  : t('playOffline')}
-            </Button>
-          )
-        )}
-      </HeroActionGroup>
-      <HeroActionGroup>
-        {primary && resume > 0 && !movieMissing && (
+        )
+      )}
+    </HeroActionGroup>
+  );
+  // The file's round icon buttons, each with its phone caption (DetailHero `icons`).
+  const heroIcons = (
+    <>
+      {primary && resume > 0 && !movieMissing && (
+        <HeroIcon caption={t('startOver')}>
           <IconButton size="lg" variant="secondary" className="rounded-full" label={t('startOver')} icon={<RotateCcw size={18} aria-hidden />} onClick={() => void play(primary, true)} />
-        )}
-        {entry.kind === 'movie' && isDesktop && !movieMissing && (
+        </HeroIcon>
+      )}
+      {entry.kind === 'movie' && isDesktop && !movieMissing && (
+        <HeroIcon caption={t('actionReveal')}>
           <IconButton
             size="lg"
             variant="secondary"
@@ -303,8 +332,10 @@ export function MyVideoDetailPage() {
             icon={<FolderOpen size={18} aria-hidden />}
             onClick={() => void perform('reveal', entry.download)}
           />
-        )}
-        {entry.kind === 'movie' && (
+        </HeroIcon>
+      )}
+      {entry.kind === 'movie' && (
+        <HeroIcon caption={t('actionRemove')}>
           <IconButton
             size="lg"
             variant="secondary"
@@ -317,8 +348,8 @@ export function MyVideoDetailPage() {
             }}
             data-testid="remove-offline"
           />
-        )}
-      </HeroActionGroup>
+        </HeroIcon>
+      )}
     </>
   );
 
@@ -445,21 +476,18 @@ export function MyVideoDetailPage() {
   return (
     <div className="isolate min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-12" data-state="browse">
       <DetailHero
-        model={heroModel(entry)}
+        model={heroModel(entry, catalogue)}
         sourceId={artSourceId}
         castLinks={false}
         back={<BackButton to={back} onClick={goBack} label={t('backToLibrary')} className={HERO_BACK} />}
+        // The size and the download date are facts of the file: they sit in About, once.
         chips={[
           <span key="kind">{t(entry.kind === 'movie' ? 'movie' : 'series')}</span>,
           entry.kind === 'series' && <span key="episodes">{t('episodeCount', { count: entry.episodes.length })}</span>,
-          sizeText && (
-            <span key="size" className="tabular-nums">
-              {sizeText}
-            </span>
-          ),
         ]}
-        note={completedText ? t('downloadedOn', { date: completedText }) : undefined}
+        progress={progress}
         actions={heroActions}
+        icons={heroIcons}
       />
       <Page width="wide" className="flex flex-col gap-10 pt-2">
         {missingPanel}
@@ -469,15 +497,17 @@ export function MyVideoDetailPage() {
             {episodeList}
           </section>
         )}
-        <AboutSection facts={about} />
-        {catalogueHref && (
-          <p>
-            <Link to={catalogueHref} className={buttonClass('ghost', 'sm', '-ms-3')} data-testid="myvideo-catalogue-link">
-              <Library size={16} aria-hidden />
-              {t('openInCatalogue', { source: source?.name ?? '' })}
-            </Link>
-          </p>
-        )}
+        <AboutSection
+          facts={about}
+          action={
+            catalogueHref && (
+              <Link to={catalogueHref} className={buttonClass('ghost', 'sm')} data-testid="myvideo-catalogue-link">
+                <Library size={16} aria-hidden />
+                {t('openInCatalogue', { source: source?.name ?? '' })}
+              </Link>
+            )
+          }
+        />
       </Page>
       {removeDialog}
     </div>

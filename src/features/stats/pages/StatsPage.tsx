@@ -123,9 +123,11 @@ export function StatsPage() {
     const split = rangeTotals(data.days);
     // KPI tiles (critique: stats): the total leads, then the split (which doubles as the chart's
     // legend) and the daily average, each a number with its label rather than one long sentence.
+    // From lg one row across the page, the total a little wider and the other three equal (the
+    // split's list is a subgrid, so its tiles take the row's own columns).
     const tile = 'flex min-w-0 flex-col justify-between gap-1 rounded-lg border border-edge bg-surface px-4 py-3';
     headline = (
-      <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1fr)]" data-testid="stats-kpis">
+      <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.5fr)_repeat(3,minmax(0,1fr))]" data-testid="stats-kpis">
         <div className={tile} data-testid="stats-total">
           {/* Read as one sentence ("3 hr 20 min watched in the last 7 days"); drawn as a number over its label. */}
           <span className="sr-only">{t(range === 7 ? 'totalWeek' : 'totalMonth', { time: time(data.totalSeconds) })}</span>
@@ -136,7 +138,7 @@ export function StatsPage() {
             {t(range === 7 ? 'kpiWeek' : 'kpiMonth')}
           </span>
         </div>
-        <ul className="grid min-w-0 grid-cols-2 gap-3" data-testid="stats-split">
+        <ul className="grid min-w-0 grid-cols-2 gap-3 lg:col-span-2 lg:grid-cols-subgrid" data-testid="stats-split">
           <li className={tile}>
             <span className="flex items-center gap-2 text-body-sm text-fg-muted">
               <span aria-hidden className={cn('size-2.5 rounded-[3px]', LIVE_FILL)} />
@@ -176,11 +178,13 @@ export function StatsPage() {
   }
 
   return (
-    <Page width="default" className="flex min-w-0 flex-col gap-6 pb-10 pt-4" data-testid="stats-page">
+    <Page width="default" className="flex min-w-0 flex-col gap-6 pb-10" data-testid="stats-page">
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
-      {/* The range control comes first for keyboard and phones; from lg up it sits at the row's end. */}
-      <div className="flex flex-col gap-4 lg:flex-row-reverse lg:items-start lg:justify-between">
+      {/* The range sets everything below it, so it leads on its own line, and the KPI row keeps
+          the page's full width and one right edge (it used to sit at the row's end, half as tall
+          as the tiles beside it). */}
+      <div className="flex flex-col gap-4">
         <Tabs
           className="self-start"
           variant="pill"

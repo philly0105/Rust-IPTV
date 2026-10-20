@@ -192,10 +192,12 @@ const SortableRow = memo(function SortableRow<T>({ item, index, count, rowKey: k
         className,
       )}
     >
+      {/* The drop marker: a mark, so the accent's mark tone (the text tone reads as brown in light). */}
       {over ? (
         <span
           aria-hidden
-          className={cn('pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-accent', over === 'before' ? '-top-px' : '-bottom-px')}
+          data-testid="drop-marker"
+          className={cn('pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-accent-mark', over === 'before' ? '-top-px' : '-bottom-px')}
         />
       ) : null}
       <Tooltip content={t('reorderHint')}>

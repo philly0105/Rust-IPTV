@@ -167,6 +167,23 @@ export function floorTo(t: number, stepMs: number): number {
 }
 
 /**
+ * Where a time track (the guide grid, the ribbon's timeline) scrolls to when it rests on now, in
+ * px from its start `from`: the start of the local half hour now is in, so the track begins on a
+ * slot line, its first time label is whole and cells start whole instead of as slivers. Should
+ * that leave less than `lead` px before now, where the now mark's head would sit on the edge
+ * (cut by it, or under the first label), the half hour before. Should now then sit past three
+ * quarters of a narrow track (`view` px wide; 0 or less: not measured yet), a quarter of the
+ * track before now instead.
+ */
+export function nowRestLeft(now: number, from: number, pxPerMin: number, view: number, lead: number): number {
+  const nowX = ((now - from) / MINUTE) * pxPerMin;
+  let slotX = ((floorLocal(now, 30) - from) / MINUTE) * pxPerMin;
+  if (nowX - slotX < lead) slotX -= 30 * pxPerMin;
+  if (view > 0 && nowX - slotX > view * 0.75) return Math.max(0, Math.round(nowX - view / 4));
+  return Math.max(0, slotX);
+}
+
+/**
  * The hour form of a locale's clock: two digits on a 24-hour clock ("08:05", as de, fr, ja and
  * the rest write it, and as wide as any other time, so the guide's columns line up), numeric on a
  * 12-hour one ("8:05 PM", "오후 8:05": a leading zero there reads as a typo).

@@ -78,5 +78,8 @@
   "resultCount_few": "{{count, number}} wyniki",
   "resultCount_many": "{{count, number}} wyników",
   "resultCount_other": "{{count, number}} wyniku",
-  "previewNext": "Następnie"
+  "previewNext": "Następnie",
+  "genreFilterOn": "Filtr: {{genre}}. Pasujące programy: {{count, number}}",
+  "genreFilterOff": "Filtr gatunku wyłączony",
+  "allGenres": "Wszystkie gatunki"
 }

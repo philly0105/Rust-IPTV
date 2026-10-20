@@ -77,5 +77,8 @@
   "resultCount_one": "{{count, number}} resultado",
   "resultCount_many": "{{count, number}} de resultados",
   "resultCount_other": "{{count, number}} resultados",
-  "previewNext": "Después"
+  "previewNext": "Después",
+  "genreFilterOn": "Filtrado por {{genre}}. Programas que coinciden: {{count, number}}",
+  "genreFilterOff": "Filtro de género desactivado",
+  "allGenres": "Todos los géneros"
 }

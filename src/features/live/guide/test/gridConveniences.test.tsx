@@ -12,6 +12,7 @@ import type { Category, Channel, CustomListEntry, FavoriteEntry, ItemRef, Page, 
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, WHEEL_ZOOM_MS } from '../../components/EpgGridPage';
+import { preloadScopePickerList } from '../../components/ScopePicker';
 import { guideHitLink } from '../programmeSearch';
 import { GUIDE_ZOOM_SLOT_PX } from '../zoom';
 import { createRpcMock, hit, installDomStubs, makeChannel, renderGuide, router, settings } from './harness';
@@ -35,10 +36,12 @@ const CHANNELS = Array.from({ length: 40 }, (_, i) => makeChannel(i));
 const cat = (id: string, name: string, itemCount: number): Category => ({ id, sourceId: 'src1', contentType: 'live', name, hidden: false, itemCount, position: 0 });
 const key = (r: ItemRef) => `${r.sourceId}|${r.contentType}|${r.itemId}`;
 
-beforeAll(() => {
+beforeAll(async () => {
   installDomStubs();
   configure({ asyncUtilTimeout: 4000 });
   vi.setConfig({ testTimeout: 20_000 });
+  // The pickers' popover list is its own chunk (SH-10): in before the tests open one.
+  await preloadScopePickerList();
 });
 beforeEach(() => {
   rpc.reset();

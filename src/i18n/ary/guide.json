@@ -80,5 +80,8 @@
   "resultCount_few": "{{count, number}} نتائج",
   "resultCount_many": "{{count, number}} نتيجة",
   "resultCount_other": "{{count, number}} نتيجة",
-  "previewNext": "من بعد"
+  "previewNext": "من بعد",
+  "genreFilterOn": "مفرّز على {{genre}}. البرامج اللي كيتطابقو: {{count, number}}",
+  "genreFilterOff": "الفرز حسب النوع طافي",
+  "allGenres": "كاع الأنواع"
 }

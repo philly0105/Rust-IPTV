@@ -7,6 +7,7 @@ import {
   ChevronsRight,
   History,
   LayoutList,
+  ListFilter,
   ListVideo,
   LocateFixed,
   PanelTopClose,
@@ -72,6 +73,7 @@ import {
   formatTimeRange,
   localDayKey,
   ms,
+  nowRestLeft,
   parseWindowAt,
   programIndexAt,
   programWhen,
@@ -94,7 +96,7 @@ import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
 import { isGuideHitState } from '../guide/programmeSearch';
 import { fitCellText, GRID_NOW_VAR, GRID_SHIFT_VAR, GuideRow, type GuideRowHandlers } from '../guide/GuideRow';
-import { GENRES, genreColor, storedGenreFilter, storeGenreFilter, type Genre } from '../guide/genre';
+import { GENRES, genreColor, genreOf, storedGenreFilter, storeGenreFilter, type Genre } from '../guide/genre';
 import { GuidePreview, storedPreviewOpen, storePreviewOpen } from '../guide/GuidePreview';
 import { useStable } from '../guide/useStable';
 import { clampGuideZoom, GUIDE_ZOOM_SLOT_PX, storedGuideZoom, storeGuideZoom } from '../guide/zoom';
@@ -170,17 +172,21 @@ export function extendDirection(x: number, dx: number, max: number): 1 | -1 | 0 
 export const GRID_CHANNEL_COMPACT = 72;
 
 /**
+ * Half the now pill's width in the ruler ("12:42 PM" at the 125 % UI scale) with a margin, in px:
+ * the track keeps at least this much before now, so the pill is never cut by the channel column.
+ */
+export const NOW_PILL_LEAD_PX = 40;
+
+/**
  * Where the track scrolls to when the guide opens on now (or Now is pressed), in px from the
  * window's `start`: the start of the local half hour now is in, so the visible track begins on a
- * slot line, its first label is whole, and rows start with whole cells instead of 60 px slivers.
- * Now then sits up to one slot in. Should that be more than three quarters of a narrow track
- * (`view` px wide; 0: not measured yet), the track keeps a quarter of it before now instead.
+ * slot line, its first label is whole, and rows start with whole cells instead of 60 px slivers;
+ * the half hour before when now is so close to that line that its pill would be cut. A narrow
+ * track keeps a quarter of its width before now instead (`view` px wide; 0: not measured yet).
+ * See {@link nowRestLeft}.
  */
 export function nowScroll(now: number, start: number, pxPerMin: number, view: number): number {
-  const nowX = ((now - start) / MINUTE) * pxPerMin;
-  const slotX = ((floorLocal(now, GRID_SLOT_MIN) - start) / MINUTE) * pxPerMin;
-  if (view > 0 && nowX - slotX > view * 0.75) return Math.max(0, Math.round(nowX - view / 4));
-  return Math.max(0, slotX);
+  return nowRestLeft(now, start, pxPerMin, view, NOW_PILL_LEAD_PX);
 }
 
 /** Portal programmes per row for a window: 12 for 6 h, more for a longer window. */
@@ -469,10 +475,24 @@ export function EpgGridPage() {
   const playingChannel = playingHere && playingItem.data && 'isRadio' in playingItem.data ? (playingItem.data as Channel) : undefined;
   // CB-GUIDE-GENRE: the genre the cells are filtered to, remembered between visits.
   const [genreFilter, setGenreFilterState] = useState<Genre | null>(storedGenreFilter);
+  // What the filter did, for screen readers: the cells only dim, which they do not see. The count
+  // is of the window's programmes in the rows whose guide is in.
+  const [genreNote, setGenreNote] = useState('');
   const setGenreFilter = useStable((g: Genre | null) => {
     storeGenreFilter(g);
     setGenreFilterState(g);
+    if (!g) {
+      setGenreNote(tg('genreFilterOff'));
+      return;
+    }
+    let matching = 0;
+    for (let row = 0; row < count; row++) {
+      for (const p of windowPrograms(row)) if (genreOf(p.category) === g) matching++;
+    }
+    setGenreNote(tg('genreFilterOn', { genre: tg(`genre_${g}`), count: matching }));
   });
+  // The cells name their genre (CB-GUIDE-GENRE), so a filtered guide reads as it looks.
+  const genreNames = useMemo(() => Object.fromEntries(GENRES.map((g) => [g, tg(`genre_${g}`)])) as Record<Genre, string>, [tg]);
   // CB-GUIDE-PREVIEW: from md up, on a window tall enough to keep a useful grid under the band.
   // Until the user opens or hides it, it is open only from 1000 px tall: on a laptop's 900 it
   // cost the grid three or four rows.
@@ -1408,6 +1428,9 @@ export function EpgGridPage() {
     // data-guide-search-bounds (SEARCH_BOUNDS_ATTR): the search panel stays inside the page, clear of the rail.
     <div ref={measurePage} className="flex h-full min-h-0 w-full min-w-0 flex-col bg-bg" data-testid="epg-grid-page" data-guide-bar={bar} data-guide-search-bounds="">
       {heading}
+      <span role="status" className="sr-only" data-testid="guide-genre-note">
+        {genreNote}
+      </span>
       <GuideToolbar
         sources={liveSources && source && !liveSources.includes(source) ? [...liveSources, source] : liveSources}
         sourceId={sourceId}
@@ -1595,6 +1618,7 @@ export function EpgGridPage() {
                     highlighted={!!ch && highlight === itemKey(ch.ref)}
                     playing={!!ch && playingKey === itemKey(ch.ref)}
                     genreFilter={genreFilter}
+                    genreNames={genreNames}
                     cursorStart={v.index === cursor.row ? cursorStart : null}
                     lang={lang}
                     stripCountryPrefix={prefs.stripCountryPrefix}
@@ -1891,6 +1915,16 @@ const GuideToolbar = memo(function GuideToolbar({
     ],
     [categories, lists, t, tg],
   );
+  const genreSections = useMemo(
+    (): PickerSection[] => [
+      { id: 'all', options: [{ value: '', label: tg('allGenres') }] },
+      {
+        id: 'genres',
+        options: GENRES.map((g) => ({ value: g, label: tg(`genre_${g}`), icon: <span className="size-2 rounded-full" style={{ background: genreColor(g) }} /> })),
+      },
+    ],
+    [tg],
+  );
   const stacked = bar !== 'full';
   const phone = bar === 'phone';
   const range = formatTimeRange(start, end, lang);
@@ -2013,44 +2047,60 @@ const GuideToolbar = memo(function GuideToolbar({
             <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" className="h-7 w-7" />
           </div>
         ) : null}
+        {phone ? (
+          // A phone's genre filter is a picker at the end of this row, not a row of chips of its
+          // own, so the grid starts two rows down; inverted while a genre is chosen, as a chip is.
+          <>
+            <ScopePicker
+              label={tg('genreFilter')}
+              value={genre ?? ''}
+              sections={genreSections}
+              onChange={(v) => onGenre((v || null) as Genre | null)}
+              triggerIcon={<ListFilter className="size-4" />}
+              testId="guide-genre-picker"
+            />
+            {onGoToPlaying ? <IconButton size="sm" label={tg('goToPlaying')} icon={<LocateFixed className="size-4" />} onClick={onGoToPlaying} className="size-9 shrink-0" data-testid="guide-go-to-playing" /> : null}
+          </>
+        ) : null}
       </div>
       {/* CB-GUIDE-GENRE: filter chips, one per bucket, with the bucket's stripe colour. One at a
           time, like Channels DVR's; a chosen chip is inverted, never amber. */}
-      <div className="flex w-full min-w-0 items-center gap-1.5" data-testid="guide-genres">
-        {/* A row too narrow for every chip scrolls, its end fading out so a chip cut at the edge reads as more to come. */}
-        <div
-          role="group"
-          aria-label={tg('genreFilter')}
-          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)] [scrollbar-width:none] rtl:[mask-image:linear-gradient(to_left,#000_calc(100%-1.5rem),transparent)]"
-        >
-          {GENRES.map((g) => {
-            const on = genre === g;
-            return (
-              <FilterChip key={g} pressed={on} dot={genreColor(g)} onClick={() => onGenre(on ? null : g)}>
-                {tg(`genre_${g}`)}
-              </FilterChip>
-            );
-          })}
+      {phone ? null : (
+        <div className="flex w-full min-w-0 items-center gap-1.5" data-testid="guide-genres">
+          {/* A row too narrow for every chip scrolls, its end fading out so a chip cut at the edge reads as more to come. */}
+          <div
+            role="group"
+            aria-label={tg('genreFilter')}
+            className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)] [scrollbar-width:none] rtl:[mask-image:linear-gradient(to_left,#000_calc(100%-1.5rem),transparent)]"
+          >
+            {GENRES.map((g) => {
+              const on = genre === g;
+              return (
+                <FilterChip key={g} pressed={on} dot={genreColor(g)} onClick={() => onGenre(on ? null : g)}>
+                  {tg(`genre_${g}`)}
+                </FilterChip>
+              );
+            })}
+          </div>
+          {onGoToPlaying ? (
+            <Button size="sm" variant="ghost" icon={<LocateFixed className="size-4" />} onClick={onGoToPlaying} className="shrink-0" data-testid="guide-go-to-playing">
+              <span className="max-sm:sr-only">{tg('goToPlaying')}</span>
+            </Button>
+          ) : null}
+          {previewOpen !== undefined ? (
+            // The label says what a press does, so no state as well: "Hide preview, pressed"
+            // contradicted itself.
+            <IconButton
+              size="sm"
+              label={previewOpen ? tg('hidePreview') : tg('showPreview')}
+              icon={previewOpen ? <PanelTopClose className="size-4" /> : <PanelTopOpen className="size-4" />}
+              onClick={onTogglePreview}
+              className="shrink-0"
+              data-testid="guide-preview-toggle"
+            />
+          ) : null}
         </div>
-        {onGoToPlaying ? (
-          <Button size="sm" variant="ghost" icon={<LocateFixed className="size-4" />} onClick={onGoToPlaying} className="shrink-0" data-testid="guide-go-to-playing">
-            <span className="max-sm:sr-only">{tg('goToPlaying')}</span>
-          </Button>
-        ) : null}
-        {previewOpen !== undefined ? (
-          // The label says what a press does, so no pressed state as well ("Hide preview, pressed"
-          // contradicts itself); expanded tells assistive tech the band is there.
-          <IconButton
-            size="sm"
-            label={previewOpen ? tg('hidePreview') : tg('showPreview')}
-            aria-expanded={previewOpen}
-            icon={previewOpen ? <PanelTopClose className="size-4" /> : <PanelTopOpen className="size-4" />}
-            onClick={onTogglePreview}
-            className="shrink-0"
-            data-testid="guide-preview-toggle"
-          />
-        ) : null}
-      </div>
+      )}
     </div>
   );
 });

@@ -135,11 +135,13 @@ export function ContextMenu({
   };
 
   // Portaled at the kit Menu's layer: rendered in the page, the mini player (later in the DOM at
-  // the same z-index) covered it, items and keyboard focus included.
+  // the same z-index) covered it, items and keyboard focus included. A dialog layer, as the kit
+  // Menu is, so a dialog under it lets focus in.
   return createPortal(
     <div
       ref={ref}
       role="menu"
+      data-dialog-layer=""
       aria-label={view.label}
       onKeyDown={onKeyDown}
       data-state={closing ? 'closed' : 'open'}

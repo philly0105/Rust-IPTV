@@ -76,5 +76,8 @@
   "shortcutDigits": "Μετάβαση σε κανάλι με τον αριθμό του",
   "resultCount_one": "{{count, number}} αποτέλεσμα",
   "resultCount_other": "{{count, number}} αποτελέσματα",
-  "previewNext": "Επόμενο"
+  "previewNext": "Επόμενο",
+  "genreFilterOn": "Φίλτρο: {{genre}}. Προγράμματα που ταιριάζουν: {{count, number}}",
+  "genreFilterOff": "Το φίλτρο είδους απενεργοποιήθηκε",
+  "allGenres": "Όλα τα είδη"
 }

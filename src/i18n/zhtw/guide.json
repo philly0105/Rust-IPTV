@@ -75,5 +75,8 @@
   "openSourceGuide": "開啟 {{name}}",
   "shortcutDigits": "依編號跳到頻道",
   "resultCount_other": "{{count, number}} 筆結果",
-  "previewNext": "接下來"
+  "previewNext": "接下來",
+  "genreFilterOn": "已依{{genre}}篩選。符合的節目：{{count, number}} 個",
+  "genreFilterOff": "已關閉類型篩選",
+  "allGenres": "全部類型"
 }

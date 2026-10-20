@@ -478,6 +478,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // ---- header -------------------------------------------------------------
   const shell = useShell();
   const title = source.data?.name ?? '';
+  const allGroup = liveView !== 'favorites' && liveView !== 'recent' && !category;
   const subtitle =
     liveView === 'favorites'
       ? t('favoritesGroup')
@@ -486,7 +487,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         : (category?.name ?? (isRadio ? t('allStations') : t('allChannels')));
   const countText = paged.total !== undefined ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
   // The group and its count once, in the header: the list no longer repeats them over its rows.
-  const headerSubtitle = countText ? t('groupWithCount', { group: subtitle, count: countText }) : subtitle;
+  // "All channels · 140": that group's name already says what is counted ("All channels · 140
+  // channels" said it twice). A named group keeps the unit ("Sports · 18 channels").
+  const headerCount = allGroup && paged.total !== undefined ? fmt.format(paged.total) : countText;
+  const headerSubtitle = headerCount ? t('groupWithCount', { group: subtitle, count: headerCount }) : subtitle;
   useEffect(() => {
     if (!title) return;
     shell.setHeader({
@@ -666,9 +670,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- idle stage ---------------------------------------------------------
   const selectRefPlay = useCallback((ref: ItemRef) => void selectRef(ref), [selectRef]);
-  // Radio's idle stage, with no station to resume, offers the list's first stations as tiles.
   const loadedRows = paged.loaded;
-  const firstStations = useMemo(() => (isRadio ? loadedRows.slice(0, 12).map((l) => l.channel) : undefined), [isRadio, loadedRows]);
   // The cursor row's now/next, when the card follows the cursor (Live only: Radio has no ribbon).
   const cursorIndex = cursorChannel && !isRadio ? loadedRows.find((l) => sameRef(l.channel.ref, cursorChannel.ref))?.index : undefined;
   const cursorNowNext = cursorIndex === undefined ? undefined : paged.getNowNext(cursorIndex);
@@ -688,8 +690,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       epgOffsetMinutes={prefs.epgOffsetMinutes}
       onResume={onPlayLive}
       // Radio's stage has room below Resume: the other stations played lately, one press each.
+      // Not the list's first stations when nothing was played: they repeated the list beside it.
       recent={isRadio ? last?.others : undefined}
-      stations={isRadio && !lastChannel ? firstStations : undefined}
       onPlayRef={selectRefPlay}
     />
   );
@@ -709,9 +711,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const hrefFor = hrefForCategory;
 
   // Run 2: the Lists group above the groups (C3), and the source's hidden channels below them (C2).
+  // Lists hold TV channels: Radio leaves them out.
   const sidebar = (
     <>
-      <ListsSidebarSection onNavigate={closeDrawer} />
+      {isRadio ? null : <ListsSidebarSection onNavigate={closeDrawer} />}
       <div className="flex min-h-0 flex-1 flex-col">
         <MemoSidebar
           categories={groups}
@@ -725,6 +728,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onManage={openManage}
           onNavigate={closeDrawer}
           totalLabel={isRadio ? t('allStations') : t('allChannels')}
+          hideLoneGroup={isRadio}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
         />

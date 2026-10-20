@@ -75,5 +75,8 @@
   "openSourceGuide": "{{name}} 열기",
   "shortcutDigits": "번호로 채널 이동",
   "resultCount_other": "결과 {{count, number}}개",
-  "previewNext": "다음"
+  "previewNext": "다음",
+  "genreFilterOn": "{{genre}} 필터 적용됨. 일치하는 프로그램: {{count, number}}개",
+  "genreFilterOff": "장르 필터 해제됨",
+  "allGenres": "모든 장르"
 }

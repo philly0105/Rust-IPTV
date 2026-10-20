@@ -258,7 +258,9 @@ describe('the Live page header and guide link', () => {
   it('names the group and its count once, in the header', async () => {
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     await screen.findByText('Channel 0');
-    await waitFor(() => expect(fakes.lastHeader()?.subtitle).toBe('All channels · 20 channels'));
+    // The group's name already says what is counted: no "All channels · 20 channels" (review
+    // round 2). A named group keeps the unit (liveStage2: "Favorites · 2 channels").
+    await waitFor(() => expect(fakes.lastHeader()?.subtitle).toBe('All channels · 20'));
   });
 
   it('the guide link carries the group and the channel to open at (LG-01)', () => {

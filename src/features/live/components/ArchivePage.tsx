@@ -248,7 +248,13 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
             live on a line of its own. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
           <ChannelLogo src={channel.logoUrl} name={name} size={56} sourceId={channel.ref.sourceId} />
-          <p dir="auto" className="min-w-0 flex-1 truncate text-body-sm text-fg-muted" data-testid="archive-airing">
+          {/* From lg the details under the player describe the cursor's programme: while that is the
+              airing one, this line would say it twice, so it steps aside (keeping its room). */}
+          <p
+            dir="auto"
+            className={cn('min-w-0 flex-1 truncate text-body-sm text-fg-muted', airing && shownProgram === airing && 'lg:invisible')}
+            data-testid="archive-airing"
+          >
             {airing ? t('idleNowOn', { title: airing.title, left: t('minutesLeft', { count: minutesLeft(airing, now) }) }) : null}
           </p>
           <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">

@@ -75,5 +75,8 @@
   "openSourceGuide": "{{name}} を開く",
   "shortcutDigits": "番号でチャンネルへ移動",
   "resultCount_other": "{{count, number}}件の結果",
-  "previewNext": "次"
+  "previewNext": "次",
+  "genreFilterOn": "{{genre}}で絞り込み中。該当する番組: {{count, number}}件",
+  "genreFilterOff": "ジャンルの絞り込みを解除しました",
+  "allGenres": "すべてのジャンル"
 }

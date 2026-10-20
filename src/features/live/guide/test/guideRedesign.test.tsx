@@ -143,6 +143,28 @@ describe('genre buckets (CB-GUIDE-GENRE)', () => {
     await waitFor(() => expect(within(movie).getByTestId('cell-genre')).toBeTruthy());
     expect(localStorage.getItem('guide.genreFilter')).toBeNull();
   });
+
+  it('names each cell’s genre and says what a filter did, for screen readers (review round 2)', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const sports = await screen.findByRole('button', { name: /^c1 P0,/ });
+    // The dimming is visual only: the names carry the genre, so a filtered guide reads as it looks.
+    expect(sports.getAttribute('aria-label')).toMatch(/, Sports$/);
+    expect(screen.getByRole('button', { name: /^c0 P0,/ }).getAttribute('aria-label')).toMatch(/, Movies$/);
+    expect(screen.getByRole('button', { name: /^c4 P0,/ }).getAttribute('aria-label')).not.toMatch(/, (Movies|Sports|News|Kids|Series & shows)$/);
+    const note = screen.getByTestId('guide-genre-note');
+    expect(note.getAttribute('role')).toBe('status');
+    expect(note.textContent).toBe('');
+
+    const chips = screen.getByRole('group', { name: 'Filter by genre' });
+    fireEvent.click(within(chips).getByRole('button', { name: 'Sports' }));
+    await waitFor(() => expect(note.textContent).toMatch(/^Filtered to Sports\. Matching programmes: \d+$/));
+    // c1, c6, c11 … carry sports: one programme an hour in the 6 h window, for every row whose guide is in.
+    const matching = Number(/\d+$/.exec(note.textContent!)![0]);
+    expect(matching).toBeGreaterThanOrEqual(6);
+    expect(matching % 6).toBe(0);
+    fireEvent.click(within(chips).getByRole('button', { name: 'Sports' }));
+    await waitFor(() => expect(note.textContent).toBe('Genre filter off'));
+  });
 });
 
 describe('what is playing (LG-01)', () => {
@@ -200,9 +222,26 @@ describe('the preview band (CB-GUIDE-PREVIEW)', () => {
     expect(within(band).getByTestId('guide-preview-title').textContent).toBe('c3 P1');
     vi.useRealTimers();
 
-    fireEvent.click(screen.getByTestId('guide-preview-toggle'));
+    // The toggle's name says what a press does, with no pressed or expanded state beside it.
+    const toggle = screen.getByTestId('guide-preview-toggle');
+    expect(toggle.getAttribute('aria-label')).toBe('Hide preview');
+    expect(toggle.hasAttribute('aria-pressed')).toBe(false);
+    expect(toggle.hasAttribute('aria-expanded')).toBe(false);
+    fireEvent.click(toggle);
     expect(screen.queryByTestId('guide-preview')).toBeNull();
     expect(localStorage.getItem('guide.preview')).toBe('0');
+    expect(screen.getByTestId('guide-preview-toggle').getAttribute('aria-label')).toBe('Show preview');
+  });
+
+  it('starts hidden on a window under 1000 px tall until the user opens it (review round 2)', async () => {
+    // Wide and 700 px or more, so the band fits; not 1000 px.
+    vi.spyOn(window, 'matchMedia').mockImplementation(((q: string) => ({ ...media(q), matches: media(q).matches && !q.includes('1000px') })) as never);
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    expect(screen.queryByTestId('guide-preview')).toBeNull();
+    fireEvent.click(screen.getByTestId('guide-preview-toggle'));
+    expect(await screen.findByTestId('guide-preview')).toBeTruthy();
+    expect(localStorage.getItem('guide.preview')).toBe('1');
   });
 });
 

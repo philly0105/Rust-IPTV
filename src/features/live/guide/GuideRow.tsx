@@ -92,6 +92,8 @@ export interface GuideRowProps {
   playing: boolean;
   /** The genre the guide is filtered to: cells of other genres step back (CB-GUIDE-GENRE). */
   genreFilter: Genre | null;
+  /** Each genre's name in the UI language: a cell's accessible name ends with its genre. */
+  genreNames: Record<Genre, string>;
   /**
    * The keyboard cursor, when it is on this row: the start of the programme it is on, or '' when
    * it is on none (the channel cell takes it). null when the cursor is on another row.
@@ -120,6 +122,7 @@ export const GuideRow = memo(function GuideRow({
   highlighted,
   playing,
   genreFilter,
+  genreNames,
   cursorStart,
   lang,
   stripCountryPrefix,
@@ -249,8 +252,9 @@ export const GuideRow = memo(function GuideRow({
             </span>
           </div>
         ) : programs.length === 0 ? (
-          // A flat, quiet band: a wall of dashed boxes read as a broken guide (LG-10).
-          <div className="absolute inset-y-1 inset-x-0.5 flex items-center rounded-md bg-surface-2/40 text-xs text-fg-subtle">
+          // A flat, quiet band: a wall of dashed boxes read as a broken guide (LG-10). Opaque, like
+          // the cells, so the now line (drawn before the rows) does not cross its label.
+          <div data-testid="no-guide-band" className="absolute inset-y-1 inset-x-0.5 flex items-center rounded-md bg-surface-2 text-xs text-fg-subtle dark:bg-surface">
             {/* Sticks just past the channel column, so a grid scrolled to now still shows it. */}
             <span data-testid="no-guide-label" className="sticky px-3" style={{ insetInlineStart: channelCol }}>
               {t('noGuideShort')}
@@ -279,7 +283,8 @@ export const GuideRow = memo(function GuideRow({
                   data-cell-row={index}
                   data-start={p.start}
                   tabIndex={cursorStart === p.start ? 0 : -1}
-                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}`}
+                  // The genre too: the filter dims cells, which a screen reader does not see.
+                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}${genre ? `, ${genreNames[genre]}` : ''}`}
                   // The full title on hover: a narrow or clipped cell truncates it (L3-visual-12).
                   title={p.title}
                   onPointerDown={() => {

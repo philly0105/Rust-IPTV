@@ -27,8 +27,6 @@ export interface StageIdleProps {
   hint?: string;
   /** Radio: more stations played lately, as tiles under Resume (from md up, where the stage is tall). */
   recent?: readonly RecentEntry[];
-  /** Radio with no station to resume: the list's first stations as tiles under the prompt. */
-  stations?: readonly Channel[];
   onPlayRef?(ref: ItemRef): void;
 }
 
@@ -41,7 +39,7 @@ export interface StageIdleProps {
  * The stage is dark in every theme, so from md up the text takes the glass colours; on a phone
  * the idle stage is a slim bar on the theme's surface above the list, with theme colours.
  */
-export function StageIdle({ kind, last, highlighted = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, stations, onPlayRef }: StageIdleProps) {
+export function StageIdle({ kind, last, highlighted = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
   const channel = last?.channel;
   const name = channel ? displayChannelName(channel.name, stripPrefix) : '';
@@ -128,15 +126,6 @@ export function StageIdle({ kind, last, highlighted = false, now, stripPrefix, e
               {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}
             </p>
           </div>
-          {/* Radio with nothing played yet: the list's first stations as tiles, so the tall
-              stage offers something to press instead of one line of text. */}
-          {stations && stations.length > 0 && onPlayRef ? (
-            <StationShelf
-              heading={t('stations')}
-              items={stations.map((c) => ({ ref: c.ref, name: displayChannelName(c.name, stripPrefix), logo: c.logoUrl }))}
-              onPlay={onPlayRef}
-            />
-          ) : null}
         </div>
       )}
     </div>

@@ -4,6 +4,9 @@
  * programme sheet over the mini player, and the idle card and ribbon telling one story.
  */
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { act, cleanup, configure, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -261,5 +264,96 @@ describe('the idle card and the ribbon tell one story (review round 2)', () => {
     // Focus moving on (to the ribbon, say) keeps the column on the cursor's channel.
     act(() => (document.activeElement as HTMLElement).blur());
     expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
+  });
+});
+
+describe('Radio stays to the point (review round 2)', () => {
+  beforeEach(() => {
+    const h = rpcMock.handlers;
+    const src = { id: 'src1', kind: 'm3u', name: 'Radio playlist', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } };
+    h['sources.get'] = () => src;
+    h['sources.list'] = () => [src];
+    h['settings.get'] = () => settings();
+    h['settings.update'] = () => settings();
+    // Every station in one group, as radio playlists often have it.
+    h['catalog.categories'] = () => [{ id: 'g1', sourceId: 'src1', contentType: 'radio', name: 'Radio', hidden: false, itemCount: 3, position: 0 }];
+    h['catalog.channels'] = (a) => {
+      const q = (a as { query: PageQuery }).query;
+      const items = Array.from({ length: Math.max(0, Math.min(q.limit, 3 - q.offset)) }, (_, i) => ({ ...makeChannel(q.offset + i), isRadio: true }));
+      return { items, total: 3, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
+    };
+    h['epg.nowNext'] = () => ({});
+    h['favorites.contains'] = () => [];
+    h['remote.status'] = () => ({ running: false, port: 7310 });
+    h['recent.list'] = () => [];
+    h['lists.list'] = () => [];
+  });
+
+  it('leaves out the TV lists, a lone group that repeats All stations, and a stage shelf that repeats the list', async () => {
+    renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
+    await within(await screen.findByTestId('channel-list')).findByText('Channel 0');
+    const nav = screen.getByRole('navigation', { name: 'Groups' });
+    expect(within(nav).getByText('All stations')).toBeTruthy();
+    expect(within(nav).queryByText('Radio')).toBeNull();
+    expect(within(nav).queryByRole('searchbox', { name: 'Filter groups' })).toBeNull();
+    expect(screen.queryByTestId('lists-section')).toBeNull();
+    // Nothing played yet: the prompt, not the list's first stations again.
+    expect(await screen.findByText('Pick a station')).toBeTruthy();
+    expect(screen.queryByTestId('stage-recent')).toBeNull();
+  });
+
+  it('keeps the lone group when it is the open one', async () => {
+    renderAt('/s/src1/radio?category=g1', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
+    await within(await screen.findByTestId('channel-list')).findByText('Channel 0');
+    const nav = screen.getByRole('navigation', { name: 'Groups' });
+    await waitFor(() => expect(within(nav).getByText('Radio').closest('a')?.getAttribute('aria-current')).toBe('page'));
+  });
+});
+
+describe('a phone shows the playing programme once (review round 2)', () => {
+  it("the playing TV row leaves its progress and time left to the ribbon's bar below md; other rows and stations keep theirs", () => {
+    const now = Date.now();
+    const row = (playing: boolean, station = false) => (
+      <ChannelRow
+        index={0}
+        channel={station ? { ...makeChannel(0), isRadio: true } : makeChannel(0)}
+        nowNext={{ now: program('Morning Mix', now - 10 * MINUTE, now + 50 * MINUTE) }}
+        favorite={false}
+        playing={playing}
+        active={false}
+        station={station}
+        now={now}
+        onActivate={() => undefined}
+        onToggleFavorite={() => undefined}
+        onContextMenu={() => undefined}
+      />
+    );
+    const { rerender } = render(<I18nextProvider i18n={i18n}>{row(true)}</I18nextProvider>);
+    expect(screen.getByTestId('channel-progress-track').className).toContain('max-md:hidden');
+    expect(screen.getByText('50m').className).toContain('max-md:hidden');
+    rerender(<I18nextProvider i18n={i18n}>{row(false)}</I18nextProvider>);
+    expect(screen.getByTestId('channel-progress-track').className).not.toContain('max-md:hidden');
+    expect(screen.getByText('50m').className).not.toContain('max-md:hidden');
+    // Radio has no ribbon: a playing station keeps its time left.
+    rerender(<I18nextProvider i18n={i18n}>{row(true, true)}</I18nextProvider>);
+    expect(screen.getByText('50m').className).not.toContain('max-md:hidden');
+  });
+});
+
+describe('the scope picker keeps cmdk out of the guide and multi-view first render (review round 2, SH-10)', () => {
+  it('imports cmdk only in its list, which nothing imports statically', () => {
+    const features = join(__dirname, '..', '..');
+    const files = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? (e.name === 'test' ? [] : files(join(dir, e.name))) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : [],
+      );
+    const offenders = files(features).filter((f) => {
+      const text = readFileSync(f, 'utf8');
+      if (f.endsWith('ScopePickerList.tsx')) return false;
+      // A type-only import is erased; a value import would pull the list (and cmdk) in at once.
+      return /from 'cmdk'/.test(text) || /^import (?!type )[^;]*from '[^']*ScopePickerList'/m.test(text);
+    });
+    expect(offenders).toEqual([]);
+    expect(readFileSync(join(features, 'live', 'components', 'ScopePicker.tsx'), 'utf8')).toMatch(/import\('\.\/ScopePickerList'\)/);
   });
 });

@@ -582,8 +582,10 @@ describe('ArchivePage, review round 2', () => {
     rpcMock.handlers['downloads.start'] = () => ({ id: 1 });
     renderAt('/live/archive/src1/c0', ROUTE);
     const details = await screen.findByTestId('archive-details');
-    // It opens on the airing programme, like the list.
+    // It opens on the airing programme, like the list; the "Now:" line beside the logo then
+    // steps aside from lg, where the details say the same.
     expect(within(details).getByRole('heading', { name: 'Matinee' })).toBeTruthy();
+    expect(screen.getByTestId('archive-airing').className).toContain('lg:invisible');
     expect(within(details).getByTestId('archive-details-play').textContent).toBe('Play from start');
     expect(within(details).queryByTestId('archive-details-download')).toBeNull();
     const rows = within(screen.getByTestId('archive-programs'))
@@ -591,6 +593,7 @@ describe('ArchivePage, review round 2', () => {
       .filter((b) => b.hasAttribute('data-state'));
     rows[0]!.focus();
     await waitFor(() => expect(within(details).getByRole('heading', { name: 'Morning show' })).toBeTruthy());
+    expect(screen.getByTestId('archive-airing').className).not.toContain('lg:invisible');
     expect(within(details).getByText('An expedition to the most remote corners of the planet.').className).toContain('line-clamp-3');
     expect(within(details).getByTestId('archive-details-play').textContent).toBe('Play from catch-up');
     fireEvent.click(within(details).getByTestId('archive-details-download'));

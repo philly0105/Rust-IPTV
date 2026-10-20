@@ -80,5 +80,8 @@
   "resultCount_few": "{{count, number}} نتائج",
   "resultCount_many": "{{count, number}} نتيجة",
   "resultCount_other": "{{count, number}} نتيجة",
-  "previewNext": "التالي"
+  "previewNext": "التالي",
+  "genreFilterOn": "التصفية حسب {{genre}}. البرامج المطابقة: {{count, number}}",
+  "genreFilterOff": "تم إيقاف التصفية حسب النوع",
+  "allGenres": "كل الأنواع"
 }

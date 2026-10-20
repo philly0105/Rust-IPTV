@@ -178,12 +178,14 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
                 <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" data-testid="row-now-title" title={cur.title}>
                   {cur.title}
                 </span>
-                <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: left })}>
+                {/* A phone's playing TV row leaves the time left and the progress to the guide
+                    ribbon's bar right above the list, which shows both for the same programme. */}
+                <span className={cn('shrink-0 tabular-nums text-fg-subtle', playing && !props.station && 'max-md:hidden')} title={t('minutesLeft', { count: left })}>
                   {t('minutesLeftShort', { count: left })}
                 </span>
               </span>
               {props.station ? null : (
-                <span className="relative mt-1 h-[3px] w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
+                <span className={cn('relative mt-1 h-[3px] w-full overflow-hidden rounded-full bg-surface-3', playing && 'max-md:hidden')} aria-hidden data-testid="channel-progress-track">
                   {/* Quiet on every row, the accent on the one playing: a list of bright bars read as
                       stripes, and red ones as "all live, all alerting". */}
                   <span

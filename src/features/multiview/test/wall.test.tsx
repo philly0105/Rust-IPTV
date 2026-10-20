@@ -119,6 +119,8 @@ function defaultHandlers(): Record<string, Handler> {
     'recent.list': () => [],
     'favorites.list': () => [],
     'catalog.channels': () => ({ items: [1, 2, 3, 4, 5, 6].map((i) => channel(i, 'm3u1')), total: 6 }),
+    // A tile saved without a logo asks for its channel record (useTileLogoBackfill).
+    'catalog.item': (a) => channel(Number(String((a['ref'] as { itemId: string }).itemId).slice(1)), (a['ref'] as { sourceId: string }).sourceId),
     'catalog.search': () => ({ live: [], movies: [], series: [] }),
     'recordings.list': () => [],
   };
@@ -905,5 +907,32 @@ describe('layout reasons', () => {
     expect(useMultiviewStore.getState().layout).toBe('2x2');
     fireEvent.mouseEnter(side);
     expect((await screen.findByRole('tooltip', {}, { timeout: 2000 })).textContent).toContain('Holds two channels');
+  });
+});
+
+describe('tile logos (review round 2)', () => {
+  it("a tile saved without a logo takes its channel's, and the wall keeps it", async () => {
+    handlers['catalog.item'] = (a) => {
+      const r = a['ref'] as { itemId: string; sourceId: string };
+      const n = Number(r.itemId.slice(1));
+      // Channel 2 has no logo in the catalog either: it keeps its monogram.
+      return n === 2 ? channel(n, r.sourceId) : { ...channel(n, r.sourceId), logoUrl: `http://logos/${r.itemId}.png` };
+    };
+    seed([1, 2]);
+    renderPage();
+    await waitFor(() => expect(useMultiviewStore.getState().tiles.find((t) => t.key === 'k1')?.logo).toBe('http://logos/c1.png'));
+    expect(useMultiviewStore.getState().tiles.find((t) => t.key === 'k2')?.logo).toBeUndefined();
+    // Saved with the wall, so the next visit has it without asking.
+    expect(localStorage.getItem('tsrust.multiview')).toContain('http://logos/c1.png');
+  });
+
+  it('a tile with a logo is not asked about, and keeps its own', async () => {
+    seed([1]);
+    useMultiviewStore.setState({ tiles: useMultiviewStore.getState().tiles.map((t) => ({ ...t, logo: 'http://kept/c1.png' })) });
+    renderPage();
+    await screen.findAllByTestId('multiview-tile-main');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.some((c) => c.cmd === 'catalog.item')).toBe(false);
+    expect(useMultiviewStore.getState().tiles[0]!.logo).toBe('http://kept/c1.png');
   });
 });

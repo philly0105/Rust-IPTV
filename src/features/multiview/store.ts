@@ -242,6 +242,21 @@ export function reinsertTile(tile: MultiviewTile, index: number, hadSound: boole
   return true;
 }
 
+/**
+ * Gives the tile of `ref` its channel's logo when it was saved without one (a wall from an older
+ * version, or a tile added from somewhere that knew only the name), so it shows the logo Live
+ * shows instead of a monogram. Saved with the wall. A tile that has a logo keeps it.
+ */
+export function fillTileLogo(ref: ItemRef, logo: string): void {
+  const s = useMultiviewStore.getState();
+  const i = s.tiles.findIndex((t) => sameRef(t.ref, ref));
+  const clean = logo.trim();
+  if (i < 0 || s.tiles[i]!.logo || !clean) return;
+  const tiles = s.tiles.slice();
+  tiles[i] = { ...tiles[i]!, logo: clean };
+  useMultiviewStore.setState({ tiles });
+}
+
 /** Undo of Clear: the cleared wall comes back, merged with anything added since. */
 export function restoreClearedWall(cleared: WallData): void {
   const s = snapshotWall();

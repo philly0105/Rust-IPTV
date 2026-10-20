@@ -50,6 +50,12 @@ export interface ScopePickerProps {
   /** The filter field shows from this many options up. */
   filterFrom?: number;
   disabled?: boolean;
+  /**
+   * A square trigger showing this icon, for a narrow toolbar (the phone guide's genre filter):
+   * the current option's name is read out but not drawn, and a choice other than the first
+   * option (`''`, "All …") inverts the trigger, as a chosen filter chip does.
+   */
+  triggerIcon?: ReactNode;
   className?: string;
   testId?: string;
 }
@@ -95,6 +101,7 @@ export function ScopePicker({
   filterLabel,
   filterFrom = 9,
   disabled,
+  triggerIcon,
   className,
   testId,
 }: ScopePickerProps) {
@@ -206,13 +213,35 @@ export function ScopePicker({
         onKeyDown={onTriggerKey}
         onPointerEnter={() => void preloadScopePickerList()}
         onFocus={() => void preloadScopePickerList()}
-        className={fieldClass('sm', cn('inline-flex min-w-0 items-center gap-2 pe-2 text-start', className))}
+        className={
+          triggerIcon
+            ? fieldClass(
+                'sm',
+                cn(
+                  'inline-flex size-9 shrink-0 items-center justify-center px-0',
+                  value ? 'border-fg bg-fg text-bg hover:bg-fg/90' : 'text-fg-muted hover:text-fg',
+                  className,
+                ),
+              )
+            : fieldClass('sm', cn('inline-flex min-w-0 items-center gap-2 pe-2 text-start', className))
+        }
       >
-        {current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
-        <span dir="auto" className={cn('min-w-0 flex-1 truncate', !current && 'text-fg-subtle')}>
-          {current?.label ?? placeholder ?? ''}
-        </span>
-        <ChevronDown aria-hidden size={16} className={cn('shrink-0 text-fg-muted motion-safe:transition-transform', open && 'rotate-180')} />
+        {triggerIcon ? (
+          <>
+            <span aria-hidden className="flex">
+              {triggerIcon}
+            </span>
+            <span className="sr-only">{current?.label ?? placeholder ?? ''}</span>
+          </>
+        ) : (
+          <>
+            {current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
+            <span dir="auto" className={cn('min-w-0 flex-1 truncate', !current && 'text-fg-subtle')}>
+              {current?.label ?? placeholder ?? ''}
+            </span>
+            <ChevronDown aria-hidden size={16} className={cn('shrink-0 text-fg-muted motion-safe:transition-transform', open && 'rotate-180')} />
+          </>
+        )}
       </button>
       {present && place
         ? createPortal(

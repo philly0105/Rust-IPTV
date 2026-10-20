@@ -76,5 +76,8 @@
   "shortcutDigits": "Ugrás csatornára a száma alapján",
   "resultCount_one": "{{count, number}} találat",
   "resultCount_other": "{{count, number}} találat",
-  "previewNext": "Következő"
+  "previewNext": "Következő",
+  "genreFilterOn": "Szűrés: {{genre}}. Egyező műsorok: {{count, number}}",
+  "genreFilterOff": "Műfajszűrő kikapcsolva",
+  "allGenres": "Minden műfaj"
 }

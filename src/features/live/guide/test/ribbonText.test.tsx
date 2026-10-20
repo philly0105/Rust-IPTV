@@ -7,8 +7,8 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EpgRibbon } from '../../components/EpgRibbon';
-import { HOUR, MINUTE } from '../../lib/epgTime';
+import { EpgRibbon, RIBBON_NOW_LEAD_PX, RIBBON_PX_PER_MIN } from '../../components/EpgRibbon';
+import { floorLocal, HOUR, MINUTE } from '../../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from '../../test/harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -107,10 +107,12 @@ describe('the ribbon opens on the half hour (review round 2)', () => {
       await screen.findByRole('button', { name: /^Midday Report,/ });
       const left = lefts.at(-1)!;
       const line = screen.getByTestId('ribbon-now-line');
-      // The now line sits within one half hour (120 px at 4 px a minute) of the visible start.
+      // The visible start is the local half hour now is in (4 px a minute), or the one before when
+      // now is too close to it for the line's head to clear the first label.
       const into = Number.parseFloat(line.style.left) + 1 - left;
-      expect(into).toBeGreaterThanOrEqual(0);
-      expect(into).toBeLessThanOrEqual(120);
+      const past = ((now - floorLocal(now, 30)) / MINUTE) * RIBBON_PX_PER_MIN;
+      expect(into).toBeCloseTo(past < RIBBON_NOW_LEAD_PX ? past + 30 * RIBBON_PX_PER_MIN : past, 0);
+      expect(into).toBeGreaterThanOrEqual(RIBBON_NOW_LEAD_PX);
       // An hour label that starts before the visible edge steps aside; the others show.
       const labels = screen.getAllByTestId('ribbon-hour-label');
       expect(labels.length).toBeGreaterThan(2);

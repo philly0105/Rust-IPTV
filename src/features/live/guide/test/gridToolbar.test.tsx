@@ -12,6 +12,7 @@ import { registerRenameHost, useRenameStore } from '@/features/channeledit/store
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage } from '../../components/EpgGridPage';
+import { preloadScopePickerList } from '../../components/ScopePicker';
 import { formatClockBare, formatDay } from '../../lib/epgTime';
 import { createRpcMock, installDomStubs, makeChannel, renderGuide, settings } from './harness';
 
@@ -127,11 +128,33 @@ describe('the toolbar at narrow widths', () => {
   });
 
   it("the genre chips' row fades out at its end, so a chip cut at the edge reads as more to come", async () => {
-    pageWidth(318);
+    pageWidth(560);
     await openGuide();
     const chips = within(screen.getByTestId('guide-genres')).getByRole('group');
     expect(chips.className).toContain('overflow-x-auto');
     expect(chips.className).toContain('[mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)]');
+  });
+
+  it('a phone puts the genre filter on the time row as a picker, so two rows of controls lead the grid (review round 2)', async () => {
+    await preloadScopePickerList();
+    localStorage.removeItem('guide.genreFilter');
+    pageWidth(318);
+    await openGuide();
+    // No row of chips: the picker ends the time row.
+    expect(screen.queryByTestId('guide-genres')).toBeNull();
+    const time = screen.getByTestId('guide-time');
+    const picker = within(time).getByRole('combobox', { name: 'Filter by genre' });
+    expect(picker.textContent).toBe('All genres');
+    expect(picker.className).not.toContain('bg-fg');
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole('option', { name: 'Sports' }));
+    // Chosen: the trigger names the genre and is inverted, as a chosen chip is.
+    await waitFor(() => expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).textContent).toBe('Sports'));
+    expect(within(time).getByRole('combobox', { name: 'Filter by genre' }).className).toContain('bg-fg');
+    expect(localStorage.getItem('guide.genreFilter')).toBe('sports');
+    fireEvent.click(within(time).getByRole('combobox', { name: 'Filter by genre' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'All genres' }));
+    await waitFor(() => expect(localStorage.getItem('guide.genreFilter')).toBeNull());
   });
 
   it('a narrow page stacks the controls but keeps the day buttons', async () => {

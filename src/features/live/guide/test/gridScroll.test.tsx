@@ -105,7 +105,11 @@ describe('helpers', () => {
     // 5:46 PM: the track starts at 5:30, one slot in, and now sits 16 minutes into it.
     expect(nowScroll(slot + 16 * MINUTE, start, px, 812)).toBe(GRID_SLOT_PX);
     expect(nowScroll(slot + 16 * MINUTE, start, px, 0)).toBe(GRID_SLOT_PX); // not measured yet
-    expect(nowScroll(slot, start, px, 318)).toBe(GRID_SLOT_PX); // on the line itself
+    // Just past the slot line the now pill would be cut by the channel column (":02 PM"): the
+    // track starts on the half hour before, and the pill sits a slot and two minutes in.
+    expect(nowScroll(slot + 2 * MINUTE, start, px, 812)).toBe(0);
+    expect(nowScroll(slot, start, px, 318)).toBe(0); // on the line itself
+    expect(nowScroll(slot + 8 * MINUTE, start, px, 318)).toBe(GRID_SLOT_PX); // 40 px in: room for the pill
     // A track too narrow for the slot: a quarter of it before now instead, so now stays in view.
     expect(nowScroll(slot + 29 * MINUTE, start, px, 160)).toBe(Math.round(GRID_SLOT_PX + 29 * px - 40));
     // Before the window: never a negative scroll.
@@ -226,6 +230,11 @@ describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
     expect(sheet.className).toContain('bottom-0');
     const scrim = sheet.previousElementSibling as HTMLElement;
     expect(scrim.className).toContain('bg-scrim');
+    // In the overlay layer, not the page: in the page the mini player (later in the DOM, at the
+    // same z-index) covered the sheet and stayed bright over its scrim (review round 2).
+    expect(screen.getByTestId('epg-grid-page').contains(sheet)).toBe(false);
+    expect(sheet.closest('[data-portal-host]')).toBeTruthy();
+    expect(scrim.className).toContain('z-50');
     fireEvent.mouseDown(scrim);
     await waitFor(() => expect(screen.queryByTestId('program-popover')).toBeNull());
   });
@@ -269,6 +278,10 @@ describe('rows and windows without guide data (L1-guide-library-14, L1-perf-1)',
     expect(label.textContent).toBe('No guide data');
     expect(label.className).toContain('sticky');
     expect(label.style.insetInlineStart).toBe('220px');
+    // The band under it is opaque, so the now line drawn before the rows does not cross the label.
+    const band = screen.getAllByTestId('no-guide-band')[0]!;
+    expect(band.contains(label)).toBe(true);
+    expect(band.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
   });
 
   it('the no-guide notice floats over the grid and stays while the next window loads', async () => {

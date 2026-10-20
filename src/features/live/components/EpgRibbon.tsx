@@ -21,7 +21,6 @@ import {
   MINUTE,
   canCatchUp,
   cellTextMaxPx,
-  floorLocal,
   floorTo,
   formatClock,
   formatDay,
@@ -32,6 +31,7 @@ import {
   lookbackMs,
   minutesLeft,
   ms,
+  nowRestLeft,
   programProgress,
   programWhen,
   shiftPrograms,
@@ -46,6 +46,11 @@ import { ChannelLogo } from './ChannelLogo';
 import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;
+/**
+ * An hour label ("10:00 PM" at 11 px) and the now line's dot, in px: the timeline keeps this much
+ * before now when it rests, so the dot never sits under the label at the edge.
+ */
+export const RIBBON_NOW_LEAD_PX = 60;
 const AHEAD = 12 * HOUR;
 const LIST_ROW = 52;
 
@@ -570,16 +575,15 @@ function Timeline(
       if (!el) return;
       const w = el.clientWidth || 1200;
       // From the local half hour now is in, as the guide opens: the airing block and the first
-      // hour label start whole at the edge, not as a clipped sliver. A narrow ribbon that would
-      // push now past three quarters of it keeps a quarter before now instead.
-      const slotX = ((floorLocal(now, 30) - from) / MINUTE) * RIBBON_PX_PER_MIN;
-      const left = Math.max(0, nowX - slotX > w * 0.75 ? nowX - w * 0.25 : slotX);
+      // hour label start whole at the edge, not as a clipped sliver. Just past the half hour, the
+      // half hour before, so the now line's head is not under the first label at the edge.
+      const left = nowRestLeft(now, from, RIBBON_PX_PER_MIN, w, RIBBON_NOW_LEAD_PX);
       const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       el.scrollTo({ left: scrollLeftFor(left, rtl), behavior: smooth && !reduced ? 'smooth' : 'auto' });
       setView({ left, width: w });
       onRestEnd?.(from + ((left + w) / RIBBON_PX_PER_MIN) * MINUTE);
     },
-    [nowX, now, rtl, from, onRestEnd],
+    [now, rtl, from, onRestEnd],
   );
 
   useLayoutEffect(() => {

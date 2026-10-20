@@ -41,6 +41,11 @@ export interface CategorySidebarProps {
    * `hrefFor` like a group's and is `activeId` while open; they are not filtered and have no menu.
    */
   pinned?: readonly { id: string; label: string; icon: ReactNode }[];
+  /**
+   * A single group holds what "All" holds: leave its row and the filter out (Radio, whose
+   * playlists often file every station under one group), unless it is the open one.
+   */
+  hideLoneGroup?: boolean;
 }
 
 function linkClass(active: boolean): string {
@@ -68,11 +73,13 @@ export function CategorySidebar(props: CategorySidebarProps) {
   // Rows follow the UI scale, and compact density tightens them.
   const rowHeight = useRowHeight(ROW, ROW_SPACING);
 
+  const lone = !!props.hideLoneGroup && props.categories?.length === 1 && props.categories[0]!.id !== props.activeId;
   const visible = useMemo(() => {
+    if (lone) return [];
     const q = foldForFilter(filter.trim());
     const list = props.categories ?? [];
     return q ? list.filter((c) => foldForFilter(c.name).includes(q)) : list;
-  }, [props.categories, filter]);
+  }, [props.categories, filter, lone]);
   const allCount = useMemo(() => (props.categories ?? []).reduce((n, c) => n + c.itemCount, 0), [props.categories]);
 
   // The open group is in view on arrival, even when it is row 1500 of a virtualized list:
@@ -198,30 +205,32 @@ export function CategorySidebar(props: CategorySidebarProps) {
         <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>
         <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} />
       </div>
-      <div className="px-3 pb-2">
-        <SearchInput
-          size="sm"
-          value={filter}
-          onChange={(v) => {
-            setFilter(v);
-            setCursor(ALL);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape' && filter) {
-              e.preventDefault();
-              e.stopPropagation();
-              setFilter('');
-            } else if (e.key === 'ArrowDown' && visible.length > 0) {
-              // Down from the filter goes straight to the first match.
-              e.preventDefault();
-              e.stopPropagation();
-              moveTo(0);
-            }
-          }}
-          placeholder={t('filterGroups')}
-          label={t('filterGroups')}
-        />
-      </div>
+      {lone ? null : (
+        <div className="px-3 pb-2">
+          <SearchInput
+            size="sm"
+            value={filter}
+            onChange={(v) => {
+              setFilter(v);
+              setCursor(ALL);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && filter) {
+                e.preventDefault();
+                e.stopPropagation();
+                setFilter('');
+              } else if (e.key === 'ArrowDown' && visible.length > 0) {
+                // Down from the filter goes straight to the first match.
+                e.preventDefault();
+                e.stopPropagation();
+                moveTo(0);
+              }
+            }}
+            placeholder={t('filterGroups')}
+            label={t('filterGroups')}
+          />
+        </div>
+      )}
 
       {props.pinned?.map((p, k) => {
         const on = props.activeId === p.id;

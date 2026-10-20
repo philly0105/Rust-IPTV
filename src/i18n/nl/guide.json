@@ -76,5 +76,8 @@
   "shortcutDigits": "Naar een kanaal springen via het nummer",
   "resultCount_one": "{{count, number}} resultaat",
   "resultCount_other": "{{count, number}} resultaten",
-  "previewNext": "Hierna"
+  "previewNext": "Hierna",
+  "genreFilterOn": "Gefilterd op {{genre}}. Overeenkomende programma's: {{count, number}}",
+  "genreFilterOff": "Genrefilter uit",
+  "allGenres": "Alle genres"
 }

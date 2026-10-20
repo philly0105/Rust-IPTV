@@ -78,5 +78,8 @@
   "resultCount_few": "{{count, number}} результата",
   "resultCount_many": "{{count, number}} результатов",
   "resultCount_other": "{{count, number}} результата",
-  "previewNext": "Далее"
+  "previewNext": "Далее",
+  "genreFilterOn": "Фильтр: {{genre}}. Подходящих передач: {{count, number}}",
+  "genreFilterOff": "Фильтр по жанру выключен",
+  "allGenres": "Все жанры"
 }

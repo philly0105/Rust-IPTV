@@ -176,10 +176,13 @@ describe('L1-vod-6: watched ticks', () => {
     ]);
     const seen = await screen.findByRole('link', { name: /^Seen/ });
     expect(within(seen).getByTestId('poster-watched')).toBeTruthy();
-    expect(within(seen).queryByRole('progressbar')).toBeNull();
+    // hidden: true, so a drawn-only bar would still be found.
+    expect(within(seen).queryByRole('progressbar', { hidden: true })).toBeNull();
     expect(seen.getAttribute('aria-label')).not.toMatch(/40%/);
     const halfway = screen.getByRole('link', { name: /^Halfway/ });
-    expect(within(halfway).getByRole('progressbar')).toBeTruthy();
+    // The bar is drawn only: the link's name already says how far (round 2, aria-progressbar-name).
+    expect(halfway.getAttribute('aria-label')).toMatch(/40%/);
+    expect(within(halfway).getByRole('progressbar', { hidden: true }).getAttribute('aria-hidden')).toBe('true');
     expect(within(halfway).queryByTestId('poster-watched')).toBeNull();
   });
 

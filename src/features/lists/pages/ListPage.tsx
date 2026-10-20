@@ -36,6 +36,7 @@ import {
   IconButton,
   PlayerStage,
   RowSkeleton,
+  SourceMonogram,
   buttonClass,
   cn,
   displayChannelName,
@@ -471,18 +472,16 @@ export function ListPage() {
             onClick={toggleSidebar}
           />
           {composition.length > 1 ? (
-            // Where the list's channels come from: one chip per source, on one line that scrolls.
-            <ul
-              aria-label={t('sourcesLabel')}
-              className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto [scrollbar-width:none] [mask-image:linear-gradient(to_right,#000_85%,transparent)] rtl:[mask-image:linear-gradient(to_left,#000_85%,transparent)]"
-              data-testid="list-sources"
-            >
+            // Where the list's channels come from: each source's monogram (the rail's mark) with its
+            // count, so every source fits beside the tools; the name is spoken and shows on hover.
+            <ul aria-label={t('sourcesLabel')} className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1" data-testid="list-sources">
               {composition.map((s) => (
-                <li key={s.id} className="flex shrink-0 items-center gap-1.5 rounded-full border border-edge bg-surface-2 py-0.5 pe-2.5 ps-2 text-xs text-fg-muted">
-                  <span dir="auto" className="max-w-40 truncate">
+                <li key={s.id} title={`${s.name} · ${fmt.format(s.count)}`} className="flex shrink-0 items-center gap-1.5 text-caption text-fg-muted">
+                  <SourceMonogram name={s.name} className="size-5 rounded-xs text-2xs" />
+                  <span dir="auto" className="sr-only">
                     {s.name}
                   </span>
-                  <span className="tabular-nums text-fg-subtle">{fmt.format(s.count)}</span>
+                  <span className="tabular-nums">{fmt.format(s.count)}</span>
                 </li>
               ))}
             </ul>

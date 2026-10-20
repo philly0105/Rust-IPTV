@@ -40,7 +40,7 @@ import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Source, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, IconButton, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
@@ -1941,19 +1941,9 @@ const GuideToolbar = memo(function GuideToolbar({
           {GENRES.map((g) => {
             const on = genre === g;
             return (
-              <button
-                key={g}
-                type="button"
-                aria-pressed={on}
-                onClick={() => onGenre(on ? null : g)}
-                className={cn(
-                  'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-3 text-caption font-medium outline-none focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-                  on ? 'border-transparent bg-fg text-bg' : 'border-edge bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg',
-                )}
-              >
-                <span aria-hidden className="size-2 rounded-full" style={{ background: genreColor(g) }} />
+              <FilterChip key={g} pressed={on} dot={genreColor(g)} onClick={() => onGenre(on ? null : g)}>
                 {tg(`genre_${g}`)}
-              </button>
+              </FilterChip>
             );
           })}
         </div>

@@ -76,7 +76,7 @@ export function UpNextRail({
                   />
                   {fraction > 0 && (
                     <div className="pointer-events-none absolute inset-x-1 bottom-1">
-                      <ProgressBar value={fraction} max={1} size="xs" />
+                      <ProgressBar value={fraction} max={1} size="xs" tone="glass" decorative />
                     </div>
                   )}
                 </div>

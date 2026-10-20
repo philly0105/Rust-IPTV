@@ -8,7 +8,7 @@
  * shortcut registry and header store.
  */
 
-export { Button, EmptyState, ErrorState, IconButton, Page, Poster, ProgressBar, SearchInput, SegmentedControl, Select, Tabs, Toggle, Tooltip, buttonClass, cn, errorDescription, useToast } from '@/ui';
+export { Button, EmptyState, ErrorState, IconButton, Page, Poster, ProgressBar, SearchInput, SegmentedControl, Select, Tabs, Toggle, Tooltip, WatchedChip, buttonClass, cn, errorDescription, useToast } from '@/ui';
 export type { MenuAction } from '@/ui';
 export { useShell } from '@/shell/store';
 export { useShortcut } from '@/shell/shortcuts';

@@ -32,6 +32,7 @@
   --color-accent-hover: #ffc865;
   --color-accent-pressed: #e09a26;
   --color-accent-fg: #1b1204;
+  --color-accent-mark: #f5b544;
   --color-accent-solid: #f5b544;
   --color-accent-solid-hover: #ffc865;
   --color-accent-solid-pressed: #e09a26;
@@ -616,8 +617,9 @@ html[data-page-hidden] [class*='animate-shimmer']::after {
 }
 
 /*
- * The tuning tick: a short amber bar marking the active rail item or selected row. Selection is
- * this tick on the neutral bg-selected fill, never an amber wash (tokens.css).
+ * The tuning tick: a short amber bar marking the active rail item or selected row, in the mark
+ * tone (the light theme's text shade would draw it brown). Selection is this tick on the neutral
+ * bg-selected fill, never an amber wash (tokens.css).
  */
 @utility tuning-tick {
   position: relative;
@@ -630,8 +632,97 @@ html[data-page-hidden] [class*='animate-shimmer']::after {
     width: 3px;
     border-start-end-radius: 3px;
     border-end-end-radius: 3px;
-    background: var(--color-accent);
+    background: var(--color-accent-mark);
     box-shadow: 0 0 10px var(--color-glow);
+  }
+}
+
+/*
+ * The kit Slider (src/ui/Field.tsx) on a native range input. The part of the track up to the value
+ * (--slider-fill, set by Slider) is the accent's mark tone; the rest is the recessed surface step
+ * with the 3:1 control border, drawn as background layers so the border stops where the fill
+ * starts. The thumb is the solid accent with an outline in the mark tone (3:1 on a white panel
+ * in light, where the bright fill alone is 1.8:1) and a ring of the surface that lifts it off the
+ * fill. The fill follows the input's direction: a range runs from the right in RTL. Focus is the
+ * global :focus-visible outline around the whole control. Sizes in rem follow the UI scale; the
+ * thumb is 1rem, which the Appearance UI scale ticks assume.
+ */
+@utility slider {
+  --slider-track: calc(6rem / 15);
+  --slider-thumb: 1rem;
+  --slider-to: right;
+  appearance: none;
+  height: calc(20rem / 15);
+  margin: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  &:where(:dir(rtl)) {
+    --slider-to: left;
+  }
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+  &::-webkit-slider-runnable-track {
+    box-sizing: border-box;
+    height: var(--slider-track);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background:
+      linear-gradient(to var(--slider-to), var(--color-accent-mark) var(--slider-fill, 0%), transparent var(--slider-fill, 0%)) border-box,
+      linear-gradient(var(--color-surface-3), var(--color-surface-3)) padding-box,
+      linear-gradient(var(--color-border), var(--color-border)) border-box;
+  }
+  &::-moz-range-track {
+    box-sizing: border-box;
+    height: var(--slider-track);
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background:
+      linear-gradient(to var(--slider-to), var(--color-accent-mark) var(--slider-fill, 0%), transparent var(--slider-fill, 0%)) border-box,
+      linear-gradient(var(--color-surface-3), var(--color-surface-3)) padding-box,
+      linear-gradient(var(--color-border), var(--color-border)) border-box;
+  }
+  &::-webkit-slider-thumb {
+    appearance: none;
+    box-sizing: border-box;
+    width: var(--slider-thumb);
+    height: var(--slider-thumb);
+    /* Centred on the track: the thumb is laid out inside the track's 1px border. */
+    margin-top: calc((var(--slider-track) - var(--slider-thumb)) / 2 - 1px);
+    border: 2px solid var(--color-accent-mark);
+    border-radius: 999px;
+    background: var(--color-accent-solid);
+    box-shadow: 0 0 0 2px var(--color-surface), var(--elevation-1);
+  }
+  &::-moz-range-thumb {
+    box-sizing: border-box;
+    width: var(--slider-thumb);
+    height: var(--slider-thumb);
+    border: 2px solid var(--color-accent-mark);
+    border-radius: 999px;
+    background: var(--color-accent-solid);
+    box-shadow: 0 0 0 2px var(--color-surface), var(--elevation-1);
+  }
+  &:hover:not(:disabled)::-webkit-slider-thumb {
+    background: var(--color-accent-solid-hover);
+  }
+  &:hover:not(:disabled)::-moz-range-thumb {
+    background: var(--color-accent-solid-hover);
+  }
+  &:active:not(:disabled)::-webkit-slider-thumb {
+    background: var(--color-accent-solid-pressed);
+  }
+  &:active:not(:disabled)::-moz-range-thumb {
+    background: var(--color-accent-solid-pressed);
+  }
+  /* Forced colours drop the gradients: hand the control back to the system. */
+  @media (forced-colors: active) {
+    appearance: auto;
+    &::-webkit-slider-thumb {
+      appearance: auto;
+    }
   }
 }
 

@@ -6,7 +6,7 @@
  * on a row of the list view.
  */
 
-import { Check, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -15,7 +15,7 @@ import { snapshotTitle } from '@/lib/title';
 import { joinList } from '@/shell/dashboard/cards';
 import { CARD_ART } from '@/ui/card';
 
-import { IconButton, Poster, ProgressBar, cn } from '../deps';
+import { IconButton, Poster, ProgressBar, WatchedChip, cn } from '../deps';
 
 /** Caption under the poster: the title and one line of facts. */
 export const CARD_CAPTION_HEIGHT = 52;
@@ -56,14 +56,12 @@ function MyListCardImpl({ entry, busy, progress, progressLabel, onRemove }: MyLi
       <div className={CARD_ART}>
         {/* The frame's ring is the edge; the poster's own hairline would double it. */}
         <Poster src={snapshot.posterUrl} sourceId={ref.sourceId} alt="" label={title} aspect="poster" className="after:hidden" />
+        {/* The kit's watched tick in the posters' corner; it gives way to the remove button on hover. */}
         {watched && (
-          <span
-            className="absolute start-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-glass-strong px-1.5 py-0.5 text-xs font-medium text-on-glass"
-            data-testid="mylist-watched"
-          >
-            <Check aria-hidden size={12} strokeWidth={2.75} />
-            {t('watched')}
-          </span>
+          <WatchedChip
+            testId="mylist-watched"
+            className="pointer-events-none absolute end-1.5 top-1.5 pointer-fine:group-hover/card:opacity-0 pointer-fine:in-focus-visible:opacity-0 motion-safe:transition-opacity"
+          />
         )}
         {progress !== undefined && progress > 0 && (
           <ProgressBar value={Math.round(progress * 100)} max={100} size="xs" tone="glass" className="absolute inset-x-2 bottom-2 w-auto" label={progressLabel} />

@@ -9,7 +9,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
-import { Button, cn, IconButton, LivePill, Skeleton, TEXT_LINK, Tooltip, useImageChain, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { Button, cn, IconButton, LivePill, SegmentedControl, Skeleton, TEXT_LINK, Tooltip, useImageChain, useListVirtualizer, useToast, errorDescription } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -248,7 +248,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
               {details ? (
                 // The airing programme's progress; the row keeps its height for the others.
                 <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full max-w-sm overflow-hidden rounded-full bg-surface-3 md:block', shownWhen !== 'now' && 'md:invisible')}>
-                  <span className="absolute inset-y-0 start-0 rounded-full bg-accent" style={{ width: `${shownWhen === 'now' ? programProgress(shown, now) * 100 : 0}%` }} />
+                  <span className="absolute inset-y-0 start-0 rounded-full bg-accent-mark" style={{ width: `${shownWhen === 'now' ? programProgress(shown, now) * 100 : 0}%` }} />
                 </span>
               ) : null}
               {shown.description && !details ? (
@@ -283,24 +283,16 @@ export function EpgRibbon(props: EpgRibbonProps) {
             </Button>
           </Tooltip>
         ) : null}
-        <div role="group" aria-label={t('guideView')} className="flex rounded-md border border-edge bg-surface-2 p-0.5">
-          <IconButton
-            size="sm"
-            label={t('timelineView')}
-            pressed={mode === 'timeline'}
-            className={mode === 'timeline' ? 'bg-raised text-fg shadow-1' : ''}
-            icon={<ChartGantt className="size-4" />}
-            onClick={() => void setMode('timeline')}
-          />
-          <IconButton
-            size="sm"
-            label={t('listView')}
-            pressed={mode === 'list'}
-            className={mode === 'list' ? 'bg-raised text-fg shadow-1' : ''}
-            icon={<LayoutList className="size-4" />}
-            onClick={() => void setMode('list')}
-          />
-        </div>
+        <SegmentedControl<Mode>
+          size="sm"
+          label={t('guideView')}
+          value={mode}
+          onChange={(m) => void setMode(m)}
+          options={[
+            { value: 'timeline', label: t('timelineView'), content: <ChartGantt aria-hidden className="size-4" /> },
+            { value: 'list', label: t('listView'), content: <LayoutList aria-hidden className="size-4" /> },
+          ]}
+        />
         {props.guideHref ? (
           <Tooltip content={t('openGuide')} describe={false}>
             <Link
@@ -351,7 +343,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
         <IconButton size="sm" label={t('showRibbon')} aria-expanded={false} icon={<ChevronDown className="size-4" />} onClick={() => setPhoneOpen(true)} />
         {shown && shownWhen === 'now' ? (
           <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-surface-3">
-            <span className="block h-full bg-accent" style={{ width: `${programProgress(shown, now) * 100}%` }} />
+            <span className="block h-full bg-accent-mark" style={{ width: `${programProgress(shown, now) * 100}%` }} />
           </span>
         ) : null}
       </div>
@@ -753,7 +745,7 @@ const TimelineBlock = memo(function TimelineBlock({
     >
       {block.when === 'now' ? (
         <span aria-hidden className="absolute start-0 end-0 bottom-0 h-0.5 bg-surface-3">
-          <span className="block h-full bg-accent" style={{ width: `${progress * 100}%` }} />
+          <span className="block h-full bg-accent-mark" style={{ width: `${progress * 100}%` }} />
         </span>
       ) : null}
       {/* A show that began before the visible edge keeps its title in view: the text sticks 8 px
@@ -843,7 +835,7 @@ function ProgramList(props: ViewProps) {
                   </span>
                   {when === 'now' ? (
                     <span className="mt-1 h-[3px] w-full max-w-48 overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                      <span className="block h-full bg-accent" style={{ width: `${programProgress(p, now) * 100}%` }} />
+                      <span className="block h-full bg-accent-mark" style={{ width: `${programProgress(p, now) * 100}%` }} />
                     </span>
                   ) : p.description ? (
                     <span dir="auto" className="truncate text-match-parent text-xs text-fg-muted">

@@ -6,7 +6,7 @@
 export { cn } from './cn';
 export { Button, IconButton, TOUCH_TARGET, buttonClass } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant, IconButtonProps } from './Button';
-export { Checkbox, Input, Radio, RadioGroup, SearchInput, Select, Switch, Textarea, Toggle, fieldClass } from './Field';
+export { Checkbox, Input, Radio, RadioGroup, SearchInput, Select, Slider, Switch, Textarea, Toggle, fieldClass } from './Field';
 export type {
   CheckboxProps,
   InputProps,
@@ -16,12 +16,13 @@ export type {
   SearchInputProps,
   SelectOption,
   SelectProps,
+  SliderProps,
   SwitchProps,
   TextareaProps,
   ToggleProps,
 } from './Field';
 export { SEGMENT_TRACK, SegmentedControl, segmentClass } from './Segmented';
-export type { SegmentedControlProps, SegmentedOption, SegmentedTone } from './Segmented';
+export type { SegmentedControlProps, SegmentedOption, SegmentedSize, SegmentedTone } from './Segmented';
 export { BackButton, Page, PageHeader, SectionHeader } from './Page';
 export { BrandMark } from './BrandMark';
 export type { BrandMarkProps } from './BrandMark';
@@ -41,8 +42,8 @@ export { useListVirtualizer } from './virtualizer';
 export type { GridAspect, VirtualGridProps } from './VirtualGrid';
 export { ToastProvider, ToastViewport, dismissToast, focusToasts, toast, useToast, useToastStore } from './Toast';
 export type { ToastOptions, ToastRecord, ToastVariant } from './Toast';
-export { Badge, Kbd, LivePill, MetaLine, ProgressBar, TEXT_LINK, comboKeys } from './Misc';
-export type { BadgeProps, BadgeVariant, KbdProps, LivePillProps, MetaLineProps, ProgressBarProps } from './Misc';
+export { Badge, FilterChip, Kbd, LivePill, MetaLine, ProgressBar, TEXT_LINK, WatchedChip, comboKeys, filterChipClass } from './Misc';
+export type { BadgeProps, BadgeVariant, FilterChipProps, KbdProps, LivePillProps, MetaLineProps, ProgressBarProps, WatchedChipProps } from './Misc';
 export { Poster, PosterWidthContext, hueOf, initialsOf } from './Poster';
 export type { PosterAspect, PosterProps } from './Poster';
 export { SourceMonogram } from './SourceMonogram';

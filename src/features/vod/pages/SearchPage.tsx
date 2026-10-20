@@ -53,7 +53,7 @@ import {
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { Badge, Button, EmptyState, ErrorState, IconButton, Page, Poster, SectionHeader, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, Page, Poster, SectionHeader, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -572,25 +572,12 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   );
 }
 
-/** A source filter pill: one line however long the name (it truncates, the tooltip has it all). */
+/** A source filter chip (the kit's): one line however long the name (it truncates, the native title has it all). */
 function FacetChip({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count?: number | string }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      title={label}
-      className={cn(
-        'inline-flex h-8 max-w-[min(100%,16rem)] items-center gap-2 rounded-full border px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus',
-        // A chosen filter is neutral (inverted), so amber stays on the actions (DS amber rules).
-        active ? 'border-fg bg-fg text-bg' : 'border-transparent bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg',
-      )}
-    >
-      <span dir="auto" className="min-w-0 truncate">
-        {label}
-      </span>
-      {count !== undefined && <span className="tabular shrink-0 text-xs opacity-80">{count}</span>}
-    </button>
+    <FilterChip pressed={active} onClick={onClick} title={label} count={count} className="max-w-[min(100%,16rem)]">
+      {label}
+    </FilterChip>
   );
 }
 

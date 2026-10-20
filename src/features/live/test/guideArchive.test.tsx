@@ -25,7 +25,7 @@ import {
 import { type CatchupChannel, resolveM3uCatchupUrl } from '../lib/catchup';
 import { HOUR, MINUTE } from '../lib/epgTime';
 import { hasAiring, markFromProvider, needsFallback, shortEpgEnabled } from '../lib/shortEpg';
-import { recorded } from './fakes';
+import { lastHeader, recorded } from './fakes';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
 configure({ asyncUtilTimeout: 10_000 });
@@ -447,7 +447,7 @@ describe('ArchivePage', () => {
     expect(tabs[1]?.getAttribute('aria-selected')).toBe('true');
     expect(document.activeElement).toBe(tabs[1]);
     // Yesterday has no XMLTV: the panel's archive table fills it, marked as the provider's.
-    expect(await screen.findByText('Old match')).toBeTruthy();
+    await waitFor(() => expect(within(screen.getByTestId('archive-programs')).getByText('Old match')).toBeTruthy());
     expect(screen.getByText("These programmes come from the provider's own guide.")).toBeTruthy();
   });
 
@@ -513,5 +513,99 @@ describe('ArchivePage', () => {
     };
     renderAt('/live/archive/src1/c0', ROUTE);
     expect(await screen.findByText('Channel not found')).toBeTruthy();
+  });
+});
+
+describe('ArchivePage, review round 2', () => {
+  const NOW = new Date(2026, 9, 12, 15, 30).getTime();
+  const today = dayStart(NOW);
+  const ROUTE = [{ path: '/live/archive/:sourceId/:channelId', element: <ArchivePage /> }];
+
+  beforeAll(() => installDomStubs());
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
+    for (const k of Object.keys(rpcMock.handlers)) delete rpcMock.handlers[k];
+    rpcMock.calls.length = 0;
+    recorded.playSource.length = 0;
+    rpcMock.handlers['settings.get'] = () => settings();
+    rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'xtream', name: 'Panel' });
+    rpcMock.handlers['catalog.item'] = () => ch({ archive: { enabled: true, durationHours: 30 } });
+    rpcMock.handlers['epg.programs'] = (a) => {
+      const from = new Date((a as { from: string }).from).getTime();
+      if (from !== today) return [];
+      return [
+        { ...program('Morning show', NOW - 3 * HOUR, NOW - 2 * HOUR), description: 'An expedition to the most remote corners of the planet.' },
+        { ...program('Matinee', NOW - 30 * MINUTE, NOW + 30 * MINUTE), description: 'A film in the afternoon.' },
+        { ...program('Late film', NOW + 2 * HOUR, NOW + 4 * HOUR), description: 'Later tonight.' },
+      ];
+    };
+    rpcMock.handlers['catchup.programs'] = () => [];
+    rpcMock.handlers['epg.shortEpg'] = () => [];
+    rpcMock.handlers['xtream.catchupUrl'] = () => ({ url: 'http://arc/x.ts', kind: 'mpegts', title: 'x', isLive: false, isRadio: false });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("a past row's revealed action and Download float over its end, so its description keeps the row's width", async () => {
+    renderAt('/live/archive/src1/c0', ROUTE);
+    const list = await screen.findByTestId('archive-programs');
+    const past = within(list).getAllByRole('listitem')[0]!;
+    const floating = within(past).getByTestId('archive-row-actions');
+    // Out of the row button's flow, laid over its end (in the flow only on touch).
+    expect(floating.className.split(/\s+/)).toEqual(expect.arrayContaining(['absolute', 'end-2', 'opacity-0', 'pointer-coarse:static']));
+    expect(within(floating).getByText('Play from catch-up')).toBeTruthy();
+    expect(within(floating).getByTestId('archive-download')).toBeTruthy();
+    const row = past.querySelector<HTMLButtonElement>('button[data-state="playable"]')!;
+    expect(row.contains(floating)).toBe(false);
+    expect(within(row).getByTestId('archive-description').className).toContain('line-clamp-2');
+    // A press on the floating label plays the row, as the row itself does.
+    fireEvent.click(within(floating).getByText('Play from catch-up'));
+    await waitFor(() => expect(recorded.playSource).toHaveLength(1));
+  });
+
+  it("a programme that cannot play steps back as a whole: its description is no brighter than its title", async () => {
+    renderAt('/live/archive/src1/c0', ROUTE);
+    const list = await screen.findByTestId('archive-programs');
+    const future = within(list).getAllByRole('button').find((b) => b.getAttribute('data-state') === 'future')!;
+    expect(future.className).toContain('text-fg-subtle');
+    const desc = within(future).getByTestId('archive-description');
+    expect(desc.className).toContain('text-fg-subtle');
+    expect(desc.className).not.toContain('text-fg-muted');
+    // A playable row keeps the muted tone under its brighter title.
+    const past = within(list).getAllByRole('button').find((b) => b.getAttribute('data-state') === 'playable')!;
+    expect(within(past).getByTestId('archive-description').className).toContain('text-fg-muted');
+  });
+
+  it('shows the programme the cursor is on under the player, with what a press does, and follows the cursor', async () => {
+    rpcMock.handlers['downloads.start'] = () => ({ id: 1 });
+    renderAt('/live/archive/src1/c0', ROUTE);
+    const details = await screen.findByTestId('archive-details');
+    // It opens on the airing programme, like the list.
+    expect(within(details).getByRole('heading', { name: 'Matinee' })).toBeTruthy();
+    expect(within(details).getByTestId('archive-details-play').textContent).toBe('Play from start');
+    expect(within(details).queryByTestId('archive-details-download')).toBeNull();
+    const rows = within(screen.getByTestId('archive-programs'))
+      .getAllByRole('button')
+      .filter((b) => b.hasAttribute('data-state'));
+    rows[0]!.focus();
+    await waitFor(() => expect(within(details).getByRole('heading', { name: 'Morning show' })).toBeTruthy());
+    expect(within(details).getByText('An expedition to the most remote corners of the planet.').className).toContain('line-clamp-3');
+    expect(within(details).getByTestId('archive-details-play').textContent).toBe('Play from catch-up');
+    fireEvent.click(within(details).getByTestId('archive-details-download'));
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'downloads.start')).toBe(true));
+    fireEvent.click(within(details).getByTestId('archive-details-play'));
+    await waitFor(() => expect(recorded.playSource).toHaveLength(1));
+    expect(recorded.playSource[0]).toMatchObject({ subtitle: 'Morning show', isLive: false });
+  });
+
+  it('names the channel once: the header title, with the archive reach and the source as its subtitle', async () => {
+    renderAt('/live/archive/src1/c0', ROUTE);
+    await screen.findByTestId('archive-programs');
+    expect(lastHeader()).toMatchObject({ title: 'Channel 0', subtitle: 'Catch-up: 2 days · Panel' });
+    // The content keeps the logo, what airs now and Watch live, not the name again.
+    expect(screen.getByTestId('archive-airing').textContent).toBe('Now: Matinee · 30 min left');
+    expect(screen.queryByText('Channel 0', { selector: 'p' })).toBeNull();
   });
 });

@@ -74,5 +74,6 @@
   "noLiveChannelsHint": "映画やシリーズしかないため、番組表は空です。ライブTVのあるソースを選んでください。",
   "openSourceGuide": "{{name}} を開く",
   "shortcutDigits": "番号でチャンネルへ移動",
-  "resultCount_other": "{{count, number}}件の結果"
+  "resultCount_other": "{{count, number}}件の結果",
+  "previewNext": "次"
 }

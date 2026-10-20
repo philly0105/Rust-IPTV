@@ -129,7 +129,8 @@ describe('Live list: place kept on return', () => {
     cleanup();
     renderAt('/s/src1/live', ROUTE);
     await screen.findByText('Channel 200');
-    expect(screen.queryByText('Channel 0')).toBeNull();
+    // The list's rows (the idle card above may name the cursor's channel).
+    expect(within(screen.getByTestId('channel-list')).queryByText('Channel 0')).toBeNull();
   });
 
   it('Live and Radio on the same source keep separate places', async () => {

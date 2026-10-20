@@ -74,5 +74,6 @@
   "noLiveChannelsHint": "영화나 시리즈만 있어 가이드가 비어 있습니다. 라이브 TV가 있는 소스를 고르세요.",
   "openSourceGuide": "{{name}} 열기",
   "shortcutDigits": "번호로 채널 이동",
-  "resultCount_other": "결과 {{count, number}}개"
+  "resultCount_other": "결과 {{count, number}}개",
+  "previewNext": "다음"
 }

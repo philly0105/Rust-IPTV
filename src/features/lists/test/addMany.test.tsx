@@ -20,6 +20,8 @@ const rpc = h.createRpcMock();
 rpcMock.current = rpc;
 const { ListsDialogHost } = await import('../host');
 await Promise.all([import('../dialogs/AddGroupDialog'), import('../dialogs/AddChannelsDialog')]);
+// The scope picker's popover list is its own chunk (SH-10): in before the tests open it.
+await (await import('@/features/live/components/ScopePicker')).preloadScopePickerList();
 const { openAddChannels, openAddGroupToList } = await import('../store');
 const { loadGroupChannels } = await import('../dialogs/AddGroupDialog');
 

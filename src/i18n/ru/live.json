@@ -245,5 +245,6 @@
   "pickerShow": "Показать",
   "filterSources": "Фильтр источников",
   "recentStations": "Недавно слушали",
-  "playNamed": "Включить {{name}}"
+  "playNamed": "Включить {{name}}",
+  "highlightedChannel": "Выбран"
 }

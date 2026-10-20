@@ -233,5 +233,6 @@
   "pickerShow": "Göster",
   "filterSources": "Kaynakları filtrele",
   "recentStations": "Son dinlenenler",
-  "playNamed": "{{name}} oynat"
+  "playNamed": "{{name}} oynat",
+  "highlightedChannel": "Seçili"
 }

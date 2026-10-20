@@ -79,5 +79,6 @@
   "resultCount_two": "نتيجتان",
   "resultCount_few": "{{count, number}} نتائج",
   "resultCount_many": "{{count, number}} نتيجة",
-  "resultCount_other": "{{count, number}} نتيجة"
+  "resultCount_other": "{{count, number}} نتيجة",
+  "previewNext": "التالي"
 }

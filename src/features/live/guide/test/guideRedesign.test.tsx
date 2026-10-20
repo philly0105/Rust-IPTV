@@ -12,6 +12,7 @@ import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, PREVIEW_HOVER_MS, slotLabels } from '../../components/EpgGridPage';
+import { preloadScopePickerList } from '../../components/ScopePicker';
 import { formatClock, HOUR, MINUTE } from '../../lib/epgTime';
 import { genreOf } from '../genre';
 import { __resetGuideSourceForTests } from '../lastSource';
@@ -63,9 +64,11 @@ const media = (q: string) => ({
 
 // The first guide a file renders pays for the module graph: slower than the default 5 s here.
 vi.setConfig({ testTimeout: 20_000 });
-beforeAll(() => {
+beforeAll(async () => {
   installDomStubs();
   configure({ asyncUtilTimeout: 4000 });
+  // The pickers' popover list is its own chunk (SH-10): in before the tests open one.
+  await preloadScopePickerList();
 });
 beforeEach(() => {
   rpc.reset();
@@ -384,8 +387,29 @@ describe('the preview band and the pointer (LG-06)', () => {
     vi.spyOn(window, 'matchMedia').mockImplementation(media as never);
     renderGuide({ path: '/epg?source=src1', routes: GRID });
     const band = await screen.findByTestId('guide-preview');
-    expect(band.className).toContain('h-[13.5rem]');
-    await waitFor(() => expect(within(band).getByTestId('guide-preview-title').className).toContain('shrink-0'));
-    expect(within(band).getByTestId('guide-preview-actions').className).toContain('shrink-0');
+    // A third shorter than it was (13.5rem): the actions sit at the end of the title's line.
+    expect(band.className).toContain('h-[10.5rem]');
+    const row = await within(band).findByTestId('guide-preview-title-row');
+    expect(row.className).toContain('shrink-0');
+    expect(row.contains(within(band).getByTestId('guide-preview-title'))).toBe(true);
+    const actions = within(band).getByTestId('guide-preview-actions');
+    expect(row.contains(actions)).toBe(true);
+    expect(actions.className).toContain('shrink-0');
+  });
+
+  it('has one Watch button: the picture is the press target, out of the tab order, and says what comes next', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(media as never);
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const band = await screen.findByTestId('guide-preview');
+    await waitFor(() => expect(within(band).getByTestId('guide-preview-title').textContent).toBe('c0 P0'));
+    // The details' Watch live is the band's only Watch button in the tab order.
+    const tabbable = within(band)
+      .getAllByRole('button')
+      .filter((b) => b.tabIndex >= 0 && /watch/i.test(b.getAttribute('aria-label') ?? b.textContent ?? ''));
+    expect(tabbable.map((b) => b.textContent)).toEqual(['Watch live']);
+    const picture = within(band).getByTestId('guide-preview-picture');
+    expect(picture.tabIndex).toBe(-1);
+    expect(picture.getAttribute('aria-label')).toBe('Watch Channel 0');
+    expect(within(band).getByTestId('guide-preview-next').textContent).toContain('c0 P1');
   });
 });

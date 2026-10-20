@@ -76,5 +76,6 @@
   "shortcutDigits": "Aller à une chaîne par son numéro",
   "resultCount_one": "{{count, number}} résultat",
   "resultCount_many": "{{count, number}} de résultats",
-  "resultCount_other": "{{count, number}} résultats"
+  "resultCount_other": "{{count, number}} résultats",
+  "previewNext": "Ensuite"
 }

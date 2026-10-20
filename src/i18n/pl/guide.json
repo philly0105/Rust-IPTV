@@ -77,5 +77,6 @@
   "resultCount_one": "{{count, number}} wynik",
   "resultCount_few": "{{count, number}} wyniki",
   "resultCount_many": "{{count, number}} wyników",
-  "resultCount_other": "{{count, number}} wyniku"
+  "resultCount_other": "{{count, number}} wyniku",
+  "previewNext": "Następnie"
 }

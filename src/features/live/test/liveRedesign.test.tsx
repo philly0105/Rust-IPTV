@@ -182,7 +182,7 @@ describe('channel rows (LG-03, LG-04)', () => {
     expect(actions.className).toContain('pointer-coarse:opacity-100');
     expect(actions.className).toContain('group-hover/row:opacity-100');
     // Only the ⋮ in the row's flow on touch: the star is in its menu, and the title keeps the room.
-    expect(within(actions).getByRole('button', { name: 'Remove from favorites' }).className).toContain('pointer-coarse:hidden');
+    expect(within(actions).getByRole('button', { name: 'Favorite', pressed: true }).className).toContain('pointer-coarse:hidden');
     expect(within(actions).getByRole('button', { name: 'Channel options' }).className).not.toContain('pointer-coarse:hidden');
     expect(screen.getByTestId('row-favorite')).toBeTruthy();
     expect(screen.getByRole('button', { name: /^4, Channel 3, Favorite/ })).toBeTruthy();
@@ -346,17 +346,39 @@ describe('the ribbon (LG-02, LG-06, LG-17)', () => {
     expect((screen.getByTestId('ribbon-header').firstElementChild as HTMLElement).className).toContain('@max-[26rem]/now:basis-full');
   });
 
-  it('lists what comes next under the timeline, and a row puts it in the header', async () => {
-    ribbon();
+  it('lists what comes after the timeline under it, and a row puts it in the header', async () => {
+    // jsdom has no layout: the timeline counts as 1200 px (5 h) wide, resting on the half hour
+    // now is in, so it shows up to 5 h ahead. Up next starts after that: no programme shows twice.
+    rpcMock.handlers['epg.programs'] = () => [
+      ...list,
+      program('Late Movie', now + 5 * HOUR, now + 6 * HOUR + 30 * MINUTE),
+      program('Night Owl', now + 6 * HOUR + 30 * MINUTE, now + 7 * HOUR),
+    ];
+    renderAt('/', [
+      { path: '/', element: <EpgRibbon channel={makeChannel(1)} sourceKind="xtream" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} details /> },
+    ]);
     const next = await screen.findByTestId('up-next');
+    await screen.findByRole('button', { name: /^Afternoon Film/ });
     const rows = within(next).getAllByRole('listitem');
     expect(rows.map((r) => within(r).getAllByRole('button')[0]!.textContent)).toEqual([
-      expect.stringContaining('Afternoon Film'),
-      expect.stringContaining('Evening News'),
+      expect.stringContaining('Late Movie'),
+      expect.stringContaining('Night Owl'),
     ]);
+    expect(within(next).queryByText('Afternoon Film')).toBeNull();
+    expect(within(next).queryByText('Evening News')).toBeNull();
     expect(within(rows[0]!).getByText('90 min')).toBeTruthy();
     fireEvent.click(within(rows[1]!).getAllByRole('button')[0]!);
-    expect(title()).toBe('Evening News');
+    expect(title()).toBe('Night Owl');
+  });
+
+  it('leaves Up next out in the list view, which lists every programme already', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ epgViewMode: 'list' });
+    rpcMock.handlers['epg.programs'] = () => [...list, program('Late Movie', now + 4 * HOUR, now + 5 * HOUR)];
+    renderAt('/', [
+      { path: '/', element: <EpgRibbon channel={makeChannel(1)} sourceKind="xtream" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} details /> },
+    ]);
+    await screen.findByRole('list', { name: 'List' });
+    expect(screen.queryByTestId('up-next')).toBeNull();
   });
 
   it('shows as many Up next rows as fit, none in a short column', () => {

@@ -76,5 +76,6 @@
   "shortcutDigits": "Vai a un canale tramite il suo numero",
   "resultCount_one": "{{count, number}} risultato",
   "resultCount_many": "{{count, number}} di risultati",
-  "resultCount_other": "{{count, number}} risultati"
+  "resultCount_other": "{{count, number}} risultati",
+  "previewNext": "Dopo"
 }

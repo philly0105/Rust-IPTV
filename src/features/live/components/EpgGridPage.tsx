@@ -13,6 +13,7 @@ import {
   PanelTopOpen,
   Play,
   Radio,
+  Search,
   Star,
   Tv,
   X,
@@ -32,7 +33,7 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 
@@ -41,6 +42,7 @@ import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Source, type SourceKind } from '@/api/types';
 
 import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
+import { portalContainer } from '@/ui/portal';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
@@ -168,11 +170,17 @@ export function extendDirection(x: number, dx: number, max: number): 1 | -1 | 0 
 export const GRID_CHANNEL_COMPACT = 72;
 
 /**
- * How far into the visible track (`view` px wide) the now line sits when the guide opens: one
- * slot (`slotPx`) of the past, but never more than a quarter of a narrow track (0: not measured yet).
+ * Where the track scrolls to when the guide opens on now (or Now is pressed), in px from the
+ * window's `start`: the start of the local half hour now is in, so the visible track begins on a
+ * slot line, its first label is whole, and rows start with whole cells instead of 60 px slivers.
+ * Now then sits up to one slot in. Should that be more than three quarters of a narrow track
+ * (`view` px wide; 0: not measured yet), the track keeps a quarter of it before now instead.
  */
-export function nowLead(view: number, slotPx: number = GRID_SLOT_PX): number {
-  return view > 0 ? Math.min(slotPx, Math.round(view / 4)) : slotPx;
+export function nowScroll(now: number, start: number, pxPerMin: number, view: number): number {
+  const nowX = ((now - start) / MINUTE) * pxPerMin;
+  const slotX = ((floorLocal(now, GRID_SLOT_MIN) - start) / MINUTE) * pxPerMin;
+  if (view > 0 && nowX - slotX > view * 0.75) return Math.max(0, Math.round(nowX - view / 4));
+  return Math.max(0, slotX);
 }
 
 /** Portal programmes per row for a window: 12 for 6 h, more for a longer window. */
@@ -222,6 +230,12 @@ export const GUIDE_BAR_DAYS_PX = 440;
 export function guideBarLayout(width: number): 'full' | 'stacked' | 'phone' {
   if (!(width > 0) || width >= GUIDE_BAR_STACK_PX) return 'full';
   return width >= GUIDE_BAR_DAYS_PX ? 'stacked' : 'phone';
+}
+
+/** The programme after `program` in a channel's sorted list, if the guide has it. */
+function nextProgram(list: readonly EpgProgram[] | undefined, program: EpgProgram): EpgProgram | undefined {
+  const end = ms(program.end);
+  return list?.find((p) => ms(p.start) >= end);
 }
 
 /** Half an hour before the current local :00/:30 slot (local, so +5:45 zones get :00/:30 columns too). */
@@ -460,13 +474,17 @@ export function EpgGridPage() {
     setGenreFilterState(g);
   });
   // CB-GUIDE-PREVIEW: from md up, on a window tall enough to keep a useful grid under the band.
+  // Until the user opens or hides it, it is open only from 1000 px tall: on a laptop's 900 it
+  // cost the grid three or four rows.
   const bandWide = useMediaQuery('(min-width: 768px)');
   const bandTall = useMediaQuery('(min-height: 700px)');
+  const bandRoomy = useMediaQuery('(min-height: 1000px)');
   const bandFits = bandWide && bandTall;
-  const [previewOpen, setPreviewOpenState] = useState(storedPreviewOpen);
+  const [previewChoice, setPreviewChoice] = useState(storedPreviewOpen);
+  const previewOpen = previewChoice ?? bandRoomy;
   const togglePreview = useStable(() => {
     storePreviewOpen(!previewOpen);
-    setPreviewOpenState(!previewOpen);
+    setPreviewChoice(!previewOpen);
   });
   const showPreview = bandFits && previewOpen;
 
@@ -831,8 +849,7 @@ export function EpgGridPage() {
     } else if (moved === 0 && zoomedFrom !== pxPerMin) {
       el.scrollLeft = scrollLeftFor((scrollX.current * pxPerMin) / zoomedFrom, rtl);
     } else {
-      const nowX = ((now - start) / MINUTE) * pxPerMin;
-      el.scrollLeft = scrollLeftFor(now > start && now < end ? Math.max(0, nowX - nowLead(el.clientWidth - channelCol, slotPx)) : 0, rtl);
+      el.scrollLeft = scrollLeftFor(now > start && now < end ? nowScroll(now, start, pxPerMin, el.clientWidth - channelCol) : 0, rtl);
     }
     scrollX.current = scrollStart(el);
     viewWidth.current = el.clientWidth;
@@ -1089,6 +1106,8 @@ export function EpgGridPage() {
   const openJump = useCallback(() => setJumpOpen(true), []);
   const closeJump = useCallback(() => setJumpOpen(false), []);
   const searchRef = useRef<HTMLInputElement>(null);
+  // A phone's toolbar folds the search field into a button on the pickers' row until it is used.
+  const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [highlight, setHighlight] = useState<ItemKey | null>(null);
   const guideArea = tg('shortcutArea');
@@ -1096,6 +1115,8 @@ export function EpgGridPage() {
     '/',
     (e) => {
       e.preventDefault();
+      // Folded on a phone: unfold it, and it takes focus as it opens.
+      if (!searchRef.current) setPhoneSearchOpen(true);
       searchRef.current?.focus();
       searchRef.current?.select();
     },
@@ -1402,6 +1423,8 @@ export function EpgGridPage() {
         offsetMinutes={prefs.epgOffsetMinutes}
         stripCountryPrefix={prefs.stripCountryPrefix}
         searchRef={searchRef}
+        phoneSearchOpen={phoneSearchOpen}
+        onPhoneSearchOpen={setPhoneSearchOpen}
         onQuery={setQuery}
         onShift={shift}
         onShiftDay={shiftDay}
@@ -1421,6 +1444,7 @@ export function EpgGridPage() {
         <GuidePreview
           channel={previewSubject?.channel}
           program={previewSubject?.program}
+          next={previewSubject ? nextProgram(programsFor(previewSubject.channel), previewSubject.program) : undefined}
           now={now}
           kind={previewSubject ? ownKind(previewSubject.channel) : undefined}
           stripPrefix={prefs.stripCountryPrefix}
@@ -1538,10 +1562,10 @@ export function EpgGridPage() {
               />
 
               {nowInWindow ? (
-                // Under the sticky channel column (z-10) and time header (z-20), and under the cells'
-                // text too: drawn before the rows, it shows through the airing cell's tinted
-                // background and gaps without striking through its title (L3-visual-3).
-                // Its head is the time pill in the ruler (GuideHeader), LG-18.
+                // Under the sticky channel column (z-10) and time header (z-20), and under the cells:
+                // drawn before the rows, it shows only in the gutters between them, and the opaque
+                // airing cell carries its stub at the foot, so it never strikes through a title or
+                // a time (L3-visual-3). Its head is the time pill in the ruler (GuideHeader), LG-18.
                 <div
                   aria-hidden
                   data-testid="epg-now-line"
@@ -1679,10 +1703,18 @@ export function EpgGridPage() {
 const MemoJumpToDialog = memo(JumpToDialog);
 const MemoMappingDialog = memo(EpgMappingDialog);
 
-/** Half the now pill's width and a margin, in px: a slot label closer than this to now hides under it. */
-const NOW_PILL_REACH = 36;
-/** About the widest ruler label ("12:30 PM" at 12 px) with its padding. */
-const RULER_LABEL_PX = 64;
+/**
+ * Whether the now pill (its text `pill`, centred on `nowX`) covers a ruler label (its text
+ * `label`, starting at `labelX` with the label's 8 px of padding), from the text lengths at the
+ * ruler's 12 px: a short "5:30" 80 px after the slot line stays, a "12:30 PM" the pill lands on goes.
+ */
+export function rulerLabelCovered(nowX: number, pill: string, labelX: number, label: string): boolean {
+  // Barlow Semi Condensed is about 0.5 em a character plus the pill's 6 px padding a side; Inter
+  // tabular figures about 0.6 em. A few px of margin round both.
+  const half = (pill.length * 6 + 12) / 2 + 2;
+  const labelEnd = labelX + 8 + label.length * 7.2 + 4;
+  return nowX - half < labelEnd && nowX + half > labelX;
+}
 
 /** The time header: the channel column's corner and a label per 30-minute slot. */
 const GuideHeader = memo(function GuideHeader({
@@ -1734,8 +1766,8 @@ const GuideHeader = memo(function GuideHeader({
           slots where they stand instead of moving them while the scroll makes up for it, which
           counted as a layout shift on every move (L4-live-4). */}
       {slots.map((_, i) => {
-        // The now pill stands on the ruler: a label it would half cover steps aside.
-        const covered = !!nowLabel && nowX > i * slotPx - NOW_PILL_REACH && nowX < i * slotPx + RULER_LABEL_PX + NOW_PILL_REACH;
+        // The now pill stands on the ruler: a label it would cover, even in part, steps aside.
+        const covered = !!nowLabel && rulerLabelCovered(nowX, nowLabel, i * slotPx, labels[i] ?? '');
         return (
           <div role="columnheader" key={i} className="flex items-center border-s border-divider text-xs tabular-nums text-fg-muted" style={{ width: slotPx }}>
             {/* Sticky past the channel column: the slot the window starts in keeps its time in
@@ -1773,6 +1805,8 @@ const GuideToolbar = memo(function GuideToolbar({
   offsetMinutes,
   stripCountryPrefix,
   searchRef,
+  phoneSearchOpen,
+  onPhoneSearchOpen,
   onQuery,
   onShift,
   onShiftDay,
@@ -1802,6 +1836,9 @@ const GuideToolbar = memo(function GuideToolbar({
   offsetMinutes: number;
   stripCountryPrefix: boolean;
   searchRef: RefObject<HTMLInputElement | null>;
+  /** The phone layout's search field is unfolded over the pickers' row. */
+  phoneSearchOpen: boolean;
+  onPhoneSearchOpen(open: boolean): void;
   onQuery(key: string, value: string | undefined): void;
   onShift(delta: number): void;
   onShiftDay(days: number): void;
@@ -1855,11 +1892,34 @@ const GuideToolbar = memo(function GuideToolbar({
     [categories, lists, t, tg],
   );
   const stacked = bar !== 'full';
+  const phone = bar === 'phone';
   const range = formatTimeRange(start, end, lang);
+  // The phone's folded field takes focus as it unfolds; it folds again once left empty.
+  const searchToggle = useRef<HTMLButtonElement>(null);
+  const searchUnfolded = phone && phoneSearchOpen;
+  useEffect(() => {
+    if (searchUnfolded) searchRef.current?.focus();
+  }, [searchUnfolded, searchRef]);
+  const search = (
+    <GuideSearch
+      inputRef={searchRef}
+      sourceId={sourceId}
+      disabled={!sourceId}
+      offsetMinutes={offsetMinutes}
+      now={now}
+      stripCountryPrefix={stripCountryPrefix}
+      onSelect={onSelectHit}
+      onWatch={onWatchHit}
+      // Narrow pages: the field fills what the selects leave on their row, or a row of its own.
+      className={phone ? 'w-full' : stacked ? 'min-w-48 flex-1' : 'w-60'}
+    />
+  );
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
-      {/* A phone puts the two pickers side by side on one row, of equal width. */}
-      <div className={bar === 'phone' ? 'grid w-full grid-cols-2 gap-2' : 'contents'}>
+      {/* A phone puts the two pickers side by side on one row, of equal width, with the search
+          folded into a button at its end: unfolded, the field covers the row (as the header's
+          search does), so the guide starts two rows lower, not three. */}
+      <div className={phone ? 'relative grid w-full grid-cols-[1fr_1fr_auto] items-center gap-2' : 'contents'}>
         <ScopePicker
           label={t('guideSource')}
           value={sourceId}
@@ -1877,20 +1937,40 @@ const GuideToolbar = memo(function GuideToolbar({
           className={bar === 'phone' ? 'h-9' : 'w-48'}
           testId="guide-group"
         />
+        {phone ? (
+          <IconButton
+            ref={searchToggle}
+            size="sm"
+            label={tg('searchLabel')}
+            icon={<Search className="size-4" />}
+            aria-expanded={phoneSearchOpen}
+            disabled={!sourceId}
+            onClick={() => onPhoneSearchOpen(true)}
+            className="size-9"
+            data-testid="guide-search-toggle"
+          />
+        ) : null}
+        {searchUnfolded ? (
+          <div
+            className="absolute inset-0 z-10 flex items-center bg-surface"
+            data-testid="guide-search-unfolded"
+            onBlur={(e) => {
+              if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) && !searchRef.current?.value) onPhoneSearchOpen(false);
+            }}
+            onKeyDown={(e) => {
+              // Escape in an empty field folds it back (the first one clears what was typed).
+              if (e.key === 'Escape' && !searchRef.current?.value) {
+                onPhoneSearchOpen(false);
+                requestAnimationFrame(() => searchToggle.current?.focus());
+              }
+            }}
+          >
+            {search}
+          </div>
+        ) : null}
       </div>
       {/* While the sources load the field holds its place, disabled, so the toolbar does not shift (L2-visual-2). */}
-      <GuideSearch
-        inputRef={searchRef}
-        sourceId={sourceId}
-        disabled={!sourceId}
-        offsetMinutes={offsetMinutes}
-        now={now}
-        stripCountryPrefix={stripCountryPrefix}
-        onSelect={onSelectHit}
-        onWatch={onWatchHit}
-        // Narrow pages: the field fills what the selects leave on their row, or a row of its own.
-        className={stacked ? 'min-w-48 flex-1' : 'w-60'}
-      />
+      {phone ? null : search}
       {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
       <div className={stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'} role="group" aria-label={t('guideTime')} data-testid="guide-time">
         {bar !== 'phone' ? (
@@ -1937,7 +2017,12 @@ const GuideToolbar = memo(function GuideToolbar({
       {/* CB-GUIDE-GENRE: filter chips, one per bucket, with the bucket's stripe colour. One at a
           time, like Channels DVR's; a chosen chip is inverted, never amber. */}
       <div className="flex w-full min-w-0 items-center gap-1.5" data-testid="guide-genres">
-        <div role="group" aria-label={tg('genreFilter')} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none]">
+        {/* A row too narrow for every chip scrolls, its end fading out so a chip cut at the edge reads as more to come. */}
+        <div
+          role="group"
+          aria-label={tg('genreFilter')}
+          className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)] [scrollbar-width:none] rtl:[mask-image:linear-gradient(to_left,#000_calc(100%-1.5rem),transparent)]"
+        >
           {GENRES.map((g) => {
             const on = genre === g;
             return (
@@ -1953,10 +2038,12 @@ const GuideToolbar = memo(function GuideToolbar({
           </Button>
         ) : null}
         {previewOpen !== undefined ? (
+          // The label says what a press does, so no pressed state as well ("Hide preview, pressed"
+          // contradicts itself); expanded tells assistive tech the band is there.
           <IconButton
             size="sm"
             label={previewOpen ? tg('hidePreview') : tg('showPreview')}
-            pressed={previewOpen}
+            aria-expanded={previewOpen}
             icon={previewOpen ? <PanelTopClose className="size-4" /> : <PanelTopOpen className="size-4" />}
             onClick={onTogglePreview}
             className="shrink-0"
@@ -2084,10 +2171,12 @@ function ProgramPopover({
     return () => window.removeEventListener('mousedown', onDown);
   }, [onClose]);
 
-  return (
+  // Portaled, as the kit's Dialog is: rendered in the page, the mini player (later in the DOM at
+  // the same z-index) painted over it, and its scrim left the mini player bright.
+  return createPortal(
     <>
       {/* The sheet's scrim: pressing it is a press outside, which closes the sheet. */}
-      {sheet ? <div aria-hidden data-scrim="" className="fixed inset-0 z-40 bg-scrim motion-safe:animate-fade-in" /> : null}
+      {sheet ? <div aria-hidden data-scrim="" className="fixed inset-0 z-50 bg-scrim motion-safe:animate-fade-in" /> : null}
       <div
         ref={ref}
         role="dialog"
@@ -2178,7 +2267,8 @@ function ProgramPopover({
           {when === 'future' ? <p className="w-full text-xs text-fg-subtle">{t('startsAt', { time: formatClock(ms(program.start), i18n.language) })}</p> : null}
         </div>
       </div>
-    </>
+    </>,
+    portalContainer(),
   );
 }
 

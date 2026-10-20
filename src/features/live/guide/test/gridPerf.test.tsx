@@ -7,7 +7,7 @@
  * column and the cells' text.
  */
 import { QueryClient } from '@tanstack/react-query';
-import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -416,11 +416,11 @@ describe('guide requests', () => {
 });
 
 describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
-  // It used to sit over the cells (z-[5]) and strike through the airing title and time. It is
-  // drawn first now, with no z-index: under the sticky channel column (z-10), and under the cells'
-  // text, showing through the airing cell's tint. The tint has to stay see-through: an 85 %
-  // selected fill turned the red line grey in every airing cell.
-  it('passes under the sticky channel column and the cells, over the translucent airing cell', async () => {
+  // It used to sit over the cells (z-[5]) and strike through the airing title and time; later it
+  // showed through a see-through airing cell, in every glyph gap. It is drawn first, with no
+  // z-index: under the sticky channel column (z-10) and under the cells, which are opaque, so it
+  // shows only in the gutters. The airing cell carries its stub at the foot.
+  it('passes under the sticky channel column and the opaque cells, with a stub at the airing cell foot', async () => {
     rpc.handlers['epg.grid'] = hourly(defaultStart(Date.now()));
     renderGuide({ path: '/epg?source=src1', routes: GRID });
     const line = await screen.findByTestId('epg-now-line');
@@ -428,8 +428,15 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     expect(line.className).not.toMatch(/(^|\s)z-/);
     expect(line.compareDocumentPosition(cell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelector('[role="rowheader"]')!.className).toContain('z-10');
-    // The see-through active layer (about 10 % alpha), not an opaque or mostly opaque fill.
-    expect(cell.className.split(/\s+/)).toContain('bg-active');
-    expect(cell.className).not.toMatch(/(^|\s)bg-(selected|surface[\w-]*)(\/\d+)?(\s|$)/);
+    // An opaque fill: the raised cell (white in light, the next surface step in dark), no state layer.
+    expect(cell.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-surface', 'dark:bg-surface-3', 'shadow-1']));
+    expect(cell.className).not.toMatch(/(^|\s)bg-(active|hover|selected)(\s|$)/);
+    expect(cell.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
+    const tick = within(cell).getByTestId('cell-now-tick');
+    expect(tick.className.split(/\s+/)).toContain('bg-live');
+    // Future cells are opaque too, and so is a cell another genre filter steps back.
+    const later = await screen.findByRole('button', { name: /^c1 P1,/ });
+    expect(later.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
+    expect(within(later).queryByTestId('cell-now-tick')).toBeNull();
   });
 });

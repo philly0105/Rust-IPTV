@@ -1,13 +1,15 @@
 /**
  * The band above the guide grid (CB-GUIDE-PREVIEW): the player on the inline start, so playing
  * from the guide no longer floats the mini player over the grid's later programmes, and the
- * programme under the cursor or the pointer on the other side: its channel, title, time with
- * progress, genre, three lines of description and the actions (Watch, catch-up, Remind, Record).
- * Channels DVR, TiviMate and the Apple TV app put the same strip over their guides.
+ * programme under the cursor or the pointer on the other side: its channel, title with the
+ * actions at its end (Watch, catch-up, Remind, Record), time with progress, genre and what comes
+ * next, and two lines of description. Channels DVR, TiviMate and the Apple TV app put the same
+ * strip over their guides.
  *
  * Shown from md up on windows tall enough to keep a useful grid under it; it can be hidden from
- * the toolbar (a UI preference in localStorage). Nothing plays by itself: the band shows the
- * player only once something plays.
+ * the toolbar (a UI preference in localStorage), and starts hidden on windows under 1000 px tall.
+ * Nothing plays by itself: until something plays, the picture is the channel's logo, and a press
+ * on it starts the channel.
  */
 
 import { CalendarClock, History, Play, Radio, Tv } from 'lucide-react';
@@ -22,24 +24,25 @@ import { ProgramActions } from '@/features/recording';
 
 import { ChannelLogo } from '../components/ChannelLogo';
 import { displayChannelName } from '../lib/channelName';
-import { canCatchUp, formatDay, formatRange, localDayKey, minutesLeft, ms, programProgress, programWhen } from '../lib/epgTime';
+import { canCatchUp, formatClock, formatDay, formatRange, localDayKey, minutesLeft, ms, programProgress, programWhen } from '../lib/epgTime';
 import { genreColor, genreOf } from './genre';
 import { useProgramDescription } from './programDescription';
 
 const PREVIEW_KEY = 'guide.preview';
 /**
  * Below this details width (px at 100 %) Remind, Record and Record series are icons, so the
- * actions stay on one line: on a tablet they wrapped to two and pushed the title and the
- * description out of the band, whose height is fixed (the grid under it never moves).
+ * actions stay on the title's line beside a readable title: wrapped, they pushed the title and
+ * the description out of the band, whose height is fixed (the grid under it never moves).
  */
-const PREVIEW_LABELLED_ACTIONS_PX = 520;
+const PREVIEW_LABELLED_ACTIONS_PX = 720;
 
-/** Whether the band is open (UI preference; open unless the user hid it). */
-export function storedPreviewOpen(): boolean {
+/** Whether the user opened or hid the band (UI preference); undefined until they chose. */
+export function storedPreviewOpen(): boolean | undefined {
   try {
-    return localStorage.getItem(PREVIEW_KEY) !== '0';
+    const v = localStorage.getItem(PREVIEW_KEY);
+    return v === null ? undefined : v !== '0';
   } catch {
-    return true;
+    return undefined;
   }
 }
 
@@ -54,6 +57,8 @@ export function storePreviewOpen(open: boolean): void {
 export interface GuidePreviewProps {
   channel?: Channel;
   program?: EpgProgram;
+  /** The programme after `program` on its channel, when the guide has it. */
+  next?: EpgProgram;
   now: number;
   /** The guide's source kind (catch-up support); undefined for rows of another source. */
   kind?: SourceKind;
@@ -99,23 +104,34 @@ export function GuidePreview(props: GuidePreviewProps) {
       data-testid="guide-preview"
       onPointerEnter={props.onPointerEnter}
       onPointerLeave={props.onPointerLeave}
-      className="flex h-[13.5rem] shrink-0 gap-4 border-b border-divider bg-surface px-3 py-3 pointer-coarse:h-[14rem]"
+      className="flex h-[10.5rem] shrink-0 gap-4 border-b border-divider bg-surface px-3 py-3 pointer-coarse:h-[11.5rem]"
     >
       <div className="relative aspect-video h-full shrink-0 overflow-hidden rounded-lg bg-black shadow-1 ring-1 ring-edge">
         <PlayerStage className="h-full w-full">
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(120%_90%_at_50%_20%,rgb(38_48_66)_0%,transparent_70%)] px-3 text-center">
-            {channel ? (
-              <>
-                <ChannelLogo src={channel.logoUrl} name={name} size={44} sourceId={channel.ref.sourceId} className="shadow-2" />
-                {/* Secondary: the band's one primary action is the details' Watch. */}
-                <Button size="sm" variant="secondary" icon={<Play size={14} className="fill-current" />} onClick={() => props.onWatch(channel)} className="max-w-full">
-                  <span className="truncate">{t('watchNow', { channel: name })}</span>
-                </Button>
-              </>
-            ) : (
+          {channel ? (
+            // The picture is the press target, as a thumbnail is: no second Watch button beside the
+            // details' one. Out of the tab order, which reaches that button; a play mark on hover.
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={t('watchNow', { channel: name })}
+              onClick={() => props.onWatch(channel)}
+              data-testid="guide-preview-picture"
+              className="group/pic absolute inset-0 flex items-center justify-center bg-[radial-gradient(120%_90%_at_50%_18%,hsl(220_20%_18%/0.85),transparent_68%)] outline-none"
+            >
+              <ChannelLogo src={channel.logoUrl} name={name} size={44} sourceId={channel.ref.sourceId} className="shadow-2 motion-safe:transition-opacity group-hover/pic:opacity-40" />
+              <span
+                aria-hidden
+                className="absolute inline-flex size-10 items-center justify-center rounded-full bg-glass-strong text-on-glass opacity-0 ring-1 ring-glass-border motion-safe:transition-opacity group-hover/pic:opacity-100"
+              >
+                <Play size={18} className="fill-current" />
+              </span>
+            </button>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(120%_90%_at_50%_18%,hsl(220_20%_18%/0.85),transparent_68%)]">
               <Tv size={24} aria-hidden className="text-on-glass-muted" />
-            )}
-          </div>
+            </div>
+          )}
         </PlayerStage>
       </div>
       <div ref={detailsRef} className="flex min-w-0 flex-1 flex-col">
@@ -134,11 +150,13 @@ export function GuidePreview(props: GuidePreviewProps) {
 
 /**
  * Everything but the description keeps its height (shrink-0); the description has two lines and
- * gives way first, so the title is never cut in half.
+ * gives way first, so the title is never cut in half. The actions sit at the end of the title's
+ * line, so the band is a third shorter and the grid under it keeps more rows.
  */
 function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: EpgProgram; name: string; narrow: boolean }) {
   const { t, i18n } = useTranslation('live');
-  const { channel, program, now, kind, name, narrow } = props;
+  const { t: tg } = useTranslation('guide');
+  const { channel, program, next, now, kind, name, narrow } = props;
   const lang = i18n.language;
   const when = programWhen(program, now);
   const catchupOk = canCatchUp(program, channel, kind, now);
@@ -154,61 +172,75 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
           {name}
         </span>
       </p>
-      <h2 dir="auto" title={program.title} className="mt-1 shrink-0 truncate text-title-sm text-match-parent text-fg" data-testid="guide-preview-title">
-        {program.title}
-      </h2>
-      <MetaLine
-        className="mt-1 shrink-0"
-        items={[
-          when === 'now' ? <LivePill key="live" size="sm" dot="none" /> : null,
-          <span key="time" className="tabular-nums">
-            {when !== 'now' && localDayKey(start) !== localDayKey(now) ? `${formatDay(start, lang)} ` : ''}
-            {formatRange(program, lang)}
-          </span>,
-          when === 'now' ? t('minutesLeft', { count: minutesLeft(program, now) }) : null,
-          program.category ? (
-            <span key="genre" className="inline-flex items-center gap-1.5">
-              {genre ? <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: genreColor(genre) }} /> : null}
-              <span className="truncate">{program.category}</span>
+      <div className="mt-1 flex min-w-0 shrink-0 items-center gap-3" data-testid="guide-preview-title-row">
+        <h2 dir="auto" title={program.title} className="min-w-0 flex-1 truncate text-title-sm text-match-parent text-fg" data-testid="guide-preview-title">
+          {program.title}
+        </h2>
+        {/* One line: the record buttons are icons on a narrow band and a long "Play …" label truncates. */}
+        <div className={cn('ms-auto flex min-w-0 shrink-0 flex-nowrap items-center gap-2', narrow && 'max-w-[60%]')} data-testid="guide-preview-actions">
+          {when === 'now' ? (
+            <Button size="sm" variant="primary" icon={<Radio size={14} />} onClick={() => props.onWatch(channel)}>
+              {t('watchLive')}
+            </Button>
+          ) : null}
+          {catchupOk ? (
+            <Button size="sm" variant={when === 'now' ? 'secondary' : 'primary'} icon={<History size={14} />} onClick={() => props.onCatchup(channel, program)}>
+              {when === 'now' ? t('startOver') : t('watchCatchup')}
+            </Button>
+          ) : null}
+          {when !== 'now' ? (
+            <Button size="sm" variant={catchupOk ? 'ghost' : 'secondary'} icon={<Play size={14} />} onClick={() => props.onWatch(channel)} className="min-w-0" title={narrow ? t('playChannel', { name }) : undefined}>
+              <span className="truncate">{t('playChannel', { name })}</span>
+            </Button>
+          ) : null}
+          {/* recording: */}
+          <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} variant={narrow ? 'icons' : 'buttons'} />
+        </div>
+      </div>
+      <div className="mt-1 flex min-w-0 shrink-0 items-center gap-4">
+        <MetaLine
+          className="min-w-0 shrink-0"
+          items={[
+            when === 'now' ? <LivePill key="live" size="sm" dot="none" /> : null,
+            <span key="time" className="tabular-nums">
+              {when !== 'now' && localDayKey(start) !== localDayKey(now) ? `${formatDay(start, lang)} ` : ''}
+              {formatRange(program, lang)}
+            </span>,
+            when === 'now' ? t('minutesLeft', { count: minutesLeft(program, now) }) : null,
+            program.category ? (
+              <span key="genre" className="inline-flex items-center gap-1.5">
+                {genre ? <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: genreColor(genre) }} /> : null}
+                <span className="truncate">{program.category}</span>
+              </span>
+            ) : null,
+          ]}
+        />
+        {/* What follows on the channel, in the band's free width (the details' text stops at a readable measure). */}
+        {next ? (
+          <p className="ms-auto flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted" data-testid="guide-preview-next">
+            <span className="shrink-0 text-fg-subtle">{tg('previewNext')}</span>
+            <span className="shrink-0 tabular-nums">{formatClock(ms(next.start), lang)}</span>
+            <span dir="auto" className="min-w-0 truncate text-match-parent text-fg" title={next.title}>
+              {next.title}
             </span>
-          ) : null,
-        ]}
-      />
+          </p>
+        ) : null}
+      </div>
       {when === 'now' ? (
-        <span aria-hidden className="mt-2 block h-[3px] w-full max-w-xs shrink-0 overflow-hidden rounded-full bg-surface-3">
+        <span aria-hidden className="mt-1.5 block h-[3px] w-full max-w-xs shrink-0 overflow-hidden rounded-full bg-surface-3">
           <span className="block h-full rounded-full bg-accent-mark" style={{ width: `${programProgress(program, now) * 100}%` }} />
         </span>
       ) : null}
       {description ? (
-        <p dir="auto" className="mt-2 line-clamp-2 min-h-0 max-w-prose text-body-sm text-match-parent text-fg-muted" data-testid="guide-preview-description">
+        <p dir="auto" className="mt-1.5 line-clamp-2 min-h-0 max-w-prose text-body-sm text-match-parent text-fg-muted" data-testid="guide-preview-description">
           {description}
         </p>
       ) : pending ? (
-        <div aria-hidden className="mt-3 flex min-h-0 max-w-prose flex-col gap-2 overflow-hidden">
+        <div aria-hidden className="mt-2 flex min-h-0 max-w-prose flex-col gap-2 overflow-hidden">
           <Skeleton className="h-3 w-full" />
           <Skeleton className="h-3 w-2/3" />
         </div>
       ) : null}
-      {/* One line when narrow: the record buttons are icons and a long "Play …" label truncates. */}
-      <div className={cn('mt-auto flex shrink-0 items-center gap-2 pt-2', narrow ? 'flex-nowrap' : 'flex-wrap')} data-testid="guide-preview-actions">
-        {when === 'now' ? (
-          <Button size="sm" variant="primary" icon={<Radio size={14} />} onClick={() => props.onWatch(channel)}>
-            {t('watchLive')}
-          </Button>
-        ) : null}
-        {catchupOk ? (
-          <Button size="sm" variant={when === 'now' ? 'secondary' : 'primary'} icon={<History size={14} />} onClick={() => props.onCatchup(channel, program)}>
-            {when === 'now' ? t('startOver') : t('watchCatchup')}
-          </Button>
-        ) : null}
-        {when !== 'now' ? (
-          <Button size="sm" variant={catchupOk ? 'ghost' : 'secondary'} icon={<Play size={14} />} onClick={() => props.onWatch(channel)} className="min-w-0" title={narrow ? t('playChannel', { name }) : undefined}>
-            <span className="truncate">{t('playChannel', { name })}</span>
-          </Button>
-        ) : null}
-        {/* recording: */}
-        <ProgramActions channelRef={channel.ref} channelName={name} program={program} now={now} variant={narrow ? 'icons' : 'buttons'} />
-      </div>
     </>
   );
 }

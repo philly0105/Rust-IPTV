@@ -223,7 +223,7 @@ describe('display names outside the rows (R1 F3, live part)', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     await screen.findByText('Alpha 0', undefined, WAIT);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add to favorites' })[0]!);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Favorite', pressed: false })[0]!);
     await waitFor(() => expect(info).toHaveBeenCalledWith('[toast]', 'Added Alpha 0 to favorites', ''), WAIT);
   });
 });

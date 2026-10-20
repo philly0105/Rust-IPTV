@@ -108,6 +108,32 @@ describe('the toolbar at narrow widths', () => {
     expect(await screen.findByTestId('guide-jump')).toBeTruthy();
   });
 
+  it('a phone folds the search into a button on the pickers row, which unfolds over the row and folds back once empty', async () => {
+    pageWidth(318);
+    await openGuide();
+    // Two rows of controls before the grid, not three: no field of its own.
+    expect(screen.queryByRole('searchbox', { name: 'Search the guide' })).toBeNull();
+    const toggle = screen.getByTestId('guide-search-toggle');
+    expect(toggle.getAttribute('aria-label')).toBe('Search the guide');
+    expect(toggle.closest('.grid')).toBe(screen.getByTestId('guide-source').closest('.grid'));
+    fireEvent.click(toggle);
+    const field = await screen.findByRole('searchbox', { name: 'Search the guide' });
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(screen.getByTestId('guide-search-unfolded').className).toContain('absolute');
+    // Escape in the empty field folds it back, and focus returns to the button.
+    fireEvent.keyDown(field, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('searchbox', { name: 'Search the guide' })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('guide-search-toggle')));
+  });
+
+  it("the genre chips' row fades out at its end, so a chip cut at the edge reads as more to come", async () => {
+    pageWidth(318);
+    await openGuide();
+    const chips = within(screen.getByTestId('guide-genres')).getByRole('group');
+    expect(chips.className).toContain('overflow-x-auto');
+    expect(chips.className).toContain('[mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)]');
+  });
+
   it('a narrow page stacks the controls but keeps the day buttons', async () => {
     pageWidth(560);
     await openGuide();

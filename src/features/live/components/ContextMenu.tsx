@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import { cn, TOUCH_TARGET, usePresence } from '@/ui';
+import { portalContainer } from '@/ui/portal';
 
 import { documentIsRtl } from '../lib/rtl';
 
@@ -132,7 +134,9 @@ export function ContextMenu({
     e.stopPropagation();
   };
 
-  return (
+  // Portaled at the kit Menu's layer: rendered in the page, the mini player (later in the DOM at
+  // the same z-index) covered it, items and keyboard focus included.
+  return createPortal(
     <div
       ref={ref}
       role="menu"
@@ -142,7 +146,7 @@ export function ContextMenu({
       inert={closing || undefined}
       style={{ left: place.left, top: place.top, ['--pop-from' as string]: place.above ? '-6px' : '6px' }}
       className={cn(
-        'fixed z-50 max-h-[calc(100dvh-1rem)] min-w-56 max-w-80 overflow-y-auto overscroll-contain rounded-lg border border-edge bg-surface p-1 text-sm text-fg shadow-2',
+        'fixed z-[60] max-h-[calc(100dvh-1rem)] min-w-56 max-w-80 overflow-y-auto overscroll-contain rounded-lg border border-edge bg-surface p-1 text-sm text-fg shadow-2',
         closing ? 'pointer-events-none motion-safe:animate-pop-out' : 'motion-safe:animate-pop-in',
       )}
     >
@@ -198,6 +202,7 @@ export function ContextMenu({
           </button>
         ),
       )}
-    </div>
+    </div>,
+    portalContainer(),
   );
 }

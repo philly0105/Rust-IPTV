@@ -1,5 +1,5 @@
 import { Play, Radio, Tv } from 'lucide-react';
-import { useId } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type Channel, type EpgNowNext, type ItemRef, type RecentEntry } from '@/api/types';
@@ -7,7 +7,6 @@ import { Button } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
 import { displayChannelName } from '../lib/channelName';
-import { monogramHue } from '../lib/monogram';
 import { isValidProgram, minutesLeft, programProgress, programWhen, shiftNowNext } from '../lib/epgTime';
 import { ChannelLogo } from './ChannelLogo';
 
@@ -15,6 +14,11 @@ export interface StageIdleProps {
   kind: 'live' | 'radio';
   /** The channel last watched here, offered with Resume; none: a short prompt. */
   last?: { channel: Channel; nowNext?: EpgNowNext };
+  /**
+   * `last` is the list's cursor row, not the channel last watched: once the user moves through
+   * the list the card follows the cursor (as the ribbon under it does), says so, and offers Play.
+   */
+  highlighted?: boolean;
   now: number;
   stripPrefix?: boolean;
   epgOffsetMinutes?: number;
@@ -37,14 +41,20 @@ export interface StageIdleProps {
  * The stage is dark in every theme, so from md up the text takes the glass colours; on a phone
  * the idle stage is a slim bar on the theme's surface above the list, with theme colours.
  */
-export function StageIdle({ kind, last, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, stations, onPlayRef }: StageIdleProps) {
+export function StageIdle({ kind, last, highlighted = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, stations, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
   const channel = last?.channel;
   const name = channel ? displayChannelName(channel.name, stripPrefix) : '';
   const shifted = channel ? shiftNowNext(last?.nowNext, epgOffsetMinutes) : undefined;
   const cur = shifted?.now && isValidProgram(shifted.now) && programWhen(shifted.now, now) === 'now' ? shifted.now : undefined;
-  // A soft glow of the channel's monogram hue behind the logo; slate without a channel.
-  const hue = channel ? monogramHue(name) : 220;
+  // A soft glow in the hue of the tile above it: the logo's own colour once it has loaded (the
+  // monogram's for a channel without one), slate while it loads, for a logo with no colour to
+  // read, and without a channel. Low saturation, so it tints the stage without washing it.
+  const channelKey = channel ? itemKey(channel.ref) : '';
+  const [tileHue, setTileHue] = useState<{ key: string; hue: number | null }>({ key: '', hue: null });
+  const onHue = useCallback((hue: number | null) => setTileHue((prev) => (prev.key === channelKey && prev.hue === hue ? prev : { key: channelKey, hue })), [channelKey]);
+  const hue = channel && tileHue.key === channelKey ? tileHue.hue : null;
+  const glow = hue === null ? 'hsl(220 20% 18% / 0.85)' : `hsl(${hue} 25% 20% / 0.85)`;
   const Icon = kind === 'radio' ? Radio : Tv;
 
   return (
@@ -53,14 +63,18 @@ export function StageIdle({ kind, last, now, stripPrefix, epgOffsetMinutes = 0, 
       <span
         aria-hidden
         className="absolute inset-0 max-md:hidden"
-        style={{ backgroundImage: `radial-gradient(120% 90% at 50% 18%, hsl(${hue} 32% 20% / 0.85), transparent 68%)` }}
+        data-testid="stage-idle-glow"
+        data-hue={hue ?? undefined}
+        style={{ backgroundImage: `radial-gradient(120% 90% at 50% 18%, ${glow}, transparent 68%)` }}
       />
       {channel ? (
         <div className="relative flex max-w-md min-w-0 flex-col items-center gap-3 px-6 text-center max-md:w-full max-md:max-w-none max-md:flex-row max-md:gap-3 max-md:px-0 max-md:text-start">
-          <ChannelLogo src={channel.logoUrl} name={name} size={64} sourceId={channel.ref.sourceId} className="shadow-2 max-md:hidden" />
+          <ChannelLogo src={channel.logoUrl} name={name} size={64} sourceId={channel.ref.sourceId} className="shadow-2 max-md:hidden" onHue={onHue} />
           <ChannelLogo src={channel.logoUrl} name={name} size={32} sourceId={channel.ref.sourceId} className="md:hidden" />
           <div className="flex min-w-0 flex-col items-center gap-0.5 max-md:flex-1 max-md:items-start">
-            <p className="text-caption text-on-glass-muted max-md:hidden">{t(kind === 'radio' ? 'lastStation' : 'lastWatched')}</p>
+            <p className="text-caption text-on-glass-muted max-md:hidden" data-testid="stage-idle-caption">
+              {t(highlighted ? 'highlightedChannel' : kind === 'radio' ? 'lastStation' : 'lastWatched')}
+            </p>
             <p dir="auto" className="max-w-full truncate text-title-sm text-on-glass max-md:text-body-sm max-md:font-medium max-md:text-fg">
               {name}
             </p>
@@ -83,8 +97,8 @@ export function StageIdle({ kind, last, now, stripPrefix, epgOffsetMinutes = 0, 
             onClick={() => onResume?.(channel)}
             data-testid="stage-resume"
           >
-            <span className="truncate max-md:hidden">{t('resumeChannel', { name })}</span>
-            <span className="md:hidden">{t('resume')}</span>
+            <span className="truncate max-md:hidden">{t(highlighted ? 'playChannel' : 'resumeChannel', { name })}</span>
+            <span className="md:hidden">{t(highlighted ? 'play' : 'resume')}</span>
           </Button>
           <p className="mt-1 text-caption text-on-glass-muted max-md:hidden">{hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}</p>
           {recent && recent.length > 0 && onPlayRef ? (

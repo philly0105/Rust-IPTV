@@ -151,9 +151,10 @@ describe('EpgGridPage RTL (F2)', () => {
     expect(right).toBeGreaterThan(CHANNEL_COL + 30 * GRID_PX_PER_MIN - 2);
     expect(right).toBeLessThan(CHANNEL_COL + 60 * GRID_PX_PER_MIN);
 
-    // initial scroll to just before now runs once the grid mounts, counted down from 0 in RTL
+    // The initial scroll to the half hour now is in (one slot into the window) runs once the
+    // grid mounts, counted down from 0 in RTL.
     await waitFor(() => expect(grid.scrollLeft).toBeLessThan(0));
-    expect(-grid.scrollLeft).toBeCloseTo(right + 1 - CHANNEL_COL - GRID_SLOT_PX, 0);
+    expect(-grid.scrollLeft).toBe(GRID_SLOT_PX);
   });
 
   it('keeps physical left offsets and a positive scrollLeft in LTR', async () => {

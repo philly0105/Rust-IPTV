@@ -303,6 +303,9 @@ describe('R6 round 2: layout fixes', () => {
   });
 
   it('the ribbon live button keeps its name when the label is hidden on narrow panes', async () => {
+    // A film plays: the stage is the player, and the ribbon offers the cursor's channel itself
+    // (with nothing playing, the idle card above offers it instead).
+    fakes.usePlayerStore.setState({ source: { ref: { sourceId: 'src9', contentType: 'movie', itemId: 'm1' }, url: 'http://x/film.mp4', title: 'Film', isLive: false } as never });
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     const btn = await screen.findByTestId('ribbon-back-to-live');
     // The name starts with the label's words (and names the channel it starts).

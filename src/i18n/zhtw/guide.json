@@ -74,5 +74,6 @@
   "noLiveChannelsHint": "它只有電影或影集，因此節目表為空。請選擇有直播電視的來源。",
   "openSourceGuide": "開啟 {{name}}",
   "shortcutDigits": "依編號跳到頻道",
-  "resultCount_other": "{{count, number}} 筆結果"
+  "resultCount_other": "{{count, number}} 筆結果",
+  "previewNext": "接下來"
 }

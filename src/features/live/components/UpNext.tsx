@@ -28,6 +28,8 @@ export interface UpNextProps {
   /** The channel's display-time programmes, sorted. */
   programs: EpgProgram[];
   now: number;
+  /** Where the timeline above ends: only programmes starting from then are listed (none: all future ones). */
+  after?: number;
   channel: Channel;
   channelName: string;
   /** The programme the ribbon's header describes: its row is marked. */
@@ -36,13 +38,13 @@ export interface UpNextProps {
 }
 
 /**
- * The next few programmes under the guide ribbon (LG-02): time, title, length, and Remind and
- * Record on hover or focus. It fills the stage column's free height and shows only as many rows
+ * The next few programmes under the guide ribbon (LG-02), after those its timeline shows: time,
+ * title, length, and Remind and Record on hover or focus. It fills the stage column's free height and shows only as many rows
  * as fit, none on a short window: the box is measured, not scrolled, so a row is never cut in
  * half. Choosing a row puts it in the ribbon's header, whose bell and record menu act on it; that
  * is how a touch screen reaches them, as three 44 px buttons per row cut the titles to "Busines…".
  */
-export function UpNext({ programs, now, channel, channelName, shown, onSelect }: UpNextProps) {
+export function UpNext({ programs, now, after, channel, channelName, shown, onSelect }: UpNextProps) {
   const { t, i18n } = useTranslation('live');
   const lang = i18n.language;
   const box = useRef<HTMLDivElement>(null);
@@ -58,7 +60,9 @@ export function UpNext({ programs, now, channel, channelName, shown, onSelect }:
   }, []);
   // h-11 and the label's padding are Tailwind spacing: they follow the UI scale and density.
   const rowPx = useRowHeight(UP_NEXT_ROW_PX, UP_NEXT_ROW_PX);
-  const upcoming = programs.filter((p) => programWhen(p, now) === 'future').slice(0, upNextRows(height, rowPx));
+  const upcoming = programs
+    .filter((p) => programWhen(p, now) === 'future' && (after === undefined || ms(p.start) >= after))
+    .slice(0, upNextRows(height, rowPx));
   const shared = useProgramActionsShared();
 
   return (

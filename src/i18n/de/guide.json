@@ -75,5 +75,6 @@
   "openSourceGuide": "{{name}} öffnen",
   "shortcutDigits": "Per Nummer zu einem Sender springen",
   "resultCount_one": "{{count, number}} Ergebnis",
-  "resultCount_other": "{{count, number}} Ergebnisse"
+  "resultCount_other": "{{count, number}} Ergebnisse",
+  "previewNext": "Danach"
 }

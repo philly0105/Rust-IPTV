@@ -135,10 +135,12 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         onDoubleClick={() => props.onActivate(index, 'double')}
         className="flex min-w-0 flex-1 items-center gap-3 py-3 ps-2.5 pe-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       >
+        {/* The playing row's number steps up to the text colour: the tick and the progress are
+            its amber marks, a third amber mark in the number read as noise. */}
         <span
           className={cn(
             'w-7 shrink-0 text-end font-numeric text-sm tabular-nums',
-            playing ? 'text-accent' : 'text-fg-muted',
+            playing ? 'text-fg' : 'text-fg-muted',
           )}
         >
           {channel.number ?? ''}
@@ -150,7 +152,16 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
               {name}
             </span>
             {/* Marks, not slots: an empty row gives their room to the title. */}
-            {favorite ? <Star data-testid="row-favorite" aria-hidden size={12} className="shrink-0 fill-current text-warning" /> : null}
+            {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
+                It steps aside while the floating actions show their own star. */}
+            {favorite ? (
+              <Star
+                data-testid="row-favorite"
+                aria-hidden
+                size={12}
+                className="shrink-0 fill-current text-fg-subtle not-pointer-coarse:group-hover/row:invisible not-pointer-coarse:group-has-[:focus-visible]/row:invisible"
+              />
+            ) : null}
             {archive ? (
               <span title={archiveLabel} className="inline-flex shrink-0 text-fg-subtle">
                 <History size={12} aria-label={t('archive')} data-testid="row-archive" />
@@ -198,10 +209,12 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         <IconButton
           size="sm"
           tabIndex={-1}
+          // One name with the pressed state; the tooltip says what a press does.
           pressed={favorite}
-          label={favorite ? t('removeFavorite') : t('addFavorite')}
+          label={t('favorite')}
+          tooltip={favorite ? t('removeFavorite') : t('addFavorite')}
           shortcut="s"
-          icon={<Star size={16} className={favorite ? 'fill-current text-warning' : undefined} />}
+          icon={<Star size={16} className={favorite ? 'fill-current text-fg' : undefined} />}
           onClick={() => props.onToggleFavorite(channel, favorite)}
           // A pressed toggle draws the selected fill; the filled star says enough here. On touch the
           // actions sit in the row's flow, so a 44 px star beside the ⋮ cut a tablet's narrow list to

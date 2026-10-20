@@ -108,24 +108,40 @@ pub fn window_factory(state: &AppState) -> Option<Arc<dyn ChildWindowFactory>> {
         .map(|h| Arc::clone(&h.0))
 }
 
-/// Desktop: a `kind: file` source that `recordings.playSource` or
-/// `myvideos.playSource` pointed at the loopback proxy, turned back into the
-/// file's path for mpv and VLC: they read local files themselves, and an
-/// external player outlives the app and its proxy. Every other source comes
-/// back unchanged.
+/// The source mpv or VLC is handed. Desktop: a `kind: file` source that
+/// `recordings.playSource` or `myvideos.playSource` pointed at the loopback
+/// proxy is turned back into the file's path: they read local files
+/// themselves, and an external player outlives the app and its proxy. The
+/// core chose that path, so it plays even on a network share. Every other
+/// source came from the UI and comes back unchanged once
+/// [`args::validate_play_url`] accepts it, which keeps a playlist line from
+/// pointing a player at a `file:` URL or a network path.
 pub async fn with_local_file(
     state: &Arc<AppState>,
     source: &PlayerSource,
 ) -> CoreResult<PlayerSource> {
     let mut out = source.clone();
+    match proxied_file(state, source).await? {
+        Some(path) => out.url = path.to_string_lossy().into_owned(),
+        None => args::validate_play_url(source)?,
+    }
+    Ok(out)
+}
+
+/// The file behind a `kind: file` source on the loopback proxy's
+/// `recordings` or `files` route; `None` for every other source.
+async fn proxied_file(
+    state: &Arc<AppState>,
+    source: &PlayerSource,
+) -> CoreResult<Option<std::path::PathBuf>> {
     if source.kind != PlayerKind::File {
-        return Ok(out);
+        return Ok(None);
     }
     let Some(api) = crate::rpc::app::desktop_api_base(state) else {
-        return Ok(out);
+        return Ok(None);
     };
     let Some(rest) = source.url.strip_prefix(&format!("{api}/")) else {
-        return Ok(out);
+        return Ok(None);
     };
     let mut parts = rest.split('/');
     let path = match (parts.next(), parts.next()) {
@@ -139,10 +155,9 @@ pub async fn with_local_file(
                 .map_err(|_| CoreError::invalid("not a download id"))?;
             crate::downloads::completed_file(state, id).await?
         }
-        _ => return Ok(out),
+        _ => return Ok(None),
     };
-    out.url = path.to_string_lossy().into_owned();
-    Ok(out)
+    Ok(Some(path))
 }
 
 /// Result of player detection.

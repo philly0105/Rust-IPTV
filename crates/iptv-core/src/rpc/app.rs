@@ -388,6 +388,10 @@ mod tests {
         other.url = "http://127.0.0.1:2/T/api/recordings/x/media.ts".into();
         let same = crate::player::with_local_file(&s, &other).await.unwrap();
         assert_eq!(same.url, other.url);
+        // A network path the core did not resolve is refused: a playlist
+        // line without a scheme reaches the player as `kind: file`.
+        other.url = r"\\host\share\x.ts".into();
+        assert!(crate::player::with_local_file(&s, &other).await.is_err());
 
         // A file that went away is reported, not handed to the player.
         std::fs::remove_file(&file).unwrap();

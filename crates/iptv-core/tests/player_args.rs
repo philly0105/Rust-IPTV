@@ -259,7 +259,6 @@ fn play_url_scheme_allowlist() {
         "udp://@239.0.0.1:1234",
         "rtp://239.0.0.1:5000",
         "mms://h/x",
-        "file:///C:/v/a.mkv",
     ] {
         assert!(validate_play_url(&source(ok, "t", None)).is_ok(), "{ok}");
     }
@@ -277,6 +276,9 @@ fn play_url_scheme_allowlist() {
         "relative/path.ts",
         r"C:\Videos\a.mkv",
         "http://h/a\nb",
+        "file:///C:/v/a.mkv",
+        "FILE://nas/share/a.ts",
+        r"\\nas\share\a.ts",
     ] {
         assert!(
             matches!(
@@ -286,16 +288,25 @@ fn play_url_scheme_allowlist() {
             "{bad:?} should be refused"
         );
     }
-    // Local absolute paths are fine for downloaded files only.
+    // Local absolute paths are fine for downloaded files only. A network
+    // path or a `file:` URL never is: the UI marks a playlist line without
+    // a scheme as `kind: file`, and Windows would log in to that server.
     let mut file = source(r"C:\Videos\clip, test.mkv", "t", None);
     file.kind = PlayerKind::File;
     assert!(validate_play_url(&file).is_ok());
-    file.url = r"\\nas\share\a.mkv".into();
-    assert!(validate_play_url(&file).is_ok());
-    file.url = "relative.mkv".into();
-    assert!(validate_play_url(&file).is_err());
-    file.url = "--log-file=C:/x".into();
-    assert!(validate_play_url(&file).is_err());
+    for bad in [
+        r"\\nas\share\a.mkv",
+        "//nas/share/a.mkv",
+        r"\/nas/share/a.mkv",
+        r"\\?\UNC\nas\share\a.mkv",
+        "file://nas/share/a.mkv",
+        "file:///C:/Videos/a.mkv",
+        "relative.mkv",
+        "--log-file=C:/x",
+    ] {
+        file.url = bad.into();
+        assert!(validate_play_url(&file).is_err(), "{bad}");
+    }
 }
 
 #[test]

@@ -336,6 +336,50 @@ async fn concurrent_refreshes_share_one_import() {
     assert_eq!(runs, 1);
 }
 
+/// ST-2: refreshes queued behind a partial sync of the source, which they
+/// cannot join, import once between them instead of one after the other.
+#[tokio::test]
+async fn refreshes_queued_behind_a_partial_sync_share_one_import() {
+    let mut env = env().await;
+    let st = env.state.clone();
+    let src = add_text(&st, "T", TWO).await;
+    let (entered_tx, entered_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let sync = {
+        let (st, id) = (st.clone(), src.id.clone());
+        tokio::spawn(async move {
+            sources::run_import_with(&st, &id, async move {
+                let _ = entered_tx.send(());
+                let _ = release_rx.await;
+            })
+            .await;
+        })
+    };
+    entered_rx.await.unwrap();
+    drain(&mut env.events);
+    let refresh = |st: Arc<AppState>, id: String| {
+        tokio::spawn(async move { sources::refresh(st, &id).await })
+    };
+    let a = refresh(st.clone(), src.id.clone());
+    let b = refresh(st.clone(), src.id.clone());
+    // Both wait for the partial sync.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!a.is_finished() && !b.is_finished());
+    release_tx.send(()).unwrap();
+    sync.await.unwrap();
+    let (a, b) = (a.await.unwrap().unwrap(), b.await.unwrap().unwrap());
+    assert_eq!(a.id, b.id);
+    let runs = drain(&mut env.events)
+        .into_iter()
+        .filter(|e| {
+            e.kind == "import.progress"
+                && e.payload["sourceId"] == src.id.as_str()
+                && e.payload["phase"] == "connecting"
+        })
+        .count();
+    assert_eq!(runs, 1, "the second refresh joined the first one's import");
+}
+
 /// ST-2: one import decodes and saves at a time; the next waits for the slot.
 #[tokio::test]
 async fn one_import_saves_at_a_time() {

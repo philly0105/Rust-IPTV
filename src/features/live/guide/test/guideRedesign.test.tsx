@@ -5,7 +5,11 @@
  * ruler, and no guide for a source without live channels (LG-11). Stage 2: channel numbers move
  * the cursor (LG-01), slot labels stick past the channel column, and the row menu is Live's.
  */
-import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { StrictMode } from 'react';
+import { I18nextProvider } from 'react-i18next';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
@@ -16,7 +20,7 @@ import { preloadScopePickerList } from '../../components/ScopePicker';
 import { formatClock, HOUR, MINUTE } from '../../lib/epgTime';
 import { genreOf } from '../genre';
 import { __resetGuideSourceForTests } from '../lastSource';
-import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
+import { createRpcMock, i18n, installDomStubs, makeChannel, newClient, program, renderGuide, router, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
 vi.mock('@/api/transport', async (orig) => ({
@@ -183,6 +187,37 @@ describe('what is playing (LG-01)', () => {
     renderGuide({ path: '/epg?source=src1&focus=c7', routes: GRID });
     await waitFor(() => expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/^c7 P0,/));
     expect(rpc.of('catalog.item')).toContainEqual({ ref: makeChannel(7).ref });
+  });
+
+  // Review round 3: the link counted as handled before its lookup answered, so a lookup cut short
+  // was never made again, and a second link to the same channel never opened there.
+  it('opens at the linked channel under StrictMode, whose second effect run cuts the first lookup short', async () => {
+    render(
+      <StrictMode>
+        <QueryClientProvider client={newClient()}>
+          <I18nextProvider i18n={i18n}>
+            <MemoryRouter initialEntries={['/epg?source=src1&focus=c7']}>
+              <Routes>
+                <Route path="/epg" element={<EpgGridPage />} />
+              </Routes>
+            </MemoryRouter>
+          </I18nextProvider>
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+    await waitFor(() => expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/^c7 P0,/));
+  });
+
+  it('a later link to the same channel opens there again', async () => {
+    const cell = () => (document.activeElement as HTMLElement | null)?.getAttribute('aria-label') ?? '';
+    renderGuide({ path: '/epg?source=src1&focus=c7', routes: GRID });
+    await waitFor(() => expect(cell()).toMatch(/^c7 P0,/));
+    act(() => void router.navigate!('/epg?source=src1'));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
+    await waitFor(() => expect(cell()).toMatch(/^c8 P0,/));
+    act(() => void router.navigate!('/epg?source=src1&focus=c7'));
+    await waitFor(() => expect(cell()).toMatch(/^c7 P0,/));
+    expect(rpc.of('catalog.item').filter((a) => (a as { ref: { itemId: string } }).ref.itemId === 'c7')).toHaveLength(2);
   });
 });
 

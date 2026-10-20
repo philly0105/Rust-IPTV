@@ -316,9 +316,11 @@ export function BackupSection({ update }: SectionProps) {
           ) : (
             // A drop zone as well as a button: a backup is usually a file the user already has open in a folder.
             <div
+              // A container, so the decorative edge at rest (the control border is for controls), firming
+              // up on hover; one radius step under the group it sits in.
               className={clsx(
-                'flex flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-center motion-safe:transition-colors',
-                dragOver ? 'border-focus bg-hover' : 'border-border',
+                'flex flex-col items-center gap-2 rounded-md border border-dashed px-4 py-6 text-center motion-safe:transition-colors',
+                dragOver ? 'border-focus bg-hover' : 'border-edge hover:border-border',
               )}
               onDragOver={(e) => {
                 if (!e.dataTransfer.types.includes('Files')) return;

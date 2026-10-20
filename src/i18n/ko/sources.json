@@ -1,7 +1,5 @@
 {
   "title": "소스",
-  "subtitleCount_one": "소스 {{count, number}}개",
-  "subtitleCount_other": "소스 {{count, number}}개",
   "listLabel": "내 소스",
   "add": "소스 추가",
   "addSource": "소스 추가",

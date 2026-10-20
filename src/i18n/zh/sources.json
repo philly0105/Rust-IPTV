@@ -1,7 +1,5 @@
 {
   "title": "播放源",
-  "subtitleCount_one": "{{count, number}} 个播放源",
-  "subtitleCount_other": "{{count, number}} 个播放源",
   "listLabel": "你的播放源",
   "add": "添加播放源",
   "addSource": "添加播放源",

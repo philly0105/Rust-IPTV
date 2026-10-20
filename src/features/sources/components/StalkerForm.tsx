@@ -23,6 +23,7 @@ export function StalkerForm({
   onSuggestName,
   onFieldBlur,
   autoFocusAddress,
+  showHeaders = true,
 }: {
   value: StalkerDraft;
   onChange: (next: StalkerDraft) => void;
@@ -36,6 +37,8 @@ export function StalkerForm({
   onFieldBlur?: (path: string) => void;
   /** The Add dialog opens on the portal address (SS-2). */
   autoFocusAddress?: boolean;
+  /** False: the dialog draws the request headers itself, with the other advanced options last. */
+  showHeaders?: boolean;
 }) {
   const { t } = useTranslation('sources');
   const set = (patch: Partial<StalkerDraft>) => onChange({ ...value, ...patch });
@@ -156,13 +159,15 @@ export function StalkerForm({
         </div>
       </details>
 
-      <HeadersFields
-        value={value.headers}
-        onChange={(headers) => set({ headers })}
-        errors={errors}
-        prefix="stalker.headers"
-        disabled={disabled}
-      />
+      {showHeaders ? (
+        <HeadersFields
+          value={value.headers}
+          onChange={(headers) => set({ headers })}
+          errors={errors}
+          prefix="stalker.headers"
+          disabled={disabled}
+        />
+      ) : null}
 
       <ConnectionTest
         kind="stalker"

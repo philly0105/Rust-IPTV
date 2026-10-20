@@ -174,7 +174,7 @@ export function PlaybackSection({ settings, update }: SectionProps) {
         </div>
       </SettingsGroup>
 
-      <SettingsGroup>
+      <SettingsGroup title={t('playbackStreamsGroup')}>
         <SettingsRow label={t('streamFormat')} description={t('streamFormatHint')}>
           {({ id }) => (
             <Segmented<StreamFormat>

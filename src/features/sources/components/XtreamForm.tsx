@@ -19,6 +19,7 @@ export function XtreamForm({
   onSuggestName,
   onFieldBlur,
   autoFocusAddress,
+  showHeaders = true,
 }: {
   value: XtreamDraft;
   onChange: (next: XtreamDraft) => void;
@@ -31,6 +32,8 @@ export function XtreamForm({
   onFieldBlur?: (path: string) => void;
   /** The Add dialog opens on the server address (SS-2). */
   autoFocusAddress?: boolean;
+  /** False: the dialog draws the request headers itself, with the other advanced options last. */
+  showHeaders?: boolean;
 }) {
   const { t } = useTranslation('sources');
   const set = (patch: Partial<XtreamDraft>) => onChange({ ...value, ...patch });
@@ -85,13 +88,15 @@ export function XtreamForm({
           {(p) => <SecretInput {...p} disabled={disabled} value={value.password} onChange={(e) => set({ password: e.target.value })} />}
         </Field>
       </div>
-      <HeadersFields
-        value={value.headers}
-        onChange={(headers) => set({ headers })}
-        errors={errors}
-        prefix="xtream.headers"
-        disabled={disabled}
-      />
+      {showHeaders ? (
+        <HeadersFields
+          value={value.headers}
+          onChange={(headers) => set({ headers })}
+          errors={errors}
+          prefix="xtream.headers"
+          disabled={disabled}
+        />
+      ) : null}
       <ConnectionTest
         kind="xtream"
         disabled={disabled}

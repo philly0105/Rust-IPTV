@@ -1,8 +1,5 @@
 {
   "title": "Sources",
-  "subtitleCount_one": "{{count, number}} source",
-  "subtitleCount_many": "{{count, number}} sources",
-  "subtitleCount_other": "{{count, number}} sources",
   "listLabel": "Vos sources",
   "add": "Ajouter une source",
   "addSource": "Ajouter une source",

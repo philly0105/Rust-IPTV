@@ -63,8 +63,10 @@ describe('Sort and filter on phones', () => {
   it('is one button that opens the three selects in a sheet, with the number of active choices', async () => {
     phoneWindow(true);
     localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({ sort: 'name', kind: 'all', status: 'all' }));
-    renderAt(sourcesRoutes, '/sources');
+    renderAt(sourcesRoutes, '/sources', { headerActions: true });
     const button = await screen.findByTestId('sources-view-button');
+    // In the header, with Add and More (no full-width Add bar and no toolbar above the cards).
+    expect(screen.getByTestId('test-header-actions').contains(button)).toBe(true);
     expect(screen.queryByTestId('sources-view')).toBeNull();
     expect(screen.queryByTestId('sources-sort')).toBeNull();
     expect(within(button).getByTestId('sources-view-count').textContent).toBe('1');
@@ -80,11 +82,59 @@ describe('Sort and filter on phones', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sort and filter' })).toBeNull());
   });
 
-  it('keeps the compact inline selects on wider windows', async () => {
+  it('puts them behind one small View button on wider windows, which names the sort and opens the labelled selects', async () => {
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({ sort: 'name', kind: 'all', status: 'all' }));
     renderAt(sourcesRoutes, '/sources');
-    const view = await screen.findByTestId('sources-view');
-    expect(within(view).getByTestId('sources-sort').className).toContain('h-9');
+    const trigger = await screen.findByTestId('sources-view-trigger');
+    // No three bordered selects across the toolbar: one sm button at the scale of the ones beside it.
+    expect(screen.queryByTestId('sources-sort')).toBeNull();
     expect(screen.queryByTestId('sources-view-button')).toBeNull();
+    expect(trigger.className).toContain('h-8');
+    expect(trigger.textContent).toContain('Name');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(within(trigger).getByTestId('sources-view-count').textContent).toBe('1');
+    expect(screen.getByTestId('sources-add').className).toContain('h-8');
+    expect(screen.getByTestId('sources-refresh-all').className).toContain('h-8');
+
+    fireEvent.click(trigger);
+    const panel = screen.getByRole('dialog', { name: 'Sort and filter' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger.getAttribute('aria-controls')).toBe(panel.id);
+    // The panel is not modal; its first choice takes focus.
+    expect(panel.getAttribute('aria-modal')).toBeNull();
+    expect(within(panel).getByLabelText('Sort')).toBe(document.activeElement);
+    fireEvent.change(within(panel).getByLabelText('Type'), { target: { value: 'xtream' } });
+    await waitFor(() => expect(within(trigger).getByTestId('sources-view-count').textContent).toBe('2'));
+    fireEvent.change(within(panel).getByLabelText('Sort'), { target: { value: 'manual' } });
+    await waitFor(() => expect(trigger.textContent).toContain('Your order'));
+  });
+
+  it('closes the View panel on Escape, giving focus back to its button, and on a press outside', async () => {
+    renderAt(sourcesRoutes, '/sources');
+    const trigger = await screen.findByTestId('sources-view-trigger');
+    fireEvent.click(trigger);
+    const sort = within(screen.getByTestId('sources-view-panel')).getByLabelText('Sort');
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    let reachedWindow = false;
+    const onWindow = () => (reachedWindow = true);
+    window.addEventListener('keydown', onWindow);
+    sort.dispatchEvent(escape);
+    window.removeEventListener('keydown', onWindow);
+    await waitFor(() => expect(screen.queryByTestId('sources-view-panel')).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+    // The page's shortcuts never saw it.
+    expect(reachedWindow).toBe(false);
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('sources-view-panel')).toBeTruthy();
+    fireEvent.mouseDown(screen.getAllByTestId('source-card')[0]!);
+    await waitFor(() => expect(screen.queryByTestId('sources-view-panel')).toBeNull());
+
+    // Focus moving past the panel closes it too.
+    fireEvent.click(trigger);
+    const panel = screen.getByTestId('sources-view-panel');
+    fireEvent.blur(within(panel).getByLabelText('Status'), { relatedTarget: screen.getByTestId('sources-add') });
+    await waitFor(() => expect(screen.queryByTestId('sources-view-panel')).toBeNull());
   });
 });
 
@@ -99,6 +149,29 @@ describe('Source card status', () => {
     expect(origin.parentElement!.contains(refreshed)).toBe(true);
     expect(origin.nextElementSibling?.getAttribute('aria-hidden')).toBe('true');
     expect(origin.nextElementSibling?.className).toContain('@3xl:inline');
+  });
+
+  it('joins the times on one line that wraps as a MetaLine, across the card, beside a smaller monogram', async () => {
+    rpcMock.handlers['sources.list'] = () => [
+      makeSource('a', { name: 'Alpha', autoRefresh: true, lastRefreshAt: new Date(Date.now() - 3_600_000).toISOString() }),
+    ];
+    rpcMock.handlers['sources.schedule'] = () => ({ sources: [{ sourceId: 'a', nextRefreshAt: new Date(Date.now() + 5 * 3_600_000).toISOString(), retrying: false }] });
+    renderAt(sourcesRoutes, '/sources');
+    const card = await screen.findByTestId('source-card');
+    const next = await within(card).findByTestId('source-next-refresh');
+    const refreshed = within(card).getByTestId('source-refreshed');
+    // One MetaLine holds both: its separator travels with "Next refresh", so a wrap never leaves it
+    // at the start of a line, and narrow cards no longer stack the times one per line.
+    const line = refreshed.closest('span.flex-wrap')!;
+    expect(line.contains(next)).toBe(true);
+    expect(line.className).not.toMatch(/flex-col/);
+    // The status row takes the card's width (so a phone fits both times on one line), and the
+    // monogram above it is smaller on a narrow card, so its edge and the name's sit close.
+    const status = within(card).getByTestId('source-origin').parentElement!;
+    expect(status.className).toContain('col-span-full');
+    const mark = within(card).getByTestId('source-monogram');
+    expect(mark.className).toContain('size-9');
+    expect(mark.className).toContain('@3xl:size-11');
   });
 });
 

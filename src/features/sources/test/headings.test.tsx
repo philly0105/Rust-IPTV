@@ -72,7 +72,7 @@ describe('/sources has one h1', () => {
 
   it('with the add dialog open from a deep link', async () => {
     rpcMock.handlers['sources.list'] = () => [];
-    renderAt(sourcesRoutes, '/sources?add=1');
+    renderAt(sourcesRoutes, '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     await expectSingleH1();
   });

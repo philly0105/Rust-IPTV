@@ -1,9 +1,5 @@
 {
   "title": "Крыніцы",
-  "subtitleCount_one": "{{count, number}} крыніца",
-  "subtitleCount_few": "{{count, number}} крыніцы",
-  "subtitleCount_many": "{{count, number}} крыніц",
-  "subtitleCount_other": "Крыніц: {{count, number}}",
   "listLabel": "Вашы крыніцы",
   "add": "Дадаць крыніцу",
   "addSource": "Дадаць крыніцу",

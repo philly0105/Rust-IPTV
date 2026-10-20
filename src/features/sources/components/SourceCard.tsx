@@ -148,6 +148,27 @@ export function radioCount(s: Source): number {
   return typeof n === 'number' && n > 0 ? n : 0;
 }
 
+/** The counts a card can show, in the order its columns take. */
+export type StatKey = 'channels' | 'radio' | 'movies' | 'series';
+export const STAT_ORDER: readonly StatKey[] = ['channels', 'radio', 'movies', 'series'];
+const STAT_LABEL: Record<StatKey, string> = { channels: 'statChannels', radio: 'statRadio', movies: 'statMovies', series: 'statSeries' };
+
+/**
+ * The counts a source has: channels always, radio when it has stations, movies and series for
+ * accounts and portals, and for a playlist that has any.
+ */
+export function statKeysOf(s: Source): StatKey[] {
+  return STAT_ORDER.filter((k) =>
+    k === 'channels' ? true : k === 'radio' ? radioCount(s) > 0 : k === 'movies' ? s.kind !== 'm3u' || s.movieCount > 0 : s.kind !== 'm3u' || s.seriesCount > 0,
+  );
+}
+
+/** The columns a list of cards shares: every count any of them has, in STAT_ORDER. */
+export function statColumnsOf(sources: readonly Source[]): StatKey[] {
+  const keys = new Set(sources.flatMap(statKeysOf));
+  return STAT_ORDER.filter((k) => keys.has(k));
+}
+
 export interface SourceCardProps {
   source: Source;
   index: number;
@@ -177,6 +198,11 @@ export interface SourceCardProps {
   warnDays?: number;
   /** When the scheduled refresh runs next; absent when the source is not scheduled. */
   schedule?: ScheduleEntry;
+  /**
+   * The count columns every card in the list shows (statColumnsOf), so the counts line up down the
+   * list; a count this source lacks shows a dash. Without it the card shows only its own counts.
+   */
+  statColumns?: readonly StatKey[];
 }
 
 /**
@@ -197,10 +223,11 @@ function nextRefreshText(entry: ScheduleEntry, lang: string, t: (k: string, o?: 
  * functions to every card. An import event then re-renders only the card it is about.
  *
  * Layout: the monogram, then the identity (name, kind, the subscription) over one line of
- * status (where it comes from, when it last and next refreshes), then the counts it has, and
- * the actions. Below @3xl the counts join the status as a line of text and the actions sit at
- * the top end beside the name. Only the stats a source has are shown, right-aligned, so the
- * last one always meets the actions and no card shows an empty column.
+ * status (where it comes from, when it last and next refreshes), then the counts, and the
+ * actions. The counts are the list's shared columns (`statColumns`), right-aligned against the
+ * actions, so each column holds one kind of count down the list and only the columns some card
+ * uses appear. Below @3xl the counts the source has join the status as a line of text, and the
+ * actions sit at the top end beside the name.
  */
 export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   const { source: s, index, total, refreshing, reorderable = true } = props;
@@ -221,10 +248,10 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   // `channelCount` is live channels only; radio gets its own stat when the source has any.
   const radio = radioCount(s);
   const live = s.channelCount;
-  const stats: { key: string; value: number; label: string }[] = [{ key: 'channels', value: live, label: t('statChannels', { count: live }) }];
-  if (radio > 0) stats.push({ key: 'radio', value: radio, label: t('statRadio', { count: radio }) });
-  if (s.kind !== 'm3u' || s.movieCount > 0) stats.push({ key: 'movies', value: s.movieCount, label: t('statMovies', { count: s.movieCount }) });
-  if (s.kind !== 'm3u' || s.seriesCount > 0) stats.push({ key: 'series', value: s.seriesCount, label: t('statSeries', { count: s.seriesCount }) });
+  const counts: Record<StatKey, number> = { channels: live, radio, movies: s.movieCount, series: s.seriesCount };
+  const stat = (key: StatKey) => ({ key, value: counts[key], label: t(STAT_LABEL[key], { count: counts[key] }) });
+  const own = statKeysOf(s);
+  const stats = own.map(stat);
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     // Alt+Arrow anywhere on the card, or plain arrows on the grip, move it.
@@ -330,7 +357,8 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
           </Tooltip>
         ) : null}
 
-        <SourceMonogram source={s} className="row-start-1" />
+        {/* Smaller on a narrow card, so the lines under it, which start at the card's edge, sit close to the name's edge. */}
+        <SourceMonogram source={s} className="row-start-1 size-9 rounded-md @3xl:size-11 @3xl:rounded-lg" />
 
         <div className="contents @3xl:flex @3xl:min-w-0 @3xl:flex-1 @3xl:flex-col @3xl:gap-1">
           <div className="col-start-2 row-start-1 flex min-h-6 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -354,8 +382,9 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
           </div>
           {/*
             Where it comes from, then when it refreshed. A narrow card gives the address its own
-            line, so a long one truncates there and the times never wrap with a separator left
-            hanging at the start of a line; from @3xl the two share one line.
+            line, so a long one truncates there, and the times one line after it that wraps as a
+            MetaLine does (a separator goes with the time after it); from @3xl the two share one line.
+            Narrow, these lines take the card's full width, so on a phone the times fit on one line.
           */}
           <div className="col-span-full row-start-2 flex min-w-0 flex-col gap-y-0.5 text-body-sm text-fg-muted @3xl:flex-row @3xl:items-center @3xl:gap-x-1.5">
             <span className="block min-w-0 truncate" dir="auto" title={origin} data-testid="source-origin">
@@ -367,13 +396,12 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
                   ·
                 </span>
                 <span className="sr-only">, </span>
-                {/* Narrow: one time per line, no separators to hang at a line's end. */}
-                <MetaLine as="span" className="shrink-0 text-body-sm @max-3xl:flex-col @max-3xl:items-start @max-3xl:[&>[aria-hidden]]:hidden" items={times} />
+                <MetaLine as="span" className="shrink-0 text-body-sm" items={times} />
               </>
             ) : null}
           </div>
           {/* Narrow cards: the counts as one line of text. */}
-          <dl className="col-span-full row-start-3 flex flex-wrap gap-x-4 gap-y-0.5 @3xl:hidden">
+          <dl className="col-span-full row-start-3 flex flex-wrap gap-x-4 gap-y-0.5 @3xl:hidden" data-testid="source-stats-line">
             {stats.map((st) => (
               <div key={st.key} className="flex items-baseline gap-1 text-body-sm">
                 <dt className="sr-only">{st.label}</dt>
@@ -388,13 +416,28 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
           </dl>
         </div>
 
-        <dl className="hidden shrink-0 items-center gap-6 @3xl:flex" data-testid="source-stats">
-          {stats.map((st) => (
-            <div key={st.key} className="flex min-w-14 flex-col-reverse items-end" data-testid="source-stat">
-              <dt className="max-w-full truncate text-caption text-fg-muted">{st.label}</dt>
-              <dd className="text-title-sm tabular-nums text-fg">{formatCount(st.value, lang)}</dd>
-            </div>
-          ))}
+        {/* The list's shared columns, each a fixed slot, so a column holds one kind of count down
+            the list; a count this source lacks (always 0) is a quiet dash. */}
+        <dl className="hidden shrink-0 items-center gap-3 @3xl:flex" data-testid="source-stats">
+          {(props.statColumns ?? own).map((key) => {
+            const st = stat(key);
+            const has = own.includes(key);
+            return (
+              <div key={key} className="flex w-14 flex-col-reverse items-end" data-testid="source-stat" data-stat={key} data-empty={has ? undefined : ''}>
+                <dt className="max-w-full truncate text-caption text-fg-muted">{st.label}</dt>
+                <dd className={clsx('text-title-sm tabular-nums', has ? 'text-fg' : 'text-fg-subtle')}>
+                  {has ? (
+                    formatCount(st.value, lang)
+                  ) : (
+                    <>
+                      <span aria-hidden>–</span>
+                      <span className="sr-only">{formatCount(st.value, lang)}</span>
+                    </>
+                  )}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
 
         {/* The same three places on every card, so the actions line up down the list (one on a phone). */}

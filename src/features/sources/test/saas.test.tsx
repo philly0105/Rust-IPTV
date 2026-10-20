@@ -49,7 +49,7 @@ afterEach(cleanup);
 describe('typed details survive a stray close (SS-1)', () => {
   it('an untouched Add dialog closes on the backdrop at once', async () => {
     rpcMock.handlers['sources.list'] = () => [];
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByTestId('add-source-dialog');
     fireEvent.mouseDown(scrim());
     await waitFor(() => expect(screen.queryByTestId('add-source-dialog')).toBeNull());
@@ -57,7 +57,7 @@ describe('typed details survive a stray close (SS-1)', () => {
 
   it('with an address typed, the backdrop does nothing and Escape asks first', async () => {
     rpcMock.handlers['sources.list'] = () => [];
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByTestId('add-source-dialog');
     fireEvent.change(within(dialog()).getByLabelText(/^Playlist URL/), { target: { value: 'http://lists.example.com/tv.m3u' } });
     fireEvent.mouseDown(scrim());
@@ -152,7 +152,7 @@ describe('typed details survive a stray close (SS-1)', () => {
 describe('the Add dialog starts at the address (SS-2, SS-14)', () => {
   it('focuses the playlist URL, names both tab lists, and puts the optional name after the address', async () => {
     rpcMock.handlers['sources.list'] = () => [];
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByTestId('add-source-dialog');
     const url = within(dialog()).getByLabelText(/^Playlist URL/);
     await waitFor(() => expect(document.activeElement).toBe(url));
@@ -165,7 +165,7 @@ describe('the Add dialog starts at the address (SS-2, SS-14)', () => {
 
   it('a kind picked with the pointer moves focus to its address field', async () => {
     rpcMock.handlers['sources.list'] = () => [];
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByTestId('add-source-dialog');
     const tab = within(dialog()).getByRole('tab', { name: 'Xtream Codes' });
     fireEvent.pointerDown(tab);
@@ -176,7 +176,7 @@ describe('the Add dialog starts at the address (SS-2, SS-14)', () => {
   it('says how often auto refresh runs, from the setting', async () => {
     rpcMock.handlers['sources.list'] = () => [];
     rpcMock.handlers['settings.get'] = () => settings({ sourceRefreshIntervalHours: 6 });
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByTestId('add-source-dialog');
     expect(await within(dialog()).findByText(/every 6 hours/)).toBeTruthy();
   });

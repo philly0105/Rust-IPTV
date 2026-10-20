@@ -320,7 +320,7 @@ describe('cancel while adding a source (C8)', () => {
       });
     rpcMock.handlers['sources.cancelImport'] = () => true;
     rpcMock.handlers['sources.remove'] = () => null;
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     const dlg = await screen.findByRole('dialog');
     fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
     const url = within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }) as HTMLInputElement;
@@ -351,7 +351,7 @@ describe('cancel while adding a source (C8)', () => {
       });
     rpcMock.handlers['sources.cancelImport'] = () => true;
     rpcMock.handlers['sources.remove'] = () => null;
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     const dlg = await screen.findByRole('dialog');
     fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
     fireEvent.change(within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }), { target: { value: 'http://lists.example.com/huge.m3u' } });
@@ -383,7 +383,7 @@ describe('cancel while adding a source (C8)', () => {
       new Promise((_, rj) => {
         rejectAdd = rj;
       });
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     const dlg = await screen.findByRole('dialog');
     fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
     fireEvent.change(within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }), { target: { value: 'http://lists.example.com/huge.m3u' } });
@@ -404,7 +404,7 @@ describe('cancel while adding a source (C8)', () => {
     let listed: ReturnType<typeof makeSource>[] = [];
     rpcMock.handlers['sources.list'] = () => listed;
     rpcMock.handlers['sources.add'] = () => new Promise(() => undefined);
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     const dlg = await screen.findByRole('dialog');
     fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
     fireEvent.change(within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }), { target: { value: 'http://lists.example.com/huge.m3u' } });
@@ -528,7 +528,7 @@ describe('credentials and hostile input', () => {
     expect(formatFileSize(300 * 1024 * 1024, 'en')).toBe('300 MB');
     expect(formatFileSize(1.5 * 1024 ** 3, 'en')).toBe('1.5 GB');
     rpcMock.handlers['sources.list'] = () => [];
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     const dlg = await screen.findByRole('dialog');
     fireEvent.click(within(dlg).getByRole('tab', { name: 'File' }));
     const file = new File(['#EXTM3U'], 'huge.m3u');
@@ -604,9 +604,16 @@ describe('review round 1', () => {
     renderAt(routes(), '/sources');
     await waitFor(() => expect(cards()).toEqual(['m', 'a']));
     const [m, a] = screen.getAllByTestId('source-card');
-    // Only the stats a source has, right-aligned against the actions: no empty columns (SS-10).
-    expect(within(m!).getAllByTestId('source-stat').map((e) => e.querySelector('dt')?.textContent)).toEqual(['channels']);
-    expect(within(a!).getAllByTestId('source-stat').map((e) => e.querySelector('dt')?.textContent)).toEqual(['channels', 'movies', 'series']);
+    // The list's columns on every card, right-aligned against the actions, so each column holds one
+    // kind of count (review round 2); only the columns some card uses (no radio here, SS-10). The
+    // playlist has no movies or series: a dash there.
+    const columns = (card: HTMLElement) => within(card).getAllByTestId('source-stat').map((e) => e.dataset['stat']);
+    expect(columns(m!)).toEqual(['channels', 'movies', 'series']);
+    expect(columns(a!)).toEqual(['channels', 'movies', 'series']);
+    const empty = (card: HTMLElement) => within(card).getAllByTestId('source-stat').filter((e) => e.dataset['empty'] === '').map((e) => e.dataset['stat']);
+    expect(empty(m!)).toEqual(['movies', 'series']);
+    expect(empty(a!)).toEqual([]);
+    for (const slot of [...within(m!).getAllByTestId('source-stat'), ...within(a!).getAllByTestId('source-stat')]) expect(slot.className).toContain('w-14');
     // The same three action places on every card (Refresh, Edit, More), so they line up down the list.
     expect(within(m!).getByTestId('source-actions').children).toHaveLength(3);
     expect(within(a!).getByTestId('source-actions').children).toHaveLength(3);
@@ -620,7 +627,7 @@ describe('review round 1', () => {
   it('locks the other kind tabs while an import runs (R1-7)', async () => {
     rpcMock.handlers['sources.list'] = () => [];
     rpcMock.handlers['sources.add'] = () => new Promise(() => undefined);
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     const dlg = await screen.findByRole('dialog');
     fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
     fireEvent.change(within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }), { target: { value: 'http://lists.example.com/huge.m3u' } });

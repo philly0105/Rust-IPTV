@@ -56,7 +56,7 @@ async function failAddAndClose() {
   };
   rpcMock.handlers['sources.remove'] = () => null;
   rpcMock.handlers['sources.restore'] = () => null;
-  renderAt(routes(), '/sources?add=1');
+  renderAt(routes(), '/sources?add=1&kind=m3u');
   await screen.findByRole('dialog');
   type(/^Name/, 'list');
   type(/^Playlist URL/, 'lists.example.com/missing.m3u');

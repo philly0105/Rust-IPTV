@@ -38,16 +38,20 @@ function LinkRow({ href, icon, title, hint, testId }: { href: string; icon: Reac
   );
 }
 
-/** A path in the data list: the label, the path in mono (it wraps anywhere), and on the desktop an Open button. */
+/**
+ * A path in the data group: the label, the path in mono (it wraps anywhere), and on the desktop an
+ * Open button. Each row is its own term and value list, with the button beside it, outside the
+ * list: a dl holds only dt and dd (or a div of them).
+ */
 function PathRow({ label, path, onOpen, openLabel, testId }: { label: string; path: string; onOpen?: () => void; openLabel: string; testId?: string }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <dl className="flex min-w-0 flex-1 flex-col gap-0.5">
         <dt className="text-body-sm text-fg-muted">{label}</dt>
         <dd className="min-w-0 break-all font-mono text-body-sm text-fg" dir="ltr">
           {path}
         </dd>
-      </div>
+      </dl>
       {onOpen ? <IconButton label={openLabel} icon={<FolderOpen aria-hidden size={16} />} onClick={onOpen} data-testid={testId} /> : null}
     </div>
   );
@@ -89,7 +93,7 @@ export function AboutSection(_props: SectionProps) {
   };
 
   return (
-    <SettingsSection title={t('sectionAbout')} testId="settings-about">
+    <SettingsSection title={t('sectionAbout')} description={t('sectionAboutLead')} testId="settings-about">
       {info.isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-28 rounded-lg" />
@@ -99,7 +103,7 @@ export function AboutSection(_props: SectionProps) {
         <ErrorState error={info.error} onRetry={() => void info.refetch()} />
       ) : (
         <>
-          <div className="flex flex-col gap-5 rounded-lg border border-edge bg-surface p-5 @md:flex-row @md:items-center" data-testid="about-product">
+          <div className="flex flex-col gap-5 rounded-lg border border-edge bg-surface p-5 @md:flex-row @md:items-start" data-testid="about-product">
             <BrandMark size={64} className="shrink-0 rounded-xl shadow-1" />
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -115,14 +119,15 @@ export function AboutSection(_props: SectionProps) {
                   kind: info.data.isDesktop ? t('aboutDesktop') : t('aboutServer'),
                 })}
               </p>
-            </div>
-            <div className="flex flex-wrap gap-2 @md:flex-col @md:items-stretch">
-              <Button variant="secondary" icon={<Gift aria-hidden size={16} />} onClick={openWhatsNew} data-testid="about-whats-new">
-                {t('aboutWhatsNew')}
-              </Button>
-              <Button variant="ghost" icon={<Route aria-hidden size={16} />} onClick={openTour} data-testid="about-tour">
-                {t('aboutTakeTour')}
-              </Button>
+              {/* One row of equal buttons under the text, so the card keeps a straight edge. */}
+              <div className="mt-2 flex flex-wrap gap-2" data-testid="about-product-actions">
+                <Button variant="secondary" size="sm" icon={<Gift aria-hidden size={16} />} onClick={openWhatsNew} data-testid="about-whats-new">
+                  {t('aboutWhatsNew')}
+                </Button>
+                <Button variant="secondary" size="sm" icon={<Route aria-hidden size={16} />} onClick={openTour} data-testid="about-tour">
+                  {t('aboutTakeTour')}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -134,21 +139,19 @@ export function AboutSection(_props: SectionProps) {
           <UpdatesPanel available={isDesktop && updaterAvailable(info.data)} server={!isDesktop} />
 
           <SettingsGroup title={t('aboutDataGroup')} description={isDesktop ? undefined : t('aboutServerNote')}>
-            <dl className="flex flex-col divide-y divide-divider">
-              <PathRow
-                label={t('aboutDataDir')}
-                path={info.data.dataDir}
-                openLabel={t('aboutOpenDataDir')}
-                onOpen={isDesktop ? () => void act(() => rpc('app.openPath', { path: info.data.dataDir })) : undefined}
-              />
-              <PathRow
-                label={t('aboutLogFile')}
-                path={info.data.logFile}
-                openLabel={t('aboutOpenLogs')}
-                onOpen={isDesktop ? () => void act(() => rpc('app.openLogDir')) : undefined}
-                testId="about-open-logs"
-              />
-            </dl>
+            <PathRow
+              label={t('aboutDataDir')}
+              path={info.data.dataDir}
+              openLabel={t('aboutOpenDataDir')}
+              onOpen={isDesktop ? () => void act(() => rpc('app.openPath', { path: info.data.dataDir })) : undefined}
+            />
+            <PathRow
+              label={t('aboutLogFile')}
+              path={info.data.logFile}
+              openLabel={t('aboutOpenLogs')}
+              onOpen={isDesktop ? () => void act(() => rpc('app.openLogDir')) : undefined}
+              testId="about-open-logs"
+            />
           </SettingsGroup>
 
           {/* For a bug report: technical details stay folded, with the copy button beside them. */}

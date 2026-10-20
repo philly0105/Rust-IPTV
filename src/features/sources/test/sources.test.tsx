@@ -136,12 +136,36 @@ describe('Add source flow sends the exact C4 args', () => {
     expect(rpcMock.callsOf('sources.add')).toHaveLength(0);
   });
 
-  it('opens an empty form for ?add=1 and non-web schemes', async () => {
+  it('opens an empty form for ?add=1 and non-web schemes, on Xtream, the first and most common kind', async () => {
     await openAdd('/sources?add=1');
-    expect((within(dialog()).getByLabelText(/^Playlist URL/, { selector: 'input' }) as HTMLInputElement).value).toBe('');
+    // The kinds in the order of the empty Sources page's tiles, Xtream first and chosen.
+    expect(within(dialog()).getAllByRole('tab', { name: /Xtream Codes|M3U playlist|Stalker portal/ }).map((tab) => tab.textContent)).toEqual([
+      'XtreamXtream Codes',
+      'M3UM3U playlist',
+      'StalkerStalker portal',
+    ]);
+    expect(within(dialog()).getByRole('tab', { name: 'Xtream Codes' }).getAttribute('aria-selected')).toBe('true');
+    expect((within(dialog()).getByLabelText(/^Server URL/, { selector: 'input' }) as HTMLInputElement).value).toBe('');
     cleanup();
     await openAdd('/sources?add=file%3A%2F%2F%2Fetc%2Fpasswd');
+    expect((within(dialog()).getByLabelText(/^Server URL/, { selector: 'input' }) as HTMLInputElement).value).toBe('');
+    cleanup();
+    // An address with no kind is a playlist address.
+    await openAdd('/sources?add=1&kind=m3u');
     expect((within(dialog()).getByLabelText(/^Playlist URL/, { selector: 'input' }) as HTMLInputElement).value).toBe('');
+  });
+
+  it('puts the request headers, an advanced option, after the name and auto refresh', async () => {
+    for (const kind of ['m3u', 'xtream', 'stalker']) {
+      await openAdd(`/sources?add=1&kind=${kind}`);
+      const name = within(dialog()).getByLabelText(/^Name/, { selector: 'input' });
+      const auto = within(dialog()).getByRole('switch', { name: /Refresh automatically/ });
+      const headers = within(dialog()).getByText('Request headers');
+      expect(name.compareDocumentPosition(headers) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(auto.compareDocumentPosition(headers) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(dialog()).getAllByText('Request headers')).toHaveLength(1);
+      cleanup();
+    }
   });
 
   it('shows the server error with a next step', async () => {

@@ -14,7 +14,8 @@ export type SaveState = 'idle' | 'saving' | 'saved';
  * from anywhere else (a theme card, a dialog) shows it beside the section title. One
  * confirmation, next to what changed, and clear of the mini player and toasts in the corner.
  */
-export const SaveFeedback = createContext<{ state: SaveState; rowId: string | null }>({ state: 'idle', rowId: null });
+// Marked pure, so a module that reaches this one only for a type or an unused export can drop it.
+export const SaveFeedback = /* @__PURE__ */ createContext<{ state: SaveState; rowId: string | null }>({ state: 'idle', rowId: null });
 
 /**
  * "Saving…" then a check and "Saved", fading in and out. Hidden from screen readers: the page's
@@ -58,14 +59,18 @@ function RowMark({ rowId }: { rowId: string }) {
   );
 }
 
-/** One settings page: heading, optional lead, and grouped rows. */
+/**
+ * One settings page: heading, optional lead, and grouped rows. Below md (the phone layout, where
+ * the shell header names the section) the heading is for screen readers only, so the lead and the
+ * first group start right under the header.
+ */
 export function SettingsSection({ title, description, children, testId }: { title: string; description?: string; children: ReactNode; testId?: string }) {
   const fb = useContext(SaveFeedback);
   return (
-    <section className="flex flex-col gap-8" aria-labelledby="settings-section-title" data-testid={testId}>
+    <section className="flex flex-col gap-8 max-md:gap-6" aria-labelledby="settings-section-title" data-testid={testId}>
       <header className="flex max-w-2xl flex-col gap-1.5">
         <div className="flex flex-wrap items-baseline gap-x-3">
-          <h2 id="settings-section-title" className="text-title text-fg">
+          <h2 id="settings-section-title" className="text-title text-fg max-md:sr-only">
             {title}
           </h2>
           {fb.rowId === null && fb.state !== 'idle' ? <SavedMark state={fb.state} /> : null}
@@ -78,13 +83,17 @@ export function SettingsSection({ title, description, children, testId }: { titl
 }
 
 /**
- * A titled block of rows. `tone="danger"` is the danger zone: irreversible actions, with a
- * danger outline and heading, at the end of a section. `id` makes it a link target
- * (`/settings/general#sources`).
+ * A titled block of rows. In a section of more than one group every group has a title, so a
+ * group without one never reads as the overflow of the one above; only a section's single group
+ * may go without. `tone="danger"` is the danger zone: irreversible actions, with a danger outline
+ * and heading, at the end of a section. `id` makes it a link target
+ * (`/settings/general#sources`); `descriptionId` lets a control inside be described by the
+ * group's description.
  */
 export function SettingsGroup({
   title,
   description,
+  descriptionId,
   children,
   actions,
   tone = 'default',
@@ -92,13 +101,14 @@ export function SettingsGroup({
 }: {
   title?: string;
   description?: ReactNode;
+  descriptionId?: string;
   children: ReactNode;
   actions?: ReactNode;
   tone?: 'default' | 'danger';
   id?: string;
 }) {
   return (
-    <div id={id} className="flex scroll-mt-6 flex-col gap-3" data-tone={tone}>
+    <div id={id} className="flex scroll-mt-6 flex-col gap-3" data-tone={tone} data-settings-group={title ? 'titled' : 'untitled'}>
       {title || actions ? (
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-0.5">
@@ -107,7 +117,11 @@ export function SettingsGroup({
                 {title}
               </h3>
             ) : null}
-            {description ? <p className="text-body-sm text-pretty text-fg-muted">{description}</p> : null}
+            {description ? (
+              <p id={descriptionId} className="text-body-sm text-pretty text-fg-muted">
+                {description}
+              </p>
+            ) : null}
           </div>
           {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
         </div>

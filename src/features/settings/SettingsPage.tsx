@@ -24,7 +24,7 @@ import { isDesktop } from '@/api/transport';
 import { ParentalSection } from '@/features/parental/ParentalSection';
 import { useShell } from '@/shell';
 import { useMediaQuery } from '@/shell/useMediaQuery';
-import { BackButton, Page } from '@/ui';
+import { Page } from '@/ui';
 import { SaveFeedback, SectionError, SectionSkeleton, type SaveState } from './components';
 import type { SettingsPatch } from './lib/patch';
 import { useSettingsQuery, useUpdateSettings } from './lib/useUpdateSettings';
@@ -252,11 +252,26 @@ export function SettingsPage() {
   const index = section === undefined;
   const valid = isSectionId(section) && sectionAvailable(section);
   const current: SectionId = valid ? section : 'general';
+  // A phone shows one section at a time: the header names it and holds the way back to the list.
+  const phoneSection = phone && valid;
+  const fromList = (location.state as { fromSettingsList?: boolean } | null)?.fromSettingsList === true;
 
   useEffect(() => {
-    // The section's own heading names it; the header says only where the user is (no title said three times).
-    if (valid || index) setHeader({ title: t('title') });
-  }, [setHeader, t, valid, index]);
+    if (phoneSection) {
+      // The header's Back to the list. From the list, back in history: a pushed /settings would leave
+      // list and sections taking turns in history, so the system back from the list went to the
+      // section just left instead of out of Settings. Opened any other way (a deep link, the command
+      // palette, a link in another section), the list replaces this section.
+      const backToList = () => {
+        if (fromList) navigate(-1);
+        else navigate('/settings', { replace: true });
+      };
+      setHeader({ title: t(SECTIONS[current].label), documentTitle: t('title'), back: { onClick: backToList, label: t('allSettings') } });
+    } else if (valid || index) {
+      // The section's own heading names it; the header says only where the user is (no title said three times).
+      setHeader({ title: t('title') });
+    }
+  }, [setHeader, t, valid, index, phoneSection, current, fromList, navigate]);
 
   if (index && !phone) return <Navigate to="/settings/general" replace />;
   if (!index && !valid) return <Navigate to="/settings/general" replace />;
@@ -271,20 +286,12 @@ export function SettingsPage() {
   }
 
   const Section = SECTIONS[current].component;
-  // The phone's "All settings". From the list, back in history: a pushed /settings would leave
-  // list and sections taking turns in history, so the system back from the list went to the
-  // section just left instead of out of Settings. Opened any other way (a deep link, the command
-  // palette, a link in another section), the list replaces this section.
-  const backToList = () => {
-    if ((location.state as { fromSettingsList?: boolean } | null)?.fromSettingsList) navigate(-1);
-    else navigate('/settings', { replace: true });
-  };
 
   return (
     <Page width="default" data-testid="settings-page" onPointerDownCapture={save.onPointerDownCapture}>
-      {/* The page's single h1 (C16) matches the header title; each section's own title is its h2. */}
-      <h1 className="sr-only">{t('title')}</h1>
-      {phone ? <BackButton to="/settings" onClick={backToList} label={t('allSettings')} className="-ms-2 mb-4" data-testid="settings-back" /> : null}
+      {/* The page's single h1 (C16) matches the header title; each section's own title is its h2,
+          which a phone hides, since its header already names the section. */}
+      <h1 className="sr-only">{phone ? t(SECTIONS[current].label) : t('title')}</h1>
       <div className="flex items-start gap-8 lg:gap-12">
         {phone ? null : (
           // Sticky inside the shell's scrolling main, so the nav stays put down a long section.

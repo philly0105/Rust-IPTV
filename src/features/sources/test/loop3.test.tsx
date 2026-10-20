@@ -62,7 +62,7 @@ describe('a failed add does not outlive a reload (L3-app-5)', () => {
       throw new RpcError('not_found', 'HTTP 404 Not Found', false, { sourceId: 'new1' });
     };
     rpcMock.handlers['sources.remove'] = () => null;
-    const view = renderAt(routes(), '/sources?add=1');
+    const view = renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     type(/^Name/, '404');
     type(/^Playlist URL/, 'lists.example.com/missing.m3u');
@@ -100,7 +100,7 @@ describe('a failed add does not outlive a reload (L3-app-5)', () => {
   it('does not touch a source whose add succeeded', async () => {
     rpcMock.handlers['sources.list'] = () => [];
     rpcMock.handlers['sources.add'] = () => makeSource('ok', { name: 'Fine' });
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     type(/^Name/, 'Fine');
     type(/^Playlist URL/, 'lists.example.com/tv.m3u');
@@ -125,7 +125,7 @@ describe('a refused duplicate names the source (L3-app-7)', () => {
     rpcMock.handlers['sources.add'] = () => {
       throw new RpcError('conflict', 'this source already exists: "Living room" uses the same playlist URL', false, { existingSourceId: 'old' });
     };
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     type(/^Name/, 'Living room again');
     type(/^Playlist URL/, 'lists.example.com/tv.m3u');
@@ -177,7 +177,7 @@ describe('focus after a failed save clicked with the mouse (L3-app-9)', () => {
     rpcMock.handlers['sources.add'] = () => {
       throw new RpcError('auth', 'xt.example.com answered HTTP 401');
     };
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     fireEvent.click(within(dialog()).getByRole('tab', { name: 'Xtream Codes' }));
     type(/^Name/, 'Big provider');

@@ -2,7 +2,7 @@
 // above and inline-start, clamped into the window; centred when nothing fits.
 import { describe, expect, it } from 'vitest';
 
-import { ARROW_INSET, CARD_GAP, centred, placeCard, spotlightBox, SPOTLIGHT_PAD, VIEWPORT_MARGIN } from '../tour/placement';
+import { ARROW_INSET, CARD_GAP, centred, placeCard, spotlightBox, SPOTLIGHT_EDGE, SPOTLIGHT_PAD, VIEWPORT_MARGIN } from '../tour/placement';
 
 const CARD = { width: 352, height: 232 };
 
@@ -92,6 +92,25 @@ describe('spotlightBox', () => {
     const far = spotlightBox({ top: 760, left: 1240, width: 80, height: 80 }, 1280, 800);
     expect(far.left + far.width).toBeLessThanOrEqual(1280);
     expect(far.top + far.height).toBeLessThanOrEqual(800);
+  });
+
+  it('keeps its 2 px ring off the window edge', () => {
+    // A rail item 8 px from the window's left edge (review round 2: the ring ran from x = 0).
+    const rail = spotlightBox({ top: 640, left: 8, width: 232, height: 40 }, 1440, 900);
+    expect(rail.left).toBe(SPOTLIGHT_EDGE);
+    expect(rail.left - 2).toBeGreaterThanOrEqual(4);
+    const corner = spotlightBox({ top: 0, left: 0, width: 64, height: 48 }, 1280, 800);
+    expect(corner.top).toBeGreaterThanOrEqual(SPOTLIGHT_EDGE);
+    expect(corner.left).toBeGreaterThanOrEqual(SPOTLIGHT_EDGE);
+    const far = spotlightBox({ top: 760, left: 1240, width: 80, height: 80 }, 1280, 800);
+    expect(far.left + far.width).toBeLessThanOrEqual(1280 - SPOTLIGHT_EDGE);
+    expect(far.top + far.height).toBeLessThanOrEqual(800 - SPOTLIGHT_EDGE);
+  });
+
+  it('leaves a rail item a small pad, so the ring stays inside the rail', () => {
+    // The rail is 248 px wide; its items end at 240.
+    const b = spotlightBox({ top: 640, left: 8, width: 232, height: 40 }, 1440, 900);
+    expect(b.left + b.width + 2).toBeLessThanOrEqual(247);
   });
 });
 

@@ -622,11 +622,15 @@ async fn portal_epg(
             }
         }
     }
+    // The channel's guide shift moves the portal's programmes (the bulk
+    // cache keeps them as the portal sent them) before the times pick.
+    let shift = crate::epg::channel_shift(state, r).await?;
     let now_at = Utc::now();
     let now = now_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let mut programs: Vec<EpgProgram> = entries
         .iter()
         .filter_map(|v| mapping::epg_program(&channel_id, v))
+        .map(|p| crate::epg::shifted(p, shift))
         .filter(|p| p.end > now || p.end == p.start)
         .collect();
     programs.sort_by(|a, b| a.start.cmp(&b.start));
@@ -636,7 +640,10 @@ async fn portal_epg(
     if let Some(from_at) = from.filter(|f| *f < now_at) {
         let from_s = from_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let mut past = Vec::new();
-        let read = past_programmes(client, &r.item_id, from_at, now_at, &mut past);
+        // A positive shift shows programmes that ended before `from` on the
+        // portal's clock, so the day tables start that much earlier.
+        let read_from = from_at - Duration::seconds(shift.max(0));
+        let read = past_programmes(client, &r.item_id, read_from, now_at, &mut past);
         match tokio::time::timeout_at(started + EPG_PAST_DEADLINE, read).await {
             Ok(Ok(())) => {}
             Ok(Err(err @ CoreError::Auth(_))) => return Err(err),
@@ -656,6 +663,7 @@ async fn portal_epg(
         programs.extend(
             past.iter()
                 .filter_map(|v| mapping::epg_program(&channel_id, v))
+                .map(|p| crate::epg::shifted(p, shift))
                 .filter(|p| p.end > from_s && p.end > p.start)
                 // Past only: the short EPG owns the airing and upcoming part.
                 .filter(|p| earliest_upcoming.as_ref().is_none_or(|e| p.start < *e))

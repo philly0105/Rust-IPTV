@@ -224,6 +224,35 @@ async fn empty_short_epg_shares_one_cached_bulk_guide() {
     assert_eq!(portal.count("itv.get_epg_info"), 2);
 }
 
+/// GPT review (provider-guides-ignore-shifts): the portal's own guide
+/// moves by the channel's guide shift, here the source's 60 minutes.
+#[tokio::test]
+async fn portal_guide_follows_the_guide_shift() {
+    let portal = Arc::new(Portal::default());
+    spawn_portal(7207, portal.clone()).await;
+    let e = env_on(7207).await;
+    let args = json!({"ref": live("1001"), "limit": 3});
+    let plain = e.call("stalker.epg", args.clone()).await.unwrap();
+    e.state
+        .db_call(|c| {
+            c.execute(
+                r#"UPDATE sources SET epg_json = '{"shiftMinutes":60}' WHERE id = ?1"#,
+                [SID],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let moved = e.call("stalker.epg", args).await.unwrap();
+    let start = |v: &Value| {
+        let t = chrono::DateTime::parse_from_rfc3339(v[0]["start"].as_str().unwrap());
+        t.unwrap().timestamp()
+    };
+    // The portal reads its own clock for each answer; a second may pass.
+    let delta = start(&moved) - start(&plain);
+    assert!((3595..=3605).contains(&delta), "moved by {delta} s");
+}
+
 /// R3 F2: on a portal that takes 3 s per request, a 7-day `from` cannot
 /// read every day table within the 40 s budget. The call still succeeds
 /// with the short EPG and the days read before the deadline.

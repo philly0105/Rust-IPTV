@@ -5,7 +5,7 @@ import { isDesktop } from '@/api/transport';
 import type { StartupBehavior, WindowStart } from '@/api/types';
 import { LANGUAGES, applyLanguage } from '@/i18n';
 
-import { Select } from '@/ui';
+import { Select, Slider } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { clampRating, type SettingsPatch } from '../lib/patch';
@@ -33,23 +33,22 @@ function MinRatingRow({ value, update }: { value: number; update: (patch: Settin
     <SettingsRow label={t('vodMinRating')} description={t('vodMinRatingHint')}>
       {({ id, describedBy }) => (
         <div className="flex items-center gap-3">
-          <input
+          <Slider
             id={id}
-            type="range"
             min={0}
             max={10}
             step={0.5}
             value={draft}
             aria-describedby={describedBy}
             aria-valuetext={label}
-            onChange={(e) => setDraft(Number(e.target.value))}
+            onValueChange={setDraft}
             onPointerUp={commit}
             onKeyUp={commit}
             onBlur={commit}
-            className="w-44 accent-[var(--color-accent)]"
+            className="w-44"
             data-testid="input-vodMinRating"
           />
-          <output htmlFor={id} className="w-14 text-end text-sm tabular-nums text-fg" data-testid="vodMinRating-value">
+          <output htmlFor={id} className="w-14 text-end text-body-sm font-medium tabular-nums text-fg" data-testid="vodMinRating-value">
             {draft > 0 ? draft.toLocaleString(intlLocale(i18n.language), { minimumFractionDigits: 1 }) : t('vodMinRatingAny')}
           </output>
         </div>

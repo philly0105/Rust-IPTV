@@ -304,6 +304,17 @@ export function Dialog({
     }
   };
 
+  const closeButton = (
+    <IconButton
+      data-dialog-close=""
+      label={t('close')}
+      shortcut="escape"
+      icon={<X aria-hidden size={18} />}
+      onClick={() => onCloseRef.current()}
+      className={drawer ? 'ms-auto' : '-me-2'}
+    />
+  );
+
   return createPortal(
     <div
       ref={layerRef}
@@ -389,16 +400,16 @@ export function Dialog({
                 </p>
               )}
             </div>
-            {!hideClose && (
-              <IconButton
-                data-dialog-close=""
-                label={t('close')}
-                shortcut="escape"
-                icon={<X aria-hidden size={18} />}
-                onClick={() => onCloseRef.current()}
-                className={drawer ? 'ms-auto' : '-me-2'}
-              />
-            )}
+            {!hideClose &&
+              (drawer || hideTitle ? (
+                closeButton
+              ) : (
+                // A box one title line tall (text-title-sm, 24/15 rem): the 40 px button centres on
+                // the title's first line and overhangs the box, so it no longer sets the row's height.
+                <div className="flex h-[calc(24rem/15)] shrink-0 items-center" data-dialog-close-box="">
+                  {closeButton}
+                </div>
+              ))}
           </div>
         )}
         {/* No body, no empty band: a confirm with only a description sits straight on its footer. */}

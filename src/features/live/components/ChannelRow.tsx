@@ -177,7 +177,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
                       stripes, and red ones as "all live, all alerting". */}
                   <span
                     data-testid="channel-progress"
-                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent' : 'bg-fg-subtle/55')}
+                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent-mark' : 'bg-fg-subtle/55')}
                     style={{ width: `${progress * 100}%` }}
                   />
                 </span>

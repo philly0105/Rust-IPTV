@@ -488,6 +488,21 @@ describe('features use the kit controls (DS-DUPLICATE-CONTROLS)', () => {
     expect(own).toEqual([]);
   });
 
+  // Round 2: settings drew Chromium's own grey range control. A page slider is the kit Slider. The
+  // level sliders over video keep their own look: the player's white `.player-range` (player.css)
+  // and the multi-view wall's volume, which sits on glass in full screen.
+  it('draws no range input of its own outside the level sliders over video', () => {
+    const OVER_VIDEO = new Set(['features/multiview/components/WallToolbar.tsx']);
+    const own = files.flatMap((f) => {
+      if (OVER_VIDEO.has(rel(f))) return [];
+      const text = readFileSync(f, 'utf8');
+      return [...text.matchAll(/<input\b((?:=>|[^>])*?)\/?>/gs)]
+        .filter((m) => /type="range"/.test(m[1]!) && !/\bplayer-range\b/.test(m[1]!))
+        .map((m) => `${rel(f)}:${text.slice(0, m.index).split('\n').length}`);
+    });
+    expect(own).toEqual([]);
+  });
+
   // The base focus rule for text fields (globals.css) lives in @layer base, so a field's own
   // border colour utility outranks its focus border: the fullscreen channel search showed only a
   // faint glow when focused. A hand-built field takes fieldClass, or names its focus look.

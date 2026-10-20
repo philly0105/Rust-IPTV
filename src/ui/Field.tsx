@@ -233,7 +233,7 @@ export interface SwitchProps extends Omit<ComponentPropsWithRef<'button'>, 'onCh
  */
 export const SWITCH_TONES = {
   off: { track: 'border-border bg-surface-3 hover:border-fg-subtle', knob: 'bg-fg-muted' },
-  on: { track: 'border-accent bg-accent-solid hover:bg-accent-solid-hover', knob: 'bg-accent-solid-fg' },
+  on: { track: 'border-accent-mark bg-accent-solid hover:bg-accent-solid-hover', knob: 'bg-accent-solid-fg' },
 } as const;
 
 /**
@@ -364,6 +364,40 @@ export function Checkbox({ indeterminate = false, onChange, onCheckedChange, cla
   );
 }
 
+export interface SliderProps extends Omit<ComponentPropsWithRef<'input'>, 'type' | 'value' | 'defaultValue' | 'onChange' | 'min' | 'max' | 'step' | 'size'> {
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  /** Every move, as a number (drag, arrow keys, Home/End). Commit on pointer up, key up or blur if saving is costly. */
+  onValueChange: (value: number) => void;
+}
+
+/**
+ * The one range slider: a native input (arrows, Home/End, Page keys) drawn by the `slider`
+ * utility (globals.css). The part up to the value fills in the accent's mark tone, the rest is a
+ * recessed track with the 3:1 control border, and the thumb is the solid accent with a ring of the
+ * surface; the fill follows the input's direction, so it grows from the right in RTL. Focus is
+ * the global outline. Name it with a <label htmlFor> or aria-label, and pass `aria-valuetext`
+ * when the number alone does not say it ("6.5 stars", "110 %").
+ */
+export function Slider({ value, min = 0, max = 100, step = 1, onValueChange, className, style, ...rest }: SliderProps) {
+  const fill = max > min ? (Math.max(min, Math.min(max, value)) - min) / (max - min) : 0;
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(e) => onValueChange(Number(e.currentTarget.value))}
+      className={cn('slider', className)}
+      style={{ ...style, ['--slider-fill' as string]: `${Math.round(fill * 10000) / 100}%` }}
+      {...rest}
+    />
+  );
+}
+
 export interface RadioProps extends Omit<ComponentPropsWithRef<'input'>, 'type' | 'size'> {
   /** Classes for the circle's wrapper (margins, alignment). */
   wrapperClassName?: string;
@@ -380,14 +414,14 @@ export function Radio({ className, wrapperClassName, ...rest }: RadioProps) {
         type="radio"
         className={cn(
           'peer m-0 size-full cursor-pointer appearance-none rounded-full border border-border bg-surface motion-safe:transition-colors',
-          'not-checked:hover:border-fg-subtle checked:border-2 checked:border-accent disabled:cursor-not-allowed disabled:opacity-50',
+          'not-checked:hover:border-fg-subtle checked:border-2 checked:border-accent-mark disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
         {...rest}
       />
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 m-auto size-2 scale-0 rounded-full bg-accent peer-checked:scale-100 motion-safe:transition-transform motion-safe:duration-(--duration-fast)"
+        className="pointer-events-none absolute inset-0 m-auto size-2 scale-0 rounded-full bg-accent-mark peer-checked:scale-100 motion-safe:transition-transform motion-safe:duration-(--duration-fast)"
       />
     </span>
   );

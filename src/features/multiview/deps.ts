@@ -17,6 +17,7 @@ export {
   isTypingTarget,
   Kbd,
   SearchInput,
+  SegmentedControl,
   Select,
   Skeleton,
   SkeletonList,

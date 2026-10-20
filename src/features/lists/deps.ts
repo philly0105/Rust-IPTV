@@ -20,6 +20,7 @@ export {
   Select,
   Skeleton,
   SkeletonList,
+  SourceMonogram,
   Toggle,
   Tooltip,
   buttonClass,

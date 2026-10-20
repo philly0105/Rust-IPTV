@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { ACCENTS, DENSITIES, UI_SCALE_MAX, UI_SCALE_MIN } from '@/api/types';
 import type { Accent, CoverSize, DashboardRails, Density, Theme } from '@/api/types';
 import { clampUiScale, previewAppearance, useTheme } from '@/shell';
-import { Button, Poster, ProgressBar, Radio as RadioInput } from '@/ui';
+import { Button, Poster, ProgressBar, Radio as RadioInput, Slider } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
@@ -339,9 +339,8 @@ function ScaleControl({
           </Button>
         ) : null}
       </div>
-      <input
+      <Slider
         id={id}
-        type="range"
         min={Math.round(UI_SCALE_MIN * 100)}
         max={Math.round(UI_SCALE_MAX * 100)}
         step={Math.round(SCALE_STEP * 100)}
@@ -349,7 +348,7 @@ function ScaleControl({
         aria-describedby={describedBy}
         aria-valuetext={pct(draft)}
         data-testid="ui-scale"
-        onChange={(e) => onInput(Number(e.currentTarget.value))}
+        onValueChange={onInput}
         onPointerDown={() => {
           dragging.current = true;
         }}
@@ -361,7 +360,7 @@ function ScaleControl({
         onBlur={() => {
           if (editing.current) commit(draft);
         }}
-        className="h-6 w-full cursor-pointer accent-accent"
+        className="w-full"
       />
       {/* The tuning scale: a tick per 5 % step, labelled at the ends and at 100 %. */}
       <div aria-hidden className="relative h-6">
@@ -372,7 +371,7 @@ function ScaleControl({
           return (
             <span
               key={i}
-              className={clsx('absolute top-0 w-px -translate-x-1/2 rtl:translate-x-1/2', major ? 'h-2' : 'h-1', on ? 'bg-accent' : 'bg-border')}
+              className={clsx('absolute top-0 w-px -translate-x-1/2 rtl:translate-x-1/2', major ? 'h-2' : 'h-1', on ? 'bg-accent-mark' : 'bg-border')}
               style={{ insetInlineStart: along(v) }}
             />
           );

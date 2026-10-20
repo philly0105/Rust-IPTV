@@ -1,4 +1,4 @@
-import { Bookmark, BookmarkCheck, BookmarkPlus, Check, Lock, Star } from 'lucide-react';
+import { Bookmark, BookmarkCheck, BookmarkPlus, Lock, Star } from 'lucide-react';
 import { createContext, memo, useContext, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -13,7 +13,7 @@ import { usePrefetchIntent, type PrefetchIntent, type PrefetchTarget } from '../
 import { formatRating } from '../lib/format';
 import { languageName, type ItemLanguage } from '../lib/language';
 import { joinList } from '@/shell/dashboard/cards';
-import { CARD_ART, CARD_ART_CURSOR, CARD_ROOT, Poster, ProgressBar, Skeleton, cn } from '@/ui';
+import { CARD_ART, CARD_ART_CURSOR, CARD_ROOT, Poster, ProgressBar, Skeleton, WatchedChip, cn } from '@/ui';
 import { listSeparator } from '@/lib/intl';
 
 export interface PosterCardProps {
@@ -302,12 +302,8 @@ function PosterCardBody({
                 <BookmarkCheck aria-hidden size={12} strokeWidth={2.5} />
               </div>
             )}
-            {watched && (
-              // Watched is a state, not an action: a glass chip with an on-glass tick, so amber stays on progress and play.
-              <div aria-hidden data-testid="poster-watched" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-glass-strong text-on-glass shadow-1">
-                <Check aria-hidden size={13} strokeWidth={3} />
-              </div>
-            )}
+            {/* Watched is a state, not an action: the kit's glass tick, so amber stays on progress and play. */}
+            {watched && <WatchedChip testId="poster-watched" />}
           </div>
         )}
         {language && (
@@ -322,8 +318,9 @@ function PosterCardBody({
           </div>
         )}
         {hasProgress && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-scrim/60 px-1.5 pb-1.5 pt-1">
-            <ProgressBar value={progress} max={1} />
+          // Glass on the artwork in every theme; the link's name already says how far, so the bar is drawn only.
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-glass/60 px-1.5 pb-1.5 pt-1">
+            <ProgressBar value={progress} max={1} tone="glass" decorative />
           </div>
         )}
         {artCorner}

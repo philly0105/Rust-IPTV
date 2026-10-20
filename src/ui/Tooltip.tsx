@@ -172,6 +172,8 @@ export function useTooltip({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
   const tipRef = useRef<HTMLDivElement>(null);
+  /** Shown because keyboard focus reached the trigger (it then follows focus), not by the pointer. */
+  const viaFocus = useRef(false);
 
   const show = (immediate: boolean) => {
     if (!enabled) return;
@@ -185,6 +187,7 @@ export function useTooltip({
   const hide = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
+    viaFocus.current = false;
     setRect((r) => {
       if (r) lastHiddenAt = Date.now();
       return null;
@@ -213,6 +216,23 @@ export function useTooltip({
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
     };
+  }, [rect]);
+
+  // WCAG 1.4.13: a tooltip the pointer brought up closes on Escape wherever focus is (the body,
+  // a field, another control), and claims that press, so it does not also close the dialog under
+  // it or go Back on a page that listens for Escape (useEscapeBack); the next press does that. A
+  // window capture listener hears the key before anything else. A tooltip that follows keyboard
+  // focus is left to the trigger's onKeyDown, which hides it and lets the press go on.
+  useEffect(() => {
+    if (!rect) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.isComposing || viaFocus.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      hide();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [rect]);
 
   // Measure after render (hidden), then place inside the viewport before paint. Content built as
@@ -246,12 +266,17 @@ export function useTooltip({
     },
     onMouseEnter: () => {
       if (lastPointerType === 'touch') return;
+      // The pointer passing over a tooltip that already follows focus leaves it a focus one.
+      if (!(viaFocus.current && rect)) viaFocus.current = false;
       show(false);
     },
     onMouseLeave: hide,
     onPointerDown: hide,
     onFocus: (e) => {
-      if ((e.target as HTMLElement).matches?.(':focus-visible')) show(true);
+      if ((e.target as HTMLElement).matches?.(':focus-visible')) {
+        viaFocus.current = true;
+        show(true);
+      }
     },
     onBlur: hide,
     onKeyDown: (e) => {

@@ -215,7 +215,7 @@ function PosterCardView({
           {badge && <span className="absolute top-2 start-2">{badge}</span>}
           {progress !== undefined && progress > 0 && (
             <span className="absolute inset-x-2 bottom-2">
-              <ProgressBar value={Math.min(1, progress) * 100} size="xs" className="bg-black/50" />
+              <ProgressBar value={Math.min(1, progress) * 100} size="xs" tone="glass" className="bg-black/50" />
             </span>
           )}
           {artCorner}

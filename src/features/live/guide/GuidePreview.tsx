@@ -176,7 +176,7 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
       />
       {when === 'now' ? (
         <span aria-hidden className="mt-2 block h-[3px] w-full max-w-xs shrink-0 overflow-hidden rounded-full bg-surface-3">
-          <span className="block h-full rounded-full bg-accent" style={{ width: `${programProgress(program, now) * 100}%` }} />
+          <span className="block h-full rounded-full bg-accent-mark" style={{ width: `${programProgress(program, now) * 100}%` }} />
         </span>
       ) : null}
       {description ? (

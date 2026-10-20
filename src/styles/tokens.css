@@ -25,10 +25,14 @@
  * the thumb of a segmented control or pill tab. Selection is never an amber wash.
  *
  * Accent. Amber marks the primary action (one per view), focus, the active nav tick, progress,
- * the playing / now marker and live progress. Nothing decorative. Two tones per theme:
- *   --color-accent (+ -hover, -pressed, -fg)  the text and indicator tone: links, active icons,
- *     the tick, progress fills, tab underlines. 4.5:1 as text in every theme, so the light theme
- *     takes a deep shade (#8f4f00).
+ * the playing / now marker and live progress. Nothing decorative. Three tones per theme:
+ *   --color-accent (+ -hover, -pressed, -fg)  the text tone: links, accent text, active icons.
+ *     4.5:1 as text in every theme, so the light theme takes a deep shade (#8f4f00).
+ *   --color-accent-mark  the indicator tone for marks that are not text: the tuning tick,
+ *     progress fills, tab underlines, the radio dot, the on switch's outline, slider fills,
+ *     the airing foot in the guide. 3:1 against bg, every surface and the selected fill. In
+ *     dark it equals the accent. In light it sits between the text shade and the solid fill
+ *     (#c26900 for amber), because the deep text shade drawn as a bar or a tick reads as brown.
  *   --color-accent-solid (+ -hover, -pressed, -fg)  the fill of primary buttons, the on switch
  *     and other filled accent controls, with its own text colour. In dark it equals the accent.
  *     In light, amber, lime and coral fill with the bright dial tone and ink text, because their
@@ -49,7 +53,7 @@
  *   data-theme   dark | light (the two base blocks, amber accent)
  *   data-accent  amber | teal | violet | rose | lime | sky | coral; each non-amber
  *                accent swaps only the accent family (accent, hover, pressed,
- *                accent-fg, the solid fill family, focus, glow), once for dark and once for light
+ *                accent-fg, the mark, the solid fill family, focus, glow), once for dark and once for light
  *   data-oled    present when OLED black is on and the dark theme is in effect;
  *                swaps the surfaces to true black and keeps the accent
  *   data-density comfortable | compact (spacing scale and chrome sizes)
@@ -89,6 +93,7 @@
   --color-accent-hover: #ffc865;
   --color-accent-pressed: #e09a26;
   --color-accent-fg: #1b1204;
+  --color-accent-mark: #f5b544;
   --color-accent-solid: #f5b544;
   --color-accent-solid-hover: #ffc865;
   --color-accent-solid-pressed: #e09a26;
@@ -150,6 +155,7 @@
   --color-accent-hover: #743f00;
   --color-accent-pressed: #5c3200;
   --color-accent-fg: #ffffff;
+  --color-accent-mark: #c26900;
   --color-accent-solid: #f5b544;
   --color-accent-solid-hover: #ffc865;
   --color-accent-solid-pressed: #e09a26;
@@ -215,7 +221,8 @@
 /*
  * Accents. Amber is the base blocks above. Each other accent is one hue tuned
  * twice: a bright dial colour with ink text for dark (and OLED), and a deep
- * shade with white text for light. Focus is the hover tone in dark and the
+ * shade with white text for light. The mark tone repeats the accent in dark and
+ * is a mid shade in light (see the header). Focus is the hover tone in dark and the
  * accent itself in light, as with amber. The solid fill family repeats the
  * accent in dark; in light it is the bright tone for lime and coral (as for
  * amber) and the deep shade for the others (see the header).
@@ -225,6 +232,7 @@
   --color-accent-hover: #62e0d0;
   --color-accent-pressed: #22b5a4;
   --color-accent-fg: #03201c;
+  --color-accent-mark: #3ccfbd;
   --color-accent-solid: #3ccfbd;
   --color-accent-solid-hover: #62e0d0;
   --color-accent-solid-pressed: #22b5a4;
@@ -239,6 +247,7 @@
   --color-accent-hover: #00544b;
   --color-accent-pressed: #00423b;
   --color-accent-fg: #ffffff;
+  --color-accent-mark: #008e7e;
   --color-accent-solid: #00685d;
   --color-accent-solid-hover: #00544b;
   --color-accent-solid-pressed: #00423b;
@@ -252,6 +261,7 @@
   --color-accent-hover: #c9b8ff;
   --color-accent-pressed: #9f85f5;
   --color-accent-fg: #170c33;
+  --color-accent-mark: #b7a0ff;
   --color-accent-solid: #b7a0ff;
   --color-accent-solid-hover: #c9b8ff;
   --color-accent-solid-pressed: #9f85f5;
@@ -266,6 +276,7 @@
   --color-accent-hover: #5833b6;
   --color-accent-pressed: #47279a;
   --color-accent-fg: #ffffff;
+  --color-accent-mark: #8460ea;
   --color-accent-solid: #6a42cf;
   --color-accent-solid-hover: #5833b6;
   --color-accent-solid-pressed: #47279a;
@@ -279,6 +290,7 @@
   --color-accent-hover: #ffaac6;
   --color-accent-pressed: #f2709b;
   --color-accent-fg: #2e0614;
+  --color-accent-mark: #ff8fb3;
   --color-accent-solid: #ff8fb3;
   --color-accent-solid-hover: #ffaac6;
   --color-accent-solid-pressed: #f2709b;
@@ -293,6 +305,7 @@
   --color-accent-hover: #971a4b;
   --color-accent-pressed: #7b143d;
   --color-accent-fg: #ffffff;
+  --color-accent-mark: #da3772;
   --color-accent-solid: #b3215a;
   --color-accent-solid-hover: #971a4b;
   --color-accent-solid-pressed: #7b143d;
@@ -306,6 +319,7 @@
   --color-accent-hover: #c7ee78;
   --color-accent-pressed: #9ccb3d;
   --color-accent-fg: #141f02;
+  --color-accent-mark: #b4e05a;
   --color-accent-solid: #b4e05a;
   --color-accent-solid-hover: #c7ee78;
   --color-accent-solid-pressed: #9ccb3d;
@@ -320,6 +334,7 @@
   --color-accent-hover: #3a5500;
   --color-accent-pressed: #2e4400;
   --color-accent-fg: #ffffff;
+  --color-accent-mark: #628c00;
   --color-accent-solid: #b4e05a;
   --color-accent-solid-hover: #c7ee78;
   --color-accent-solid-pressed: #9ccb3d;
@@ -333,6 +348,7 @@
   --color-accent-hover: #8fd2ff;
   --color-accent-pressed: #4aa9ee;
   --color-accent-fg: #03182b;
+  --color-accent-mark: #6cc2ff;
   --color-accent-solid: #6cc2ff;
   --color-accent-solid-hover: #8fd2ff;
   --color-accent-solid-pressed: #4aa9ee;
@@ -347,6 +363,7 @@
   --color-accent-hover: #084c8a;
   --color-accent-pressed: #063d70;
   --color-accent-fg: #ffffff;
+  --color-accent-mark: #167bd6;
   --color-accent-solid: #0a5ca6;
   --color-accent-solid-hover: #084c8a;
   --color-accent-solid-pressed: #063d70;
@@ -360,6 +377,7 @@
   --color-accent-hover: #ffac92;
   --color-accent-pressed: #f2795a;
   --color-accent-fg: #2b0d04;
+  --color-accent-mark: #ff9474;
   --color-accent-solid: #ff9474;
   --color-accent-solid-hover: #ffac92;
   --color-accent-solid-pressed: #f2795a;
@@ -374,6 +392,7 @@
   --color-accent-hover: #923012;
   --color-accent-pressed: #78270e;
   --color-accent-fg: #ffffff;
+  --color-accent-mark: #d6532a;
   --color-accent-solid: #ff9474;
   --color-accent-solid-hover: #ffac92;
   --color-accent-solid-pressed: #f2795a;

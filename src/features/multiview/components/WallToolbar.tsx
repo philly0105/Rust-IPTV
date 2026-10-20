@@ -2,7 +2,7 @@ import { Eraser, Maximize2, Minimize2, Plus, Volume1, Volume2, VolumeX } from 'l
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cn, Tooltip } from '../deps';
+import { cn, SegmentedControl, Tooltip } from '../deps';
 import { layoutFits, LAYOUTS, MAX_TILES } from '../layout';
 import { GLASS_BUTTON } from '../styles';
 import type { MultiviewLayout } from '../types';
@@ -83,50 +83,27 @@ export function WallToolbar({
           : 'border-b border-divider bg-surface px-(--page-gutter) py-2',
       )}
     >
-      {/* Layout: three toggle buttons drawn as their monitor walls. */}
-      <div role="group" aria-label={t('layoutLabel')} className={cn('flex items-center gap-0.5 rounded-lg p-0.5', overlay ? '' : 'bg-surface-2')}>
-        {LAYOUTS.map((l) => {
-          const fits = layoutFits(l, count);
-          const checked = l === layout;
-          const label = t(LAYOUT_LABEL_KEYS[l]);
-          // A layout that cannot hold the tiles stays focusable and hoverable (aria-disabled, not
-          // disabled), so its tooltip can say why: a disabled button gets no pointer events.
-          return (
-            <Tooltip
-              key={l}
-              content={fits ? label : `${label}. ${t('layout1x2Disabled')}`}
-              tone={overlay ? 'glass' : 'default'}
-              describe={!fits}
-            >
-              <button
-                type="button"
-                aria-pressed={checked}
-                aria-label={label}
-                aria-disabled={fits ? undefined : true}
-                data-testid={`multiview-layout-${l}`}
-                onClick={() => {
-                  if (fits) onLayout(l);
-                }}
-                className={cn(
-                  'inline-flex h-8 items-center gap-2 rounded-md px-2 text-sm font-medium outline-none focus-visible:ring-2',
-                  overlay ? 'focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]' : 'focus-visible:ring-focus',
-                  'aria-disabled:cursor-not-allowed aria-disabled:opacity-40 motion-safe:transition-colors motion-safe:duration-150',
-                  overlay
-                    ? checked
-                      ? 'bg-[color:var(--color-glass-border,rgb(255_255_255/0.14))] text-[color:var(--color-on-glass,#f4f6fa)]'
-                      : 'text-[color:var(--color-on-glass-muted,#c8cfdc)] hover:text-[color:var(--color-on-glass,#f4f6fa)] aria-disabled:hover:text-[color:var(--color-on-glass-muted,#c8cfdc)]'
-                    : checked
-                      ? 'bg-surface text-fg shadow-1'
-                      : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active aria-disabled:hover:bg-transparent aria-disabled:hover:text-fg-muted',
-                )}
-              >
-                <LayoutGlyph layout={l} tally={checked && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
-                <span className="hidden lg:inline">{label}</span>
-              </button>
-            </Tooltip>
-          );
-        })}
-      </div>
+      {/* Layout: the kit segmented control, each segment drawn as its monitor wall. A layout that
+          cannot hold the tiles stays focusable and hoverable, so its tooltip can say why. */}
+      <SegmentedControl<MultiviewLayout>
+        size="sm"
+        tone={overlay ? 'glass' : 'default'}
+        label={t('layoutLabel')}
+        value={layout}
+        onChange={onLayout}
+        options={LAYOUTS.map((l) => ({
+          value: l,
+          label: t(LAYOUT_LABEL_KEYS[l]),
+          content: (
+            <>
+              <LayoutGlyph layout={l} tally={l === layout && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
+              <span className="hidden lg:inline">{t(LAYOUT_LABEL_KEYS[l])}</span>
+            </>
+          ),
+          disabledReason: layoutFits(l, count) ? undefined : t('layout1x2Disabled'),
+          testId: `multiview-layout-${l}`,
+        }))}
+      />
 
       <button type="button" className={toolButton(overlay)} onClick={onAdd} disabled={full} data-testid="multiview-add">
         <Plus aria-hidden className="size-4" />

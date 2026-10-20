@@ -54,7 +54,7 @@ describe('border contract (D23)', () => {
     const allowed = [
       /block h-1 w-10 rounded-full bg-border/,
       /midnight \? 'bg-border'/,
-      /on \? 'bg-accent' : 'bg-border'/,
+      /on \? 'bg-accent-mark' : 'bg-border'/,
       /on \? 'bg-bg\/25' : 'bg-border'/,
     ];
     const offenders: string[] = [];

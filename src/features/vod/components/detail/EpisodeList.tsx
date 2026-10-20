@@ -8,7 +8,7 @@ import { useScrollMargin } from '../../hooks/useContainerColumns';
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, isResumable, isWatched, progressFraction } from '../../lib/format';
 import { handleGridKeyDown } from '../../lib/gridNav';
-import { MetaLine, Menu, Poster, ProgressBar, Tabs, cn, useListVirtualizer } from '@/ui';
+import { MetaLine, Menu, Poster, ProgressBar, Tabs, WatchedChip, cn, useListVirtualizer } from '@/ui';
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
@@ -149,11 +149,15 @@ export function EpisodeList({
                       <Play size={22} className="fill-current" />
                     </span>
                   </Poster>
-                  {fraction > 0 && (
+                  {/* On the thumbnail the bar is glass, and drawn only (the row says how far). A watched
+                      episode shows the watched tick instead, as a poster does. */}
+                  {watched ? (
+                    <WatchedChip className="pointer-events-none absolute end-1.5 top-1.5" />
+                  ) : fraction > 0 ? (
                     <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5">
-                      <ProgressBar value={fraction} max={1} size="xs" />
+                      <ProgressBar value={fraction} max={1} size="xs" tone="glass" decorative />
                     </div>
-                  )}
+                  ) : null}
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   {/* One line of facts, one separator between them; the runtime no longer floats to the

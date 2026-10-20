@@ -2,7 +2,7 @@
 
 How to build a screen with the kit. Tokens live in `src/styles/tokens.css` (values per theme) and `src/styles/globals.css` (`@theme` mapping, utilities, keyframes); components in `src/ui`, imported from `@/ui` (player code imports single files, `@/ui/Tooltip`, to keep its chunk small). Theme mechanics, accents, density and UI scale are in [appearance.md](appearance.md); the shell is in [ui-shell.md](ui-shell.md).
 
-Rule of thumb: if the kit has it, use it. A feature never draws its own switch, checkbox, radio, segmented control, LIVE pill, back button, tooltip or search field.
+Rule of thumb: if the kit has it, use it. A feature never draws its own switch, checkbox, radio, slider, segmented control, filter chip, watched mark, LIVE pill, back button, tooltip or search field.
 
 ## Tokens
 
@@ -40,11 +40,12 @@ Amber marks, and only marks: the primary action (one per view), focus, the activ
 
 | Token | Use |
 | --- | --- |
-| `text-accent`, `bg-accent` (+ `-hover`, `-pressed`) | the text and indicator tone: links (`TEXT_LINK`), the active nav icon, the tick, progress fills, tab underlines, drop markers, the radio dot. Deep (#8f4f00) in light so it reads as text |
+| `text-accent` (+ `-hover`, `-pressed`) | the text tone: links (`TEXT_LINK`), accent text, the active nav icon. Deep (#8f4f00) in light so it reads as text |
+| `bg-accent-mark`, `border-accent-mark` | the mark tone, for indicators that are not text: the tuning tick, progress fills (`ProgressBar`), tab underlines, the radio dot, the on switch's outline, slider fills, drop markers, the guide's airing foot. The accent itself in dark; a mid shade in light (#c26900 for amber), 3:1 on every surface and the selected fill, because the deep text tone drawn as a bar reads as brown. A bar, tick or dot still written `bg-accent` moves to it when its file is next touched |
 | `bg-accent-solid text-accent-solid-fg` (+ `hover:bg-accent-solid-hover`, `active:bg-accent-solid-pressed`) | every filled accent control: the primary Button, the on Switch, checked Checkbox, CTA pills in the player. Bright amber with ink text in both themes |
 | `ring-focus`, `outline-focus` | focus styles. Never `ring-accent` |
 
-A chosen filter chip is inverted (`bg-fg text-bg`), not amber.
+A chosen filter chip is inverted (`bg-fg text-bg`), not amber. A favourite is a state too: its star is neutral (`fill-current text-fg-subtle` inline, `text-fg` on a pressed toggle), never amber and never `text-warning`, which is a status tone (olive in light). On artwork the star beside a rating takes the glass accent.
 
 ### Status
 
@@ -58,7 +59,7 @@ A chosen filter chip is inverted (`bg-fg text-bg`), not amber.
 
 ### Glass (over video and artwork)
 
-`bg-glass` / `bg-glass-strong`, `text-on-glass` / `text-on-glass-muted`, `border-glass-border`, `bg-glass-accent` with `text-glass-accent-fg`. Glass stays dark in every theme, so never use theme text or accent colours on it. Blur only through `glass-blur`, and only on small, short-lived overlays. Kit components take `tone="glass"` where they appear on glass (Tooltip, IconButton's tooltip, SegmentedControl, BackButton).
+`bg-glass` / `bg-glass-strong`, `text-on-glass` / `text-on-glass-muted`, `border-glass-border`, `bg-glass-accent` with `text-glass-accent-fg`. Glass stays dark in every theme, so never use theme text or accent colours on it. Blur only through `glass-blur`, and only on small, short-lived overlays. Kit components take `tone="glass"` where they appear on glass (Tooltip, IconButton's tooltip, SegmentedControl, BackButton, ProgressBar). Anything drawn on a picture is glass: a progress bar on a poster, a thumbnail or the hero is `ProgressBar tone="glass"` (a light track and the glass accent in every theme), and its band under it `bg-glass/60`, not the theme's scrim.
 
 Buttons over the picture (the player's error screen, Up next, the sleep prompt, the external player's stage) use the player's `glassButton(variant, size)` (`src/features/player/components/glassButton.ts`): the kit Button's shapes with `primary` (the solid accent, one per surface), `secondary` (a see-through fill with a hairline) and `ghost`, white state layers, and the 44 px touch floor. The kit Button has no glass variants; if it gets them, the player can switch. Inside the player a level is not progress: volume sliders are white, and only playback progress is amber.
 
@@ -82,7 +83,7 @@ Weights are 400, 500 and 600 only. Headings track in by -0.01 to -0.02 em (the c
 
 ## Radii, elevation, spacing
 
-- Radii: `rounded-xs` 4 (badges, checkboxes, key caps), `rounded-sm` 6 (segments, small chips), `rounded-md` 8 (buttons, inputs, rows, menu items), `rounded-lg` 12 (cards, posters, menus, toasts, panels, settings groups), `rounded-xl` 16 (dialogs, the hero frame, sheets), `rounded-full`. Bare `rounded` is a mistake; use `rounded-xs`.
+- Radii: `rounded-xs` 4 (badges, checkboxes, key caps), `rounded-sm` 6 (segments, small status chips on artwork), `rounded-md` 8 (buttons, inputs, rows, menu items, segmented tracks), `rounded-lg` 12 (cards, posters, menus, toasts, panels, settings groups), `rounded-xl` 16 (dialogs, the hero frame, sheets), `rounded-full` (filter chips, the watched mark, sliders, dots, avatars). Bare `rounded` is a mistake; use `rounded-xs`.
 - Elevation: `shadow-1` (cards, raised thumbs, the primary button), `shadow-2` (menus, popovers, toasts, tooltips, floating panels, the mini player), `shadow-3` (dialogs, drawers, sheets). They read `--elevation-N`, which differs per theme; in CSS write `var(--elevation-N)`. Never put a literal shadow in `@theme`.
 - Spacing follows density (compact shrinks every spacing step by an eighth); text and icons follow the UI scale only.
 - Page gutter: `--page-gutter` (1rem, 1.5rem from `sm`, 2rem from `lg`), shared by the header and `Page`.
@@ -151,7 +152,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 </Tooltip>
 ```
 
-Shows on hover after 400 ms (the next one within 500 ms shows at once), and at once on keyboard focus; never after a touch. Escape, a press, blur or scrolling hides it. On a keyboard-focused trigger Escape also goes on to whatever handles it (a menu or dialog closes, a player menu steps back, PiP ends), so a tooltip never costs an extra press; a tooltip the pointer brought up claims the Escape, so dismissing it does not close the dialog under it. It adds handlers and a ref to its single child, with no wrapper element, so the child keeps its layout. `describe` (default true) points `aria-describedby` at it while shown; pass `false` when it only repeats the accessible name. `content={null}` turns it off without remounting the child. For a custom hook-level trigger, `useTooltip(options)` returns `{ triggerProps, tooltip }`; its `content` may be JSX built in the caller's render.
+Shows on hover after 400 ms (the next one within 500 ms shows at once), and at once on keyboard focus; never after a touch. Escape, a press, blur or scrolling hides it. On a keyboard-focused trigger Escape also goes on to whatever handles it (a menu or dialog closes, a player menu steps back, PiP ends), so a tooltip never costs an extra press. A tooltip the pointer brought up hears Escape wherever focus is (WCAG 1.4.13: the body, a field, another control) and claims that press, so dismissing it does not close the dialog under it or go Back on a page with Escape-back; the next press does. It adds handlers and a ref to its single child, with no wrapper element, so the child keeps its layout. `describe` (default true) points `aria-describedby` at it while shown; pass `false` when it only repeats the accessible name. `content={null}` turns it off without remounting the child. For a custom hook-level trigger, `useTooltip(options)` returns `{ triggerProps, tooltip }`; its `content` may be JSX built in the caller's render.
 
 Keep native `title` only for text cut by truncation (a long channel name) and for the reason on a disabled button, which gets no pointer events.
 
@@ -166,18 +167,20 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 <label className="flex items-center gap-3"><Checkbox checked={c} onCheckedChange={setC} />{t('alsoDelete')}</label>
 <RadioGroup label={t('player')} value={p} onValueChange={setP} options={[{ value: 'mpv', label: 'mpv', description: t('mpvHint') }]} />
 <SegmentedControl label={t('density')} value={d} onChange={setD} options={[{ value: 'comfortable', label: t('comfortable') }, { value: 'compact', label: t('compact') }]} />
+<Slider id={id} min={0} max={10} step={0.5} value={v} onValueChange={setV} onPointerUp={save} aria-valuetext={t('stars', { value: v })} className="w-44" />
 ```
 
 - Fields: `Input`, `Textarea`, `Select` (native, restyled), `SearchInput` (search icon, clear button that keeps focus, first Escape clears). A field a feature must build itself takes `fieldClass('sm' | 'md', extra)`. The settings `CommitInput` (commit on blur or Enter, Escape restores) is built on it and merges classes, so `className="w-28"` works.
 - `Switch`: the only switch. Off is a recessed track with the control border and a `fg-muted` knob; on is the solid accent with a knob in the fill's text colour (`accent-solid-fg`) and an outline in the accent's indicator tone, so the on track keeps 3:1 against a white panel in light. A white knob is not an option: 1.2:1 on the light off track, 1.8:1 on amber. The classes live in `SWITCH_TONES` (`Field.tsx`), which `contrast.test.ts` reads. `Toggle` is a labelled Switch; the settings `SwitchRow` renders one too.
 - `Checkbox`: a native input drawn as an 18 px box; `indeterminate` for mixed. Wrap it in a `<label>` with its text. When the row draws its own focus ring, pass `className="focus-visible:outline-none focus-visible:shadow-none"`.
 - `Radio` and `RadioGroup`: native inputs (arrow keys work); RadioGroup is a list of labelled rows with a description and an optional `note`, the chosen row on `bg-selected`. To hide a radio inside a card that draws the choice itself, wrap it in a `<span className="sr-only">`: `wrapperClassName="sr-only"` does not work, because the radio's own `relative` and size outlast it in `cn`.
-- `SegmentedControl`: two to six short options side by side (role radiogroup, arrows choose). One neutral raised thumb. `content` shows an icon or sample instead of the label, which then becomes the tooltip. `tone="glass"` inside player menus. `itemClassName="flex-1"` for equal segments. The settings `Segmented` wraps it.
+- `SegmentedControl`: two to six short options side by side (role radiogroup, arrows choose). One neutral raised thumb. `content` shows an icon or sample instead of the label, which then becomes the tooltip. `tone="glass"` inside player menus and over the multi-view wall. `size="sm"` (about 32 px) beside `sm` buttons in a compact header (the ribbon's view switch, the multi-view layout picker). `itemClassName="flex-1"` for equal segments. An option with `disabledReason` cannot be chosen but stays focusable and hoverable (aria-disabled): its tooltip and description give the reason, and the arrows stop on it without choosing it; plain `disabled` takes an option out with no reason. `testId` per option. The settings `Segmented` wraps it. A row of view or layout buttons is a SegmentedControl, never IconButtons with `bg-raised` on a track of their own.
+- `Slider`: the one range slider (`Field.tsx`, the `slider` utility in `globals.css`). A native input, so arrows, Home, End and Page keys work; `onValueChange` gets a number on every move, so a costly save goes on pointer up, key up or blur. Up to the value the track fills in the mark tone, the rest is a recessed track with the 3:1 control border, the thumb is the solid accent with a mark outline (3:1 on a white panel) and a ring of the surface, and the fill follows the input's direction, so it grows from the right in RTL. Focus is the global outline. Name it (`<label htmlFor>` or `aria-label`) and pass `aria-valuetext` when the number does not say it. The player's level sliders over video (volume, subtitle position) keep their white `.player-range` look, since a level is not progress.
 - `Tabs`: `variant="underline"` (page sections: accent bar under the chosen tab) or `variant="pill"` (compact toolbars: the SegmentedControl look). Use Tabs when the choice switches a panel, SegmentedControl when it sets a value.
 
 ### Overlays
 
-- `Dialog`: `open`, `onClose`, `title`, `description`, `footer`, `size` (`sm` … `xl`, `full`), `placement="end"` for a drawer, and `sheet` for a dialog that is a bottom sheet below sm (full width from the bottom edge, top corners rounded, clear of the home indicator, rising in; the add and edit source dialogs, the Sources page's Sort and filter, the phone's More sheet). A sheet's height cap can be changed with `className="max-sm:max-h-…"`. `hideTitle` keeps the title as the accessible name only; with `hideClose` too no header row is drawn at all (the command palette). Focus trap, Escape, focus restore, scroll lock, exit animation. Mark the first field `data-autofocus` if it is not the first focusable.
+- `Dialog`: `open`, `onClose`, `title`, `description`, `footer`, `size` (`sm` … `xl`, `full`), `placement="end"` for a drawer, and `sheet` for a dialog that is a bottom sheet below sm (full width from the bottom edge, top corners rounded, clear of the home indicator, rising in; the add and edit source dialogs, the Sources page's Sort and filter, the phone's More sheet). A sheet's height cap can be changed with `className="max-sm:max-h-…"`. `hideTitle` keeps the title as the accessible name only; with `hideClose` too no header row is drawn at all (the command palette). The close button sits in a box one title line tall, so it centres on the title and its 40 px do not set the header's height. Focus trap, Escape, focus restore, scroll lock, exit animation. Mark the first field `data-autofocus` if it is not the first focusable.
 - `Menu`: `items` (actions with `icon`, `hint`, `danger`, `disabled`; separators), `label`, `align`, `placement`. The default trigger is an IconButton (ellipsis) with `label` as its tooltip; a custom `trigger` can take `tooltip`.
 - `toast({ title, description, variant, action, progress, duration, id })`: works outside React; an `id` updates in place. Use `errorDescription(err)` as the description of an error toast.
 
@@ -189,13 +192,17 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 <LivePill size="sm" dot="none" />  {/* inside guide and ribbon cells */}
 <MetaLine items={[year, runtime, rating]} />
 <ProgressBar value={40} label={t('progress')} tone="glass" size="xs" />
+<FilterChip pressed={on} dot={genreColor(g)} onClick={toggle}>{t('sports')}</FilterChip>
+<WatchedChip className="absolute end-1.5 top-1.5" />
 <Kbd combo="mod+k" />
 ```
 
 - `Badge`: `neutral`, `accent` (accent text on a neutral chip), `success`, `warning`, `danger`, `outline`, `live`. Long text truncates.
 - `LivePill`: the only LIVE mark. `dot="still"` in rails of many cards (a running animation per card keeps the compositor busy).
-- `MetaLine`: joins metadata with one drawn separator (spoken as commas); empty items drop out. `as="span"` inside a button.
-- `ProgressBar`: `tone` accent (default), success, danger, fg, glass; `indeterminate`.
+- `MetaLine`: joins metadata with one drawn separator (spoken as commas); empty items drop out. Each separator is one unit with the item after it, so a wrapped line never ends on a dot. `as="span"` inside a button.
+- `ProgressBar`: `tone` accent (default, the mark tone), success, danger, fg, glass (every bar on artwork); `indeterminate`. It reports a percentage (0 to 100) whatever `max` is, so `value={0.63} max={1}` reads 63 %; `valueText` says the value in words ("16 minutes left"). `decorative` hides it from assistive tech, for a bar inside a control whose name already gives the share (a poster card's link ends in "18% watched", an episode button); every other bar takes a `label`.
+- `FilterChip`: a pill that turns a filter on or off (aria-pressed) in a row of others: `h-7`, `rounded-full`, `bg-surface-2` with the edge at rest, inverted (`bg-fg text-bg`) when on, never amber. `dot` (a colour) or `icon` leads, `count` trails in the quiet tone; the label truncates and takes `dir="auto"`, so pass the whole text as `title` when it can be cut. `filterChipClass(on, extra)` styles a link as a chip. Chips that only inform (where a list's channels come from) are not filter chips: show the source's `SourceMonogram` with the count.
+- `WatchedChip`: the one watched mark on artwork, a 20 px round glass tick in the top-end corner of posters, My List cards and episode thumbnails. A watched title shows it instead of a progress bar. Hidden from assistive tech; the card's name says "Watched".
 - `Kbd`: key caps in the UI language (`comboKeys` for the strings).
 - `EmptyState` (`icon`, `title`, `description`, `action`, `size="page" | "inline"`) and `ErrorState` (`error`, `onRetry`, `action`, `hint`). For a core error the translated hint for its code leads; an error the UI raised itself (a plain `Error`) leads with its own message.
 - `Skeleton`, `SkeletonList`, `SkeletonGrid`; `Poster`; `VirtualList`, `VirtualGrid`; `Pagination`.
@@ -204,6 +211,7 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 
 ## Checks that guard this
 
-- `src/ui/test/contrast.test.ts`: every text pair AA and control boundaries 3:1 in all 21 themes, the edge between divider and border, the state layers (and the now line through the airing cell), the Switch as drawn (`SWITCH_TONES`), the elevation mapping.
-- `src/ui/test/kit.test.tsx`: the kit pieces above, and that no feature draws its own switch, checkbox or radio, puts a native `title` on an IconButton, or builds a text field whose border colour hides its focus border.
+- `src/ui/test/contrast.test.ts`: every text pair AA and control boundaries 3:1 in all 21 themes, the mark tone 3:1 on every surface and the selected fill, the edge between divider and border, the state layers (and the now line through the airing cell), the Switch as drawn (`SWITCH_TONES`), the elevation mapping.
+- `src/ui/test/kit.test.tsx`: the kit pieces above, and that no feature draws its own switch, checkbox, radio or range input (outside the level sliders over video), puts a native `title` on an IconButton, or builds a text field whose border colour hides its focus border.
+- `src/ui/test/round2.test.tsx`: ProgressBar percentages and decorative bars, glass bars and the watched chip on posters, My List cards, episode and Up next thumbnails, MetaLine wrapping, the dialog close button, hover tooltips closing on Escape from anywhere, Slider, FilterChip and segmented options with a reason.
 - `src/ui/test/cn.test.ts`: tailwind-merge knows the theme's sizes, shadows and animations.

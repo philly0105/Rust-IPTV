@@ -71,6 +71,7 @@ const ACCENT_KEYS = [
   'accent-hover',
   'accent-pressed',
   'accent-fg',
+  'accent-mark',
   'accent-solid',
   'accent-solid-hover',
   'accent-solid-pressed',
@@ -174,6 +175,18 @@ for (const [name, c] of Object.entries(THEMES)) {
       expect(contrast(tok('accent'), tok('selected')), 'tick on selected').toBeGreaterThanOrEqual(3);
     });
 
+    // Round 2 (light theme still brown): the tick, progress fills, tab underlines, the radio dot,
+    // the on switch's outline and slider fills draw in the mark tone, not the text tone.
+    it('the mark tone reaches 3:1 on bg, every surface and the selected fill (WCAG 1.4.11)', () => {
+      for (const s of SURFACES) expect(contrast(tok('accent-mark'), tok(s)), `mark on ${s}`).toBeGreaterThanOrEqual(3);
+      expect(contrast(tok('accent-mark'), tok('selected')), 'tick on selected').toBeGreaterThanOrEqual(3);
+    });
+
+    it(name.startsWith('light') ? 'the mark is brighter than the text tone, so a bar or tick reads as the hue' : 'the mark is the accent itself', () => {
+      if (name.startsWith('light')) expect(luminance(tok('accent-mark'))).toBeGreaterThan(luminance(tok('accent')) * 1.5);
+      else expect(tok('accent-mark')).toEqual(tok('accent'));
+    });
+
     // Read from the classes Switch renders (SWITCH_TONES), so the guard cannot drift from the
     // component again: it once checked a fg-muted thumb while the switch drew a white one.
     it.each(['off', 'on'] as const)('the %s switch: knob 3:1 on its track, track outline 3:1 on every surface', (state) => {
@@ -243,7 +256,7 @@ describe('Tailwind theme mapping', () => {
   const theme = globals.split('@layer base')[0]!;
 
   it('exposes the line, state and fill tokens as utility colours', () => {
-    for (const k of ['divider', 'edge', 'border', 'selected', 'raised', 'accent-solid', 'accent-solid-fg', 'danger-solid', 'live-solid']) {
+    for (const k of ['divider', 'edge', 'border', 'selected', 'raised', 'accent-mark', 'accent-solid', 'accent-solid-fg', 'danger-solid', 'live-solid']) {
       expect(theme, `--color-${k}`).toMatch(new RegExp(String.raw`--color-${k}:\s*#[0-9a-f]{6}`, 'i'));
     }
     for (const k of ['hover', 'active']) expect(theme, `--color-${k}`).toMatch(new RegExp(String.raw`--color-${k}:\s*rgb\(`));

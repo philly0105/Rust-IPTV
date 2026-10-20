@@ -175,7 +175,7 @@ export const GuideRow = memo(function GuideRow({
         {...longPress}
       >
         {/* guide search: the row a hit moved to, marked for a moment. */}
-        {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent" /> : null}
+        {highlighted ? <span aria-hidden className="pointer-events-none absolute inset-y-0 start-0 w-[3px] bg-accent-mark" /> : null}
         {ch ? (
           <button
             type="button"
@@ -308,12 +308,12 @@ export const GuideRow = memo(function GuideRow({
                   {genre && !muted ? (
                     <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
                   ) : null}
-                  {/* The airing programme's progress along its foot (LG-18): accent, a mark of progress. */}
+                  {/* The airing programme's progress along its foot (LG-18): the accent's mark tone, a mark of progress. */}
                   {b.when === 'now' && !muted ? (
                     <span
                       aria-hidden
                       data-testid="cell-progress"
-                      className="absolute start-0 bottom-0 h-0.5 bg-accent"
+                      className="absolute start-0 bottom-0 h-0.5 bg-accent-mark"
                       style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
                     />
                   ) : null}

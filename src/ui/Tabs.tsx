@@ -176,7 +176,7 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
               variant === 'underline'
                 ? cn(
                     '-mb-px h-10 border-b-2 px-3',
-                    selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg hover:border-divider active:border-border motion-safe:transition-colors',
+                    selected ? 'border-accent-mark text-fg' : 'border-transparent text-fg-muted hover:text-fg hover:border-divider active:border-border motion-safe:transition-colors',
                   )
                 : // One raised thumb for every segmented choice (DS-STATE-FILLS): neutral, never an amber fill.
                   cn(segmentClass(selected), 'h-8 shrink-0'),

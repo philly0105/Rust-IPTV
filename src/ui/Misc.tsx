@@ -1,5 +1,6 @@
 import i18next from 'i18next';
-import { Children, Fragment, type ComponentPropsWithRef, type ReactNode } from 'react';
+import { Check } from 'lucide-react';
+import { Children, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from './cn';
@@ -231,26 +232,31 @@ export interface MetaLineProps extends Omit<ComponentPropsWithRef<'p'>, 'childre
 /**
  * A line of metadata joined by one separator: "2021 · 1 h 52 min · PG-13". The dots are drawn,
  * not spoken; a screen reader hears the facts with a comma between them. Wraps between items,
- * never inside one. Caption size and muted colour by default; pass classes to change either.
+ * never inside one, and a separator travels with the item after it, so no line ends on a dot.
+ * Caption size and muted colour by default; pass classes to change either.
  */
 export function MetaLine({ items, as: Tag = 'p', className, ...rest }: MetaLineProps) {
   const shown = items.filter((i) => i !== null && i !== undefined && i !== false && i !== '');
   if (shown.length === 0) return null;
   return (
     <Tag className={cn('flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-caption text-fg-muted', className)} {...rest}>
-      {shown.map((item, i) => (
-        <Fragment key={i}>
-          {i > 0 && (
-            <>
-              <span aria-hidden className="text-fg-subtle">
-                ·
-              </span>
-              <span className="sr-only">, </span>
-            </>
-          )}
-          <span className="min-w-0">{item}</span>
-        </Fragment>
-      ))}
+      {shown.map((item, i) =>
+        i === 0 ? (
+          <span key={i} className="min-w-0">
+            {item}
+          </span>
+        ) : (
+          // The dot and the item are one flex unit (no break between its children), so a wrap moves
+          // both; a long item can still wrap inside itself.
+          <span key={i} className="inline-flex min-w-0 items-center gap-1.5">
+            <span aria-hidden className="text-fg-subtle">
+              ·
+            </span>
+            <span className="sr-only">, </span>
+            <span className="min-w-0">{item}</span>
+          </span>
+        ),
+      )}
     </Tag>
   );
 }
@@ -267,32 +273,51 @@ export interface ProgressBarProps {
   max?: number;
   /** Accessible name. */
   label?: string;
+  /** What a screen reader says for the value instead of the percentage ("16 minutes left"). */
+  valueText?: string;
+  /**
+   * Drawn only, hidden from assistive tech: for a bar inside a control whose name already says
+   * how far (a poster card's link ends in "18% watched"), so it does not add a second, unnamed value.
+   */
+  decorative?: boolean;
   className?: string;
   /** Unknown progress: animated stripe. */
   indeterminate?: boolean;
-  /** `glass`: for bars drawn on glass over artwork or video (C8): a light track and the bright glass accent. */
+  /**
+   * `accent` (default) fills in the mark tone. `glass`: for every bar drawn on artwork or video
+   * (C8), a light track and the bright glass accent, in every theme. A theme colour never sits on
+   * a picture, so a bar inside `CARD_ART`, a thumbnail or the hero takes `glass`.
+   */
   tone?: 'accent' | 'success' | 'danger' | 'fg' | 'glass';
   size?: 'xs' | 'sm' | 'md';
 }
 
+/**
+ * A determinate or indeterminate bar. It reports a percentage (0 to 100) whatever `max` is, so a
+ * fraction with `max={1}` reads "63 %", not "1 of 1".
+ */
 export function ProgressBar({
   value,
   max = 100,
   label,
+  valueText,
+  decorative,
   className,
   indeterminate,
   tone = 'accent',
   size = 'sm',
 }: ProgressBarProps) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-  const toneClass = { accent: 'bg-accent', success: 'bg-success', danger: 'bg-danger', fg: 'bg-fg', glass: 'bg-glass-accent' }[tone];
+  const toneClass = { accent: 'bg-accent-mark', success: 'bg-success', danger: 'bg-danger', fg: 'bg-fg', glass: 'bg-glass-accent' }[tone];
   return (
     <div
       role="progressbar"
       aria-label={label}
+      aria-hidden={decorative || undefined}
       aria-valuemin={0}
-      aria-valuemax={indeterminate ? undefined : max}
-      aria-valuenow={indeterminate ? undefined : Math.round(Math.min(value, max))}
+      aria-valuemax={indeterminate ? undefined : 100}
+      aria-valuenow={indeterminate ? undefined : Math.round(pct)}
+      aria-valuetext={indeterminate ? undefined : valueText}
       className={cn(
         'relative w-full overflow-hidden rounded-full',
         tone === 'glass' ? 'bg-on-glass/20' : 'bg-surface-3',
@@ -309,5 +334,67 @@ export function ProgressBar({
         />
       )}
     </div>
+  );
+}
+
+export interface WatchedChipProps {
+  className?: string;
+  testId?: string;
+}
+
+/**
+ * The one "watched" mark on artwork: a small round glass chip with a tick, at the art's top-end
+ * corner (posters, My List cards, episode thumbnails). Watched is a state, so it is never amber,
+ * and a watched title shows no progress bar. Hidden from assistive tech: the card's name says
+ * "Watched".
+ */
+export function WatchedChip({ className, testId }: WatchedChipProps) {
+  return (
+    <span
+      aria-hidden
+      data-testid={testId}
+      className={cn('inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-glass-strong text-on-glass shadow-1', className)}
+    >
+      <Check aria-hidden size={13} strokeWidth={3} />
+    </span>
+  );
+}
+
+/** Classes of a filter chip, for a Link or a custom element drawn as one (`FilterChip` is the button). */
+export function filterChipClass(on: boolean, className?: string): string {
+  return cn(
+    'inline-flex h-7 min-w-0 shrink-0 items-center gap-1.5 rounded-full border px-3 text-caption font-medium motion-safe:transition-colors',
+    // A chosen filter is inverted, never amber: amber marks actions and progress.
+    on ? 'border-transparent bg-fg text-bg hover:bg-fg/90' : 'border-edge bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg active:bg-pressed',
+    className,
+  );
+}
+
+export interface FilterChipProps extends Omit<ComponentPropsWithRef<'button'>, 'type'> {
+  /** The chip is on: its filter applies (aria-pressed). */
+  pressed: boolean;
+  /** A leading dot in this colour (a genre's stripe colour). */
+  dot?: string;
+  /** A leading icon, instead of a dot. */
+  icon?: ReactNode;
+  /** A trailing count, in the quieter tone. */
+  count?: ReactNode;
+}
+
+/**
+ * A filter chip: a pill that turns a filter on or off (aria-pressed), in a row of others. Long
+ * labels truncate; pass the whole text as `title` when that can happen. Use `filterChipClass`
+ * for a chip that is a link.
+ */
+export function FilterChip({ pressed, dot, icon, count, className, children, ...rest }: FilterChipProps) {
+  return (
+    <button type="button" aria-pressed={pressed} className={filterChipClass(pressed, className)} {...rest}>
+      {dot ? <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: dot }} /> : icon}
+      {/* dir="auto": a chip often names provider text (a source), which keeps its own direction. */}
+      <span dir="auto" className="min-w-0 truncate">
+        {children}
+      </span>
+      {count !== undefined && count !== null ? <span className={cn('tabular shrink-0', !pressed && 'text-fg-subtle')}>{count}</span> : null}
+    </button>
   );
 }

@@ -4,6 +4,8 @@
  * dimensions, Home/End jump to the ends. With `restoreKey`, the scroll
  * position and the focused card survive leaving the page: Back to the same
  * history entry lands where the user was, with focus on the card they opened.
+ * When the focused card goes away (Delete, its remove button), focus moves to
+ * the card that took its place, as in VirtualRows.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
@@ -144,6 +146,10 @@ export function VirtualCardGrid<T>({
     if (active >= items.length) setActive(Math.max(0, items.length - 1));
   }, [items.length, active]);
 
+  // Where keyboard focus last sat in the grid. When that card goes away (Delete, its remove
+  // button) focus would drop to <body>, and the page's keys (arrows, Delete, W) with it.
+  const lastFocus = useRef<{ key: string; index: number } | null>(null);
+
   // Remember where the user was when the grid goes away (opening a card, or any navigation).
   useEffect(() => {
     if (!restoreKey) return;
@@ -179,6 +185,26 @@ export function VirtualCardGrid<T>({
     },
     [columns, items.length, virtualizer],
   );
+
+  useEffect(() => {
+    const last = lastFocus.current;
+    if (!last) return;
+    const still = items.findIndex((it) => itemKey(it) === last.key);
+    const focused = document.activeElement;
+    const lost = focused === null || focused === document.body || !focused.isConnected;
+    if (!lost) {
+      // Focus is still on the card, or moved somewhere on purpose (a dialog, another control).
+      if (still >= 0) last.index = still;
+      else lastFocus.current = null;
+      return;
+    }
+    // The card itself when it only moved to another row (a card before it went away), else the
+    // one now in its place, else the new last one.
+    lastFocus.current = null;
+    const target = still >= 0 ? still : Math.min(last.index, items.length - 1);
+    if (target >= 0) focusIndex(target);
+    // Runs when the cards change; the helpers are recreated with them.
+  }, [items]);
 
   const open = (index: number, item: T) => {
     openedRef.current = true;
@@ -225,6 +251,11 @@ export function VirtualCardGrid<T>({
       onScroll={(e) => {
         offsetRef.current = e.currentTarget.scrollTop;
       }}
+      onBlur={(e) => {
+        // Focus that leaves for another control is a deliberate move; forget the card.
+        const next = e.relatedTarget;
+        if (next instanceof Node && !e.currentTarget.contains(next)) lastFocus.current = null;
+      }}
       className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)}
       data-testid={testId}
     >
@@ -253,7 +284,10 @@ export function VirtualCardGrid<T>({
                     aria-label={cardLabel(item)}
                     tabIndex={index === active ? 0 : -1}
                     data-card-index={index}
-                    onFocus={() => setActive(index)}
+                    onFocus={() => {
+                      setActive(index);
+                      lastFocus.current = { key: itemKey(item), index };
+                    }}
                     onKeyDown={(e) => onKeyDown(e, index, item)}
                     onClick={() => open(index, item)}
                     // CARD_ROOT hands the focus ring to the artwork (CARD_ART), so the caption is not boxed in too.

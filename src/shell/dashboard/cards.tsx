@@ -1,4 +1,4 @@
-import { BookmarkCheck, Play } from 'lucide-react';
+import { BookmarkCheck, EllipsisVertical, Play, Search } from 'lucide-react';
 import { createContext, useContext, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -8,10 +8,11 @@ import { MyListButton, canSave, useInMyList } from '@/features/mylist';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { intlLocale, listSeparator } from '@/lib/intl';
-import { CARD_ART, CARD_ROOT, LivePill, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
+import { CARD_ART, CARD_ROOT, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, initialsOf, useImageChain } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 import { sourceHomePath } from '../railLinks';
+import { kindShortKey } from '../sourceKind';
 
 /** The focusable card; its focus ring, hover lift and press are drawn on the artwork (CARD_ART). */
 const cardRoot = cn(CARD_ROOT, 'block w-full rounded-md text-start');
@@ -75,6 +76,14 @@ export function usePrefetchTarget(ref: ItemRef | undefined, posterUrl?: string, 
   }, [sourceId, contentType, itemId, sourceKind, posterUrl, backdropUrl]);
 }
 
+/**
+ * The one caption of every Home card (and the rail skeleton, DashboardRail): the title in
+ * body-sm medium, one line of metadata in caption size. Two specs used to drift apart between
+ * Home and the VOD rails.
+ */
+export const CAPTION_TITLE = 'mt-2 block truncate text-match-parent text-body-sm font-medium text-fg';
+export const CAPTION_META = 'block truncate text-match-parent text-caption text-fg-muted';
+
 function PlayGlyph() {
   return (
     <span
@@ -84,6 +93,21 @@ function PlayGlyph() {
       <span className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-active/card:scale-90">
         <Play size={20} fill="currentColor" className="translate-x-px" />
       </span>
+    </span>
+  );
+}
+
+/** A search card's hover and focus mark: a glass disc with a magnifier and what it does, not the amber play disc. */
+function SearchGlyph({ label }: { label: string }) {
+  return (
+    <span
+      aria-hidden
+      className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-scrim/0 px-3 text-center opacity-0 group-hover/card:bg-scrim/60 group-hover/card:opacity-100 group-focus-visible/card:bg-scrim/60 group-focus-visible/card:opacity-100 motion-safe:transition-opacity"
+    >
+      <span className="flex size-12 items-center justify-center rounded-full border border-glass-border bg-glass-strong text-on-glass shadow-2">
+        <Search size={20} />
+      </span>
+      <span className="text-caption font-medium text-on-glass">{label}</span>
     </span>
   );
 }
@@ -114,6 +138,11 @@ export interface PosterCardProps {
   sourceId?: string;
   /** The title's backdrop, warmed with its detail page when a linked card is hovered or focused (C4). */
   backdropUrl?: string;
+  /**
+   * The card opens a search, not a title (TMDB trending, SH-trending-dead-end): on hover and
+   * focus the artwork shows a search glyph and this text instead of the play disc.
+   */
+  search?: string;
 }
 
 /**
@@ -171,6 +200,7 @@ function PosterCardView({
   ariaLabel,
   artCorner,
   artClassName,
+  search,
 }: PosterCardViewProps) {
   // Only a link to a movie or series page prefetches; play cards and search links do not.
   const opens = onPlay ? undefined : linkTarget(to, title, posterUrl)?.itemRef;
@@ -181,6 +211,7 @@ function PosterCardView({
         {/* The caption below names the card; alt text would read the title twice. */}
         <Poster src={posterUrl} sourceId={sourceId} alt="" label={title} aspect="poster" className="after:hidden">
           {onPlay && <PlayGlyph />}
+          {search && <SearchGlyph label={search} />}
           {badge && <span className="absolute top-2 start-2">{badge}</span>}
           {progress !== undefined && progress > 0 && (
             <span className="absolute inset-x-2 bottom-2">
@@ -191,11 +222,11 @@ function PosterCardView({
         </Poster>
       </div>
       {/* dir="auto": a Latin title in an RTL UI truncates at its own end, not its start. The title attribute shows a cut-off line in full. */}
-      <span dir="auto" title={title} className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
+      <span dir="auto" title={title} className={CAPTION_TITLE}>
         {title}
       </span>
       {subtitle && (
-        <span dir="auto" title={subtitle} className="block truncate text-match-parent text-sm text-fg-muted">
+        <span dir="auto" title={subtitle} className={CAPTION_META}>
           {subtitle}
         </span>
       )}
@@ -331,7 +362,65 @@ export interface ChannelCardProps {
   sourceId?: string;
 }
 
-/** 16:9 channel tile with the logo centered on a per-channel tint. */
+/** Right click, the context-menu key and Shift+F10 on a card, as one pair of handlers (`open` gets where to draw the menu). */
+function menuHandlers<E extends HTMLElement>(open: ((pos: { x: number; y: number }) => void) | undefined) {
+  if (!open) return {};
+  return {
+    onContextMenu: (e: MouseEvent<E>) => {
+      e.preventDefault();
+      // Focused, so closing the menu hands focus back to this card.
+      e.currentTarget.focus({ preventScroll: true });
+      // A keyboard-made contextmenu event (no keydown seen) has no pointer position.
+      open(e.clientX === 0 && e.clientY === 0 ? menuAnchor(e.currentTarget) : { x: e.clientX, y: e.clientY });
+    },
+    onKeyDown: (e: KeyboardEvent<E>) => {
+      if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      open(menuAnchor(e.currentTarget));
+    },
+  };
+}
+
+/** A channel logo centred on the channel's own tint: the art of a channel with no programme picture. */
+function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?: string; sourceId?: string; isRadio?: boolean }) {
+  const hue = hueOf(name);
+  return (
+    <div
+      className="absolute inset-0"
+      style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
+    >
+      <Poster
+        src={logoUrl}
+        sourceId={sourceId}
+        alt=""
+        label={name}
+        aspect="wide"
+        fit="contain"
+        kind={isRadio ? 'radio' : 'live'}
+        className="h-full bg-transparent after:hidden"
+        rounded="sm"
+      />
+    </div>
+  );
+}
+
+/** A thin bar flush with the artwork's bottom edge: watched share, or how far the programme on air has run. */
+function EdgeProgress({ value }: { value: number }) {
+  return (
+    // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
+    <span className="absolute inset-x-0 bottom-0" aria-hidden>
+      {/* The glass tone: the bright dial amber in every theme, as everything drawn on artwork. */}
+      <ProgressBar value={Math.min(1, value) * 100} size="xs" tone="glass" className="h-1 rounded-none bg-black/50 [&>div]:rounded-none" />
+    </span>
+  );
+}
+
+/**
+ * 16:9 channel tile with the logo centered on a per-channel tint. No LIVE pill: a channel tile
+ * is live by definition, and a dozen identical red pills drowned out the programme and its
+ * progress bar (SH-live-pill-noise); the bar along the bottom is the live cue.
+ */
 export function ChannelCard({
   rail,
   name,
@@ -348,64 +437,20 @@ export function ChannelCard({
 }: ChannelCardProps) {
   const { t } = useTranslation('shell');
   const openMenu = useContext(ChannelMenuContext);
-  const hue = hueOf(name);
   const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay }) : undefined;
-  const onContextMenu = menu
-    ? (e: MouseEvent<HTMLButtonElement>) => {
-        e.preventDefault();
-        // Focused, so closing the menu hands focus back to this card.
-        e.currentTarget.focus({ preventScroll: true });
-        // A keyboard-made contextmenu event (no keydown seen) has no pointer position.
-        menu(e.clientX === 0 && e.clientY === 0 ? menuAnchor(e.currentTarget) : { x: e.clientX, y: e.clientY });
-      }
-    : undefined;
-  const onKeyDown = menu
-    ? (e: KeyboardEvent<HTMLButtonElement>) => {
-        if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        menu(menuAnchor(e.currentTarget));
-      }
-    : undefined;
   return (
-    <button type="button" {...rail} onClick={onPlay} onContextMenu={onContextMenu} onKeyDown={onKeyDown} aria-label={ariaLabel} className={cardRoot}>
-      <div
-        className={cn(CARD_ART, 'aspect-video w-full')}
-        style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
-      >
-        <Poster
-          src={logoUrl}
-          sourceId={sourceId ?? channel?.ref.sourceId}
-          alt=""
-          label={name}
-          aspect="wide"
-          fit="contain"
-          kind={isRadio ? 'radio' : 'live'}
-          className="bg-transparent after:hidden"
-          rounded="sm"
-        />
+    <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
+      <div className={cn(CARD_ART, 'aspect-video w-full')}>
+        <LogoArt name={name} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
         <PlayGlyph />
-        <span className="absolute top-2 start-2">
-          {/*
-            The still dot: a rail of channel cards ran one pulse animation per card, and any running
-            animation keeps the browser compositing at the display's refresh rate (about 33 % of a
-            core on the idle dashboard, L3-perf-desktop-1). The red pill already says live.
-          */}
-          <LivePill dot="still" />
-        </span>
-        {nowProgress !== undefined && (
-          // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
-          <span className="absolute inset-x-0 bottom-0" aria-hidden>
-            <ProgressBar value={nowProgress * 100} size="xs" className="rounded-none bg-black/40" />
-          </span>
-        )}
+        {nowProgress !== undefined && <EdgeProgress value={nowProgress} />}
       </div>
-      <span dir="auto" title={name} className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
+      <span dir="auto" title={name} className={CAPTION_TITLE}>
         {name}
       </span>
       {now && showSourceWithNow && sourceName ? (
         // Programme first; the source keeps up to half the line, so it never truncates away.
-        <span className="flex min-w-0 items-baseline gap-1.5 text-sm text-fg-muted">
+        <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
           <span dir="auto" title={now} className="min-w-0 truncate text-match-parent">
             {now}
           </span>
@@ -415,7 +460,7 @@ export function ChannelCard({
           </span>
         </span>
       ) : (
-        <span dir="auto" title={now ?? sourceName} className="block truncate text-match-parent text-sm text-fg-muted">
+        <span dir="auto" title={now ?? sourceName} className={CAPTION_META}>
           {now ?? sourceName ?? (isRadio ? t('radio') : t('liveTv'))}
         </span>
       )}
@@ -423,7 +468,221 @@ export function ChannelCard({
   );
 }
 
-const KIND_NAMES: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'Xtream', stalker: 'Stalker' };
+// ---------------------------------------------------------------------------
+// Wide (16:9) cards: Continue watching and On now.
+
+/** A card asking for a menu of plain actions (Continue watching): where to draw it, its name and its items. */
+export interface CardMenuRequest {
+  pos: { x: number; y: number };
+  label: string;
+  items: CardMenuItem[];
+}
+
+export interface CardMenuItem {
+  id: string;
+  label: string;
+  icon?: ReactNode;
+  onSelect(): void;
+}
+
+/** Opens a card's action menu. `ChannelMenuHost` provides it; without it a card has no menu. */
+export const CardMenuContext = createContext<((request: CardMenuRequest) => void) | null>(null);
+
+/**
+ * 16:9 artwork for a title that may only have a poster: the backdrop when there is one; else
+ * the poster stands upright at the inline start over a soft field made from its own colours,
+ * the cheap quarter-size blur (C5), so a resume rail of posters still reads as one row of
+ * stills.
+ */
+function WideArt({ title, backdropUrl, posterUrl, sourceId }: { title: string; backdropUrl?: string; posterUrl?: string; sourceId?: string }) {
+  const railWidth = useContext(PosterWidthContext);
+  // The upright poster is the frame's height at 2:3: 3/8 of the card's width.
+  const posterWidth = railWidth ? Math.round((railWidth * 3) / 8) : undefined;
+  const field = useImageChain([backdropUrl ? undefined : posterUrl], sourceId, posterWidth);
+  if (backdropUrl) {
+    return <Poster src={backdropUrl} fallbackSrc={posterUrl} sourceId={sourceId} alt="" label={title} aspect="wide" className="h-full after:hidden" rounded="sm" />;
+  }
+  const hue = hueOf(title);
+  return (
+    <div
+      aria-hidden
+      className="absolute inset-0 overflow-hidden"
+      style={{ background: `linear-gradient(150deg, hsl(${hue} 40% 26%), hsl(${(hue + 40) % 360} 45% 12%))` }}
+    >
+      {field.url && (
+        <img src={field.url} alt="" loading="lazy" decoding="async" draggable={false} referrerPolicy="no-referrer" onError={field.onError} className={cn(QUARTER_BLUR, 'opacity-70 saturate-150')} />
+      )}
+      <span className="absolute inset-0 bg-gradient-to-r from-black/45 to-transparent rtl:bg-gradient-to-l" />
+      {posterUrl && (
+        <Poster
+          src={posterUrl}
+          sourceId={sourceId}
+          width={posterWidth}
+          alt=""
+          label={title}
+          aspect="poster"
+          className="absolute inset-y-0 start-0 h-full w-auto shadow-2"
+          rounded="sm"
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The visible "more" button of a wide card, beside the card's own button (a button inside a
+ * button is a nested control). It shows on hover and on the focused card, and always on touch
+ * screens, where there is no hover and no reliable long press.
+ */
+function CardMenuButton({ label, tabIndex, onOpen }: { label: string; tabIndex: number; onOpen: (anchor: HTMLElement) => void }) {
+  return (
+    <Tooltip content={label} side="top" describe={false}>
+      <button
+        type="button"
+        tabIndex={tabIndex}
+        aria-label={label}
+        aria-haspopup="menu"
+        onClick={(e) => onOpen(e.currentTarget)}
+        data-card-menu=""
+        className={cn(
+          'absolute top-1.5 end-1.5 z-[1] inline-flex size-8 items-center justify-center rounded-full border border-glass-border bg-glass-strong text-on-glass shadow-1',
+          'opacity-0 group-hover/wide:opacity-100 group-focus-within/wide:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100',
+          'hover:bg-glass active:scale-95 motion-safe:transition-[opacity,transform] motion-safe:duration-(--duration-fast)',
+        )}
+      >
+        <EllipsisVertical aria-hidden size={16} />
+      </button>
+    </Tooltip>
+  );
+}
+
+export interface ContinueCardProps {
+  rail: RailCardProps;
+  title: string;
+  /** The episode line of a series ("S2 E4 · Calm Before"); it moves off the artwork into the caption. */
+  episode?: string;
+  /** "16 minutes left". */
+  left?: string;
+  progress?: number;
+  posterUrl?: string;
+  backdropUrl?: string;
+  sourceId?: string;
+  ariaLabel: string;
+  onPlay(): void;
+  /** Go to details, Mark watched, Remove (CB-CONTINUE-MENU). */
+  menu: CardMenuItem[];
+  /** Shown on the art's corner when the title is in My List. */
+  saved?: boolean;
+}
+
+/**
+ * Continue watching as 16:9 stills (Netflix, Apple TV Up Next, Plex): the episode is what
+ * matters when resuming, and it sets resume apart from the poster rails. The watched share is
+ * a bar flush with the bottom edge; the episode and the time left are the caption.
+ */
+export function ContinueCard({ rail, title, episode, left, progress, posterUrl, backdropUrl, sourceId, ariaLabel, onPlay, menu, saved }: ContinueCardProps) {
+  const { t } = useTranslation('shell');
+  const openMenu = useContext(CardMenuContext);
+  const open = openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, label: title, items: menu }) : undefined;
+  return (
+    <div className="group/wide relative min-w-0">
+      <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(open)} aria-label={ariaLabel} className={cardRoot}>
+        <div className={cn(CARD_ART, 'aspect-video w-full bg-surface-2')}>
+          <WideArt title={title} backdropUrl={backdropUrl} posterUrl={posterUrl} sourceId={sourceId} />
+          <PlayGlyph />
+          {saved && (
+            <span
+              aria-hidden
+              data-testid="mylist-saved-marker"
+              className="absolute bottom-2.5 end-1.5 inline-flex size-7 items-center justify-center rounded-full border border-glass-border bg-glass-strong text-on-glass shadow-1"
+            >
+              <BookmarkCheck aria-hidden size={14} strokeWidth={2.25} />
+            </span>
+          )}
+          {progress !== undefined && progress > 0 && <EdgeProgress value={progress} />}
+        </div>
+        <span dir="auto" title={title} className={CAPTION_TITLE}>
+          {title}
+        </span>
+        {(episode || left) && (
+          <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
+            {episode && (
+              <span dir="auto" title={episode} className="min-w-0 truncate text-match-parent">
+                {episode}
+              </span>
+            )}
+            {episode && left && <span aria-hidden className="shrink-0 text-fg-subtle">·</span>}
+            {left && <span className={cn('tabular', episode ? 'shrink-0' : 'truncate')}>{left}</span>}
+          </span>
+        )}
+      </button>
+      {open && <CardMenuButton label={t('moreActionsFor', { title })} tabIndex={rail.tabIndex} onOpen={(el) => open(menuAnchor(el))} />}
+    </div>
+  );
+}
+
+export interface OnNowCardProps {
+  rail: RailCardProps;
+  /** The programme on air. */
+  programme: string;
+  /** The programme's own picture (XMLTV icon), when the guide has one. */
+  programmeArt?: string;
+  channelName: string;
+  logoUrl?: string;
+  /** "12 minutes left". */
+  left?: string;
+  progress?: number;
+  sourceId: string;
+  isRadio?: boolean;
+  ariaLabel: string;
+  onPlay(): void;
+  channel?: Channel;
+}
+
+/**
+ * What is on air now, as a wall of art (CB-PROGRAM-ART, Channels DVR "On Now"): the
+ * programme's own picture through the image cache, or the channel logo on its tint, the
+ * programme title and the channel under it, and how far it has run along the bottom edge.
+ */
+export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
+  const openMenu = useContext(ChannelMenuContext);
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay }) : undefined;
+  return (
+    <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot} data-on-now="">
+      <div className={cn(CARD_ART, 'aspect-video w-full bg-surface-2')}>
+        {programmeArt ? (
+          <>
+            <Poster src={programmeArt} sourceId={sourceId} alt="" label={programme} aspect="wide" className="h-full after:hidden" rounded="sm" />
+            {/* The channel stays recognisable on the programme's picture: its logo on a glass chip. */}
+            {logoUrl && (
+              <span aria-hidden className="absolute top-2 start-2 flex h-7 w-11 items-center justify-center rounded-sm border border-glass-border bg-glass-strong p-1">
+                <Poster src={logoUrl} sourceId={sourceId} width={44} alt="" label={channelName} aspect="wide" fit="contain" kind="live" className="h-full bg-transparent after:hidden [&_img]:p-0" rounded="sm" />
+              </span>
+            )}
+          </>
+        ) : (
+          <LogoArt name={channelName} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
+        )}
+        <PlayGlyph />
+        {progress !== undefined && <EdgeProgress value={progress} />}
+      </div>
+      <span dir="auto" title={programme} className={CAPTION_TITLE}>
+        {programme}
+      </span>
+      <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
+        <span dir="auto" title={channelName} className="min-w-0 truncate text-match-parent">
+          {channelName}
+        </span>
+        {left && (
+          <>
+            <span aria-hidden className="shrink-0 text-fg-subtle">·</span>
+            <span className="shrink-0 tabular">{left}</span>
+          </>
+        )}
+      </span>
+    </button>
+  );
+}
 
 /** Source tile: monogram, name, kind, and catalog counts. */
 export function SourceCard({ rail, source }: { rail: RailCardProps; source: Source }) {
@@ -455,7 +714,7 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
       >
         {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
         <span aria-hidden className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
-        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white">{KIND_NAMES[source.kind]}</span>
+        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white">{t(kindShortKey(source.kind))}</span>
         {source.lastError && (
           <span aria-hidden className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />
         )}
@@ -466,13 +725,13 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
           </span>
         )}
       </div>
-      <span dir="auto" title={source.name} className="mt-2 block truncate text-match-parent text-sm font-medium text-fg">
+      <span dir="auto" title={source.name} className={CAPTION_TITLE}>
         {source.name}
       </span>
       {/* A title alone is never read on a link; these join the card's name after the source name. */}
-      <span className="sr-only" data-testid="source-card-kind">{`, ${KIND_NAMES[source.kind]}`}</span>
+      <span className="sr-only" data-testid="source-card-kind">{`, ${t(kindShortKey(source.kind))}`}</span>
       {source.lastError && <span className="sr-only">{`, ${t('sourceHasError')}`}</span>}
-      <span title={caption} className={cn('block truncate text-sm tabular', importing ? 'text-fg' : 'text-fg-muted')} data-testid="source-card-caption">
+      <span title={caption} className={cn('block truncate text-caption tabular', importing ? 'text-fg' : 'text-fg-muted')} data-testid="source-card-caption">
         {caption}
       </span>
     </Link>

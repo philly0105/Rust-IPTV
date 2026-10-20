@@ -21,12 +21,14 @@
  * so it plays only when the user changes slides: an automatic turn swaps the
  * ticks at once (idle Home 3.2% -> 0.8% main-thread time, L2 XB2-22).
  *
- * Text sits on frosted glass (C8 tokens) that clears toward the inline end, so
- * it stays readable on any artwork in every theme; a slide with no artwork gets
- * a per-title tint instead. The frost is not a backdrop filter (C5): it is a
- * glass tint over a quarter-size, lightly blurred copy of the artwork, masked
- * to the text column, so nothing re-samples the page while the hero is on
- * screen. Artwork loads through the image cache; the visible slide's pictures
+ * The hero runs edge to edge under the header (the cinematic full-bleed hero):
+ * the artwork fills the frame, and two glass gradients, from the bottom and from
+ * the inline start, keep the copy readable on any picture in every theme; a
+ * slide with no artwork gets a per-title tint instead. Gradients only, no blur
+ * over the picture and no backdrop filter (C5), so nothing re-samples the page
+ * while the hero is on screen. A slide that has only a poster shows it upright
+ * at the inline end over a soft field made from its own colours (the cheap
+ * quarter-size blur). Artwork loads through the image cache; the visible slide's pictures
  * load at high priority, and the next slide's backdrop is mounted (and so
  * fetched at low priority) once the main thread is idle. Every slide body is laid into one grid cell, so the
  * hero keeps the height of its tallest slide and nothing below it moves when
@@ -41,12 +43,12 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { Poster, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
+import { MetaLine, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
-import { itemPath, joinList, usePrefetchTarget } from './cards';
-import { HERO_BODY, HERO_FRAME } from './HeroSkeleton';
+import { itemPath, usePrefetchTarget } from './cards';
+import { HERO_BODY, HERO_FRAME, HERO_PAGE_FADE } from './HeroSkeleton';
 import { HERO_DWELL_MS, titleEndsWithYear, wrapIndex, type HeroSlide } from './heroSlides';
 
 export interface HeroCarouselProps {
@@ -280,20 +282,26 @@ function Backdrop({ slide, active, title }: { slide: HeroSlide; active: boolean;
           onError={image.onError}
           className={cn(
             'motion-safe:transition-opacity motion-safe:duration-500',
-            wide ? 'absolute inset-0 h-full w-full object-cover object-[center_25%]' : cn(QUARTER_BLUR, 'saturate-150'),
-            shown ? (wide ? 'opacity-100' : 'opacity-70') : 'opacity-0',
+            wide ? 'absolute inset-0 h-full w-full object-cover object-[center_20%]' : cn(QUARTER_BLUR, 'saturate-150'),
+            shown ? (wide ? 'opacity-100' : 'opacity-60') : 'opacity-0',
           )}
         />
       )}
       {/*
-        The frost's texture: the same backdrop, quarter-size and blurred, under the
-        glass tint and masked like it. Mounted once the picture has loaded, so it
-        comes from the memory cache and never shows a broken image.
+        A poster standing in for the backdrop also stands upright at the inline end, from lg
+        up, so the wide frame is not an empty colour field. Mounted once the picture has
+        loaded, so it comes from the memory cache and never shows a broken image.
       */}
-      {wide && shown && (
-        <div data-hero-frost-art="" className="absolute inset-0 overflow-hidden hero-frost">
-          <img src={url} alt="" draggable={false} decoding="async" referrerPolicy="no-referrer" className={cn(QUARTER_BLUR, 'object-[center_25%] saturate-125')} />
-        </div>
+      {!wide && shown && (
+        <img
+          src={url}
+          alt=""
+          draggable={false}
+          decoding="async"
+          referrerPolicy="no-referrer"
+          data-hero-poster=""
+          className="absolute end-[max(var(--page-gutter),6%)] top-1/2 z-[3] hidden aspect-[2/3] h-[72%] w-auto -translate-y-1/2 rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block"
+        />
       )}
     </div>
   );
@@ -327,7 +335,10 @@ function SlideBody({
   const rating = s.rating ? new Intl.NumberFormat(intlLocale(i18n.language), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
   // A displayed title that still ends with "(2025)" (no titleBase from the core, or an older
   // continue-watching snapshot) does not get the year again below it.
-  const facts = joinList([!titleEndsWithYear(title, s.year) && s.year, s.genres?.slice(0, 2).join(' / ')], i18n.language);
+  // A displayed title that still ends with "(2025)" (no titleBase from the core, or an older
+  // continue-watching snapshot) does not get the year again below it.
+  const year = !titleEndsWithYear(title, s.year) ? s.year : undefined;
+  const genres = s.genres?.slice(0, 2).join(' / ');
   const eyebrow = continuing ? t('heroEyebrow') : sourceName ? t('heroNewIn', { source: sourceName }) : t('heroNew');
   const titleId = `${panelId}-title-${index}`;
   // Details warms the detail page (query, route chunk, artwork) on hover or focus (C4).
@@ -340,54 +351,37 @@ function SlideBody({
         ? { id: panelId, role: 'tabpanel', 'aria-roledescription': t('heroSlide'), 'aria-label': t('heroSlideOf', { index: index + 1, total: count }), 'data-testid': 'hero-slide' }
         : { 'aria-hidden': true, inert: true })}
       data-hero-slide={s.key}
-      // Room above the copy for the slide controls in the top corner.
-      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, count > 1 && 'pt-14 sm:pt-14', !active && 'invisible')}
+      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, !active && 'invisible')}
     >
-      <div className="hidden w-[10rem] shrink-0 lg:block">
-        {active || s.posterUrl ? (
-          <Poster
-            src={s.posterUrl}
-            alt=""
-            label={title}
-            aspect="poster"
-            sourceId={s.ref.sourceId}
-            priority={active}
-            className="shadow-2 ring-1 ring-glass-border"
-          />
-        ) : (
-          <div className="aspect-[2/3] w-full" />
-        )}
-      </div>
       {/* The copy column grows with wide heroes, so a title is not wrapped into a corner of an empty frame. */}
-      <div className={cn('flex min-w-0 max-w-[28rem] flex-1 flex-col gap-2.5 text-on-glass min-[1440px]:max-w-[40rem]', active && 'motion-safe:animate-hero-copy')}>
-        <p className="flex items-center gap-2 text-sm font-semibold text-on-glass-muted">
-          <span aria-hidden className="h-3.5 w-[3px] shrink-0 rounded-full bg-glass-accent shadow-[0_0_10px_var(--color-glass-accent)]" />
-          <span dir="auto" title={eyebrow} className="truncate">
-            {eyebrow}
-          </span>
+      <div className={cn('flex w-full min-w-0 max-w-[36rem] flex-col gap-3 text-on-glass min-[1440px]:max-w-[42rem]', active && 'motion-safe:animate-hero-copy')}>
+        <p dir="auto" title={eyebrow} className="truncate text-caption font-semibold tracking-wider text-on-glass-muted uppercase">
+          {eyebrow}
         </p>
-        <h2
-          id={titleId}
-          dir="auto"
-          className="line-clamp-2 text-match-parent text-display text-on-glass"
-        >
+        <h2 id={titleId} dir="auto" className="line-clamp-2 text-match-parent text-display text-on-glass [text-shadow:0_2px_24px_rgb(0_0_0/0.35)]">
           {title}
         </h2>
-        {(facts || rating || (continuing && s.subtitle)) && (
-          <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-on-glass-muted tabular">
-            {continuing && s.subtitle && <span dir="auto" className="truncate">{s.subtitle}</span>}
-            {facts && <span>{facts}</span>}
-            {rating && (
+        <MetaLine
+          className="text-body-sm text-on-glass-muted tabular [&>span[aria-hidden]]:text-on-glass-muted"
+          items={[
+            continuing && s.subtitle ? (
+              <span dir="auto" className="block truncate">
+                {s.subtitle}
+              </span>
+            ) : null,
+            year,
+            genres,
+            rating ? (
               <span className="inline-flex items-center gap-1">
                 <Star aria-hidden size={13} className="fill-current text-glass-accent" />
                 <span aria-hidden>{rating}</span>
                 <span className="sr-only">{t('ratedLabel', { rating })}</span>
               </span>
-            )}
-          </p>
-        )}
+            ) : null,
+          ]}
+        />
         {s.plot && !continuing && (
-          <p dir="auto" className="line-clamp-2 max-w-[60ch] text-match-parent text-sm text-on-glass-muted">
+          <p dir="auto" className="line-clamp-2 max-w-[60ch] text-match-parent text-body text-on-glass-muted max-sm:hidden">
             {s.plot}
           </p>
         )}
@@ -397,7 +391,8 @@ function SlideBody({
             {s.minutesLeft !== undefined && <span className="shrink-0 text-sm text-on-glass-muted tabular">{t('minutesLeft', { count: s.minutesLeft })}</span>}
           </div>
         )}
-        <div className="mt-1.5 flex flex-wrap gap-3">
+        {/* On a phone Play takes the row and Details folds into a square icon button beside it. */}
+        <div className="mt-2 flex flex-wrap gap-3 max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto]">
           {playable && (
             <button
               type="button"
@@ -405,7 +400,7 @@ function SlideBody({
               disabled={!canPlay}
               aria-describedby={titleId}
               className={cn(
-                'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-glass-accent px-5 text-base font-semibold text-glass-accent-fg shadow-2 select-none',
+                'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-glass-accent px-6 text-base font-semibold text-glass-accent-fg shadow-2 select-none',
                 'hover:brightness-110 active:brightness-90 disabled:cursor-not-allowed disabled:opacity-50',
                 'motion-safe:transition-[filter,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
               )}
@@ -423,12 +418,12 @@ function SlideBody({
               onFocus={details.onFocus}
               onBlur={details.onBlur}
               className={cn(
-                'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-glass-border bg-on-glass/10 px-5 text-base font-medium text-on-glass select-none',
+                'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-md border border-glass-border bg-on-glass/10 px-5 text-base font-medium text-on-glass select-none max-sm:w-12 max-sm:px-0',
                 'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
               )}
             >
               <Info aria-hidden size={18} />
-              {t('details')}
+              <span className="max-sm:sr-only">{t('details')}</span>
             </Link>
           )}
         </div>
@@ -552,15 +547,24 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
         seen.has(s.key) || i === index ? <Backdrop key={s.key} slide={s} active={i === index} title={titleOf(s)} /> : null,
       )}
       {/*
-        Frosted glass over the artwork: solid behind the text column, clearing toward
-        the inline end so the picture shows. Narrow screens frost the whole frame,
-        because the text runs edge to edge there.
+        The scrims: glass from the inline start behind the copy column (from sm, where the copy
+        has a side), and from the bottom, taller on phones where the copy runs edge to edge
+        under the picture. Then, in the dark themes, the fade into the page.
       */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 z-[2] bg-glass hero-frost" />
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-1/3 bg-gradient-to-t from-glass to-transparent" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 start-0 z-[2] w-[72%] bg-gradient-to-r from-glass-strong via-glass/55 to-transparent max-sm:hidden rtl:bg-gradient-to-l"
+      />
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-[72%] bg-gradient-to-t from-glass-strong via-glass/60 to-transparent sm:h-3/5" />
+      <div aria-hidden className={HERO_PAGE_FADE} />
 
       {count > 1 && (
-        <div className="absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1" data-testid="hero-controls">
+        // Top corner on smaller screens, beside the button row from lg up (the copy column has
+        // the room then). On a phone the chevrons go: a swipe moves and the ticks choose.
+        <div
+          className="absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-14"
+          data-testid="hero-controls"
+        >
           {canRotate && (
             <Tooltip content={userPaused ? t('heroPlayRotation') : t('heroPause')} tone="glass" side="bottom" describe={false}>
               <button
@@ -575,7 +579,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
             </Tooltip>
           )}
           <Tooltip content={t('heroPrevious')} tone="glass" side="bottom" describe={false}>
-            <button type="button" onClick={() => go(-1)} aria-label={t('heroPrevious')} className={oscButton} data-testid="hero-prev">
+            <button type="button" onClick={() => go(-1)} aria-label={t('heroPrevious')} className={cn(oscButton, 'max-sm:hidden')} data-testid="hero-prev">
               <ChevronLeft aria-hidden size={16} className="rtl:rotate-180" />
             </button>
           </Tooltip>
@@ -620,7 +624,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
             })}
           </div>
           <Tooltip content={t('heroNext')} tone="glass" side="bottom" describe={false}>
-            <button type="button" onClick={() => go(1)} aria-label={t('heroNext')} className={oscButton} data-testid="hero-next">
+            <button type="button" onClick={() => go(1)} aria-label={t('heroNext')} className={cn(oscButton, 'max-sm:hidden')} data-testid="hero-next">
               <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
             </button>
           </Tooltip>

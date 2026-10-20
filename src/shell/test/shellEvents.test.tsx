@@ -42,6 +42,7 @@ vi.mock('@/api/events', () => ({
 }));
 
 const { EVENT_INVALIDATION, useShellEvents } = await import('../effects');
+const { BACK_ONLINE_MS, ConnectionBanner, ConnectionWatcher, OFFLINE_GRACE_MS, useConnectionStore } = await import('../connection');
 
 function emit(type: string, payload: unknown): void {
   act(() => {
@@ -149,43 +150,67 @@ describe('epg.changed (EP-2)', () => {
   });
 });
 
-describe('connection lost toast (web)', () => {
+describe('offline strip (web, SH-offline-stack)', () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   });
 
-  it('shows after 3 s when the page never connected, and goes once it opens', () => {
-    mount();
+  function mountWithStrip(): void {
+    function StripLayout() {
+      useShellEvents();
+      return (
+        <>
+          <ConnectionWatcher />
+          <ConnectionBanner />
+          <Outlet />
+        </>
+      );
+    }
+    renderRoutes([{ path: '/', element: <StripLayout />, children: [{ index: true, element: <div>home</div> }] }], '/');
+  }
+  const strip = () => document.querySelector<HTMLElement>('[data-testid="connection-banner"]');
+
+  it('shows after 3 s when the page never connected, says "Back online" once it opens, and toasts nothing', () => {
+    mountWithStrip();
     setConnection('closed');
-    act(() => vi.advanceTimersByTime(2999));
-    expect(connectionToast()).toBeUndefined();
+    act(() => vi.advanceTimersByTime(OFFLINE_GRACE_MS - 1));
+    expect(strip()).toBeNull();
     act(() => vi.advanceTimersByTime(1));
-    expect(connectionToast()?.variant).toBe('error');
+    expect(strip()?.dataset['state']).toBe('offline');
+    expect(strip()?.getAttribute('role')).toBe('status');
+    expect(strip()?.textContent).toContain('Lost connection to the server');
+    expect(useConnectionStore.getState().offline).toBe(true);
+    // One surface for the outage: no toast stacked on top of it.
+    expect(connectionToast()).toBeUndefined();
 
     setConnection('open');
-    expect(connectionToast()).toBeUndefined();
+    expect(strip()?.dataset['state']).toBe('online');
+    expect(strip()?.textContent).toContain('Back online');
+    expect(useConnectionStore.getState().offline).toBe(false);
+    act(() => vi.advanceTimersByTime(BACK_ONLINE_MS));
+    expect(strip()).toBeNull();
   });
 
   it('stays quiet when the socket opens within 3 s', () => {
-    mount();
+    mountWithStrip();
     setConnection('closed');
     act(() => vi.advanceTimersByTime(2000));
     setConnection('open');
     act(() => vi.advanceTimersByTime(5000));
+    expect(strip()).toBeNull();
     expect(connectionToast()).toBeUndefined();
   });
 
-  it('shows once per outage: reconnect attempts do not bring a dismissed toast back', () => {
-    mount();
+  it('reconnect attempts during one outage keep one strip up', () => {
+    mountWithStrip();
     setConnection('open');
     setConnection('closed');
-    act(() => vi.advanceTimersByTime(3000));
-    expect(connectionToast()).toBeDefined();
-    act(() => useToastStore.getState().dismiss('connection'));
-
+    act(() => vi.advanceTimersByTime(OFFLINE_GRACE_MS));
+    expect(strip()).not.toBeNull();
     setConnection('connecting');
     setConnection('closed');
     act(() => vi.advanceTimersByTime(10_000));
-    expect(connectionToast()).toBeUndefined();
+    expect(document.querySelectorAll('[data-testid="connection-banner"]')).toHaveLength(1);
+    expect(strip()?.dataset['state']).toBe('offline');
   });
 });

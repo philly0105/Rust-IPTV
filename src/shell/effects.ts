@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
 
-import { onAppEvent, onConnectionState } from '@/api/events';
+import { onAppEvent } from '@/api/events';
 import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
 import type { ImportProgressEvent, Settings, Source, SourceKind, WindowState } from '@/api/types';
@@ -421,31 +421,8 @@ export function useShellEvents(): void {
       });
     }
 
-    // Web mode: tell the user, once per outage, when the live event stream is down for
-    // 3 s: after a drop, and also when the page never connected (server down at load).
-    if (!isDesktop) {
-      let shown = false;
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      offs.push(
-        onConnectionState((s) => {
-          if (s === 'open') {
-            if (timer) clearTimeout(timer);
-            timer = null;
-            if (shown) dismissToast('connection');
-            shown = false;
-            return;
-          }
-          if (s === 'closed' && !shown && !timer) {
-            timer = setTimeout(() => {
-              timer = null;
-              shown = true;
-              toast({ id: 'connection', variant: 'error', title: tRef.current('connectionLost'), description: tRef.current('connectionLostHint'), duration: 0 });
-            }, 3000);
-          }
-        }),
-      );
-      offs.push(() => timer && clearTimeout(timer));
-    }
+    // Web mode: an outage is reported by the strip under the header (connection.tsx,
+    // SH-offline-stack), not by a toast stacked on top of the page's own errors.
 
     return () => offs.forEach((f) => f());
   }, []);

@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isDesktop } from '@/api/transport';
 import { comboKeys, Dialog, Kbd, SearchInput } from '@/ui';
 
 import { normalizeCombo, useShortcutList, type ShortcutInfo } from './shortcuts';
@@ -12,10 +13,11 @@ import { useShellStore } from './store';
  * the overlay is always the complete reference. Registered entries with the
  * same area + combo replace these.
  */
-export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; area: string }[] = [
+export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; area: string; desktopOnly?: true }[] = [
   { combo: 'mod+k', descKey: 'scPalette', area: 'Global' },
   { combo: 'mod+f', descKey: 'scSearch', area: 'Global' },
-  { combo: 'mod+r', descKey: 'scRecent', area: 'Global' },
+  // A browser keeps Ctrl+R for reload (SH-ctrl-r-browser); only the app window binds it.
+  { combo: 'mod+r', descKey: 'scRecent', area: 'Global', desktopOnly: true },
   { combo: '?', descKey: 'scHelp', area: 'Global' },
   { combo: 'escape', descKey: 'scEscape', area: 'Global' },
   { combo: 'mod+shift+l', descKey: 'scTheme', area: 'Global' },
@@ -252,8 +254,8 @@ export function groupShortcuts(
  * keeps the two lists from drifting apart (an area missing from a second
  * label map used to show its raw English id in Settings).
  */
-export function shortcutReference(registered: ShortcutInfo[], t: (key: string) => string): [string, ShortcutInfo[]][] {
-  const documented = DOCUMENTED_SHORTCUTS.map((d) => ({ combo: d.combo, area: d.area, description: t(d.descKey) }));
+export function shortcutReference(registered: ShortcutInfo[], t: (key: string) => string, desktop = isDesktop): [string, ShortcutInfo[]][] {
+  const documented = DOCUMENTED_SHORTCUTS.filter((d) => desktop || !d.desktopOnly).map((d) => ({ combo: d.combo, area: d.area, description: t(d.descKey) }));
   const label = (area: string) => {
     const key = SHORTCUT_AREA_KEYS[area];
     return key ? t(key) : area;
@@ -297,10 +299,15 @@ function OpenShortcutOverlay() {
       onClose={() => setOpen(false)}
       title={t('keyboardShortcuts')}
       description={t('shortcutsIntro')}
-      size="lg"
+      // Wide enough for two columns of one-line rows; the filter stays put while the list scrolls,
+      // and the list fades out at the bottom edge where it continues.
+      size="xl"
+      bodyClassName="pb-8 [mask-image:linear-gradient(to_bottom,#000_calc(100%-2rem),transparent)]"
       testId="shortcut-overlay"
     >
-      <SearchInput value={filter} onChange={setFilter} placeholder={t('filterShortcuts')} size="sm" className="mb-5" data-autofocus="" />
+      <div className="sticky top-0 z-[1] -mx-1 bg-surface px-1 pt-1 pb-4">
+        <SearchInput value={filter} onChange={setFilter} placeholder={t('filterShortcuts')} size="sm" data-autofocus="" />
+      </div>
       {groups.length === 0 ? (
         <p className="py-8 text-center text-sm text-fg-muted">{t('noShortcutsMatch')}</p>
       ) : (
@@ -309,12 +316,14 @@ function OpenShortcutOverlay() {
           role="region"
           aria-label={t('shortcutsListLabel')}
           tabIndex={0}
-          className="grid gap-x-8 gap-y-6 rounded-md md:grid-cols-2"
+          // Two balanced columns: each area flows into the next, with no gap where a short one sat beside a long one.
+          className="gap-x-10 rounded-md md:columns-2"
         >
           {groups.map(([area, list], gi) => (
             // Area names have spaces; an IDREF must not, so the id comes from useId plus the index.
-            <section key={area} aria-labelledby={`${idBase}-area-${gi}`}>
-              <h3 id={`${idBase}-area-${gi}`} className="mb-2 text-sm font-semibold text-fg">
+            <section key={area} aria-labelledby={`${idBase}-area-${gi}`} className="mb-7 min-w-0 break-inside-avoid">
+              {/* Quiet group labels: the accent marks actions, not headings. */}
+              <h3 id={`${idBase}-area-${gi}`} className="mb-1.5 text-caption font-semibold tracking-wider text-fg-subtle uppercase">
                 {area}
               </h3>
               <dl className="flex flex-col">
@@ -322,9 +331,9 @@ function OpenShortcutOverlay() {
                   <div
                     key={`${s.combo}|${s.description}`}
                     data-combo={s.combo}
-                    className="flex items-center justify-between gap-4 border-b border-divider py-2 last:border-b-0"
+                    className="flex min-h-10 items-center justify-between gap-4 border-b border-divider py-1.5 last:border-b-0"
                   >
-                    <dt className="text-sm text-fg">{s.description}</dt>
+                    <dt className="text-body-sm text-fg">{s.description}</dt>
                     <dd className="shrink-0">
                       <Kbd combo={s.combo} />
                     </dd>

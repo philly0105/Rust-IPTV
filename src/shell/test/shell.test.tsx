@@ -1,9 +1,13 @@
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { configure, act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FavoriteEntry, PlaybackPosition, RecentEntry, VodItem } from '@/api/types';
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from './harness';
+
+// The whole shell renders here, with Home and its lazy overlays (palette, shortcut help): a cold
+// first render under a loaded full-suite run can pass the 1 s default.
+configure({ asyncUtilTimeout: 4000 });
 
 /** Matches toast text in the visible stack, not its copy in the screen-reader live region. */
 const VISIBLE_TOAST = { ignore: 'script, style, [data-toast-live] *' };
@@ -201,7 +205,7 @@ describe('ShellLayout', () => {
     await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
-  it('Ctrl+R, Ctrl+F and Ctrl+K do nothing over a dialog or in a text field, and keep the browser from reloading', async () => {
+  it('Ctrl+F and Ctrl+K do nothing over a dialog or in a text field; in a browser Ctrl+R stays the reload key (SH-ctrl-r-browser)', async () => {
     const { router } = renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');
     const dialog = document.createElement('div');
@@ -209,24 +213,27 @@ describe('ShellLayout', () => {
     const field = document.createElement('input');
     dialog.appendChild(field);
     document.body.appendChild(dialog);
-    field.focus();
-    expect(fireEvent.keyDown(field, { key: 'r', code: 'KeyR', ctrlKey: true })).toBe(false);
-    expect(fireEvent.keyDown(field, { key: 'f', code: 'KeyF', ctrlKey: true })).toBe(false);
-    fireEvent.keyDown(field, { key: 'k', code: 'KeyK', ctrlKey: true });
-    expect(useShellStore.getState().paletteOpen).toBe(false);
-    dialog.remove();
+    try {
+      field.focus();
+      expect(fireEvent.keyDown(field, { key: 'f', code: 'KeyF', ctrlKey: true })).toBe(false);
+      fireEvent.keyDown(field, { key: 'k', code: 'KeyK', ctrlKey: true });
+      expect(useShellStore.getState().paletteOpen).toBe(false);
+      // Not claimed: the browser reloads, as the user asked.
+      expect(fireEvent.keyDown(field, { key: 'r', code: 'KeyR', ctrlKey: true })).toBe(true);
+    } finally {
+      dialog.remove();
+    }
 
-    // A text field on the page, no dialog.
-    const pageField = document.createElement('input');
-    document.body.appendChild(pageField);
-    pageField.focus();
-    fireEvent.keyDown(pageField, { key: 'r', code: 'KeyR', ctrlKey: true });
+    // Nor on the page: Ctrl+R never leaves for Recently watched in a browser.
+    expect(fireEvent.keyDown(window, { key: 'r', code: 'KeyR', ctrlKey: true })).toBe(true);
     await new Promise((r) => setTimeout(r, 20));
     expect(router.state.location.pathname).toBe('/favorites');
-    pageField.remove();
-
-    key('r', { code: 'KeyR', ctrlKey: true });
-    await waitFor(() => expect(router.state.location.pathname).toBe('/recent'));
+    // The palette still leads there, with no Ctrl+R hint on the row.
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    const palette = await screen.findByTestId('command-palette');
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'recently watched' } });
+    const row = await within(palette).findByText('Recently watched');
+    expect(row.closest('[cmdk-item]')!.querySelector('kbd')).toBeNull();
   });
 
   it('mod+k toggles the palette closed from inside its input, and Escape still closes it', async () => {
@@ -500,9 +507,10 @@ describe('DashboardPage', () => {
     const nowNextArgs = rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext').map((c) => c.args as { withDescription?: boolean });
     expect(nowNextArgs.length).toBeGreaterThan(0);
     for (const a of nowNextArgs) expect(a.withDescription).toBe(false);
-    // A still LIVE pill per card: an infinite pulse on every card kept an idle dashboard compositing (L3-perf-desktop-1).
-    expect(within(live).getAllByText('Live').length).toBeGreaterThan(0);
-    expect(live.querySelector('[class*="animate-live-pulse"]')).toBeNull();
+    // No LIVE pill on channel tiles (SH-live-pill-noise), and no animation per card: an infinite
+    // pulse on every card kept an idle dashboard compositing (L3-perf-desktop-1).
+    expect(live.querySelector('[data-live-pill]')).toBeNull();
+    expect(live.querySelector('[class*="animate-"]:not([data-rail-skeleton-card] *)')).toBeNull();
     expect(within(await screen.findByTestId('dashboard-rail-recent-live')).getByText('Metro Sport')).toBeTruthy();
     expect(within(await screen.findByTestId('dashboard-rail-favorite-vod')).getByText('Quiet Coast')).toBeTruthy();
     expect(within(await screen.findByTestId('dashboard-rail-recently-added')).getByText('Fresh Arrival')).toBeTruthy();
@@ -531,11 +539,27 @@ describe('DashboardPage', () => {
     expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull();
   });
 
-  it('shows a welcome state with no sources', async () => {
+  it('first run welcomes with the mark, the three kinds and the backup link, and adds a source right on Home (SH-welcome-generic)', async () => {
     baseHandlers({ sources: 0 });
-    renderRoutes(routes(), '/dashboard');
-    const welcome = await screen.findByTestId('dashboard-welcome');
-    expect(within(welcome).getByRole('link', { name: 'Add your first source' }).getAttribute('href')).toBe('/sources?add=1&from=%2Fdashboard');
+    const { router } = renderRoutes(routes(), '/dashboard');
+    const welcome = await screen.findByTestId('dashboard-welcome', {}, { timeout: 3000 });
+    expect(within(welcome).getByRole('heading', { name: 'Welcome to Tsrust IPTV' })).toBeTruthy();
+    expect(welcome.querySelector('svg')).toBeTruthy();
+    for (const kind of ['m3u', 'xtream', 'stalker']) expect(within(welcome).getByTestId(`onboard-${kind}`)).toBeTruthy();
+    expect(within(welcome).getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
+    // The browser build keeps its data on the server.
+    expect(within(welcome).getByText(/stay on your Tsrust server/)).toBeTruthy();
+    // One call to action: the rail shows no add row of its own beside the welcome.
+    expect(screen.queryByTestId('rail-add-source')).toBeNull();
+
+    // A tile opens the add dialog here, on its kind; cancelling stays on Home (SH-cancel-returns).
+    fireEvent.click(within(welcome).getByTestId('onboard-xtream'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add a source' }, { timeout: 3000 });
+    expect(router.state.location.pathname).toBe('/dashboard');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add a source' })).toBeNull());
+    expect(router.state.location.pathname).toBe('/dashboard');
+    expect(screen.getByTestId('dashboard-welcome')).toBeTruthy();
   });
 
   it('warms the playback engines at idle once there is something to play (XB2-14)', async () => {
@@ -571,7 +595,8 @@ describe('DashboardPage', () => {
     renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-live-favorites');
     expect(await within(rail).findByText("Couldn't reach the server")).toBeTruthy();
-    expect(within(rail).getByText(/stored on this computer/)).toBeTruthy();
+    // The browser build: the data lives on the server (SH-kind-labels-copy), not "this computer".
+    expect(within(rail).getByText(/stored on your Tsrust server/)).toBeTruthy();
     fail = false;
     fireEvent.click(within(rail).getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(screen.queryByTestId('dashboard-rail-live-favorites')).toBeNull());
@@ -593,7 +618,7 @@ describe('DashboardPage', () => {
     const banner = await screen.findByTestId('dashboard-error');
     // Local-data copy, not the provider-network hint.
     expect(within(banner).getByRole('heading', { name: "Couldn't load your dashboard" })).toBeTruthy();
-    expect(within(banner).getByText(/stored on this computer/)).toBeTruthy();
+    expect(within(banner).getByText(/stored on your Tsrust server/)).toBeTruthy();
     expect(within(banner).queryByText(/provider URL/)).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(1);
     // Failed rails collapse; the card sits in the normal flow (never over live content) and
@@ -798,14 +823,30 @@ describe('polish pass (B7)', () => {
   });
 });
 
-describe('startup without layout jumps (B7)', () => {
-  it('the pending startup frame uses the dashboard hero skeleton geometry', async () => {
+describe('startup without layout jumps (B7, SH-hero-skeleton-flash)', () => {
+  it('the pending startup frame is a neutral line on the page gutter, not a hero that may never come', async () => {
     rpcMock.handlers['settings.get'] = () => new Promise(() => {});
     renderRoutes([{ path: '/', element: <StartupOnly /> }], '/');
     const pending = await screen.findByTestId('startup-pending');
-    expect(pending.querySelector('[data-testid="hero-skeleton"]')).toBeTruthy();
-    expect(pending.className).toContain('gap-10');
-    expect(pending.className).toContain('pt-8');
+    expect(pending.querySelector('[data-testid="hero-skeleton"]')).toBeNull();
+    expect(pending.className).toContain('px-(--page-gutter)');
+    expect(pending.getAttribute('aria-busy')).toBe('true');
+  });
+
+  it('a hero that loaded empty last time shows no skeleton while Home loads', async () => {
+    const { writeRailEmpty } = await import('../dashboard/railEmpty');
+    rpcMock.handlers['positions.continueWatching'] = () => [];
+    rpcMock.handlers['catalog.recentlyAdded'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard');
+    await waitFor(() => expect(localStorage.getItem('tsrust.dashRailEmpty.hero')).toBe('1'));
+    cleanup();
+    (await import('@/api/query')).queryClient.clear();
+    writeRailEmpty('hero', true);
+    rpcMock.handlers['positions.continueWatching'] = () => new Promise(() => undefined);
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard');
+    expect(screen.queryByTestId('hero-skeleton')).toBeNull();
   });
 });
 
@@ -1001,12 +1042,12 @@ describe('B7 review round 1', () => {
     });
   });
 
-  it('header: page title follows its own script, and the palette button has no Mac-only glyph', async () => {
+  it('header: page title follows its own script, and the search trigger has no Mac-only glyph', async () => {
     renderRoutes(routes(), '/dashboard');
     expect((await screen.findByTestId('page-title')).getAttribute('dir')).toBe('auto');
     const open = screen.getByTestId('open-palette');
     expect(open.querySelector('svg.lucide-command')).toBeNull();
-    expect(open.querySelector('svg.lucide-square-chevron-right')).not.toBeNull();
+    expect(open.querySelector('svg.lucide-search')).not.toBeNull();
   });
 
   it('rail links press darker', async () => {
@@ -1087,7 +1128,9 @@ describe('B7 review round 2', () => {
     const card = busy.querySelector<HTMLElement>('[data-rail-skeleton-card]')!;
     const title = card.children[1] as HTMLElement;
     const subtitle = card.children[2] as HTMLElement;
-    for (const line of [title, subtitle]) expect(line.className).toMatch(/\bh-\[1lh\].*\btext-sm\b/);
+    // The cards' caption spec (CAPTION_TITLE in body-sm, CAPTION_META in caption size).
+    expect(title.className).toMatch(/\bh-\[1lh\].*\btext-body-sm\b/);
+    expect(subtitle.className).toMatch(/\bh-\[1lh\].*\btext-caption\b/);
     expect(title.className).toMatch(/\bmt-2\b/);
     expect(card.className).not.toMatch(/\bgap-/);
   });
@@ -1200,8 +1243,9 @@ describe('B7 review round 3', () => {
     expect(railsWithContent('favorites.list', [movie])).toEqual(['favorite-vod']);
     expect(railsWithContent('recent.list', [movie])).toEqual([]);
     expect(railsWithContent('recent.list', [live])).toEqual(['recent-live']);
-    expect(railsWithContent('positions.continueWatching', [movie])).toEqual(['continue-watching']);
-    expect(railsWithContent('catalog.recentlyAdded', [movie])).toEqual(['recently-added']);
+    // The hero rotates both, so either clears its flag too (SH-hero-skeleton-flash).
+    expect(railsWithContent('positions.continueWatching', [movie])).toEqual(['continue-watching', 'hero']);
+    expect(railsWithContent('catalog.recentlyAdded', [movie])).toEqual(['recently-added', 'hero']);
     expect(railsWithContent('favorites.list', [])).toEqual([]);
     expect(railsWithContent('sources.list', [movie])).toEqual([]);
   });
@@ -1285,13 +1329,12 @@ describe('Run 3 onboarding wiring', () => {
     expect(live).toHaveLength(1);
     expect(live[0]!.textContent).toContain('Night Portal');
     expect(within(nav).getByRole('link', { name: /My List/ }).getAttribute('data-tour')).toBe('vod');
-    // From lg up the header's "Search everything" button is the one search anchor: not the rail's
-    // Search link, and never the palette button (it opens commands, not search).
+    // The header's one search trigger is the one search anchor, not the rail's Search link.
     const search = document.querySelectorAll('[data-tour="search"]');
     expect(search).toHaveLength(1);
     expect(screen.getByTestId('shell-header').contains(search[0]!)).toBe(true);
     expect(search[0]!.textContent).toContain('Search everything');
-    expect(screen.getByTestId('open-palette').hasAttribute('data-tour')).toBe(false);
+    expect(search[0]).toBe(screen.getByTestId('open-palette'));
   });
 
   describe('the search anchor follows the layout', () => {
@@ -1327,15 +1370,26 @@ describe('Run 3 onboarding wiring', () => {
     it.each([
       ['/favorites', 'favorites page'],
       ['/search', 'search field page'],
-    ])('below lg the rail Search link holds it on %s', async (path, text) => {
+    ])('below lg the header search slot still holds it on %s: it stays on screen there now', async (path, text) => {
       setNarrow(true);
       renderRoutes(routes(<SearchFieldPage />), path);
       await screen.findByText(text);
-      const nav = screen.getByRole('navigation', { name: 'Main navigation' });
       const search = document.querySelectorAll('[data-tour="search"]');
       expect(search).toHaveLength(1);
-      expect(search[0]).toBe(within(nav).getByRole('link', { name: 'Search' }));
-      expect(screen.getByTestId('open-palette').hasAttribute('data-tour')).toBe(false);
+      expect(screen.getByTestId('shell-header').contains(search[0]!)).toBe(true);
+      const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+      expect(within(nav).getByRole('link', { name: 'Search' }).hasAttribute('data-tour')).toBe(false);
+    });
+
+    it('on a phone the tab bar Search tab holds it, and the header has no search, palette or theme button', async () => {
+      window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: query === '(max-width: 639px)' || query === '(max-width: 1023px)' })) as typeof window.matchMedia;
+      renderRoutes(routes(<SearchFieldPage />), '/favorites');
+      await screen.findByText('favorites page');
+      const search = document.querySelectorAll('[data-tour="search"]');
+      expect(search).toHaveLength(1);
+      expect(screen.getByTestId('tab-bar').contains(search[0]!)).toBe(true);
+      expect(screen.queryByTestId('open-palette')).toBeNull();
+      expect(screen.queryByTestId('theme-toggle')).toBeNull();
     });
   });
 
@@ -1396,7 +1450,9 @@ describe('L1 shell polish', () => {
     renderRoutes(routes(), '/favorites');
     await screen.findByText('favorites page');
     key('k', { ctrlKey: true });
-    await screen.findByPlaceholderText('Type a command or search');
+    const input = await screen.findByPlaceholderText('Type a command or search');
+    // Source links wait for a query; the empty palette leads with recent channels and suggestions.
+    fireEvent.change(input, { target: { value: 'radio' } });
     expect(await screen.findByText('Radio Box: Radio')).toBeTruthy();
     expect(screen.queryByText('Plain List: Radio')).toBeNull();
   });
@@ -1459,28 +1515,48 @@ describe('L1 shell polish', () => {
 });
 
 describe('L2 shell header', () => {
-  it("the header's Search everything button lands in the search field, not on the leaving page's own filter (L2-shell-5)", async () => {
+  it('the header search trigger opens the palette, one width on every page, and its search row opens the search page (SH-header-search)', async () => {
     const shellRoute = routes()[0]!;
+    function ScopedPage() {
+      const shell = useShell();
+      useEffect(() => {
+        shell.setHeader({ title: 'Movies', search: { value: '', onChange: () => {}, placeholder: 'Search Night Portal' } });
+      }, [shell]);
+      return <Page>scoped page</Page>;
+    }
     const tree = [
       {
         ...shellRoute,
         children: [
           ...shellRoutes,
-          // Distinct trees, so React mounts a new field rather than relabelling the old one.
           { path: 'mine', element: <section><input data-page-search="" aria-label="My filter" /></section> },
+          { path: 'scoped', element: <ScopedPage /> },
           { path: 'search', element: <Page><input data-page-search="" aria-label="Search field" /></Page> },
         ],
       },
     ];
     const { router } = renderRoutes(tree, '/mine');
     await screen.findByLabelText('My filter');
-    fireEvent.click(screen.getByRole('button', { name: /Search everything/ }));
+    const trigger = screen.getByRole('button', { name: /Search everything/ });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    // One shortcut hint, Ctrl K; no separate palette button beside it.
+    expect(trigger.querySelector('[class*="sr-only"]')?.textContent).toBe('Ctrl + K');
+    expect(screen.queryByRole('button', { name: 'Open command palette' })).toBeNull();
+    fireEvent.click(trigger);
+    const palette = await screen.findByTestId('command-palette');
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'harbor' } });
+    fireEvent.click(await within(palette).findByText('Search for "harbor"'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
-    const field = await screen.findByLabelText('Search field');
-    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(router.state.location.search).toBe('?q=harbor');
+
+    // A page's own field takes the same slot, at the same width.
+    await act(() => router.navigate('/scoped'));
+    const field = await screen.findByRole('searchbox', { name: 'Search Night Portal' });
+    expect(field.parentElement!.className).toContain('sm:w-[clamp(14rem,24vw,22rem)]');
+    expect(trigger.className).toContain('w-[clamp(14rem,24vw,22rem)]');
   });
 
-  it('page actions sit in a shrinking wrapper, so the palette and theme buttons stay on screen (L2-visual-4)', async () => {
+  it('page actions sit in a shrinking wrapper, so the search trigger and theme button stay on screen (L2-visual-4)', async () => {
     function ActionsPage() {
       const shell = useShell();
       useEffect(() => {

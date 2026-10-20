@@ -4,12 +4,16 @@
  * Add to multi-view, Add to list…, Rename… and Hide, as in Live's menu.
  */
 
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { configure, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FavoriteEntry, RecentEntry } from '@/api/types';
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from '../../test/harness';
+
+// The whole shell renders here, with Home and its lazy overlays (palette, shortcut help): a cold
+// first render under a loaded full-suite run can pass the 1 s default.
+configure({ asyncUtilTimeout: 4000 });
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),

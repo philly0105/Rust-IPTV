@@ -1,22 +1,12 @@
 import { Command as Cmdk, defaultFilter } from 'cmdk';
 import type { TFunction } from 'i18next';
 import {
-  AlarmClock,
-  Bookmark,
   CalendarRange,
-  ChartColumn,
   Clapperboard,
   CornerDownLeft,
-  Download,
   Gift,
-  HardDrive,
-  Heart,
-  History,
-  House,
   Keyboard,
   Layers,
-  LayoutGrid,
-  ListOrdered,
   ListVideo,
   Lock,
   Monitor,
@@ -35,6 +25,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
+import { homeContinueArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import { isDesktop } from '@/api/transport';
 import { itemKey, type ContentType, type ItemRef, type ItemSnapshot } from '@/api/types';
@@ -47,13 +38,15 @@ import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
 // The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
-import { cn, Dialog, Kbd, toast, errorDescription } from '@/ui';
+import { snapshotTitle } from '@/lib/title';
+import { cn, Dialog, Kbd, Poster, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
+import { ALL_NAV_LINKS } from './navigation';
 import { railLinks } from './railLinks';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
-import { persistTheme } from './theme';
+import { persistTheme, useTheme } from './theme';
 
 /**
  * Every Settings section, in page order. A copy of the settings feature's `SECTION_IDS` (importing
@@ -111,6 +104,8 @@ interface PaletteItem {
   title: string;
   group: string;
   icon?: LucideIcon;
+  /** A picture instead of the icon: a channel's logo. */
+  image?: { src: string; sourceId: string };
   shortcut?: string;
   keywords?: string[];
   /** Quiet trailing text: a favourite's or recent item's kind, then its source when there are several. */
@@ -202,6 +197,77 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
   }, [q, sources.data, favorites.data, recent.data, t, navigate]);
 }
 
+/** Recent channels the palette opens with. */
+const START_CHANNELS = 5;
+/** Titles to resume the palette opens with. */
+const START_RESUME = 3;
+
+/**
+ * What the palette shows before anything is typed (Raycast and Linear lead the same way): the
+ * last few channels, the titles to resume, then a few suggested actions; the destinations come
+ * after them in the main list. Listing the twelve rail links first only repeated the sidebar.
+ * The channels and titles read Home's own queries (same keys), and only while the palette is open.
+ */
+function useStartItems(query: string, open: boolean): PaletteItem[] {
+  const { t } = useTranslation('shell');
+  const sources = useVisibleSources();
+  const recent = useRpcQuery('recent.list', RECENT_ARGS, { enabled: open });
+  const resume = useRpcQuery('positions.continueWatching', homeContinueArgs(), { enabled: open });
+  const empty = !query.trim();
+
+  return useMemo(() => {
+    if (!empty) return [];
+    const sourceById = new Map((sources.data ?? []).map((s) => [s.id, s]));
+    const many = sourceById.size > 1;
+    const play = (args: Parameters<typeof import('@/features/player').playItem>[0], title: string) => () =>
+      void import('@/features/player')
+        .then(({ playItem }) => playItem(args))
+        .catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title }), description: errorDescription(err) }));
+    const items: PaletteItem[] = [];
+    const seen = new Set<string>();
+    const channels = t('groupRecentChannels');
+    for (const r of recent.data ?? []) {
+      if (seen.size >= START_CHANNELS) break;
+      const source = sourceById.get(r.ref.sourceId);
+      const live = r.ref.contentType === 'live' || r.ref.contentType === 'radio';
+      if (!source || !live || seen.has(itemKey(r.ref))) continue;
+      seen.add(itemKey(r.ref));
+      const title = r.snapshot.title;
+      const isRadio = r.ref.contentType === 'radio';
+      items.push({
+        id: `recent.${itemKey(r.ref)}`,
+        title,
+        group: channels,
+        icon: isRadio ? Radio : Tv,
+        image: r.snapshot.posterUrl ? { src: r.snapshot.posterUrl, sourceId: r.ref.sourceId } : undefined,
+        detail: many ? [source.name] : undefined,
+        run: play({ ref: r.ref, title, posterUrl: r.snapshot.posterUrl, isLive: true, isRadio, sourceKind: source.kind }, title),
+      });
+    }
+    const continuing = t('railContinueWatching');
+    let resumed = 0;
+    for (const p of resume.data ?? []) {
+      if (resumed >= START_RESUME) break;
+      const source = sourceById.get(p.ref.sourceId);
+      if (!source || !p.snapshot) continue;
+      resumed += 1;
+      const title = snapshotTitle(p.ref, p.snapshot.title).title;
+      items.push({
+        id: `resume.${itemKey(p.ref)}|${p.episodeId ?? ''}`,
+        title,
+        group: continuing,
+        icon: p.ref.contentType === 'series' ? Layers : Clapperboard,
+        detail: p.snapshot.subtitle ? [p.snapshot.subtitle] : undefined,
+        run: play(
+          { ref: p.ref, episodeId: p.episodeId, title, subtitle: p.snapshot.subtitle, posterUrl: p.snapshot.posterUrl, isLive: false, isRadio: false, sourceKind: source.kind },
+          title,
+        ),
+      });
+    }
+    return items;
+  }, [empty, sources.data, recent.data, resume.data, t]);
+}
+
 /** Most guide programmes the palette lists for one query. */
 const PROGRAMME_LIMIT = 5;
 
@@ -267,19 +333,43 @@ export function usePaletteItems(): PaletteItem[] {
   return useMemo(() => {
     const go = (to: string) => () => navigate(to);
     const nav = t('groupNavigation');
+    // The rail's destinations in rail order, with the words people search them by.
+    const NAV_EXTRA: Record<string, Pick<PaletteItem, 'keywords' | 'shortcut'>> = {
+      '/dashboard': { keywords: ['home'] },
+      '/search': { shortcut: 'mod+f' },
+      '/epg': { keywords: ['epg', 'tv guide', 'schedule'] },
+      '/multiview': { keywords: ['multiview', 'wall', 'split screen', 'mosaic'] },
+      '/my-list': { keywords: ['watchlist', 'watch later'] },
+      '/lists': { keywords: ['custom lists', 'channel lists', 'playlists'] },
+      // Ctrl+R is the app window's; a browser keeps it for reload (SH-ctrl-r-browser).
+      '/recent': { keywords: ['history'], ...(isDesktop ? { shortcut: 'mod+r' } : {}) },
+      '/my-videos': { keywords: ['offline'] },
+      '/scheduled': { keywords: ['recordings', 'reminders'] },
+      '/stats': { keywords: ['statistics', 'time watched', 'history'] },
+    };
+    const NAV_IDS: Record<string, string> = {
+      '/dashboard': 'dashboard',
+      '/search': 'search',
+      '/epg': 'guide',
+      '/multiview': 'multiview',
+      '/favorites': 'favorites',
+      '/my-list': 'myList',
+      '/lists': 'lists',
+      '/recent': 'recent',
+      '/downloads': 'downloads',
+      '/my-videos': 'myVideos',
+      '/scheduled': 'scheduled',
+      '/stats': 'stats',
+    };
     const items: PaletteItem[] = [
-      { id: 'nav.dashboard', title: t('navDashboard'), group: nav, icon: House, run: go('/dashboard'), keywords: ['home'] },
-      { id: 'nav.search', title: t('navSearch'), group: nav, icon: Search, shortcut: 'mod+f', run: go('/search') },
-      { id: 'nav.guide', title: t('navGuide'), group: nav, icon: CalendarRange, run: go('/epg'), keywords: ['epg', 'tv guide', 'schedule'] },
-      { id: 'nav.multiview', title: t('navMultiview'), group: nav, icon: LayoutGrid, run: go('/multiview'), keywords: ['multiview', 'wall', 'split screen', 'mosaic'] },
-      { id: 'nav.favorites', title: t('navFavorites'), group: nav, icon: Heart, run: go('/favorites') },
-      { id: 'nav.myList', title: t('navMyList'), group: nav, icon: Bookmark, run: go('/my-list'), keywords: ['watchlist', 'watch later'] },
-      { id: 'nav.lists', title: t('lists:title'), group: nav, icon: ListOrdered, run: go('/lists'), keywords: ['custom lists', 'channel lists', 'playlists'] },
-      { id: 'nav.recent', title: t('navRecent'), group: nav, icon: History, shortcut: 'mod+r', run: go('/recent'), keywords: ['history'] },
-      { id: 'nav.downloads', title: t('navDownloads'), group: nav, icon: Download, run: go('/downloads') },
-      { id: 'nav.myVideos', title: t('navMyVideos'), group: nav, icon: HardDrive, run: go('/my-videos'), keywords: ['offline'] },
-      { id: 'nav.scheduled', title: t('navScheduled'), group: nav, icon: AlarmClock, run: go('/scheduled'), keywords: ['recordings', 'reminders'] },
-      { id: 'nav.stats', title: t('stats:title'), group: nav, icon: ChartColumn, run: go('/stats'), keywords: ['statistics', 'time watched', 'history'] },
+      ...ALL_NAV_LINKS.map((l): PaletteItem => ({
+        id: `nav.${NAV_IDS[l.to] ?? l.to}`,
+        title: t(l.labelKey),
+        group: nav,
+        icon: l.icon,
+        run: go(l.to),
+        ...NAV_EXTRA[l.to],
+      })),
       { id: 'nav.sources', title: t('manageSources'), group: nav, icon: ListVideo, run: go('/sources'), keywords: ['playlists'] },
       { id: 'nav.addSource', title: t('addSource'), group: nav, icon: Plus, run: go('/sources?add=1'), keywords: ['playlist', 'm3u', 'xtream', 'stalker', 'portal'] },
       { id: 'nav.settings', title: t('navSettings'), group: nav, icon: SettingsIcon, run: go('/settings'), keywords: ['preferences'] },
@@ -347,6 +437,34 @@ export function usePaletteItems(): PaletteItem[] {
   }, [t, navigate, sources.data, setHelpOpen, registered, canLockParental]);
 }
 
+/** The empty palette's actions, ahead of the destinations: the theme flip, a new source, the keys. */
+function useSuggestedItems(query: string): PaletteItem[] {
+  const { t } = useTranslation('shell');
+  const navigate = useNavigate();
+  const setHelpOpen = useShellStore((s) => s.setHelpOpen);
+  const { resolved } = useTheme();
+  const empty = !query.trim();
+  return useMemo(() => {
+    if (!empty) return [];
+    const group = t('groupSuggested');
+    return [
+      {
+        id: 'suggest.theme',
+        title: resolved === 'dark' ? t('switchToLight') : t('switchToDark'),
+        group,
+        icon: resolved === 'dark' ? Sun : Moon,
+        shortcut: 'mod+shift+l',
+        run: () => void persistTheme(resolved === 'dark' ? 'light' : 'dark'),
+      },
+      { id: 'suggest.addSource', title: t('addSource'), group, icon: Plus, run: () => navigate('/sources?add=1') },
+      { id: 'suggest.shortcuts', title: t('keyboardShortcuts'), group, icon: Keyboard, shortcut: '?', run: () => setHelpOpen(true) },
+    ];
+  }, [empty, resolved, t, navigate, setHelpOpen]);
+}
+
+/** Groups the empty palette shows; the rest (sources, settings) wait for a query. */
+const EMPTY_GROUP_IDS = ['recent.', 'resume.', 'suggest.', 'nav.'];
+
 export function CommandPalette() {
   const { t } = useTranslation('shell');
   const open = useShellStore((s) => s.paletteOpen);
@@ -354,6 +472,8 @@ export function CommandPalette() {
   const items = usePaletteItems();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
+  const start = useStartItems(query, open);
+  const suggested = useSuggestedItems(query);
   const content = useContentItems(query, open);
   const programmes = useProgrammeItems(query, open);
   // Every way of closing (Esc, the scrim, Ctrl+K again, Back) leaves the next open empty: the
@@ -364,16 +484,20 @@ export function CommandPalette() {
     if (open && query !== '') setQuery('');
   }
 
-  // Favourites and recent items lead: a tie with a command goes to the content.
+  // Favourites and recent items lead: a tie with a command goes to the content. With nothing
+  // typed, the recent channels, the titles to resume and the suggestions lead, then the
+  // destinations; sources and settings come with a query.
   const groups = useMemo(() => {
+    const empty = !query.trim();
+    const all = empty ? [...start, ...suggested, ...items.filter((it) => EMPTY_GROUP_IDS.some((p) => it.id.startsWith(p)))] : [...content, ...programmes, ...items];
     const map = new Map<string, PaletteItem[]>();
-    for (const it of [...content, ...programmes, ...items]) {
+    for (const it of all) {
       const list = map.get(it.group) ?? [];
       list.push(it);
       map.set(it.group, list);
     }
     return [...map.entries()];
-  }, [content, programmes, items]);
+  }, [query, start, suggested, content, programmes, items]);
 
   // cmdk 1.1 sorts items inside a group but never moves the groups themselves (it looks a
   // group up by its value while tracking it by an internal id), so "Go to" always led. Order
@@ -414,8 +538,22 @@ export function CommandPalette() {
     setTimeout(fn, 0);
   };
 
+  const row = 'flex h-10 cursor-pointer items-center gap-3 rounded-md px-2 text-sm text-fg';
+  const iconTile = 'flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-edge bg-surface-2 text-fg-muted';
+
   return (
-    <Dialog open={open} onClose={close} title={t('commandPalette')} hideTitle hideClose size="md" bodyClassName="p-0" testId="command-palette">
+    <Dialog
+      open={open}
+      onClose={close}
+      title={t('commandPalette')}
+      hideTitle
+      hideClose
+      size="lg"
+      // The hidden title's row keeps no padding: an empty band sat above the search field.
+      className="overflow-hidden [&>div:first-child]:p-0"
+      bodyClassName="p-0"
+      testId="command-palette"
+    >
       {/*
         vimBindings off: cmdk's Ctrl+K (move up) would claim the key, and the
         shell's mod+k must reach the registry to toggle the palette closed.
@@ -428,25 +566,25 @@ export function CommandPalette() {
             value={query}
             onValueChange={setQuery}
             placeholder={t('palettePlaceholder')}
-            className="h-14 min-w-0 flex-1 bg-transparent text-base text-fg outline-none placeholder:text-fg-subtle focus-visible:shadow-none focus-visible:outline-none"
+            className="h-14 min-w-0 flex-1 bg-transparent text-body text-fg outline-none placeholder:text-fg-subtle focus-visible:shadow-none focus-visible:outline-none"
           />
-          <Kbd>Esc</Kbd>
+          <Kbd combo="escape" className="pointer-coarse:hidden" />
         </div>
-        <Cmdk.List ref={listRef} className="max-h-[min(60vh,480px)] overflow-y-auto overscroll-contain p-2">
+        <Cmdk.List ref={listRef} className="max-h-[min(60vh,28rem)] overflow-y-auto overscroll-contain p-2">
           <Cmdk.Empty className="px-4 py-10 text-center text-sm text-fg-muted">{t('paletteEmpty')}</Cmdk.Empty>
           {ranked.map(([group, list]) => (
             <Cmdk.Group key={group} heading={group}>
               {list.map((it) => {
                 const Icon = it.icon;
                 return (
-                  <Cmdk.Item
-                    key={it.id}
-                    value={`${it.title}${VALUE_SEP}${it.id}`}
-                    keywords={it.keywords}
-                    onSelect={() => run(it.run)}
-                    className="flex h-11 cursor-pointer items-center gap-3 rounded-md px-3 text-sm text-fg-muted"
-                  >
-                    {Icon && <Icon aria-hidden size={16} className="shrink-0" />}
+                  <Cmdk.Item key={it.id} value={`${it.title}${VALUE_SEP}${it.id}`} keywords={it.keywords} onSelect={() => run(it.run)} className={row}>
+                    <span aria-hidden className={iconTile}>
+                      {it.image ? (
+                        <Poster src={it.image.src} sourceId={it.image.sourceId} width={28} alt="" label={it.title} aspect="square" fit="contain" kind="live" className="bg-transparent after:hidden [&_img]:p-0.5" rounded="sm" />
+                      ) : (
+                        Icon && <Icon size={16} />
+                      )}
+                    </span>
                     <span dir="auto" title={it.title} className="min-w-0 flex-1 truncate text-match-parent">
                       {it.title}
                     </span>
@@ -455,7 +593,7 @@ export function CommandPalette() {
                         {d}
                       </span>
                     ))}
-                    {it.shortcut && <Kbd combo={it.shortcut} />}
+                    {it.shortcut && <Kbd combo={it.shortcut} className="pointer-coarse:hidden" />}
                   </Cmdk.Item>
                 );
               })}
@@ -467,16 +605,18 @@ export function CommandPalette() {
                 value={`search-everywhere ${query}`}
                 forceMount
                 onSelect={() => run(() => navigate(`/search?q=${encodeURIComponent(query.trim())}`))}
-                className="flex h-11 cursor-pointer items-center gap-3 rounded-md px-3 text-sm text-fg-muted"
+                className={row}
               >
-                <Search aria-hidden size={16} className="shrink-0" />
+                <span aria-hidden className={iconTile}>
+                  <Search size={16} />
+                </span>
                 <span className="min-w-0 flex-1 truncate">{t('searchFor', { query: query.trim() })}</span>
                 <CornerDownLeft aria-hidden size={14} className="text-fg-subtle" />
               </Cmdk.Item>
             </Cmdk.Group>
           )}
         </Cmdk.List>
-        <div className="flex items-center gap-4 border-t border-divider px-4 py-2 text-xs text-fg-subtle">
+        <div className="flex items-center gap-4 border-t border-divider bg-surface-2/50 px-4 py-2 text-xs text-fg-subtle pointer-coarse:hidden">
           <span className="flex items-center gap-1.5">
             <Kbd combo="arrowup" />
             <Kbd combo="arrowdown" />
@@ -485,6 +625,10 @@ export function CommandPalette() {
           <span className="flex items-center gap-1.5">
             <Kbd combo="enter" />
             {t('paletteHintRun')}
+          </span>
+          <span className="ms-auto flex items-center gap-1.5">
+            <Kbd combo="escape" />
+            {t('paletteHintClose')}
           </span>
         </div>
       </Cmdk>

@@ -1,22 +1,38 @@
-import { ListTree, Moon, PanelLeftOpen, Search, SquareChevronRight, Sun } from 'lucide-react';
+import { ListTree, Moon, PanelLeftOpen, Search, Sun } from 'lucide-react';
 import { memo, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
 
 import { IconButton, Kbd, SearchInput, cn } from '@/ui';
 
-import { openSearch } from './focusSearch';
 import { useShellStore } from './store';
 import { useTheme } from './theme';
 
 /**
- * `narrow`: below lg, where the rail is auto-collapsed. The tour's search anchor (Run 3 C7) then
- * moves to the rail's Search link, since the "Search everything" button folds away there.
- * `railHidden`: the user hid the rail there; the header leads with the button that shows it.
- * Memoized (performance audit SH-1): the shell's own re-renders pass it by.
+ * The header's search slot (SH-header-search): one width on every page, so the field neither
+ * moves nor resizes between Home, a source's Movies and the search page. A page that searches
+ * its own content puts its field here in the same box; otherwise the slot is the trigger that
+ * opens the command palette. In rem, so it follows the UI scale.
  */
-export const Header = memo(function Header({ panelInline, narrow = false, railHidden = false }: { panelInline: boolean; narrow?: boolean; railHidden?: boolean }) {
+export const HEADER_SEARCH_WIDTH = 'w-[clamp(14rem,24vw,22rem)]';
+/** The same width for a page's own field, from sm up (below sm it folds into an icon). Literal, for Tailwind's scanner. */
+export const HEADER_FIELD_WIDTH = 'sm:w-[clamp(14rem,24vw,22rem)]';
+
+/**
+ * `phone`: below sm, where the tab bar
+ * carries navigation and Search, so the header keeps only the page's title and actions.
+ * `railHidden`: the user hid the rail on a narrow window; the header leads with the button
+ * that shows it. Memoized (performance audit SH-1): the shell's own re-renders pass it by.
+ */
+export const Header = memo(function Header({
+  panelInline,
+  railHidden = false,
+  phone = false,
+}: {
+  panelInline: boolean;
+  railHidden?: boolean;
+  phone?: boolean;
+}) {
   const { t } = useTranslation('shell');
   const toggleRailHidden = useShellStore((s) => s.toggleRailHidden);
   const header = useShellStore((s) => s.header);
@@ -25,7 +41,6 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
   const setPanelOpen = useShellStore((s) => s.setPanelOpen);
   const setPaletteOpen = useShellStore((s) => s.setPaletteOpen);
   const { resolved, toggle } = useTheme();
-  const navigate = useNavigate();
   const title = header?.title;
   const appName = t('appName');
 
@@ -87,10 +102,34 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
         )}
       </div>
 
-      {header?.search ? (
+      {/*
+        Page actions and the context-panel toggle come before the search slot, so the slot and
+        the theme button keep one place at the inline end on every page. Page actions give way
+        before the shell's own controls: on a phone (worst in Arabic) a labelled action used to
+        push them off the screen. The wrapper shrinks and clips sideways only; the clip margin
+        keeps the actions' focus rings.
+      */}
+      {header?.actions && (
+        <div data-testid="header-actions" className="flex min-w-0 items-center gap-2 overflow-x-clip [overflow-clip-margin:0.25rem]">
+          {header.actions}
+        </div>
+      )}
+      {hasPanel && !panelInline && (
+        <IconButton
+          label={panelOpen ? t('hideDetails') : t('showDetails')}
+          icon={<ListTree size={18} className="rtl:-scale-x-100" />}
+          aria-expanded={panelOpen}
+          aria-haspopup="dialog"
+          onClick={() => setPanelOpen(!panelOpen)}
+          className="shrink-0"
+          data-testid="panel-toggle"
+        />
+      )}
+
+      {header?.search && (
         <SearchInput
           className={cn(
-            'sm:w-[clamp(12rem,28vw,25rem)]',
+            HEADER_FIELD_WIDTH,
             /*
               Below sm a fixed-width field would squeeze the page title to its first
               letter, so the search folds into a search-icon button: the same input,
@@ -110,65 +149,43 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
           onKeyDown={header.search.onKeyDown}
           placeholder={header.search.placeholder}
           data-shell-search=""
-          data-tour={narrow ? undefined : 'search'}
+          // On a phone the tab bar's Search tab is the tour's search step.
+          data-tour={phone ? undefined : 'search'}
         />
-      ) : (
-        <button
-          type="button"
-          // Lands in the search field, as Ctrl+F does, so the user can type at once.
-          onClick={() => openSearch(navigate)}
-          data-tour={narrow ? undefined : 'search'}
-          className={cn(
-            // Looks like a field but opens the palette: a quiet edge that firms up to the field border on hover.
-            'hidden h-8 w-[clamp(10rem,22vw,20rem)] items-center gap-2 rounded-md border border-edge bg-surface-2 px-3 text-sm text-fg-subtle lg:flex',
-            'hover:border-border hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
-          )}
-        >
-          <Search aria-hidden size={15} />
-          <span className="flex-1 truncate text-start">{t('searchEverything')}</span>
-          <Kbd combo="mod+f" />
-        </button>
       )}
 
-      {/*
-        Page actions give way before the shell's own buttons: on a phone (worst in Arabic) a
-        labelled action used to push the palette and theme buttons off the screen. The wrapper
-        shrinks and clips sideways only; the clip margin keeps the actions' focus rings.
-      */}
-      {header?.actions && (
-        <div data-testid="header-actions" className="flex min-w-0 items-center gap-2 overflow-x-clip [overflow-clip-margin:0.25rem]">
-          {header.actions}
+      {!phone && (
+        <div className="flex shrink-0 items-center gap-1">
+          {!header?.search && (
+            <button
+              type="button"
+              // One way in: the palette searches favourites, history, the guide and commands, and
+              // hands anything else to the search page. Ctrl+F still opens the search page.
+              onClick={() => setPaletteOpen(true)}
+              aria-haspopup="dialog"
+              data-tour="search"
+              data-testid="open-palette"
+              className={cn(
+                HEADER_SEARCH_WIDTH,
+                // Looks like a field but opens the palette: a quiet edge that firms up to the field border on hover.
+                'me-1 flex h-8 items-center gap-2 rounded-md border border-edge bg-surface-2 ps-3 pe-1.5 text-sm text-fg-subtle',
+                'hover:border-border hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
+              )}
+            >
+              <Search aria-hidden size={16} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-start">{t('searchEverything')}</span>
+              <Kbd combo="mod+k" className="pointer-coarse:hidden" />
+            </button>
+          )}
+          <IconButton
+            label={resolved === 'dark' ? t('switchToLight') : t('switchToDark')}
+            shortcut="mod+shift+l"
+            icon={resolved === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            onClick={toggle}
+            data-testid="theme-toggle"
+          />
         </div>
       )}
-
-      <div className="flex shrink-0 items-center gap-1">
-        {hasPanel && !panelInline && (
-          <IconButton
-            label={panelOpen ? t('hideDetails') : t('showDetails')}
-            // A list glyph, so it never reads as the palette's square-and-chevron next to it.
-            icon={<ListTree size={18} className="rtl:-scale-x-100" />}
-            aria-expanded={panelOpen}
-            aria-haspopup="dialog"
-            onClick={() => setPanelOpen(!panelOpen)}
-            data-testid="panel-toggle"
-          />
-        )}
-        <IconButton
-          label={t('openPalette')}
-          shortcut="mod+k"
-          // A command-prompt glyph, not the Mac ⌘ key: the shortcut is Ctrl+K outside macOS.
-          icon={<SquareChevronRight size={18} className="rtl:-scale-x-100" />}
-          onClick={() => setPaletteOpen(true)}
-          data-testid="open-palette"
-        />
-        <IconButton
-          label={resolved === 'dark' ? t('switchToLight') : t('switchToDark')}
-          shortcut="mod+shift+l"
-          icon={resolved === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          onClick={toggle}
-          data-testid="theme-toggle"
-        />
-      </div>
     </header>
   );
 });

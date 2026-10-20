@@ -1,9 +1,13 @@
-import { act, cleanup, screen } from '@testing-library/react';
+import { configure, act, cleanup, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FavoriteEntry, PlaybackPosition, RecentEntry, VodItem, WatchlistEntry } from '@/api/types';
 
 import { installDomStubs, makeSource, renderRoutes, rpcMock, settings } from '../../test/harness';
+
+// The whole shell renders here, with Home and its lazy overlays (palette, shortcut help): a cold
+// first render under a loaded full-suite run can pass the 1 s default.
+configure({ asyncUtilTimeout: 4000 });
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),

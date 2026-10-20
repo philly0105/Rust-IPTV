@@ -1,11 +1,15 @@
 /** Run 1 craft fixes in the shell: the dashboard quiet state and My List (C3), the rail's Home glyph, the phone-width header search. */
 
-import { act, cleanup, screen, within } from '@testing-library/react';
+import { configure, act, cleanup, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { WatchlistEntry } from '@/api/types';
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from '../../test/harness';
+
+// The whole shell renders here, with Home and its lazy overlays (palette, shortcut help): a cold
+// first render under a loaded full-suite run can pass the 1 s default.
+configure({ asyncUtilTimeout: 4000 });
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -176,7 +180,8 @@ describe('header search below sm', () => {
     const box = field.parentElement!;
     expect(box.className).toContain('max-sm:w-8');
     expect(box.className).toContain('max-sm:focus-within:flex-1');
-    expect(box.className).toContain('sm:w-[clamp(12rem,28vw,25rem)]');
+    // From sm up it is the header's one search width, the same as the trigger on other pages.
+    expect(box.className).toContain('sm:w-[clamp(14rem,24vw,22rem)]');
     // The title yields to the search only while it is focused or holds a query.
     const titleBox = screen.getByTestId('page-title').parentElement!;
     expect(titleBox.className).toContain('max-sm:group-has-[[data-shell-search]:focus]/header:hidden');

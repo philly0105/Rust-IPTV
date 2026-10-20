@@ -1,0 +1,235 @@
+/**
+ * Phones (below sm, CB-PHONE-NAV): a bottom tab bar instead of the rail. The collapsed rail took
+ * 72 px, a fifth of a 390 px screen, for nineteen unlabelled icons, and every page under it
+ * truncated or wrapped. The bar holds Home, Live TV, the guide, Search and More; More opens a
+ * sheet with the Library pages, the sources and Settings.
+ *
+ * The bar sits in the shell's column under the outlet, not over it, so no page needs bottom
+ * padding for it. Overlays that float over the page (the mini player, toasts) read its height
+ * from --shell-bottom-inset on <html> (SHELL_BOTTOM_INSET), which the shell sets while it shows.
+ */
+
+import { CalendarRange, ChevronRight, House, LayoutGrid, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
+import { memo, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Link, NavLink, useLocation } from 'react-router';
+
+import type { Source } from '@/api/types';
+import { cn, Dialog, hueOf, initialsOf } from '@/ui';
+
+import { isLiveRoute, LIBRARY_LINKS, liveTabTarget, readLastSource } from './navigation';
+import { railLinks } from './railLinks';
+import { useVisibleSources } from './useVisibleSources';
+
+/** The bar's own height, in rem against the 15 px root: it follows the UI scale, not density. */
+export const TAB_BAR_HEIGHT = 'calc(56rem / 15)';
+/** What overlays lift by while the bar shows: its height plus the home indicator's safe area. */
+export const SHELL_BOTTOM_INSET = `calc(${TAB_BAR_HEIGHT} + env(safe-area-inset-bottom, 0px))`;
+
+interface Tab {
+  id: 'home' | 'live' | 'guide' | 'search';
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  active: boolean;
+  tour?: 'search';
+}
+
+const tabClass = (active: boolean) =>
+  cn(
+    'relative flex h-full w-full flex-col items-center justify-center gap-1 rounded-md px-1 text-2xs font-medium outline-offset-[-2px] select-none',
+    'motion-safe:transition-colors motion-safe:duration-(--duration-fast)',
+    // The current tab: the accent tick along the bar's top edge, an accent icon and full text.
+    active
+      ? 'text-fg before:absolute before:inset-x-[30%] before:top-0 before:h-0.5 before:rounded-b-full before:bg-accent'
+      : 'text-fg-muted active:bg-active',
+  );
+
+/** The bar. Rendered by the shell below sm only. */
+export const TabBar = memo(function TabBar() {
+  const { t } = useTranslation('shell');
+  const sources = useVisibleSources();
+  const { pathname, key } = useLocation();
+  const [moreOpen, setMoreOpen] = useState(false);
+  // A tab or a link in the sheet moved on: the sheet belongs to the page it opened over.
+  useEffect(() => setMoreOpen(false), [key]);
+
+  const live = liveTabTarget(sources.data, readLastSource());
+  const tabs: Tab[] = [
+    { id: 'home', to: '/dashboard', label: t('navDashboard'), icon: House, active: pathname === '/dashboard' },
+    // No sources yet: the tab leads to adding one, as Home does.
+    { id: 'live', to: live ?? '/sources', label: t('liveTv'), icon: Tv, active: isLiveRoute(pathname) },
+    { id: 'guide', to: '/epg', label: t('navGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
+    { id: 'search', to: '/search', label: t('navSearch'), icon: Search, active: pathname === '/search', tour: 'search' },
+  ];
+  const moreActive = !tabs.some((tab) => tab.active);
+
+  return (
+    <nav
+      aria-label={t('mainNavigation')}
+      data-testid="tab-bar"
+      className="shrink-0 border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]"
+    >
+      <ul className="grid grid-cols-5 px-1" style={{ height: TAB_BAR_HEIGHT }}>
+        {tabs.map(({ id, to, label, icon: Icon, active, tour }) => (
+          <li key={id} className="min-w-0">
+            <Link to={to} aria-current={active ? 'page' : undefined} data-tab={id} data-tour={tour} className={tabClass(active)}>
+              <Icon aria-hidden size={22} className={cn('shrink-0', active && 'text-accent')} />
+              <span className="max-w-full truncate">{label}</span>
+            </Link>
+          </li>
+        ))}
+        <li className="min-w-0">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={moreOpen}
+            data-tab="more"
+            onClick={() => setMoreOpen(true)}
+            className={tabClass(moreActive)}
+          >
+            <MenuIcon aria-hidden size={22} className={cn('shrink-0', moreActive && 'text-accent')} />
+            <span className="max-w-full truncate">{t('tabMore')}</span>
+          </button>
+        </li>
+      </ul>
+      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data ?? []} pathname={pathname} />
+    </nav>
+  );
+});
+
+/** A source's monogram, as in the rail. */
+function Monogram({ source }: { source: Source }) {
+  const hue = hueOf(source.name);
+  return (
+    <span
+      aria-hidden
+      className="inline-flex size-9 shrink-0 items-center justify-center rounded-md font-display text-sm font-semibold text-white"
+      style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
+    >
+      {initialsOf(source.name)}
+    </span>
+  );
+}
+
+const rowClass = (active: boolean) =>
+  cn(
+    'flex min-h-12 items-center gap-3 rounded-md px-3 text-body font-medium',
+    active ? 'tuning-tick bg-selected text-fg' : 'text-fg hover:bg-hover active:bg-active',
+  );
+
+/**
+ * The More sheet: the kit Dialog drawn as a bottom sheet, so it keeps the dialog's focus trap,
+ * Escape, scroll lock and focus return. Below sm only, like the bar.
+ */
+function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClose: () => void; sources: readonly Source[]; pathname: string }) {
+  const { t } = useTranslation('shell');
+  const current = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={t('tabMore')}
+      testId="more-sheet"
+      className={cn(
+        'fixed inset-x-0 bottom-0 max-w-none rounded-t-xl rounded-b-none border-x-0 border-b-0 pb-[env(safe-area-inset-bottom,0px)]',
+        'max-h-[85dvh] max-sm:max-h-[85dvh]',
+        open ? 'motion-safe:animate-sheet-in' : 'motion-safe:animate-sheet-out',
+      )}
+      bodyClassName="flex flex-col gap-6"
+    >
+      <section aria-labelledby="more-library" className="flex flex-col gap-2">
+        <h3 id="more-library" className="text-caption font-medium text-fg-subtle">
+          {t('navGroupLibrary')}
+        </h3>
+        <ul className="grid grid-cols-4 gap-2">
+          {LIBRARY_LINKS.map(({ to, labelKey, icon: Icon }) => {
+            const active = current(to);
+            return (
+              <li key={to} className="min-w-0">
+                <NavLink
+                  to={to}
+                  className={cn(
+                    'flex h-full flex-col items-center gap-1.5 rounded-lg px-1 py-2.5 text-center text-caption font-medium',
+                    active ? 'bg-selected text-fg' : 'text-fg-muted hover:bg-hover active:bg-active',
+                  )}
+                >
+                  <span aria-hidden className="flex size-11 items-center justify-center rounded-lg border border-edge bg-surface-2">
+                    <Icon size={20} className={cn(active ? 'text-accent' : 'text-fg')} />
+                  </span>
+                  <span className="line-clamp-2 break-words">{t(labelKey)}</span>
+                </NavLink>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
+      <section aria-labelledby="more-sources" className="flex flex-col gap-2">
+        <h3 id="more-sources" className="text-caption font-medium text-fg-subtle">
+          {t('sources')}
+        </h3>
+        {sources.length === 0 ? (
+          <Link to="/sources?add=1" className={cn(rowClass(false), 'border border-dashed border-edge')}>
+            <Plus aria-hidden size={18} className="shrink-0 text-fg-muted" />
+            <span className="min-w-0 flex-1 truncate">{t('addSource')}</span>
+          </Link>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {sources.map((s) => (
+              <li key={s.id} className="flex flex-col gap-2 rounded-lg border border-edge bg-surface-2 p-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <Monogram source={s} />
+                  <span dir="auto" title={s.name} className="min-w-0 flex-1 truncate text-body font-medium text-fg">
+                    {s.name}
+                  </span>
+                </div>
+                {/* An M3U source lists Radio only when it has stations, as in the palette. */}
+                <ul className="flex flex-wrap gap-1.5" aria-label={s.name}>
+                  {/* What the source holds; its favourites and history are in Library above. */}
+                  {railLinks(s, { hasRadio: (s.radioCount ?? 0) > 0 })
+                    .filter((l) => l.id !== 'favorites' && l.id !== 'recent')
+                    .map((l) => {
+                    const active = current(l.to);
+                    return (
+                      <li key={l.id}>
+                        <NavLink
+                          to={l.to}
+                          className={cn(
+                            'inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-body-sm font-medium',
+                            active ? 'bg-fg text-bg' : 'bg-surface-3 text-fg hover:bg-pressed active:bg-pressed',
+                          )}
+                        >
+                          <l.icon aria-hidden size={14} />
+                          {t(l.labelKey)}
+                        </NavLink>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <ul className="flex flex-col gap-0.5 border-t border-divider pt-3">
+        {(
+          [
+            { to: '/multiview', label: t('navMultiview'), icon: LayoutGrid },
+            { to: '/sources', label: t('manageSources'), icon: ListVideo },
+            { to: '/settings', label: t('navSettings'), icon: SettingsIcon },
+          ] as const
+        ).map(({ to, label, icon: Icon }) => (
+          <li key={to}>
+            <NavLink to={to} className={rowClass(current(to))}>
+              <Icon aria-hidden size={18} className={cn('shrink-0', current(to) ? 'text-accent' : 'text-fg-muted')} />
+              <span className="min-w-0 flex-1 truncate">{label}</span>
+              <ChevronRight aria-hidden size={16} className="shrink-0 text-fg-subtle rtl:rotate-180" />
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </Dialog>
+  );
+}

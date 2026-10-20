@@ -21,7 +21,7 @@ import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem'
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { useParentalStatus } from '@/features/parental/status';
 
-import { ChannelMenuContext, type ChannelMenuRequest } from './cards';
+import { CardMenuContext, ChannelMenuContext, type CardMenuRequest, type ChannelMenuRequest } from './cards';
 
 /**
  * The channel a favorite or recent entry stands for, from its saved snapshot:
@@ -45,11 +45,27 @@ const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /** A channel's group rarely changes; the lookup below is kept this long. */
 const GROUP_STALE_MS = 5 * 60_000;
 
-/** Provides the channel card menu to the cards below it and draws it. Mount once around the rails. */
+/**
+ * Provides the card menus to the cards below it and draws them: the channel menu, and the plain
+ * action menu of a Continue watching card (CardMenuContext). One menu shows at a time. Mount once
+ * around the rails.
+ */
 export function ChannelMenuHost({ children }: { children: ReactNode }) {
   const { t } = useTranslation('shell');
-  const [menu, setMenu] = useState<ChannelMenuRequest | null>(null);
-  const close = useCallback(() => setMenu(null), []);
+  const [menu, setMenuState] = useState<ChannelMenuRequest | null>(null);
+  const [actions, setActions] = useState<CardMenuRequest | null>(null);
+  const setMenu = useCallback((request: ChannelMenuRequest) => {
+    setActions(null);
+    setMenuState(request);
+  }, []);
+  const openActions = useCallback((request: CardMenuRequest) => {
+    setMenuState(null);
+    setActions(request);
+  }, []);
+  const close = useCallback(() => {
+    setMenuState(null);
+    setActions(null);
+  }, []);
 
   const channel = menu?.channel ?? null;
   // C4: radio has no picture, so a station gets no multi-view entry.
@@ -83,8 +99,15 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
 
   return (
     <ChannelMenuContext.Provider value={setMenu}>
-      {children}
-      <ContextMenu pos={menu?.pos ?? null} items={items} label={menu?.channel.name ?? ''} onClose={close} />
+      <CardMenuContext.Provider value={openActions}>
+        {children}
+        <ContextMenu
+          pos={menu?.pos ?? actions?.pos ?? null}
+          items={menu ? items : (actions?.items ?? [])}
+          label={menu?.channel.name ?? actions?.label ?? ''}
+          onClose={close}
+        />
+      </CardMenuContext.Provider>
     </ChannelMenuContext.Provider>
   );
 }

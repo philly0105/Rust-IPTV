@@ -23,6 +23,8 @@ export type {
 export { SEGMENT_TRACK, SegmentedControl, segmentClass } from './Segmented';
 export type { SegmentedControlProps, SegmentedOption, SegmentedTone } from './Segmented';
 export { BackButton, Page, PageHeader, SectionHeader } from './Page';
+export { BrandMark } from './BrandMark';
+export type { BrandMarkProps } from './BrandMark';
 export type { BackButtonProps, PageHeaderProps, PageProps, PageWidth, SectionHeaderProps } from './Page';
 export { Dialog } from './Dialog';
 export type { DialogProps, DialogSize } from './Dialog';

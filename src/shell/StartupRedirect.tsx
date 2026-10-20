@@ -4,7 +4,8 @@ import { Navigate } from 'react-router';
 import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { CustomList, Settings, Source } from '@/api/types';
-import { HeroSkeleton } from './dashboard/HeroSkeleton';
+import { Skeleton } from '@/ui';
+
 import { consumeStartupDeepLink, isRestorableRoute, useStartupDeepLink } from './effects';
 import { routeSourceId } from './railLinks';
 import { useSettings } from './useSettings';
@@ -104,9 +105,11 @@ export function StartupRedirect({ isKnownPath }: { isKnownPath?: (pathname: stri
   if (link.path) return <Navigate to={link.path} replace />;
   if (settings.isPending || !link.settled || checksPending) {
     return (
-      // Same frame as the dashboard's loading state, the most common landing page.
-      <div className="flex flex-col gap-10 pt-8" aria-busy="true" data-testid="startup-pending">
-        <HeroSkeleton />
+      // A neutral frame, not the hero's (SH-hero-skeleton-flash): restoring the last screen, the
+      // default, often lands somewhere else, and a new user's Home has no hero at all, so a
+      // 22rem placeholder showed and then collapsed. One faint line where every page starts.
+      <div className="px-(--page-gutter) py-6" aria-busy="true" data-testid="startup-pending">
+        <Skeleton className="h-5 w-48 opacity-60" />
       </div>
     );
   }

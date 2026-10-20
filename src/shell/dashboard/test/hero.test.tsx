@@ -404,15 +404,25 @@ describe('HeroCarousel', () => {
     expect(layer.querySelector('img')).toBeNull();
   });
 
-  it('frosts the copy with a tint over a cheaply blurred copy of the backdrop, not a backdrop filter', () => {
+  it('keeps the copy readable with glass gradients only: no blur over a backdrop and no backdrop filter (C5)', () => {
     const { hero } = renderHero([slide('a', { backdropUrl: 'https://img.test/a-wide.jpg' })]);
     const layer = hero.querySelector('[data-hero-backdrop]')!;
-    expect(layer.querySelector('[data-hero-frost-art]')).toBeNull();
     fireEvent.load(layer.querySelector('img')!);
-    const art = layer.querySelector('[data-hero-frost-art] img')!;
-    expect(art.getAttribute('src')).toBe(layer.querySelector('img')!.getAttribute('src'));
-    expect(art.className).toContain('blur-md');
-    expect(hero.innerHTML).not.toMatch(/backdrop-blur|glass-blur/);
+    // The backdrop is one sharp picture: no second, blurred copy of it.
+    expect(layer.querySelectorAll('img')).toHaveLength(1);
+    expect(layer.querySelector('img')!.className).not.toMatch(/blur/);
+    expect(hero.innerHTML).not.toMatch(/backdrop-blur|glass-blur|hero-frost/);
+    expect(hero.querySelector('[class*="from-glass-strong"]')).toBeTruthy();
+  });
+
+  it('a poster-only slide also shows its poster upright at the inline end, once it has loaded', () => {
+    const { hero } = renderHero([slide('a', { posterUrl: 'https://img.test/upright.jpg' })]);
+    const layer = hero.querySelector('[data-hero-backdrop]')!;
+    expect(layer.querySelector('[data-hero-poster]')).toBeNull();
+    fireEvent.load(layer.querySelector('img')!);
+    const poster = layer.querySelector<HTMLImageElement>('[data-hero-poster]')!;
+    expect(poster.getAttribute('src')).toBe(layer.querySelector('img')!.getAttribute('src'));
+    expect(poster.className).toContain('lg:block');
   });
 
   it('titles a new arrival with titleBase like its detail page, and the year line follows what is shown', () => {

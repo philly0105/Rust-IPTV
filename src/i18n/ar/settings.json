@@ -226,9 +226,10 @@
 
   "backupExport": "تصدير",
   "backupExportHint": "يحفظ مصادرك ومفضلتك وإعداداتك في ملف JSON.",
-  "backupIncludeSecrets": "تضمين كلمات المرور والمفاتيح",
-  "backupIncludeSecretsHint": "متوقف افتراضيًا، ليكون الملف آمنًا للمشاركة.",
+  "backupIncludeSecrets": "تضمين كلمات مرور Xtream وStalker ومفاتيحها",
+  "backupIncludeSecretsHint": "عند إيقافه تُستبعد من الملف، ويجب إدخالها مجددًا بعد الاستيراد.",
   "backupIncludeSecretsWarning": "يستطيع أي شخص لديه هذا الملف تسجيل الدخول إلى مزوّديك. احتفظ به لنفسك.",
+  "backupPrivacyNote": "تحتفظ كل نسخة احتياطية بعناوين قوائم التشغيل والدليل وعناوين MAC الخاصة بـ Stalker، وقد تعمل كبيانات دخول. احتفظ بملفات النسخ الاحتياطية لنفسك.",
   "backupExportButton": "تصدير نسخة احتياطية",
   "backupExported": "تم تصدير النسخة الاحتياطية",
   "backupExportFailed": "تعذّر تصدير النسخة الاحتياطية",

@@ -222,9 +222,10 @@
 
   "backupExport": "Dışa Aktar",
   "backupExportHint": "Kaynaklarınızı, favorilerinizi ve ayarlarınızı bir JSON dosyasına kaydeder.",
-  "backupIncludeSecrets": "Parolaları ve anahtarları dahil et",
-  "backupIncludeSecretsHint": "Varsayılan olarak kapalıdır, böylece dosya güvenle paylaşılabilir.",
+  "backupIncludeSecrets": "Xtream ve Stalker parolalarını ve anahtarlarını dahil et",
+  "backupIncludeSecretsHint": "Kapalıyken dosyaya eklenmez; içe aktarmadan sonra yeniden girilmeleri gerekir.",
   "backupIncludeSecretsWarning": "Bu dosyaya sahip olan herkes sağlayıcılarınızda oturum açabilir. Dosyayı gizli tutun.",
+  "backupPrivacyNote": "Her yedek, liste ve rehber adreslerini ve Stalker MAC adreslerini içerir; bunlar oturum bilgisi işlevi görebilir. Yedek dosyalarını gizli tutun.",
   "backupExportButton": "Yedeği dışa aktar",
   "backupExported": "Yedek dışa aktarıldı",
   "backupExportFailed": "Yedek dışa aktarılamadı",

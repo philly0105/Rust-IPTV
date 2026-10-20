@@ -223,9 +223,10 @@
 
   "backupExport": "Esporta",
   "backupExportHint": "Salva sorgenti, preferiti e impostazioni in un file JSON.",
-  "backupIncludeSecrets": "Includi password e chiavi",
-  "backupIncludeSecretsHint": "Disattivato per impostazione predefinita, così il file è sicuro da condividere.",
+  "backupIncludeSecrets": "Includi password e chiavi di Xtream e Stalker",
+  "backupIncludeSecretsHint": "Se disattivato, vengono escluse e andranno reinserite dopo l'importazione.",
   "backupIncludeSecretsWarning": "Chiunque abbia questo file può accedere ai tuoi fornitori. Non condividerlo.",
+  "backupPrivacyNote": "Ogni backup conserva gli indirizzi di playlist e guida e gli indirizzi MAC di Stalker, che possono valere come credenziali. Tieni privati i file di backup.",
   "backupExportButton": "Esporta backup",
   "backupExported": "Backup esportato",
   "backupExportFailed": "Impossibile esportare il backup",

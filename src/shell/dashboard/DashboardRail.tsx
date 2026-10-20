@@ -149,6 +149,8 @@ export function DashboardRail<T>({
   // The track element and item order the last commit showed.
   const shownRef = useRef<{ el: HTMLUListElement | null; order: string }>({ el: null, order: '' });
   const orderKey = items?.map(getKey).join('\u0000') ?? '';
+  // The card that holds focus (on the card or on its menu button), by key and place in the rail.
+  const focusedRef = useRef<{ key: string; index: number } | null>(null);
 
   // Scroll snapping keeps the previously snapped card snapped across layout
   // changes; when the items reorder (e.g. sources ranked once recents load) the
@@ -169,6 +171,25 @@ export function DashboardRail<T>({
   useEffect(() => {
     if (focusIndex >= count && count > 0) setFocusIndex(count - 1);
   }, [count, focusIndex]);
+
+  // A card that goes while it holds focus (Remove or Mark watched from its menu, which hands focus
+  // back to the card first) took focus to <body>, so the next Tab started again at the top of the
+  // page. Focus goes to the card that took its place, or the one before it when it was the last;
+  // when the rail goes with its last card, to the page's main region. Focus that moved on to
+  // something else stays there.
+  useLayoutEffect(() => {
+    const was = focusedRef.current;
+    if (!was || items?.some((item) => getKey(item) === was.key)) return;
+    focusedRef.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const cards = trackRef.current?.querySelectorAll<HTMLElement>('[data-rail-card]');
+    const next = cards && cards.length > 0 ? cards[Math.min(was.index, cards.length - 1)] : undefined;
+    if (next) next.focus({ preventScroll: true });
+    else document.getElementById('main')?.focus({ preventScroll: true });
+    // Only a change of the rail's items can take a card away.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderKey]);
 
   useEffect(() => {
     const el = trackRef.current;
@@ -311,6 +332,14 @@ export function DashboardRail<T>({
               const cards = Array.from(trackRef.current?.querySelectorAll<HTMLElement>('[data-rail-card]') ?? []);
               const i = cards.indexOf(e.target as HTMLElement);
               if (i >= 0 && i !== focusIndex) setFocusIndex(i);
+              // The card, or its menu button: both sit in the card's list item.
+              const li = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-rail-key]') : null;
+              const track = trackRef.current;
+              if (li && track?.contains(li)) focusedRef.current = { key: li.dataset['railKey']!, index: Array.prototype.indexOf.call(track.children, li) };
+            }}
+            onBlur={(e) => {
+              // Focus left the rail (a menu it opened counts: the menu hands focus back on close).
+              if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) focusedRef.current = null;
             }}
             aria-labelledby={headingId}
             className={cn(
@@ -323,7 +352,7 @@ export function DashboardRail<T>({
             {/* The cards' artwork fills the card, so it loads at this width without measuring (SH-6). */}
             <PosterWidthContext.Provider value={width}>
               {items!.map((item, i) => (
-                <li key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
+                <li key={getKey(item)} data-rail-key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
                   {renderCard(item, { tabIndex: i === focusIndex ? 0 : -1, 'data-rail-card': '' })}
                 </li>
               ))}

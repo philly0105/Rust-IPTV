@@ -21,6 +21,7 @@ vi.mock('@/api/transport', async (importOriginal) => ({
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
 
 const { Dialog, FilterChip, IconButton, MetaLine, ProgressBar, SegmentedControl, Slider, Tooltip, WatchedChip } = await import('..');
+const { TOOLTIP_CLOSE_MS } = await import('../Tooltip');
 const { PosterCard } = await import('@/features/vod/components/PosterCard');
 const { EpisodeList } = await import('@/features/vod/components/detail/EpisodeList');
 const { UpNextRail } = await import('@/features/vod/components/detail/UpNext');
@@ -106,7 +107,9 @@ describe('bars on artwork are glass in every theme (round 2: light posters drew 
     expect(link.getAttribute('aria-label')).toMatch(/40%/);
     const bar = bars(link)[0]!;
     expect(fill(bar).className).toContain('bg-glass-accent');
-    expect(bar.className).toContain('bg-on-glass/20');
+    // A dark glass track: the light see-through one left the fill at 1.3:1 on pale art.
+    expect(bar.className).toContain('bg-glass-strong');
+    expect(bar.className).not.toContain('bg-on-glass/20');
     expect(bar.getAttribute('aria-hidden')).toBe('true');
     // The band under it is glass too, not the theme's scrim (lighter in light).
     expect(bar.parentElement!.className).toContain('bg-glass/60');
@@ -291,6 +294,8 @@ describe('a hover tooltip closes on Escape wherever focus is (WCAG 1.4.13)', () 
       fireEvent.mouseEnter(btn);
       await act(() => new Promise((r) => setTimeout(r, 10)));
       fireEvent.mouseLeave(btn);
+      // It stays a moment, so the pointer can reach it (WCAG 1.4.13), then goes.
+      await act(() => new Promise((r) => setTimeout(r, TOOLTIP_CLOSE_MS + 20)));
       expect(screen.queryByRole('tooltip')).toBeNull();
       fireEvent.keyDown(document.body, { key: 'Escape' });
       expect(onWindow).toHaveBeenCalledTimes(1);

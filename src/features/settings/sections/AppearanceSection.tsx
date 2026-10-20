@@ -65,15 +65,15 @@ export const ACCENT_PALETTE: Record<Accent, Record<'dark' | 'light', AccentTones
   },
   teal: {
     dark: { accent: '#3ccfbd', fg: '#03201c', solid: '#3ccfbd', solidFg: '#03201c' },
-    light: { accent: '#00685d', fg: '#ffffff', solid: '#00685d', solidFg: '#ffffff' },
+    light: { accent: '#00685d', fg: '#ffffff', solid: '#3ccfbd', solidFg: '#03201c' },
   },
   violet: {
     dark: { accent: '#b7a0ff', fg: '#170c33', solid: '#b7a0ff', solidFg: '#170c33' },
-    light: { accent: '#6a42cf', fg: '#ffffff', solid: '#6a42cf', solidFg: '#ffffff' },
+    light: { accent: '#6a42cf', fg: '#ffffff', solid: '#b7a0ff', solidFg: '#170c33' },
   },
   rose: {
     dark: { accent: '#ff8fb3', fg: '#2e0614', solid: '#ff8fb3', solidFg: '#2e0614' },
-    light: { accent: '#b3215a', fg: '#ffffff', solid: '#b3215a', solidFg: '#ffffff' },
+    light: { accent: '#b3215a', fg: '#ffffff', solid: '#ff8fb3', solidFg: '#2e0614' },
   },
   lime: {
     dark: { accent: '#b4e05a', fg: '#141f02', solid: '#b4e05a', solidFg: '#141f02' },
@@ -81,7 +81,7 @@ export const ACCENT_PALETTE: Record<Accent, Record<'dark' | 'light', AccentTones
   },
   sky: {
     dark: { accent: '#6cc2ff', fg: '#03182b', solid: '#6cc2ff', solidFg: '#03182b' },
-    light: { accent: '#0a5ca6', fg: '#ffffff', solid: '#0a5ca6', solidFg: '#ffffff' },
+    light: { accent: '#0a5ca6', fg: '#ffffff', solid: '#6cc2ff', solidFg: '#03182b' },
   },
   coral: {
     dark: { accent: '#ff9474', fg: '#2b0d04', solid: '#ff9474', solidFg: '#2b0d04' },

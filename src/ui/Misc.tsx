@@ -285,12 +285,19 @@ export interface ProgressBarProps {
   indeterminate?: boolean;
   /**
    * `accent` (default) fills in the mark tone. `glass`: for every bar drawn on artwork or video
-   * (C8), a light track and the bright glass accent, in every theme. A theme colour never sits on
-   * a picture, so a bar inside `CARD_ART`, a thumbnail or the hero takes `glass`.
+   * (C8), a dark glass track and the bright glass accent, in every theme. A theme colour never
+   * sits on a picture, so a bar inside `CARD_ART`, a thumbnail or the hero takes `glass`.
    */
   tone?: 'accent' | 'success' | 'danger' | 'fg' | 'glass';
   size?: 'xs' | 'sm' | 'md';
 }
+
+/**
+ * The bar's track per tone, exported so src/ui/test/contrast.test.ts checks the fill against the
+ * track it really draws. On a picture the track is the strong glass, which stays dark whatever the
+ * artwork is: a see-through light track left the fill at 1.3:1 on pale art.
+ */
+export const PROGRESS_TRACK = { theme: 'bg-surface-3', glass: 'bg-glass-strong' } as const;
 
 /**
  * A determinate or indeterminate bar. It reports a percentage (0 to 100) whatever `max` is, so a
@@ -320,7 +327,7 @@ export function ProgressBar({
       aria-valuetext={indeterminate ? undefined : valueText}
       className={cn(
         'relative w-full overflow-hidden rounded-full',
-        tone === 'glass' ? 'bg-on-glass/20' : 'bg-surface-3',
+        tone === 'glass' ? PROGRESS_TRACK.glass : PROGRESS_TRACK.theme,
         { xs: 'h-0.75', sm: 'h-1.5', md: 'h-2.5' }[size],
         className,
       )}

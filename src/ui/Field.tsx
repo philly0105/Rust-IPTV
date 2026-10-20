@@ -237,6 +237,17 @@ export const SWITCH_TONES = {
 } as const;
 
 /**
+ * Forced colours (Windows High Contrast) turn every background into the system's, so the knob,
+ * which is only a fill, vanished with the on fill. The switch opts out of that adjustment
+ * (inherited by the knob) and draws both states in system colours: off is a framed track with a
+ * knob in the text colour, on is the Highlight fill with a HighlightText knob.
+ */
+export const SWITCH_FORCED = {
+  off: { track: 'forced-colors:border-[CanvasText] forced-colors:bg-[Canvas]', knob: 'forced-colors:bg-[CanvasText]' },
+  on: { track: 'forced-colors:border-[Highlight] forced-colors:bg-[Highlight]', knob: 'forced-colors:bg-[HighlightText]' },
+} as const;
+
+/**
  * The one switch (role="switch"; Space and Enter toggle, as on any button). Off: a recessed
  * track with the 3:1 control border and a muted knob. On: the solid accent fill with a knob in
  * its text colour (SWITCH_TONES). The knob slides with motion allowed. Name it with a
@@ -245,6 +256,7 @@ export const SWITCH_TONES = {
  */
 export function Switch({ checked, onCheckedChange, className, onClick, ...rest }: SwitchProps) {
   const tones = checked ? SWITCH_TONES.on : SWITCH_TONES.off;
+  const forced = checked ? SWITCH_FORCED.on : SWITCH_FORCED.off;
   return (
     <button
       type="button"
@@ -258,6 +270,8 @@ export function Switch({ checked, onCheckedChange, className, onClick, ...rest }
         'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border motion-safe:transition-colors',
         'disabled:cursor-not-allowed disabled:opacity-50',
         tones.track,
+        'forced-color-adjust-none',
+        forced.track,
         className,
       )}
       {...rest}
@@ -268,6 +282,7 @@ export function Switch({ checked, onCheckedChange, className, onClick, ...rest }
         className={cn(
           'inline-block size-4.5 rounded-full shadow-1 motion-safe:transition-transform motion-safe:duration-(--duration-fast)',
           tones.knob,
+          forced.knob,
           checked ? 'translate-x-5.5 rtl:-translate-x-5.5' : 'translate-x-0.5 rtl:-translate-x-0.5',
         )}
       />
@@ -324,8 +339,9 @@ export interface CheckboxProps extends Omit<ComponentPropsWithRef<'input'>, 'typ
 
 /**
  * Checkbox: a native input (so labels, forms, Space and screen readers work as usual) drawn as
- * an 18px box with the 3:1 control border; checked and mixed fill with the solid accent. Wrap it
- * in a <label> with its text, or give it aria-label.
+ * an 18px box with the 3:1 control border; checked and mixed fill with the solid accent inside an
+ * outline in the mark tone, as the on Switch does, so the box keeps 3:1 on a white panel where
+ * the fill is the bright tone. Wrap it in a <label> with its text, or give it aria-label.
  */
 export function Checkbox({ indeterminate = false, onChange, onCheckedChange, className, wrapperClassName, ref, ...rest }: CheckboxProps) {
   const inner = useRef<HTMLInputElement | null>(null);
@@ -344,7 +360,7 @@ export function Checkbox({ indeterminate = false, onChange, onCheckedChange, cla
         }}
         className={cn(
           'peer m-0 size-full cursor-pointer appearance-none rounded-xs border border-border bg-surface motion-safe:transition-colors',
-          'not-checked:not-indeterminate:hover:border-fg-subtle checked:border-accent-solid checked:bg-accent-solid indeterminate:border-accent-solid indeterminate:bg-accent-solid',
+          'not-checked:not-indeterminate:hover:border-fg-subtle checked:border-accent-mark checked:bg-accent-solid indeterminate:border-accent-mark indeterminate:bg-accent-solid',
           'disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
@@ -405,7 +421,9 @@ export interface RadioProps extends Omit<ComponentPropsWithRef<'input'>, 'type' 
 
 /**
  * Radio: a native input (arrow keys move within its `name` group) drawn as an 18px circle with
- * the control border; checked draws the accent ring and dot. Most screens want RadioGroup.
+ * the control border; checked draws the accent ring and dot. The dot is only a fill, which forced
+ * colours (Windows High Contrast) paint over, so there the input goes back to the system's own
+ * radio. Most screens want RadioGroup.
  */
 export function Radio({ className, wrapperClassName, ...rest }: RadioProps) {
   return (
@@ -415,13 +433,15 @@ export function Radio({ className, wrapperClassName, ...rest }: RadioProps) {
         className={cn(
           'peer m-0 size-full cursor-pointer appearance-none rounded-full border border-border bg-surface motion-safe:transition-colors',
           'not-checked:hover:border-fg-subtle checked:border-2 checked:border-accent-mark disabled:cursor-not-allowed disabled:opacity-50',
+          'forced-colors:appearance-auto',
           className,
         )}
         {...rest}
       />
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 m-auto size-2 scale-0 rounded-full bg-accent-mark peer-checked:scale-100 motion-safe:transition-transform motion-safe:duration-(--duration-fast)"
+        data-radio-dot=""
+        className="pointer-events-none absolute inset-0 m-auto size-2 scale-0 rounded-full bg-accent-mark peer-checked:scale-100 motion-safe:transition-transform motion-safe:duration-(--duration-fast) forced-colors:hidden"
       />
     </span>
   );

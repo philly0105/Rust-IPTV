@@ -1,3 +1,11 @@
+/**
+ * Focus on glass (chrome over video or artwork), for a control that sits there: the global focus
+ * outline and glow in the bright glass accent. Glass stays dark in every theme, while the theme's
+ * focus colour is a deep shade in light (2.8:1 and less on glass); src/ui/test/contrast.test.ts
+ * holds the glass accent to 3:1 on glass.
+ */
+export const GLASS_FOCUS = '[--color-focus:var(--color-glass-accent)] [--color-glow:color-mix(in_srgb,var(--color-glass-accent)_28%,transparent)]';
+
 const FOCUSABLE = [
   'a[href]',
   'area[href]',

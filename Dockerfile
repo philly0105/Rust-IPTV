@@ -10,8 +10,9 @@
 # (HTTPS and a password). See also docs/architecture/server.md.
 #
 # Build arg VERSION sets the image's version label (the release workflow passes
-# the tag). A THIRD_PARTY_NOTICES.md in the build context, written by
-# tools/third-party-notices.mjs, is copied to /usr/share/doc/tsrust-iptv/.
+# the tag). NOTICE (IPTVnator's copyright and MIT licence) always goes to
+# /usr/share/doc/tsrust-iptv/; a THIRD_PARTY_NOTICES.md in the build context,
+# written by tools/third-party-notices.mjs, is copied there too.
 
 # ---- 1. Web UI (vite build -> /src/dist) -----------------------------------
 FROM node:24-bookworm-slim AS web
@@ -52,6 +53,8 @@ RUN apt-get update \
 
 COPY --from=server /usr/local/bin/iptv-server /usr/local/bin/iptv-server
 COPY --from=web /src/dist /app/dist
+# Required: IPTVnator's licence asks for its notice in every copy.
+COPY NOTICE /usr/share/doc/tsrust-iptv/NOTICE
 # Optional: the glob matches nothing when the file was not generated.
 COPY THIRD_PARTY_NOTICES.m[d] /usr/share/doc/tsrust-iptv/
 

@@ -223,9 +223,10 @@
 
   "backupExport": "Exporter",
   "backupExportHint": "Enregistre vos sources, favoris et paramètres dans un fichier JSON.",
-  "backupIncludeSecrets": "Inclure les mots de passe et les clés",
-  "backupIncludeSecretsHint": "Désactivé par défaut, pour que le fichier puisse être partagé sans risque.",
+  "backupIncludeSecrets": "Inclure les mots de passe et clés Xtream et Stalker",
+  "backupIncludeSecretsHint": "Désactivé, ils sont exclus du fichier et devront être ressaisis après une importation.",
   "backupIncludeSecretsWarning": "Toute personne disposant de ce fichier peut se connecter à vos fournisseurs. Gardez-le privé.",
+  "backupPrivacyNote": "Chaque sauvegarde conserve les adresses des listes et des guides et les adresses MAC Stalker, qui peuvent servir d'identifiants. Gardez vos fichiers de sauvegarde privés.",
   "backupExportButton": "Exporter la sauvegarde",
   "backupExported": "Sauvegarde exportée",
   "backupExportFailed": "Impossible d'exporter la sauvegarde",

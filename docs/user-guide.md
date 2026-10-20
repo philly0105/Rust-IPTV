@@ -130,7 +130,7 @@ Scheduled recordings and reminders:
 - In the TV guide, the programme dialog and the now/next ribbon offer "Remind me" and "Record". The ribbon's record menu can also record the channel for 30 minutes to 3 hours. A bell or a red dot marks those programmes in the grid and list views.
 - Reminders fire a few minutes before the start (Settings > Recording) while the app runs, including when it is hidden in the tray. They show a Windows notification and a toast with "Watch now", or switch to the channel with Undo.
 - Recordings run without the player, as a direct copy for plain MPEG-TS streams (and Xtream live channels) or through a headless mpv for HLS and DASH, with 1 minute of padding before and 5 after by default. Files are named `<Channel> - <Programme> - <YYYY-MM-DD HHmm>.ts`. A dropped stream is retried into part files. A recording that was due while the app was closed is marked missed.
-- Library > Scheduled lists what is recording now, what is coming up, and recent results. My Videos > Recordings plays, shows and deletes the files (to the Recycle Bin, with Undo).
+- Library > Scheduled lists what is recording now, what is coming up, and recent results. My Videos > Recordings plays, shows and deletes the files. A delete waits eight seconds for Undo; closing the app or the page in that time carries it out. On Windows the file goes to the Recycle Bin; on Linux, as in the Docker image, it is deleted for good. Show in folder is in the desktop app only.
 - Series recording rules come from the guide search; see [TV guide](#tv-guide).
 - In the browser (server mode), recording needs mpv on the server. The Docker image includes it; elsewhere, install mpv on the server's `PATH`. Without it Record is hidden. Reminders show in the app with "Watch now". The app never asks for permission to show browser notifications. If you allowed notifications for the site in the browser's site settings, a browser notification appears as well; browsers allow that only over HTTPS or on localhost.
 
@@ -265,7 +265,7 @@ Settings > Backup and storage exports and imports the IPTVnator playlist backup 
 
 A backup made here also keeps My List, your custom channel lists, channel renames and hidden channels, series recording rules, the watch history behind the Stats page, the subtitle style and the Hide watched setting of the movie and series grids, parental locks and the parental options, never the PIN. While parental controls are locked, a "Replace" import is refused until you unlock them with the PIN.
 
-Export leaves passwords out unless you tick "Include passwords and keys". Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See [backup.md](architecture/backup.md).
+By default, exports omit the separate Xtream and Stalker password fields and Stalker signature keys (turn on "Include Xtream and Stalker passwords and keys" to keep them). Playlist and guide URLs, playlist contents, and Stalker MAC addresses remain and may contain credentials. Treat every backup as private. Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See [backup.md](architecture/backup.md).
 
 ## Using it in a browser (server mode)
 

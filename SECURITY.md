@@ -51,7 +51,7 @@ Anyone who can reach the API can use every source and setting, so the proxy's pa
 
 - The loopback media proxy listens on 127.0.0.1 under a random per-launch token, and only the app's own webview origin may read its responses. See [docs/architecture/desktop.md](docs/architecture/desktop.md).
 - The remote control listens on 127.0.0.1 only. "Allow phones on this network" (off by default) adds the computer's private addresses; a phone must pair with a one-time QR code that expires after 5 minutes, and paired phones can be revoked. See [docs/architecture/remote-control.md](docs/architecture/remote-control.md).
-- Provider logins (Xtream passwords, Stalker MACs, playlist URLs with tokens) are stored unencrypted in the app's SQLite database under `%APPDATA%\com.philly.tsrustiptv`. Logs redact them. Backups leave passwords out unless "Include passwords and keys" is ticked.
+- Provider logins (Xtream passwords, Stalker MACs, playlist URLs with tokens) are stored unencrypted in the app's SQLite database under `%APPDATA%\com.philly.tsrustiptv`. Logs redact them. By default, exports omit the separate Xtream and Stalker password fields and Stalker signature keys. Playlist and guide URLs, playlist contents, and Stalker MAC addresses remain and may contain credentials. Treat every backup as private.
 - The parental PIN is stored as a PBKDF2 hash, with a lockout after wrong entries. It keeps content away from children; it is not protection against someone with access to the computer's files.
 
 ### Releases

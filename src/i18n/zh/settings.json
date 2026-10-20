@@ -222,9 +222,10 @@
 
   "backupExport": "导出",
   "backupExportHint": "将播放源、收藏和设置保存到 JSON 文件。",
-  "backupIncludeSecrets": "包含密码和密钥",
-  "backupIncludeSecretsHint": "默认关闭，因此文件可以安全分享。",
+  "backupIncludeSecrets": "包含 Xtream 和 Stalker 的密码与密钥",
+  "backupIncludeSecretsHint": "关闭时不会写入文件，导入后需要重新输入。",
   "backupIncludeSecretsWarning": "任何拥有此文件的人都能登录你的提供商账户。请妥善保管。",
+  "backupPrivacyNote": "每份备份都会保留播放列表和节目指南的地址以及 Stalker 的 MAC 地址，这些信息可能可以用来登录。请妥善保管备份文件。",
   "backupExportButton": "导出备份",
   "backupExported": "备份已导出",
   "backupExportFailed": "无法导出备份",

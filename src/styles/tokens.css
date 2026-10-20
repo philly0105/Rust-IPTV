@@ -34,10 +34,10 @@
  *     dark it equals the accent. In light it sits between the text shade and the solid fill
  *     (#c26900 for amber), because the deep text shade drawn as a bar or a tick reads as brown.
  *   --color-accent-solid (+ -hover, -pressed, -fg)  the fill of primary buttons, the on switch
- *     and other filled accent controls, with its own text colour. In dark it equals the accent.
- *     In light, amber, lime and coral fill with the bright dial tone and ink text, because their
- *     deep shades read as brown or olive; teal, violet, rose and sky keep the deep shade with
- *     white text, which still reads as the hue.
+ *     and other filled accent controls, with its own text colour: the bright dial tone with ink
+ *     text, in both themes and for every accent, so a primary button, the on switch and the
+ *     accent swatch look alike whichever accent is chosen. In dark it equals the accent; in
+ *     light the deep shade is the text tone only.
  * Status fills (white text): --color-live-solid for LIVE pills, --color-danger-solid (+ -hover)
  * for destructive buttons. --color-live and --color-danger stay the text tones.
  *
@@ -223,9 +223,8 @@
  * twice: a bright dial colour with ink text for dark (and OLED), and a deep
  * shade with white text for light. The mark tone repeats the accent in dark and
  * is a mid shade in light (see the header). Focus is the hover tone in dark and the
- * accent itself in light, as with amber. The solid fill family repeats the
- * accent in dark; in light it is the bright tone for lime and coral (as for
- * amber) and the deep shade for the others (see the header).
+ * accent itself in light, as with amber. The solid fill family is the bright
+ * dial tone with ink text in both themes, as for amber (see the header).
  */
 :root[data-accent='teal'] {
   --color-accent: #3ccfbd;
@@ -248,10 +247,10 @@
   --color-accent-pressed: #00423b;
   --color-accent-fg: #ffffff;
   --color-accent-mark: #008e7e;
-  --color-accent-solid: #00685d;
-  --color-accent-solid-hover: #00544b;
-  --color-accent-solid-pressed: #00423b;
-  --color-accent-solid-fg: #ffffff;
+  --color-accent-solid: #3ccfbd;
+  --color-accent-solid-hover: #62e0d0;
+  --color-accent-solid-pressed: #22b5a4;
+  --color-accent-solid-fg: #03201c;
   --color-focus: #00685d;
   --color-glow: rgb(0 104 93 / 0.16);
 }
@@ -277,10 +276,10 @@
   --color-accent-pressed: #47279a;
   --color-accent-fg: #ffffff;
   --color-accent-mark: #8460ea;
-  --color-accent-solid: #6a42cf;
-  --color-accent-solid-hover: #5833b6;
-  --color-accent-solid-pressed: #47279a;
-  --color-accent-solid-fg: #ffffff;
+  --color-accent-solid: #b7a0ff;
+  --color-accent-solid-hover: #c9b8ff;
+  --color-accent-solid-pressed: #9f85f5;
+  --color-accent-solid-fg: #170c33;
   --color-focus: #6a42cf;
   --color-glow: rgb(106 66 207 / 0.16);
 }
@@ -306,10 +305,10 @@
   --color-accent-pressed: #7b143d;
   --color-accent-fg: #ffffff;
   --color-accent-mark: #da3772;
-  --color-accent-solid: #b3215a;
-  --color-accent-solid-hover: #971a4b;
-  --color-accent-solid-pressed: #7b143d;
-  --color-accent-solid-fg: #ffffff;
+  --color-accent-solid: #ff8fb3;
+  --color-accent-solid-hover: #ffaac6;
+  --color-accent-solid-pressed: #f2709b;
+  --color-accent-solid-fg: #2e0614;
   --color-focus: #b3215a;
   --color-glow: rgb(179 33 90 / 0.16);
 }
@@ -364,10 +363,10 @@
   --color-accent-pressed: #063d70;
   --color-accent-fg: #ffffff;
   --color-accent-mark: #167bd6;
-  --color-accent-solid: #0a5ca6;
-  --color-accent-solid-hover: #084c8a;
-  --color-accent-solid-pressed: #063d70;
-  --color-accent-solid-fg: #ffffff;
+  --color-accent-solid: #6cc2ff;
+  --color-accent-solid-hover: #8fd2ff;
+  --color-accent-solid-pressed: #4aa9ee;
+  --color-accent-solid-fg: #03182b;
   --color-focus: #0a5ca6;
   --color-glow: rgb(10 92 166 / 0.16);
 }

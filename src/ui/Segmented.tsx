@@ -1,19 +1,48 @@
 import { useId, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { GLASS_FOCUS } from './focus';
 import { useTooltip, withTooltipProps } from './Tooltip';
 
 /** `default` on app surfaces; `glass` inside the player's glass menus. */
 export type SegmentedTone = 'default' | 'glass';
 
 /**
+ * The colours of the segmented look per tone, exported so src/ui/test/contrast.test.ts checks the
+ * pairs it really draws (it reads the token names out of these classes). The chosen segment is
+ * one raised, neutral thumb (amber marks actions, not choices: DS-STATE-FILLS) with a ring that
+ * keeps 3:1 against the track (WCAG 1.4.11): the raised fill alone was 1.24:1 on the dark track
+ * and 1.09:1 on the light one. Glass segments take the glass accent for focus, since the theme's
+ * focus colour is a deep shade in light that does not read on glass.
+ */
+export const SEGMENT_TONES = {
+  default: {
+    track: 'border-edge bg-surface-2',
+    thumb: 'bg-raised text-fg shadow-1 ring-1 ring-border',
+    rest: 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
+    focus: '',
+  },
+  glass: {
+    track: 'bg-white/6',
+    thumb: 'bg-white/16 text-white ring-1 ring-on-glass-muted',
+    rest: 'text-white/80 hover:bg-white/10 hover:text-white',
+    focus: GLASS_FOCUS,
+  },
+} as const;
+
+/**
+ * Forced colours (Windows High Contrast) drop the thumb's fill and ring, which left nothing to
+ * tell the chosen segment by. It takes the system's selected colours instead.
+ */
+const SEGMENT_FORCED = 'forced-color-adjust-none forced-colors:bg-[Highlight] forced-colors:text-[HighlightText]';
+
+/**
  * The segmented look, shared with the pill Tabs: a recessed track and one raised, neutral thumb
- * for the chosen segment (bg-raised + shadow-1). Amber marks actions, not choices, so the thumb
- * is never an accent fill (DS-STATE-FILLS).
+ * for the chosen segment (SEGMENT_TONES).
  */
 export const SEGMENT_TRACK: Record<SegmentedTone, string> = {
-  default: 'flex gap-1 rounded-md border border-edge bg-surface-2 p-1',
-  glass: 'flex gap-1 rounded-md bg-white/6 p-0.5',
+  default: `flex gap-1 rounded-md border p-1 ${SEGMENT_TONES.default.track}`,
+  glass: `flex gap-1 rounded-md p-0.5 ${SEGMENT_TONES.glass.track}`,
 };
 
 /** `md` (default) for forms and toolbars; `sm` for a compact header row beside `sm` buttons (about 32 px tall). */
@@ -23,15 +52,11 @@ const SM_TRACK = 'gap-0.5 p-0.5';
 const SM_SEGMENT = 'min-h-7 px-2';
 
 export function segmentClass(selected: boolean, tone: SegmentedTone = 'default'): string {
+  const tones = SEGMENT_TONES[tone];
   return cn(
     'inline-flex min-h-8 min-w-0 items-center justify-center gap-1.5 rounded-sm px-3 text-sm font-medium motion-safe:transition-colors disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
-    tone === 'default'
-      ? selected
-        ? 'bg-raised text-fg shadow-1'
-        : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active'
-      : selected
-        ? 'bg-white/16 text-white ring-1 ring-white/35'
-        : 'text-white/80 hover:bg-white/10 hover:text-white',
+    selected ? cn(tones.thumb, SEGMENT_FORCED) : tones.rest,
+    tones.focus,
     // A segment that cannot be chosen keeps its resting look under the pointer.
     'aria-disabled:hover:bg-transparent',
     tone === 'default' ? 'aria-disabled:hover:text-fg-muted' : 'aria-disabled:hover:text-white/80',

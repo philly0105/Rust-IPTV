@@ -222,9 +222,10 @@
 
   "backupExport": "내보내기",
   "backupExportHint": "소스, 즐겨찾기, 설정을 JSON 파일로 저장합니다.",
-  "backupIncludeSecrets": "비밀번호 및 키 포함",
-  "backupIncludeSecretsHint": "기본적으로 꺼져 있어 파일을 안전하게 공유할 수 있습니다.",
+  "backupIncludeSecrets": "Xtream 및 Stalker 비밀번호와 키 포함",
+  "backupIncludeSecretsHint": "끄면 파일에서 빠지므로 가져온 후 다시 입력해야 합니다.",
   "backupIncludeSecretsWarning": "이 파일이 있으면 누구나 제공업체에 로그인할 수 있습니다. 외부에 공유하지 마세요.",
+  "backupPrivacyNote": "모든 백업에는 재생목록·편성표 주소와 Stalker MAC 주소가 들어 있으며, 이는 로그인 정보로 쓰일 수 있습니다. 백업 파일은 외부에 공유하지 마세요.",
   "backupExportButton": "백업 내보내기",
   "backupExported": "백업을 내보냈습니다",
   "backupExportFailed": "백업을 내보낼 수 없습니다",

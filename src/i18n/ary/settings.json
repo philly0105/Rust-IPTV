@@ -226,9 +226,10 @@
 
   "backupExport": "صدّر",
   "backupExportHint": "كيحفظ المصادر، المفضلة والإعدادات ديالك فملف JSON.",
-  "backupIncludeSecrets": "زيد كلمات السر والمفاتيح",
-  "backupIncludeSecretsHint": "مطفي افتراضياً، باش يكون الملف آمن للمشاركة.",
+  "backupIncludeSecrets": "زيد كلمات السر والمفاتيح ديال Xtream و Stalker",
+  "backupIncludeSecretsHint": "إلا كان مطفي، كيتحيدو من الملف وخاصك تعاود تدخلهم من بعد الاستيراد.",
   "backupIncludeSecretsWarning": "أي واحد عندو هاد الملف يقدر يدخل للمزودين ديالك. خليه عندك بوحدك.",
+  "backupPrivacyNote": "كل نسخة احتياطية كتحتافظ بعناوين قوائم التشغيل والدليل وعناوين MAC ديال Stalker، وهادو يقدرو يخدمو بحال معلومات الدخول. خلي ملفات النسخ عندك بوحدك.",
   "backupExportButton": "صدّر النسخة الاحتياطية",
   "backupExported": "النسخة الاحتياطية تصدّرات",
   "backupExportFailed": "ما قدرناش نصدّرو النسخة الاحتياطية",

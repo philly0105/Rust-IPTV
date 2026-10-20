@@ -80,8 +80,8 @@ None of the feature belongs in the entry chunk:
 
 `WhatsNewDialog.tsx` uses the shared `Dialog` (size `lg`).
 
-- Description: "Version x".
-- Body: a scrolling region. The newest release leads with its first three items as highlights, full-width rows in one panel, each with its icon tile beside its title and text (three columns in the `lg` dialog were about 185 px each, and their texts ran to five lines); the rest follow as a compact list with a small icon. A per-release version badge appears only when the dialog lists several releases.
+- Description: "Version x", the running version, whenever it is known.
+- Body: a scrolling region. The newest release leads with its first three items as highlights, full-width rows in one panel, each with its icon tile beside its title and text (three columns in the `lg` dialog were about 185 px each, and their texts ran to five lines); the rest follow as a compact list with a small icon. When the dialog lists several releases (an open by hand from About), each one the description does not name gets a version badge as its heading, so the newest release has no badge on a row of its own above its highlights; if the version cannot be read, every release has one.
 - Footer: "Take the tour" (only when a source exists; it closes the dialog and then opens the tour) and "Got it", which takes focus.
 - States: a skeleton while `app.info` loads, and an empty message when an open by hand has nothing to list. A startup open with nothing in range stores the version and renders nothing. If `app.info` fails, an open by hand still lists every release.
 - The list region is a Tab stop only while it overflows, so keyboard users can scroll it.

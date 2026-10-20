@@ -284,6 +284,7 @@ describe('Sort, filter and remove all', () => {
     await screen.findAllByTestId('source-card');
     expect(names()).toEqual(['Zulu', 'alpha', 'Source c']);
     expect(document.querySelectorAll('[data-grip]')).toHaveLength(3);
+    fireEvent.click(screen.getByTestId('sources-view-trigger'));
     fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'name' } });
     expect(names()).toEqual(['alpha', 'Source c', 'Zulu']);
     expect(document.querySelectorAll('[data-grip]')).toHaveLength(0);
@@ -301,6 +302,7 @@ describe('Sort, filter and remove all', () => {
     rpcMock.handlers['sources.list'] = list;
     renderAt(routes(), '/sources');
     await screen.findAllByTestId('source-card');
+    fireEvent.click(screen.getByTestId('sources-view-trigger'));
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'error' } });
     expect(names()).toEqual(['alpha']);
     expect(screen.getByTestId('sources-view-hint').textContent).toContain('Showing 1 of 3');

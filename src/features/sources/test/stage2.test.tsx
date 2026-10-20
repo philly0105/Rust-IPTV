@@ -82,16 +82,59 @@ describe('Sort and filter on phones', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sort and filter' })).toBeNull());
   });
 
-  it("keeps the compact inline selects on wider windows, at the toolbar's small size", async () => {
+  it('puts them behind one small View button on wider windows, which names the sort and opens the labelled selects', async () => {
+    localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({ sort: 'name', kind: 'all', status: 'all' }));
     renderAt(sourcesRoutes, '/sources');
-    const view = await screen.findByTestId('sources-view');
-    // h-8 and text-body-sm, as the sm buttons beside them; no filter glyph before them.
-    expect(within(view).getByTestId('sources-sort').className).toContain('h-8');
-    expect(within(view).getByTestId('sources-sort').className).toContain('text-body-sm');
-    expect(view.querySelector(':scope > svg')).toBeNull();
+    const trigger = await screen.findByTestId('sources-view-trigger');
+    // No three bordered selects across the toolbar: one sm button at the scale of the ones beside it.
+    expect(screen.queryByTestId('sources-sort')).toBeNull();
     expect(screen.queryByTestId('sources-view-button')).toBeNull();
+    expect(trigger.className).toContain('h-8');
+    expect(trigger.textContent).toContain('Name');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(within(trigger).getByTestId('sources-view-count').textContent).toBe('1');
     expect(screen.getByTestId('sources-add').className).toContain('h-8');
     expect(screen.getByTestId('sources-refresh-all').className).toContain('h-8');
+
+    fireEvent.click(trigger);
+    const panel = screen.getByRole('dialog', { name: 'Sort and filter' });
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger.getAttribute('aria-controls')).toBe(panel.id);
+    // The panel is not modal; its first choice takes focus.
+    expect(panel.getAttribute('aria-modal')).toBeNull();
+    expect(within(panel).getByLabelText('Sort')).toBe(document.activeElement);
+    fireEvent.change(within(panel).getByLabelText('Type'), { target: { value: 'xtream' } });
+    await waitFor(() => expect(within(trigger).getByTestId('sources-view-count').textContent).toBe('2'));
+    fireEvent.change(within(panel).getByLabelText('Sort'), { target: { value: 'manual' } });
+    await waitFor(() => expect(trigger.textContent).toContain('Your order'));
+  });
+
+  it('closes the View panel on Escape, giving focus back to its button, and on a press outside', async () => {
+    renderAt(sourcesRoutes, '/sources');
+    const trigger = await screen.findByTestId('sources-view-trigger');
+    fireEvent.click(trigger);
+    const sort = within(screen.getByTestId('sources-view-panel')).getByLabelText('Sort');
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    let reachedWindow = false;
+    const onWindow = () => (reachedWindow = true);
+    window.addEventListener('keydown', onWindow);
+    sort.dispatchEvent(escape);
+    window.removeEventListener('keydown', onWindow);
+    await waitFor(() => expect(screen.queryByTestId('sources-view-panel')).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+    // The page's shortcuts never saw it.
+    expect(reachedWindow).toBe(false);
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId('sources-view-panel')).toBeTruthy();
+    fireEvent.mouseDown(screen.getAllByTestId('source-card')[0]!);
+    await waitFor(() => expect(screen.queryByTestId('sources-view-panel')).toBeNull());
+
+    // Focus moving past the panel closes it too.
+    fireEvent.click(trigger);
+    const panel = screen.getByTestId('sources-view-panel');
+    fireEvent.blur(within(panel).getByLabelText('Status'), { relatedTarget: screen.getByTestId('sources-add') });
+    await waitFor(() => expect(screen.queryByTestId('sources-view-panel')).toBeNull());
   });
 });
 

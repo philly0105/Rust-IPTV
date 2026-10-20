@@ -151,9 +151,10 @@ function Row({ item }: { item: ReleaseNoteItem }) {
 }
 
 /**
- * One release. The newest leads with its first three changes as cards, then the rest as a
- * single-column list; older releases (opened by hand from About) are lists under a version
- * badge. With one release the dialog's description already names the version, so no heading.
+ * One release. The newest leads with its first three changes as highlight rows, then the rest as
+ * a single-column list; older releases (opened by hand from About) are lists under a version
+ * badge. The release the dialog's description names (the running version) has no heading of its
+ * own, so its badge never stands alone on a row above the highlights.
  */
 function Release({ release, showVersion, lead }: { release: ReleaseNotes; showVersion: boolean; lead: boolean }) {
   const { t } = useOnboardingStrings();
@@ -228,8 +229,8 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
       open
       onClose={() => close()}
       title={t('whatsNewTitle')}
-      // With several releases listed each has its own version badge, so the header does not say it again.
-      description={version && releases.length <= 1 ? t('whatsNewVersion', { version }) : undefined}
+      // The running version, in the header; older releases listed under it carry their own badge.
+      description={version ? t('whatsNewVersion', { version }) : undefined}
       size="lg"
       testId="whats-new"
       // The list scrolls inside its own region (a Tab stop while it overflows), not the dialog body.
@@ -265,7 +266,7 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
           ) : (
             <div className="flex flex-col gap-8">
               {releases.map((r, i) => (
-                <Release key={r.version} release={r} showVersion={releases.length > 1} lead={i === 0} />
+                <Release key={r.version} release={r} showVersion={releases.length > 1 && r.version !== version} lead={i === 0} />
               ))}
             </div>
           )}

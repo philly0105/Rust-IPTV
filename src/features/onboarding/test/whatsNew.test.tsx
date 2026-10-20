@@ -151,6 +151,26 @@ describe("What's new", () => {
     expect(await screen.findAllByTestId('whats-new-item')).toHaveLength(all);
   });
 
+  it('opened by hand on a later version, names it in the header and heads only the older releases', async () => {
+    core.state.version = '0.2.0';
+    open({ since: null });
+    await screen.findAllByTestId('whats-new-item');
+    // The running version is the description, not a lone badge on a row above the highlights.
+    const desc = document.getElementById(screen.getByRole('dialog', { name: "What's new" }).getAttribute('aria-describedby') ?? '');
+    expect(desc?.textContent).toBe('Version 0.2.0');
+    expect(within(dialog()).getAllByRole('heading', { level: 3 }).map((x) => x.textContent)).toEqual(['Version 0.1.0']);
+    expect(within(dialog()).getByRole('region', { name: 'Version 0.1.0' })).toBeTruthy();
+  });
+
+  it('heads every release when the version cannot be read, since the header names none', async () => {
+    core.state.failInfo = true;
+    open({ since: null });
+    await screen.findAllByTestId('whats-new-item');
+    expect(within(dialog()).getAllByRole('heading', { level: 3 }).map((x) => x.textContent)).toEqual(
+      notesFor(RELEASE_NOTES, DESKTOP).map((r) => `Version ${r.version}`),
+    );
+  });
+
   it('offers the tour when a source exists, and opens it after closing', async () => {
     core.addSource();
     useOnboardingStore.setState({ overlay: { kind: 'whatsNew', since: null, auto: false }, pending: null, seq: 1 });

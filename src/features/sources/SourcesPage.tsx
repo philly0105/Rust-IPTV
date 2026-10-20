@@ -23,6 +23,7 @@ import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
 import { RemoveAllDialog } from './components/RemoveAllDialog';
 import { SourceCard, statColumnsOf, type StatKey } from './components/SourceCard';
+import { ViewPopover } from './components/ViewPopover';
 import { newlyEnabledEpgUrls, refreshGuides, useGuideProgressFeed } from './lib/epgRefresh';
 import { nextStepKey, summaryKey } from './lib/errors';
 import {
@@ -509,7 +510,7 @@ export function SourcesPage() {
   const sortOptions = SORTS.map((v) => ({ value: v, label: t(`sort_${v}`) }));
   const kindOptions = KIND_FILTERS.map((v) => ({ value: v, label: v === 'all' ? t('filterKindAll') : t(`kindLabel_${v}`) }));
   const statusOptions = STATUS_FILTERS.map((v) => ({ value: v, label: t(`filterStatus_${v}`) }));
-  // How many of the three differ from the default (the phone button's count).
+  // How many of the three differ from the default (the count on the View button and the phone's).
   const viewChanges = (view.sort !== DEFAULT_VIEW.sort ? 1 : 0) + (view.kind !== DEFAULT_VIEW.kind ? 1 : 0) + (view.status !== DEFAULT_VIEW.status ? 1 : 0);
 
   // The count columns the cards share; a stable array while the set is the same, so a change in
@@ -566,8 +567,7 @@ export function SourcesPage() {
     // moreItems follows phone and refreshingAll; its handlers are stable.
   }, [setHeader, t, i18n.language, hasSources, sources.length, phone, compact, viewChanges, refreshingAll, headerAdd]);
 
-  // The same three selects in the toolbar (compact, sized to their text) and in the phone sheet
-  // (labelled, full width).
+  // The same three labelled selects in the toolbar's View panel and in the phone sheet.
   const viewSelects = (className: string, labelled = false) => (
     <>
       <Select
@@ -648,13 +648,14 @@ export function SourcesPage() {
             </div>
           ) : null
         ) : (
-          // The toolbar at the small control size: compact selects, sm buttons, and More in the
-          // cards' More column (pe-2, pe-3: the cards' padding less their actions' -me-1).
+          // The toolbar at the small control size: the sort and filters behind one button, sm
+          // buttons, and More in the cards' More column (pe-2, pe-3: the cards' padding less their
+          // actions' -me-1).
           <div className={clsx('flex flex-wrap items-center gap-3', compact ? 'justify-end' : 'justify-between')}>
             {compact ? null : (
-              <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('viewControls')} data-testid="sources-view">
-                {viewSelects('h-8 w-auto text-body-sm')}
-              </div>
+              <ViewPopover label={t('viewControls')} summary={t(`sort_${view.sort}`)} count={viewChanges} countLabel={formatCount(viewChanges, i18n.language)}>
+                {viewSelects('w-full', true)}
+              </ViewPopover>
             )}
             <div className="flex flex-wrap items-center gap-2 pe-2 @2xl:pe-3" data-testid="sources-toolbar-actions">
               {refreshAllButton()}

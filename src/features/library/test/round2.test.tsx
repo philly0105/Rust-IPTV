@@ -16,9 +16,10 @@ import type { Channel, Download, Recording, RecordingFile } from '@/api/types';
 import { DownloadRow } from '../components/DownloadRow';
 import { RecordingCard } from '../components/RecordingCard';
 import { fileTitle, recordingEntry } from '../lib/myvideos';
+import { FavoritesPage } from '../pages/FavoritesPage';
 import { MyVideoDetailPage } from '../pages/MyVideoDetailPage';
 import { RecentPage } from '../pages/RecentPage';
-import { makeDownload, makeRecent } from './fixtures';
+import { makeDownload, makeFavorite, makeRecent } from './fixtures';
 import { i18n, installDomStubs, renderAt } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -129,7 +130,7 @@ describe('download rows', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <I18nextProvider i18n={i18n}>
-          <DownloadRow download={d} actions={actions} onAction={() => undefined} />
+          <DownloadRow download={d} source={undefined} actions={actions} busy={false} onAction={() => undefined} />
         </I18nextProvider>
       </QueryClientProvider>,
     );
@@ -204,5 +205,20 @@ describe('an offline title page', () => {
     expect(screen.queryByText(/^Downloaded /)).toBeNull();
     expect(within(screen.getByTestId('vod-detail-meta')).queryByText(/GB/)).toBeNull();
     expect(within(about).getByText(/GB/)).toBeTruthy();
+  });
+});
+
+describe('page tops', () => {
+  it("Favorites' first heading row is only as tall as the heading; later ones keep the gap above them", async () => {
+    rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('movie', 'm1', 1)];
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    const list = await screen.findByTestId('favorites-list');
+    await waitFor(() => expect(within(list).getAllByRole('heading', { level: 2 })).toHaveLength(2));
+    const heights = within(list)
+      .getAllByRole('heading', { level: 2 })
+      .map((hd) => (hd.closest('[style*="translateY"]') as HTMLElement).style.height);
+    expect(heights).toEqual(['36px', '56px']);
+    // No top padding of its own: the Page's py-6 sets where the first line starts, as on the other pages.
+    expect(screen.getByTestId('favorites-page').className).not.toMatch(/(^|\s)pt-\d/);
   });
 });

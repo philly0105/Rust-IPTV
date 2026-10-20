@@ -40,6 +40,8 @@ const positionCalls: PositionCalls = {
 };
 
 const HEADER_HEIGHT = 56;
+/** The first heading's row with nothing above it (see FavoritesPage). */
+const FIRST_HEADER_HEIGHT = 36;
 const RECENT_LIMIT = 500;
 const CONTINUE_LIMIT = 20;
 
@@ -268,7 +270,8 @@ export function RecentPage() {
         // The rail takes the rows' reading width, so the page has one right edge.
         header={rail ? <div className="max-w-4xl">{rail}</div> : null}
         headerHeight={rail ? CONTINUE_RAIL_HEIGHT : 0}
-        rowHeight={(r) => (r.kind === 'header' ? HEADER_HEIGHT : ENTRY_ROW_HEIGHT)}
+        // With no rail above it, the first day's heading row is only as tall as the heading (as on Favorites).
+        rowHeight={(r) => (r.kind === 'header' ? (!rail && r === rows[0] ? FIRST_HEADER_HEIGHT : HEADER_HEIGHT) : ENTRY_ROW_HEIGHT)}
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         testId="recent-list"

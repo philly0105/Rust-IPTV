@@ -187,8 +187,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const query = normalizeQuery(q);
 
   // While parental controls are set, recent searches are neither kept nor offered, and setting
-  // them clears the list (lib/recentSearches). Before paint, so a stored chip never flashes up.
-  const parentalOn = useParentalStatus().data?.enabled;
+  // them clears the list (lib/recentSearches). Before paint, so a stored chip never flashes up;
+  // until the status is known (a cold start), the zero state offers none either.
+  const parental = useParentalStatus();
+  const parentalOn = parental.data?.enabled;
   useLayoutEffect(() => {
     if (parentalOn !== undefined) setRecentSearchesPaused(parentalOn);
   }, [parentalOn]);
@@ -434,6 +436,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
       <SearchStart
         sourceId={sourceId}
         sources={allSources}
+        offerRecent={!parental.isPending}
         onPick={(q) => {
           setDraft(q);
           rememberSearch(q);
@@ -1303,6 +1306,7 @@ function SearchSkeleton() {
   );
 }
 
+const NO_QUERIES: readonly string[] = [];
 /** Titles in "Jump back in" on the search page's zero state. */
 const JUMP_BACK_LIMIT = 16;
 /** Category chips per section in a scoped search's zero state. */
@@ -1317,6 +1321,7 @@ const BROWSE_CHIPS = 12;
 function SearchStart({
   sourceId,
   sources,
+  offerRecent,
   onPick,
   title,
   hint,
@@ -1324,6 +1329,8 @@ function SearchStart({
 }: {
   sourceId: string | undefined;
   sources: Source[];
+  /** False until the parental status is known: with a PIN set, recent searches are not offered. */
+  offerRecent: boolean;
   onPick: (query: string) => void;
   /** The prompt, as a short lead above the sections (the full empty state when there are none). */
   title: string;
@@ -1331,7 +1338,8 @@ function SearchStart({
   empty: ReactNode;
 }) {
   const { t } = useTranslation('vod');
-  const queries = useRecentSearches();
+  const stored = useRecentSearches();
+  const queries = offerRecent ? stored : NO_QUERIES;
   const recent = useRpcQuery('recent.list', sourceId ? { sourceId, limit: 60 } : { limit: 60 }, { staleTime: 30_000 });
   const jump = useMemo(
     () => (recent.data ?? []).filter((e) => e.ref.contentType === 'movie' || e.ref.contentType === 'series').slice(0, JUMP_BACK_LIMIT),
@@ -1376,12 +1384,16 @@ function SearchStart({
           />
           <ul className="flex flex-wrap gap-2">
             {queries.map((q) => (
-              <li key={q} className="inline-flex h-8 max-w-full items-center rounded-full bg-surface-2 pe-0.5">
+              // The kit's filter-chip look (FilterChip at rest), with a remove button inside its end.
+              <li
+                key={q}
+                className="inline-flex h-8 max-w-full items-center rounded-full border border-edge bg-surface-2 pe-0.5 text-fg-muted hover:bg-surface-3 hover:text-fg motion-safe:transition-colors"
+              >
                 <button
                   type="button"
                   data-recent-search=""
                   onClick={() => onPick(q)}
-                  className="inline-flex h-full min-w-0 items-center gap-1.5 rounded-full ps-3 pe-1.5 text-sm text-fg hover:text-fg"
+                  className="inline-flex h-full min-w-0 items-center gap-1.5 rounded-full ps-3 pe-1.5 text-caption font-medium"
                 >
                   <History aria-hidden size={14} className="shrink-0 text-fg-subtle" />
                   <span dir="auto" className="min-w-0 truncate">

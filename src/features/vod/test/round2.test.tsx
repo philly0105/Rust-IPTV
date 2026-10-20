@@ -124,7 +124,7 @@ describe('recent searches and parental controls', () => {
     expect(localStorage.getItem(RECENT_SEARCHES_KEY)).toBeNull();
     // Controls off again: the list starts over (nothing from the paused time comes back).
     act(() => setRecentSearchesPaused(false));
-    rememberSearch('copper');
+    act(() => rememberSearch('copper'));
     expect(result.current).toEqual(['copper']);
   });
 
@@ -135,6 +135,19 @@ describe('recent searches and parental controls', () => {
     await waitFor(() => expect(localStorage.getItem(RECENT_SEARCHES_KEY)).toBeNull());
     expect(screen.queryByRole('button', { name: 'after dark' })).toBeNull();
     expect(screen.queryByText('Recent searches')).toBeNull();
+  });
+
+  it('the search page offers none until the parental status is known', async () => {
+    let answer: (s: typeof OFF) => void = () => undefined;
+    rpcMock.handlers['parental.status'] = () => new Promise((resolve) => (answer = resolve));
+    rememberSearch('harbor');
+    renderAt('/search', [{ path: '/search', element: <SearchPage /> }]);
+    await waitFor(() => expect(callsOf('parental.status')).toHaveLength(1));
+    expect(screen.queryByRole('button', { name: 'harbor' })).toBeNull();
+    // Off, as it turns out: the stored chip shows up and stays stored.
+    act(() => answer(OFF));
+    expect(await screen.findByRole('button', { name: 'harbor' })).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY)!)).toEqual(['harbor']);
   });
 
   it('the search page still offers them with parental controls off', async () => {
@@ -161,7 +174,9 @@ describe('the movie page', () => {
     await screen.findByTestId('player-stage');
     const row = screen.getByTestId('vod-hero-icons');
     const buttons = within(row).getAllByRole('button');
-    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Save Dune: Part Two to My List', 'Favorite', 'Mark as watched', 'Download']);
+    // My List first (its label comes from the mylist namespace, not loaded here), then the toggles.
+    expect(buttons[0]!.dataset['testid']).toBe('mylist-button');
+    expect(buttons.slice(1).map((b) => b.getAttribute('aria-label'))).toEqual(['Favorite', 'Mark as watched', 'Download']);
     for (const b of buttons) {
       expect(b.textContent?.trim()).toBe('');
       expect(b.className).toContain('rounded-full');
@@ -245,7 +260,8 @@ describe('category pages', () => {
 
   it('a small category drops the decade chips and its search field; a large one keeps them', async () => {
     renderAt('/s/src1/movies/c/c2', gridRoute);
-    await screen.findByRole('option', { name: /^Movie 100/ });
+    // The first grid of a cold test file takes longer than findBy's second to load its chunks.
+    await screen.findByRole('option', { name: /^Movie 100/ }, { timeout: 5000 });
     await waitFor(() => expect(callsOf('catalog.categories').length).toBeGreaterThan(0));
     expect(screen.queryByTestId('vod-year-filter')).toBeNull();
     expect(screen.queryByRole('searchbox')).toBeNull();

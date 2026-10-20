@@ -4,7 +4,8 @@
 // (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when
 // Home's route chunk statically loads player code (performance audit SH-2), when the Search,
 // Settings or category-grid route chunks statically load the player's UI, or when there is no
-// build to check. Plain Node, no dependencies.
+// build to check. The Live and Guide route chunks are measured too and noted while they still load
+// the player's controls (see ROUTES). Plain Node, no dependencies.
 //
 //   node tools/check-bundle.mjs [distDir]    (default: dist)
 //
@@ -39,12 +40,21 @@ const CONTROLS = /^Controls-[\w-]+\.js$/;
  * Lazy route chunks, named after their page module, and the player chunks each must not reach
  * through static imports. Home plays only through import() (SH-2); Search plays a channel and a
  * category grid's poster menu plays a movie the same way.
+ *
+ * Live and the guide draw the stage (`PlayerStage`), but the controls come with the dock, which the
+ * shell loads; they reach the controls chunk only because the `@/features/player` barrel exports
+ * `PlayerDock`, so importing `PlayerStage` from it puts the dock's whole graph in their chunks'
+ * reach (measured: about 37 kB gzipped each before their first render). `pending` routes print a
+ * note instead of failing until that is fixed in the player feature; the check says when a pending
+ * route is clean, so the note can become a guard.
  */
 const ROUTES = [
   { name: 'Home', chunk: /^DashboardPage-[\w-]+\.js$/, page: 'src/shell/dashboard/DashboardPage.tsx', forbid: PLAYER, what: 'player code' },
   { name: 'Search', chunk: /^SearchPage-[\w-]+\.js$/, page: 'src/features/vod/pages/SearchPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
   { name: 'Settings', chunk: /^SettingsPage-[\w-]+\.js$/, page: 'src/features/settings/SettingsPage.tsx', forbid: PLAYER, what: 'player code' },
   { name: 'Category grid', chunk: /^CategoryGridPage-[\w-]+\.js$/, page: 'src/features/vod/pages/CategoryGridPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
+  { name: 'Live', chunk: /^LivePage-[\w-]+\.js$/, page: 'src/features/live/components/LivePage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
+  { name: 'Guide', chunk: /^EpgGridPage-[\w-]+\.js$/, page: 'src/features/live/components/EpgGridPage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
 ];
 /** A static `import`/`export ... from "./chunk.js"` in Rollup's output; `import("./x.js")` is not one. */
 const STATIC_IMPORT = /\b(?:import|export)\s*(?:\{[^}]*\}\s*from\s*|\*\s*as\s*[\w$]+\s*from\s*|[\w$]+\s*from\s*)?["']\.\/([\w.-]+\.js)["']/g;
@@ -131,6 +141,7 @@ if (!chunks.some((c) => CONTROLS.test(c.file))) {
   fail(`no player controls chunk (Controls-*.js) in ${shown}; update CONTROLS and PLAYER_UI in tools/check-bundle.mjs if the module moved.`);
 }
 const leaks = [];
+const notes = [];
 for (const route of ROUTES) {
   const page = chunks.find((c) => route.chunk.test(c.file));
   if (!page) fail(`no ${route.name} route chunk (${route.page}) in ${shown}; update ROUTES in tools/check-bundle.mjs if the page moved.`);
@@ -140,8 +151,15 @@ for (const route of ROUTES) {
   const routeGzip = beyondBoot.reduce((sum, c) => sum + c.gzip, 0);
   console.log(`${route.name} ${page.file}: ${beyondBoot.length} chunks, ${bytes(routeBytes)} bytes (${kb(routeGzip)} gz) beyond the boot chunks before its first render.`);
   const player = [...closure].filter((f) => route.forbid.test(f)).sort();
-  if (player.length > 0) leaks.push(`The ${route.name} route chunk statically loads ${route.what} (${player.join(', ')}).`);
+  if (player.length === 0) {
+    if (route.pending) notes.push(`${route.name} no longer loads ${route.what}: drop \`pending\` from its ROUTES entry so the check guards it.`);
+  } else if (route.pending) {
+    notes.push(`${route.name} still loads ${route.what} (${player.join(', ')}) before its first render; take PlayerDock out of the @/features/player barrel and have the shell load it from its own module.`);
+  } else {
+    leaks.push(`The ${route.name} route chunk statically loads ${route.what} (${player.join(', ')}).`);
+  }
 }
+for (const note of notes) console.log(`size:check: note: ${note}`);
 if (leaks.length > 0) {
   fail(`${leaks.join(' ')} Load the player inside the click handler with import('@/features/player'), and import the store from '@/features/player/store' where a page reads it; see docs/architecture/performance.md.`);
 }

@@ -64,7 +64,7 @@ describe('add toast total (L2-sources-home-6)', () => {
   it('counts radio and formats the number, so it matches the progress bar', async () => {
     rpcMock.handlers['sources.add'] = () =>
       makeSource('new', { name: 'Sample', channelCount: 19_500, radioCount: 500, movieCount: 60_000, seriesCount: 8_000 });
-    await addSample('/sources?add=1');
+    await addSample('/sources?add=1&kind=m3u');
     await waitFor(() => expect(lastToast()?.title).toBe('Added Sample'));
     expect(lastToast()?.description).toBe('88,000 items imported');
   });
@@ -73,7 +73,7 @@ describe('add toast total (L2-sources-home-6)', () => {
 describe('add toast for a source without live channels (F-VOD-ONLY-SOURCE)', () => {
   it('opens the source on its movies', async () => {
     rpcMock.handlers['sources.add'] = () => makeSource('vod', { name: 'Sample', channelCount: 0, radioCount: 0, movieCount: 1_200, seriesCount: 40 });
-    const { router } = await addSample('/sources?add=1');
+    const { router } = await addSample('/sources?add=1&kind=m3u');
     await waitFor(() => expect(lastToast()?.title).toBe('Added Sample'));
     lastToast()?.action?.onClick();
     await waitFor(() => expect(router.state.location.pathname).toBe('/s/vod/movies'));
@@ -86,20 +86,20 @@ describe('return after a first add (L2-sources-home-12)', () => {
   });
 
   it('opens the first source on its channels instead of going back (SS-6)', async () => {
-    const { router } = await addSample('/sources?add=1&from=%2F');
+    const { router } = await addSample('/sources?add=1&kind=m3u&from=%2F');
     expect(await screen.findByText('live page')).toBeTruthy();
     expect(router.state.location.pathname).toBe('/s/new/live');
   });
 
   it('goes back to the page that opened Add when sources already existed', async () => {
-    const { router } = await addSample('/sources?add=1&from=%2F', [makeSource('old', { name: 'Old' })]);
+    const { router } = await addSample('/sources?add=1&kind=m3u&from=%2F', [makeSource('old', { name: 'Old' })]);
     expect(await screen.findByText('home page')).toBeTruthy();
     expect(router.state.location.pathname).toBe('/');
   });
 
   it('stays on Sources when Add closes without adding', async () => {
     rpcMock.handlers['sources.list'] = () => [];
-    const { router } = renderAt(routes(), '/sources?add=1&from=%2F');
+    const { router } = renderAt(routes(), '/sources?add=1&kind=m3u&from=%2F');
     await screen.findByRole('dialog');
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -108,7 +108,7 @@ describe('return after a first add (L2-sources-home-12)', () => {
   });
 
   it('ignores a return target that leaves the app', async () => {
-    const { router } = await addSample('/sources?add=1&from=%2F%2Fevil.example.com', [makeSource('old', { name: 'Old' })]);
+    const { router } = await addSample('/sources?add=1&kind=m3u&from=%2F%2Fevil.example.com', [makeSource('old', { name: 'Old' })]);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(router.state.location.pathname).toBe('/sources');
     expect(screen.queryByText('home page')).toBeNull();

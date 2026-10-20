@@ -90,8 +90,9 @@ function useAnchorBox(anchor: TourAnchor): Box | null {
 }
 
 /**
- * Where the tour is: one dot per step, the current one stretched and in the accent (progress is
- * an accent use). Decorative; the sr-only text beside it says the step.
+ * Where the tour is: one dot per step, the current one stretched and in the accent's mark tone
+ * (progress is an accent use), the ones to come in a quiet tone that still shows on the card.
+ * Decorative; the step's text ("Step 1 of 3") is for screen readers.
  */
 function StepDots({ step, total }: { step: number; total: number }) {
   return (
@@ -101,7 +102,7 @@ function StepDots({ step, total }: { step: number; total: number }) {
           key={i}
           className={cn(
             'h-1.5 rounded-full motion-safe:transition-[width,background-color] motion-safe:duration-(--duration-base)',
-            i === step ? 'w-4 bg-accent' : i < step ? 'w-1.5 bg-fg-subtle' : 'w-1.5 bg-surface-3',
+            i === step ? 'w-4 bg-accent-mark' : i < step ? 'w-1.5 bg-fg-subtle' : 'w-1.5 bg-fg-subtle/50',
           )}
         />
       ))}
@@ -294,7 +295,7 @@ export function Tour({ onClose, coach: startCoach = false }: TourProps) {
           data-testid="tour-spotlight"
           className={cn(
             'pointer-events-none fixed top-0 left-0 rounded-md will-change-transform',
-            'shadow-[0_0_0_2px_var(--color-accent),0_0_0_7px_var(--color-glow),0_0_0_200vmax_var(--color-scrim)]',
+            'shadow-[0_0_0_2px_var(--color-accent-mark),0_0_0_7px_var(--color-glow),0_0_0_200vmax_var(--color-scrim)]',
             'motion-safe:transition-[transform,width,height] motion-safe:duration-200 motion-safe:ease-out',
           )}
           style={{ width: spot.width, height: spot.height, transform: translateTo(spot.left, spot.top) }}
@@ -327,7 +328,8 @@ export function Tour({ onClose, coach: startCoach = false }: TourProps) {
             <Icon size={18} />
           </span>
           {coach ? null : (
-            <p className="min-w-0 flex-1 text-caption text-fg-subtle" data-testid="tour-progress">
+            // The dots show the step; this says it to screen readers.
+            <p className="sr-only" data-testid="tour-progress">
               {t('tourStep', { current: step + 1, total })}
             </p>
           )}

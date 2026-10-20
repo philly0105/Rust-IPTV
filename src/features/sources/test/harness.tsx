@@ -16,6 +16,7 @@ import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-rout
 
 import { queryClient } from '@/api/query';
 import { DEFAULT_SETTINGS, type Settings, type Source } from '@/api/types';
+import { useShellStore } from '@/shell/store';
 
 type Handler = (args: unknown) => unknown;
 
@@ -113,13 +114,21 @@ export function confirmDiscard(): void {
   fireEvent.click(screen.getByTestId('discard-confirm'));
 }
 
-export function renderAt(routes: RouteObject[], path: string) {
+/** The page's header actions, which the shell would draw; tests render pages without the shell. */
+function HeaderActions() {
+  const actions = useShellStore((s) => s.header?.actions);
+  return actions ? <div data-testid="test-header-actions">{actions}</div> : null;
+}
+
+/** `headerActions`: also draw the actions the page puts in the shell header (a phone's Sources page). */
+export function renderAt(routes: RouteObject[], path: string, opts: { headerActions?: boolean } = {}) {
   queryClient.clear();
   queryClient.setDefaultOptions({ queries: { retry: false, gcTime: Infinity } });
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const view = render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
+      {opts.headerActions ? <HeaderActions /> : null}
     </QueryClientProvider>,
   );
   return { ...view, router };

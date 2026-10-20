@@ -129,7 +129,7 @@ describe('waiting for the first progress (L1-sources-home-10)', () => {
   it('shows the host in the add dialog while the add waits', async () => {
     rpcMock.handlers['sources.list'] = () => [];
     rpcMock.handlers['sources.add'] = () => new Promise(() => undefined);
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     type(/^Name/, 'Slow');
     type(/^Playlist URL/, 'lists.example.com/tv.m3u');
@@ -144,7 +144,7 @@ describe('progress on a short window (L1-sources-home-9)', () => {
     try {
       rpcMock.handlers['sources.list'] = () => [];
       rpcMock.handlers['sources.add'] = () => new Promise(() => undefined);
-      renderAt(routes(), '/sources?add=1');
+      renderAt(routes(), '/sources?add=1&kind=m3u');
       await screen.findByRole('dialog');
       type(/^Name/, 'Slow');
       type(/^Playlist URL/, 'lists.example.com/tv.m3u');
@@ -161,7 +161,7 @@ describe('reopening Add after "Close, keep importing" (L1-sources-home-1)', () =
     let finish!: (s: unknown) => void;
     rpcMock.handlers['sources.list'] = () => [];
     rpcMock.handlers['sources.add'] = (a) => new Promise((r) => (finish = () => r(makeSource('bg', { name: (a as { name: string }).name }))));
-    const { router } = renderAt(routes(), '/sources?add=1');
+    const { router } = renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     type(/^Name/, 'Background');
     type(/^Playlist URL/, 'lists.example.com/tv.m3u');
@@ -170,7 +170,7 @@ describe('reopening Add after "Close, keep importing" (L1-sources-home-1)', () =
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Close, keep importing' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 
-    await act(async () => router.navigate('/sources?add=1'));
+    await act(async () => router.navigate('/sources?add=1&kind=m3u'));
     await screen.findByRole('dialog');
     expect(screen.getByTestId('add-source-submit').textContent).toBe('Add source');
     expect(input(/^Playlist URL/).disabled).toBe(false);
@@ -181,7 +181,7 @@ describe('reopening Add after "Close, keep importing" (L1-sources-home-1)', () =
     await act(async () => finish(undefined));
     await waitFor(() => expect(toasts().some((t) => t.title === 'Added Background')).toBe(true));
     expect(screen.getByRole('dialog')).toBeTruthy();
-    expect(router.state.location.search).toBe('?add=1');
+    expect(router.state.location.search).toBe('?add=1&kind=m3u');
     expect(input(/^Playlist URL/).disabled).toBe(false);
   });
 });
@@ -206,7 +206,7 @@ describe('closing after a failed add (L1-sources-home-8)', () => {
   }
 
   async function failThenClose() {
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     type(/^Name/, 'hang');
     type(/^Playlist URL/, 'http://127.0.0.1:7399/x.m3u');

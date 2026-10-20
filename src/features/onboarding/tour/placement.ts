@@ -42,8 +42,13 @@ export interface CardPlacement {
 export const CARD_GAP = 16;
 /** Least distance between the card and the window edge. */
 export const VIEWPORT_MARGIN = 12;
-/** Extra room the spotlight leaves around its anchor. */
-export const SPOTLIGHT_PAD = 6;
+/**
+ * Extra room the spotlight leaves around its anchor. Small, so the ring round a rail item stays
+ * inside the rail rather than across its border.
+ */
+export const SPOTLIGHT_PAD = 4;
+/** Least distance between the spotlight box and the window edge: the 2 px ring outside it never touches the edge. */
+export const SPOTLIGHT_EDGE = 6;
 /** Least distance between the arrow's tip and a corner of the card (its radius plus the arrow's half width). */
 export const ARROW_INSET = 24;
 
@@ -58,12 +63,13 @@ export function centred(card: { width: number; height: number }, vw: number, vh:
   };
 }
 
-/** The spotlight box around an anchor: padded, then kept inside the window. */
+/** The spotlight box around an anchor: padded, then kept SPOTLIGHT_EDGE inside the window. */
 export function spotlightBox(anchor: Box, vw: number, vh: number): Box {
-  const left = clamp(anchor.left - SPOTLIGHT_PAD, 2, vw - 4);
-  const top = clamp(anchor.top - SPOTLIGHT_PAD, 2, vh - 4);
-  const right = clamp(anchor.left + anchor.width + SPOTLIGHT_PAD, left + 2, vw - 2);
-  const bottom = clamp(anchor.top + anchor.height + SPOTLIGHT_PAD, top + 2, vh - 2);
+  const e = SPOTLIGHT_EDGE;
+  const left = clamp(anchor.left - SPOTLIGHT_PAD, e, vw - e - 2);
+  const top = clamp(anchor.top - SPOTLIGHT_PAD, e, vh - e - 2);
+  const right = clamp(anchor.left + anchor.width + SPOTLIGHT_PAD, left + 2, vw - e);
+  const bottom = clamp(anchor.top + anchor.height + SPOTLIGHT_PAD, top + 2, vh - e);
   return { left, top, width: right - left, height: bottom - top };
 }
 

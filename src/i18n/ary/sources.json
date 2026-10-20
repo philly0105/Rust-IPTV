@@ -1,11 +1,5 @@
 {
   "title": "المصادر",
-  "subtitleCount_zero": "حتى مصدر ما كاين",
-  "subtitleCount_one": "{{count, number}} مصدر",
-  "subtitleCount_two": "جوج مصادر",
-  "subtitleCount_few": "{{count, number}} مصادر",
-  "subtitleCount_many": "{{count, number}} مصدر",
-  "subtitleCount_other": "المصادر: {{count, number}}",
   "listLabel": "المصادر ديالك",
   "add": "زيد مصدر",
   "addSource": "زيد مصدر",

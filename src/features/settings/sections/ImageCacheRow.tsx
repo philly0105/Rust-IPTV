@@ -146,11 +146,12 @@ export function ImageCacheRow({ update: tracked }: { update?: (patch: SettingsPa
 
   return (
     <div role="group" aria-labelledby={labelId} className="flex flex-col gap-3 px-4 py-4" data-testid="image-cache-row">
-      <div className="flex min-w-0 flex-col gap-0.5 @2xl:max-w-[60%]">
-        <p id={labelId} className="font-medium text-fg">
+      {/* The label column of every settings row (RowLabel): capped for reading, not by a percentage. */}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <p id={labelId} className="text-body font-medium text-fg">
           {t('imageCache')}
         </p>
-        <p id={hintId} className="text-sm text-fg-muted">
+        <p id={hintId} className="max-w-[38rem] text-body-sm text-pretty text-fg-muted">
           {hint}
         </p>
       </div>
@@ -220,6 +221,9 @@ export function ImageCacheRow({ update: tracked }: { update?: (patch: SettingsPa
   );
 }
 
+/** From this share of the limit the usage bar turns to the warning tone. */
+const NEARLY_FULL_PCT = 90;
+
 function UsageAndControls({
   labelId,
   hintId,
@@ -263,7 +267,9 @@ function UsageAndControls({
         className="relative h-2 w-full overflow-hidden rounded-full bg-surface-3"
       >
         <div
-          className="h-full rounded-full bg-accent motion-safe:transition-[width] motion-safe:duration-300"
+          // A level, not progress: neutral, and the warning tone once the cache is nearly full.
+          className={cn('h-full rounded-full motion-safe:transition-[width] motion-safe:duration-300', pct >= NEARLY_FULL_PCT ? 'bg-warning' : 'bg-fg-muted')}
+          data-full={pct >= NEARLY_FULL_PCT || undefined}
           // A sliver for a cache that holds anything at all, so "not empty" shows.
           style={{ width: `${empty ? 0 : Math.max(pct, 1.5)}%` }}
         />

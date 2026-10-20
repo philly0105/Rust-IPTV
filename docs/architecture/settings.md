@@ -47,17 +47,21 @@ The browser UI follows the same rule: Settings has no External players section t
 
 ## The Settings page
 
-`src/features/settings/SettingsPage.tsx` shows one section per route (`/settings/<section>`). From 768 px up the section nav is a sticky column at the page's inline start, grouped as App (General, Appearance, Shortcuts), Watching (Playback, External players, Guide, Recording, Metadata), Household (Parental controls, Remote control) and System (Backup and storage, About); the chosen section has the selected fill and the tuning tick. Below 768 px `/settings` is a list of the sections with their one-line leads, and each opens on its own screen with an "All settings" back button. The page does not use the shell's context panel. The command palette keeps its own copy of the section ids (`SETTINGS_SECTIONS` in `src/shell/CommandPalette.tsx`, checked against `SECTION_IDS` by a shell test) and its labels and search words in `shell.json` (`settings<Section>`, `settings<Section>Keywords`).
+`src/features/settings/SettingsPage.tsx` shows one section per route (`/settings/<section>`). From 768 px up the section nav is a sticky column at the page's inline start, grouped as App (General, Appearance, Shortcuts), Watching (Playback, External players, Guide, Recording, Metadata), Household (Parental controls, Remote control) and System (Backup and storage, About); the chosen section has the selected fill and the tuning tick. Below 768 px `/settings` is a list of the sections with their one-line leads, and each opens on its own screen whose shell header names the section and holds the way back to the list (the header's Back, labelled "Settings"; `allSettings`): the page's sr-only h1 says the same as the header, the section's h2 is visually hidden below md (`max-md:sr-only`), and the window title stays "Settings". From the list Back goes back in history; a section opened any other way replaces itself with the list. The page does not use the shell's context panel.
+
+A section is a heading, a lead (every section has one, About included) and groups of rows (`SettingsGroup`). When a section has more than one group, every group has a title, so an untitled group never reads as the overflow of the one above; a single-group section such as Metadata may go without. A test renders every section and checks the rule. The command palette keeps its own copy of the section ids (`SETTINGS_SECTIONS` in `src/shell/CommandPalette.tsx`, checked against `SECTION_IDS` by a shell test) and its labels and search words in `shell.json` (`settings<Section>`, `settings<Section>Keywords`).
 
 Where rows live:
 
 - General: language, on startup and window at startup, how sources refresh and how early a subscription warns (`sourceRefreshIntervalHours`, `accountExpiryWarnDays`), the catalog filters (country prefix, English only, minimum rating) and the downloads folder.
-- Appearance: theme, OLED black, accent, density, interface size, poster size (`coverSize`), and the Home screen group (`showDashboard`, `dashboardRails`).
-- Guide: the global XMLTV addresses, then one status row per guide source, led by the source, with its refresh button beside the switch; then the view and time shift.
-- Recording: the recordings folder, the padding before and after as one row, and reminders.
+- Appearance: theme (with OLED black), the accent color group (its title and hint describe the swatches; the live preview sits under them), size and spacing (density, interface size, poster size, `coverSize`), and the Home screen group (`showDashboard`, `dashboardRails`).
+- Playback: the player, then Streams and playback (stream format and the playback switches), then subtitles.
+- Guide: the global XMLTV addresses, then one status row per guide source, led by the source, with its refresh button beside the switch; then Display (the view, time shift and short-guide fallback).
+- Recording: Recordings (the folder, the padding before and after as one row), and Reminders.
 - Metadata: while TMDB is off, a note says what turning it on opens and the rows it governs are dimmed.
-- Remote control: whether the remote runs, and its address, show under the switch.
-- Backup and storage: Export in the group's header, Import with a drop zone for the backup file, the image cache row, and Reset settings.
+- Remote control: the Control page group (whether the remote runs, and its address, show under the switch; the port), then phones on this network.
+- Backup and storage: Export in the group's header, Import with a drop zone for the backup file (a dashed container edge, the control border on hover), the image cache row (the settings row's label column; its usage bar is a neutral level that turns to the warning tone from 90 % of the limit, since a level is not progress), and Reset settings.
+- About: the product card (mark, name, version, platform, and What's new and Take the tour as one row of equal buttons under the text), links, updates, Your data (each path its own term list, the desktop's Open button beside it), and the folded diagnostics.
 
 ## Fields added after wave 1
 

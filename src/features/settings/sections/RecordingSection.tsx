@@ -34,7 +34,7 @@ export function RecordingSection({ settings, update }: SectionProps) {
     <SettingsSection title={t('sectionRecording')} description={t('recordingSectionHint')} testId="settings-recording">
       {/* SS-8: the folder sits with the rest of recording, where people look for it. The padding is
           one row with its two minutes side by side, not two label-only rows. */}
-      <SettingsGroup>
+      <SettingsGroup title={t('recordingsGroup')}>
         <RecordingsFolderRow value={parity(settings).recordingsDir} update={update} />
         <SettingsRow label={t('recordingPaddingGroup')} description={t('recordingPaddingHint')}>
           {({ id, describedBy }) => (

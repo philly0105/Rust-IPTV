@@ -29,9 +29,11 @@ export interface M3uFormProps {
   onFieldBlur?: (path: string) => void;
   /** The Add dialog opens on the playlist address, or the text box for a paste (SS-2). */
   autoFocusAddress?: boolean;
+  /** False: the dialog draws the request headers itself, with the other advanced options last. */
+  showHeaders?: boolean;
 }
 
-export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur, autoFocusAddress }: M3uFormProps) {
+export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur, autoFocusAddress, showHeaders = true }: M3uFormProps) {
   const { t, i18n } = useTranslation('sources');
   const fileInput = useRef<HTMLInputElement>(null);
   const fileHintId = useId();
@@ -255,13 +257,15 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
 
       {value.origin === 'file' || (value.origin === 'text' && mode === 'add') || (editText && previewText) ? <PreviewPanel state={preview} /> : null}
 
-      <HeadersFields
-        value={value.headers}
-        onChange={(headers) => set({ headers })}
-        errors={errors}
-        prefix="m3u.headers"
-        disabled={disabled}
-      />
+      {showHeaders ? (
+        <HeadersFields
+          value={value.headers}
+          onChange={(headers) => set({ headers })}
+          errors={errors}
+          prefix="m3u.headers"
+          disabled={disabled}
+        />
+      ) : null}
     </div>
   );
 }

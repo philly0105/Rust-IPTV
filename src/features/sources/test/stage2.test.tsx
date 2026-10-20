@@ -63,8 +63,10 @@ describe('Sort and filter on phones', () => {
   it('is one button that opens the three selects in a sheet, with the number of active choices', async () => {
     phoneWindow(true);
     localStorage.setItem(VIEW_STORAGE_KEY, JSON.stringify({ sort: 'name', kind: 'all', status: 'all' }));
-    renderAt(sourcesRoutes, '/sources');
+    renderAt(sourcesRoutes, '/sources', { headerActions: true });
     const button = await screen.findByTestId('sources-view-button');
+    // In the header, with Add and More (no full-width Add bar and no toolbar above the cards).
+    expect(screen.getByTestId('test-header-actions').contains(button)).toBe(true);
     expect(screen.queryByTestId('sources-view')).toBeNull();
     expect(screen.queryByTestId('sources-sort')).toBeNull();
     expect(within(button).getByTestId('sources-view-count').textContent).toBe('1');
@@ -80,11 +82,16 @@ describe('Sort and filter on phones', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Sort and filter' })).toBeNull());
   });
 
-  it('keeps the compact inline selects on wider windows', async () => {
+  it("keeps the compact inline selects on wider windows, at the toolbar's small size", async () => {
     renderAt(sourcesRoutes, '/sources');
     const view = await screen.findByTestId('sources-view');
-    expect(within(view).getByTestId('sources-sort').className).toContain('h-9');
+    // h-8 and text-body-sm, as the sm buttons beside them; no filter glyph before them.
+    expect(within(view).getByTestId('sources-sort').className).toContain('h-8');
+    expect(within(view).getByTestId('sources-sort').className).toContain('text-body-sm');
+    expect(view.querySelector(':scope > svg')).toBeNull();
     expect(screen.queryByTestId('sources-view-button')).toBeNull();
+    expect(screen.getByTestId('sources-add').className).toContain('h-8');
+    expect(screen.getByTestId('sources-refresh-all').className).toContain('h-8');
   });
 });
 
@@ -99,6 +106,29 @@ describe('Source card status', () => {
     expect(origin.parentElement!.contains(refreshed)).toBe(true);
     expect(origin.nextElementSibling?.getAttribute('aria-hidden')).toBe('true');
     expect(origin.nextElementSibling?.className).toContain('@3xl:inline');
+  });
+
+  it('joins the times on one line that wraps as a MetaLine, across the card, beside a smaller monogram', async () => {
+    rpcMock.handlers['sources.list'] = () => [
+      makeSource('a', { name: 'Alpha', autoRefresh: true, lastRefreshAt: new Date(Date.now() - 3_600_000).toISOString() }),
+    ];
+    rpcMock.handlers['sources.schedule'] = () => ({ sources: [{ sourceId: 'a', nextRefreshAt: new Date(Date.now() + 5 * 3_600_000).toISOString(), retrying: false }] });
+    renderAt(sourcesRoutes, '/sources');
+    const card = await screen.findByTestId('source-card');
+    const next = await within(card).findByTestId('source-next-refresh');
+    const refreshed = within(card).getByTestId('source-refreshed');
+    // One MetaLine holds both: its separator travels with "Next refresh", so a wrap never leaves it
+    // at the start of a line, and narrow cards no longer stack the times one per line.
+    const line = refreshed.closest('span.flex-wrap')!;
+    expect(line.contains(next)).toBe(true);
+    expect(line.className).not.toMatch(/flex-col/);
+    // The status row takes the card's width (so a phone fits both times on one line), and the
+    // monogram above it is smaller on a narrow card, so its edge and the name's sit close.
+    const status = within(card).getByTestId('source-origin').parentElement!;
+    expect(status.className).toContain('col-span-full');
+    const mark = within(card).getByTestId('source-monogram');
+    expect(mark.className).toContain('size-9');
+    expect(mark.className).toContain('@3xl:size-11');
   });
 });
 

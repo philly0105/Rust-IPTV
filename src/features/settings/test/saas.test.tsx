@@ -4,7 +4,7 @@
  * General and the danger zone (SS-8), and About as a product page with honest update text
  * (SS-12, SR-6).
  */
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Settings } from '@/api/types';
@@ -29,6 +29,17 @@ vi.mock('@/api/events', () => ({
 const settingsRoutes = await eagerRoutes((await import('../routes')).settingsRoutes);
 const { PHONE_QUERY } = await import('../SettingsPage');
 const { BUTTON_VARIANTS } = await import('@/ui/Button');
+const { useShellStore } = await import('@/shell');
+
+/** The header's Back on a phone section (the shell draws it; these tests render the page alone). */
+async function headerBack() {
+  await waitFor(() => expect(useShellStore.getState().header?.back).toBeTruthy());
+  return useShellStore.getState().header!.back!;
+}
+async function pressBack() {
+  const back = await headerBack();
+  act(() => back.onClick());
+}
 
 let current: Settings;
 const realMatchMedia = window.matchMedia;
@@ -82,7 +93,7 @@ describe('phone layout (SS-7)', () => {
     await screen.findByTestId('settings-playback');
     // No side nav on a phone; Back returns to the list.
     expect(screen.queryByTestId('settings-sidebar')).toBeNull();
-    fireEvent.click(screen.getByTestId('settings-back'));
+    await pressBack();
     expect(await screen.findByTestId('settings-nav-list')).toBeTruthy();
     expect(view.router.state.location.pathname).toBe('/settings');
   });
@@ -93,11 +104,14 @@ describe('phone layout (SS-7)', () => {
     await screen.findByTestId('settings-nav-list');
     const listKey = view.router.state.location.key;
     // Two round trips: list, General, back, Playback, back.
-    for (const name of [/^General/, /^Playback/]) {
+    for (const [name, testId] of [
+      [/^General/, 'settings-general'],
+      [/^Playback/, 'settings-playback'],
+    ] as const) {
       fireEvent.click(within(screen.getByTestId('settings-nav-list')).getByRole('link', { name }));
-      await screen.findByTestId('settings-back');
+      await screen.findByTestId(testId);
       expect(view.router.state.historyAction).toBe('PUSH');
-      fireEvent.click(screen.getByTestId('settings-back'));
+      await pressBack();
       await screen.findByTestId('settings-nav-list');
       expect(view.router.state.historyAction).toBe('POP');
       // The very entry the list had: history is one list entry, not a list per visit.
@@ -108,7 +122,8 @@ describe('phone layout (SS-7)', () => {
   it('Back from a section reached by a deep link replaces it with the list', async () => {
     phoneWindow(true);
     const view = renderAt(settingsRoutes, '/settings/playback');
-    fireEvent.click(await screen.findByTestId('settings-back'));
+    await screen.findByTestId('settings-playback');
+    await pressBack();
     await screen.findByTestId('settings-nav-list');
     expect(view.router.state.historyAction).toBe('REPLACE');
     expect(view.router.state.location.pathname).toBe('/settings');
@@ -137,7 +152,26 @@ describe('phone layout (SS-7)', () => {
     await screen.findByTestId('settings-general');
     expect(view.router.state.location.pathname).toBe('/settings/general');
     expect(screen.getByTestId('settings-sidebar')).toBeTruthy();
-    expect(screen.queryByTestId('settings-back')).toBeNull();
+    // The header names Settings and has no Back; the section's heading names the section.
+    expect(useShellStore.getState().header).toEqual({ title: 'Settings' });
+    expect(screen.getByRole('heading', { level: 2, name: 'General' }).className).toContain('max-md:sr-only');
+  });
+
+  it('a phone section names itself once, in the header, with the way back there too', async () => {
+    phoneWindow(true);
+    renderAt(settingsRoutes, '/settings/general');
+    await screen.findByTestId('settings-general');
+    const header = useShellStore.getState().header!;
+    // Not "Settings" over "← Settings" over "General": the header is the section's title bar.
+    expect(header.title).toBe('General');
+    expect(header.back?.label).toBe('Settings');
+    // The window keeps the app's name for the page.
+    expect(header.documentTitle).toBe('Settings');
+    // No Back of its own in the page, and the page's h1 says what the header says (C16).
+    expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull();
+    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['General']);
+    // The section's h2 stays for screen readers, out of sight below md.
+    expect(screen.getByRole('heading', { level: 2, name: 'General' }).className).toContain('max-md:sr-only');
   });
 });
 

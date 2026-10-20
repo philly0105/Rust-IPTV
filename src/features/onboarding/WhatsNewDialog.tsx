@@ -95,11 +95,7 @@ function NotesSkeleton({ label }: { label: string }) {
   return (
     <div role="status" aria-busy="true" className="flex flex-col gap-5" data-testid="whats-new-loading">
       <span className="sr-only">{label}</span>
-      <div className="grid gap-3 sm:grid-cols-3">
-        {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-36 rounded-lg" />
-        ))}
-      </div>
+      <Skeleton className="h-60 rounded-lg" />
       <div className="flex flex-col gap-4">
         {Array.from({ length: 4 }, (_, i) => (
           <div key={i} className="flex items-start gap-3">
@@ -115,22 +111,25 @@ function NotesSkeleton({ label }: { label: string }) {
   );
 }
 
-/** How many items of the newest release lead as larger cards; the rest follow as a compact list. */
+/** How many items of the newest release lead in the highlights panel; the rest follow as a compact list. */
 const HIGHLIGHTS = 3;
 
-/** One of the newest release's leading changes: a card with its icon, title and a short text. */
+/**
+ * One of the newest release's leading changes: a row of the highlights panel, its icon in a tile
+ * beside the title and text. Rows at every width: three columns in the dialog were about 185 px
+ * each, and their texts ran to five lines.
+ */
 function Highlight({ item }: { item: ReleaseNoteItem }) {
   const { t } = useOnboardingStrings();
   const Icon = item.icon;
   return (
-    // On a phone the three cards stack: the icon moves beside the text, so they stay short.
-    <li className="flex items-start gap-3 rounded-lg border border-edge bg-surface-2 p-4 sm:flex-col" data-testid="whats-new-item" data-highlight="">
+    <li className="flex items-start gap-3 p-4" data-testid="whats-new-item" data-highlight="">
       <span aria-hidden className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-edge bg-surface text-fg">
         <Icon size={18} />
       </span>
-      <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-col gap-0.5">
         <p className="text-body font-semibold leading-snug text-fg">{t(`${item.key}Title`)}</p>
-        <p className="text-body-sm text-fg-muted">{t(`${item.key}Text`)}</p>
+        <p className="text-body-sm text-pretty text-fg-muted">{t(`${item.key}Text`)}</p>
       </div>
     </li>
   );
@@ -168,7 +167,7 @@ function Release({ release, showVersion, lead }: { release: ReleaseNotes; showVe
         </h3>
       )}
       {highlights.length > 0 && (
-        <ul className="grid gap-3 sm:grid-cols-3">
+        <ul className="flex flex-col divide-y divide-divider rounded-lg border border-edge bg-surface-2" data-testid="whats-new-highlights">
           {highlights.map((item) => (
             <Highlight key={item.key} item={item} />
           ))}

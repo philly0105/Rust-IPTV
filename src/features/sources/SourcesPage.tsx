@@ -13,7 +13,7 @@ import { HiddenChannelsDialog } from '@/features/channeledit';
 import { useStable } from '@/features/live/guide/useStable';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
-import { Badge, Button, Dialog, EmptyState, ErrorState, Menu, Page, Select, Skeleton, TEXT_LINK, Tooltip, useToast, errorDescription } from '@/ui';
+import { Badge, Button, Dialog, EmptyState, ErrorState, IconButton, Menu, Page, Select, Skeleton, TEXT_LINK, Tooltip, useToast, errorDescription, type MenuItem } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
 import { sourceHomePath } from '@/shell/railLinks';
 import { useMediaQuery } from '@/shell/useMediaQuery';
@@ -22,7 +22,7 @@ import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDi
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
 import { Onboarding } from './components/Onboarding';
 import { RemoveAllDialog } from './components/RemoveAllDialog';
-import { SourceCard } from './components/SourceCard';
+import { SourceCard, statColumnsOf, type StatKey } from './components/SourceCard';
 import { newlyEnabledEpgUrls, refreshGuides, useGuideProgressFeed } from './lib/epgRefresh';
 import { nextStepKey, summaryKey } from './lib/errors';
 import {
@@ -126,8 +126,8 @@ export function SourcesPage() {
   // With one or two sources there is nothing to sort or filter: the controls and the hint stay
   // away, and a sort or filter saved from a longer list does not hide a card the user cannot get back.
   const compact = sources.length <= COMPACT_MAX;
-  // On a phone Refresh all waits in the More menu, so Add a source and More share one row; it comes
-  // out as a button while it runs, to show its progress and Stop.
+  // On a phone the page's actions are header buttons and Refresh all waits in their More menu; it
+  // comes onto the page as a button while it runs, to show its progress and Stop.
   const phone = useMediaQuery('(max-width: 639.98px)');
   const [viewSheetOpen, setViewSheetOpen] = useState(false);
   const activeView = compact ? DEFAULT_VIEW : view;
@@ -199,13 +199,6 @@ export function SourcesPage() {
     next.delete('from');
     setParams(next, { replace: true });
   };
-
-  useEffect(() => {
-    setHeader({
-      title: t('title'),
-      subtitle: query.data ? t('subtitleCount', { count: sources.length }) : undefined,
-    });
-  }, [setHeader, t, query.data, sources.length]);
 
   useEffect(() => onAppEvent('sources.changed', () => void invalidate('sources.')), []);
 
@@ -518,6 +511,61 @@ export function SourcesPage() {
   const statusOptions = STATUS_FILTERS.map((v) => ({ value: v, label: t(`filterStatus_${v}`) }));
   // How many of the three differ from the default (the phone button's count).
   const viewChanges = (view.sort !== DEFAULT_VIEW.sort ? 1 : 0) + (view.kind !== DEFAULT_VIEW.kind ? 1 : 0) + (view.status !== DEFAULT_VIEW.status ? 1 : 0);
+
+  // The count columns the cards share; a stable array while the set is the same, so a change in
+  // one card does not re-render the others.
+  const statSig = statColumnsOf(shown).join(',');
+  const statColumns = useMemo(() => (statSig ? (statSig.split(',') as StatKey[]) : []), [statSig]);
+
+  // The page's actions for the header on a phone, and the More menu on every width.
+  const headerAdd = useStable(() => openAdd());
+  const headerRefreshAll = useStable(() => void refreshAll());
+  const headerRemoveAll = useStable(() => openRemoveAll());
+  const hasSources = sources.length > 0;
+  const moreItems: MenuItem[] = [
+    ...(phone
+      ? [
+          { id: 'refresh-all', label: t('refreshAll'), icon: <RefreshCw aria-hidden className="size-4" />, disabled: refreshingAll, onSelect: headerRefreshAll },
+          { id: 'sep', type: 'separator' as const },
+        ]
+      : []),
+    { id: 'remove-all', label: t('removeAllMenu'), icon: <Trash2 aria-hidden className="size-4" />, danger: true, onSelect: headerRemoveAll },
+  ];
+
+  useEffect(() => {
+    setHeader({
+      title: t('title'),
+      // The count as a bare number beside the title, as PageHeader shows one; none while empty.
+      subtitle: hasSources ? formatCount(sources.length, i18n.language) : undefined,
+      // On a phone the page's actions are header buttons, so the cards start right under the header
+      // (no full-width Add bar above them). Wider windows keep them in the toolbar.
+      actions:
+        phone && hasSources ? (
+          <div className="flex items-center gap-1" data-testid="sources-header-actions">
+            {compact ? null : (
+              // The sort and filters, behind one button with the number of active choices, in a bottom sheet.
+              <Tooltip content={t('viewControls')} describe={false}>
+                <Button
+                  variant="ghost"
+                  icon={<ListFilter aria-hidden size={18} />}
+                  onClick={() => setViewSheetOpen(true)}
+                  aria-haspopup="dialog"
+                  className="shrink-0 px-2.5"
+                  data-testid="sources-view-button"
+                >
+                  <span className="sr-only">{t('viewControls')}</span>
+                  {viewChanges > 0 ? <Badge data-testid="sources-view-count">{formatCount(viewChanges, i18n.language)}</Badge> : null}
+                </Button>
+              </Tooltip>
+            )}
+            <IconButton label={t('addSource')} icon={<Plus aria-hidden size={18} />} onClick={headerAdd} data-testid="sources-add" />
+            <Menu label={t('moreActions')} items={moreItems} />
+          </div>
+        ) : undefined,
+    });
+    // moreItems follows phone and refreshingAll; its handlers are stable.
+  }, [setHeader, t, i18n.language, hasSources, sources.length, phone, compact, viewChanges, refreshingAll, headerAdd]);
+
   // The same three selects in the toolbar (compact, sized to their text) and in the phone sheet
   // (labelled, full width).
   const viewSelects = (className: string, labelled = false) => (
@@ -555,6 +603,34 @@ export function SourcesPage() {
     </>
   );
 
+  const refreshAllButton = (className?: string) => (
+    <Button
+      variant="secondary"
+      size="sm"
+      className={className}
+      icon={<RefreshCw aria-hidden className="size-4" />}
+      loading={refreshingAll}
+      disabled={sources.length === 0}
+      onClick={() => void refreshAll()}
+      data-testid="sources-refresh-all"
+    >
+      {refreshAllStep && refreshAllStep.total > 1 ? t('refreshAllProgress', refreshAllStep) : t('refreshAll')}
+    </Button>
+  );
+  const stopButton = (className?: string) => (
+    <Button
+      variant="ghost"
+      size="sm"
+      className={className}
+      icon={<CircleStop aria-hidden className="size-4" />}
+      disabled={stoppingAll}
+      onClick={stopRefreshAll}
+      data-testid="sources-refresh-all-stop"
+    >
+      {stoppingAll ? t('refreshAllStopping') : t('refreshAllStop')}
+    </Button>
+  );
+
   let body: ReactNode;
   if (query.isPending) body = <SourcesSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
@@ -562,88 +638,34 @@ export function SourcesPage() {
   else
     body = (
       <div className="flex flex-col gap-4">
-        <div className={clsx('flex flex-wrap items-center gap-3', compact ? 'justify-end' : 'justify-between')}>
-          {compact || phone ? null : (
-            <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('viewControls')} data-testid="sources-view">
-              <ListFilter aria-hidden size={16} className="text-fg-subtle" />
-              {viewSelects('h-9 w-auto')}
+        {phone ? (
+          // A phone's actions are in the header; a running Refresh all comes out here, with its
+          // progress and Stop.
+          refreshingAll ? (
+            <div className="flex gap-2">
+              {refreshAllButton('flex-1')}
+              {stopButton('flex-1')}
             </div>
-          )}
-          {/* Add and its More menu stay together; on phones the buttons fill their row. */}
-          <div className="flex w-full flex-wrap gap-2 @md:w-auto">
-            {phone && !refreshingAll ? null : (
-              <Button
-                variant="secondary"
-                className="@max-md:flex-1"
-                icon={<RefreshCw aria-hidden className="size-4" />}
-                loading={refreshingAll}
-                disabled={sources.length === 0}
-                onClick={() => void refreshAll()}
-                data-testid="sources-refresh-all"
-              >
-                {refreshAllStep && refreshAllStep.total > 1 ? t('refreshAllProgress', refreshAllStep) : t('refreshAll')}
-              </Button>
+          ) : null
+        ) : (
+          // The toolbar at the small control size: compact selects, sm buttons, and More in the
+          // cards' More column (pe-2, pe-3: the cards' padding less their actions' -me-1).
+          <div className={clsx('flex flex-wrap items-center gap-3', compact ? 'justify-end' : 'justify-between')}>
+            {compact ? null : (
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t('viewControls')} data-testid="sources-view">
+                {viewSelects('h-8 w-auto text-body-sm')}
+              </div>
             )}
-            {refreshingAll ? (
-              <Button
-                variant="ghost"
-                className="@max-md:flex-1"
-                icon={<CircleStop aria-hidden className="size-4" />}
-                disabled={stoppingAll}
-                onClick={stopRefreshAll}
-                data-testid="sources-refresh-all-stop"
-              >
-                {stoppingAll ? t('refreshAllStopping') : t('refreshAllStop')}
-              </Button>
-            ) : null}
-            <div className="flex gap-2 @max-md:flex-1">
-              {phone && !compact ? (
-                // Phones: the sort and filters sit behind one button on the Add row, with the number
-                // of active choices, and open in a bottom sheet (no three selects above the cards).
-                <Tooltip content={t('viewControls')} describe={false}>
-                  <Button
-                    variant="secondary"
-                    icon={<ListFilter aria-hidden size={16} />}
-                    onClick={() => setViewSheetOpen(true)}
-                    aria-haspopup="dialog"
-                    className="shrink-0"
-                    data-testid="sources-view-button"
-                  >
-                    <span className="sr-only">{t('viewControls')}</span>
-                    {viewChanges > 0 ? <Badge data-testid="sources-view-count">{formatCount(viewChanges, i18n.language)}</Badge> : null}
-                  </Button>
-                </Tooltip>
-              ) : null}
-              <Button variant="primary" className="@max-md:flex-1" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
+            <div className="flex flex-wrap items-center gap-2 pe-2 @2xl:pe-3" data-testid="sources-toolbar-actions">
+              {refreshAllButton()}
+              {refreshingAll ? stopButton() : null}
+              <Button variant="primary" size="sm" icon={<Plus aria-hidden className="size-4" />} onClick={() => openAdd()} data-testid="sources-add">
                 {t('addSource')}
               </Button>
-              <Menu
-                label={t('moreActions')}
-                items={[
-                  ...(phone
-                    ? [
-                        {
-                          id: 'refresh-all',
-                          label: t('refreshAll'),
-                          icon: <RefreshCw aria-hidden className="size-4" />,
-                          disabled: refreshingAll,
-                          onSelect: () => void refreshAll(),
-                        },
-                        { id: 'sep', type: 'separator' as const },
-                      ]
-                    : []),
-                  {
-                    id: 'remove-all',
-                    label: t('removeAllMenu'),
-                    icon: <Trash2 aria-hidden className="size-4" />,
-                    danger: true,
-                    onSelect: openRemoveAll,
-                  },
-                ]}
-              />
+              <Menu label={t('moreActions')} items={moreItems} />
             </div>
           </div>
-        </div>
+        )}
         {/* Your order needs no explanation: the grip's tooltip says how to move a card. */}
         {manual ? null : (
           <p className="text-sm text-fg-muted" data-testid="sources-view-hint">
@@ -691,6 +713,7 @@ export function SourcesPage() {
               account={accountById.get(s.id)}
               warnDays={warnDays}
               schedule={scheduleById.get(s.id)}
+              statColumns={statColumns}
             />
           ))}
         </ul>

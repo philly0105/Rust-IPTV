@@ -1,8 +1,5 @@
 {
   "title": "Sorgenti",
-  "subtitleCount_one": "{{count, number}} sorgente",
-  "subtitleCount_many": "{{count, number}} sorgenti",
-  "subtitleCount_other": "{{count, number}} sorgenti",
   "listLabel": "Le tue sorgenti",
   "add": "Aggiungi sorgente",
   "addSource": "Aggiungi una sorgente",

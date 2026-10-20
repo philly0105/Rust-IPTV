@@ -1,7 +1,5 @@
 {
   "title": "ソース",
-  "subtitleCount_one": "{{count, number}}件のソース",
-  "subtitleCount_other": "{{count, number}}件のソース",
   "listLabel": "あなたのソース",
   "add": "ソースを追加",
   "addSource": "ソースを追加",

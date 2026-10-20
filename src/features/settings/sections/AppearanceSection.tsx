@@ -140,11 +140,11 @@ function ThemePreview({ mode, oled, accent }: { mode: 'light' | 'dark' | 'system
 
 /**
  * Seven dial-knob swatches as a radio group: arrows move and choose (flipped
- * in right-to-left locales), Home/End jump to the ends.
+ * in right-to-left locales), Home/End jump to the ends. Its name and help text
+ * are the group's title and description (`hintId`).
  */
-function AccentPicker({ value, onChange, tone }: { value: Accent; onChange: (a: Accent) => void; tone: 'dark' | 'light' }) {
+function AccentPicker({ value, onChange, tone, hintId }: { value: Accent; onChange: (a: Accent) => void; tone: 'dark' | 'light'; hintId: string }) {
   const { t } = useTranslation('settings');
-  const hintId = useId();
   const groupRef = useRef<HTMLDivElement>(null);
 
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
@@ -163,13 +163,7 @@ function AccentPicker({ value, onChange, tone }: { value: Accent; onChange: (a: 
   };
 
   return (
-    <div className="flex flex-col gap-3 px-4 py-4">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-body font-medium text-fg">{t('accent')}</span>
-        <p id={hintId} className="text-body-sm text-fg-muted">
-          {t('accentHint')}
-        </p>
-      </div>
+    <div className="px-3 py-3">
       <div
         ref={groupRef}
         role="radiogroup"
@@ -401,6 +395,7 @@ export function AppearanceSection({ settings, update }: SectionProps) {
   const oledBlack = settings.oledBlack === true;
   const density: Density = settings.density === 'compact' ? 'compact' : 'comfortable';
   const uiScale = clampUiScale(settings.uiScale);
+  const accentHintId = useId();
 
   const choose = (value: Theme) => {
     if (value === current) return;
@@ -424,23 +419,27 @@ export function AppearanceSection({ settings, update }: SectionProps) {
               // One selection language on the page: the chosen card (like the chosen swatch) gets
               // the accent outline and a check badge. The radio stays, visually hidden, for its
               // semantics and arrow keys; the card draws its focus ring.
+              // rounded-md: one radius step under the 12 px group it sits in, 12 px in.
               <label
                 key={o.value}
                 className={clsx(
-                  'relative flex cursor-pointer flex-col gap-3 rounded-lg border p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
+                  'relative flex cursor-pointer flex-col gap-3 rounded-md border p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
                   selected ? 'border-accent bg-surface-2' : 'border-edge hover:border-border hover:bg-hover active:bg-active',
                 )}
               >
-                <ThemePreview mode={o.value} oled={oledBlack} accent={accent} />
-                {selected ? (
-                  <span
-                    aria-hidden
-                    className="absolute top-1.5 end-1.5 flex size-5 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-1"
-                    data-testid="theme-check"
-                  >
-                    <Check size={12} strokeWidth={3} />
-                  </span>
-                ) : null}
+                {/* The check sits inside the preview's corner, not across its edge. */}
+                <span className="relative block">
+                  <ThemePreview mode={o.value} oled={oledBlack} accent={accent} />
+                  {selected ? (
+                    <span
+                      aria-hidden
+                      className="absolute top-2 end-2 flex size-5 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-1"
+                      data-testid="theme-check"
+                    >
+                      <Check size={12} strokeWidth={3} />
+                    </span>
+                  ) : null}
+                </span>
                 {/* Hidden by a wrapper, not through wrapperClassName: the kit's own `relative size-4.5`
                     there outlasts sr-only and left a blank band in every card. */}
                 <span className="sr-only">
@@ -470,8 +469,8 @@ export function AppearanceSection({ settings, update }: SectionProps) {
         />
       </SettingsGroup>
 
-      <SettingsGroup>
-        <AccentPicker value={accent} tone={resolved} onChange={(a) => a !== accent && void update({ accent: a })} />
+      <SettingsGroup title={t('accent')} description={t('accentHint')} descriptionId={accentHintId}>
+        <AccentPicker value={accent} tone={resolved} hintId={accentHintId} onChange={(a) => a !== accent && void update({ accent: a })} />
         <AppearanceSample />
       </SettingsGroup>
 

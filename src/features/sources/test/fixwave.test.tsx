@@ -148,7 +148,12 @@ describe('Source card stats', () => {
     expect(withRadio!.textContent).toContain('48,500');
     expect(withRadio!.textContent).toContain('1,000');
     expect(withRadio!.textContent).toMatch(/radio/);
-    expect(plain!.textContent).not.toMatch(/radio/);
+    // The narrow card's line of counts names only what the source has.
+    expect(within(plain!).getByTestId('source-stats-line').textContent).not.toMatch(/radio/);
+    // The wide card's columns are the list's: the source without stations has a dash under radio.
+    const slot = within(plain!).getAllByTestId('source-stat').find((e) => e.dataset['stat'] === 'radio')!;
+    expect(slot.dataset['empty']).toBe('');
+    expect(slot.querySelector('dd [aria-hidden]')?.textContent).toBe('–');
   });
 });
 
@@ -378,7 +383,7 @@ describe('Retrying a failed add reuses the source it created', () => {
   }
 
   async function failFirstAdd() {
-    renderAt(routes(), '/sources?add=1');
+    renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByRole('dialog');
     type(/^Name/, 'retrytest');
     type(/^Playlist URL/, 'http://127.0.0.1:7399/x.m3u');

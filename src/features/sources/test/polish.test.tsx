@@ -36,7 +36,7 @@ const xtream = (id: string, over = {}) =>
 
 async function openAdd(kindTab?: string) {
   rpcMock.handlers['sources.list'] = () => [];
-  renderAt(routes(), '/sources?add=1');
+  renderAt(routes(), '/sources?add=1&kind=m3u');
   await screen.findByRole('dialog');
   if (kindTab) fireEvent.click(within(dialog()).getByRole('tab', { name: kindTab }));
 }

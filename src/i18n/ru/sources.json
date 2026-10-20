@@ -1,9 +1,5 @@
 {
   "title": "Источники",
-  "subtitleCount_one": "{{count, number}} источник",
-  "subtitleCount_few": "{{count, number}} источника",
-  "subtitleCount_many": "{{count, number}} источников",
-  "subtitleCount_other": "{{count, number}} источника",
   "listLabel": "Ваши источники",
   "add": "Добавить источник",
   "addSource": "Добавление источника",

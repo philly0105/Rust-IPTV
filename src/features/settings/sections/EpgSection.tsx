@@ -330,7 +330,7 @@ export function EpgSection({ settings, update }: SectionProps) {
         )}
       </SettingsGroup>
 
-      <SettingsGroup>
+      <SettingsGroup title={t('epgDisplayGroup')}>
         <SettingsRow label={t('epgViewMode')} description={t('epgViewModeHint')}>
           {({ id }) => (
             <Segmented<EpgViewMode>

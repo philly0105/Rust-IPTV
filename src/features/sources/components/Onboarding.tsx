@@ -66,13 +66,23 @@ export function SourceKindTiles({ onPick, className }: { onPick: (kind: SourceKi
   );
 }
 
-/** First-run empty state: the three ways to add a source, plus backup restore. */
+/**
+ * First-run empty state: the three ways to add a source, plus backup restore. A large empty state
+ * takes the headline size (display is for hero and detail titles), and on a wide page the block
+ * sits at the optical centre of the window rather than at its top.
+ */
 export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
   const { t } = useTranslation('sources');
   return (
-    <section aria-labelledby="sources-onboarding-title" className="flex w-full max-w-5xl flex-col gap-8 py-4 @2xl:py-10" data-testid="sources-onboarding">
+    <section
+      aria-labelledby="sources-onboarding-title"
+      // The Page's own padding (py-6) and the header make up the rest of the window's height; the
+      // larger bottom padding lifts the block a little above the middle, where it looks centred.
+      className="flex w-full max-w-5xl flex-col gap-8 py-4 @2xl:min-h-[calc(100dvh-var(--header-height)-3rem)] @2xl:justify-center @2xl:pb-16"
+      data-testid="sources-onboarding"
+    >
       <div className="flex max-w-2xl flex-col gap-2">
-        <h2 id="sources-onboarding-title" className="text-headline text-fg @2xl:text-display">
+        <h2 id="sources-onboarding-title" className="text-headline text-fg">
           {t('onboardTitle')}
         </h2>
         <p className="text-body text-fg-muted">{t('onboardLead')}</p>

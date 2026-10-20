@@ -18,6 +18,7 @@ import {
   emptyDraft,
   withFieldError,
   type DraftErrors,
+  type HeadersDraft,
   type SourceDraft,
 } from '../lib/draft';
 import { enabledEpgUrls, refreshGuides, useGuideProgressFeed } from '../lib/epgRefresh';
@@ -39,6 +40,7 @@ import { useNextFrame } from '../lib/useNextFrame';
 import { checkHttpUrl, displayHost, parseXtreamLink, suggestName } from '../lib/validate';
 import { PHONE_SHEET_BODY, sameDraft, useDiscardGuard } from './DiscardGuard';
 import { Field } from './Field';
+import { HeadersFields } from './HeadersFields';
 import { ImportProgressView } from './ImportProgressView';
 import { M3uForm } from './M3uForm';
 import { StalkerForm } from './StalkerForm';
@@ -51,7 +53,11 @@ export interface AddSourceInitial {
   name?: string;
 }
 
-/** Draft for an initial request (deep link / onboarding tile). */
+/**
+ * Draft for an initial request (deep link / onboarding tile). With no kind, an address opens as
+ * the playlist it most likely is, and a bare Add opens on Xtream, the most common kind (the one
+ * the empty Sources page puts first).
+ */
 export function initialDraft(initial: AddSourceInitial | undefined): SourceDraft {
   const url = initial?.url?.trim() ?? '';
   const xt = url ? parseXtreamLink(url) : null;
@@ -61,7 +67,7 @@ export function initialDraft(initial: AddSourceInitial | undefined): SourceDraft
     d.name = initial?.name ?? suggestName(xt.serverUrl);
     return d;
   }
-  const kind = initial?.kind ?? 'm3u';
+  const kind = initial?.kind ?? (url ? 'm3u' : 'xtream');
   const d = emptyDraft(kind);
   if (url) {
     if (kind === 'm3u') d.m3u.url = url;
@@ -477,11 +483,11 @@ export function AddSourceDialog({
   // Locked while an import runs: switching kind mid-import would show a form that is not the one importing.
   // The current tab stays enabled so it keeps its place in the tab order.
   // On a phone the three full names do not fit in one row: the tabs show the short name, and the
-  // full one stays the tab's accessible name.
+  // full one stays the tab's accessible name. Xtream first, as on the empty Sources page.
   const kinds: { id: SourceKind; label: ReactNode; disabled: boolean }[] = (
     [
-      ['m3u', t('kindM3u'), t('kindM3uShort')],
       ['xtream', t('kindXtream'), t('kindXtreamShort')],
+      ['m3u', t('kindM3u'), t('kindM3uShort')],
       ['stalker', t('kindStalker'), t('kindStalkerShort')],
     ] as const
   ).map(([id, label, short]) => ({
@@ -522,6 +528,11 @@ export function AddSourceDialog({
   );
 
   const isTextOrigin = draft.kind === 'm3u' && draft.m3u.origin !== 'url' && !(draft.m3u.origin === 'file' && isDesktop);
+  // The request headers are an advanced option: last in the form, after the name and auto refresh.
+  const setHeaders = (headers: HeadersDraft) =>
+    setDraft((d) =>
+      d.kind === 'm3u' ? { ...d, m3u: { ...d.m3u, headers } } : d.kind === 'xtream' ? { ...d, xtream: { ...d.xtream, headers } } : { ...d, stalker: { ...d.stalker, headers } },
+    );
 
   return (
     <>
@@ -578,6 +589,7 @@ export function AddSourceDialog({
               disabled={submitting}
               onSuggestName={suggest}
               onFieldBlur={onFieldBlur}
+              showHeaders={false}
               onUseXtream={(xtream) => {
                 setDraft((d) => ({ ...d, kind: 'xtream', xtream: { ...d.xtream, ...xtream } }));
                 setSuggested(suggestName(xtream.serverUrl));
@@ -595,6 +607,7 @@ export function AddSourceDialog({
               autoFocusAddress
               onSuggestName={suggest}
               onFieldBlur={onFieldBlur}
+              showHeaders={false}
             />
           ) : null}
           {draft.kind === 'stalker' ? (
@@ -607,6 +620,7 @@ export function AddSourceDialog({
               autoFocusAddress
               onSuggestName={suggest}
               onFieldBlur={onFieldBlur}
+              showHeaders={false}
             />
           ) : null}
 
@@ -619,6 +633,8 @@ export function AddSourceDialog({
             label={t('autoRefresh')}
             description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
           />
+
+          <HeadersFields value={draft[draft.kind].headers} onChange={setHeaders} errors={errors} prefix={`${draft.kind}.headers`} disabled={submitting} />
 
           {submitting ? (
             <div ref={progressRef} className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4" data-testid="add-source-progress">

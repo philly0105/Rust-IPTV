@@ -23,6 +23,7 @@ const h = await import('./harness');
 const core = h.createCore();
 rpcMock.current = core;
 const { Tour } = await import('../tour/Tour');
+const { SPOTLIGHT_EDGE, SPOTLIGHT_PAD } = await import('../tour/placement');
 const { shortcutRegistry } = await import('@/shell/shortcuts');
 
 const anchors: HTMLElement[] = [];
@@ -68,6 +69,12 @@ describe('Tour', () => {
     const described = document.getElementById(dialog.getAttribute('aria-describedby') ?? '');
     expect(described?.textContent).toMatch(/Open a source here/);
     expect(screen.getByTestId('tour-progress')?.textContent).toContain('Step 1 of 3');
+    // The dots show the step, so the text is for screen readers only, and the steps to come show on the card.
+    expect(screen.getByTestId('tour-progress').className).toContain('sr-only');
+    const dots = [...screen.getByTestId('tour-dots').children].map((d) => d.className);
+    expect(dots[0]).toContain('bg-accent-mark');
+    expect(dots[1]).toContain('bg-fg-subtle/50');
+    expect(dots[1]).not.toContain('bg-surface-3');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('button', { name: 'Skip tour' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
@@ -295,7 +302,8 @@ describe('Tour', () => {
     addAnchor('live');
     open();
     const spot = screen.getByTestId('tour-spotlight');
-    expect(at(spot)).toEqual({ x: 2, y: 114 });
+    // Padded by SPOTLIGHT_PAD, and kept SPOTLIGHT_EDGE from the window's left edge (the anchor is 8 px in).
+    expect(at(spot)).toEqual({ x: SPOTLIGHT_EDGE, y: 120 - SPOTLIGHT_PAD });
     expect(card().getAttribute('data-side')).toBe('end');
     expect(at(card()).x).toBeGreaterThan(64);
   });
@@ -347,9 +355,9 @@ describe('Tour', () => {
     addAnchor('live');
     addAnchor('vod', { top: 180, left: 8, width: 56, height: 44 });
     open();
-    expect(at(screen.getByTestId('tour-spotlight')).y).toBe(114);
+    expect(at(screen.getByTestId('tour-spotlight')).y).toBe(120 - SPOTLIGHT_PAD);
     key('ArrowRight');
-    expect(at(screen.getByTestId('tour-spotlight')).y).toBe(174);
+    expect(at(screen.getByTestId('tour-spotlight')).y).toBe(180 - SPOTLIGHT_PAD);
     key('ArrowRight');
     expect(screen.queryByTestId('tour-spotlight')).toBeNull();
     expect(card().getAttribute('data-side')).toBe('center');

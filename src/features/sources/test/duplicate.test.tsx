@@ -48,7 +48,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 async function addDuplicate() {
-  const view = renderAt(routes(), '/sources?add=1');
+  const view = renderAt(routes(), '/sources?add=1&kind=m3u');
   await screen.findByRole('dialog');
   type(/^Name/, 'Sample again');
   type(/^Playlist URL/, 'lists.example.com/tv.m3u');

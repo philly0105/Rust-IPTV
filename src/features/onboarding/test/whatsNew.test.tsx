@@ -227,8 +227,23 @@ describe("What's new per platform (SR-9)", () => {
     open({ since: '0.1.0', auto: true });
     await screen.findAllByTestId('whats-new-item');
     expect(dialog().textContent).not.toContain('Start maximized or fullscreen');
-    // The newest release leads with three larger cards.
+    // The newest release leads with three highlights.
     expect(dialog().querySelectorAll('[data-highlight]')).toHaveLength(3);
+  });
+
+  it('lays the highlights out as full-width rows in one panel, not three narrow columns', async () => {
+    core.state.version = '0.2.0';
+    open({ since: '0.1.0', auto: true });
+    await screen.findAllByTestId('whats-new-item');
+    // Three columns were about 185 px each in the dialog, and their texts ran to five lines.
+    const panel = screen.getByTestId('whats-new-highlights');
+    expect(panel.className).not.toMatch(/grid-cols/);
+    expect(panel.className).toContain('divide-y');
+    for (const item of panel.querySelectorAll('[data-highlight]')) {
+      expect(item.className).not.toMatch(/flex-col/);
+      // The icon tile leads the row.
+      expect(item.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
+    }
   });
 });
 

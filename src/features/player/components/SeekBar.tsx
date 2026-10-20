@@ -28,9 +28,16 @@ export function clampTip(x: number, width: number): number {
   return Math.min(width - TIP_HALF, Math.max(TIP_HALF, x));
 }
 
+/** The preview labels over the bar: the glass tooltip's look. */
+const SEEK_LABEL =
+  'pointer-events-none absolute bottom-7 rounded-sm border border-glass-border bg-glass-strong px-2 py-0.5 font-numeric text-caption text-on-glass tabular-nums shadow-2 pointer-coarse:bottom-10';
+
 /**
- * The tuner dial: a thin track with buffered segments, an amber played fill and a
- * needle thumb. Scrubbing previews locally and commits one seek on release.
+ * The seek bar (PL-BAR-HIERARCHY): a 4 px track that thickens under the pointer, the buffered
+ * ranges, a lighter fill up to the time under the pointer with that time over it, the accent
+ * played fill and a round thumb that shows on hover, focus and while scrubbing. Scrubbing previews
+ * locally and commits one seek on release. Under a coarse pointer the hit area grows to 36 px
+ * around the same track and the thumb to 16 px (PL-TOUCH-ERGONOMICS).
  */
 export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, className }: SeekBarProps) {
   const { t } = useTranslation('player');
@@ -90,6 +97,7 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
 
   const valueText = positionReadout(t, { position: shown, duration: max, liveEnd: live ? max : undefined, edgeSlack });
 
+  const scrubbing = preview !== null;
   return (
     <div
       ref={trackRef}
@@ -100,7 +108,8 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
       aria-valuemax={Math.floor(max)}
       aria-valuenow={Math.floor(shown)}
       aria-valuetext={valueText}
-      className={cn('group/seek relative flex h-5 cursor-pointer touch-none items-center select-none', className)}
+      data-scrubbing={scrubbing ? '' : undefined}
+      className={cn('group/seek relative flex h-6 cursor-pointer touch-none items-center select-none pointer-coarse:h-9', className)}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -108,7 +117,7 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
       onPointerLeave={() => setHover(null)}
       onKeyDown={onKeyDown}
     >
-      <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/20 motion-safe:transition-[height] group-hover/seek:h-1.5 group-focus-visible/seek:h-1.5">
+      <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/25 group-hover/seek:h-1.5 group-focus-visible/seek:h-1.5 group-data-[scrubbing]/seek:h-1.5 motion-safe:transition-[height] motion-safe:duration-(--duration-fast)">
         {live && buffered.length === 0 && (
           // Live rewind without buffered ranges (mpv's cache): everything up to the edge is cached.
           <div
@@ -124,25 +133,27 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
             style={{ left: `${pct(r.start)}%`, width: `${Math.max(0, pct(r.end) - pct(r.start))}%` }}
           />
         ))}
+        {/* Up to the time under the pointer, lighter, so the preview reads against the played part. */}
+        {hover && !scrubbing && (
+          <div aria-hidden data-testid="seek-hover-fill" className="absolute inset-y-0 left-0 bg-white/25" style={{ width: `${pct(hover.time)}%` }} />
+        )}
         <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${pct(shown)}%` }} />
       </div>
-      {/* The needle */}
+      {/* The thumb: on hover, focus and while scrubbing. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute top-1/2 h-3.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-hover shadow-[0_0_10px_var(--color-accent)] opacity-0 motion-safe:transition-opacity group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100"
-        style={{ left: `${pct(shown)}%`, opacity: preview !== null ? 1 : undefined }}
+        data-testid="seek-thumb"
+        className="pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 scale-0 rounded-full bg-accent shadow-[0_0_0_3px_rgb(0_0_0/0.25)] group-hover/seek:scale-100 group-focus-visible/seek:scale-100 group-data-[scrubbing]/seek:scale-100 motion-safe:transition-transform motion-safe:duration-(--duration-fast) pointer-coarse:size-4"
+        style={{ left: `${pct(shown)}%` }}
       />
       {live && (
         <>
-          <div
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 right-0 size-2 -translate-y-1/2 rounded-full bg-live"
-          />
-          {/* How far back the rewind window reaches, at its start (shown with the needle). */}
+          <div aria-hidden className="pointer-events-none absolute top-1/2 right-0 size-2 -translate-y-1/2 rounded-full bg-live" />
+          {/* How far back the rewind window reaches, at its start (shown with the thumb). */}
           <div
             aria-hidden
             data-testid="rewind-depth"
-            className="player-glass-strong player-on-glass-muted pointer-events-none absolute bottom-6 left-0 rounded-sm border px-1.5 py-0.5 font-numeric text-xs tabular-nums opacity-0 motion-safe:transition-opacity group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100"
+            className={cn(SEEK_LABEL, 'left-0 text-on-glass-muted opacity-0 group-hover/seek:opacity-100 group-focus-visible/seek:opacity-100 motion-safe:transition-opacity')}
             style={{ opacity: hover && hover.x < 64 ? 0 : undefined }}
           >
             -{formatTime(span)}
@@ -153,7 +164,7 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
         <div
           aria-hidden
           data-testid="seek-preview"
-          className="player-glass-strong pointer-events-none absolute bottom-6 -translate-x-1/2 rounded-sm border px-1.5 py-0.5 font-numeric text-xs tabular-nums"
+          className={cn(SEEK_LABEL, '-translate-x-1/2')}
           // Kept inside the bar so the ends never clip at the player's edge.
           style={{ left: clampTip(hover.x, trackRef.current?.getBoundingClientRect().width ?? 0) }}
         >

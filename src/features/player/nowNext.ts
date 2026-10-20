@@ -209,6 +209,64 @@ export function airedShare(p: Pick<EpgProgram, 'start' | 'end'>, now: number): n
   return Math.min(1, Math.max(0, (now - start) / (end - start)));
 }
 
+/** The programme airing at `now` and the one after it, from a guide answer that may have aged. */
+export function airingPair(guide: EpgNowNext | null | undefined, now: number): { current?: EpgProgram; upcoming?: EpgProgram } {
+  if (!guide) return {};
+  const airs = (p: EpgProgram | undefined): p is EpgProgram => !!p && ms(p.start) <= now && ms(p.end) > now;
+  // The guide's "now" ended while the banner was up: its next is what airs.
+  const current = airs(guide.now) ? guide.now : airs(guide.next) ? guide.next : undefined;
+  const upcoming = current !== guide.next && guide.next && ms(guide.next.end) > now ? guide.next : undefined;
+  const out: { current?: EpgProgram; upcoming?: EpgProgram } = {};
+  if (current) out.current = current;
+  if (upcoming) out.upcoming = upcoming;
+  return out;
+}
+
+/** How often the playing channel's airing programme is looked at (a cache read; a request only when it ended). */
+export const LIVE_PROGRAMME_CHECK_MS = 30_000;
+
+/**
+ * Keeps a live source's subtitle on the programme airing now (PL-STALE-PROGRAMME). A live
+ * source is subtitled with the airing title once, at tune time; an hour on one channel left the
+ * previous show under its name in the player's title bar and in the system's media controls
+ * (`mediaSession.ts`). Every `LIVE_PROGRAMME_CHECK_MS` the cached guide answer is read (and asked
+ * again once its programme ended), and a new airing title patches `source.subtitle`: the same
+ * media (`watchKey`), so nothing restarts. A guide with nothing airing leaves the subtitle as it
+ * is. Bound once by the dock; returns the unbind.
+ */
+export function bindLiveProgramme(): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let followed: string | undefined;
+  const check = async (): Promise<void> => {
+    const s = usePlayerStore.getState().source;
+    const ref = s?.isLive && !isPendingZap(s) && !isLockedZap(s) ? s.ref : undefined;
+    if (!ref) return;
+    const key = itemKey(ref);
+    const now = Date.now();
+    const guide = peekNowNext(ref, now) ?? (await fetchNowNext(ref));
+    const title = airingPair(guide, Date.now()).current?.title;
+    const cur = usePlayerStore.getState().source;
+    if (!title || !cur?.ref || itemKey(cur.ref) !== key || !cur.isLive || cur.subtitle === title) return;
+    usePlayerStore.setState({ source: { ...cur, subtitle: title } });
+  };
+  const follow = (): void => {
+    const s = usePlayerStore.getState().source;
+    const key = s?.isLive && s.ref && !isPendingZap(s) ? itemKey(s.ref) : undefined;
+    if (key === followed) return;
+    followed = key;
+    if (timer) clearInterval(timer);
+    timer = key ? setInterval(() => void check(), LIVE_PROGRAMME_CHECK_MS) : null;
+  };
+  follow();
+  const unsub = usePlayerStore.subscribe(follow);
+  return () => {
+    unsub();
+    if (timer) clearInterval(timer);
+    timer = null;
+    followed = undefined;
+  };
+}
+
 /** Testing only. */
 export function __resetNowNextForTests(): void {
   cache.clear();

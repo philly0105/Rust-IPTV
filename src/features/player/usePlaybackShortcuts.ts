@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useShortcut } from '@/shell/shortcuts';
-import { LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, positionReadout, SEEK_STEP, SEEK_STEP_LARGE, targetOwnsKey, type KeyKind } from './format';
+import { LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, positionReadout, SEEK_STEP, SEEK_STEP_JL, SEEK_STEP_LARGE, targetOwnsKey, type KeyKind } from './format';
 import { playPreviousChannel, setHistoryOpen, useHistoryStore } from './history';
 import { showOsd, useMediaStore } from './media';
 import { exitPip, usePipStore } from './pip';
@@ -17,7 +17,7 @@ const AREA = 'Playback';
 /** Seconds the left and right arrows skip (shared with the seek bar). */
 export { SEEK_STEP };
 /** Seconds J and L skip. */
-export const SEEK_STEP_JL = 10;
+export { SEEK_STEP_JL };
 /** Volume change per arrow press or wheel notch. */
 export const VOLUME_STEP = 0.05;
 

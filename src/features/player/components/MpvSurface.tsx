@@ -569,7 +569,7 @@ export function MpvSurface({ className }: { className?: string }) {
           role="status"
           aria-live="polite"
           data-testid="mpv-connecting"
-          className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-white/70"
+          className="player-chrome absolute inset-0 flex flex-col items-center justify-center gap-3 text-body-sm text-on-glass-muted"
         >
           <svg viewBox="0 0 48 48" className="size-10 text-accent motion-safe:animate-spin" style={{ animationDuration: '1.4s' }} aria-hidden>
             <circle cx="24" cy="24" r="20" fill="none" stroke="rgb(255 255 255 / 0.15)" strokeWidth="3" />
@@ -619,7 +619,7 @@ function MpvConnectingNotice({ source }: { source: PlayerSource | null | undefin
         aria-live="polite"
         data-mpv-overlay=""
         data-testid="connecting-notice"
-        className={cn('player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1 text-sm', offerSwitch ? 'pe-1 ps-3' : 'px-3')}
+        className={cn('player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1 text-body-sm', offerSwitch ? 'pe-1 ps-3' : 'px-3')}
       >
         <span className="truncate">{t('stillConnecting')}</span>
         {offerSwitch && (
@@ -632,7 +632,7 @@ function MpvConnectingNotice({ source }: { source: PlayerSource | null | undefin
               void tryAnotherSource().finally(() => setBusy(false));
             }}
             onDoubleClick={(e) => e.stopPropagation()}
-            className="pointer-events-auto shrink-0 rounded-full bg-white/12 px-2.5 py-0.5 font-medium hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/70 disabled:opacity-60"
+            className="pointer-events-auto shrink-0 rounded-full bg-white/12 px-2.5 py-0.5 font-medium hover:bg-white/20 active:bg-white/25 disabled:opacity-60 pointer-coarse:py-1.5"
           >
             {t('tryAnotherSource')}
           </button>

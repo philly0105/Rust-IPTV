@@ -10,6 +10,7 @@ import { cn } from '../cn';
 import { safeImageUrl } from '../format';
 import { currentLiveKey, playHistoryEntry, setHistoryOpen, useHistoryStore, type HistoryEntry } from '../history';
 import { getSettings, usePlayerStore } from '../store';
+import { MENU_HEADER, menuFrameClass, menuFrameStyle, UNMEASURED, type MenuFit } from './menuFrame';
 
 /** What airs now on each history channel, fetched once per opening. */
 function useNowPlaying(entries: readonly HistoryEntry[]): Record<string, string> {
@@ -51,20 +52,21 @@ function Logo({ entry }: { entry: HistoryEntry }) {
   if (!logo.url) {
     const Icon = entry.isRadio ? Radio : Tv;
     return (
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-white/8 text-white/60" aria-hidden>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-sm bg-white/8 text-on-glass-muted ring-1 ring-white/10" aria-hidden>
         <Icon className="size-4" />
       </span>
     );
   }
-  return <img src={logo.url} alt="" aria-hidden className="size-8 shrink-0 rounded-sm bg-white/8 object-contain" onError={logo.onError} />;
+  return <img src={logo.url} alt="" aria-hidden className="size-8 shrink-0 rounded-sm bg-white/8 object-contain p-0.5 ring-1 ring-white/10" onError={logo.onError} />;
 }
 
 /**
- * Channels watched this session (Shift+B or the History button of the live controls). Arrow
- * keys move, Enter plays, Escape closes. A `role="menu"`, so embedded mpv cuts it out of the
- * native video like the other player menus.
+ * Channels watched this session (Shift+B or the History row of the options menu). Arrow keys
+ * move, Enter plays, Escape closes. A `role="menu"`, so embedded mpv cuts it out of the native
+ * video like the other player menus. `fit`: a popover as tall as the room above the bar, or a
+ * sheet in a short player (Controls measures it); its header stays in view while the list scrolls.
  */
-export function ChannelHistory() {
+export function ChannelHistory({ fit = UNMEASURED }: { fit?: MenuFit }) {
   const { t } = useTranslation('player');
   const { t: tc } = useTranslation('common');
   const entries = useHistoryStore((s) => s.entries);
@@ -108,23 +110,26 @@ export function ChannelHistory() {
           items[to]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge glass-blur max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border p-1.5 text-white motion-safe:animate-pop-in"
+      data-sheet={fit.sheet ? '' : undefined}
+      style={menuFrameStyle(fit, '60vh, 420px')}
+      className={menuFrameClass(fit, 'max-h-[min(60vh,420px)] w-72 max-w-[calc(100vw-1rem)]')}
     >
-      <div className="mb-1 flex items-center gap-1 border-b border-white/10">
-        <span className="flex-1 px-2 py-2 text-sm font-medium">{t('channelHistory')}</span>
+      {/* The options menu's header: the title, then Close. */}
+      <div className={MENU_HEADER}>
+        <span className="flex-1 px-2 py-1.5 text-body-sm font-medium">{t('channelHistory')}</span>
         <Tooltip content={tc('close')} tone="glass" describe={false}>
           <button
             type="button"
             aria-label={tc('close')}
             onClick={() => setHistoryOpen(false)}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-on-glass-muted hover:bg-white/10 hover:text-on-glass pointer-coarse:size-10"
           >
             <X className="size-4" aria-hidden />
           </button>
         </Tooltip>
       </div>
       {entries.length === 0 ? (
-        <p className="px-3 py-3 text-sm text-white/70">{t('channelHistoryEmpty')}</p>
+        <p className="px-3 py-3 text-body-sm text-on-glass-muted">{t('channelHistoryEmpty')}</p>
       ) : (
         entries.map((entry) => {
           const playing = entry.key === current;
@@ -136,18 +141,26 @@ export function ChannelHistory() {
               role="menuitem"
               aria-current={playing ? 'true' : undefined}
               onClick={() => pick(entry)}
-              className="flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-start hover:bg-white/10 focus-visible:bg-white/10"
+              className={cn(
+                'flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-start pointer-coarse:min-h-[calc(44rem/15)]',
+                // The channel on now: the rail's tick on a neutral fill, as in the channel list.
+                playing ? 'tuning-tick bg-white/12' : 'hover:bg-white/10 focus-visible:bg-white/10',
+              )}
             >
               <Logo entry={entry} />
               <span className="min-w-0 flex-1">
-                <span className={cn('block truncate text-sm', playing && 'text-accent-hover')}>{entry.title}</span>
-                <span className="block truncate text-xs text-white/60">{playing ? t('channelHistoryWatching') : (airing ?? ' ')}</span>
+                <span dir="auto" className={cn('block truncate text-body-sm', playing && 'font-medium')}>
+                  {entry.title}
+                </span>
+                <span dir="auto" className="block truncate text-caption text-on-glass-muted">
+                  {playing ? t('channelHistoryWatching') : (airing ?? ' ')}
+                </span>
               </span>
             </button>
           );
         })
       )}
-      {entries.length === 1 && current === entries[0]?.key && <p className="px-3 pt-1 pb-2 text-xs text-white/60">{t('channelHistoryEmpty')}</p>}
+      {entries.length === 1 && current === entries[0]?.key && <p className="px-3 pt-1 pb-2 text-caption text-on-glass-muted">{t('channelHistoryEmpty')}</p>}
     </div>
   );
 }

@@ -257,10 +257,13 @@ describe('control tooltips', () => {
       expect(screen.getByRole('button', { name: 'Pause' }).getAttribute('aria-keyshortcuts')).toBe('Space K');
       expect(tip('Fullscreen').keys).toEqual(['F']);
       expect(tip('Mute').keys).toEqual(['M']);
+      // The 10 s skips (PL-BAR-HIERARCHY) name J and L.
+      expect(tip('Back 10 seconds').keys).toEqual(['J']);
+      expect(tip('Forward 10 seconds').keys).toEqual(['L']);
       // No made-up shortcut where there is none.
-      const stop = tip('Stop');
-      expect(stop.text).toBe('Stop');
-      expect(stop.keys).toEqual([]);
+      const options = tip('Playback options');
+      expect(options.text).toBe('Playback options');
+      expect(options.keys).toEqual([]);
       expect(ctlCombo(undefined)).toBeUndefined();
     } finally {
       vi.useRealTimers();

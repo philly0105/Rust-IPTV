@@ -1,5 +1,9 @@
 /* Player-only styles that Tailwind utilities cannot express cleanly. */
 
+/*
+ * The level sliders over the picture (volume, the subtitle position): a white fill and thumb, as
+ * on Apple TV. A level is not progress, so it leaves the accent to the seek bar and the live marks.
+ */
 .player-range {
   appearance: none;
   height: 20px;
@@ -9,12 +13,12 @@
 .player-range::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--color-accent) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+  background: linear-gradient(to right, var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
 }
 .player-range::-moz-range-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--color-accent) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+  background: linear-gradient(to right, var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
 }
 .player-range::-webkit-slider-thumb {
   appearance: none;
@@ -36,6 +40,14 @@
 /* Fullscreen host paints black so a remounted engine never shows app surface. */
 [data-player-host]:fullscreen {
   background: #000;
+}
+
+/*
+ * A stage whose page heads it with the title (PlayerStage showTitle={false}) drops the player's
+ * own title bar, except in fullscreen, where the page's heading is not on screen (PL-DUPLICATE-CHROME).
+ */
+[data-player-stage][data-stage-title='off'] [data-player-host]:not(:fullscreen) [data-testid='player-titlebar'] {
+  display: none;
 }
 
 /* Hide the cursor with the chrome in fullscreen. */
@@ -61,11 +73,15 @@
 /*
  * While the control bar is up (PlayerSurface marks the host data-idle=false) the overlay ends
  * above it, so the lower line of a two-line cue is not hidden behind the bar. A cue placed low
- * rises by about the bar's height; one placed high hardly moves. The clearance is the floating
- * bar (seek row, buttons, padding), capped by the player's height for the mini player's lower bar.
+ * rises by about the bar's height; one placed high hardly moves. The clearance is the bar (seek
+ * row, buttons, padding), capped by the player's height for the mini player's lower bar; the
+ * fullscreen bar is larger.
  */
 [data-player-host][data-idle='false'] .player-subs {
-  bottom: min(5.5rem, 32%);
+  bottom: min(6rem, 32%);
+}
+[data-player-host][data-idle='false']:fullscreen .player-subs {
+  bottom: min(9.5rem, 30%);
 }
 @media (prefers-reduced-motion: no-preference) {
   html:not([data-reduced-motion='true']) .player-subs {
@@ -151,6 +167,15 @@ html[data-reduced-motion='true'] .player-osd {
   animation-duration: 2.4s !important;
 }
 
+/*
+ * The dark stage behind what has no picture (a radio station, a stream playing in an external
+ * player): near black, a touch lighter in the middle. Dark in every theme, like the video it
+ * stands in for, so the chrome on it uses the glass text colours (`player-chrome`).
+ */
+.player-stage-dark {
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, #111827, #05080d 75%);
+}
+
 /* Radio signal meter. */
 @keyframes player-radio-bar {
   0%,
@@ -199,7 +224,7 @@ html[data-reduced-motion='true'] .player-osd {
  * tones the dark theme uses (PL-LIGHT-THEME-ACCENT). Dark themes need none of this: their
  * accent is the glass accent already.
  */
-:root[data-theme='light'] :is(.player-glass, .player-glass-strong, [data-player-host], [data-player-stage], [data-pip-layer]) {
+:root[data-theme='light'] :is(.player-glass, .player-glass-strong, .player-chrome, [data-player-host], [data-player-stage], [data-pip-layer]) {
   --color-accent: var(--color-glass-accent, #f5b544);
   --color-accent-hover: color-mix(in srgb, var(--color-glass-accent, #f5b544) 80%, var(--color-on-glass, #f4f6fa));
   --color-accent-pressed: var(--color-glass-accent, #f5b544);
@@ -213,6 +238,14 @@ html[data-reduced-motion='true'] .player-osd {
   --color-danger: #ff7a7a;
   --color-warning: #eccb5c;
 }
+/*
+ * A player menu shown as a sheet (menuFrame.ts) leaves the picture for the page, whose text would
+ * show through the glass. It is the glass laid over black instead: the same colour as the menu over
+ * a dark frame, and opaque. (The class sits on the glass element, so it outranks the rule above.)
+ */
+.player-glass-strong.player-sheet {
+  background: linear-gradient(var(--color-glass-strong, rgb(12 19 32 / 0.88)), var(--color-glass-strong, rgb(12 19 32 / 0.88))), #000;
+}
 /* Secondary text on glass (passes 4.5:1 on the glass surface over black or white). */
 .player-on-glass-muted {
   color: var(--color-on-glass-muted, #c8cfdc);
@@ -225,14 +258,43 @@ html[data-reduced-motion='true'] .player-osd {
 }
 
 /*
- * Scrims behind the floating chrome: just enough to lift it off a bright picture. Video is
- * dark in every theme, so these stay black (like the captions) instead of following --color-scrim.
+ * Chrome laid straight on the picture (the control bar on its scrim, the title bar): the glass
+ * text colours without a glass pane. `--color-white` follows `--color-on-glass` as inside glass,
+ * so the state layers (bg-white/12) are the glass ones too.
+ */
+.player-chrome {
+  --color-white: var(--color-on-glass, #f4f6fa);
+  color: var(--color-on-glass, #f4f6fa);
+}
+
+/*
+ * Scrims behind the floating chrome, edge to edge (PL-BAR-HIERARCHY): the control bar sits on the
+ * picture with no pane around it, as on Netflix or Apple TV. Video is dark in every theme, so
+ * these stay black (like the captions) instead of following --color-scrim. The bottom one holds
+ * --player-scrim-floor from the bar's bottom edge up to its top fade (`--player-scrim-fade`, the
+ * scrim's top padding), so on-glass and on-glass-muted text keep 4.5:1 over a white frame
+ * (playerCss.test.ts reads these values); above that it fades out over the picture.
  */
 .player-scrim-bottom {
-  background: linear-gradient(to top, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.18) 55%, transparent);
+  --player-scrim-floor: 0.7;
+  --player-scrim-fade: 4rem;
+  background: linear-gradient(
+    to top,
+    rgb(0 0 0 / 0.82),
+    rgb(0 0 0 / var(--player-scrim-floor)) calc(100% - var(--player-scrim-fade)),
+    rgb(0 0 0 / 0.3) calc(100% - var(--player-scrim-fade) * 0.45),
+    transparent
+  );
+}
+/* The mini player's bar fades in over 2rem (its top padding); the fullscreen bar over 6rem. */
+.player-scrim-bottom.player-scrim-compact {
+  --player-scrim-fade: 2rem;
+}
+.player-scrim-bottom.player-scrim-big {
+  --player-scrim-fade: 6rem;
 }
 .player-scrim-top {
-  background: linear-gradient(to bottom, rgb(0 0 0 / 0.6), transparent);
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.66), rgb(0 0 0 / 0.32) 55%, transparent);
 }
 
 /* Sleep timer chip: a slow breath while the volume fades (motion only; the fade itself is audio). */

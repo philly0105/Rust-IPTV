@@ -1,9 +1,10 @@
-import { AlertTriangle, ChevronRight, Copy, ExternalLink, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Copy, RotateCcw } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { proxiedUrl, isDesktop, rpc } from '@/api/transport';
 import { itemKey, type PlayerSource } from '@/api/types';
+import { redactText } from '@/features/sources/lib/redact';
 
 import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { useToast } from '@/ui/Toast';
@@ -41,6 +42,8 @@ import {
 import { clearExternal, selectText, setInlineSubtitleTarget, withExternal } from '../subtitles/tracks';
 import { usePlayerSettings } from '../useSettings';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
+import { ErrorActions, rawTsHintKey } from './ErrorActions';
+import { glassButton } from './glassButton';
 
 /** Stable identity for "the same media": a source swap with the same url keeps the engine. */
 function mediaKey(s: PlayerSource | undefined): string {
@@ -88,6 +91,24 @@ function rangesOf(tr: TimeRanges, offset = 0): TimeRange[] {
   const out: TimeRange[] = [];
   for (let i = 0; i < tr.length; i++) out.push({ start: tr.start(i) + offset, end: tr.end(i) + offset });
   return out;
+}
+
+/** Waiting for sound to come back after a forced mute (one subscription at a time). */
+let unmuteWatch: (() => void) | null = null;
+
+/**
+ * The browser made the start muted (PL-MUTED-AUTOPLAY): raise the unmute prompt, and take it down
+ * once sound is back by any means (the prompt, the bar's button, M, the volume slider).
+ */
+export function noteAutoMuted(): void {
+  useMediaStore.setState({ autoMuted: true });
+  if (unmuteWatch) return;
+  unmuteWatch = usePlayerStore.subscribe((s) => {
+    if (s.muted) return;
+    unmuteWatch?.();
+    unmuteWatch = null;
+    useMediaStore.setState({ autoMuted: false });
+  });
 }
 
 export interface InlinePlayerProps {
@@ -221,10 +242,12 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
       el.playbackRate = 1;
       el.play().catch((err: unknown) => {
         if (disposed) return;
-        // Autoplay without a gesture (reload restore): retry muted rather than sit paused.
+        // Autoplay without a gesture (reload restore): retry muted rather than sit paused, and
+        // say so (the unmute prompt) instead of playing silently.
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
           el.muted = true;
           usePlayerStore.setState({ muted: true });
+          noteAutoMuted();
           el.play().catch(() => reportStatus('paused'));
         }
       });
@@ -528,36 +551,31 @@ function ErrorOverlay({
 }) {
   const { t } = useTranslation('player');
   const { toast } = useToast();
-  const retryRef = useRef<HTMLButtonElement>(null);
+  const settings = usePlayerSettings();
+  const primaryRef = useRef<HTMLButtonElement>(null);
   const view = useStreamError(kind);
   useRetryWhenOnline(view.cls, onRetry);
-  // Keyboard users land on Retry instead of hunting for it (only when the player has focus).
-  useEffect(() => focusIfPlayerOwnsFocus(retryRef.current), []);
+  // Keyboard users land on the first action instead of hunting for it (only when the player has focus).
+  useEffect(() => focusIfPlayerOwnsFocus(primaryRef.current), []);
   // Raw TS only fails for lack of MSE when mpegts.js could not run at all.
   const isRawTs = !!source && looksLikeMpegTs(source) && !mseSupported();
-  const hint = isRawTs ? t('errorTsLive') : view.hint;
-  const hasMedia = !!source?.url;
+  const hint = isRawTs ? t(rawTsHintKey(source, settings, view.external, view.others)) : view.hint;
 
   if (compact) {
     return (
       <div
         role="alert"
         data-error-class={view.cls}
-        className="pointer-events-auto absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/80 p-3 text-center text-white"
+        className="player-chrome pointer-events-auto absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/80 p-3 text-center"
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >
-        <p className="flex max-w-full items-center gap-1.5 text-sm font-medium" title={message ? `${view.title}: ${message}` : hint}>
+        <p className="flex max-w-full items-center gap-1.5 text-body-sm font-medium" title={message ? `${view.title}: ${message}` : hint}>
           <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
           <span className="truncate">{view.title}</span>
         </p>
-        <button
-          ref={retryRef}
-          type="button"
-          onClick={onRetry}
-          className="inline-flex items-center gap-1.5 rounded-md bg-accent-solid px-2.5 py-1 text-xs font-medium text-accent-solid-fg hover:bg-accent-solid-hover"
-        >
-          <RotateCcw className="size-3.5" aria-hidden />
+        <button ref={primaryRef} type="button" onClick={onRetry} className={glassButton('primary', 'xs')}>
+          <RotateCcw aria-hidden />
           {t('retry')}
         </button>
       </div>
@@ -589,9 +607,15 @@ function ErrorOverlay({
     }
   };
 
-  // Buttons and their icons, smaller in a short player.
-  const action = tight ? 'gap-1.5 px-2.5 py-1 text-xs' : 'gap-2 px-3 py-1.5 text-sm';
-  const actionIcon = tight ? 'size-3.5' : 'size-4';
+  /** What the engine said, with the headline, for a bug report or a provider ticket; logins taken out. */
+  const copyDetails = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(redactText(`${view.title}\n${message ?? ''}`.trim()));
+      toast({ title: t('errorDetailsCopied'), variant: 'success' });
+    } catch {
+      toast({ title: t('errorDetailsCopyFailed'), variant: 'error' });
+    }
+  };
 
   return (
     // Bottom room for the control bar, which stays up over an error and paints above this. Top
@@ -602,76 +626,58 @@ function ErrorOverlay({
       data-error-class={view.cls}
       data-tight={tight || undefined}
       className={cn(
-        'pointer-events-auto absolute inset-0 z-20 flex overflow-y-auto bg-black/80 text-white',
-        tight ? 'px-4 pt-3 pb-14' : 'px-6 pt-14 pb-16',
+        'player-chrome pointer-events-auto absolute inset-0 z-20 flex overflow-y-auto bg-black/80',
+        tight ? 'px-4 pt-3 pb-14' : 'px-6 pt-16 pb-24',
       )}
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >
-      <div className={cn('m-auto flex max-w-md flex-col items-start', tight ? 'gap-1.5' : 'gap-3')}>
+      <div className={cn('m-auto flex w-full max-w-md flex-col items-center text-center', tight ? 'gap-2' : 'gap-4')}>
         {tight ? (
-          <h2 className="flex max-w-full items-center gap-2 font-display text-sm" title={message ? `${view.title}: ${message}` : undefined}>
+          <h2 className="flex max-w-full items-center gap-2 text-body-sm font-medium" title={message ? `${view.title}: ${message}` : undefined}>
             <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
             <span className="truncate">{view.title}</span>
           </h2>
         ) : (
           <>
-            <AlertTriangle className="size-7 text-warning" aria-hidden />
-            <h2 className="font-display text-lg">{view.title}</h2>
+            <span aria-hidden className="flex size-14 items-center justify-center rounded-full bg-white/8 ring-1 ring-white/15">
+              <AlertTriangle className="size-6 text-warning" />
+            </span>
+            <h2 className="text-title-sm text-balance">{view.title}</h2>
           </>
         )}
-        <p className={cn('text-white/80', tight ? 'line-clamp-2 text-xs' : 'text-sm')}>{hint}</p>
+        <p className={cn('text-on-glass-muted', tight ? '-mt-1 line-clamp-2 text-caption' : '-mt-2 text-body-sm text-pretty')}>{hint}</p>
+        <ErrorActions
+          view={view}
+          source={source}
+          onRetry={onRetry}
+          onOpenExternal={openExternalAvailable ? (p) => void openExternal(p) : undefined}
+          onCopyLink={openExternalAvailable ? undefined : () => void copyLink()}
+          rawTs={isRawTs}
+          size={tight ? 'xs' : 'md'}
+          max={tight ? 2 : 4}
+          barRetry={tight}
+          primaryRef={primaryRef}
+          className={cn('flex flex-wrap justify-center', tight ? 'gap-1.5' : 'mt-1 gap-2')}
+        />
         {message && !tight && (
           // What the engine said, for a bug report or a provider ticket: out of the way until asked for.
-          <details className="group w-full text-xs text-white/60">
-            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-white/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70 [&::-webkit-details-marker]:hidden">
+          <details className="group flex w-full flex-col items-center text-caption text-on-glass-muted">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm select-none hover:text-on-glass focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
               <ChevronRight className="size-3.5 transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90 motion-reduce:transition-none" aria-hidden />
               {t('errorDetails')}
             </summary>
-            <p className="mt-1.5 ps-4.5 font-mono break-all select-all">{message}</p>
+            <div className="mt-2 flex w-full flex-col items-stretch gap-1.5 rounded-md bg-white/6 p-2.5 text-start ring-1 ring-white/10">
+              <p dir="auto" className="font-mono break-all select-all">
+                {message}
+              </p>
+              <button type="button" onClick={() => void copyDetails()} className={glassButton('ghost', 'xs', 'self-end')}>
+                <Copy aria-hidden />
+                {t('errorCopyDetails')}
+              </button>
+            </div>
           </details>
         )}
-        <div className="mt-1 flex flex-wrap gap-2">
-          <button
-            ref={retryRef}
-            type="button"
-            onClick={onRetry}
-            className={cn('inline-flex items-center rounded-md bg-accent-solid font-medium text-accent-solid-fg hover:bg-accent-solid-hover', action)}
-          >
-            <RotateCcw className={actionIcon} aria-hidden />
-            {t('retry')}
-          </button>
-          {!openExternalAvailable && hasMedia && source && canShareSource(source) && (
-            <button
-              type="button"
-              onClick={() => void copyLink()}
-              className={cn('inline-flex items-center rounded-md border border-white/25 hover:bg-white/10', action)}
-            >
-              <Copy className={actionIcon} aria-hidden />
-              {t('copyStreamLink')}
-            </button>
-          )}
-          {openExternalAvailable && hasMedia && (
-            <>
-              <button
-                type="button"
-                onClick={() => void openExternal('mpv')}
-                className={cn('inline-flex items-center rounded-md border border-white/25 hover:bg-white/10', action)}
-              >
-                <ExternalLink className={actionIcon} aria-hidden />
-                {t('openInMpv')}
-              </button>
-              <button
-                type="button"
-                onClick={() => void openExternal('vlc')}
-                className={cn('inline-flex items-center rounded-md border border-white/25 hover:bg-white/10', action)}
-              >
-                <ExternalLink className={actionIcon} aria-hidden />
-                {t('openInVlc')}
-              </button>
-            </>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -704,7 +710,7 @@ function ConnectingNotice({ source, compact }: { source?: PlayerSource | undefin
         className={cn(
           'player-glass-strong inline-flex max-w-[90%] items-center gap-2 rounded-full border py-1',
           offerSwitch ? 'pe-1 ps-3' : 'px-3',
-          compact ? 'text-xs' : 'text-sm',
+          compact ? 'text-caption' : 'text-body-sm',
         )}
       >
         <span className="truncate">{t('stillConnecting')}</span>
@@ -717,7 +723,7 @@ function ConnectingNotice({ source, compact }: { source?: PlayerSource | undefin
               onSwitch();
             }}
             onDoubleClick={(e) => e.stopPropagation()}
-            className="pointer-events-auto shrink-0 rounded-full bg-white/12 px-2.5 py-0.5 font-medium hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-white/70 disabled:opacity-60"
+            className="pointer-events-auto shrink-0 rounded-full bg-white/12 px-2.5 py-0.5 font-medium hover:bg-white/20 active:bg-white/25 disabled:opacity-60 pointer-coarse:py-1.5"
           >
             {t('tryAnotherSource')}
           </button>

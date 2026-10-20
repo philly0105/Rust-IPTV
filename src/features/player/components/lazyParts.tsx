@@ -77,7 +77,22 @@ export const SubtitleStyleMenu = lazyPart(() => import('./SubtitleMenu').then((m
 /** The camera button (Run 3 C6) and the capture code behind it; a same-size gap while it loads. */
 export const ScreenshotButton = lazyPart(
   () => import('./ScreenshotButton').then((m) => m.ScreenshotButton),
-  (p) => <span aria-hidden className={p.stage ? 'size-9' : 'size-10 shrink-0'} />,
+  () => <span aria-hidden className="size-10 shrink-0" />,
+);
+/** The channel's logo in the title bar; a same-size gap while it loads. */
+export const TitleLogo = lazyPart(
+  () => import('./ZapBanner').then((m) => m.TitleLogo),
+  (p) => <span aria-hidden className={p.big ? 'size-14 shrink-0' : 'size-10 shrink-0'} />,
+);
+/** What airs now under the channel's name in the title bar; the tuned subtitle until it loads. */
+export const LiveProgrammeLine = lazyPart(
+  () => import('./ZapBanner').then((m) => m.LiveProgrammeLine),
+  (p) =>
+    p.fallback ? (
+      <p dir="auto" data-testid="player-subtitle" className="mt-0.5 truncate text-body-sm text-on-glass-muted">
+        {p.fallback}
+      </p>
+    ) : null,
 );
 /** The mini player's header line while the zap banner is up; the plain name until it loads. */
 export const ZapHeaderLine = lazyPart(

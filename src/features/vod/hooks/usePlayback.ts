@@ -24,7 +24,7 @@ export interface PlayTarget {
 export interface PlayOptions {
   episodeId?: string;
   subtitle?: string;
-  /** Forget the saved position first, so playback starts at 0. */
+  /** Play from 0. The saved position (and the watched mark) stays until playback saves a new one. */
   fromStart?: boolean;
   /** Play a different copy (another source) instead of the page's target. */
   target?: PlayTarget;
@@ -95,10 +95,6 @@ export function usePlayback(target: PlayTarget | undefined) {
       if (!tgt) return;
       const { ref } = tgt;
       try {
-        if (opts.fromStart) {
-          await rpc('positions.remove', opts.episodeId ? { ref, episodeId: opts.episodeId } : { ref }).catch(() => undefined);
-          void invalidate('positions.');
-        }
         const args: Parameters<typeof playItem>[0] = {
           ref,
           title: tgt.title,
@@ -109,6 +105,9 @@ export function usePlayback(target: PlayTarget | undefined) {
         if (opts.subtitle) args.subtitle = opts.subtitle;
         if (tgt.posterUrl) args.posterUrl = tgt.posterUrl;
         if (tgt.categoryId) args.categoryId = tgt.categoryId;
+        // Start over (VL-start-over-unwatches): no positions.remove first, which also dropped the
+        // watched mark and, when the play then failed, the old resume point.
+        if (opts.fromStart) args.fromStart = true;
         await playItem(args);
       } catch (err) {
         toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' });

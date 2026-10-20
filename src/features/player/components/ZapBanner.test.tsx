@@ -480,7 +480,7 @@ describe('in a small player', () => {
         zap.hideZapBanner();
         usePlayerStore.setState({ status: 'error', error: 'HTTP 404' });
       });
-      const title = () => screen.getByTestId('player-title').parentElement!.parentElement!.className;
+      const title = () => screen.getByTestId('player-titlebar').className;
       expect(title()).toContain('opacity-0');
       // The bar stays up over the error: Retry and the rest of it.
       expect(hidden()).toBe(false);
@@ -557,7 +557,7 @@ describe('in a small player', () => {
       expect(hidden()).toBe(false);
       expect(screen.queryByTestId('zap-banner')).toBeNull();
       expect(visible()).toBe(false);
-      expect(screen.getByTestId('player-title').parentElement!.parentElement!.className).not.toContain('opacity-0');
+      expect(screen.getByTestId('player-titlebar').className).not.toContain('opacity-0');
       // The next zap brings the chip back, alone again.
       await advance(3000);
       tune(sport);

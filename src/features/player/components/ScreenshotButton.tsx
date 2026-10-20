@@ -5,12 +5,13 @@ import { useTranslation } from 'react-i18next';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
+import { pressKeepsFocus } from '../format';
 import { blockReasonKey, explainBlock, screenshotBlock, takeScreenshot } from '../screenshot';
 import { usePlayerStore } from '../store';
 
 /**
  * The camera button (C6). In the control bar it sits with the other round controls; on the
- * external player's stage (`stage`) it is a bordered square like the stage's own buttons.
+ * external player's stage (`stage`) it is a square like the stage's own secondary buttons.
  *
  * Where there is no picture to take (radio, an external player) it stays in place but is
  * `aria-disabled`, so it remains focusable: the tooltip and the screen reader description say
@@ -60,12 +61,14 @@ export function ScreenshotButton({
           aria-disabled={reason ? true : undefined}
           aria-describedby={reason ? reasonId : undefined}
           aria-busy={busy || undefined}
+          onMouseDown={menuItem ? undefined : pressKeepsFocus}
           onClick={press}
           className={cn(
             'inline-flex shrink-0 items-center justify-center motion-safe:transition-colors',
+            // On a stage: the square of the stage's secondary buttons (glassButton); in a bar, the round controls.
             stage
-              ? 'size-9 rounded-md border border-white/25 text-white hover:bg-white/10 [&_svg]:size-4'
-              : 'size-10 rounded-full text-white/90 hover:bg-white/12 hover:text-white [&_svg]:size-5',
+              ? 'size-10 rounded-md bg-white/10 text-on-glass ring-1 ring-white/20 ring-inset hover:bg-white/16 pointer-coarse:size-11 [&_svg]:size-4'
+              : 'size-10 rounded-full text-on-glass hover:bg-white/12 [&_svg]:size-5',
             (reason || busy) && 'opacity-40',
             reason && 'cursor-not-allowed',
             className,

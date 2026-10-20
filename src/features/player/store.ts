@@ -30,6 +30,7 @@ import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQuer
 
 import { parseClearKey } from './clearKey';
 import { preloadEngineFor } from './enginePreload';
+import { enterVideoFullscreen } from './fullscreen';
 import { rpcErrorCode } from './errors';
 import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
 import { __resetNowNextForTests, fetchNowNext, holdNowNext, passNowNext, peekNowNext } from './nowNext';
@@ -689,6 +690,9 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
 
   toggleFullscreen() {
     if (!get().source) return;
+    // iPhone Safari: no element fullscreen, so the video goes to the system player and the flag
+    // stays off (PL-IOS-FULLSCREEN). Everywhere else the dock follows the flag (PlayerDock).
+    if (!get().isFullscreen && enterVideoFullscreen()) return;
     set({ isFullscreen: !get().isFullscreen });
   },
 
@@ -1074,6 +1078,13 @@ export interface PlayItemArgs {
    * with its URL in the row plays without asking the catalog for the item again.
    */
   channel?: Channel;
+  /**
+   * Start over: play from 0 whatever was saved. Neither resume source is read (the point the
+   * core puts in an Xtream stream URL, the saved position), and the saved row is left alone:
+   * the watched mark stays, a failed start keeps the old resume point, and the next save of
+   * this playback overwrites the position (VL-start-over-unwatches).
+   */
+  fromStart?: boolean;
 }
 
 /** True when `ref` is the item playing now or the one the parental gate last let through. */
@@ -1164,6 +1175,12 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
   const poster = args.posterUrl ?? resolved.posterUrl;
   if (poster) out.posterUrl = poster;
   return out;
+}
+
+/** `source` without a resume point: a start over plays from 0. */
+function fromTheStart(source: PlayerSource): PlayerSource {
+  const { resumeSeconds: _drop, ...rest } = source;
+  return rest;
 }
 
 async function withResume(source: PlayerSource): Promise<PlayerSource> {
@@ -1317,7 +1334,8 @@ export async function startItem(
   });
   let source: PlayerSource;
   try {
-    source = await withResume(await resolveSource(args));
+    const resolved = await resolveSource(args);
+    source = args.fromStart ? fromTheStart(resolved) : await withResume(resolved);
   } catch (err) {
     // A newer request won the race: do not clobber it.
     if (seq !== requestSeq) return 'superseded';
@@ -1457,6 +1475,38 @@ export async function refreshPlayingChannel(sourceId?: string): Promise<void> {
   if (!name || !cur?.ref || itemKey(cur.ref) !== itemKey(ref)) return;
   const title = displayChannelName(name, peekSettings()?.stripCountryPrefix) || name;
   if (title !== cur.title) usePlayerStore.setState({ source: { ...cur, title } });
+}
+
+/**
+ * Starts the playing item again from its ref, asking for its stream anew: what a plain retry
+ * cannot do, since that reloads the same URL. For the error screen's actions that change what
+ * the lookup answers (a refreshed source, the Xtream stream format switched to HLS). A channel
+ * row this session holds may carry the old URL, so it is read again from the catalog. Keeps the
+ * queue; false when there is no ref to look up or the lookup fails.
+ */
+export async function replayFromRef(): Promise<boolean> {
+  const s = usePlayerStore.getState();
+  const src = s.source;
+  const ref = src?.ref;
+  if (!src || !ref) return false;
+  try {
+    const kind = await sourceKindOf(ref.sourceId);
+    if (src.isLive && (ref.contentType === 'live' || ref.contentType === 'radio')) {
+      knownChannels.delete(itemKey(ref));
+      const item = await rpc('catalog.item', { ref });
+      if (!('isRadio' in item)) return false;
+      await playChannel(item, kind, { keepList: !!s.zapContext?.listId });
+      return true;
+    }
+    const args: PlayItemArgs = { ref, title: src.title, isLive: src.isLive, isRadio: src.isRadio, sourceKind: kind };
+    if (src.episodeId) args.episodeId = src.episodeId;
+    if (src.subtitle) args.subtitle = src.subtitle;
+    if (src.posterUrl) args.posterUrl = src.posterUrl;
+    await startItem(args, s.queue.length ? { queue: s.queue } : undefined);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 interface TuneOptions {

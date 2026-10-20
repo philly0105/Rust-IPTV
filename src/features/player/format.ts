@@ -1,3 +1,5 @@
+import type { MouseEvent as ReactMouseEvent } from 'react';
+
 /** `1:02:03` / `4:05`. Non-finite or negative values render as `0:00`. */
 export function formatTime(seconds: number | undefined): string {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -11,6 +13,8 @@ export function formatTime(seconds: number | undefined): string {
 /** Seconds the arrow keys skip, both as global shortcuts and on a focused seek bar (Shift: 30 s). */
 export const SEEK_STEP = 10;
 export const SEEK_STEP_LARGE = 30;
+/** Seconds J and L skip, and the bar's 10 s buttons and a double tap on touch (PL-BAR-HIERARCHY). */
+export const SEEK_STEP_JL = 10;
 
 /** Seconds behind the end of the seekable window that still count as live (the element's buffer). */
 export const LIVE_EDGE_SLACK = 6;
@@ -60,6 +64,21 @@ export function focusFromPointer(): boolean {
 export function __resetInputModality(): void {
   lastPointerAt = 0;
   lastKeyAt = 0;
+}
+
+/**
+ * A pointer press on a player control leaves focus off the control (PL-SPACE-CLICKED-CONTROL).
+ * A clicked button used to keep focus, and the browser then gave the next Space to it: click
+ * Fullscreen, then Space to resume, and the player left fullscreen; click Mute, and Space muted
+ * again. Focus goes to the player itself instead (`[data-player-focus]`, no role), where Space is
+ * play/pause and the player's other keys work, as on YouTube or Netflix. Keyboard focus (Tab,
+ * then Enter or Space) is untouched. For buttons only: a range input needs its press.
+ */
+export function pressKeepsFocus(e: ReactMouseEvent<HTMLElement>): void {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const root = e.currentTarget.closest<HTMLElement>('[data-player-focus]');
+  if (root && document.activeElement !== root) root.focus({ preventScroll: true });
 }
 
 /** True when nothing useful holds keyboard focus (it fell back to the document). */

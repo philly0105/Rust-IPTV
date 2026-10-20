@@ -41,7 +41,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
     <div
       role="status"
       className={cn(
-        'flex items-center gap-3 border-t border-edge bg-surface-2 px-4 py-2 text-sm text-fg motion-safe:animate-fade-in',
+        'flex items-center gap-3 border-t border-divider bg-surface-2 px-4 py-2 text-body-sm text-fg motion-safe:animate-fade-in',
         className,
       )}
     >
@@ -50,8 +50,8 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
       <span className="min-w-0 truncate font-medium" title={shown.title}>
         {shown.title}
       </span>
-      {runs.length > 1 && <span className="shrink-0 rounded-sm bg-surface-3 px-1.5 text-xs text-fg-muted tabular-nums">{runs.length}</span>}
-      <span className="ms-auto hidden shrink-0 text-xs text-fg-subtle md:inline">{t('externalStopHint', { player: name })}</span>
+      {runs.length > 1 && <span className="shrink-0 rounded-xs bg-surface-3 px-1.5 text-caption text-fg-muted tabular-nums">{runs.length}</span>}
+      <span className="ms-auto hidden shrink-0 text-caption text-fg-muted md:inline">{t('externalStopHint', { player: name })}</span>
       <button
         type="button"
         onClick={() => {
@@ -60,7 +60,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
         }}
         disabled={stopping}
         aria-busy={stopping || undefined}
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-edge px-2.5 text-xs font-medium text-fg hover:bg-hover disabled:opacity-50"
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-edge bg-surface px-2.5 text-caption font-medium text-fg hover:bg-surface-3 active:bg-pressed disabled:opacity-50 pointer-coarse:min-h-[calc(44rem/15)]"
       >
         <Square className="size-3 fill-current" aria-hidden />
         {t('externalStop', { player: name })}
@@ -71,7 +71,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
             type="button"
             aria-label={t('dismiss')}
             onClick={() => setDismissed(latest.startedAt)}
-            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg pointer-coarse:size-10"
           >
             <X className="size-4" />
           </button>

@@ -55,7 +55,7 @@ MAC rules: a newly typed MAC (`sources.add`, `stalker.test`, a changed MAC in `s
 
 ## Import (`stalker.sync`, importer)
 
-- Live: `itv/get_genres` (the `*` entry is skipped) and `itv/get_all_channels`. When `get_all_channels` is empty or unsupported, the importer pages `itv/get_ordered_list&genre=*` instead. Paged walks (`vod::walk_pages`) read page 1 for the total and the page size, then fetch the remaining pages four at a time in order; the page count follows the total, up to 100,000 rows (a longer total logs a warning), and an empty page ends the list. Episode walks keep their 30-page cap.
+- Live: `itv/get_genres` (the `*` entry is skipped) and `itv/get_all_channels`. When `get_all_channels` is empty or unsupported, the importer pages `itv/get_ordered_list&genre=*` instead. Paged walks (`vod::walk_pages`) read page 1 for the total and the page size, then fetch the remaining pages four at a time in order; the page count follows the total, up to 100,000 rows (a longer total logs a warning), and an empty page ends the list. The pages are read in order as they arrive, so an empty page stops the walk at once: a total the portal overstates costs only the requests already out, and a page past the end that fails is never read. Episode walks keep their 30-page cap.
   - Channels whose genre is unknown go to the `uncategorized` category, named "Uncategorized".
   - Logos are made absolute.
   - `archive_hours` comes from `tv_archive_duration` when `tv_archive` or `enable_tv_archive` is set.
@@ -73,7 +73,7 @@ MAC rules: a newly typed MAC (`sources.add`, `stalker.test`, a changed MAC in `s
 ## Movies and series
 
 - `offset/limit` is mapped onto portal pages. A page holds `max_page_items` rows (14 by default); the size learned from a response is remembered per source and type.
-  - Pages are fetched four at a time. `limit` is clamped to 200. Once the portal has confirmed the page size (`max_page_items`), every page covering the window goes out in one wave; before that, the first page goes alone to learn the size and the rest follow. Pages of the wave past the reported total are dropped, since some portals repeat their last page.
+  - Pages are fetched four at a time. `limit` is clamped to 200. Once the portal has confirmed the page size (`max_page_items`), every page covering the window goes out in one wave; before that, the first page goes alone to learn the size and the rest follow. Pages of the wave past the reported total are dropped, failed or not, since some portals repeat their last page and others fail it; only a failure of a page the window needs fails the listing.
   - Sort `name` maps to `sortby=name`; every other sort maps to `added`.
   - VOD requests send `genre=0` and `category=<id>`, or `*` when there is no category.
 - VOD rows flagged `is_series` get `ref.contentType = series`, so the UI opens the series view.

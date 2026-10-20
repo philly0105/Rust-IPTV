@@ -2,9 +2,11 @@
 //! time instead of one after another, the channel fallback follows the
 //! portal's total instead of stopping at 400 pages (5,600 channels), and a
 //! VOD grid page with a known page size sends its portal pages in one wave.
-//! ST-3: a refresh whose answers did not change keeps the catalog.
+//! ST-3: a refresh whose answers did not change keeps the catalog. A page
+//! past the real end of a list never fails it.
 
 use axum::extract::{Query, State};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use iptv_core::events::BroadcastSink;
@@ -33,6 +35,10 @@ const PAGE: usize = 14;
 struct Portal {
     /// Channels served by the paged fallback.
     channels: AtomicUsize,
+    /// `total_items` the channel list reports instead (0: the real count).
+    reported_channels: AtomicUsize,
+    /// Per list `type`, the first page that answers with an error page.
+    fail_from: Mutex<HashMap<String, usize>>,
     calls: Mutex<HashMap<String, u64>>,
     inflight: AtomicUsize,
     max_inflight: AtomicUsize,
@@ -67,19 +73,30 @@ fn movie(i: usize) -> Value {
 async fn portal_php(
     State(p): State<Arc<Portal>>,
     Query(q): Query<HashMap<String, String>>,
-) -> Json<Value> {
+) -> Response {
     let get = |k: &str| q.get(k).cloned().unwrap_or_default();
     let key = format!("{}.{}", get("type"), get("action"));
     *p.calls.lock().unwrap().entry(key.clone()).or_default() += 1;
     let page = get("p").parse::<usize>().unwrap_or(1).max(1);
     let listed = key.ends_with(".get_ordered_list");
+    let failing = p.fail_from.lock().unwrap().get(&get("type")).copied();
+    if listed && failing.is_some_and(|from| page >= from) {
+        return Html("<html>Broken</html>").into_response();
+    }
     if listed {
         let now = p.inflight.fetch_add(1, Ordering::SeqCst) + 1;
         p.max_inflight.fetch_max(now, Ordering::SeqCst);
         tokio::time::sleep(Duration::from_millis(40)).await;
     }
     let js = match key.as_str() {
-        "itv.get_ordered_list" => page_of(p.channels.load(Ordering::SeqCst), page, channel),
+        "itv.get_ordered_list" => {
+            let mut js = page_of(p.channels.load(Ordering::SeqCst), page, channel);
+            let reported = p.reported_channels.load(Ordering::SeqCst);
+            if reported > 0 {
+                js["total_items"] = json!(reported);
+            }
+            js
+        }
         "radio.get_ordered_list" => page_of(STATIONS, page, station),
         "vod.get_ordered_list" => page_of(MOVIES, page, movie),
         "series.get_ordered_list" => json!({"total_items": 0, "max_page_items": PAGE, "data": []}),
@@ -89,7 +106,7 @@ async fn portal_php(
     if listed {
         p.inflight.fetch_sub(1, Ordering::SeqCst);
     }
-    Json(json!({ "js": js }))
+    Json(json!({ "js": js })).into_response()
 }
 
 struct Env {
@@ -228,6 +245,40 @@ async fn a_known_page_size_sends_a_grid_page_in_one_wave() {
         )
         .await;
     assert_eq!(last["items"].as_array().unwrap().len(), MOVIES - 84);
+}
+
+/// GPT review (stalker-pages-beyond-total): with a known page size a grid
+/// page asks for all its portal pages at once, before the total is known,
+/// and a page past the real end that failed failed the whole grid page.
+#[tokio::test]
+async fn a_failing_page_past_the_total_does_not_fail_a_grid_page() {
+    let e = env(CHANNELS).await;
+    e.portal.fail_from.lock().unwrap().insert("vod".into(), 9);
+    // The first call learns the page size; the second sends pages 7 to 9
+    // in one wave, and page 9 is past the 100 movies.
+    let args = json!({"sourceId": SID, "query": {"offset": 84, "limit": 42}});
+    for _ in 0..2 {
+        let last = e.ok("stalker.movies", args.clone()).await;
+        assert_eq!(last["items"].as_array().unwrap().len(), MOVIES - 84);
+        assert_eq!(last["total"], MOVIES);
+    }
+    assert_eq!(e.portal.count("vod.get_ordered_list"), 5);
+}
+
+/// GPT review (stalker-empty-page-termination): a list whose total is far
+/// too high asked for every page it reported before looking for an empty
+/// one, and a failure past the real end failed the import. The walk now
+/// stops at the first empty page.
+#[tokio::test]
+async fn a_stale_total_stops_at_the_first_empty_page() {
+    let e = env(30).await;
+    let stale = 100 * PAGE;
+    e.portal.reported_channels.store(stale, Ordering::SeqCst);
+    e.portal.fail_from.lock().unwrap().insert("itv".into(), 5);
+    e.ok("stalker.sync", json!({"sourceId": SID})).await;
+    assert_eq!(e.count_rows("live").await, 30);
+    let calls = e.portal.count("itv.get_ordered_list");
+    assert!(calls < 20, "{calls} channel pages asked for 3 real ones");
 }
 
 /// ST-3: Stalker refreshes always rewrote live and radio. Unchanged answers

@@ -20,8 +20,7 @@
   <a href="https://github.com/philly0105/Rust-IPTV/actions/workflows/ci.yml"><img src="https://github.com/philly0105/Rust-IPTV/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
 </p>
 
-<!-- The screenshots are commented out until the files exist; docs/screenshots/README.md lists them.
-![The Tsrust IPTV dashboard with a featured title, Continue watching and channel rails](docs/screenshots/home.png) -->
+![The Tsrust IPTV dashboard with a featured title, Continue watching and channel rails](docs/screenshots/home.png)
 
 No channels, films or other content come with the app. It plays the sources you add.
 
@@ -53,7 +52,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 2. Add a source: paste a playlist URL (or choose an M3U file), enter an Xtream server, username and password, or a Stalker portal address and MAC.
 3. Open Live TV and pick a channel, or open the TV guide. A card points out search and the command palette; Show me around on it tours your sources, My List and search.
 
-<!-- ![The Sources page with an M3U playlist, an Xtream account and a Stalker portal](docs/screenshots/sources.png) -->
+![The Sources page with an M3U playlist, an Xtream account and a Stalker portal](docs/screenshots/sources.png)
 
 ## What you can do
 
@@ -66,9 +65,9 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - Favorites and Recently watched sit at the top of each source's groups, in Live TV and Radio. Type a channel number in the guide to jump to its row.
 - Make your own channel lists across sources, or add a whole group at once, and rename or hide channels without changing the provider's data.
 
-<!-- ![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png) -->
+![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png)
 
-<!-- ![The TV guide grid with the now line](docs/screenshots/guide.png) -->
+![The TV guide grid with the now line](docs/screenshots/guide.png)
 
 ### Watch movies and series
 
@@ -77,7 +76,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - Episodes in M3U playlists are grouped into series and seasons, like Xtream and Stalker series.
 - With your own TMDB API key, detail pages show plots, cast, trailers, ratings and similar titles.
 
-<!-- ![A movie's detail page with artwork, Resume and My List](docs/screenshots/movie-detail.png) -->
+![A movie's detail page with artwork, Resume and My List](docs/screenshots/movie-detail.png)
 
 ### Control playback
 
@@ -105,7 +104,7 @@ Record a programme or a whole series from the guide, or the next 30 minutes to 3
 - A web remote in another browser tab, or on your phone after scanning a QR code in the desktop app: change channels, type a number, play, pause, seek and set the volume.
 - On phones, a tab bar at the bottom (Home, Live TV, Guide, Search and More), a compact mini player that stays above it, and tap-to-show controls. Narrow windows can hide the sidebar.
 
-<!-- ![The phone layout](docs/screenshots/phone.png) -->
+![The phone layout](docs/screenshots/phone.png)
 
 ### Lock content and keep your data private
 

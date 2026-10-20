@@ -1684,7 +1684,8 @@ async fn url_entries_without_channel_text_import_from_the_url() {
 }
 
 /// Per-channel guide shifts travel as `tsrustEpgShifts`: imported under the
-/// entry's source (zero and out-of-range rows skipped) and exported again.
+/// entry's source (zero and out-of-range rows skipped, including numbers and
+/// strings that saturate to i64::MIN) and exported again.
 #[tokio::test]
 async fn channel_guide_shifts_round_trip() {
     let (_d, st) = app(false).await;
@@ -1698,7 +1699,11 @@ async fn channel_guide_shifts_round_trip() {
             "userState": { "favorites": [], "recentlyViewed": [], "tsrustEpgShifts": [
                 { "contentType": "live", "itemId": "a", "shiftMinutes": 90 },
                 { "contentType": "live", "itemId": "b", "shiftMinutes": 0 },
-                { "contentType": "live", "itemId": "c", "shiftMinutes": 5000 }
+                { "contentType": "live", "itemId": "c", "shiftMinutes": 5000 },
+                { "contentType": "live", "itemId": "d", "shiftMinutes": i64::MIN },
+                { "contentType": "live", "itemId": "e", "shiftMinutes": "-1e30" },
+                { "contentType": "live", "itemId": "f", "shiftMinutes": -720 },
+                { "contentType": "live", "itemId": "g", "shiftMinutes": -721 }
             ] }
         }]
     })
@@ -1707,18 +1712,22 @@ async fn channel_guide_shifts_round_trip() {
     let rows = st
         .db_call(|c| {
             let mut s = c.prepare(
-                "SELECT item_id, shift_minutes FROM epg_channel_shift WHERE source_id = 'm3u-s'",
+                "SELECT item_id, shift_minutes FROM epg_channel_shift WHERE source_id = 'm3u-s'
+                 ORDER BY item_id",
             )?;
             let rows = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)
         })
         .await
         .unwrap();
-    assert_eq!(rows, vec![("a".to_string(), 90)]);
+    assert_eq!(rows, vec![("a".to_string(), 90), ("f".to_string(), -720)]);
     let exported = export(&r, &st, false).await;
     assert_eq!(
         exported["playlists"][0]["userState"]["tsrustEpgShifts"],
-        json!([{ "contentType": "live", "itemId": "a", "shiftMinutes": 90 }])
+        json!([
+            { "contentType": "live", "itemId": "a", "shiftMinutes": 90 },
+            { "contentType": "live", "itemId": "f", "shiftMinutes": -720 }
+        ])
     );
 }
 

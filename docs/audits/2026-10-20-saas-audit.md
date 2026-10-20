@@ -11,15 +11,15 @@ Round 1 graded nine areas and filed 142 findings: 1 critical, 23 high, 78 medium
 | Area | Grade | Findings | Critical and high | Fixed | Partial | Not done | Owner decision |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | DS: design system and kit | C+ | 17 | 4 | 15 | 2 | 0 | 0 |
-| SH: shell and Home | B- | 19 | 4 | 17 | 2 | 0 | 0 |
-| LG: Live TV, guide, multi-view and lists | B- | 19 | 3 | 19 | 0 | 0 | 0 |
+| SH: shell and Home | B- | 19 | 4 | 16 | 3 | 0 | 0 |
+| LG: Live TV, guide, multi-view and lists | B- | 19 | 3 | 17 | 2 | 0 | 0 |
 | VL: movies, series, search and library | B- | 22 | 3 | 19 | 3 | 0 | 0 |
 | SS: sources, settings and onboarding | B- | 20 | 1 | 19 | 1 | 0 | 0 |
 | PL: player | B- | 15 | 4 | 15 | 0 | 0 | 0 |
-| SR: ship readiness | C | 13 | 2 | 7 | 5 | 0 | 1 |
+| SR: ship readiness | C | 13 | 2 | 6 | 6 | 0 | 1 |
 | FW: wiring, front to back | C+ | 8 | 2 | 7 | 0 | 1 | 0 |
 | CB: competitive benchmark | B | 9 | 1 | 6 | 2 | 1 | 0 |
-| Total | | 142 | 24 | 124 | 15 | 2 | 1 |
+| Total | | 142 | 24 | 120 | 19 | 2 | 1 |
 
 The bugs that mattered most:
 
@@ -31,7 +31,7 @@ The bugs that mattered most:
 - VL-tmdb-deadend (high). More like this and Known for listed titles the source did not carry, and each one opened an empty search.
 - SR-1 and SR-2 (high). There was nothing to download, and no distributable carried third-party licence notices.
 
-What changed, in 55 commits on audit/saas-polish (884 files) plus 18 Rust commits from saas/rustfix-a and saas/rustfix-b:
+What changed, in 55 commits on audit/saas-polish (884 files) plus 22 Rust commits from saas/rustfix-a and saas/rustfix-b:
 
 - A new design system, Night Tuner 2, with new dark, light and OLED palettes. Containers use a quiet edge token, and the 3:1 border is kept for form controls. Hover and pressed states are see-through layers, the selected item is a neutral fill with the tuning tick, and amber is kept for primary actions, progress, focus and the playing mark. LIVE and danger have solid fills, and there is a type scale from caption to display, five radii, three elevations per theme, and motion tokens with exit animations. Inter and Barlow Semi Condensed are self-hosted. The kit in `src/ui` gained Switch, Checkbox, RadioGroup, SegmentedControl, Slider, FilterChip, a rewritten Tooltip, Page, PageHeader, SectionHeader, LivePill, MetaLine, WatchedChip and SourceMonogram, all described in `docs/architecture/design-system.md`.
 - One brand mark, an amber tuning dial, for the exe, installer, tray, favicon and web icons. The masters are in `docs/brand/`, and `tools/brand-icons.mjs` regenerates every icon. The web build shows a splash while it loads, and the manifest has maskable icons and shortcuts.
@@ -41,9 +41,9 @@ What changed, in 55 commits on audit/saas-polish (884 files) plus 18 Rust commit
 - Sources and settings have a discard guard on the source dialogs, a grouped settings navigation, About as a product page, new source cards, and a one-card first-run tour.
 - The player has fixes for the focus and click bugs above, error screens whose buttons fit the failure, a control bar with a 48 px play button and skip buttons, an unmute prompt, and a phone mini bar.
 - For shipping there is a README written as a product page with six screenshots, a user guide, CHANGELOG, CONTRIBUTING and SECURITY files, a release workflow for the installer and a multi-arch image, a notices generator plus IPTVnator's NOTICE, a Caddy recipe for HTTPS and a password in `deploy/`, and CI jobs for advisories and licences, the minimum Rust version, the Docker image, the desktop build and Playwright.
-- In Rust, M3U movies play, old M3U catalogs re-import with series, group locks follow episodes, and the phone remote's channel list stays current. Fixes from the GPT-6.1 review keep M3U state through a token rotation and staged playlist text through a crash, limit trust to a source's exact host and port, check the Origin's scheme and port, resume proxy reads only with a validator, apply guide shifts to provider guides, record in server mode only over the guarded HTTP copy, and refuse `file:` and UNC paths from playlists.
+- In Rust, M3U movies play, old M3U catalogs re-import with series, group locks follow episodes, and the phone remote's channel list stays current. Fixes from the GPT-6.1 review keep M3U state through a token rotation and staged playlist text through a crash, limit trust to a source's exact host and port, check the Origin's scheme and port, resume proxy reads only with a validator, apply guide shifts to provider guides, record in server mode only over the guarded HTTP copy, refuse `file:` and UNC paths from playlists, and let refreshes queued behind a sync share one import.
 
-After round 1, a second set of critics scored 69 screens again. The average rose from 5.0 to 7.0, the phone screens from 4.0 to 6.7, and the empty first-run dashboard from 4 to 8. Every screen gained between 1 and 4 points. The lowest after round 1 were the actor page (5), the movie player, Radio, the light guide and the phone guide (5.5 each). Round 2 then filed 99 issues, 10 of them high, and fixed 86. Nothing was scored after round 2 or after the GPT-6.1 fixes, so the scores describe the branch before those fixes.
+After round 1, a second set of critics scored 69 screens again. The average rose from 5.0 to 7.0, the phone screens from 4.0 to 6.7, and the empty first-run dashboard from 4 to 8. Every screen gained between 1 and 4 points. The lowest after round 1 were the actor page (5), the movie player, Radio, the light guide and the phone guide (5.5 each). Round 2 then filed 99 issues, 10 of them high, and fixed 85. Nothing was scored after round 2 or after the GPT-6.1 fixes, so the scores describe the branch before those fixes.
 
 What still stands between this branch and a public release:
 
@@ -51,10 +51,10 @@ What still stands between this branch and a public release:
 - The version (0.2.0 or 0.3.0) is undecided, and no tag exists.
 - The installer is unsigned, and the updater has a placeholder feed and no key.
 - Private vulnerability reporting is off, and the ghcr package may start private.
-- cargo-deny reports six advisories in rustls 0.23.45 and quick-xml 0.37.5.
-- CI run 2 failed Windows clippy on five new lints.
-- The Rust fixes from the GPT-6.1 review have not been compiled yet, and one of them (refresh-admission-race) was still being written.
-- Neither CI run included Playwright, which lives in e2e.yml and starts on pull requests, on Mondays and by hand. Every spec change was checked only against the screenshot mock.
+- cargo-deny reports eight advisories: four in rustls 0.23.45, two in quick-xml 0.37.5, one in rustls-webpki 0.103.15 and one in webpki-roots 1.0.9.
+- The Windows Rust job has not passed yet. In CI run 4 it failed clippy on ten lints in iptv-core.
+- The Rust fixes on saas/rustfix-a have not been compiled yet. saas/rustfix-b has: it builds and passes its tests on Linux (CI runs 3 and 4).
+- No CI run included Playwright, which lives in e2e.yml and starts on pull requests, on Mondays and by hand. Every spec change was checked only against the screenshot mock.
 - Server mode still has no login of its own. The Caddy recipe puts basic auth in front of it, and that setup is untested in Safari.
 
 ## Method
@@ -71,7 +71,7 @@ GPT-6.1 then reviewed commit `f4549d1` in 15 slices: four Rust slices, six front
 
 Nothing on gmk1 can build Rust. Every Rust change was written without a compiler and then checked by a separate review that read each changed line against the definitions it uses, for rustc, clippy and rustfmt. The branch was pushed to GitHub, and CI compiled all of the Rust for the first time (see CI state at publication).
 
-The machine lost power once, at about 21:55 UTC. The loss corrupted the git object store. Two merge commits were rebuilt from the branches they merged, which were intact, and no work was lost. Two Rust fixers were cut off by it, and their uncommitted work was saved as WIP commits (`5b065ff`, `f816df3`). Earlier, at about 19:50, four round-2 fixers had stopped before finishing, and their work was saved the same way (`f129c2c`, `4cb521a`, `81468a1`, `54c69b2`). Each next fixer reviewed its WIP commit and finished it. The live round-2 fixer's final report was cut off in its journal, so its commit message (`1b577ab`) is the record of that work.
+The machine lost power once, at about 21:55 UTC. The loss corrupted the git object store. Two merge commits were rebuilt from the branches they merged, which were intact, and no work was lost. Two Rust fixers were cut off by it, and their uncommitted work was saved as WIP commits (`5b065ff`, `f816df3`). Earlier, at about 20:50, four round-2 fixers had stopped before finishing, and their work was saved the same way (`f129c2c`, `4cb521a`, `81468a1`, `54c69b2`). Each next fixer reviewed its WIP commit and finished it. The live round-2 fixer's final report was cut off in its journal, so its commit message (`1b577ab`) is the record of that work.
 
 The statuses below come from each fixer's report, checked against the git history. For the items under Known remaining issues, I checked the code at `e8eea35` myself.
 
@@ -199,10 +199,10 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 | SH-welcome-generic | First-run Home is a generic empty state | High | Fixed | `Welcome.tsx` with the mark, the source-kind tiles, Import a backup and a privacy line. The add dialog opens in place. |
 | SH-home-empty-m3u | Home stays almost empty for M3U sources | High | Fixed | An On now rail with programme art, a channels rail, and Get started tiles while Home is quiet. |
 | SH-titlebar-theme | The desktop title bar ignores the theme | High | Partial | ThemeSync sets the window theme. With an explicit theme opposite to the OS, the bar shows the OS colour for a moment at launch; fixing that needs window setup in Rust. |
-| SH-rail-ia | Flat rail of 12 links | Medium | Partial | The rail is grouped into Watch, Library and Sources, and each source remembers whether it is open. There are no top-level Live TV, Movies and Series links; phones get a Live TV tab. |
+| SH-rail-ia | Flat rail of 12 links | Medium | Partial | The rail is grouped into Watch, Library and Sources. Sources are an accordion, and the rail remembers which one was left open. There are no top-level Live TV, Movies and Series links; phones get a Live TV tab. |
 | SH-native-tooltips | Icon chrome uses native title tooltips | Medium | Fixed | Kit tooltips on all shell chrome. |
 | SH-hero-skeleton-flash | A hero skeleton flashes on every launch | Medium | Fixed | Home remembers that the hero is empty and skips its skeleton. |
-| SH-pwa-manifest | Manifest and icons not production-ready | Medium | Fixed | Maskable and opaque Apple icons, an id, a description and shortcuts. The manifest has no screenshots. |
+| SH-pwa-manifest | Manifest and icons not production-ready | Medium | Partial | Maskable and opaque Apple icons, an id, a description and shortcuts. The brand fixer skipped the manifest screenshots, and `index.html` has no og:title, og:description or og:image for shared server links. |
 | SH-no-webfont | No brand type outside Windows and macOS | Medium | Fixed | Same work as DS-FONTS-PLATFORM. |
 | SH-ctrl-r-browser | Ctrl+R opens Recently watched in the browser | Medium | Fixed | Ctrl+R is a desktop-only shortcut; the browser reloads. |
 | SH-offline-stack | Three error surfaces when the server is down | Medium | Fixed | One connection banner after 3 s offline, with Try again. |
@@ -226,7 +226,7 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 | LG-05 | Mini player Expand can open another source | Medium | Fixed | `expandPath()` opens the playing channel's own page, Favorites and Recently watched views included. Round 2 fixed it for recordings and the guide band. |
 | LG-06 | The ribbon header sticks on the last hovered programme | Medium | Fixed | Hover previews, a click pins, and Back to now returns. |
 | LG-07 | The list page keeps the old letterboxed stage | Medium | Fixed | Lists use the shared LiveStageColumn. |
-| LG-08 | Catch-up goes by three names | Medium | Fixed | "Catch-up" in every locale. |
+| LG-08 | Catch-up goes by three names | Medium | Partial | The live namespace says "Catch-up" in every locale ("Browse catch-up" in menus). The player's channel panel still says "Browse archive" (`player.json` browseArchive, rendered in `ChannelPanelGuide.tsx`), and source settings say "Archive days". |
 | LG-09 | Catch-up plays in the corner mini player | Medium | Fixed | The catch-up page has its own 16:9 stage. |
 | LG-10 | A guide with no EPG looks broken | Medium | Fixed | An empty-state card with Add guide. |
 | LG-11 | Native selects in the guide | Medium | Fixed | A ScopePicker combobox, whose list loads lazily since round 2. Sources without live channels are not offered. |
@@ -236,7 +236,7 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 | LG-15 | Selection and "now" colours vary by component | Medium | Fixed | One selected and one playing style. |
 | LG-17 | About three rows of list room on a playing phone | Medium | Fixed | The phone ribbon folds to one line. |
 | LG-19 | The multi-view picker can't browse groups or lists | Medium | Fixed | A Show picker for groups, favorites and lists. |
-| LG-16 | Hand-rolled menus, search fields and badges | Low | Fixed | Search fields and LIVE pills use the kit. The cursor menu copies the kit Menu but stays its own component, because the kit Menu opens only from a trigger. |
+| LG-16 | Hand-rolled menus, search fields and badges | Low | Partial | Search fields and LIVE pills use the kit. The channel menu was not moved onto the kit Menu: the cursor menu (`ContextMenu.tsx`) copies its look but stays its own component, because the kit Menu opens only from a trigger. |
 | LG-18 | Hidden now dot, no current time, rows ignore density | Low | Fixed | A now pill in the ruler; rows follow density and UI scale. |
 
 ### VL: movies, series, search and library (B-)
@@ -322,7 +322,7 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 | SR-5 | Placeholder installer identity | Medium | Owner decision | Copyright, homepage and descriptions are set. Identifier, publisher, binary name, NSIS languages and the `iptv://` scheme need the owner (checklist item 10). |
 | SR-6 | The updates panel points users at the README | Medium | Fixed | |
 | SR-7 | The README reads as a developer manual | Medium | Fixed | A product page with six screenshots (`e8eea35`); the manual moved to `docs/user-guide.md`. |
-| SR-8 | Minimal PWA manifest and meta | Low | Fixed | `package.json` still describes the app as "IPTVnator rebuilt on Tauri 2 with a Rust core". |
+| SR-8 | Minimal PWA manifest and meta | Low | Partial | Icons, id, shortcuts and the description are done (see SH-pwa-manifest). The manifest has no screenshots, and `package.json` still describes the app as "IPTVnator rebuilt on Tauri 2 with a Rust core". |
 | SR-9 | What's new shows desktop items in the browser | Low | Fixed | |
 | SR-10 | CI never builds the image, runs e2e or checks advisories | Low | Fixed | ci.yml gained cargo-deny, msrv, docker and tauri-build jobs; e2e.yml runs Playwright; Dependabot covers npm, cargo and Actions. |
 | SR-11 | No OCI labels; Debian 12 base | Low | Partial | Labels added. The images are still on bookworm. |
@@ -358,15 +358,15 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 
 ## GPT-6.1 review of f4549d1
 
-84 findings: 6 high, 52 medium, 5 low, and 21 translation fixes without a severity. 77 are fixed, 3 partly, 1 was still being fixed when this was written, 1 was wrong, and 2 were never assigned. Commits marked (a) or (b) are on saas/rustfix-a or saas/rustfix-b.
+84 findings: 6 high, 52 medium, 5 low, and 21 translation fixes without a severity. 78 are fixed, 3 partly, 1 was wrong, and 2 were never assigned. Commits marked (a) or (b) are on saas/rustfix-a or saas/rustfix-b.
 
 | Group | Findings | Fixed | Partial | Other | Commits | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Rust core | 3 | 2 | 0 | 1 in progress | `5b065ff`, `936d1e8`, `da63250` (a) | playlist-file-after-commit is the same bug as staged-text-crash-loss. An i64::MIN guide shift in a backup no longer panics. refresh-admission-race (two refreshes queued behind a partial sync each run a full import) was still with the fixer. |
+| Rust core | 3 | 3 | 0 | | `5b065ff`, `936d1e8`, `da63250`, `5db5444` (a) | playlist-file-after-commit is the same bug as staged-text-crash-loss. An i64::MIN guide shift in a backup no longer panics. Two refreshes queued behind a partial sync now share one import instead of running two (refresh-admission-race), with a new test in `crates/iptv-core/tests/sources_crud.rs`. |
 | Rust M3U | 7 | 6 | 1 | | `5b065ff`, `936d1e8`, `0538d16`, `8fec6de` (a) | Favorites, positions and locks follow episodes through a token rotation; staged text survives a crash; The Office [US] and [UK] stay apart; plain tvg-names name the show. Episode ids no longer follow playlist order, but when the first-by-name version of an episode leaves, the next one takes its id. |
-| Rust hosts | 4 | 4 | | | `261008d`, `224b321`, `a253612`, `9f37a42` (b) | Trust only the source's exact host and port; the Origin must match scheme, host and port; the proxy resumes only with a validator; windowStart applies after an early reveal. |
-| Rust portals | 6 | 5 | 1 | | `1ebb34e`, `5876b99`, `6e9dda1`, `5470f5d`, `e3b7e93` (b) | Long list requests get a read timeout longer than their head wait; Stalker scrubs credentials in arrays and stops at the first empty page. guide-search-shift-window is partial. Provider guides now follow guide shifts, which moves catch-up requests (checklist item 12). |
-| Security | 5 | 5 | | | `e90b21d`, `e32bb9d`, `cda5adf` (a), `261008d` (b), `bbf4544`, `9fb6f69` | Server mode records only over the guarded HTTP copy. Playlists can't send `file:` or UNC paths to native players. Xtream headers export only with secrets, and the UI no longer calls a backup without passwords safe to share. Cleared searches stay cleared across tabs. |
+| Rust hosts | 4 | 4 | | | `261008d`, `224b321`, `a253612`, `9f37a42`, `0b8964c` (b) | Trust only the source's exact host and port; the Origin must match scheme, host and port; the proxy resumes only with a validator; windowStart applies after an early reveal. |
+| Rust portals | 6 | 5 | 1 | | `1ebb34e`, `5876b99`, `6e9dda1`, `5470f5d`, `e3b7e93`, `22612f3` (b) | Long list requests get a read timeout longer than their head wait; Stalker scrubs credentials in arrays and stops at the first empty page. guide-search-shift-window is partial: hits a channel's shift moves out of the window no longer count toward the limit (`22612f3`), but one gap remains (see follow-ups). Provider guides now follow guide shifts, which moves catch-up requests (checklist item 12). |
+| Security | 5 | 5 | | | `e90b21d`, `e32bb9d`, `cda5adf`, `789fce2` (a), `261008d` (b), `bbf4544`, `9fb6f69` | Server mode records only over the guarded HTTP copy, and a recording it refuses at start gets the error code `serverHttpOnly` (`789fce2`). Playlists can't send `file:` or UNC paths to native players. Xtream headers export only with secrets, and the UI no longer calls a backup without passwords safe to share. Cleared searches stay cleared across tabs. |
 | Docs and CI | 3 | 3 | | | `0dead7b` | Backup, recording-delete and NOTICE claims corrected. |
 | e2e | 12 | 11 | | 1 wrong | `4346c29`, `d7f9c02` | xtream-password-role was wrong, because Playwright 1.64 gives a password input the textbox role. New specs: m3u-vod, phone-tabs and welcome. All were checked only against the screenshot mock. |
 | Kit | 6 | 6 | | | `806fbe7` | A 3:1 ring on the selected segment, glass focus and track, hoverable tooltips, forced-colors marks, keyboard tooltips and Escape-back. |
@@ -377,7 +377,7 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 | Settings and sources | 2 | 0 | | 2 not assigned | none | optional-name-blocks-paste and guide-url-escapes-discard-guard were left out of the fix assignments (see follow-ups). |
 | Translations, European | 11 | 11 | | | `7b03743` | German and Hungarian formal address, Dutch informal, Brazilian Portuguese terms, Polish, Belarusian and Turkish wording. |
 | Translations, other | 10 | 10 | | | `7b03743` | Arabic duals, the server and web-edition messages in Arabic, Darija, Korean and Chinese, and one name each for Continue watching, Favorites and the palette. |
-| Total | 84 | 77 | 3 | 4 | | |
+| Total | 84 | 78 | 3 | 3 | | |
 
 ## Round 2 issues
 
@@ -391,9 +391,9 @@ The round-2 critics and reviewers filed 99 issues on the integrated branch: 10 h
 | Settings and sources | 18 | 15 | 3 | 0 | `4cb521a`, `7aaf2e5`, `e095f09` | "Settings" no longer appears twice on phones; a View button replaces three bordered selects; light accents got bright fills. Partial: the Toggle description wraps one word alone, the image cache hint is still long, and What's new has no release date. |
 | Movies, series and library | 19 | 17 | 1 | 1 | `81468a1`, `aa8b417` | The watch view shows the title once; recordings show their own cards; search Top results, Downloads retry and the Stats chart are fixed; Search, Settings and category pages no longer load the player controls. Partial: Live and Guide still load the 69 kB Controls chunk. Not done: Poster size still skips Home's and My List's rails. |
 | Live TV and guide | 19 | 18 | 0 | 1 | `54c69b2`, `1b577ab` | Opaque airing cells with a red now stub, so the now line no longer strikes through titles; the idle card and ribbon describe one channel; the archive layout; the phone guide fits two control rows; portaled menus; the scope picker loads lazily. Not done: `/lists` still opens the first list, a product decision. |
-| Translations | 1 | 1 | 0 | 0 | `7b03743` | German formal address in the new strings. |
+| Translations | 1 | 0 | 1 | 0 | `7b03743` | German formal address in the new strings is fixed. The other two parts are not: de and pl still give recentStations nearly the same text as lastStation, and whether to localise "Rec" is undecided (see follow-ups). |
 | Not assigned | 1 | 0 | 0 | 1 | | Hero slide controls come before the slide's own actions in tab order. |
-| Total | 99 | 86 | 7 | 6 | | |
+| Total | 99 | 85 | 8 | 6 | | |
 
 ## Owner decisions and release checklist
 
@@ -407,7 +407,7 @@ Settle these before the first public tag. "Now" is the state at `e8eea35` with t
 | 4 | Updater key and feed | `tauri.conf.json` points at `https://example.invalid/tsrust-iptv/latest.json` with an empty pubkey. The updater feature is off, and release.yml sets `includeUpdaterJson: false`. | Generate a key, host `latest.json`, turn on updater artifacts, and enable the feature. |
 | 5 | Private vulnerability reporting | Off. SECURITY.md asks reporters to open a detail-free "Security contact" issue. An HTML comment in it holds the `gh api` command and the replacement paragraph. | Turn it on and swap in the paragraph. |
 | 6 | ghcr package visibility | No image has been pushed. New packages may start private. The arm64 image job runs on `ubuntu-24.04-arm`, which is free only while the repository is public. | After the first push, make the tsrust-iptv package public. When publishing, wait for the image jobs, or re-run "Image latest tag" afterwards. |
-| 7 | Advisories | cargo-deny reports six advisories, four in rustls 0.23.45 and two in quick-xml 0.37.5. The advisories job doesn't fail CI. | `cargo update -p rustls` to 0.23.46 or later (lockfile only). Raise quick-xml from 0.37 to 0.41 or later in Cargo.toml and adapt `crates/iptv-core/src/epg/xmltv.rs`. The lockfile already has quick-xml 0.42.0 for another dependency. |
+| 7 | Advisories | cargo-deny reports eight advisories: RUSTSEC-2026-0346 to 0349 in rustls 0.23.45 (fixed in 0.23.46), 0194 and 0195 in quick-xml 0.37.5 (fixed in 0.41.0), 0382 in rustls-webpki 0.103.15 (fixed in 0.103.16) and 0381 in webpki-roots 1.0.9 (fixed in 1.0.10). The advisories job doesn't fail CI. | `cargo update -p rustls -p rustls-webpki -p webpki-roots` (lockfile only). Raise quick-xml from 0.37 to 0.41 or later in Cargo.toml and adapt `crates/iptv-core/src/epg/xmltv.rs`. The lockfile already has quick-xml 0.42.0 for another dependency. |
 | 8 | mpv bundling and its GPL notice | The release builds the standard installer only, and the built-in player is the default. `vendor/mpv/LICENSE.txt` offers source through the issue tracker "or the contact address published with the release", and no address is published. | Decide whether to publish an installer with mpv. If so, attach the mpv, FFmpeg and libplacebo sources or honour the written offer, and publish a contact address or drop that phrase. |
 | 9 | Stalker sort menu | Top rated is gone from Stalker landings (`42b3a91`). CategoryGridPage still offers Rating and Year sorts and the direction flip for Stalker, but `stalker/vod.rs` knows only name and added, so those sorts silently fall back to Added. | Limit the menu to Added and Name for Stalker (choose the direction rule and the copy), or add the sorts in the core. |
 | 10 | Installer identity | Identifier `com.philly.tsrustiptv` fixes the data folder; publisher "philly"; the exe is `iptv-tauri.exe`; the installer is English only; the app registers the generic `iptv://` scheme. | Settle all of them before the first public build. The identifier can't change afterwards without moving users' data. |
@@ -433,9 +433,10 @@ Product and design calls the fixers left open, none of which blocks a release:
 
 Rust, landing from saas/rustfix-a and saas/rustfix-b:
 
-- refresh-admission-race in `crates/iptv-core/src/sources/mod.rs` (around line 1958) had no commit yet when this was written; the fixer on saas/rustfix-a was still working on it.
-- Guide search with shifts is partial (`crates/iptv-core/src/epg/search.rs`, `docs/architecture/guide-search.md`). A programme that only a channel's own shift or tvg-shift moves into the window is still missed, and a search can return fewer hits than its limit. A repair pass on saas/rustfix-b was working on it.
-- The Origin check now needs `X-Forwarded-Proto` from an HTTPS reverse proxy (`224b321`). Caddy sends it, nginx doesn't by default. `server.md` and SECURITY.md say so; `deploy/README.md` and `docs/user-guide.md` don't yet. The same repair pass had this.
+- Guide search with shifts is partial (`crates/iptv-core/src/epg/search.rs`, `docs/architecture/guide-search.md`). A programme that only a channel's own shift or tvg-shift moves into the window is still missed. The full fix needs every channel's shift before the walk, and guide-search.md lists the steps. Since `22612f3` a source where many channels have a negative shift searches more slowly, because the walk reads the row and shift of every channel it skips.
+- The Origin check now needs `X-Forwarded-Proto` and the Host with its port from an HTTPS reverse proxy (`224b321`); without them, writes and `/api/events` get 403. Caddy sends both. deploy/README.md and docs/user-guide.md give nginx users the two `proxy_set_header` lines (`0b8964c`).
+- The compile review of the core-security fixes on saas/rustfix-a found no compile problems and left three logic notes. A refresh admitted before an edit or a cancel can still import twice, as it could before `5db5444` (`crates/iptv-core/src/sources/mod.rs`, around line 1400); the review gives a fix. Stalker connection headers and M3U source headers are still exported without secrets, unlike Xtream's since `cda5adf` (`crates/iptv-core/src/backup/export.rs`, around lines 290 and 603). The comment on the `file:` refusal in `crates/iptv-core/src/player/args.rs` (around line 117) claims more than the check does: a bare drive path from a playlist still reaches mpv or VLC, and only network shares are closed.
+- Server mode still reports recording as unsupported without mpv and tells the user to install it, although the server no longer runs mpv (`crates/iptv-core/src/recording/mod.rs`, around line 587). The repair fixer skipped it because e2e/guide.spec.ts and e2e/main-flow.spec.ts would then try to record the HLS sample, which the server refuses. `docs/architecture/recording.md` and `server.md` describe the gap. The fix changes those two specs first, then `capabilities()` and the `SERVER_NO_MPV` fallbacks in `recording/mod.rs` and `recording/rules.rs`.
 - The compile review of saas/rustfix-a found two edge cases around staged playlist text. A merge restore of a backup can be overwritten by an older staged update that failed to move (`crates/iptv-core/src/backup/import.rs`, around line 1297). A source switched from pasted text to a URL with a failed move still pending fails every refresh (`crates/iptv-core/src/m3u/importer.rs`, around line 759). The review gives a fix for each.
 - Episode ids are only partly stable (`crates/iptv-core/src/m3u/series.rs`). The full fix reuses the previous import's ids and needs a compiler.
 - `IMPORT_VERSION` 4 makes every M3U source re-import once after the upgrade. Series ids for shows with country tags, and episode ids for extra versions of an episode, change once, so per-episode positions and watched marks on those are lost once. No version has been released, so only development databases are affected.
@@ -455,21 +456,26 @@ Frontend:
 - The light theme's chrome is flat, with a grey header over a white rail and white panes (`src/shell/Rail.tsx`, `Header.tsx`).
 - Smaller kit gaps remain. The multi-view empty-state layout picker (`src/features/multiview/components/EmptyIntro.tsx`) is hand-rolled, the Toggle description in `src/ui/Field.tsx` needs `text-pretty`, SectionHeader has no meta slot, VOD posters don't use Home's caption spec, and recording fallback tiles all share one colour (`src/ui/Poster.tsx`).
 - Copy actions fail on plain HTTP with no fallback, and Settings > About has no Open-source licences link (SR-2, SR-4).
-- `package.json` still describes the app as "IPTVnator rebuilt on Tauri 2 with a Rust core".
+- `package.json` still describes the app as "IPTVnator rebuilt on Tauri 2 with a Rust core". The manifest has no screenshots, and `index.html` has no Open Graph tags (SH-pwa-manifest, SR-8).
+- The player's channel panel still says "Browse archive" (`src/i18n/en/player.json` browseArchive, rendered in `src/features/player/components/ChannelPanelGuide.tsx`), where the live pages say "Browse catch-up" (LG-08).
+- On the radio idle stage, de and pl give recentStations almost the same text as lastStation: both are "Zuletzt gehört" in `src/i18n/de/live.json`, and the two pl strings differ by one letter (`src/i18n/pl/live.json`). Both render in `src/features/live/components/StageIdle.tsx`. Whether to localise "Rec" (library.json scheduledRec, still "Rec" in nine locales) is undecided.
+- `789fce2` gives a recording the server refuses at start the error code `serverHttpOnly`, but `src/` has no `library:recErrorServerHttpOnly` string and `RecordingErrorCode` in `src/api/types.ts` lacks the code, so the UI still shows the core's English note.
 - A guide focus link scrolls its row to the top of the grid instead of the middle.
-- Some timing tests fail under load: lists sortable, the guide's gridLoad and gridPerf, and two tests in `src/features/live/test/stalkerGridArchive.test.tsx`. The two Stalker tests also fail on `7b03743` and `f4549d1` when run alone on a loaded machine. They may point at a real guide bug and need a look on a quiet machine. In CI run 1, one frontend test of 4,790 failed, on a timeout.
+- Some timing tests fail under load: lists sortable, the guide's gridLoad and gridPerf, and two tests in `src/features/live/test/stalkerGridArchive.test.tsx`. The two Stalker tests also fail on `7b03743` and `f4549d1` when run alone on a loaded machine. They passed in CI run 2 (4,790 of 4,790, the six stalkerGridArchive tests included), so the local failures look load-related. In CI run 1, one frontend test of 4,790 failed, on a timeout.
 
 Tests and fixtures:
 
-- The e2e fixer could check the specs only against the screenshot mock, and neither CI run included Playwright. The three new specs (m3u-vod, phone-tabs, welcome) depend on core behaviour the mock only faked: M3U series grouping, the movie's User-Agent from `catalog.item`, mp4 range requests through the proxy, a finished download, and a playlist text update followed by a refresh. Run e2e.yml by hand before the first tag.
+- The e2e fixer could check the specs only against the screenshot mock, and no CI run included Playwright. The three new specs (m3u-vod, phone-tabs, welcome) depend on core behaviour the mock only faked: M3U series grouping, the movie's User-Agent from `catalog.item`, mp4 range requests through the proxy, a finished download, and a playlist text update followed by a refresh. Run e2e.yml by hand before the first tag.
 - `crates/iptv-mock/src/catalog.rs` and `fixtures/sample.m3u` still use real broadcaster and programme names. The README screenshots came from the invented-data mock, so this matters only if someone captures from `iptv-mock` (`docs/screenshots/README.md`).
 
 ## CI state at publication
 
-GitHub has the branch at `41f86e2`. The 16 commits merged after it (the GPT-6.1 frontend, docs and e2e fixes, and the README screenshots) and the Rust fixes on saas/rustfix-a and saas/rustfix-b had not been through CI when this was written.
+GitHub has audit/saas-polish at `0861a2b`. It holds `e8eea35` and saas/rustfix-b (merged as `eca8edf`). saas/rustfix-a and this report had not been pushed or through CI when this was written.
 
-- CI run 1 compiled all of the Rust for the first time. Before today none of it had ever been compiled, because nothing on gmk1 can build Rust. On Linux it built and passed every test except `mpv_commands_without_session`. rustfmt flagged seven layouts. The frontend job passed 4,789 of 4,790 tests; the one failure was a timeout. `41f86e2` fixed all three.
-- In CI run 2 the Linux Rust job and the frontend job passed. Windows clippy failed on five lints that are new in the latest stable clippy, all in iptv-mock (`manual_is_multiple_of`, `chunks_exact_to_as_chunks`). A fix was in progress.
-- cargo-deny reports the advisories in rustls 0.23.45 and quick-xml 0.37.5 without failing CI (checklist item 7).
+- CI run 1 (`7b03743`) compiled all of the Rust for the first time. Before today none of it had ever been compiled, because nothing on gmk1 can build Rust. On Linux it built and passed every test except `mpv_commands_without_session`. rustfmt flagged seven layouts. The frontend job passed 4,789 of 4,790 tests; the one failure was a timeout. `41f86e2` fixed all three.
+- In CI run 2 (`41f86e2`) the Linux Rust job and the frontend job passed, all 4,790 frontend tests included. Windows clippy failed on five lints that are new in the latest stable clippy, all in iptv-mock (`manual_is_multiple_of`, `chunks_exact_to_as_chunks`).
+- Run 3 (`f045cba`) added saas/rustfix-b and fixed the five iptv-mock lints. The Linux Rust job and the frontend job passed, so the rustfix-b code compiles and its tests pass on Linux. Windows failed at `cargo fmt --check`.
+- Run 4 (`0861a2b`) applied rustfmt's layout to one line. The Linux Rust job and the frontend job passed again. On Windows `cargo fmt --check` passed and clippy failed on ten lints in iptv-core: five `manual_is_multiple_of`, three `chunks_exact_to_as_chunks` and two `byte_char_slices`. The Windows tests have not run yet, because they come after clippy in that job. The MSRV check, the Docker image and the desktop release build run only on pull requests and master, so no run so far included them.
+- In every run the advisories job reported the eight advisories in rustls, quick-xml, rustls-webpki and webpki-roots and failed without blocking (checklist item 7).
 
 <!-- final CI result -->

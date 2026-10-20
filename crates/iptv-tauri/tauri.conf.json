@@ -53,7 +53,7 @@
       "nsis"
     ],
     "publisher": "philly",
-    "copyright": "Copyright © 2026 philly. MIT License.",
+    "copyright": "Copyright © 2026 philly",
     "homepage": "https://github.com/philly0105/Rust-IPTV",
     "category": "Video",
     "shortDescription": "IPTV player for M3U playlists, Xtream accounts and Stalker portals",

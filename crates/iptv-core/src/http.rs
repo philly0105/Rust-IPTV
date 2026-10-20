@@ -1648,4 +1648,30 @@ mod tests {
             .is_err());
         assert!(g.check(&u("http://localhost:22/a"), None).await.is_err());
     }
+
+    /// GPT review (trusted-host-dns-rebinding): the resolver trusts a name,
+    /// not a port, so the source-trusting client is only for its exact
+    /// authority, and a redirect to the trusted name on another port ends
+    /// the name's trust in that client's resolver.
+    #[test]
+    fn trust_is_for_the_exact_authority() {
+        let own = a("provider.example", 8080);
+        let mine = Some(&own);
+        assert_eq!(trust_for("http://Provider.Example:8080/x", mine), mine);
+        assert_eq!(trust_for("http://provider.example:8317/x", mine), None);
+        assert_eq!(trust_for("https://provider.example/x", mine), None);
+        assert_eq!(trust_for("http://other.example:8080/x", mine), None);
+        assert_eq!(trust_for("http://provider.example:8080/x", None), None);
+        assert_eq!(trust_for("not a url", mine), None);
+
+        let resolver = NetGuard::new(false).resolver(mine);
+        assert!(resolver.trusts("provider.example"));
+        assert!(!resolver.trusts("other.example"));
+        resolver.distrust();
+        assert!(!resolver.trusts("provider.example"));
+        // --allow-private-targets trusts every name anyway.
+        let open = NetGuard::new(true).resolver(mine);
+        open.distrust();
+        assert!(open.trusts("provider.example"));
+    }
 }

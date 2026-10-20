@@ -184,18 +184,27 @@ message names that flag. Loopback, RFC 1918, link-local (including
 NAT64/6to4-embedded private addresses are refused. IP literals are checked
 per hop; host names are checked by the proxy client's own DNS resolver at
 connect time, so a name cannot pass the check and then rebind to a private
-address. Trust is per request: each request gets a client whose resolver
-trusts only the requesting source's own host (nothing is remembered), so
-using one source never opens its host to requests without a source, to
-another source, or to a redirect from another source.
+address. A resolver sees host names without ports, so the client whose
+resolver trusts the requesting source's own host is used only for a URL or
+redirect hop on exactly the source's `host:port`; every other hop, the same
+host name on another port included, goes through the client that trusts
+nothing, which drops private addresses when it connects. Trust is per
+request (nothing is remembered), so using one source never opens its host
+to requests without a source, to another source, or to a redirect from
+another source.
 
 The same guard lives in `iptv_core::http` (`NetGuard`, `ServerMode`), and
 `iptv-server` installs it on the core at startup: in server mode downloads,
 M3U URL imports, XMLTV downloads and Xtream/Stalker API calls use a guarded
 client too, each trusting only its own source's `host:port` (a guide URL is
-trusted when any source listing it sits on its `host:port`). Its redirect policy applies
-the port rule above: a redirect to another port of a trusted host name that
-resolves privately is refused. No client sends `Referer`, so redirects never
+trusted when any source listing it sits on its `host:port`). A fetch of a URL
+that may be elsewhere (a download, a recording, a logo) gets the
+source-trusting client only when the URL is on the source's exact
+`host:port`. Its redirect policy applies the port rule above: a redirect to
+another port of a trusted host name that resolves privately is refused, and
+one that is followed first ends that name's trust in the client's resolver,
+so the hop (and every later connection of that client) reaches only public
+addresses whatever the name resolves to by then. No client sends `Referer`, so redirects never
 carry Xtream credentials. Local EPG paths and `file://` guide URLs are
 refused (501). The desktop app does not install it and
 may fetch from the LAN freely. Its loopback media proxy reuses this route with

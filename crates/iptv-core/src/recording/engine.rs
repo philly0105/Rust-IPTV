@@ -334,7 +334,7 @@ pub async fn diagnose(
             .await
             .ok()?;
     }
-    let client = crate::http::source_client(state, source_id).await;
+    let client = crate::http::source_client(state, source_id, url).await;
     let req = crate::http::apply_source_headers(
         client.get(url),
         &source.headers.clone().unwrap_or_default(),
@@ -523,7 +523,7 @@ async fn run_http(
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
         .unwrap_or_else(|| "the server".into());
-    let client = crate::http::source_client(state, source_id).await;
+    let client = crate::http::source_client(state, source_id, &url).await;
     let req = crate::http::apply_source_headers(
         client.get(&url),
         &source.headers.clone().unwrap_or_default(),

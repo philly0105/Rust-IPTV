@@ -1018,12 +1018,15 @@ pub async fn fetch_sized(
         Some(source) => source,
         None => load_source(state, source_id).await?,
     };
+    // The source-trusting client only for a logo on the source's own
+    // host:port; its resolver cannot tell ports apart.
+    let trusted = http::trust_for(url.as_str(), source.trusted.as_ref());
     let scope = flight_scope(
         mode.as_ref().is_some_and(|m| !m.guard.allow_private),
-        source.trusted.as_ref(),
+        trusted,
         &source.headers,
     );
-    let client = http::guarded_client(state, source.trusted.as_ref());
+    let client = http::guarded_client(state, trusted);
     let job = Job {
         url,
         key,
@@ -1036,8 +1039,8 @@ pub async fn fetch_sized(
 
 /// Disk hit, or fetch, validate and store. Concurrent calls for one URL share
 /// one fetch (single flight).
-/// Desktop: `state.http`. Server mode: `http::source_client(state, source_id)`
-/// when given (trusts the source's host), else the guarded client.
+/// Desktop: `state.http`. Server mode: the guarded client, trusting the
+/// source's `host:port` only for an image on exactly it.
 /// Non-image content type -> Unsupported; body over [`MAX_IMAGE_BYTES`] ->
 /// Invalid; upstream 404 -> NotFound; other failures -> Network.
 /// Failures are remembered in memory for 10 min (no refetch storm).

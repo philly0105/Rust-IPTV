@@ -26,8 +26,9 @@ export function useSyncSummary(): string | undefined {
   return changed ? t('syncAdjusted') : undefined;
 }
 
+/** 28 px steppers, 36 px under a coarse pointer (PL-TOUCH-ERGONOMICS). */
 const STEP_BUTTON =
-  'inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-white hover:bg-white/12 disabled:opacity-40 disabled:hover:bg-transparent [&_svg]:size-4';
+  'inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-on-glass hover:bg-white/12 disabled:opacity-40 disabled:hover:bg-transparent pointer-coarse:size-9 [&_svg]:size-4';
 
 /**
  * One delay: its name and value, then earlier / later by one step and reset. Unsupported

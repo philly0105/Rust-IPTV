@@ -359,6 +359,38 @@ describe('up next and queue advance', () => {
     expect(usePlayerStore.getState().source?.resumeSeconds).toBe(300);
   });
 
+  it('fromStart plays from 0, reads no resume source and leaves the saved row alone (VL-start-over-unwatches)', async () => {
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/movie/9.mkv', kind: 'direct', title: 'srv', isLive: false, isRadio: false, resumeSeconds: 900 });
+    // A watched movie replayed part-way: a resume point the plain play would use.
+    handlers['positions.get'] = () => ({ ref: { sourceId: 's1', contentType: 'movie', itemId: '9' }, positionSeconds: 900, durationSeconds: 3000, updatedAt: '', watched: true });
+    const args = { ref: { sourceId: 's1', contentType: 'movie' as const, itemId: '9' }, title: 'Film', isLive: false, sourceKind: 'xtream' as const };
+    await playItem(args);
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBe(900);
+    const before = calls('positions.get').length;
+    await playItem({ ...args, fromStart: true });
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+    expect(usePlayerStore.getState().positionSeconds).toBe(0);
+    expect(calls('positions.get')).toHaveLength(before);
+    expect(calls('positions.remove')).toHaveLength(0);
+  });
+
+  it('a start over whose lookup fails keeps the saved row, and its Retry still starts from 0', async () => {
+    let fail = true;
+    handlers['xtream.streamUrl'] = () => {
+      if (fail) throw new Error('network down');
+      return { url: 'http://x/movie/9.mkv', kind: 'direct', title: 'srv', isLive: false, isRadio: false, resumeSeconds: 900 };
+    };
+    handlers['positions.get'] = () => ({ ref: { sourceId: 's1', contentType: 'movie', itemId: '9' }, positionSeconds: 900, durationSeconds: 3000, updatedAt: '', watched: false });
+    const args = { ref: { sourceId: 's1', contentType: 'movie' as const, itemId: '9' }, title: 'Film', isLive: false, sourceKind: 'xtream' as const, fromStart: true };
+    await expect(playItem(args)).rejects.toThrow('network down');
+    expect(usePlayerStore.getState().status).toBe('error');
+    expect(calls('positions.remove')).toHaveLength(0);
+    fail = false;
+    expect(store.retryResolve()).toBe(true);
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://x/movie/9.mkv'));
+    expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
+  });
+
   it('a resume of a few seconds is not applied', async () => {
     handlers['positions.get'] = () => ({ ref: movieRef, positionSeconds: 3, durationSeconds: 1000, updatedAt: '' });
     await playSource(vod('201'));

@@ -60,6 +60,12 @@ export interface MediaState {
    * core (resolving a stream URL, `mpv.load`). Classifies the error copy before message matching.
    */
   errorCode?: RpcErrorCode;
+  /**
+   * The browser refused to start with sound (no gesture yet: a reload restoring playback), so the
+   * player started muted (PL-MUTED-AUTOPLAY). The surface offers "Tap to unmute" until sound is
+   * back. Not reset with the media: the mute it forced lasts across zaps until then.
+   */
+  autoMuted?: boolean;
 }
 
 export const useMediaStore = create<MediaState>()(() => ({

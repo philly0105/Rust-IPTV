@@ -186,7 +186,8 @@ describe('Controls picture-in-picture', () => {
 
     act(() => usePipStore.setState({ active: true }));
     rerender(<Controls variant="dock" visible />);
-    expect(screen.getByRole('button', { name: 'Exit picture in picture' }).getAttribute('aria-pressed')).toBe('true');
+    // Its label says the state, so it is not also a pressed toggle (PL-MENU-A11Y).
+    expect(screen.getByRole('button', { name: 'Exit picture in picture' }).getAttribute('aria-pressed')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Fullscreen' })).toBeNull();
   });
 
@@ -440,61 +441,59 @@ describe('Controls in a narrow player', () => {
   });
   afterEach(() => restore());
 
-  it('keeps the core controls in the row and moves the rest into the options menu', async () => {
+  it('keeps the core controls in the row and moves the rest into the options menu', () => {
     render(<Controls variant="overlay" visible />);
     for (const name of ['Pause', 'Mute', 'Playback options', 'Fullscreen']) expect(screen.getByRole('button', { name })).toBeTruthy();
-    for (const name of ['Stop', 'Picture in picture', 'Take screenshot']) expect(screen.queryByRole('button', { name })).toBeNull();
+    for (const name of ['Back 10 seconds', 'Picture in picture']) expect(screen.queryByRole('button', { name })).toBeNull();
     expect(screen.queryByTestId('volume-readout')).toBeNull();
 
     openMenu();
-    // The camera button loads on demand.
-    await screen.findByRole('menuitem', { name: 'Take screenshot' });
     const moved = screen.getByTestId('moved-controls');
     const names = Array.from(moved.querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
-    expect(names).toEqual(['Picture in picture', 'Take screenshot', 'Stop']);
+    expect(names).toEqual(['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture']);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Picture in picture' }));
     expect(commands.togglePip).toHaveBeenCalledTimes(1);
     expect(menu()).toBeNull();
   });
 
-  it('keeps the spare buttons the row has room for, most useful first', async () => {
+  it('keeps the spare buttons the row has room for, most useful first', () => {
     restore();
-    // A row with 100 px to spare, laid out like a flex row: each spare shown takes 42 px of it.
-    const spares = (row: Element): number => row.querySelectorAll(':scope > [data-ctl="stop"], :scope > [data-ctl="pip"], :scope > [data-ctl="screenshot"]').length;
+    // A row with 100 px to spare, laid out like a flex row: each spare shown takes 44 px of it.
+    const spares = (row: Element): number => row.querySelectorAll('[data-ctl="back10"], [data-ctl="fwd10"], [data-ctl="pip"]').length;
     const spies = [
       vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
         if (this.hasAttribute('data-player-controls')) return 358;
-        if (this.hasAttribute('data-row-free')) return Math.max(0, 100 - 42 * spares(this.parentElement!));
+        if (this.hasAttribute('data-row-free')) return Math.max(0, 100 - 44 * spares(this.parentElement!));
         return 0;
       }),
       vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
         return this.hasAttribute('data-ctl-row') ? 330 : 0;
       }),
       vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
-        return this.hasAttribute('data-ctl-row') ? 330 + Math.max(0, 42 * spares(this) - 100) : 0;
+        return this.hasAttribute('data-ctl-row') ? 330 + Math.max(0, 44 * spares(this) - 100) : 0;
       }),
     ];
     restore = () => spies.forEach((s) => s.mockRestore());
     const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
 
-    render(<Controls variant="overlay" visible />);
-    await frame();
-    await frame();
-    // Room for two: picture in picture, then stop; the camera goes to the menu.
-    expect(screen.getByRole('button', { name: 'Picture in picture' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Take screenshot' })).toBeNull();
-    openMenu();
-    await screen.findByRole('menuitem', { name: 'Take screenshot' });
-    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
-    expect(names).toEqual(['Take screenshot']);
+    return (async () => {
+      render(<Controls variant="overlay" visible />);
+      await frame();
+      await frame();
+      // Room for two: the 10 s skips come first; picture in picture goes to the menu.
+      expect(screen.getByRole('button', { name: 'Back 10 seconds' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Forward 10 seconds' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
+      openMenu();
+      const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+      expect(names).toEqual(['Picture in picture']);
+    })();
   });
 
   it('a wide player keeps the full row and a menu without moved controls', () => {
     restore();
     render(<Controls variant="overlay" visible />);
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Picture in picture' })).toBeTruthy();
+    for (const name of ['Back 10 seconds', 'Forward 10 seconds', 'Picture in picture']) expect(screen.getByRole('button', { name })).toBeTruthy();
     openMenu();
     expect(screen.queryByTestId('moved-controls')).toBeNull();
   });

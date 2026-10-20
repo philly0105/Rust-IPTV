@@ -7,7 +7,7 @@ import { dismissToast, toast } from '@/ui/Toast';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
-import { focusIfPlayerOwnsFocus } from '../format';
+import { focusIfPlayerOwnsFocus, pressKeepsFocus } from '../format';
 import { fetchNowNext, peekNowNext } from '../nowNext';
 import { usePipStore } from '../pip';
 import { announceSleep, sleepLeftText } from '../sleepReadout';
@@ -41,7 +41,7 @@ function useTick(active: boolean, ms = 1000): number {
  * The countdown in the control bar while a timer runs: a moon and the time left. Opens the
  * sleep menu. Accent in the last minute; breathes (motion-safe) while the volume fades.
  */
-export function SleepChip({ compact, onOpen }: { compact?: boolean; onOpen(): void }) {
+export function SleepChip({ compact, expanded = false, menuId, onOpen }: { compact?: boolean; expanded?: boolean; menuId?: string; onOpen(): void }) {
   const { t } = useTranslation('player');
   const target = useSleepTimer((s) => s.target);
   const endsAt = useSleepTimer((s) => s.endsAt);
@@ -60,9 +60,14 @@ export function SleepChip({ compact, onOpen }: { compact?: boolean; onOpen(): vo
         data-testid="sleep-chip"
         aria-label={label}
         aria-keyshortcuts="Z"
+        // It opens the sleep menu (PL-MENU-A11Y): a menu button, not a plain one.
+        aria-haspopup="menu"
+        aria-expanded={expanded}
+        aria-controls={expanded ? menuId : undefined}
+        onMouseDown={pressKeepsFocus}
         onClick={onOpen}
         className={cn(
-          'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric font-semibold tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors',
+          'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors pointer-coarse:min-h-9',
           compact ? 'h-6 gap-1 px-1.5 text-[calc(11rem/15)]' : 'h-7 gap-1.5 px-2 text-xs',
           // The last minute lights up: the dial's accent on the dark themes, a brighter edge on the light one.
           last ? 'bg-white/10 text-white ring-white/70 dark:text-accent-hover dark:ring-accent/70' : 'text-white ring-white/25 hover:ring-white/45',

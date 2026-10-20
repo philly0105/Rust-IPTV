@@ -90,6 +90,24 @@ function rangesOf(tr: TimeRanges, offset = 0): TimeRange[] {
   return out;
 }
 
+/** Waiting for sound to come back after a forced mute (one subscription at a time). */
+let unmuteWatch: (() => void) | null = null;
+
+/**
+ * The browser made the start muted (PL-MUTED-AUTOPLAY): raise the unmute prompt, and take it down
+ * once sound is back by any means (the prompt, the bar's button, M, the volume slider).
+ */
+export function noteAutoMuted(): void {
+  useMediaStore.setState({ autoMuted: true });
+  if (unmuteWatch) return;
+  unmuteWatch = usePlayerStore.subscribe((s) => {
+    if (s.muted) return;
+    unmuteWatch?.();
+    unmuteWatch = null;
+    useMediaStore.setState({ autoMuted: false });
+  });
+}
+
 export interface InlinePlayerProps {
   /** Audio element for radio; video otherwise. */
   as?: 'video' | 'audio';
@@ -221,10 +239,12 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
       el.playbackRate = 1;
       el.play().catch((err: unknown) => {
         if (disposed) return;
-        // Autoplay without a gesture (reload restore): retry muted rather than sit paused.
+        // Autoplay without a gesture (reload restore): retry muted rather than sit paused, and
+        // say so (the unmute prompt) instead of playing silently.
         if (err instanceof DOMException && err.name === 'NotAllowedError') {
           el.muted = true;
           usePlayerStore.setState({ muted: true });
+          noteAutoMuted();
           el.play().catch(() => reportStatus('paused'));
         }
       });

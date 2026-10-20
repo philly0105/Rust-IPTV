@@ -10,7 +10,7 @@ import { useListVirtualizer } from '@/ui/virtualizer';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
-import { focusIsLost, safeImageUrl } from '../format';
+import { focusIsLost, pressKeepsFocus, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { playChannel, usePlayerStore } from '../store';
 import { useStreamInfoStore } from '../streamInfo';
@@ -456,9 +456,10 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
             }}
             onDoubleClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={pressKeepsFocus}
             // Fades with the controls; hidden, it lets the pointer through like the rest of the chrome.
             className={cn(
-              'player-glass glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-white/90 hover:bg-white/12 hover:text-white',
+              'player-glass glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-on-glass hover:bg-white/12 pointer-coarse:size-11',
               'motion-safe:transition-opacity motion-safe:duration-200',
               !chromeVisible && 'pointer-events-none opacity-0',
             )}

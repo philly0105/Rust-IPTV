@@ -2,14 +2,14 @@ import { Lock, Tv } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { itemKey, type EpgNowNext, type EpgProgram, type ItemRef } from '@/api/types';
+import { itemKey, type EpgNowNext, type ItemRef } from '@/api/types';
 import { formatClock, ms } from '@/features/live/lib/epgTime';
 import { useImageChain } from '@/ui/image';
 
 import { cn } from '../cn';
 import { safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
-import { airedShare, fetchNowNext, peekNowNext } from '../nowNext';
+import { airedShare, airingPair, fetchNowNext, peekNowNext } from '../nowNext';
 import { isLockedZap, usePlayerStore } from '../store';
 import { fetchChannelInfo, peekChannelInfo, useZapBanner, type ZapChannelInfo } from '../zapBanner';
 import { useZapBannerShown, useZapHover } from './zapHooks';
@@ -60,14 +60,14 @@ function useZapData(ref: ItemRef | undefined, now: number, locked = false): ZapD
 }
 
 /** A clock for the progress bar while the banner is up (programmes move slowly: every 5 s). */
-function useClock(active: boolean): number {
+function useClock(active: boolean, everyMs = 5000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
     setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 5000);
+    const id = setInterval(() => setNow(Date.now()), everyMs);
     return () => clearInterval(id);
-  }, [active]);
+  }, [active, everyMs]);
   return now;
 }
 
@@ -75,9 +75,22 @@ function useClock(active: boolean): number {
  * The channel's logo: the guide's logo, else the item's own picture, each through the image
  * cache (C3) and then its original URL once; the TV icon when none loads.
  */
-function Logo({ urls, sourceId, compact, chip = false }: { urls: readonly (string | undefined)[]; sourceId: string; compact: boolean; chip?: boolean }) {
+function Logo({
+  urls,
+  sourceId,
+  compact,
+  chip = false,
+  box: boxClass,
+}: {
+  urls: readonly (string | undefined)[];
+  sourceId: string;
+  compact: boolean;
+  chip?: boolean;
+  /** Size and corner in place of the variant's (the title bar's 40 px tile). */
+  box?: string;
+}) {
   const logo = useImageChain(urls.map(safeImageUrl), sourceId);
-  const box = chip ? 'size-6 rounded-[3px]' : compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10';
+  const box = boxClass ?? (chip ? 'size-6 rounded-xs' : compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10');
   if (!logo.url) {
     return (
       <span
@@ -103,8 +116,8 @@ function Logo({ urls, sourceId, compact, chip = false }: { urls: readonly (strin
 }
 
 /** In place of the logo for a locked channel: a lock on the logo's tile, nothing of the channel's own. */
-function LockTile({ compact, chip = false }: { compact: boolean; chip?: boolean }) {
-  const box = chip ? 'size-6 rounded-[3px]' : compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10';
+function LockTile({ compact, chip = false, box: boxClass }: { compact: boolean; chip?: boolean; box?: string }) {
+  const box = boxClass ?? (chip ? 'size-6 rounded-xs' : compact ? 'size-9 rounded-sm' : 'size-14 rounded-md @max-md:size-10');
   return (
     <span
       data-testid="zap-lock"
@@ -117,26 +130,16 @@ function LockTile({ compact, chip = false }: { compact: boolean; chip?: boolean 
 }
 
 /** How far into the programme, as a thin bar lit in the accent like the seek bar. */
-function Progress({ share, className }: { share: number; className?: string }) {
+function Progress({ share, className, testId = 'zap-progress' }: { share: number; className?: string; testId?: string }) {
   return (
     <div className={cn('h-[3px] overflow-hidden rounded-full bg-white/15', className)} aria-hidden>
-      <div data-testid="zap-progress" className="h-full rounded-full bg-accent" style={{ width: `${Math.round(share * 1000) / 10}%` }} />
+      <div data-testid={testId} className="h-full rounded-full bg-accent" style={{ width: `${Math.round(share * 1000) / 10}%` }} />
     </div>
   );
 }
 
-/** The programme airing at `now` and the one after it, from a guide answer that may have aged. */
-export function airingPair(guide: EpgNowNext | null | undefined, now: number): { current?: EpgProgram; upcoming?: EpgProgram } {
-  if (!guide) return {};
-  const airs = (p: EpgProgram | undefined): p is EpgProgram => !!p && ms(p.start) <= now && ms(p.end) > now;
-  // The guide's "now" ended while the banner was up: its next is what airs.
-  const current = airs(guide.now) ? guide.now : airs(guide.next) ? guide.next : undefined;
-  const upcoming = current !== guide.next && guide.next && ms(guide.next.end) > now ? guide.next : undefined;
-  const out: { current?: EpgProgram; upcoming?: EpgProgram } = {};
-  if (current) out.current = current;
-  if (upcoming) out.upcoming = upcoming;
-  return out;
-}
+/** Re-exported for the banner's tests and callers that already import it from here. */
+export { airingPair };
 
 function GuideRows({ guide, now, compact, locked = false }: { guide: EpgNowNext | null | undefined; now: number; compact: boolean; locked?: boolean }) {
   const { t, i18n } = useTranslation('player');
@@ -439,5 +442,58 @@ export function ZapHeaderLine({ title }: { title: string }) {
         </span>
       )}
     </span>
+  );
+}
+
+/** How often the title bar's programme line moves on (its minutes left, its bar). */
+const TITLE_CLOCK_MS = 30_000;
+
+/**
+ * The channel's logo in the player's title bar, where a LIVE pill used to repeat the bar's badge
+ * (PL-DUPLICATE-CHROME). The banner's own lookup and image cache; the TV glyph when none loads.
+ */
+export function TitleLogo({ channel, posterUrl, big = false }: { channel: ItemRef; posterUrl?: string | undefined; big?: boolean }) {
+  const source = usePlayerStore((s) => s.source);
+  const locked = isLockedZap(source);
+  const { info } = useZapData(channel, 0, locked);
+  // 40 px beside the title, 56 in fullscreen.
+  const box = big ? 'size-14 rounded-lg' : 'size-10 rounded-md';
+  if (locked) return <LockTile compact box={box} />;
+  return <Logo urls={[info?.logoUrl, posterUrl]} sourceId={channel.sourceId} compact box={box} />;
+}
+
+/**
+ * Under the channel's name in the title bar: what airs now, how long it has left and how far in
+ * (PL-STALE-PROGRAMME). It follows the guide on a 30 s clock, so an hour on one channel no longer
+ * leaves the previous show there. `fallback` (the subtitle the channel was tuned with) shows while
+ * the guide is asked, and when it has nothing.
+ */
+export function LiveProgrammeLine({ channel, fallback }: { channel: ItemRef; fallback?: string | undefined }) {
+  const { t } = useTranslation('player');
+  const source = usePlayerStore((s) => s.source);
+  const locked = isLockedZap(source);
+  const now = useClock(true, TITLE_CLOCK_MS);
+  const { guide } = useZapData(channel, now, locked);
+  const { current } = airingPair(guide, now);
+  if (!current) {
+    return fallback ? (
+      <p dir="auto" data-testid="player-subtitle" className="mt-0.5 truncate text-body-sm text-on-glass-muted">
+        {fallback}
+      </p>
+    ) : null;
+  }
+  const minutesLeft = Math.max(1, Math.ceil((ms(current.end) - now) / 60_000));
+  return (
+    <div data-testid="player-programme" className="mt-0.5 flex min-w-0 flex-col gap-1">
+      <p className="flex min-w-0 items-baseline gap-1.5 text-body-sm text-on-glass-muted">
+        <span dir="auto" data-testid="player-subtitle" className="min-w-0 truncate text-on-glass">
+          {current.title}
+        </span>
+        <span aria-hidden>·</span>
+        <span className="sr-only">, </span>
+        <span className="shrink-0 tabular-nums">{t('zapMinutesLeft', { minutes: minutesLeft })}</span>
+      </p>
+      <Progress share={airedShare(current, now)} className="w-36 max-w-full" testId="player-programme-progress" />
+    </div>
   );
 }

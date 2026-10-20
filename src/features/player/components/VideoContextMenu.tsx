@@ -1,16 +1,17 @@
 import { Camera, ChevronLeft, Copy, Maximize, Minimize, Pause, PictureInPicture2, Play } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { useToast } from '@/ui/Toast';
 import { useMediaStore } from '../media';
+import { noteMenuDismissed } from '../menuDismiss';
 import { takeScreenshot } from '../screenshot';
 import { usePipStore } from '../pip';
 import { canShareSource } from '../shareable';
 import { knownSourceKind, usePlayerStore } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
-import { MenuChoice, MenuRow, MenuToggle } from './Controls';
+import { MenuAction, MenuChoice, MenuRow, MenuSeparator, MenuToggle, PictureRows, SpeedRows, usePictureSummary } from './Controls';
 import { SleepMenu, SleepRowValue } from './SleepTimer';
 import { SubtitleStyleMenu, SubtitleTrackMenu } from './SubtitleMenu';
 import { SyncRows, useSyncSummary } from './SyncMenu';
@@ -18,7 +19,7 @@ import { SyncRows, useSyncSummary } from './SyncMenu';
 /** Gap kept between the menu and the window edges, in CSS px. */
 const EDGE = 8;
 
-type View = 'root' | 'audio' | 'text' | 'style' | 'sync' | 'sleep';
+type View = 'root' | 'audio' | 'text' | 'style' | 'sync' | 'sleep' | 'picture' | 'speed';
 
 /**
  * Where the menu mounts. Inside the player it would stay in the stage's stacking context, under
@@ -29,28 +30,15 @@ function menuLayer(): Element {
   return document.fullscreenElement ?? document.querySelector('[data-pip-layer]:not([hidden])') ?? document.body;
 }
 
-function MenuAction({ icon, label, hint, onClick }: { icon: ReactNode; label: string; hint?: string; onClick(): void }) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      aria-keyshortcuts={hint}
-      onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-start text-sm text-white hover:bg-white/10"
-    >
-      {icon}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {hint && <kbd className="player-on-glass-muted font-sans text-xs">{hint}</kbd>}
-    </button>
-  );
-}
-
 /**
- * The right-click menu of the embedded mpv video, opened at `at` (CSS px in the viewport).
- * The native window paints above the DOM, so the surface cuts this menu out of the video while
- * it is open (it carries `data-mpv-overlay`). Portalled (`menuLayer`) so no page strip paints
- * over it. Closes on a pick, Escape, a click elsewhere or a resize; `onClose` must be stable
- * (it is an effect dependency).
+ * The right-click menu of the video, opened at `at` (CSS px in the viewport): embedded mpv's, and
+ * the built-in player's in place of the browser's page menu (PL-NATIVE-CONTEXT-MENU). The same
+ * rows for both engines, Picture and (for VOD) Speed included. Over mpv the native window paints
+ * above the DOM, so the surface cuts this menu out of the video while it is open (it carries
+ * `data-mpv-overlay`). Portalled (`menuLayer`) so no page strip paints over it. Closes on a pick,
+ * Escape, a click elsewhere or a resize; `onClose` must be stable (it is an effect dependency).
+ * A click elsewhere is noted (`noteMenuDismissed`), so the built-in player's click on the
+ * picture that follows only closes it.
  */
 export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }; onClose(): void }) {
   const { t } = useTranslation('player');
@@ -67,6 +55,8 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   const pipActive = usePipStore((s) => s.active);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const syncSummary = useSyncSummary();
+  const pictureValue = usePictureSummary();
+  const rate = useMediaStore((s) => s.rate);
 
   // Open at the click, flipped or pushed back inside the window when it would overflow.
   useLayoutEffect(() => {
@@ -95,7 +85,10 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const close = (): void => onClose();
     const onPointer = (e: PointerEvent): void => {
-      if (!(e.target instanceof Node) || !ref.current?.contains(e.target)) close();
+      if (e.target instanceof Node && ref.current?.contains(e.target)) return;
+      // A primary press: its click on the picture only closes the menu (a right one opens it again).
+      if (!(e.button > 0)) noteMenuDismissed(e.target);
+      close();
     };
     // Capture: claims Escape before the shell and the PiP layer see it.
     const onKey = (e: KeyboardEvent): void => {
@@ -142,7 +135,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
       role={styleView ? undefined : 'menuitem'}
       data-menu-back
       onClick={() => setView(view === 'style' ? 'text' : 'root')}
-      className="mb-1 flex w-full items-center gap-1 rounded-sm px-2 py-2 text-start text-sm font-medium text-white hover:bg-white/10"
+      className="mb-1 flex w-full items-center gap-1 rounded-md px-2 py-1.5 text-start text-body-sm font-medium text-on-glass hover:bg-white/10"
     >
       <ChevronLeft className="size-4 rtl:rotate-180" aria-hidden />
       {view === 'audio'
@@ -153,10 +146,15 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
             ? t('sleepTimer')
             : view === 'style'
               ? t('subtitleStyle.menuTitle')
-              : t('subtitles')}
+              : view === 'picture'
+                ? t('picture')
+                : view === 'speed'
+                  ? t('speed')
+                  : t('subtitles')}
     </button>
   );
   const icon = 'size-4 shrink-0';
+  const isVod = !source.isLive && !source.isRadio;
 
   // `isFullscreen` and `pipActive` re-render the menu when the layer it belongs in changes.
   return createPortal(
@@ -183,7 +181,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
         }
       }}
-      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[min(70vh,420px)] w-60 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
+      className="player-glass-strong player-glass-edge glass-blur fixed z-[60] max-h-[min(70vh,420px)] w-64 overflow-y-auto rounded-lg border p-1.5 motion-safe:animate-pop-in"
     >
       {view === 'root' && (
         <>
@@ -215,17 +213,17 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
           )}
           {/* Always there (C6): a file can be loaded into a stream without subtitles. */}
           <MenuRow label={t('subtitles')} value={tracks.text.find((a) => a.selected)?.label ?? t('off')} onClick={() => setView('text')} />
+          {isVod && (
+            <MenuRow label={t('speed')} value={rate === 1 ? t('speedNormal') : t('speedValue', { speed: rate })} onClick={() => setView('speed')} />
+          )}
           <MenuRow label={t('sync')} value={syncSummary} onClick={() => setView('sync')} />
+          <MenuRow label={t('picture')} value={pictureValue} onClick={() => setView('picture')} />
           {/* Sleep timer (C5), as in the options menu. */}
           <MenuRow label={t('sleepTimer')} value={<SleepRowValue />} onClick={() => setView('sleep')} />
           <MenuToggle label={t('streamInfo')} checked={statsOpen} hint="I" onClick={() => pick(() => void toggleStreamInfo())} />
+          <MenuSeparator />
           {/* Screenshot (C6): the menu closes first, so it is never in the picture. */}
-          <MenuAction
-            icon={<Camera className={icon} aria-hidden />}
-            label={t('screenshot')}
-            hint="S"
-            onClick={() => pick(() => void takeScreenshot())}
-          />
+          <MenuAction icon={<Camera className={icon} aria-hidden />} label={t('screenshot')} shortcut="screenshot" onClick={() => pick(() => void takeScreenshot())} />
           {canShareSource(source, knownSourceKind) && (
             <MenuAction icon={<Copy className={icon} aria-hidden />} label={t('copyStreamLink')} onClick={() => void copyLink()} />
           )}
@@ -243,6 +241,18 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
         <>
           {back}
           <SyncRows />
+        </>
+      )}
+      {view === 'picture' && (
+        <>
+          {back}
+          <PictureRows />
+        </>
+      )}
+      {view === 'speed' && (
+        <>
+          {back}
+          <SpeedRows onDone={onClose} />
         </>
       )}
       {view === 'sleep' && (

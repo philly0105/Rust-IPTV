@@ -1001,7 +1001,19 @@ describe('wheel and context menu over the native video', () => {
     expect(m!.style.left).toBe('200px');
     expect(m!.style.top).toBe('120px');
     const items = Array.from(m!.querySelectorAll('[role="menuitem"]')).map((n) => n.textContent);
-    expect(items).toEqual(['Pause', 'Fullscreen', 'Picture in picture', 'SubtitlesOff', 'Sync', 'Sleep timerOff', 'Take screenshotS', 'Copy stream link']);
+    // The same rows as the built-in player's menu (PL-NATIVE-CONTEXT-MENU): Speed for VOD, Picture.
+    expect(items).toEqual([
+      'Pause',
+      'Fullscreen',
+      'Picture in picture',
+      'SubtitlesOff',
+      'Playback speedNormal',
+      'Sync',
+      'Picture',
+      'Sleep timerOff',
+      'Take screenshotS',
+      'Copy stream link',
+    ]);
     await tick(30);
     const last = calls('mpv.setBounds').at(-1)?.[1] as { bounds: Bounds; holes: Bounds[] } | undefined;
     expect(last?.holes.length).toBeGreaterThan(0);

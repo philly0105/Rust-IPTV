@@ -12,6 +12,7 @@ import { cn } from '../cn';
 import { bindExternalEvents } from '../external';
 import { bindRecovery } from '../reconnect';
 import { useMediaStore } from '../media';
+import { bindLiveProgramme } from '../nowNext';
 import { bindRemote } from '../remote';
 import { bindParentalGuard } from '../parentalGuard';
 import { exitPip, usePipStore } from '../pip';
@@ -50,9 +51,28 @@ function readPos(): MiniPos {
   return { end: MARGIN, bottom: MARGIN };
 }
 
+/** A probe as tall as the shell's bottom inset, measured instead of parsed (it may be a calc with env()). */
+let insetProbe: HTMLDivElement | null = null;
+
+/**
+ * The height the shell keeps clear at the bottom of the window (a phone's tab bar and the home
+ * indicator), in px: `--shell-bottom-inset`, 0 where the shell sets none. The mini frame's
+ * `bottom` offset counts from above it.
+ */
+export function shellBottomInset(): number {
+  if (typeof document === 'undefined') return 0;
+  if (!insetProbe?.isConnected) {
+    insetProbe = document.createElement('div');
+    insetProbe.setAttribute('aria-hidden', 'true');
+    insetProbe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;visibility:hidden;pointer-events:none;height:var(--shell-bottom-inset,0px)';
+    document.body.appendChild(insetProbe);
+  }
+  return insetProbe.offsetHeight;
+}
+
 function clampPos(p: MiniPos, w: number, h: number): MiniPos {
   const maxEnd = Math.max(MARGIN, window.innerWidth - w - MARGIN);
-  const maxBottom = Math.max(MARGIN, window.innerHeight - h - MARGIN);
+  const maxBottom = Math.max(MARGIN, window.innerHeight - shellBottomInset() - h - MARGIN);
   return { end: Math.min(maxEnd, Math.max(MARGIN, p.end)), bottom: Math.min(maxBottom, Math.max(MARGIN, p.bottom)) };
 }
 
@@ -94,17 +114,15 @@ function RouterExpand({ label }: { label: string }) {
   );
 }
 
+/** The mini header's round buttons: 28 px, 40 px under a coarse pointer (PL-TOUCH-ERGONOMICS). */
+const MINI_BUTTON =
+  'inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg active:bg-active pointer-coarse:size-10';
+
 function ExpandBase({ label, onExpand }: { label: string; onExpand(): void }) {
   return (
     <Tooltip content={label} describe={false}>
-      <button
-        type="button"
-        aria-label={label}
-        onClick={onExpand}
-        onPointerDown={(e) => e.stopPropagation()}
-        className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
-      >
-        <Maximize2 className="size-4" />
+      <button type="button" aria-label={label} onClick={onExpand} onPointerDown={(e) => e.stopPropagation()} className={MINI_BUTTON}>
+        <Maximize2 className="size-4" aria-hidden />
       </button>
     </Tooltip>
   );
@@ -173,6 +191,8 @@ export const PlayerDock = memo(function PlayerDock() {
 
   // failover: smart reconnect and live failover follow the player from here.
   useEffect(() => bindRecovery(), []);
+  // A live channel's subtitle follows what airs (title bar, system media controls).
+  useEffect(() => bindLiveProgramme(), []);
   // Parental controls locking again re-check what plays (Ask: PIN prompt; Hide: stop).
   useEffect(() => bindParentalGuard(), []);
 
@@ -308,10 +328,12 @@ export const PlayerDock = memo(function PlayerDock() {
           isRadio ? 'w-[min(420px,calc(100vw-32px))]' : 'w-[max(190px,45vw)] sm:w-[clamp(280px,26vw,440px)]',
           inMini && 'motion-safe:animate-pop-in',
         )}
-        style={{ insetInlineEnd: pos.end, bottom: pos.bottom }}
+        // Above the shell's bottom inset (a phone's tab bar), wherever it was dragged.
+        style={{ insetInlineEnd: pos.end, bottom: `calc(${pos.bottom}px + var(--shell-bottom-inset, 0px))` }}
       >
         <div
-          className="flex h-9 shrink-0 cursor-grab items-center gap-1.5 border-b border-divider pe-1 ps-2 active:cursor-grabbing"
+          // touch-none: a finger on the header drags the frame instead of scrolling the page.
+          className="flex h-10 shrink-0 cursor-grab touch-none items-center gap-1.5 border-b border-divider ps-1.5 pe-1 active:cursor-grabbing pointer-coarse:h-11 pointer-coarse:ps-3"
           onPointerDown={onDragStart}
           onPointerMove={onDragMove}
           onPointerUp={onDragEnd}
@@ -335,14 +357,16 @@ export const PlayerDock = memo(function PlayerDock() {
                 e.stopPropagation();
                 nudge(d[0], d[1]);
               }}
-              className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:text-fg"
+              // A finger drags the header itself; the grip is the keyboard's (arrow keys), and a
+              // phone's 190 px frame needs the room for the name.
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-hover hover:text-fg pointer-coarse:hidden"
             >
-              <GripHorizontal className="size-4" />
+              <GripHorizontal className="size-4" aria-hidden />
             </button>
           </Tooltip>
           {source?.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
           <span
-            className="flex min-w-0 flex-1 text-sm font-medium text-fg"
+            className="flex min-w-0 flex-1 text-body-sm font-medium text-fg"
             title={source?.title}
             onPointerEnter={titleHover.onPointerEnter}
             onPointerLeave={titleHover.onPointerLeave}
@@ -356,9 +380,9 @@ export const PlayerDock = memo(function PlayerDock() {
               aria-label={t('close')}
               onClick={() => usePlayerStore.getState().stop()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
+              className={MINI_BUTTON}
             >
-              <X className="size-4" />
+              <X className="size-4" aria-hidden />
             </button>
           </Tooltip>
         </div>

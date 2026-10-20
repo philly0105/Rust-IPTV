@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
+import { pressKeepsFocus } from '../format';
 import { blockReasonKey, explainBlock, screenshotBlock, takeScreenshot } from '../screenshot';
 import { usePlayerStore } from '../store';
 
@@ -60,6 +61,7 @@ export function ScreenshotButton({
           aria-disabled={reason ? true : undefined}
           aria-describedby={reason ? reasonId : undefined}
           aria-busy={busy || undefined}
+          onMouseDown={menuItem ? undefined : pressKeepsFocus}
           onClick={press}
           className={cn(
             'inline-flex shrink-0 items-center justify-center motion-safe:transition-colors',

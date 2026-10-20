@@ -263,12 +263,13 @@ describe('SeriesDetailPage (B4-vod-D1, D3, D4, D10)', () => {
     await waitFor(() => expect(queueIds()).toEqual(['e11', 'e12', 'e13', 'e21']));
   });
 
-  it('D3: a resumable episode also offers "Start over", which forgets the position first', async () => {
+  it('D3: a resumable episode also offers "Start over", which plays from 0 and keeps the saved row', async () => {
     renderAt('/s/src1/series/s1', route);
     fireEvent.click(await screen.findByRole('button', { name: 'Start S01E02 over' }));
     await waitFor(() => expect(played).toHaveLength(1));
-    expect(callsOf('positions.remove')[0]!.args).toEqual({ ref: sref, episodeId: 'e12' });
-    expect(played[0]).toMatchObject({ episodeId: 'e12' });
+    // VL-start-over-unwatches: removing the row first also dropped its watched mark.
+    expect(callsOf('positions.remove')).toHaveLength(0);
+    expect(played[0]).toMatchObject({ episodeId: 'e12', fromStart: true });
   });
 
   it('D4: no second "next episode" countdown when the player queue already has the next episode', async () => {

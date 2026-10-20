@@ -81,7 +81,13 @@ test.describe('sources: cancel and undo', () => {
 
     // No half-written source: the row the add inserted is gone, and no channels were kept.
     await expect.poll(async () => (await listSources(page.request)).filter((s) => s.name === name).length, { timeout: 20_000 }).toBe(0);
+    // The form still holds the typed details, so Escape asks before dropping them (SS-1).
     await page.keyboard.press('Escape');
+    const discard = page.getByTestId('discard-prompt');
+    await expect(discard).toBeVisible();
+    await expect(discard).toHaveAccessibleName('Discard changes?');
+    await discard.getByTestId('discard-confirm').click();
+    await expect(discard).toBeHidden();
     await expect(dialog).toBeHidden();
     await expect(card(page, name)).toHaveCount(0);
     await page.reload();

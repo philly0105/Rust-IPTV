@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import type { Page } from '@playwright/test';
+
 import type { Source } from '../src/api/types';
-import { favorites, resetApp, rpc } from './helpers/api';
+import { favorites, listSources, resetApp, rpc } from './helpers/api';
 import { MOCK, MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
 import { expectPlaying, resumeRecord } from './helpers/media';
@@ -20,9 +22,11 @@ import {
 } from './helpers/ui';
 
 // Check 7 (SC5): M3U from URL, pasted text and file upload; groups; search;
-// number zap; favorites; EPG ribbon now/next from the playlist's XMLTV.
+// number zap; favorites; EPG ribbon now/next from the playlist's XMLTV; re-importing a pasted
+// playlist and replacing its text.
 
 const URL_NAME = 'M3U from URL';
+const TEXT_NAME = 'M3U from text';
 
 /** A small hand-written playlist pointing at the mock's live HLS streams. */
 const PASTED = [
@@ -35,6 +39,21 @@ const PASTED = [
   `${MOCK}/xtream/live/demo/secret/108.m3u8`,
   '',
 ].join('\n');
+
+/** What the pasted playlist is replaced with from its Edit dialog. */
+const REPLACED = [
+  '#EXTM3U',
+  `#EXTINF:-1 tvg-id="replaced.one" tvg-chno="1" group-title="Replaced",Replaced One`,
+  `${MOCK}/xtream/live/demo/secret/103.m3u8`,
+  `#EXTINF:-1 tvg-id="replaced.two" tvg-chno="2" group-title="Replaced",Replaced Two`,
+  `${MOCK}/xtream/live/demo/secret/104.m3u8`,
+  '',
+].join('\n');
+
+/** A source card by its exact name. */
+function sourceCard(page: Page, name: string) {
+  return page.getByTestId('source-card').filter({ has: page.getByTestId('source-name').getByText(name, { exact: true }) });
+}
 
 test.describe.serial('m3u flow', () => {
   let source: Source;
@@ -139,7 +158,7 @@ test.describe.serial('m3u flow', () => {
   });
 
   test('add from pasted text', async ({ page }) => {
-    const pasted = await addM3uFromText(page, 'M3U from text', PASTED);
+    const pasted = await addM3uFromText(page, TEXT_NAME, PASTED);
     expect(pasted.channelCount).toBe(3);
     await gotoLive(page, pasted.id);
     for (const name of ['Pasted One', 'Pasted Two', 'Pasted Three']) await expect(channelButton(page, name)).toBeVisible();
@@ -148,6 +167,54 @@ test.describe.serial('m3u flow', () => {
     await expect(groups.getByRole('link', { name: /^Pasted Sports 1$/ })).toBeVisible();
     const raw = await rpc<{ text: string }>(page.request, 'm3u.raw', { sourceId: pasted.id });
     expect(raw.text).toContain('Pasted Three');
+  });
+
+  test('a pasted playlist re-imports from its card, and its text can be replaced', async ({ page }) => {
+    const before = (await listSources(page.request)).find((s) => s.name === TEXT_NAME)!;
+    expect(before, `${TEXT_NAME} from the previous test`).toBeTruthy();
+    await page.goto('/sources');
+    const card = sourceCard(page, TEXT_NAME);
+    await expect(card.getByTestId('source-origin')).toHaveText('Pasted playlist');
+
+    // There is no address to fetch again: the card's button re-reads the stored text.
+    const reimported = page.waitForResponse((r) => r.url().endsWith('/api/rpc/sources.refresh'));
+    await card.getByRole('button', { name: `Re-import ${TEXT_NAME}`, exact: true }).click();
+    const res = await reimported;
+    expect(res.ok(), 'the re-import succeeds').toBe(true);
+    const after = (await res.json()) as Source;
+    expect(after.id).toBe(before.id);
+    expect(after.lastError ?? null).toBeNull();
+    expect(after.channelCount).toBe(3);
+    expect(Date.parse(after.lastRefreshAt!)).toBeGreaterThanOrEqual(Date.parse(before.lastRefreshAt!));
+    await expect(card.getByTestId('source-error')).toHaveCount(0);
+
+    // Edit: new text replaces the channels of the same source.
+    await card.getByRole('button', { name: `Edit ${TEXT_NAME}`, exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: `Edit ${TEXT_NAME}` });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('m3u-text-origin-note')).toBeVisible();
+    const text = dialog.getByTestId('m3u-replace-text');
+    await expect(text).toHaveAccessibleName('New playlist text');
+    await expect(text).toHaveValue('');
+    await text.fill(REPLACED);
+    await expect(dialog.getByTestId('preview-channel-count')).toHaveText('2');
+    await dialog.getByTestId('edit-source-save').click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator('[data-toast-id]').filter({ hasText: `Saved ${TEXT_NAME}` })).toBeVisible();
+
+    await expect
+      .poll(async () => (await rpc<Source>(page.request, 'sources.get', { id: before.id })).channelCount, { timeout: 30_000, message: 'the new text is imported' })
+      .toBe(2);
+    // Still one source by that name, the same one.
+    expect((await listSources(page.request)).filter((s) => s.name === TEXT_NAME).map((s) => s.id)).toEqual([before.id]);
+    const raw = await rpc<{ text: string }>(page.request, 'm3u.raw', { sourceId: before.id });
+    expect(raw.text).toContain('Replaced Two');
+    expect(raw.text).not.toContain('Pasted Three');
+
+    await gotoLive(page, before.id);
+    for (const name of ['Replaced One', 'Replaced Two']) await expect(channelButton(page, name)).toBeVisible();
+    await expect(channelButton(page, 'Pasted One')).toHaveCount(0);
+    await expect(page.getByRole('navigation', { name: 'Groups' }).getByRole('link', { name: /^Replaced 2$/ })).toBeVisible();
   });
 
   test('add from file upload', async ({ page }) => {

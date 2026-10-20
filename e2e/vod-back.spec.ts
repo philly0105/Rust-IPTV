@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { ensureSource, resetApp } from './helpers/api';
 import { expect, test } from './helpers/fixtures';
@@ -22,10 +22,18 @@ async function openGrid(page: Page): Promise<string> {
   return page.url();
 }
 
-/** Opens the OPEN_INDEX card; returns its option text (the title). */
+/**
+ * The poster card inside a grid option. Its `title` attribute is the item's full title; the
+ * option's text starts with the rating chip drawn on the artwork, so it cannot name the title.
+ */
+function posterCard(option: Locator): Locator {
+  return option.locator('[data-poster-card]');
+}
+
+/** Opens the OPEN_INDEX card; returns its full title. */
 async function openCard(page: Page): Promise<string> {
   const option = page.getByTestId('vod-grid-movie').getByRole('listbox').getByRole('option').nth(OPEN_INDEX);
-  const title = (await option.innerText()).split('\n')[0]!.trim();
+  const title = (await posterCard(option).getAttribute('title')) ?? '';
   expect(title.length).toBeGreaterThan(0);
   await option.click();
   await expect(page.getByTestId('vod-movie-detail').getByRole('heading', { level: 1 })).toBeVisible();
@@ -36,15 +44,22 @@ async function openCard(page: Page): Promise<string> {
 
 async function expectGridRestored(page: Page, gridUrl: string, title: string): Promise<void> {
   await expect(page).toHaveURL(gridUrl);
-  const grid = page.getByTestId('vod-grid-movie');
-  const opened = grid.getByRole('listbox').getByRole('option').filter({ hasText: title }).first();
+  const listbox = page.getByTestId('vod-grid-movie').getByRole('listbox');
+  // The grid mounts again, so the option ids (useId) are new: compare the cards, not the ids.
+  const opened = listbox.getByRole('option').filter({ has: page.locator(`[data-poster-card][title="${cssString(title)}"]`) });
+  await expect(opened).toHaveCount(1);
   await expect(opened).toBeInViewport();
-  const listbox = grid.getByRole('listbox');
+  await expect(opened).toHaveAttribute('aria-posinset', String(OPEN_INDEX + 1));
   await expect(listbox).toBeFocused();
   // The keyboard cursor (aria-activedescendant) is on the title that was opened.
   const activeId = await listbox.getAttribute('aria-activedescendant');
   expect(activeId, 'grid has an active cell after Back').toBeTruthy();
-  await expect(page.locator(`[id="${activeId}"]`)).toContainText(title);
+  await expect(opened).toHaveAttribute('id', activeId!);
+}
+
+/** `s` as the inside of a double-quoted CSS attribute value. */
+function cssString(s: string): string {
+  return s.replace(/["\\]/g, '\\$&');
 }
 
 test.describe('VOD back navigation', () => {

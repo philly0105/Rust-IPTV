@@ -45,6 +45,8 @@ test.describe.serial('xtream flow', () => {
     const cast = page.getByTestId('vod-movie-detail').getByTestId('vod-cast-line');
     await expect(cast).toBeVisible();
     await expect(cast).toContainText('Cast');
+    // The names come from the provider's get_vod_info (crates/iptv-mock catalog.rs, Black Harbor).
+    for (const name of ['Mara Venn', 'Elias Shore', 'Tomas Bell', 'June Cross']) await expect(cast).toContainText(name);
     const src = await playMovieOnDetail(page);
     expect(src).toContain(`/xtream/movie/demo/secret/${MOCK_FACTS.firstMovie.id}.mp4`);
   });

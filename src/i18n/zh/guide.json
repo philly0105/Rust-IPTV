@@ -17,7 +17,6 @@
   "searchNoGuideHint": "添加或刷新节目指南后即可搜索。",
   "epgSettings": "节目指南设置",
   "searchMore": "仅显示前 {{n}} 个结果。请细化搜索。",
-  "resultsCount": "结果：{{n}}",
   "closeSearch": "关闭搜索",
   "hitLabel": "{{title}}，{{channel}}，{{time}}",
   "dayHeading": "{{rel}}，{{date}}",
@@ -73,5 +72,7 @@
   "watchChannels": "观看频道",
   "noLiveChannels": "此来源没有直播频道",
   "noLiveChannelsHint": "它只有电影或剧集，因此节目指南为空。请选择有直播电视的来源。",
-  "openSourceGuide": "打开 {{name}}"
+  "openSourceGuide": "打开 {{name}}",
+  "shortcutDigits": "按编号跳到频道",
+  "resultCount_other": "{{count, number}} 条结果"
 }

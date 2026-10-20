@@ -217,5 +217,20 @@
   "hideRibbon": "隐藏节目信息",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "直播电视",
-  "archiveStageIdle": "选择一个节目在此播放。"
+  "archiveStageIdle": "选择一个节目在此播放。",
+  "favoritesGroup": "收藏",
+  "recentGroup": "最近观看",
+  "favoritesEmpty": "还没有收藏的频道",
+  "favoritesEmptyStations": "还没有收藏的电台",
+  "favoritesEmptyHint": "在任意分组中为频道加星标，即可固定在这里。",
+  "recentEmpty": "还没有观看记录",
+  "recentEmptyHint": "你在此来源播放过的频道会显示在这里。",
+  "addGroupToList": "全部添加到列表…",
+  "openGroupInGuide": "在节目指南中打开",
+  "pickerTypeForMore": "输入以查找更多",
+  "pickerViews": "视图",
+  "pickerShow": "显示",
+  "filterSources": "筛选来源",
+  "recentStations": "最近播放",
+  "playNamed": "播放 {{name}}"
 }

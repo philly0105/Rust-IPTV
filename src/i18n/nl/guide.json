@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Voeg een gids toe of vernieuw er een om erin te zoeken.",
   "epgSettings": "Gidsinstellingen",
   "searchMore": "De eerste {{n}} worden getoond. Verfijn de zoekopdracht.",
-  "resultsCount": "Resultaten: {{n}}",
   "closeSearch": "Zoeken sluiten",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,8 @@
   "watchChannels": "Zenders bekijken",
   "noLiveChannels": "Deze bron heeft geen livezenders",
   "noLiveChannelsHint": "Er staan alleen films of series in, dus de gids is leeg. Kies een bron met live tv.",
-  "openSourceGuide": "{{name}} openen"
+  "openSourceGuide": "{{name}} openen",
+  "shortcutDigits": "Naar een kanaal springen via het nummer",
+  "resultCount_one": "{{count, number}} resultaat",
+  "resultCount_other": "{{count, number}} resultaten"
 }

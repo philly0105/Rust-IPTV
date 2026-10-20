@@ -141,7 +141,8 @@ describe('Live list: place kept on return', () => {
 
     cleanup();
     renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
-    await screen.findByText('Channel 0');
+    // The row, not its tile on the idle stage's station shelf.
+    await within(await screen.findByTestId('channel-list')).findByText('Channel 0');
     expect(cursorIndex()).toBe(0);
     rowButton(0)!.focus();
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });

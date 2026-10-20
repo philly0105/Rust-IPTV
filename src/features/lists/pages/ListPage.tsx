@@ -5,7 +5,7 @@
  * Channels the provider dropped sit under the list, greyed, with Remove.
  */
 
-import { ListOrdered, ListPlus, ListTree, ListVideo, Play, Settings2, Star, Trash2, X } from 'lucide-react';
+import { ListOrdered, ListTree, ListVideo, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
@@ -14,7 +14,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type CustomListEntry, type EpgNowNext, type ItemKey, type SourceKind } from '@/api/types';
 import { registerCommands } from '@/shell/commands';
-import { useChannelEditMenuItems, useChannelEditShortcuts } from '@/features/channeledit';
+import { useChannelEditShortcuts } from '@/features/channeledit';
 import { EpgMappingDialog } from '@/features/live/components/EpgMappingDialog';
 import { EpgRibbon } from '@/features/live/components/EpgRibbon';
 import { LiveStageColumn } from '@/features/live/components/LiveStageColumn';
@@ -31,6 +31,7 @@ import {
   ContextMenu,
   EmptyState,
   canZap,
+  channelMenuHeader,
   ErrorState,
   IconButton,
   PlayerStage,
@@ -45,6 +46,7 @@ import {
   usePlayerStore,
   useRowHeight,
   useShell,
+  useChannelMenuItems,
   useToast,
   useVisibleSources,
   type MenuItem,
@@ -57,7 +59,7 @@ import { useListChannels } from '../hooks/useListChannels';
 import { useListLocks } from '../hooks/useListLocks';
 import { useLists } from '../hooks/useLists';
 import { LISTS_PATH } from '../paths';
-import { openEditListItems, openListPicker, openManageLists } from '../store';
+import { openAddChannels, openEditListItems, openManageLists } from '../store';
 
 const SIDEBAR_KEY = 'lists.sidebarCollapsed';
 
@@ -193,32 +195,35 @@ export function ListPage() {
   const onToggleFavorite = useCallback((c: Channel, fav: boolean) => void toggleFavorite(c, fav), [toggleFavorite]);
 
   // ---- row menu -----------------------------------------------------------
+  // LG-13: Live's own channel menu (catch-up, external players, multi-view, guide matching), with
+  // "Remove from list" among the Organize entries.
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; favorite: boolean } | null>(null);
   const onContextMenu = useCallback((pos: { x: number; y: number }, channel: Channel, favorite: boolean) => setMenu({ pos, channel, favorite }), []);
   const closeMenu = useCallback(() => setMenu(null), []);
   const entryOf = useCallback((c: Channel) => paged.entries?.find((e) => sameRef(e.ref, c.ref)), [paged.entries]);
-  // C2 (wired by I): Rename / Reset name / Hide, as in Live's channel menu.
-  const editItems = useChannelEditMenuItems(menu?.channel ?? null);
-  const menuItems: MenuItem[] = useMemo(() => {
-    if (!menu) return [];
+  const playRow = useCallback((ch: Channel) => play(ch, paged.getNowNext(paged.channels.indexOf(ch))), [play, paged]);
+  const removeItem = useMemo((): MenuItem[] => {
+    const entry = menu ? entryOf(menu.channel) : undefined;
+    if (!menu || !list || !entry) return [];
+    const name = displayChannelName(menu.channel.name, prefs.stripCountryPrefix);
+    return [{ id: 'remove', label: t('removeFromList'), icon: <X className="size-4" />, onSelect: () => actions.removeEntries(list, [entry], name) }];
+  }, [menu, list, entryOf, prefs.stripCountryPrefix, t, actions]);
+  const menuItems = useChannelMenuItems(menu?.channel ?? null, {
+    source: menu ? sourceById.get(menu.channel.ref.sourceId) : undefined,
+    favorite: menu?.favorite,
+    onPlay: playRow,
+    onToggleFavorite,
+    onMapGuide: setMapping,
+    organize: removeItem,
+    editHints: true,
+  });
+  const menuHeader = useMemo(() => {
+    if (!menu) return undefined;
     const ch = menu.channel;
-    const name = displayChannelName(ch.name, prefs.stripCountryPrefix);
-    const entry = entryOf(ch);
-    return [
-      { id: 'play', label: tl('play'), icon: <Play className="size-4" />, onSelect: () => play(ch, paged.getNowNext(paged.channels.indexOf(ch))) },
-      {
-        id: 'favorite',
-        label: menu.favorite ? tl('removeFavorite') : tl('addFavorite'),
-        icon: <Star className="size-4" fill={menu.favorite ? 'currentColor' : 'none'} />,
-        onSelect: () => void toggleFavorite(ch, menu.favorite),
-      },
-      { id: 'lists', label: t('addToList'), icon: <ListPlus className="size-4" />, onSelect: () => openListPicker(ch) },
-      ...editItems,
-      ...(list && entry
-        ? [{ id: 'remove', label: t('removeFromList'), icon: <X className="size-4" />, onSelect: () => actions.removeEntries(list, [entry], name) }]
-        : []),
-    ];
-  }, [menu, prefs.stripCountryPrefix, entryOf, t, tl, play, paged, toggleFavorite, list, actions, editItems]);
+    // C2: a locked channel's programme stays back until the PIN, in the menu as in its row.
+    const nowTitle = locks.channelLocked(ch) ? undefined : paged.getNowNext(paged.channels.indexOf(ch))?.now?.title;
+    return channelMenuHeader(ch, displayChannelName(ch.name, prefs.stripCountryPrefix), nowTitle);
+  }, [menu, locks, paged, prefs.stripCountryPrefix]);
 
   // ---- sidebar ------------------------------------------------------------
   const wide = useMediaQuery('(min-width: 1024px)');
@@ -392,14 +397,21 @@ export function ListPage() {
         title={paged.unavailable.length > 0 ? t('allUnavailableTitle') : t('listEmptyTitle')}
         description={t('listEmptyHint')}
         action={
-          // Live TV, where L adds a channel (the hint above). Not `/`: it restores the saved screen, this one.
-          <Link
-            to={firstSource ? `/s/${encodeURIComponent(firstSource.id)}/live` : '/dashboard'}
-            className={buttonClass('secondary', 'sm')}
-            data-testid="list-browse-channels"
-          >
-            {t('browseChannels')}
-          </Link>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {list ? (
+              <Button variant="primary" size="sm" icon={<Plus className="size-4" />} onClick={() => openAddChannels(list.id)}>
+                {t('addChannels')}
+              </Button>
+            ) : null}
+            {/* Live TV, where L adds a channel (the hint above). Not `/`: it restores the saved screen, this one. */}
+            <Link
+              to={firstSource ? `/s/${encodeURIComponent(firstSource.id)}/live` : '/dashboard'}
+              className={buttonClass('secondary', 'sm')}
+              data-testid="list-browse-channels"
+            >
+              {t('browseChannels')}
+            </Link>
+          </div>
         }
       />
     );
@@ -478,8 +490,21 @@ export function ListPage() {
             <span className="flex-1" />
           )}
           {list ? (
-            // From sm up Edit channels is in the header; a phone's header has no room for it.
-            <IconButton size="sm" label={t('editChannels')} icon={<ListOrdered className="size-4" />} onClick={() => openEditListItems(list.id)} className="sm:hidden" />
+            <>
+              {/* LG-13: the list grows from here too, not only from Live's menus. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Plus className="size-4" />}
+                onClick={() => openAddChannels(list.id)}
+                className="shrink-0 max-sm:w-8 max-sm:px-0"
+                data-testid="list-add-channels"
+              >
+                <span className="max-sm:sr-only">{t('addChannels')}</span>
+              </Button>
+              {/* From sm up Edit channels is in the header; a phone's header has no room for it. */}
+              <IconButton size="sm" label={t('editChannels')} icon={<ListOrdered className="size-4" />} onClick={() => openEditListItems(list.id)} className="sm:hidden" />
+            </>
           ) : null}
         </div>
         {listBody}
@@ -534,7 +559,13 @@ export function ListPage() {
         }
       />
 
-      <ContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
+      <ContextMenu
+        pos={menu?.pos ?? null}
+        items={menuItems}
+        header={menuHeader}
+        label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
+        onClose={closeMenu}
+      />
       <EpgMappingDialog channel={mapping} onClose={() => setMapping(null)} />
     </div>
   );

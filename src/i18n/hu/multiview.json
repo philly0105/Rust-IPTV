@@ -137,5 +137,7 @@
   "announceSwapped": "{{a}} és {{b}} helyet cserélt",
   "announceLayout": "Elrendezés: {{layout}}",
   "announceMuted": "Fal némítva",
-  "announceUnmuted": "Fal hangja visszakapcsolva"
+  "announceUnmuted": "Fal hangja visszakapcsolva",
+  "pickerScope": "Megjelenítés",
+  "pickerEmptyScope": "Itt nincs semmi ebből a forrásból"
 }

@@ -229,5 +229,20 @@
   "hideRibbon": "Ukryj program",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Telewizja na żywo",
-  "archiveStageIdle": "Wybierz program, aby odtworzyć go tutaj."
+  "archiveStageIdle": "Wybierz program, aby odtworzyć go tutaj.",
+  "favoritesGroup": "Ulubione",
+  "recentGroup": "Ostatnio oglądane",
+  "favoritesEmpty": "Brak ulubionych kanałów",
+  "favoritesEmptyStations": "Brak ulubionych stacji",
+  "favoritesEmptyHint": "Oznacz kanał gwiazdką w dowolnej grupie, aby przypiąć go tutaj.",
+  "recentEmpty": "Jeszcze nic nie oglądano",
+  "recentEmptyHint": "Tutaj pojawią się kanały odtwarzane z tego źródła.",
+  "addGroupToList": "Dodaj wszystkie do listy…",
+  "openGroupInGuide": "Otwórz w przewodniku TV",
+  "pickerTypeForMore": "Pisz, aby znaleźć więcej",
+  "pickerViews": "Widoki",
+  "pickerShow": "Pokaż",
+  "filterSources": "Filtruj źródła",
+  "recentStations": "Ostatnio słuchane",
+  "playNamed": "Odtwórz {{name}}"
 }

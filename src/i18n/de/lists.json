@@ -81,5 +81,22 @@
   "errorTooMany": "Sie können bis zu {{max}} Listen anlegen. Löschen Sie zuerst eine.",
   "errorListFull": "Eine Liste fasst bis zu {{max}} Sender.",
   "errorGone": "Diese Liste wurde gelöscht.",
-  "shortcutAddToList": "Ausgewählten Sender zu einer Liste hinzufügen"
+  "shortcutAddToList": "Ausgewählten Sender zu einer Liste hinzufügen",
+  "addChannels": "Sender hinzufügen",
+  "addChannelsTo": "Sender zu {{list}} hinzufügen",
+  "inList": "In der Liste",
+  "addedNamed": "{{name}} zu {{list}} hinzugefügt",
+  "showMore": "Mehr anzeigen",
+  "groupTitle": "Gruppe zu einer Liste hinzufügen",
+  "groupAdd": "Hinzufügen",
+  "groupAddTo": "Gruppe zu {{list}} hinzufügen",
+  "groupAdded_one": "{{formatted}} Sender zu {{list}} hinzugefügt",
+  "groupAdded_other": "{{formatted}} Sender zu {{list}} hinzugefügt",
+  "groupAddedShort_one": "{{formatted}} hinzugefügt",
+  "groupAddedShort_other": "{{formatted}} hinzugefügt",
+  "groupAlreadyIn": "{{list}} enthält bereits alle",
+  "groupNothingNew": "Schon enthalten",
+  "groupLoadFailed": "Die Sender dieser Gruppe konnten nicht geladen werden",
+  "groupCapped": "Eine Liste fasst bis zu {{max}} Sender, daher werden nur die ersten {{max}} hinzugefügt.",
+  "groupNewList": "Oder eine neue Liste mit diesen Sendern anlegen:"
 }

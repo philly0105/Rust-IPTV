@@ -162,7 +162,12 @@ describe('zoom (F-GUIDE-CONVENIENCES)', () => {
 });
 
 describe('favorites and list views (F-GUIDE-CONVENIENCES)', () => {
-  const group = () => screen.getByRole('combobox', { name: 'Group' }) as HTMLSelectElement;
+  // LG-11: the group picker is a combobox button opening a sectioned listbox.
+  const group = () => screen.getByRole('combobox', { name: 'Group' });
+  const choose = (name: string | RegExp) => {
+    fireEvent.click(group());
+    fireEvent.click(screen.getByRole('option', { name }));
+  };
   const fav = (ch: Channel, position: number): FavoriteEntry => ({ ref: ch.ref, position, addedAt: '2026-01-01T00:00:00Z', snapshot: { title: ch.name, contentType: 'live' } });
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-channel-row]')].map((el) => el.textContent ?? '');
 
@@ -170,17 +175,19 @@ describe('favorites and list views (F-GUIDE-CONVENIENCES)', () => {
     rpc.handlers['favorites.list'] = () => [fav(CHANNELS[5]!, 1), fav(CHANNELS[7]!, 0), { ...fav(CHANNELS[9]!, 2), ref: { sourceId: 'src1', contentType: 'radio', itemId: 'r9' } }];
     rpc.handlers['catalog.item'] = (a) => CHANNELS.find((c) => c.ref.itemId === (a as { ref: ItemRef }).ref.itemId)!;
     await openGuide();
-    expect([...group().options].map((o) => o.text).slice(0, 3)).toEqual(['All channels', 'Favorites', 'List: Picks']);
-    fireEvent.change(group(), { target: { value: '@view:favorites' } });
+    // All channels, then the views (favorites, each list) under their heading, then the groups.
+    fireEvent.click(group());
+    expect(screen.getAllByRole('option').map((o) => o.textContent).slice(0, 3)).toEqual(['All channels', 'Favorites', 'List: Picks']);
+    fireEvent.click(screen.getByRole('option', { name: 'Favorites' }));
     await waitFor(() => expect(router.location?.search).toContain('view=favorites'));
     expect(rpc.of('favorites.list')).toContainEqual({ sourceId: 'src1' });
     await waitFor(() => expect(rows()).toHaveLength(2));
     await waitFor(() => expect(rows()[0]).toContain('Channel 7'));
     expect(rows()[1]).toContain('Channel 5');
-    expect(group().value).toBe('@view:favorites');
+    expect(group().textContent).toBe('Favorites');
 
     // A group replaces the view.
-    fireEvent.change(group(), { target: { value: 'g1' } });
+    choose(/^News/);
     await waitFor(() => expect(router.location?.search).toContain('category=g1'));
     expect(router.location?.search).not.toContain('view=');
   });

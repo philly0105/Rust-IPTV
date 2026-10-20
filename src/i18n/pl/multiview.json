@@ -141,5 +141,7 @@
   "announceSwapped": "Zamieniono {{a}} i {{b}}",
   "announceLayout": "Układ: {{layout}}",
   "announceMuted": "Ściana wyciszona",
-  "announceUnmuted": "Dźwięk ściany włączony"
+  "announceUnmuted": "Dźwięk ściany włączony",
+  "pickerScope": "Pokaż",
+  "pickerEmptyScope": "Nic tu nie ma z tego źródła"
 }

@@ -4,9 +4,13 @@ import { itemKey, type Channel, type EpgNowNext, type ItemRef, type RecentEntry 
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /** Enough history to find a channel among the films and episodes watched since. */
 const RECENT_LIMIT = 30;
+/** How many more of the history `others` carries. */
+const OTHERS = 6;
 
 export interface LastChannel {
   entry: RecentEntry;
+  /** The next few of the same kind that `accept` takes, newest first (Radio's recent stations). */
+  others: RecentEntry[];
   /** The catalog row, once it is in; undefined when the channel is gone from the source. */
   channel?: Channel;
   nowNext?: EpgNowNext;
@@ -41,5 +45,8 @@ export function useLastChannel(opts: {
   });
   if (!entry) return undefined;
   const channel = item.data && 'isRadio' in item.data ? (item.data as Channel) : undefined;
-  return { entry, channel, nowNext: nowNext.data?.[itemKey(ref)] };
+  const others = (recent.data ?? [])
+    .filter((e) => e !== entry && e.ref.contentType === contentType && (!accept || accept(e.ref)))
+    .slice(0, OTHERS);
+  return { entry, others, channel, nowNext: nowNext.data?.[itemKey(ref)] };
 }

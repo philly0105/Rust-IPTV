@@ -217,5 +217,20 @@
   "hideRibbon": "隱藏節目資訊",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "直播電視",
-  "archiveStageIdle": "選擇一個節目在此播放。"
+  "archiveStageIdle": "選擇一個節目在此播放。",
+  "favoritesGroup": "我的最愛",
+  "recentGroup": "最近觀看",
+  "favoritesEmpty": "尚未加入任何最愛頻道",
+  "favoritesEmptyStations": "尚未加入任何最愛電台",
+  "favoritesEmptyHint": "在任一群組為頻道加上星號，就會固定在這裡。",
+  "recentEmpty": "尚無觀看紀錄",
+  "recentEmptyHint": "你在此來源播放過的頻道會顯示在這裡。",
+  "addGroupToList": "全部加入清單…",
+  "openGroupInGuide": "在節目表中開啟",
+  "pickerTypeForMore": "輸入以尋找更多",
+  "pickerViews": "檢視",
+  "pickerShow": "顯示",
+  "filterSources": "篩選來源",
+  "recentStations": "最近播放",
+  "playNamed": "播放 {{name}}"
 }

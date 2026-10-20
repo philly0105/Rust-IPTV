@@ -17,7 +17,6 @@
   "searchNoGuideHint": "أضف دليلًا أو حدّثه للبحث فيه.",
   "epgSettings": "إعدادات الدليل",
   "searchMore": "تُعرض أول {{n}} نتيجة. ضيّق نطاق البحث.",
-  "resultsCount": "النتائج: {{n}}",
   "closeSearch": "إغلاق البحث",
   "hitLabel": "{{title}}، {{channel}}، {{time}}",
   "dayHeading": "{{rel}}، {{date}}",
@@ -73,5 +72,12 @@
   "watchChannels": "مشاهدة القنوات",
   "noLiveChannels": "لا توجد قنوات مباشرة في هذا المصدر",
   "noLiveChannelsHint": "يحتوي على أفلام أو مسلسلات فقط، لذا دليله فارغ. اختر مصدرًا فيه بث مباشر.",
-  "openSourceGuide": "فتح {{name}}"
+  "openSourceGuide": "فتح {{name}}",
+  "shortcutDigits": "الانتقال إلى قناة برقمها",
+  "resultCount_zero": "{{count, number}} نتيجة",
+  "resultCount_one": "نتيجة واحدة",
+  "resultCount_two": "نتيجتان",
+  "resultCount_few": "{{count, number}} نتائج",
+  "resultCount_many": "{{count, number}} نتيجة",
+  "resultCount_other": "{{count, number}} نتيجة"
 }

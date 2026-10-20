@@ -217,5 +217,20 @@
   "hideRibbon": "Yayın akışını gizle",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Canlı TV",
-  "archiveStageIdle": "Burada oynatmak için bir program seçin."
+  "archiveStageIdle": "Burada oynatmak için bir program seçin.",
+  "favoritesGroup": "Favoriler",
+  "recentGroup": "Son izlenenler",
+  "favoritesEmpty": "Henüz favori kanal yok",
+  "favoritesEmptyStations": "Henüz favori istasyon yok",
+  "favoritesEmptyHint": "Buraya sabitlemek için herhangi bir gruptaki bir kanalı yıldızlayın.",
+  "recentEmpty": "Henüz bir şey izlenmedi",
+  "recentEmptyHint": "Bu kaynaktan oynattığınız kanallar burada görünür.",
+  "addGroupToList": "Tümünü listeye ekle…",
+  "openGroupInGuide": "TV rehberinde aç",
+  "pickerTypeForMore": "Daha fazlası için yazın",
+  "pickerViews": "Görünümler",
+  "pickerShow": "Göster",
+  "filterSources": "Kaynakları filtrele",
+  "recentStations": "Son dinlenenler",
+  "playNamed": "{{name}} oynat"
 }

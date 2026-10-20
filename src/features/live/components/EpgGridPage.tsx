@@ -6,7 +6,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   History,
-  Link2,
+  LayoutList,
+  ListVideo,
   LocateFixed,
   PanelTopClose,
   PanelTopOpen,
@@ -37,18 +38,15 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
-import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
+import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Source, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, IconButton, Select, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useToast, type MenuAction, type SelectOption, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, IconButton, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
-import { useChannelEditMenuItems } from '@/features/channeledit';
-import { useAddToListMenuItem } from '@/features/lists';
-import { channelInput } from '@/features/multiview/addChannel';
-import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
-import { useLockMenuItems } from '@/features/parental/lockMenu';
+import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
+import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
@@ -81,7 +79,9 @@ import { archivePath, canBrowseArchive } from '../lib/archive';
 import { playCatchup, playChannel } from '../lib/playback';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 import { GuideUnavailableNotice } from './ChannelList';
-import { ContextMenu, type MenuItem } from './ContextMenu';
+import { ContextMenu } from './ContextMenu';
+import { DigitOsd, type ZapFeedback } from './DigitOsd';
+import { ScopePicker, type PickerSection } from './ScopePicker';
 import { EpgMappingDialog } from './EpgMappingDialog';
 // recording:
 import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/features/recording';
@@ -99,7 +99,13 @@ import { clampGuideZoom, GUIDE_ZOOM_SLOT_PX, storedGuideZoom, storeGuideZoom } f
 import { guideViewParam, parseGuideView, useGuideViewChannels, type GuideView } from '../guide/viewChannels';
 import { prefetchProgramDescription, useProgramDescription } from '../guide/programDescription';
 
+/** A guide row at 100 % UI scale and comfortable density; the page scales it (LG-18). */
 export const GRID_ROW = 56;
+/**
+ * The part of {@link GRID_ROW} made of Tailwind spacing, which compact density tightens: the
+ * cells' top-1 and bottom-1 insets and their py-1 (3.75 px each at the 15 px root).
+ */
+const GRID_ROW_SPACING = 15;
 export const GRID_SLOT_MIN = 30;
 export const GRID_SLOT_PX = 150;
 export const GRID_WINDOW = 6 * HOUR;
@@ -360,7 +366,11 @@ export function EpgGridPage() {
   const wide = useMediaQuery('(min-width: 1024px)');
   // Phones: a logo-and-number column, so the track shows more than one slot beside it.
   const compact = !useMediaQuery(`(min-width: ${GUIDE_BAR_STACK_PX}px)`);
-  const channelCol = compact ? GRID_CHANNEL_COMPACT : wide ? 220 : 168;
+  // LG-18: the column, the rows and the ruler follow the UI scale (and compact density tightens
+  // the rows), like Live's list: at 125 % the old fixed 56 px rows clipped their two lines.
+  const channelCol = useScaledPx(compact ? GRID_CHANNEL_COMPACT : wide ? 220 : 168);
+  const rowH = useRowHeight(GRID_ROW, GRID_ROW_SPACING);
+  const headerH = useScaledPx(HEADER_H);
   const rtl = useIsRtl();
   // The time scale: the zoom step's px per 30-minute slot (toolbar buttons, Ctrl+scroll).
   const [zoom, setZoom] = useState(storedGuideZoom);
@@ -458,11 +468,18 @@ export function EpgGridPage() {
   const virtualizer = useListVirtualizer({
     count,
     getScrollElement: () => scroller.current,
-    estimateSize: () => GRID_ROW,
+    estimateSize: () => rowH,
     overscan: 6,
-    scrollPaddingStart: HEADER_H,
+    scrollPaddingStart: headerH,
     initialRect: { width: 1200, height: 720 },
   });
+  // A new scale or density: drop the cached row sizes so every row takes the new height.
+  const measuredRow = useRef(rowH);
+  useLayoutEffect(() => {
+    if (measuredRow.current === rowH) return;
+    measuredRow.current = rowH;
+    virtualizer.measure();
+  }, [rowH, virtualizer]);
   const vItems = virtualizer.getVirtualItems();
   const first = vItems[0]?.index ?? 0;
   const last = vItems[vItems.length - 1]?.index ?? 0;
@@ -1128,6 +1145,48 @@ export function EpgGridPage() {
     };
   }, [focusParam, sourceId, categoryId, viewParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // LG-01: a typed channel number moves the cursor to that channel's row, at the cursor's time, as
+  // number keys tune on Live. A channel outside the group or view on screen opens in all channels.
+  const [osd, setOsd] = useState<ZapFeedback | null>(null);
+  const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (osdTimer.current) clearTimeout(osdTimer.current);
+  }, []);
+  const jumpToNumber = useStable(async (n: number) => {
+    if (osdTimer.current) clearTimeout(osdTimer.current);
+    setOsd(null);
+    const missing = () => {
+      setOsd({ kind: 'missing', number: n });
+      osdTimer.current = setTimeout(() => setOsd(null), 2000);
+    };
+    try {
+      const ch = await rpc('catalog.channelByNumber', { sourceId, number: n, contentType: 'live' });
+      if (!ch) return missing();
+      const time = cursorRef.current.time ?? Date.now();
+      const key = itemKey(ch.ref);
+      const inView = view ? paged.loaded.some((l) => itemKey(l.channel.ref) === key) : !categoryId || ch.categoryId === categoryId;
+      if (!inView) goTo(time, { category: null });
+      setHighlight(null);
+      setReveal({ key, ref: ch.ref, number: ch.number, time, channelName: displayChannelName(ch.name, prefs.stripCountryPrefix), categoryId: inView ? categoryId : undefined });
+    } catch {
+      missing();
+    }
+  });
+  const digits = useDigitEntry((n) => void jumpToNumber(n));
+  useEffect(() => {
+    if (!digits.buffer) return;
+    if (osdTimer.current) clearTimeout(osdTimer.current);
+    setOsd({ kind: 'typing', digits: digits.buffer });
+  }, [digits.buffer]);
+  useShortcut(
+    'digit',
+    (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || !sourceId) return;
+      digits.push(e.key);
+    },
+    { description: tg('shortcutDigits'), area: guideArea },
+  );
+
   // Once the list the hit needs is on screen, find the channel's row, scroll to it, put the
   // keyboard cursor on the programme and highlight the row for a moment.
   const listReady = !!sourceId && !paged.isLoading && !paged.refreshing && !paged.error;
@@ -1405,6 +1464,8 @@ export function EpgGridPage() {
         // The grid with the no-guide notice floating over its foot: the notice comes and goes as
         // chunks load without moving the grid (L1-perf-1).
         <div className="relative flex min-h-0 flex-1 flex-col">
+          {/* LG-01: the number being typed, over the grid's top end. */}
+          <DigitOsd state={osd} />
           <div
             ref={scroller}
             role="grid"
@@ -1427,7 +1488,7 @@ export function EpgGridPage() {
               style={
                 {
                   width: channelCol + trackWidth,
-                  height: virtualizer.getTotalSize() + HEADER_H,
+                  height: virtualizer.getTotalSize() + headerH,
                   position: 'relative',
                   // Moves every row's cells to the window (GuideRow lays them out from `origin`).
                   [GRID_SHIFT_VAR]: `${gridShift}px`,
@@ -1437,6 +1498,7 @@ export function EpgGridPage() {
               }
             >
               <GuideHeader
+                height={headerH}
                 slots={slots}
                 labels={labels}
                 channelCol={channelCol}
@@ -1457,7 +1519,7 @@ export function EpgGridPage() {
                   aria-hidden
                   data-testid="epg-now-line"
                   className="pointer-events-none absolute w-0.5 bg-live"
-                  style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: HEADER_H, height: virtualizer.getTotalSize() }}
+                  style={{ ...inlineStart(channelCol + nowX - 1, rtl), top: headerH, height: virtualizer.getTotalSize() }}
                 />
               ) : null}
 
@@ -1467,8 +1529,8 @@ export function EpgGridPage() {
                   <GuideRow
                     key={v.key}
                     index={v.index}
-                    top={HEADER_H + v.start}
-                    height={GRID_ROW}
+                    top={headerH + v.start}
+                    height={rowH}
                     channel={ch}
                     programs={programsFor(ch)}
                     origin={origin}
@@ -1550,7 +1612,16 @@ export function EpgGridPage() {
       )}
 
       {rowMenu ? (
-        <GuideRowMenu menu={rowMenu} kind={ownKind(rowMenu.channel)} onPlay={playLive} onMapGuide={setMapping} onToggleFavorite={toggleFavorite} onClose={closeRowMenu} />
+        <GuideRowMenu
+          menu={rowMenu}
+          source={rowMenu.channel.ref.sourceId === source?.id ? source : undefined}
+          // The grid shows the channel's programmes anyway; the header names the airing one.
+          nowTitle={programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title}
+          onPlay={playLive}
+          onMapGuide={setMapping}
+          onToggleFavorite={toggleFavorite}
+          onClose={closeRowMenu}
+        />
       ) : null}
       <MemoMappingDialog channel={mapping} onClose={closeMapping} />
 
@@ -1581,8 +1652,14 @@ export function EpgGridPage() {
 const MemoJumpToDialog = memo(JumpToDialog);
 const MemoMappingDialog = memo(EpgMappingDialog);
 
+/** Half the now pill's width and a margin, in px: a slot label closer than this to now hides under it. */
+const NOW_PILL_REACH = 36;
+/** About the widest ruler label ("12:30 PM" at 12 px) with its padding. */
+const RULER_LABEL_PX = 64;
+
 /** The time header: the channel column's corner and a label per 30-minute slot. */
 const GuideHeader = memo(function GuideHeader({
+  height,
   slots,
   labels,
   channelCol,
@@ -1593,6 +1670,7 @@ const GuideHeader = memo(function GuideHeader({
   nowX,
   rtl,
 }: {
+  height: number;
   slots: readonly number[];
   labels: readonly string[];
   channelCol: number;
@@ -1608,7 +1686,7 @@ const GuideHeader = memo(function GuideHeader({
 }) {
   const { t } = useTranslation('live');
   return (
-    <div role="row" className="sticky top-0 z-20 flex border-b border-divider bg-surface" style={{ height: HEADER_H, width: channelCol + trackWidth }}>
+    <div role="row" className="sticky top-0 z-20 flex border-b border-divider bg-surface" style={{ height, width: channelCol + trackWidth }}>
       {nowLabel ? (
         // The now line's labelled head: it used to be a dot the ruler painted over. Under the
         // sticky channel column (z-10 here) when the track is scrolled past now.
@@ -1628,11 +1706,19 @@ const GuideHeader = memo(function GuideHeader({
       {/* Keyed by place, not time: a window move at the edge of a sideways scroll relabels the
           slots where they stand instead of moving them while the scroll makes up for it, which
           counted as a layout shift on every move (L4-live-4). */}
-      {slots.map((_, i) => (
-        <div role="columnheader" key={i} className="flex items-center border-s border-divider px-2 text-xs tabular-nums text-fg-muted" style={{ width: slotPx }}>
-          {labels[i]}
-        </div>
-      ))}
+      {slots.map((_, i) => {
+        // The now pill stands on the ruler: a label it would half cover steps aside.
+        const covered = !!nowLabel && nowX > i * slotPx - NOW_PILL_REACH && nowX < i * slotPx + RULER_LABEL_PX + NOW_PILL_REACH;
+        return (
+          <div role="columnheader" key={i} className="flex items-center border-s border-divider text-xs tabular-nums text-fg-muted" style={{ width: slotPx }}>
+            {/* Sticky past the channel column: the slot the window starts in keeps its time in
+                view while the column covers its start, so the left of the grid is never unlabelled. */}
+            <span className={cn('sticky px-2 whitespace-nowrap', covered && 'invisible')} style={{ insetInlineStart: channelCol }} data-testid="ruler-label">
+              {labels[i]}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 });
@@ -1675,9 +1761,9 @@ const GuideToolbar = memo(function GuideToolbar({
   onTogglePreview,
   onGoToPlaying,
 }: {
-  sources: readonly { id: string; name: string }[] | undefined;
+  sources: readonly { id: string; name: string; channelCount?: number }[] | undefined;
   sourceId: string;
-  categories: readonly { id: string; name: string }[] | undefined;
+  categories: readonly { id: string; name: string; itemCount?: number; hidden?: boolean }[] | undefined;
   categoryId: string | undefined;
   view: GuideView | undefined;
   lists: readonly { id: string; name: string }[] | undefined;
@@ -1711,16 +1797,33 @@ const GuideToolbar = memo(function GuideToolbar({
   const { t, i18n } = useTranslation('live');
   const { t: tg } = useTranslation('guide');
   const lang = i18n.language;
-  // The kit's Select, sized down to the toolbar's 32 px buttons.
-  const selectClass = 'h-8 max-w-48';
-  const sourceOptions: SelectOption[] = useMemo(() => (sources ?? []).map((s) => ({ value: s.id, label: s.name })), [sources]);
+  // LG-11: the source and the group or view are pickers with sections, counts and a filter, not
+  // OS dropdowns holding hundreds of groups with the lists mixed in.
+  const sourceSections: PickerSection[] = useMemo(
+    () => [{ id: 'sources', options: (sources ?? []).map((s) => ({ value: s.id, label: s.name, count: s.channelCount })) }],
+    [sources],
+  );
   // All channels, then the views (favorites, each custom list), then the source's groups.
-  const groupOptions: SelectOption[] = useMemo(
+  const groupSections: PickerSection[] = useMemo(
     () => [
-      { value: '', label: t('allChannels') },
-      { value: `${VIEW_OPTION}${guideViewParam({ kind: 'favorites' })}`, label: tg('viewFavorites') },
-      ...(lists ?? []).map((l) => ({ value: `${VIEW_OPTION}${guideViewParam({ kind: 'list', id: l.id })}`, label: tg('viewList', { name: l.name }) })),
-      ...(categories ?? []).map((c) => ({ value: c.id, label: c.name })),
+      { id: 'all', options: [{ value: '', label: t('allChannels'), icon: <LayoutList size={14} /> }] },
+      {
+        id: 'views',
+        heading: t('pickerViews'),
+        options: [
+          { value: `${VIEW_OPTION}${guideViewParam({ kind: 'favorites' })}`, label: tg('viewFavorites'), icon: <Star size={14} /> },
+          ...(lists ?? []).map((l) => ({
+            value: `${VIEW_OPTION}${guideViewParam({ kind: 'list', id: l.id })}`,
+            label: tg('viewList', { name: l.name }),
+            icon: <ListVideo size={14} />,
+          })),
+        ],
+      },
+      {
+        id: 'groups',
+        heading: t('groups'),
+        options: (categories ?? []).filter((c) => !c.hidden).map((c) => ({ value: c.id, label: c.name, count: c.itemCount })),
+      },
     ],
     [categories, lists, t, tg],
   );
@@ -1728,15 +1831,26 @@ const GuideToolbar = memo(function GuideToolbar({
   const range = formatTimeRange(start, end, lang);
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
-      <Select aria-label={t('guideSource')} className={selectClass} wrapperClassName="min-w-0" value={sourceId} options={sourceOptions} onValueChange={(v) => onQuery('source', v)} />
-      <Select
-        aria-label={t('guideGroup')}
-        className={selectClass}
-        wrapperClassName="min-w-0"
-        value={view ? `${VIEW_OPTION}${guideViewParam(view)}` : (categoryId ?? '')}
-        options={groupOptions}
-        onValueChange={(v) => (v.startsWith(VIEW_OPTION) ? onQuery('view', v.slice(VIEW_OPTION.length)) : onQuery('category', v || undefined))}
-      />
+      {/* A phone puts the two pickers side by side on one row, of equal width. */}
+      <div className={bar === 'phone' ? 'grid w-full grid-cols-2 gap-2' : 'contents'}>
+        <ScopePicker
+          label={t('guideSource')}
+          value={sourceId}
+          sections={sourceSections}
+          onChange={(v) => onQuery('source', v)}
+          filterLabel={t('filterSources')}
+          className={bar === 'phone' ? 'h-9' : 'w-48'}
+          testId="guide-source"
+        />
+        <ScopePicker
+          label={t('guideGroup')}
+          value={view ? `${VIEW_OPTION}${guideViewParam(view)}` : (categoryId ?? '')}
+          sections={groupSections}
+          onChange={(v) => (v.startsWith(VIEW_OPTION) ? onQuery('view', v.slice(VIEW_OPTION.length)) : onQuery('category', v || undefined))}
+          className={bar === 'phone' ? 'h-9' : 'w-48'}
+          testId="guide-group"
+        />
+      </div>
       {/* While the sources load the field holds its place, disabled, so the toolbar does not shift (L2-visual-2). */}
       <GuideSearch
         inputRef={searchRef}
@@ -1839,62 +1953,35 @@ const GuideToolbar = memo(function GuideToolbar({
 
 
 /**
- * A channel row's menu (right click on the row, or the context-menu key / Shift+F10 in the grid):
- * play, the archive, favorite, multi-view, lists, rename / hide (C2), guide matching and the
- * parental lock, as on the Live page. Mounted only while open, so the guide asks for favorite,
- * list, edit and lock state on demand.
+ * A channel row's menu (right click on the row, the context-menu key / Shift+F10 in the grid, or
+ * a long press): Live's own menu (LG-13), headed by the channel and what is on (LG-16). Mounted
+ * only while open, so the guide asks for favorite, list, edit and lock state on demand. F2 and
+ * Shift+Delete belong to the Live list; the guide does not bind them, so no key hints here.
  */
 function GuideRowMenu({
   menu,
-  kind,
+  source,
+  nowTitle,
   onPlay,
   onMapGuide,
   onToggleFavorite,
   onClose,
 }: {
   menu: { pos: { x: number; y: number }; channel: Channel };
-  kind?: SourceKind;
+  source: Source | undefined;
+  nowTitle: string | undefined;
   onPlay(channel: Channel): void;
   onMapGuide(channel: Channel): void;
   onToggleFavorite(channel: Channel, wasFavorite: boolean): void;
   onClose(): void;
 }) {
-  const { t } = useTranslation('live');
-  const navigate = useNavigate();
   const { stripCountryPrefix } = useDisplayPrefs();
   const ch = menu.channel;
   const name = displayChannelName(ch.name, stripCountryPrefix);
-  // C4: radio has no picture, so a station gets no multi-view entry.
-  const live = ch.ref.contentType === 'live';
-  const multiviewItem = useMultiviewMenuItem(live ? channelInput(ch) : null);
-  const addToListItem = useAddToListMenuItem(ch);
-  const editItems = useChannelEditMenuItems(ch);
-  const lockItems = useLockMenuItems(
-    { sourceId: ch.ref.sourceId, contentType: ch.ref.contentType, kind: 'item', targetId: ch.ref.itemId, name },
-    { categoryId: ch.categoryId },
-  );
   const favorites = useRpcQuery('favorites.contains', { refs: [ch.ref] });
-  const favorite = !!favorites.data?.some((r) => sameRef(r, ch.ref));
-  // F2 and Shift+Delete belong to the Live list; the guide does not bind them, so no key hints here.
-  const plain = ({ id, label, icon, disabled, onSelect }: MenuAction): MenuItem => ({ id, label, icon, disabled, onSelect });
-  const items: MenuItem[] = [
-    { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
-    ...(canBrowseArchive(ch, kind) ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref)) }] : []),
-    {
-      id: 'fav',
-      label: favorite ? t('removeFavorite') : t('addFavorite'),
-      icon: <Star className="size-4" fill={favorite ? 'currentColor' : 'none'} />,
-      // Until the answer is in, the entry would not know which way it goes.
-      disabled: !favorites.data,
-      onSelect: () => onToggleFavorite(ch, favorite),
-    },
-    ...(live ? [plain(multiviewItem)] : []),
-    ...(addToListItem ? [plain(addToListItem)] : []),
-    ...editItems.map(plain),
-    { id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => onMapGuide(ch) },
-    ...lockItems.map(plain),
-  ];
-  return <ContextMenu pos={menu.pos} items={items} label={name} onClose={onClose} />;
+  const favorite = favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined;
+  const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide });
+  return <ContextMenu pos={menu.pos} items={items} header={channelMenuHeader(ch, name, nowTitle)} label={name} onClose={onClose} />;
 }
 
 function ProgramPopover({
@@ -2085,5 +2172,7 @@ function cellInView(cell: HTMLElement, grid: HTMLElement, channelCol: number, rt
   const a = cell.getBoundingClientRect();
   const left = rtl ? box.left : box.left + channelCol;
   const right = rtl ? box.right - channelCol : box.right;
-  return a.right > left && a.left < right && a.bottom > box.top + HEADER_H && a.top < box.bottom;
+  // The ruler's height as drawn (it follows the UI scale).
+  const header = grid.querySelector<HTMLElement>('[role="row"]')?.getBoundingClientRect().height || HEADER_H;
+  return a.right > left && a.left < right && a.bottom > box.top + header && a.top < box.bottom;
 }

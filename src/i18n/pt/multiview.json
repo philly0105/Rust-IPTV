@@ -139,5 +139,7 @@
   "announceSwapped": "{{a}} e {{b}} trocados",
   "announceLayout": "Layout: {{layout}}",
   "announceMuted": "Mural silenciado",
-  "announceUnmuted": "Som do mural reativado"
+  "announceUnmuted": "Som do mural reativado",
+  "pickerScope": "Mostrar",
+  "pickerEmptyScope": "Nada aqui desta fonte"
 }

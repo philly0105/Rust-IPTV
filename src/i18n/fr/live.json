@@ -223,5 +223,20 @@
   "hideRibbon": "Masquer le programme",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "TV en direct",
-  "archiveStageIdle": "Choisissez un programme pour le lire ici."
+  "archiveStageIdle": "Choisissez un programme pour le lire ici.",
+  "favoritesGroup": "Favoris",
+  "recentGroup": "Regardés récemment",
+  "favoritesEmpty": "Pas encore de chaînes favorites",
+  "favoritesEmptyStations": "Pas encore de stations favorites",
+  "favoritesEmptyHint": "Ajoutez une étoile à une chaîne de n'importe quel groupe pour l'épingler ici.",
+  "recentEmpty": "Rien regardé pour l'instant",
+  "recentEmptyHint": "Les chaînes que vous lisez depuis cette source apparaissent ici.",
+  "addGroupToList": "Tout ajouter à une liste…",
+  "openGroupInGuide": "Ouvrir dans le guide TV",
+  "pickerTypeForMore": "Tapez pour en trouver d'autres",
+  "pickerViews": "Vues",
+  "pickerShow": "Afficher",
+  "filterSources": "Filtrer les sources",
+  "recentStations": "Écoutées récemment",
+  "playNamed": "Lire {{name}}"
 }

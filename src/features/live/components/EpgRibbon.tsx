@@ -173,12 +173,14 @@ export function EpgRibbon(props: EpgRibbonProps) {
     >
       {/* Three lines tall with or without a programme (time, title, description), so a zap never
           moves what is under it. The Now card (details, md up) keeps its own fixed height. */}
-      <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3 max-[480px]:basis-full', details && 'md:min-h-[7.25rem]')}>
+      <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3 max-[480px]:basis-full', details && 'md:min-h-[4.5rem]')}>
         {details && shown?.icon ? <ProgrammeArt src={shown.icon} sourceId={channel?.ref.sourceId} /> : null}
-        <div className="flex min-w-0 flex-1 flex-col justify-center">
+        {/* A container: the meta line drops what does not fit by the pane's own width, not the window's. */}
+        <div className="@container/ribbon flex min-w-0 flex-1 flex-col justify-center">
           {shown ? (
             <>
-              {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
+              {/* Clipped, never overflowing, and numbers are never cut: a narrow pane says "27m" for
+                  "27 min left" and leaves the category out (it used to read "2.. N"). */}
               <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
                 {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
@@ -186,17 +188,14 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   {formatRange(shown, i18n.language)}
                 </span>
                 {shownWhen === 'now' ? (
-                  <span
-                    className="min-w-0 truncate whitespace-nowrap"
-                    data-testid="ribbon-remaining"
-                    title={t('minutesLeft', { count: minutesLeft(shown, now) })}
-                  >
-                    {t('minutesLeft', { count: minutesLeft(shown, now) })}
+                  <span className="shrink-0 whitespace-nowrap" data-testid="ribbon-remaining" title={t('minutesLeft', { count: minutesLeft(shown, now) })}>
+                    <span className="@[22rem]/ribbon:hidden">{t('minutesLeftShort', { count: minutesLeft(shown, now) })}</span>
+                    <span className="hidden @[22rem]/ribbon:inline">{t('minutesLeft', { count: minutesLeft(shown, now) })}</span>
                   </span>
                 ) : null}
-                {/* The category is the first thing to go: below 1440 px the pane is too narrow for it to be more than "Ne…". */}
+                {/* The category is the first thing to go: in a narrow pane it would be no more than "Ne…". */}
                 {shown.category ? (
-                  <span className="hidden min-w-0 truncate text-fg-subtle min-[1440px]:block" data-testid="ribbon-category">
+                  <span className="hidden min-w-0 truncate text-fg-subtle @[30rem]/ribbon:block" data-testid="ribbon-category">
                     {shown.category}
                   </span>
                 ) : null}
@@ -223,8 +222,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   <span className="absolute inset-y-0 start-0 rounded-full bg-accent" style={{ width: `${shownWhen === 'now' ? programProgress(shown, now) * 100 : 0}%` }} />
                 </span>
               ) : null}
-              {shown.description ? (
-                <p dir="auto" className={cn('line-clamp-1 text-match-parent text-xs text-fg-muted', details && 'md:line-clamp-3 md:text-body-sm')} data-testid="ribbon-description">
+              {shown.description && !details ? (
+                <p dir="auto" className="line-clamp-1 text-match-parent text-xs text-fg-muted" data-testid="ribbon-description">
                   {shown.description}
                 </p>
               ) : null}
@@ -295,6 +294,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
           />
         ) : null}
       </div>
+      {/* The Now card's description spans the card under the art, the title and the buttons, so a
+          narrow stage column does not wrap it a few words to a line beside them. Three lines are
+          kept from md up whether or not there is one, so a zap never moves what is under it. */}
+      {details ? (
+        <p
+          dir="auto"
+          className="line-clamp-1 basis-full text-match-parent text-xs text-fg-muted md:line-clamp-3 md:min-h-[3.75rem] md:text-body-sm"
+          data-testid={shown?.description ? 'ribbon-description' : undefined}
+        >
+          {shown?.description}
+        </p>
+      ) : null}
     </div>
   );
   // LG-17: a phone's folded ribbon, one line: what is on, the time left, and a hairline of progress.
@@ -595,7 +606,8 @@ function Timeline(
             const midnight = localDayKey(tt) !== localDayKey(i > 0 ? ticks[i - 1]! : from);
             return (
               <div key={tt} className="absolute top-0 bottom-0" style={inlineStart(x, rtl)}>
-                <span className="absolute top-0 start-1 text-[calc(11rem/15)] whitespace-nowrap text-fg-subtle tabular-nums">
+                {/* On the ribbon's own surface, so the now line passes behind the label, not through it. */}
+                <span className="absolute top-0 start-0.5 rounded-xs bg-surface px-0.5 text-[calc(11rem/15)] whitespace-nowrap text-fg-subtle tabular-nums">
                   {midnight ? formatDay(tt, i18n.language) : formatClock(tt, i18n.language)}
                 </span>
                 <span className={`absolute top-4 bottom-0 w-px ${midnight ? 'bg-border' : 'bg-divider'}`} />

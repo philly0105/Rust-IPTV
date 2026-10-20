@@ -139,5 +139,7 @@
   "announceSwapped": "{{a}} e {{b}} scambiati",
   "announceLayout": "Disposizione: {{layout}}",
   "announceMuted": "Audio della parete disattivato",
-  "announceUnmuted": "Audio della parete riattivato"
+  "announceUnmuted": "Audio della parete riattivato",
+  "pickerScope": "Mostra",
+  "pickerEmptyScope": "Niente qui da questa sorgente"
 }

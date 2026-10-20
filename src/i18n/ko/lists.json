@@ -79,5 +79,20 @@
   "errorTooMany": "목록은 최대 {{max}}개까지 만들 수 있습니다. 먼저 하나를 삭제하세요.",
   "errorListFull": "목록 하나에 채널을 최대 {{max}}개까지 담을 수 있습니다.",
   "errorGone": "이 목록은 삭제되었습니다.",
-  "shortcutAddToList": "선택한 채널을 목록에 추가"
+  "shortcutAddToList": "선택한 채널을 목록에 추가",
+  "addChannels": "채널 추가",
+  "addChannelsTo": "{{list}}에 채널 추가",
+  "inList": "목록에 있음",
+  "addedNamed": "{{name}}을(를) {{list}}에 추가했습니다",
+  "showMore": "더 보기",
+  "groupTitle": "그룹을 목록에 추가",
+  "groupAdd": "추가",
+  "groupAddTo": "그룹을 {{list}}에 추가",
+  "groupAdded_other": "{{list}}에 채널 {{formatted}}개를 추가했습니다",
+  "groupAddedShort_other": "{{formatted}}개 추가됨",
+  "groupAlreadyIn": "{{list}}에 이미 모두 있습니다",
+  "groupNothingNew": "이미 있음",
+  "groupLoadFailed": "이 그룹의 채널을 불러오지 못했습니다",
+  "groupCapped": "목록에는 최대 {{max}}개 채널만 담을 수 있어 처음 {{max}}개만 추가됩니다.",
+  "groupNewList": "또는 이 채널들로 새 목록 만들기:"
 }

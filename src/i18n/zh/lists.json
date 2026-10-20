@@ -79,5 +79,20 @@
   "errorTooMany": "最多可以有 {{max}} 个列表。请先删除一个。",
   "errorListFull": "一个列表最多可容纳 {{max}} 个频道。",
   "errorGone": "此列表已被删除。",
-  "shortcutAddToList": "将选中的频道添加到列表"
+  "shortcutAddToList": "将选中的频道添加到列表",
+  "addChannels": "添加频道",
+  "addChannelsTo": "添加频道到 {{list}}",
+  "inList": "已在列表中",
+  "addedNamed": "已将 {{name}} 添加到 {{list}}",
+  "showMore": "显示更多",
+  "groupTitle": "将分组添加到列表",
+  "groupAdd": "添加",
+  "groupAddTo": "将分组添加到 {{list}}",
+  "groupAdded_other": "已将 {{formatted}} 个频道添加到 {{list}}",
+  "groupAddedShort_other": "已添加 {{formatted}} 个",
+  "groupAlreadyIn": "{{list}} 已包含全部频道",
+  "groupNothingNew": "已存在",
+  "groupLoadFailed": "无法加载此分组的频道",
+  "groupCapped": "一个列表最多容纳 {{max}} 个频道，因此只添加前 {{max}} 个。",
+  "groupNewList": "或用这些频道新建列表："
 }

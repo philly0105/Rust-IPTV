@@ -1,7 +1,8 @@
 import { Play, Radio, Tv } from 'lucide-react';
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { Channel, EpgNowNext } from '@/api/types';
+import { itemKey, type Channel, type EpgNowNext, type ItemRef, type RecentEntry } from '@/api/types';
 import { Button } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 
@@ -20,6 +21,11 @@ export interface StageIdleProps {
   onResume?(channel: Channel): void;
   /** The idle prompt's own hint, when it differs from Live's ("Pick a channel, or type its number"). */
   hint?: string;
+  /** Radio: more stations played lately, as tiles under Resume (from md up, where the stage is tall). */
+  recent?: readonly RecentEntry[];
+  /** Radio with no station to resume: the list's first stations as tiles under the prompt. */
+  stations?: readonly Channel[];
+  onPlayRef?(ref: ItemRef): void;
 }
 
 /**
@@ -31,7 +37,7 @@ export interface StageIdleProps {
  * The stage is dark in every theme, so from md up the text takes the glass colours; on a phone
  * the idle stage is a slim bar on the theme's surface above the list, with theme colours.
  */
-export function StageIdle({ kind, last, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint }: StageIdleProps) {
+export function StageIdle({ kind, last, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, stations, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
   const channel = last?.channel;
   const name = channel ? displayChannelName(channel.name, stripPrefix) : '';
@@ -81,9 +87,16 @@ export function StageIdle({ kind, last, now, stripPrefix, epgOffsetMinutes = 0, 
             <span className="md:hidden">{t('resume')}</span>
           </Button>
           <p className="mt-1 text-caption text-on-glass-muted max-md:hidden">{hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}</p>
+          {recent && recent.length > 0 && onPlayRef ? (
+            <StationShelf
+              heading={t('recentStations')}
+              items={recent.map((e) => ({ ref: e.ref, name: displayChannelName(e.snapshot.title, stripPrefix), logo: e.snapshot.posterUrl }))}
+              onPlay={onPlayRef}
+            />
+          ) : null}
         </div>
       ) : (
-        <div className="relative flex min-w-0 flex-col items-center gap-2 text-center max-md:flex-row max-md:gap-3 max-md:text-start">
+        <div className="relative flex min-w-0 flex-col items-center gap-2 px-6 text-center max-md:flex-row max-md:gap-3 max-md:px-0 max-md:text-start">
           <span
             aria-hidden
             className={cn(
@@ -101,8 +114,48 @@ export function StageIdle({ kind, last, now, stripPrefix, epgOffsetMinutes = 0, 
               {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}
             </p>
           </div>
+          {/* Radio with nothing played yet: the list's first stations as tiles, so the tall
+              stage offers something to press instead of one line of text. */}
+          {stations && stations.length > 0 && onPlayRef ? (
+            <StationShelf
+              heading={t('stations')}
+              items={stations.map((c) => ({ ref: c.ref, name: displayChannelName(c.name, stripPrefix), logo: c.logoUrl }))}
+              onPlay={onPlayRef}
+            />
+          ) : null}
         </div>
       )}
     </div>
+  );
+}
+
+/** Station tiles under the idle stage's prompt (Radio, from md up): logo and name, one press plays. */
+function StationShelf({ heading, items, onPlay }: { heading: string; items: { ref: ItemRef; name: string; logo?: string }[]; onPlay(ref: ItemRef): void }) {
+  const { t } = useTranslation('live');
+  const id = useId();
+  return (
+    <section aria-labelledby={id} className="mt-6 flex w-full max-w-xl flex-col items-center gap-3 max-md:hidden" data-testid="stage-recent">
+      <h2 id={id} className="text-caption font-medium text-on-glass-muted">
+        {heading}
+      </h2>
+      <ul className="flex flex-wrap items-start justify-center gap-2">
+        {items.map((it) => (
+          <li key={itemKey(it.ref)}>
+            <button
+              type="button"
+              onClick={() => onPlay(it.ref)}
+              aria-label={t('playNamed', { name: it.name })}
+              className="flex w-24 flex-col items-center gap-1.5 rounded-lg p-2 text-on-glass outline-none hover:bg-on-glass/8 active:bg-on-glass/12 focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <ChannelLogo src={it.logo} name={it.name} size={48} sourceId={it.ref.sourceId} />
+              {/* Two lines before the ellipsis: "Tidewater Jazz Radio" reads whole, not "Tidewater ...". */}
+              <span dir="auto" className="line-clamp-2 w-full text-center text-caption break-words" title={it.name}>
+                {it.name}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

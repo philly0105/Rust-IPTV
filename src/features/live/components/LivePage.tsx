@@ -1,18 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  CalendarClock,
-  Copy,
-  ExternalLink,
-  History,
-  Link2,
-  ListTree,
-  Lock,
-  Play,
-  Radio as RadioIcon,
-  Search,
-  Star,
-  Tv,
-} from 'lucide-react';
+import { CalendarClock, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Star, Tv } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -29,7 +16,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
-import { isDesktop, rpc } from '@/api/transport';
+import { rpc } from '@/api/transport';
 import {
   itemKey,
   sameRef,
@@ -44,21 +31,20 @@ import {
 
 import { Button, buttonClass, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
-import { canShareSource, isShareableUrl } from '@/features/player/shareable';
 import { canZap, isPendingZap } from '@/features/player/store';
 import { hideZapBanner } from '@/features/player/zapBanner';
-import { preloadChannelEditDialogs, useChannelEditMenuItems, useChannelEditShortcuts, useHiddenChannelCount } from '@/features/channeledit';
-import { ListsSidebarSection, useAddToListMenuItem, useAddToListShortcut } from '@/features/lists';
-import { channelInput } from '@/features/multiview/addChannel';
-import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
+import { preloadChannelEditDialogs, useChannelEditShortcuts, useHiddenChannelCount } from '@/features/channeledit';
+import { ListsSidebarSection, openAddGroupToList, useAddToListShortcut } from '@/features/lists';
 import { requestPin } from '@/features/parental/gate';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { applyStatus, hidesContent, useParentalStatus } from '@/features/parental/status';
 import { registerCommands, useShell, useShortcut } from '@/shell';
 import { intlLocale } from '@/lib/intl';
+import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useLastChannel } from '../hooks/useLastChannel';
+import { LIVE_VIEW_ID, liveViewOf, useLiveViewChannels } from '../hooks/useLiveViewChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
@@ -70,14 +56,13 @@ import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { MINUTE } from '../lib/epgTime';
-import { openChannelSource, playChannel } from '../lib/playback';
+import { playChannel } from '../lib/playback';
 import { needsFallback } from '../lib/shortEpg';
-import { archivePath, canBrowseArchive } from '../lib/archive';
 import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
 import { ChannelList } from './ChannelList';
 import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from './ChannelRow';
-import { ContextMenu, type MenuItem } from './ContextMenu';
+import { ContextMenu, type MenuEntry } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { EpgMappingDialog } from './EpgMappingDialog';
 import { EpgRibbon } from './EpgRibbon';
@@ -134,7 +119,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const [searchParams] = useSearchParams();
   const sourceId = params.sourceId ?? '';
   const isRadio = mode === 'radio';
-  const categoryId = (isRadio ? searchParams.get('category') : params.categoryId) ?? undefined;
+  const routeCategory = (isRadio ? searchParams.get('category') : params.categoryId) ?? undefined;
+  // LG-12: Favorites and Recently watched are pinned groups with their own ids in the route.
+  const liveView = liveViewOf(routeCategory);
+  const categoryId = liveView ? undefined : routeCategory;
   const contentType: ContentType = isRadio ? 'radio' : 'live';
   const now = useNow(30_000);
   const prefs = useDisplayPrefs();
@@ -166,7 +154,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     setSearch('');
     setDebouncedSearch('');
   }, []);
-  useEffect(() => clearSearch(), [sourceId, categoryId, clearSearch]);
+  useEffect(() => clearSearch(), [sourceId, routeCategory, clearSearch]);
   // The rail's TV guide link opens the guide on the source browsed here (L4-live-2).
   useEffect(() => rememberGuideSource(sourceId), [sourceId]);
   /** Focus the list cursor once the committed search's rows are on screen. */
@@ -175,8 +163,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const kind = source.data?.kind;
   // guide: Xtream channels without XMLTV show the panel's short EPG.
   const shortEpgOn = useShortEpgEnabled(kind);
-  const paged = usePagedChannels({
-    sourceId,
+  const groupPaged = usePagedChannels({
+    // A pinned view lists its own channels: the source's pages are not asked for.
+    sourceId: liveView ? '' : sourceId,
     categoryId,
     search: debouncedSearch,
     radio: isRadio,
@@ -185,6 +174,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     shortEpg: shortEpgOn,
     epgOffsetMinutes: prefs.epgOffsetMinutes,
   });
+  const viewPaged = useLiveViewChannels(liveView, { sourceId, contentType, search: debouncedSearch, now, epgOffsetMinutes: prefs.epgOffsetMinutes });
+  const paged = viewPaged ?? groupPaged;
   // The loading skeleton matches the list's rows at the current scale and density.
   const rowHeight = useRowHeight(CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING);
   useEffect(() => {
@@ -214,7 +205,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // guide (and flash a skeleton) for every channel passed on the way. The report belongs to the
   // list it came from: once the list changes (search, group, source) or is replaced by a loading,
   // empty or error state, the old cursor channel no longer drives the ribbon.
-  const listKey = `${contentType}|${sourceId}|${categoryId ?? ''}|${debouncedSearch}`;
+  const listKey = `${contentType}|${sourceId}|${routeCategory ?? ''}|${debouncedSearch}`;
   const listShown = !paged.error && !paged.isLoading && paged.total !== 0;
   const [reported, setReported] = useState<{ key: string; channel: Channel | undefined }>({ key: '', channel: undefined });
   const listKeyRef = useRef(listKey);
@@ -276,8 +267,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     : undefined;
 
   useEffect(() => {
-    if (sourceId) usePlayerStore.setState({ zapContext: { sourceId, categoryId } });
-  }, [sourceId, categoryId]);
+    // A pinned view zaps through the source; playing from Favorites then walks the favorites (below).
+    if (sourceId) usePlayerStore.setState({ zapContext: categoryId ? { sourceId, categoryId } : { sourceId } });
+  }, [sourceId, categoryId, liveView]);
 
   const zap = useChannelZap();
   const queryClient = useQueryClient();
@@ -292,11 +284,17 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       // player's) finds it instead of asking the catalog again (XB2-12).
       const itemQuery = rpcKey('catalog.item', { ref: channel.ref });
       if (queryClient.getQueryData(itemQuery) === undefined) queryClient.setQueryData(itemQuery, channel);
-      playChannel(channel, kind, nn?.now?.title, name).catch((err: unknown) =>
-        toast({ title: t('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
-      );
+      playChannel(channel, kind, nn?.now?.title, name)
+        .then(() => {
+          // LG-12: from Favorites, channel up and down walk the favorites in their order, as on the
+          // Favorites page (library/lib/open.ts).
+          if (liveView === 'favorites' && sameRef(usePlayerStore.getState().source?.ref, channel.ref)) {
+            usePlayerStore.setState({ zapContext: { sourceId: channel.ref.sourceId, favorites: { sourceId: channel.ref.sourceId } } });
+          }
+        })
+        .catch((err: unknown) => toast({ title: t('playFailed', { name }), description: errorDescription(err), variant: 'error' }));
     },
-    [kind, source.data?.id, prefs.stripCountryPrefix, t, toast, queryClient],
+    [kind, source.data?.id, prefs.stripCountryPrefix, t, toast, queryClient, liveView],
   );
 
   // ---- number entry -------------------------------------------------------
@@ -420,7 +418,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const [mapping, setMapping] = useState<Channel | null>(null);
   const closeMapping = useCallback(() => setMapping(null), []);
-  const [menu, setMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; favorite: boolean } | null>(null);
+  const [menu, setMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; favorite: boolean; nowTitle?: string } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ pos: { x: number; y: number }; category: Category } | null>(null);
 
   const shortcutArea = t('shortcutArea');
@@ -441,7 +439,11 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // LG-01: the guide opens on this group, at the channel playing here (or the list's cursor).
   const guideFocus = playingRef?.itemId ?? activeChannel?.ref.itemId;
-  const guideHref = guideLink(sourceId, isRadio ? undefined : categoryId, isRadio ? undefined : guideFocus);
+  const guideHref = isRadio
+    ? guideLink(sourceId)
+    : liveView === 'favorites'
+      ? `${guideLink(sourceId, undefined, guideFocus)}&view=favorites`
+      : guideLink(sourceId, categoryId, guideFocus);
   useEffect(
     () =>
       registerCommands([
@@ -454,7 +456,12 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // ---- header -------------------------------------------------------------
   const shell = useShell();
   const title = source.data?.name ?? '';
-  const subtitle = category?.name ?? (isRadio ? t('allStations') : t('allChannels'));
+  const subtitle =
+    liveView === 'favorites'
+      ? t('favoritesGroup')
+      : liveView === 'recent'
+        ? t('recentGroup')
+        : (category?.name ?? (isRadio ? t('allStations') : t('allChannels')));
   const countText = paged.total !== undefined ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
   // The group and its count once, in the header: the list no longer repeats them over its rows.
   const headerSubtitle = countText ? t('groupWithCount', { group: subtitle, count: countText }) : subtitle;
@@ -545,117 +552,68 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     [t, toast, prefs.stripCountryPrefix, setOverride],
   );
   const onToggleFavorite = useCallback((c: Channel, fav: boolean) => void toggleFavorite(c, fav), [toggleFavorite]);
-  const onContextMenu = useCallback(
-    (pos: { x: number; y: number }, channel: Channel, favorite: boolean) => setMenu({ pos, channel, favorite }),
-    [],
-  );
+  // The menu's header says what is on: the row's own now/next, read when the menu opens.
+  const pagedRef = useRef(paged);
+  pagedRef.current = paged;
+  const onContextMenu = useCallback((pos: { x: number; y: number }, channel: Channel, favorite: boolean) => {
+    const p = pagedRef.current;
+    const at = p.loaded.find((l) => sameRef(l.channel.ref, channel.ref))?.index;
+    setMenu({ pos, channel, favorite, nowTitle: at === undefined ? undefined : p.getNowNext(at)?.now?.title });
+  }, []);
   const closeMenu = useCallback(() => setMenu(null), []);
 
   const navigate = useNavigate();
   const menuChannel = menu?.channel ?? null;
-  // C4: radio has no picture, so a station gets no multi-view entry.
-  const multiviewItem = useMultiviewMenuItem(menuChannel && menuChannel.ref.contentType === 'live' ? channelInput(menuChannel) : null);
-  // C2: lock / remove lock for the channel or station.
-  const lockItems = useLockMenuItems(
-    menuChannel
-      ? {
-          sourceId: menuChannel.ref.sourceId,
-          contentType: menuChannel.ref.contentType,
-          kind: 'item',
-          targetId: menuChannel.ref.itemId,
-          name: displayChannelName(menuChannel.name, prefs.stripCountryPrefix),
-        }
-      : null,
-    { categoryId: menuChannel?.categoryId },
-  );
-  // Run 2: "Add to list…" (C3) and Rename / Reset name / Hide (C2).
-  const addToListItem = useAddToListMenuItem(menuChannel);
-  const editItems = useChannelEditMenuItems(menuChannel);
+  // LG-13: the menu every channel row has (Live, lists, the guide), in three sections.
+  const menuItems = useChannelMenuItems(menuChannel, {
+    source: source.data,
+    favorite: menu?.favorite,
+    onPlay: play,
+    onToggleFavorite: onToggleFavorite,
+    onMapGuide: setMapping,
+    editHints: true,
+  });
   const groupLockItems = useLockMenuItems(
     groupMenu
       ? { sourceId, contentType, kind: 'category', targetId: groupMenu.category.id, name: groupMenu.category.name }
       : null,
   );
-  // Groups get a menu (right click, context-menu key) only while there is something in it.
-  const parentalOn = useParentalStatus().data?.enabled === true;
   // Ask mode: what will ask for the PIN carries a lock in the groups and the list (C2).
   const locks = useParentalLocks(sourceId, contentType);
+  // A locked channel's programme stays back until the PIN, in the menu as in its row (C2).
+  const menuHeader = menu
+    ? channelMenuHeader(menu.channel, displayChannelName(menu.channel.name, prefs.stripCountryPrefix), locks.channelLocked(menu.channel) ? undefined : menu.nowTitle)
+    : undefined;
   const closeGroupMenu = useCallback(() => setGroupMenu(null), []);
   const openGroupMenu = useCallback((pos: { x: number; y: number }, category: Category) => setGroupMenu({ pos, category }), []);
-  const menuItems: MenuItem[] = useMemo(() => {
-    if (!menu || !source.data) return [];
-    const ch = menu.channel;
-    const src = source.data;
-    const external = (player: 'mpv' | 'vlc') => async () => {
-      try {
-        // C2: a locked channel or group asks for the PIN first, as inline playback does.
-        const s = await openChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
-        if (!s) return;
-        // The stage says what plays where, with Stop and Reopen (the player's ExternalStage), instead
-        // of "Nothing playing"; the in-app player gives way to it (L2-desktop-9). The store opens it and
-        // remembers the player chosen here, so Reopen uses it too (L3-live-ch-x4); a failed open shows
-        // on the stage with Retry.
-        const store = usePlayerStore.getState();
-        if (store.source && store.mode !== 'external') store.stop();
-        // The ref marks the row and the ribbon as playing, as an inline play does.
-        const playing = { ...s, ref: s.ref ?? ch.ref };
-        await store.play(playing, { mode: 'external', externalPlayer: player, queue: [] });
-      } catch (err) {
-        toast({ title: t('externalFailed', { player: player.toUpperCase() }), description: errorDescription(err), variant: 'error' });
-      }
-    };
+  // LG-13: every group has a menu: add the whole group to a list, open it in the guide, and (C2) lock it.
+  const groupMenuItems: MenuEntry[] = useMemo(() => {
+    if (!groupMenu) return [];
+    const c = groupMenu.category;
     return [
-      { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => play(ch) },
-      // guide: the channel's catch-up archive browser.
-      ...(canBrowseArchive(ch, src.kind)
-        ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => navigate(archivePath(ch.ref)) }]
-        : []),
-      // External players run only in the desktop app; the server answers `unsupported` (as InlinePlayer gates them).
-      ...(isDesktop
-        ? [
-            { id: 'mpv', label: t('playIn', { player: 'MPV' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('mpv')() },
-            { id: 'vlc', label: t('playIn', { player: 'VLC' }), icon: <ExternalLink className="size-4" />, onSelect: () => void external('vlc')() },
-          ]
-        : []),
       {
-        id: 'fav',
-        label: menu.favorite ? t('removeFavorite') : t('addFavorite'),
-        icon: <Star className="size-4" fill={menu.favorite ? 'currentColor' : 'none'} />,
-        onSelect: () => void toggleFavorite(ch, menu.favorite),
+        id: 'group-add-to-list',
+        label: t('addGroupToList'),
+        icon: <ListPlus className="size-4" />,
+        disabled: c.itemCount === 0,
+        onSelect: () => openAddGroupToList({ sourceId, contentType, categoryId: c.id, name: c.name, count: c.itemCount }),
       },
-      // Xtream and Stalker links carry the login (and so can a playlist link): only a link with no
-      // credentials in it is offered, and the resolved link is checked again before it is copied.
-      ...(src.kind === 'm3u' && !!ch.url && isShareableUrl(ch.url)
-        ? [
-            {
-              id: 'copy',
-              label: t('copyUrl'),
-              icon: <Copy className="size-4" />,
-              onSelect: async () => {
-                try {
-                  // C2: copying a locked channel's link needs the PIN like playing it.
-                  const s = await openChannelSource(ch, src, displayChannelName(ch.name, prefs.stripCountryPrefix));
-                  if (!s) return;
-                  if (!canShareSource(s, () => src.kind)) {
-                    toast({ title: t('copyFailed'), variant: 'error' });
-                    return;
-                  }
-                  await navigator.clipboard.writeText(s.url);
-                  toast({ title: t('urlCopied'), variant: 'success' });
-                } catch (err) {
-                  toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
-                }
-              },
-            },
-          ]
-        : []),
-      ...(ch.ref.contentType === 'live' ? [multiviewItem] : []),
-      ...(addToListItem ? [addToListItem] : []),
-      ...editItems,
-      { id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => setMapping(ch) },
-      ...lockItems,
+      ...(isRadio
+        ? []
+        : [{ id: 'group-guide', label: t('openGroupInGuide'), icon: <CalendarClock className="size-4" />, onSelect: () => void navigate(guideLink(sourceId, c.id)) }]),
+      { id: 'sep-lock', type: 'separator' as const },
+      ...groupLockItems,
     ];
-  }, [menu, source.data, play, prefs.stripCountryPrefix, t, toast, toggleFavorite, navigate, multiviewItem, addToListItem, editItems, lockItems]);
+  }, [groupMenu, groupLockItems, sourceId, contentType, isRadio, navigate, t]);
+
+  // LG-12: Favorites and Recently watched sit above All channels (one array, so the memoised sidebar stays put).
+  const pinnedViews = useMemo(
+    () => [
+      { id: LIVE_VIEW_ID.favorites, label: t('favoritesGroup'), icon: <Star size={14} /> },
+      { id: LIVE_VIEW_ID.recent, label: t('recentGroup'), icon: <History size={14} /> },
+    ],
+    [t],
+  );
 
   const hrefForCategory = useCallback(
     (cid?: string) =>
@@ -685,6 +643,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   }, [t]);
 
   // ---- idle stage ---------------------------------------------------------
+  const selectRefPlay = useCallback((ref: ItemRef) => void selectRef(ref), [selectRef]);
   // CB-AUTOPLAY-LAST without autoplay: the stage offers the channel last watched on this source.
   const last = useLastChannel({
     contentType,
@@ -694,6 +653,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     epgOffsetMinutes: prefs.epgOffsetMinutes,
   });
   const lastChannel = last?.channel;
+  // Radio's idle stage, with no station to resume, offers the list's first stations as tiles.
+  const loadedRows = paged.loaded;
+  const firstStations = useMemo(() => (isRadio ? loadedRows.slice(0, 12).map((l) => l.channel) : undefined), [isRadio, loadedRows]);
   const idle = (
     <StageIdle
       kind={isRadio ? 'radio' : 'live'}
@@ -702,6 +664,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       stripPrefix={prefs.stripCountryPrefix}
       epgOffsetMinutes={prefs.epgOffsetMinutes}
       onResume={onPlayLive}
+      // Radio's stage has room below Resume: the other stations played lately, one press each.
+      recent={isRadio ? last?.others : undefined}
+      stations={isRadio && !lastChannel ? firstStations : undefined}
+      onPlayRef={selectRefPlay}
     />
   );
 
@@ -730,12 +696,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           isLoading={allCategories.isLoading}
           error={allCategories.error}
           onRetry={retryCategories}
-          activeId={categoryId}
+          activeId={routeCategory}
           hrefFor={hrefFor}
+          pinned={pinnedViews}
           onManage={openManage}
           onNavigate={closeDrawer}
           totalLabel={isRadio ? t('allStations') : t('allChannels')}
-          onGroupMenu={parentalOn ? openGroupMenu : undefined}
+          onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
         />
       </div>
@@ -767,6 +734,19 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           <Button size="sm" onClick={clearSearch}>
             {t('clearSearch')}
           </Button>
+        }
+      />
+    );
+  } else if (listEmpty && liveView) {
+    listBody = (
+      <EmptyState
+        icon={liveView === 'favorites' ? <Star className="size-6" /> : <History className="size-6" />}
+        title={liveView === 'favorites' ? t(isRadio ? 'favoritesEmptyStations' : 'favoritesEmpty') : t('recentEmpty')}
+        description={liveView === 'favorites' ? t('favoritesEmptyHint') : t('recentEmptyHint')}
+        action={
+          <Link to={hrefFor(undefined)} className={buttonClass('secondary', 'sm')}>
+            {isRadio ? t('allStations') : t('allChannels')}
+          </Link>
         }
       />
     );
@@ -834,6 +814,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         openOnDoubleClick={settings.data?.openStreamOnDoubleClick ?? false}
         now={now}
         compact={false}
+        station={isRadio}
         sourceKind={kind}
         onPlay={play}
         onToggleFavorite={onToggleFavorite}
@@ -948,14 +929,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         />
       )}
 
-      <MemoContextMenu pos={menu?.pos ?? null} items={menuItems} label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)} onClose={closeMenu} />
-      {/* C2: a group's menu only has entries while parental controls are on. */}
       <MemoContextMenu
-        pos={groupMenu && groupLockItems.length > 0 ? groupMenu.pos : null}
-        items={groupLockItems}
-        label={groupMenu?.category.name ?? ''}
-        onClose={closeGroupMenu}
+        pos={menu?.pos ?? null}
+        items={menuItems}
+        header={menuHeader}
+        label={displayChannelName(menu?.channel.name, prefs.stripCountryPrefix)}
+        onClose={closeMenu}
       />
+      <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu?.category.name ?? ''} onClose={closeGroupMenu} />
       <MemoManageDialog open={manageOpen} onClose={closeManage} sourceId={sourceId} contentType={contentType} />
       <MemoMappingDialog channel={mapping} onClose={closeMapping} />
     </div>

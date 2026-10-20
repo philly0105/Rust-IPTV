@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Adicione ou atualize um guia para pesquisar nele.",
   "epgSettings": "Configurações do guia",
   "searchMore": "Mostrando os primeiros {{n}}. Refine a pesquisa.",
-  "resultsCount": "Resultados: {{n}}",
   "closeSearch": "Fechar pesquisa",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,9 @@
   "watchChannels": "Ver canais",
   "noLiveChannels": "Esta fonte não tem canais ao vivo",
   "noLiveChannelsHint": "Só tem filmes ou séries, por isso o guia está vazio. Escolha uma fonte com TV ao vivo.",
-  "openSourceGuide": "Abrir {{name}}"
+  "openSourceGuide": "Abrir {{name}}",
+  "shortcutDigits": "Ir para um canal pelo número",
+  "resultCount_one": "{{count, number}} resultado",
+  "resultCount_many": "{{count, number}} de resultados",
+  "resultCount_other": "{{count, number}} resultados"
 }

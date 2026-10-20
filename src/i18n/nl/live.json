@@ -217,5 +217,20 @@
   "hideRibbon": "Programma verbergen",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Live tv",
-  "archiveStageIdle": "Kies een programma om het hier af te spelen."
+  "archiveStageIdle": "Kies een programma om het hier af te spelen.",
+  "favoritesGroup": "Favorieten",
+  "recentGroup": "Onlangs bekeken",
+  "favoritesEmpty": "Nog geen favoriete kanalen",
+  "favoritesEmptyStations": "Nog geen favoriete zenders",
+  "favoritesEmptyHint": "Geef een kanaal in een willekeurige groep een ster om het hier vast te zetten.",
+  "recentEmpty": "Nog niets bekeken",
+  "recentEmptyHint": "Kanalen die je van deze bron afspeelt, verschijnen hier.",
+  "addGroupToList": "Alles toevoegen aan lijst…",
+  "openGroupInGuide": "Openen in programmagids",
+  "pickerTypeForMore": "Typ om meer te vinden",
+  "pickerViews": "Weergaven",
+  "pickerShow": "Tonen",
+  "filterSources": "Bronnen filteren",
+  "recentStations": "Onlangs beluisterd",
+  "playNamed": "{{name}} afspelen"
 }

@@ -135,5 +135,7 @@
   "announceSwapped": "{{a}} と {{b}} を入れ替えました",
   "announceLayout": "レイアウト: {{layout}}",
   "announceMuted": "ウォールをミュートしました",
-  "announceUnmuted": "ウォールのミュートを解除しました"
+  "announceUnmuted": "ウォールのミュートを解除しました",
+  "pickerScope": "表示",
+  "pickerEmptyScope": "このソースのチャンネルはここにありません"
 }

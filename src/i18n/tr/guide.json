@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Aramak için bir rehber ekleyin veya yenileyin.",
   "epgSettings": "Rehber ayarları",
   "searchMore": "İlk {{n}} sonuç gösteriliyor. Aramayı daraltın.",
-  "resultsCount": "Sonuçlar: {{n}}",
   "closeSearch": "Aramayı kapat",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,8 @@
   "watchChannels": "Kanalları izle",
   "noLiveChannels": "Bu kaynakta canlı kanal yok",
   "noLiveChannelsHint": "Yalnızca film veya dizi içeriyor, bu yüzden rehberi boş. Canlı TV içeren bir kaynak seçin.",
-  "openSourceGuide": "{{name}} aç"
+  "openSourceGuide": "{{name}} aç",
+  "shortcutDigits": "Numarasıyla bir kanala git",
+  "resultCount_one": "{{count, number}} sonuç",
+  "resultCount_other": "{{count, number}} sonuç"
 }

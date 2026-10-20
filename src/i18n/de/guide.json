@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Füge Programmdaten hinzu oder aktualisiere sie, um zu suchen.",
   "epgSettings": "Programmführer-Einstellungen",
   "searchMore": "Die ersten {{n}} werden angezeigt. Verfeinere die Suche.",
-  "resultsCount": "Ergebnisse: {{n}}",
   "closeSearch": "Suche schließen",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,8 @@
   "watchChannels": "Sender ansehen",
   "noLiveChannels": "Diese Quelle hat keine Live-Sender",
   "noLiveChannelsHint": "Sie enthält nur Filme oder Serien, daher ist ihr Programmführer leer. Wählen Sie eine Quelle mit Live-TV.",
-  "openSourceGuide": "{{name}} öffnen"
+  "openSourceGuide": "{{name}} öffnen",
+  "shortcutDigits": "Per Nummer zu einem Sender springen",
+  "resultCount_one": "{{count, number}} Ergebnis",
+  "resultCount_other": "{{count, number}} Ergebnisse"
 }

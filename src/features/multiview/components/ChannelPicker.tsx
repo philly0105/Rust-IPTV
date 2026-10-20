@@ -5,6 +5,10 @@ import { Link } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { sameRef, type Channel, type Source } from '@/api/types';
+import { ScopePicker } from '@/features/live/components/ScopePicker';
+import { nowTitleOf, SCOPE_ALL, useBrowseSections, useChannelBrowse, type BrowseScope } from '@/features/live/hooks/useChannelBrowse';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
+import { displayChannelName } from '@/features/live/lib/channelName';
 
 import { addToWall, channelInput, replaceOnWall } from '../addChannel';
 import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, SearchInput, Select, SkeletonList, toast } from '../deps';
@@ -56,7 +60,11 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
   const sourcesQ = useRpcQuery('sources.list', undefined, { enabled: open });
   const sources = useMemo(() => liveSources(sourcesQ.data), [sourcesQ.data]);
   const [source, setSource] = useState<string>(ALL);
+  // LG-19: what to browse in the source: all channels, a group, the favorites, recent or a list.
+  const [scope, setScope] = useState<BrowseScope>(SCOPE_ALL);
   const [query, setQuery] = useState('');
+  const { stripCountryPrefix } = useDisplayPrefs();
+  const display = (ch: Channel) => displayChannelName(ch.name, stripCountryPrefix);
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [pending, setPending] = useState<string | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -96,30 +104,24 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
     // Only on opening and when the source list arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sources]);
-  useEffect(() => setLimit(PAGE_SIZE), [source, q]);
+  useEffect(() => setLimit(PAGE_SIZE), [source, scope, q]);
+  // A group belongs to its source: another source starts on all its channels. Views (favorites,
+  // recent, lists) carry over.
+  const changeSource = (v: string) => {
+    setSource(v);
+    if (!scope.startsWith('@')) setScope(SCOPE_ALL);
+  };
 
   const searching = q.length > 0;
-  const browse = useRpcQuery(
-    'catalog.channels',
-    { sourceId: source, query: { offset: 0, limit } },
-    { enabled: open && !searching && source !== ALL, keepPrevious: true },
-  );
-  const search = useRpcQuery(
-    'catalog.search',
-    { query: q, contentTypes: ['live'], limit: SEARCH_LIMIT, ...(source !== ALL ? { sourceId: source } : {}) },
-    { enabled: open && searching, keepPrevious: true },
-  );
-  const active = searching ? search : browse;
-  const channels: Channel[] = useMemo(
-    () => (searching ? (search.data?.live ?? []) : (browse.data?.items ?? [])).filter((c) => !c.isRadio && c.ref.contentType === 'live'),
-    [searching, search.data, browse.data],
-  );
-  const total = searching ? channels.length : (browse.data?.total ?? 0);
+  const sections = useBrowseSections(source, open);
+  const active = useChannelBrowse({ enabled: open, sourceId: source, scope, query: q, limit: searching ? SEARCH_LIMIT : limit });
+  const { channels, total } = active;
   const sourceName = (id: string) => sources.find((s) => s.id === id)?.name ?? '';
 
   const pick = async (ch: Channel) => {
     if (pending) return;
-    const input = channelInput(ch);
+    // The tile is titled as Live names the channel (settings.stripCountryPrefix).
+    const input = { ...channelInput(ch), title: display(ch) };
     const key = `${ch.ref.sourceId}|${ch.ref.itemId}`;
     setPending(key);
     lastSource = ch.ref.sourceId;
@@ -188,7 +190,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
         }
       />
     );
-  } else if (!searching && source === ALL) {
+  } else if (active.needsQuery) {
     body = <EmptyState size="inline" icon={<Tv aria-hidden className="size-5" />} title={t('pickerAllPrompt')} description={t('pickerAllPromptHint')} />;
   } else if (active.isPending) {
     body = <SkeletonList rows={6} />;
@@ -199,7 +201,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
       <EmptyState
         size="inline"
         icon={<Tv aria-hidden className="size-5" />}
-        title={searching ? t('pickerEmptySearch', { query: q }) : t('pickerEmptySource')}
+        title={searching ? t('pickerEmptySearch', { query: q }) : scope === SCOPE_ALL ? t('pickerEmptySource') : t('pickerEmptyScope')}
       />
     );
   } else {
@@ -216,7 +218,10 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
             const rowKey = `${ch.ref.sourceId}|${ch.ref.itemId}`;
             const busy = pending === rowKey;
             const disabled = (onWall && !isCurrent) || (full && !onWall) || (pending !== null && !busy);
-            const label = mode.kind === 'replace' ? t('pickerPickLabel', { name: ch.name }) : t('pickerAddLabel', { name: ch.name });
+            const name = display(ch);
+            const label = mode.kind === 'replace' ? t('pickerPickLabel', { name }) : t('pickerAddLabel', { name });
+            // What is on, so a match or a show can be found by its title (LG-19); else the group.
+            const nowTitle = nowTitleOf(active.nowNext, ch);
             // Under "All sources" the banner cannot say which rows it means: the rows say it.
             const rowLimited = source === ALL && !onWall && !disabled && limitedIds.has(ch.ref.sourceId);
             return (
@@ -226,7 +231,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                   data-picker-row=""
                   data-testid="multiview-picker-row"
                   disabled={disabled || isCurrent}
-                  aria-label={onWall ? `${ch.name}, ${t('pickerOnSlot', { slot: slotOf + 1 })}` : rowLimited ? `${label}, ${t('errorLimitTitle')}` : label}
+                  aria-label={onWall ? `${name}, ${t('pickerOnSlot', { slot: slotOf + 1 })}` : rowLimited ? `${label}, ${t('errorLimitTitle')}` : label}
                   data-at-limit={rowLimited ? 'true' : undefined}
                   aria-busy={busy || undefined}
                   onClick={() => void pick(ch)}
@@ -237,15 +242,15 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                     'motion-safe:transition-colors motion-safe:duration-100',
                   )}
                 >
-                  <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={ch.name} className="size-9 rounded-md" />
+                  <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={name} className="size-9 rounded-md" />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span dir="auto" className={cn('truncate text-start text-sm font-medium', disabled && !onWall ? 'text-fg-muted' : 'text-fg')}>
                       {ch.number !== undefined ? <span className="me-2 font-numeric tabular-nums text-fg-muted">{ch.number}</span> : null}
-                      {ch.name}
+                      {name}
                     </span>
                     <span className="flex min-w-0 gap-2 text-xs text-fg-muted">
                       <span dir="auto" className="truncate">
-                        {ch.categoryName}
+                        {nowTitle ?? ch.categoryName}
                       </span>
                       {source === ALL ? (
                         <span dir="auto" className="shrink-0 truncate text-fg-subtle">
@@ -280,7 +285,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
         </ul>
         {!searching && channels.length < total ? (
           <div className="flex justify-center pt-2">
-            <Button variant="ghost" size="sm" loading={browse.isFetching} onClick={() => setLimit((l) => l + PAGE_SIZE)}>
+            <Button variant="ghost" size="sm" loading={active.isFetching} onClick={() => setLimit((l) => l + PAGE_SIZE)}>
               {t('pickerShowMore')}
             </Button>
           </div>
@@ -313,9 +318,22 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
             label={t('pickerSource')}
             options={sourceOptions}
             value={source}
-            onValueChange={(v) => setSource(v)}
-            wrapperClassName="sm:w-56 sm:shrink-0"
+            onValueChange={changeSource}
+            wrapperClassName="sm:w-48 sm:shrink-0"
           />
+          <div className="flex min-w-0 flex-col gap-1.5 sm:w-48 sm:shrink-0">
+            <span className="text-sm font-medium text-fg" aria-hidden>
+              {t('pickerScope')}
+            </span>
+            <ScopePicker
+              label={t('pickerScope')}
+              value={scope}
+              sections={sections}
+              onChange={setScope}
+              className="h-10"
+              testId="multiview-picker-scope"
+            />
+          </div>
           <SearchInput
             ref={searchRef}
             value={query}

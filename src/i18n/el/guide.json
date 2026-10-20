@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Προσθέστε ή ανανεώστε έναν οδηγό για να κάνετε αναζήτηση.",
   "epgSettings": "Ρυθμίσεις οδηγού",
   "searchMore": "Εμφανίζονται τα πρώτα {{n}}. Περιορίστε την αναζήτηση.",
-  "resultsCount": "Αποτελέσματα: {{n}}",
   "closeSearch": "Κλείσιμο αναζήτησης",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,8 @@
   "watchChannels": "Παρακολούθηση καναλιών",
   "noLiveChannels": "Αυτή η πηγή δεν έχει ζωντανά κανάλια",
   "noLiveChannelsHint": "Έχει μόνο ταινίες ή σειρές, οπότε ο οδηγός της είναι κενός. Επιλέξτε μια πηγή με ζωντανή TV.",
-  "openSourceGuide": "Άνοιγμα {{name}}"
+  "openSourceGuide": "Άνοιγμα {{name}}",
+  "shortcutDigits": "Μετάβαση σε κανάλι με τον αριθμό του",
+  "resultCount_one": "{{count, number}} αποτέλεσμα",
+  "resultCount_other": "{{count, number}} αποτελέσματα"
 }

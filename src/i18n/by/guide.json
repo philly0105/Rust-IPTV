@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Дадайце або абнавіце праграму перадач, каб шукаць па ёй.",
   "epgSettings": "Налады праграмы перадач",
   "searchMore": "Паказаны першыя {{n}}. Удакладніце запыт.",
-  "resultsCount": "Вынікаў: {{n}}",
   "closeSearch": "Закрыць пошук",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,10 @@
   "watchChannels": "Глядзець каналы",
   "noLiveChannels": "У гэтай крыніцы няма каналаў прамога эфіру",
   "noLiveChannelsHint": "У ёй толькі фільмы або серыялы, таму праграма пустая. Выберыце крыніцу з прамым эфірам.",
-  "openSourceGuide": "Адкрыць {{name}}"
+  "openSourceGuide": "Адкрыць {{name}}",
+  "shortcutDigits": "Перайсці да канала па нумары",
+  "resultCount_one": "{{count, number}} вынік",
+  "resultCount_few": "{{count, number}} вынікі",
+  "resultCount_many": "{{count, number}} вынікаў",
+  "resultCount_other": "{{count, number}} выніку"
 }

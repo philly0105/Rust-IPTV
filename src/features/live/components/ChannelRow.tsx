@@ -34,6 +34,11 @@ export interface ChannelRowProps {
   playing: boolean;
   active: boolean;
   compact?: boolean;
+  /**
+   * Radio: a station is known by its logo, and a show has no picture to follow, so the logo is
+   * larger and the progress bar goes; the current show stays on its one line.
+   */
+  station?: boolean;
   now: number;
   /** Hides the archive icon when the source cannot play this channel's catch-up. */
   sourceKind?: SourceKind;
@@ -137,7 +142,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         >
           {channel.number ?? ''}
         </span>
-        {!compact ? <ChannelLogo src={channel.logoUrl} name={name} size={40} sourceId={channel.ref.sourceId} /> : null}
+        {!compact ? <ChannelLogo src={channel.logoUrl} name={name} size={props.station ? 44 : 40} sourceId={channel.ref.sourceId} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-1.5">
             <span dir="auto" className={cn('truncate text-body-sm text-match-parent text-fg', playing ? 'font-semibold' : 'font-medium')}>
@@ -165,15 +170,17 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
                   {t('minutesLeftShort', { count: left })}
                 </span>
               </span>
-              <span className="relative mt-1 h-[3px] w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                {/* Quiet on every row, the accent on the one playing: a list of bright bars read as
-                    stripes, and red ones as "all live, all alerting". */}
-                <span
-                  data-testid="channel-progress"
-                  className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent' : 'bg-fg-subtle/55')}
-                  style={{ width: `${progress * 100}%` }}
-                />
-              </span>
+              {props.station ? null : (
+                <span className="relative mt-1 h-[3px] w-full overflow-hidden rounded-full bg-surface-3" aria-hidden>
+                  {/* Quiet on every row, the accent on the one playing: a list of bright bars read as
+                      stripes, and red ones as "all live, all alerting". */}
+                  <span
+                    data-testid="channel-progress"
+                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent' : 'bg-fg-subtle/55')}
+                    style={{ width: `${progress * 100}%` }}
+                  />
+                </span>
+              )}
             </>
           ) : props.guideUnavailable ? (
             <span className="truncate text-caption text-fg-subtle" data-testid="row-guide-unavailable">

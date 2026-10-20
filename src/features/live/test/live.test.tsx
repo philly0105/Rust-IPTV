@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, Page, PageQuery } from '@/api/types';
@@ -138,7 +138,8 @@ describe('LivePage', () => {
   it('radio digit zap asks for the radio station with that number', async () => {
     rpcMock.handlers['catalog.channelByNumber'] = (a) => ({ ...makeChannel(2), name: 'Radio Three', isRadio: true, ref: { sourceId: 'src1', contentType: 'radio', itemId: 'r3' }, number: (a as { number: number }).number });
     renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
-    await screen.findByText('Channel 0');
+    // The row, and its tile on the idle stage's station shelf.
+    await within(await screen.findByTestId('channel-list')).findByText('Channel 0');
     act(() => {
       fireEvent.keyDown(window, { key: '3' });
     });
@@ -205,7 +206,8 @@ describe('LivePage', () => {
 
   it('renders the radio stage', async () => {
     renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
-    await screen.findByText('Channel 0');
+    // The row, and its tile on the idle stage's station shelf.
+    await within(await screen.findByTestId('channel-list')).findByText('Channel 0');
     expect(screen.getByTestId('radio-stage')).toBeTruthy();
     const call = rpcMock.calls.find((c) => c.cmd === 'catalog.channels');
     expect(call?.args).toMatchObject({ radio: true });

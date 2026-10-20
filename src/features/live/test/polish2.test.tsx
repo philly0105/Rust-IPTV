@@ -266,7 +266,8 @@ describe('radio', () => {
     rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'Pop', contentType: 'radio' }), cat(2, { name: 'Jazz', contentType: 'radio' })];
     rpcMock.handlers['catalog.channels'] = serve([{ ...makeChannel(0), isRadio: true, name: 'Classic FM' }]);
     renderIn('/s/src1/radio?category=g2', RADIO);
-    await screen.findByText('Classic FM');
+    // The row, and its tile on the idle stage's station shelf.
+    await within(await screen.findByTestId('channel-list')).findByText('Classic FM');
     expect(screen.getByRole('searchbox', { name: 'Search stations' })).toBeTruthy();
     expect(screen.getByText('1 station')).toBeTruthy();
     const nav = screen.getByRole('navigation', { name: 'Groups' });
@@ -678,9 +679,9 @@ describe('guide grid', () => {
     // part of the cell that is on screen so it ends in an ellipsis there.
     expect(text.className).toContain('sticky');
     expect(parseFloat(text.style.maxWidth)).toBeGreaterThan(0);
-    // Kit Select: same accessible name, with the kit's chevron beside the native control.
+    // The source picker (LG-11): same accessible name, with a chevron like the kit Select's.
     const source = screen.getByRole('combobox', { name: 'Source' });
-    expect(source.parentElement!.querySelector('svg')).toBeTruthy();
+    expect(source.querySelector('svg.lucide-chevron-down')).toBeTruthy();
   });
 });
 

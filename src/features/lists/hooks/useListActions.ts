@@ -72,7 +72,10 @@ export async function saveEntryOrder(listId: string, refs: readonly ItemRef[]): 
 const containingKey = (ref: ItemRef) => rpcKey('lists.containing', { ref });
 
 export interface ListActions {
-  create(name: string, channel?: Channel): Promise<CustomList>;
+  /** A new list; it starts with `channels` (one channel or many: a whole group). */
+  create(name: string, channels?: Channel | readonly Channel[]): Promise<CustomList>;
+  /** Adds `channels` to `list` in one write; resolves how many were new, or null when it failed (a toast said why). */
+  addMany(list: CustomList, channels: readonly Channel[]): Promise<number | null>;
   rename(list: CustomList, name: string): Promise<boolean>;
   setOnDashboard(list: CustomList, on: boolean): void;
   /** Hides the list at once and deletes it once its Undo toast goes; Undo brings it back untouched. */
@@ -92,15 +95,16 @@ export function useListActions(): ListActions {
   const { toast } = useToast();
 
   const create = useCallback(
-    async (name: string, channel?: Channel) => {
+    async (name: string, channels?: Channel | readonly Channel[]) => {
       const trimmed = name.trim();
+      const start: readonly Channel[] = channels === undefined ? [] : 'ref' in channels ? [channels] : channels;
       // A list deleted a moment ago still holds its name and its place under the limit.
       const full = (readLists()?.length ?? 0) >= MAX_LISTS;
       await settleDeletes((l) => full || sameName(l.name, trimmed));
       try {
-        const list = await rpc('lists.create', { name: trimmed, ...(channel ? { items: [withSnapshot(channel)] } : {}) });
+        const list = await rpc('lists.create', { name: trimmed, ...(start.length > 0 ? { items: start.map(withSnapshot) } : {}) });
         patchLists((ls) => (ls.some((l) => l.id === list.id) ? ls : [...ls, list]));
-        if (channel) {
+        for (const channel of start) {
           queryClient.setQueryData<string[]>(containingKey(channel.ref), (ids) => (ids ? [...new Set([...ids, list.id])] : ids));
         }
         return list;
@@ -206,6 +210,22 @@ export function useListActions(): ListActions {
     [t, toast],
   );
 
+  const addMany = useCallback(
+    async (list: CustomList, channels: readonly Channel[]) => {
+      if (channels.length === 0) return 0;
+      try {
+        const { added } = await rpc('lists.addItems', { id: list.id, items: channels.map(withSnapshot) });
+        return added;
+      } catch (err) {
+        toast({ title: t('addFailed', { list: list.name }), description: errorText(err, t), variant: 'error' });
+        return null;
+      } finally {
+        void refreshLists();
+      }
+    },
+    [t, toast],
+  );
+
   const removeEntries = useCallback(
     (list: Pick<CustomList, 'id' | 'name'>, entries: readonly CustomListEntry[], label: string) => {
       if (entries.length === 0) return;
@@ -268,7 +288,7 @@ export function useListActions(): ListActions {
   );
 
   return useMemo(
-    () => ({ create, rename, setOnDashboard, remove, reorder, setMember, removeEntries, reorderEntries }),
-    [create, rename, setOnDashboard, remove, reorder, setMember, removeEntries, reorderEntries],
+    () => ({ create, rename, setOnDashboard, remove, reorder, setMember, addMany, removeEntries, reorderEntries }),
+    [create, rename, setOnDashboard, remove, reorder, setMember, addMany, removeEntries, reorderEntries],
   );
 }

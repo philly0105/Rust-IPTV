@@ -79,5 +79,20 @@
   "errorTooMany": "リストは{{max}}個まで作成できます。先に1つ削除してください。",
   "errorListFull": "1つのリストに入れられるチャンネルは{{max}}個までです。",
   "errorGone": "このリストは削除されました。",
-  "shortcutAddToList": "選択中のチャンネルをリストに追加"
+  "shortcutAddToList": "選択中のチャンネルをリストに追加",
+  "addChannels": "チャンネルを追加",
+  "addChannelsTo": "{{list}}にチャンネルを追加",
+  "inList": "リスト内",
+  "addedNamed": "{{name}}を{{list}}に追加しました",
+  "showMore": "さらに表示",
+  "groupTitle": "グループをリストに追加",
+  "groupAdd": "追加",
+  "groupAddTo": "グループを{{list}}に追加",
+  "groupAdded_other": "{{list}}に{{formatted}}チャンネルを追加しました",
+  "groupAddedShort_other": "{{formatted}}件を追加",
+  "groupAlreadyIn": "{{list}}にはすでにすべて含まれています",
+  "groupNothingNew": "追加済み",
+  "groupLoadFailed": "このグループのチャンネルを読み込めませんでした",
+  "groupCapped": "リストに入れられるのは最大{{max}}チャンネルなので、最初の{{max}}件だけを追加します。",
+  "groupNewList": "またはこれらのチャンネルで新しいリストを作成:"
 }

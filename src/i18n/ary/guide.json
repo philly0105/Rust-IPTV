@@ -17,7 +17,6 @@
   "searchNoGuideHint": "زيد شي دليل ولا جدّدو باش تقلّب فيه.",
   "epgSettings": "إعدادات الدليل",
   "searchMore": "باينين غير أول {{n}}. دقّق البحث.",
-  "resultsCount": "النتائج: {{n}}",
   "closeSearch": "سدّ البحث",
   "hitLabel": "{{title}}، {{channel}}، {{time}}",
   "dayHeading": "{{rel}}، {{date}}",
@@ -73,5 +72,12 @@
   "watchChannels": "تفرج فالقنوات",
   "noLiveChannels": "هاد المصدر ما فيه حتى قناة مباشرة",
   "noLiveChannelsHint": "فيه غير أفلام ولا مسلسلات، داكشي علاش الدليل ديالو خاوي. ختار مصدر فيه البث المباشر.",
-  "openSourceGuide": "حلّ {{name}}"
+  "openSourceGuide": "حلّ {{name}}",
+  "shortcutDigits": "سير لشي قناة بالنمرة ديالها",
+  "resultCount_zero": "{{count, number}} نتيجة",
+  "resultCount_one": "نتيجة وحدة",
+  "resultCount_two": "جوج نتائج",
+  "resultCount_few": "{{count, number}} نتائج",
+  "resultCount_many": "{{count, number}} نتيجة",
+  "resultCount_other": "{{count, number}} نتيجة"
 }

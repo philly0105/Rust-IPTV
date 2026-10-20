@@ -9,8 +9,20 @@ import { create } from 'zustand';
 
 import type { Channel } from '@/api/types';
 
+/** A source's group, offered whole to a list (LG-13: the group menu's "Add all to list…"). */
+export interface GroupTarget {
+  sourceId: string;
+  contentType: 'live' | 'radio';
+  categoryId: string;
+  name: string;
+  /** The group's channel count as the sidebar shows it. */
+  count: number;
+}
+
 export type ListsDialog =
   | { kind: 'picker'; channel: Channel }
+  | { kind: 'group'; group: GroupTarget }
+  | { kind: 'add'; listId: string }
   | { kind: 'create'; channel?: Channel; openAfter: boolean }
   | { kind: 'manage'; focusId?: string }
   | { kind: 'items'; listId: string; fromManage: boolean };
@@ -28,6 +40,16 @@ const open = (dialog: ListsDialog) => useListsDialogs.setState((s) => ({ dialog,
 /** "Add to list": checkboxes for every list plus an inline "New list". */
 export function openListPicker(channel: Channel): void {
   open({ kind: 'picker', channel });
+}
+
+/** "Add all to list…": every channel of a group into a list, or a new list named after it. */
+export function openAddGroupToList(group: GroupTarget): void {
+  open({ kind: 'group', group });
+}
+
+/** "Add channels" on a list's page: browse and search sources, adding as you go. */
+export function openAddChannels(listId: string): void {
+  open({ kind: 'add', listId });
 }
 
 /** "New list"; with `channel`, the new list starts with it. `openAfter` navigates to the new list. */

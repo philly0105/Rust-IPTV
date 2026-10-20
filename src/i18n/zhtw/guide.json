@@ -17,7 +17,6 @@
   "searchNoGuideHint": "新增或重新整理節目表後即可搜尋。",
   "epgSettings": "節目表設定",
   "searchMore": "僅顯示前 {{n}} 筆結果。請縮小搜尋範圍。",
-  "resultsCount": "結果：{{n}}",
   "closeSearch": "關閉搜尋",
   "hitLabel": "{{title}}，{{channel}}，{{time}}",
   "dayHeading": "{{rel}}，{{date}}",
@@ -73,5 +72,7 @@
   "watchChannels": "觀看頻道",
   "noLiveChannels": "此來源沒有直播頻道",
   "noLiveChannelsHint": "它只有電影或影集，因此節目表為空。請選擇有直播電視的來源。",
-  "openSourceGuide": "開啟 {{name}}"
+  "openSourceGuide": "開啟 {{name}}",
+  "shortcutDigits": "依編號跳到頻道",
+  "resultCount_other": "{{count, number}} 筆結果"
 }

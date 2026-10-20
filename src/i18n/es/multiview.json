@@ -139,5 +139,7 @@
   "announceSwapped": "{{a}} y {{b}} intercambiados",
   "announceLayout": "Diseño: {{layout}}",
   "announceMuted": "Muro silenciado",
-  "announceUnmuted": "Sonido del muro activado"
+  "announceUnmuted": "Sonido del muro activado",
+  "pickerScope": "Mostrar",
+  "pickerEmptyScope": "No hay nada aquí de esta fuente"
 }

@@ -145,5 +145,7 @@
   "announceSwapped": "تم تبديل {{a}} و{{b}}",
   "announceLayout": "التخطيط: {{layout}}",
   "announceMuted": "تم كتم صوت الجدار",
-  "announceUnmuted": "تمت إعادة صوت الجدار"
+  "announceUnmuted": "تمت إعادة صوت الجدار",
+  "pickerScope": "عرض",
+  "pickerEmptyScope": "لا شيء هنا من هذا المصدر"
 }

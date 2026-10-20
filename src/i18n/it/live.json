@@ -223,5 +223,20 @@
   "hideRibbon": "Nascondi la programmazione",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "TV in diretta",
-  "archiveStageIdle": "Scegli un programma per riprodurlo qui."
+  "archiveStageIdle": "Scegli un programma per riprodurlo qui.",
+  "favoritesGroup": "Preferiti",
+  "recentGroup": "Visti di recente",
+  "favoritesEmpty": "Ancora nessun canale preferito",
+  "favoritesEmptyStations": "Ancora nessuna stazione preferita",
+  "favoritesEmptyHint": "Aggiungi una stella a un canale di qualsiasi gruppo per fissarlo qui.",
+  "recentEmpty": "Non hai ancora guardato nulla",
+  "recentEmptyHint": "Qui compaiono i canali che riproduci da questa sorgente.",
+  "addGroupToList": "Aggiungi tutti a una lista…",
+  "openGroupInGuide": "Apri nella guida TV",
+  "pickerTypeForMore": "Digita per trovarne altri",
+  "pickerViews": "Viste",
+  "pickerShow": "Mostra",
+  "filterSources": "Filtra sorgenti",
+  "recentStations": "Ascoltate di recente",
+  "playNamed": "Riproduci {{name}}"
 }

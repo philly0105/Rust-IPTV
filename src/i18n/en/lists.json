@@ -81,5 +81,22 @@
   "errorTooMany": "You can have up to {{max}} lists. Delete one first.",
   "errorListFull": "A list holds up to {{max}} channels.",
   "errorGone": "This list was deleted.",
-  "shortcutAddToList": "Add the focused channel to a list"
+  "shortcutAddToList": "Add the focused channel to a list",
+  "addChannels": "Add channels",
+  "addChannelsTo": "Add channels to {{list}}",
+  "inList": "In list",
+  "addedNamed": "Added {{name}} to {{list}}",
+  "showMore": "Show more",
+  "groupTitle": "Add a group to a list",
+  "groupAdd": "Add",
+  "groupAddTo": "Add the group to {{list}}",
+  "groupAdded_one": "Added {{formatted}} channel to {{list}}",
+  "groupAdded_other": "Added {{formatted}} channels to {{list}}",
+  "groupAddedShort_one": "{{formatted}} added",
+  "groupAddedShort_other": "{{formatted}} added",
+  "groupAlreadyIn": "{{list}} already has all of them",
+  "groupNothingNew": "Already there",
+  "groupLoadFailed": "Couldn't load this group's channels",
+  "groupCapped": "A list holds up to {{max}} channels, so only the first {{max}} are added.",
+  "groupNewList": "Or start a new list with these channels:"
 }

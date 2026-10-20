@@ -167,7 +167,7 @@ describe('GuideSearchPanel results', () => {
     expect(within(rows[1]!).getByText('Beta')).toBeTruthy();
     expect(within(rows[1]!).getByText('Evening News')).toBeTruthy();
     expect(rows[1]!.textContent).toMatch(/7:00\s?PM|19:00/);
-    expect(screen.getByTestId('guide-search-count').textContent).toBe('Results: 4');
+    expect(screen.getByTestId('guide-search-count').textContent).toBe('4 results');
   });
 
   it('Watch is offered only while a hit airs', async () => {

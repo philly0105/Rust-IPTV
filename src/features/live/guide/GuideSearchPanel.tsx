@@ -48,7 +48,8 @@ interface Span {
 }
 
 /**
- * Where the results panel goes, horizontally: its inline end lined up with the field's, then slid
+ * Where the results panel goes, horizontally: its inline start lined up with the field's (it hangs
+ * from the field it answers, over the grid, not back over the pickers and the channel column), then slid
  * back inside `bounds` (the guide page) so that a field near the page's other edge (a phone, or a
  * toolbar that wrapped the field to the start of a row) never pushes it off screen or under the
  * rail. `left` is relative to the field's left edge; null when there is no room to measure.
@@ -57,7 +58,7 @@ export function panelPlacement(field: Span, bounds: Span, maxWidth: number, rtl:
   const room = bounds.right - bounds.left - 2 * margin;
   if (!(room > 0)) return null;
   const width = Math.min(maxWidth, room);
-  const want = rtl ? field.left : field.right - width;
+  const want = rtl ? field.right - width : field.left;
   const left = Math.max(bounds.left + margin, Math.min(want, bounds.right - margin - width));
   return { left: left - field.left, width };
 }
@@ -372,7 +373,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
           {t('searchResults')}
         </h2>
         <span className="font-display text-xs tabular-nums text-fg-subtle" aria-live="polite" data-testid="guide-search-count">
-          {state === 'results' && hits ? t('resultsCount', { n: hits.length }) : ''}
+          {state === 'results' && hits ? t('resultCount', { count: hits.length }) : ''}
         </span>
         <IconButton size="sm" label={t('closeSearch')} icon={<X className="size-4" aria-hidden />} onClick={() => onClose(true)} />
       </div>
@@ -417,7 +418,7 @@ const HitRow = memo(function HitRow({
         {/* Wide enough for a 12-hour "05:00 AM" on one line; a longer local format widens it, never wraps it. */}
         <span className="flex min-w-[4.5rem] shrink-0 flex-col items-start">
           {/* The title leads; the time is a quieter readout beside it. */}
-          <span className={cn('font-numeric text-[calc(14rem/15)] leading-tight whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg-muted')}>{time}</span>
+          <span className={cn('font-numeric text-body-sm leading-tight whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg-muted')}>{time}</span>
           {airing ? <span className="text-[calc(10rem/15)] leading-tight text-live">{t('airingNow')}</span> : null}
         </span>
         <ChannelLogo src={hit.logoUrl} name={name} size={28} sourceId={hit.ref.sourceId} />

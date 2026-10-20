@@ -137,5 +137,7 @@
   "announceSwapped": "Έγινε ανταλλαγή {{a}} και {{b}}",
   "announceLayout": "Διάταξη: {{layout}}",
   "announceMuted": "Σίγαση τοίχου",
-  "announceUnmuted": "Ο ήχος του τοίχου επανήλθε"
+  "announceUnmuted": "Ο ήχος του τοίχου επανήλθε",
+  "pickerScope": "Εμφάνιση",
+  "pickerEmptyScope": "Δεν υπάρχει τίποτα εδώ από αυτή την πηγή"
 }

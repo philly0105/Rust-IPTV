@@ -229,5 +229,20 @@
   "hideRibbon": "Скрыть программу",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Прямой эфир",
-  "archiveStageIdle": "Выберите передачу, чтобы воспроизвести её здесь."
+  "archiveStageIdle": "Выберите передачу, чтобы воспроизвести её здесь.",
+  "favoritesGroup": "Избранное",
+  "recentGroup": "Недавно просмотренные",
+  "favoritesEmpty": "Избранных каналов пока нет",
+  "favoritesEmptyStations": "Избранных станций пока нет",
+  "favoritesEmptyHint": "Отметьте канал звёздочкой в любой группе, чтобы закрепить его здесь.",
+  "recentEmpty": "Вы ещё ничего не смотрели",
+  "recentEmptyHint": "Здесь появятся каналы, которые вы включали из этого источника.",
+  "addGroupToList": "Добавить все в список…",
+  "openGroupInGuide": "Открыть в телегиде",
+  "pickerTypeForMore": "Введите текст, чтобы найти больше",
+  "pickerViews": "Представления",
+  "pickerShow": "Показать",
+  "filterSources": "Фильтр источников",
+  "recentStations": "Недавно слушали",
+  "playNamed": "Включить {{name}}"
 }

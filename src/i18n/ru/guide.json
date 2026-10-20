@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Добавьте или обновите телегид, чтобы искать по нему.",
   "epgSettings": "Настройки телегида",
   "searchMore": "Показаны первые {{n}}. Уточните запрос.",
-  "resultsCount": "Результатов: {{n}}",
   "closeSearch": "Закрыть поиск",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,10 @@
   "watchChannels": "Смотреть каналы",
   "noLiveChannels": "В этом источнике нет каналов прямого эфира",
   "noLiveChannelsHint": "В нём только фильмы или сериалы, поэтому телегид пуст. Выберите источник с прямым эфиром.",
-  "openSourceGuide": "Открыть {{name}}"
+  "openSourceGuide": "Открыть {{name}}",
+  "shortcutDigits": "Перейти к каналу по номеру",
+  "resultCount_one": "{{count, number}} результат",
+  "resultCount_few": "{{count, number}} результата",
+  "resultCount_many": "{{count, number}} результатов",
+  "resultCount_other": "{{count, number}} результата"
 }

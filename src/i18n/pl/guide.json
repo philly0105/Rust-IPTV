@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Dodaj lub odśwież przewodnik, aby go przeszukać.",
   "epgSettings": "Ustawienia przewodnika",
   "searchMore": "Pokazano pierwsze {{n}}. Zawęź wyszukiwanie.",
-  "resultsCount": "Wyniki: {{n}}",
   "closeSearch": "Zamknij wyszukiwanie",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,10 @@
   "watchChannels": "Oglądaj kanały",
   "noLiveChannels": "To źródło nie ma kanałów na żywo",
   "noLiveChannelsHint": "Zawiera tylko filmy lub seriale, więc jego przewodnik jest pusty. Wybierz źródło z telewizją na żywo.",
-  "openSourceGuide": "Otwórz {{name}}"
+  "openSourceGuide": "Otwórz {{name}}",
+  "shortcutDigits": "Przejdź do kanału po numerze",
+  "resultCount_one": "{{count, number}} wynik",
+  "resultCount_few": "{{count, number}} wyniki",
+  "resultCount_many": "{{count, number}} wyników",
+  "resultCount_other": "{{count, number}} wyniku"
 }

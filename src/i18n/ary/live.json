@@ -241,5 +241,20 @@
   "hideRibbon": "خبّي شنو كيدوز",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "البث المباشر",
-  "archiveStageIdle": "ختار برنامج باش يتشغّل هنا."
+  "archiveStageIdle": "ختار برنامج باش يتشغّل هنا.",
+  "favoritesGroup": "المفضلة",
+  "recentGroup": "اللي تشافو مؤخرا",
+  "favoritesEmpty": "باقي ما كاين حتى قناة مفضلة",
+  "favoritesEmptyStations": "باقي ما كاينة حتى إذاعة مفضلة",
+  "favoritesEmptyHint": "دير نجمة على شي قناة فشي مجموعة باش تبان هنا.",
+  "recentEmpty": "باقي ما تفرجتي فوالو",
+  "recentEmptyHint": "القنوات اللي كتشغّل من هاد المصدر كيبانو هنا.",
+  "addGroupToList": "زيد كلشي لشي ليستة…",
+  "openGroupInGuide": "حل فدليل البرامج",
+  "pickerTypeForMore": "كتب باش تلقى كثر",
+  "pickerViews": "العروض",
+  "pickerShow": "بيّن",
+  "filterSources": "فلتر المصادر",
+  "recentStations": "تشغّلو مؤخرا",
+  "playNamed": "شغّل {{name}}"
 }

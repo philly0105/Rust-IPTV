@@ -21,6 +21,8 @@ export interface ChannelListProps {
   openOnDoubleClick: boolean;
   now: number;
   compact?: boolean;
+  /** Radio stations: see `ChannelRow.station`. */
+  station?: boolean;
   sourceKind?: SourceKind;
   /** Initial-height hint for tests and SSR-less environments. */
   initialHeight?: number;
@@ -434,6 +436,7 @@ export function ChannelList(props: ChannelListProps) {
                   playing={!!ch && sameRef(ch.ref, playingRef)}
                   active={v.index === active}
                   compact={props.compact}
+                  station={props.station}
                   now={now}
                   sourceKind={props.sourceKind}
                   stripPrefix={prefs.stripCountryPrefix}

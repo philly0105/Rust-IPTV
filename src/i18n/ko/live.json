@@ -217,5 +217,20 @@
   "hideRibbon": "방송 정보 숨기기",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "라이브 TV",
-  "archiveStageIdle": "프로그램을 고르면 여기서 재생됩니다."
+  "archiveStageIdle": "프로그램을 고르면 여기서 재생됩니다.",
+  "favoritesGroup": "즐겨찾기",
+  "recentGroup": "최근 시청",
+  "favoritesEmpty": "아직 즐겨찾는 채널이 없습니다",
+  "favoritesEmptyStations": "아직 즐겨찾는 방송국이 없습니다",
+  "favoritesEmptyHint": "아무 그룹에서나 채널에 별표를 하면 여기에 고정됩니다.",
+  "recentEmpty": "아직 시청한 항목이 없습니다",
+  "recentEmptyHint": "이 소스에서 재생한 채널이 여기에 표시됩니다.",
+  "addGroupToList": "모두 목록에 추가…",
+  "openGroupInGuide": "TV 가이드에서 열기",
+  "pickerTypeForMore": "입력하면 더 찾을 수 있습니다",
+  "pickerViews": "보기",
+  "pickerShow": "표시",
+  "filterSources": "소스 필터",
+  "recentStations": "최근 재생",
+  "playNamed": "{{name}} 재생"
 }

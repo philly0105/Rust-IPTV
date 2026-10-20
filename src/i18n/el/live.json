@@ -217,5 +217,20 @@
   "hideRibbon": "Απόκρυψη προγράμματος",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Ζωντανή TV",
-  "archiveStageIdle": "Επιλέξτε ένα πρόγραμμα για να παίξει εδώ."
+  "archiveStageIdle": "Επιλέξτε ένα πρόγραμμα για να παίξει εδώ.",
+  "favoritesGroup": "Αγαπημένα",
+  "recentGroup": "Πρόσφατα προβεβλημένα",
+  "favoritesEmpty": "Δεν υπάρχουν ακόμα αγαπημένα κανάλια",
+  "favoritesEmptyStations": "Δεν υπάρχουν ακόμα αγαπημένοι σταθμοί",
+  "favoritesEmptyHint": "Βάλτε αστέρι σε ένα κανάλι οποιασδήποτε ομάδας για να το καρφιτσώσετε εδώ.",
+  "recentEmpty": "Δεν έχετε δει τίποτα ακόμα",
+  "recentEmptyHint": "Εδώ εμφανίζονται τα κανάλια που παίζετε από αυτή την πηγή.",
+  "addGroupToList": "Προσθήκη όλων σε λίστα…",
+  "openGroupInGuide": "Άνοιγμα στον οδηγό προγράμματος",
+  "pickerTypeForMore": "Πληκτρολογήστε για περισσότερα",
+  "pickerViews": "Προβολές",
+  "pickerShow": "Εμφάνιση",
+  "filterSources": "Φιλτράρισμα πηγών",
+  "recentStations": "Παίχτηκαν πρόσφατα",
+  "playNamed": "Αναπαραγωγή {{name}}"
 }

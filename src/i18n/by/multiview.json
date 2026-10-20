@@ -141,5 +141,7 @@
   "announceSwapped": "{{a}} і {{b}} памяняліся месцамі",
   "announceLayout": "Раскладка: {{layout}}",
   "announceMuted": "Гук сцяны выключаны",
-  "announceUnmuted": "Гук сцяны ўключаны"
+  "announceUnmuted": "Гук сцяны ўключаны",
+  "pickerScope": "Паказаць",
+  "pickerEmptyScope": "Тут няма нічога з гэтай крыніцы"
 }

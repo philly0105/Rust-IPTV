@@ -217,5 +217,20 @@
   "hideRibbon": "Hide what's on",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Live TV",
-  "archiveStageIdle": "Pick a programme to play it here."
+  "archiveStageIdle": "Pick a programme to play it here.",
+  "favoritesGroup": "Favorites",
+  "recentGroup": "Recently watched",
+  "favoritesEmpty": "No favorite channels yet",
+  "favoritesEmptyStations": "No favorite stations yet",
+  "favoritesEmptyHint": "Star a channel in any group to pin it here.",
+  "recentEmpty": "Nothing watched yet",
+  "recentEmptyHint": "Channels you play on this source show up here.",
+  "addGroupToList": "Add all to list…",
+  "openGroupInGuide": "Open in TV guide",
+  "pickerTypeForMore": "Type to find more",
+  "pickerViews": "Views",
+  "pickerShow": "Show",
+  "filterSources": "Filter sources",
+  "recentStations": "Played lately",
+  "playNamed": "Play {{name}}"
 }

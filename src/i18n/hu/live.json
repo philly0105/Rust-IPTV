@@ -217,5 +217,20 @@
   "hideRibbon": "Műsor elrejtése",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Élő tévéadás",
-  "archiveStageIdle": "Válasszon egy műsort, és itt lejátszódik."
+  "archiveStageIdle": "Válasszon egy műsort, és itt lejátszódik.",
+  "favoritesGroup": "Kedvencek",
+  "recentGroup": "Nemrég nézett",
+  "favoritesEmpty": "Még nincs kedvenc csatorna",
+  "favoritesEmptyStations": "Még nincs kedvenc állomás",
+  "favoritesEmptyHint": "Jelölj meg egy csatornát csillaggal bármelyik csoportban, és itt jelenik meg.",
+  "recentEmpty": "Még nem néztél semmit",
+  "recentEmptyHint": "Az ebből a forrásból lejátszott csatornák itt jelennek meg.",
+  "addGroupToList": "Összes hozzáadása listához…",
+  "openGroupInGuide": "Megnyitás a műsorújságban",
+  "pickerTypeForMore": "Gépelj a további találatokért",
+  "pickerViews": "Nézetek",
+  "pickerShow": "Megjelenítés",
+  "filterSources": "Források szűrése",
+  "recentStations": "Nemrég hallgatott",
+  "playNamed": "{{name}} lejátszása"
 }

@@ -81,5 +81,22 @@
   "errorTooMany": "Μπορείτε να έχετε έως {{max}} λίστες. Διαγράψτε πρώτα μία.",
   "errorListFull": "Μια λίστα χωράει έως {{max}} κανάλια.",
   "errorGone": "Αυτή η λίστα διαγράφηκε.",
-  "shortcutAddToList": "Προσθήκη του επιλεγμένου καναλιού σε λίστα"
+  "shortcutAddToList": "Προσθήκη του επιλεγμένου καναλιού σε λίστα",
+  "addChannels": "Προσθήκη καναλιών",
+  "addChannelsTo": "Προσθήκη καναλιών στη λίστα {{list}}",
+  "inList": "Στη λίστα",
+  "addedNamed": "Το {{name}} προστέθηκε στη λίστα {{list}}",
+  "showMore": "Εμφάνιση περισσότερων",
+  "groupTitle": "Προσθήκη ομάδας σε λίστα",
+  "groupAdd": "Προσθήκη",
+  "groupAddTo": "Προσθήκη της ομάδας στη λίστα {{list}}",
+  "groupAdded_one": "Προστέθηκε {{formatted}} κανάλι στη λίστα {{list}}",
+  "groupAdded_other": "Προστέθηκαν {{formatted}} κανάλια στη λίστα {{list}}",
+  "groupAddedShort_one": "Προστέθηκε {{formatted}}",
+  "groupAddedShort_other": "Προστέθηκαν {{formatted}}",
+  "groupAlreadyIn": "Η λίστα {{list}} τα περιέχει ήδη όλα",
+  "groupNothingNew": "Υπάρχουν ήδη",
+  "groupLoadFailed": "Δεν ήταν δυνατή η φόρτωση των καναλιών αυτής της ομάδας",
+  "groupCapped": "Μια λίστα χωράει έως {{max}} κανάλια, οπότε προστίθενται μόνο τα πρώτα {{max}}.",
+  "groupNewList": "Ή ξεκινήστε μια νέα λίστα με αυτά τα κανάλια:"
 }

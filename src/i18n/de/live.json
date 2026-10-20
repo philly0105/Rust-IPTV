@@ -217,5 +217,20 @@
   "hideRibbon": "Programm ausblenden",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Live-TV",
-  "archiveStageIdle": "Wählen Sie eine Sendung, um sie hier abzuspielen."
+  "archiveStageIdle": "Wählen Sie eine Sendung, um sie hier abzuspielen.",
+  "favoritesGroup": "Favoriten",
+  "recentGroup": "Zuletzt angesehen",
+  "favoritesEmpty": "Noch keine Lieblingssender",
+  "favoritesEmptyStations": "Noch keine Lieblingsradiosender",
+  "favoritesEmptyHint": "Markiere einen Sender in einer beliebigen Gruppe mit einem Stern, um ihn hier anzuheften.",
+  "recentEmpty": "Noch nichts angesehen",
+  "recentEmptyHint": "Sender, die du aus dieser Quelle abspielst, erscheinen hier.",
+  "addGroupToList": "Alle zu einer Liste hinzufügen…",
+  "openGroupInGuide": "Im Programmführer öffnen",
+  "pickerTypeForMore": "Tippen, um mehr zu finden",
+  "pickerViews": "Ansichten",
+  "pickerShow": "Anzeigen",
+  "filterSources": "Quellen filtern",
+  "recentStations": "Zuletzt gehört",
+  "playNamed": "{{name}} abspielen"
 }

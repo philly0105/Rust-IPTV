@@ -17,7 +17,6 @@
   "searchNoGuideHint": "Add or refresh a guide to search it.",
   "epgSettings": "Guide settings",
   "searchMore": "First {{n}} shown. Refine the search.",
-  "resultsCount": "Results: {{n}}",
   "closeSearch": "Close search",
   "hitLabel": "{{title}}, {{channel}}, {{time}}",
   "dayHeading": "{{rel}}, {{date}}",
@@ -73,5 +72,8 @@
   "watchChannels": "Watch channels",
   "noLiveChannels": "This source has no live channels",
   "noLiveChannelsHint": "It only has films or series, so its guide is empty. Pick a source with live TV.",
-  "openSourceGuide": "Open {{name}}"
+  "openSourceGuide": "Open {{name}}",
+  "shortcutDigits": "Jump to a channel by its number",
+  "resultCount_one": "{{count, number}} result",
+  "resultCount_other": "{{count, number}} results"
 }

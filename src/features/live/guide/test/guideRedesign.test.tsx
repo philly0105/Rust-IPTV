@@ -2,7 +2,8 @@
  * The guide redesign (stage 1): genre buckets from XMLTV categories with stripes and a filter
  * (CB-GUIDE-GENRE), the playing channel's row marked and the guide opening at it (LG-01), the now
  * pill in the ruler (LG-18), the preview band (CB-GUIDE-PREVIEW), AM/PM on the hour only in the
- * ruler, and no guide for a source without live channels (LG-11).
+ * ruler, and no guide for a source without live channels (LG-11). Stage 2: channel numbers move
+ * the cursor (LG-01), slot labels stick past the channel column, and the row menu is Live's.
  */
 import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -210,8 +211,12 @@ describe('sources without live channels (LG-11)', () => {
     ];
     renderGuide({ path: '/epg', routes: GRID });
     await screen.findByRole('button', { name: /^c0 P0,/ });
-    expect(screen.getByRole('combobox', { name: 'Source' })).toHaveProperty('value', 'src1');
-    expect(within(screen.getByRole('combobox', { name: 'Source' })).queryByRole('option', { name: 'Films only' })).toBeNull();
+    const picker = screen.getByRole('combobox', { name: 'Source' });
+    expect(picker.textContent).toBe('Demo');
+    fireEvent.click(picker);
+    expect(screen.getByRole('option', { name: /^Demo/ })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: /Films only/ })).toBeNull();
+    fireEvent.keyDown(screen.getByRole('option', { name: /^Demo/ }), { key: 'Escape' });
     cleanup();
 
     rpc.handlers['catalog.channels'] = () => ({ items: [], total: 0, offset: 0, limit: 120 });
@@ -231,5 +236,63 @@ describe('touch (LG-04)', () => {
     act(() => vi.advanceTimersByTime(500));
     vi.useRealTimers();
     expect(await screen.findByRole('menu', { name: 'Channel 1' })).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stage 2
+
+describe('channel numbers in the guide (LG-01)', () => {
+  it('a typed number moves the cursor to that channel, at the cursor’s time', async () => {
+    rpc.handlers['catalog.channelByNumber'] = (a) => {
+      const n = (a as { number: number }).number;
+      return n >= 1 && n <= CHANNELS.length ? CHANNELS[n - 1]! : null;
+    };
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    fireEvent.keyDown(window, { key: '1' });
+    fireEvent.keyDown(window, { key: '3' });
+    expect((await screen.findByTestId('digit-osd')).textContent).toContain('13');
+    // c12 holds number 13.
+    await waitFor(() => expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/^c12 P0,/), { timeout: 6000 });
+    expect(rpc.of('catalog.channelByNumber')).toContainEqual({ sourceId: 'src1', number: 13, contentType: 'live' });
+  });
+
+  it('a number no channel has says so', async () => {
+    rpc.handlers['catalog.channelByNumber'] = () => null;
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    fireEvent.keyDown(window, { key: '9' });
+    fireEvent.keyDown(window, { key: '9' });
+    await waitFor(() => expect(screen.getByTestId('digit-osd').textContent).toContain('No channel 99'), { timeout: 6000 });
+  });
+});
+
+describe('the ruler and the row menu (stage 2)', () => {
+  it('slot labels stick past the channel column, so the window’s first slot keeps its time', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    const labels = screen.getAllByTestId('ruler-label');
+    expect(labels.length).toBeGreaterThan(2);
+    for (const l of labels) {
+      expect(l.className).toContain('sticky');
+      expect(Number.parseFloat(l.style.insetInlineStart)).toBeGreaterThan(0);
+    }
+  });
+
+  it('the channel menu is headed by the channel and what is on, with Live’s entries', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    const cell = document.querySelector<HTMLElement>('[data-channel-row="1"]')!.closest<HTMLElement>('[role="rowheader"]')!;
+    fireEvent.contextMenu(cell, { clientX: 30, clientY: 200 });
+    const menu = await screen.findByRole('menu', { name: 'Channel 1' });
+    const header = within(menu).getByTestId('context-menu-header');
+    expect(header.textContent).toContain('Channel 1');
+    expect(header.textContent).toContain('c1 P0');
+    expect(within(menu).getByRole('menuitem', { name: 'Play' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: 'Match guide channel' })).toBeTruthy();
+    // The desktop app offers the external players here too, as on Live.
+    expect(within(menu).getByRole('menuitem', { name: 'Play in MPV' })).toBeTruthy();
+    expect(within(menu).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
   });
 });

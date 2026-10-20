@@ -81,5 +81,22 @@
   "errorTooMany": "Legfeljebb {{max}} listája lehet. Előbb töröljön egyet.",
   "errorListFull": "Egy lista legfeljebb {{max}} csatornát tartalmazhat.",
   "errorGone": "Ezt a listát törölték.",
-  "shortcutAddToList": "A kijelölt csatorna hozzáadása egy listához"
+  "shortcutAddToList": "A kijelölt csatorna hozzáadása egy listához",
+  "addChannels": "Csatornák hozzáadása",
+  "addChannelsTo": "Csatornák hozzáadása ide: {{list}}",
+  "inList": "Listában",
+  "addedNamed": "{{name}} hozzáadva ide: {{list}}",
+  "showMore": "Több mutatása",
+  "groupTitle": "Csoport hozzáadása listához",
+  "groupAdd": "Hozzáadás",
+  "groupAddTo": "A csoport hozzáadása ide: {{list}}",
+  "groupAdded_one": "{{formatted}} csatorna hozzáadva ide: {{list}}",
+  "groupAdded_other": "{{formatted}} csatorna hozzáadva ide: {{list}}",
+  "groupAddedShort_one": "{{formatted}} hozzáadva",
+  "groupAddedShort_other": "{{formatted}} hozzáadva",
+  "groupAlreadyIn": "A(z) {{list}} lista már mindet tartalmazza",
+  "groupNothingNew": "Már benne vannak",
+  "groupLoadFailed": "Nem sikerült betölteni a csoport csatornáit",
+  "groupCapped": "Egy lista legfeljebb {{max}} csatornát tartalmazhat, ezért csak az első {{max}} kerül bele.",
+  "groupNewList": "Vagy kezdj új listát ezekkel a csatornákkal:"
 }

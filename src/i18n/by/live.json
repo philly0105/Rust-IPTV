@@ -229,5 +229,20 @@
   "hideRibbon": "Схаваць, што ў эфіры",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "Прамы эфір",
-  "archiveStageIdle": "Выберыце перадачу, каб прайграць яе тут."
+  "archiveStageIdle": "Выберыце перадачу, каб прайграць яе тут.",
+  "favoritesGroup": "Выбранае",
+  "recentGroup": "Нядаўна прагледжаныя",
+  "favoritesEmpty": "Абраных каналаў пакуль няма",
+  "favoritesEmptyStations": "Абраных станцый пакуль няма",
+  "favoritesEmptyHint": "Пазначце канал зорачкай у любой групе, каб замацаваць яго тут.",
+  "recentEmpty": "Пакуль нічога не праглядалася",
+  "recentEmptyHint": "Тут з'явяцца каналы, якія вы ўключаеце з гэтай крыніцы.",
+  "addGroupToList": "Дадаць усе ў спіс…",
+  "openGroupInGuide": "Адкрыць у праграме перадач",
+  "pickerTypeForMore": "Увядзіце, каб знайсці больш",
+  "pickerViews": "Выгляды",
+  "pickerShow": "Паказаць",
+  "filterSources": "Фільтр крыніц",
+  "recentStations": "Нядаўна слуханыя",
+  "playNamed": "Прайграць {{name}}"
 }

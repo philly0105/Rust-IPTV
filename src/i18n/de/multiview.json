@@ -137,5 +137,7 @@
   "announceSwapped": "{{a}} und {{b}} getauscht",
   "announceLayout": "Layout: {{layout}}",
   "announceMuted": "Wand stummgeschaltet",
-  "announceUnmuted": "Ton der Wand an"
+  "announceUnmuted": "Ton der Wand an",
+  "pickerScope": "Anzeigen",
+  "pickerEmptyScope": "Hier ist nichts aus dieser Quelle"
 }

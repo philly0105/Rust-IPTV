@@ -79,5 +79,20 @@
   "errorTooMany": "最多可以有 {{max}} 個清單。請先刪除一個。",
   "errorListFull": "一個清單最多可容納 {{max}} 個頻道。",
   "errorGone": "此清單已被刪除。",
-  "shortcutAddToList": "將選取的頻道加入清單"
+  "shortcutAddToList": "將選取的頻道加入清單",
+  "addChannels": "加入頻道",
+  "addChannelsTo": "將頻道加入 {{list}}",
+  "inList": "已在清單中",
+  "addedNamed": "已將 {{name}} 加入 {{list}}",
+  "showMore": "顯示更多",
+  "groupTitle": "將群組加入清單",
+  "groupAdd": "加入",
+  "groupAddTo": "將群組加入 {{list}}",
+  "groupAdded_other": "已將 {{formatted}} 個頻道加入 {{list}}",
+  "groupAddedShort_other": "已加入 {{formatted}} 個",
+  "groupAlreadyIn": "{{list}} 已包含全部頻道",
+  "groupNothingNew": "已存在",
+  "groupLoadFailed": "無法載入此群組的頻道",
+  "groupCapped": "一個清單最多容納 {{max}} 個頻道，因此只加入前 {{max}} 個。",
+  "groupNewList": "或用這些頻道建立新清單："
 }

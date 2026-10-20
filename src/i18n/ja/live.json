@@ -217,5 +217,20 @@
   "hideRibbon": "番組情報を隠す",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "ライブTV",
-  "archiveStageIdle": "番組を選ぶとここで再生します。"
+  "archiveStageIdle": "番組を選ぶとここで再生します。",
+  "favoritesGroup": "お気に入り",
+  "recentGroup": "最近視聴",
+  "favoritesEmpty": "お気に入りのチャンネルはまだありません",
+  "favoritesEmptyStations": "お気に入りの局はまだありません",
+  "favoritesEmptyHint": "どのグループでもチャンネルに星を付けると、ここに表示されます。",
+  "recentEmpty": "まだ何も視聴していません",
+  "recentEmptyHint": "このソースで再生したチャンネルがここに表示されます。",
+  "addGroupToList": "すべてをリストに追加…",
+  "openGroupInGuide": "番組表で開く",
+  "pickerTypeForMore": "入力するとさらに検索できます",
+  "pickerViews": "ビュー",
+  "pickerShow": "表示",
+  "filterSources": "ソースを絞り込む",
+  "recentStations": "最近再生した局",
+  "playNamed": "{{name}}を再生"
 }

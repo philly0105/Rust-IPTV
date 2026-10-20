@@ -81,5 +81,22 @@
   "errorTooMany": "En fazla {{max}} listeniz olabilir. Önce birini silin.",
   "errorListFull": "Bir listede en fazla {{max}} kanal olabilir.",
   "errorGone": "Bu liste silindi.",
-  "shortcutAddToList": "Seçili kanalı bir listeye ekle"
+  "shortcutAddToList": "Seçili kanalı bir listeye ekle",
+  "addChannels": "Kanal ekle",
+  "addChannelsTo": "{{list}} listesine kanal ekle",
+  "inList": "Listede",
+  "addedNamed": "{{name}}, {{list}} listesine eklendi",
+  "showMore": "Daha fazla göster",
+  "groupTitle": "Bir grubu listeye ekle",
+  "groupAdd": "Ekle",
+  "groupAddTo": "Grubu {{list}} listesine ekle",
+  "groupAdded_one": "{{formatted}} kanal {{list}} listesine eklendi",
+  "groupAdded_other": "{{formatted}} kanal {{list}} listesine eklendi",
+  "groupAddedShort_one": "{{formatted}} eklendi",
+  "groupAddedShort_other": "{{formatted}} eklendi",
+  "groupAlreadyIn": "{{list}} listesinde hepsi zaten var",
+  "groupNothingNew": "Zaten var",
+  "groupLoadFailed": "Bu grubun kanalları yüklenemedi",
+  "groupCapped": "Bir liste en fazla {{max}} kanal alır, bu yüzden yalnızca ilk {{max}} kanal eklenir.",
+  "groupNewList": "Ya da bu kanallarla yeni bir liste başlatın:"
 }

@@ -137,5 +137,7 @@
   "announceSwapped": "{{a}} ile {{b}} yer değiştirdi",
   "announceLayout": "Düzen: {{layout}}",
   "announceMuted": "Duvarın sesi kapatıldı",
-  "announceUnmuted": "Duvarın sesi açıldı"
+  "announceUnmuted": "Duvarın sesi açıldı",
+  "pickerScope": "Göster",
+  "pickerEmptyScope": "Burada bu kaynaktan bir şey yok"
 }

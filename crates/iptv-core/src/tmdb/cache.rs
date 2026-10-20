@@ -375,7 +375,9 @@ impl TmdbCache {
         let now = Utc::now();
         let entry = Self::entry_for(fetched, ttl, now);
         let row = entry.clone();
-        db.spawn("tmdb cache", move |conn| Self::write_db(conn, media, &key, &row, now));
+        db.spawn("tmdb cache", move |conn| {
+            Self::write_db(conn, media, &key, &row, now)
+        });
         Ok(entry)
     }
 

@@ -10,7 +10,10 @@
 //! [`HEADER_TIMEOUT`]; bodies may idle for [`READ_TIMEOUT`] between reads
 //! (streams and large playlists stay alive as long as bytes flow). Metadata
 //! requests that must finish as a whole use [`send_metadata`]
-//! ([`METADATA_DEADLINE`]).
+//! ([`METADATA_DEADLINE`]). reqwest's read timeout also runs while a response
+//! head is awaited, so requests that may wait 120 s for one (big playlists
+//! and provider lists) use the long-wait clients ([`guarded_long_client`],
+//! [`LONG_READ_TIMEOUT`]) and limit their bodies' idle time themselves.
 //!
 //! Server mode (SSRF guard): the server binary installs [`ServerMode`] in the
 //! state's extensions. Core fetches of user-supplied URLs (downloads,
@@ -19,8 +22,11 @@
 //! policy refuse loopback, private and link-local addresses, and call
 //! [`check_fetch`] first. A source's own `host:port` is trusted for that
 //! source's fetches only: each trusted authority gets its own guarded client
-//! ([`guarded_client`]) and nothing is trusted process-wide.
-//! `--allow-private-targets` turns the guard off. The
+//! ([`guarded_client`]) and nothing is trusted process-wide. The resolver
+//! sees host names without ports, so that client is used only for URLs on
+//! exactly that authority ([`trust_for`]), and a redirect it follows to the
+//! same name on another port takes the name's trust away first
+//! ([`GuardedResolver`]). `--allow-private-targets` turns the guard off. The
 //! desktop app and tests without [`ServerMode`] are unaffected.
 
 use crate::error::{CoreError, CoreResult};
@@ -62,8 +68,14 @@ pub async fn interactive<F: Future>(fut: F) -> F::Output {
 pub fn is_interactive() -> bool {
     INTERACTIVE.try_with(|_| ()).is_ok()
 }
-/// Read (idle body) timeout for every request.
+/// Read (idle body) timeout for every request. reqwest also applies it to
+/// the wait for the response head.
 pub const READ_TIMEOUT: Duration = Duration::from_secs(60);
+/// Read timeout of the long-wait clients ([`guarded_long_client`]): longer
+/// than the 120 s response-head deadline of big lists (M3U playlists, Xtream
+/// list actions, Stalker `get_all_channels`), which [`READ_TIMEOUT`] would
+/// cut at 60 s. Their bodies keep their own idle limits.
+pub const LONG_READ_TIMEOUT: Duration = Duration::from_secs(150);
 /// Time allowed between sending a request and receiving the response head
 /// in [`send`] / [`send_checked`]. A server that accepts the connection and
 /// never answers fails after this instead of after [`READ_TIMEOUT`].
@@ -638,17 +650,42 @@ const MAX_CACHED_CLIENTS: usize = 64;
 
 /// DNS resolver of a guarded client: drops non-public addresses unless the
 /// name is the host of the one authority this client trusts or private
-/// targets are allowed. Names carry no port, so the port rule lives in
-/// [`NetGuard::check`] and the redirect policy.
+/// targets are allowed. Names carry no port, so a client that trusts an
+/// authority is used only for URLs on exactly it ([`trust_for`]), and its
+/// redirect policy takes the name's trust away ([`GuardedResolver::distrust`])
+/// before it follows a redirect to the same name on another port: that
+/// connection, and every later one of the client, then reaches only public
+/// addresses, whatever the name resolves to by then.
 pub struct GuardedResolver {
     pub trusted: Option<Authority>,
     pub allow_private: bool,
+    /// Set by [`GuardedResolver::distrust`].
+    distrusted: std::sync::atomic::AtomicBool,
+}
+
+impl GuardedResolver {
+    /// Ends the private-address exception of the trusted name for every
+    /// later lookup of this resolver.
+    pub fn distrust(&self) {
+        use std::sync::atomic::Ordering;
+        self.distrusted.store(true, Ordering::SeqCst);
+    }
+
+    /// True when `host` may resolve to private addresses.
+    pub fn trusts(&self, host: &str) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.allow_private {
+            return true;
+        }
+        !self.distrusted.load(Ordering::SeqCst)
+            && self.trusted.as_ref().is_some_and(|t| t.host == host)
+    }
 }
 
 impl Resolve for GuardedResolver {
     fn resolve(&self, name: Name) -> Resolving {
         let host = normalize_host(name.as_str());
-        let trusted = self.allow_private || self.trusted.as_ref().is_some_and(|t| t.host == host);
+        let trusted = self.trusts(&host);
         Box::pin(async move {
             let all: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0)).await?.collect();
             if all.is_empty() {
@@ -700,6 +737,7 @@ impl NetGuard {
         Arc::new(GuardedResolver {
             trusted: trusted.cloned(),
             allow_private: self.allow_private,
+            distrusted: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -803,20 +841,34 @@ impl GuardedClients {
     }
 }
 
-/// Redirect policy of a core guarded client that trusts `trusted`: every hop
-/// is checked against that authority only. IP literals are checked here;
-/// host names by the resolver when the redirect connects, except the trusted
-/// name on another port, which gets [`NetGuard::check`]'s port rule here.
-fn guarded_redirect(guard: Arc<NetGuard>, trusted: Option<Authority>) -> reqwest::redirect::Policy {
+/// Redirect policy of a core guarded client whose resolver is `resolver`:
+/// every hop is checked against the one authority it trusts. IP literals are
+/// checked here; host names by the resolver when the redirect connects. The
+/// trusted name on another port gets [`NetGuard::check`]'s port rule here,
+/// and a hop that passes it first takes the name's trust away
+/// ([`GuardedResolver::distrust`]): the resolver cannot tell the ports apart,
+/// and the name may resolve elsewhere when the hop connects.
+fn guarded_redirect(
+    guard: Arc<NetGuard>,
+    resolver: Arc<GuardedResolver>,
+) -> reqwest::redirect::Policy {
     reqwest::redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= MAX_REDIRECTS {
             return attempt.error(format!("stopped after {MAX_REDIRECTS} redirects"));
         }
         let url = attempt.url();
-        let checked = check_target(url, trusted.as_ref(), guard.allow_private)
-            .and_then(|()| guard.check_other_port_blocking(url, trusted.as_ref()));
+        let trusted = resolver.trusted.as_ref();
+        let checked = check_target(url, trusted, guard.allow_private)
+            .and_then(|()| guard.check_other_port_blocking(url, trusted));
+        let auth = Authority::of(url);
+        let other_port = auth.is_some_and(|a| needs_port_check(url, &a, trusted));
         match checked {
-            Ok(()) => attempt.follow(),
+            Ok(()) => {
+                if other_port {
+                    resolver.distrust();
+                }
+                attempt.follow()
+            }
             Err(TargetError::Invalid(m) | TargetError::Forbidden(m)) => {
                 attempt.error(BlockedTarget(m))
             }
@@ -832,6 +884,10 @@ pub struct ServerMode {
     clients: GuardedClients,
     /// The same clients with [`INTERACTIVE_CONNECT_TIMEOUT`].
     interactive: GuardedClients,
+    /// The same clients with [`LONG_READ_TIMEOUT`].
+    long: GuardedClients,
+    /// The long-wait clients with [`INTERACTIVE_CONNECT_TIMEOUT`].
+    long_interactive: GuardedClients,
 }
 
 /// Extension key of [`ServerMode`].
@@ -844,23 +900,29 @@ impl ServerMode {
             return None;
         }
         let guard = Arc::new(NetGuard::new(allow_private));
-        let guarded = |connect: Duration| {
+        let guarded = |connect: Duration, read: Duration| {
             let g = guard.clone();
             GuardedClients::new(move |trusted| {
+                let resolver = g.resolver(trusted);
                 build(
                     builder(None)
                         .connect_timeout(connect)
-                        .redirect(guarded_redirect(g.clone(), trusted.cloned()))
-                        .dns_resolver(g.resolver(trusted)),
+                        .read_timeout(read)
+                        .redirect(guarded_redirect(g.clone(), resolver.clone()))
+                        .dns_resolver(resolver),
                 )
             })
         };
-        let clients = guarded(CONNECT_TIMEOUT);
-        let interactive = guarded(INTERACTIVE_CONNECT_TIMEOUT);
+        let clients = guarded(CONNECT_TIMEOUT, READ_TIMEOUT);
+        let interactive = guarded(INTERACTIVE_CONNECT_TIMEOUT, READ_TIMEOUT);
+        let long = guarded(CONNECT_TIMEOUT, LONG_READ_TIMEOUT);
+        let long_interactive = guarded(INTERACTIVE_CONNECT_TIMEOUT, LONG_READ_TIMEOUT);
         let mode = Arc::new(Self {
             guard,
             clients,
             interactive,
+            long,
+            long_interactive,
         });
         state.set_ext(SERVER_MODE_EXT, mode.clone());
         Some(mode)
@@ -873,6 +935,15 @@ impl ServerMode {
             self.interactive.get(trusted)
         } else {
             self.clients.get(trusted)
+        }
+    }
+
+    /// [`ServerMode::client`] with [`LONG_READ_TIMEOUT`].
+    pub fn long_client(&self, trusted: Option<&Authority>) -> reqwest::Client {
+        if is_interactive() {
+            self.long_interactive.get(trusted)
+        } else {
+            self.long.get(trusted)
         }
     }
 }
@@ -902,8 +973,32 @@ pub fn guarded_client(state: &AppState, trusted: Option<&Authority>) -> reqwest:
     }
 }
 
+/// [`guarded_client`] with [`LONG_READ_TIMEOUT`], for a request that may
+/// wait up to 120 s for its response head (a big playlist or provider list).
+/// Read its body with an idle limit of its own.
+pub fn guarded_long_client(state: &AppState, trusted: Option<&Authority>) -> reqwest::Client {
+    match server_mode(state) {
+        Some(mode) => mode.long_client(trusted),
+        None => desktop_long_client(state),
+    }
+}
+
+/// `trusted` when `url` is on exactly that `host:port`, else `None`. The
+/// guarded resolver trusts host names, not ports, so a fetch of a URL that
+/// may be elsewhere (a download, a recording, a logo) passes this to
+/// [`guarded_client`]: the same host on another port then gets the client
+/// that trusts nothing, which refuses private addresses when it connects.
+pub fn trust_for<'a>(url: &str, trusted: Option<&'a Authority>) -> Option<&'a Authority> {
+    let parsed = Url::parse(url.trim()).ok();
+    let target = parsed.as_ref().and_then(Authority::of);
+    trusted.filter(|t| target.as_ref() == Some(*t))
+}
+
 /// Extension key of the desktop's short-connect client.
 const INTERACTIVE_CLIENT_EXT: &str = "http.interactive";
+/// Extension keys of the desktop's long-wait clients.
+const LONG_CLIENT_EXT: &str = "http.long";
+const LONG_INTERACTIVE_CLIENT_EXT: &str = "http.long.interactive";
 
 /// `state.http` with [`INTERACTIVE_CONNECT_TIMEOUT`], built once.
 fn interactive_client(state: &AppState) -> reqwest::Client {
@@ -917,15 +1012,36 @@ fn interactive_client(state: &AppState) -> reqwest::Client {
     reqwest::Client::clone(&client)
 }
 
+/// `state.http` with [`LONG_READ_TIMEOUT`] (and inside [`interactive`] the
+/// short connect timeout), each built once.
+fn desktop_long_client(state: &AppState) -> reqwest::Client {
+    let (key, connect) = if is_interactive() {
+        (LONG_INTERACTIVE_CLIENT_EXT, INTERACTIVE_CONNECT_TIMEOUT)
+    } else {
+        (LONG_CLIENT_EXT, CONNECT_TIMEOUT)
+    };
+    let client = state.ext_or_insert_with(key, || {
+        Arc::new(build(
+            builder(None)
+                .connect_timeout(connect)
+                .read_timeout(LONG_READ_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS)),
+        ))
+    });
+    reqwest::Client::clone(&client)
+}
+
 /// Client for fetching user-supplied URLs that trusts no source: the guarded
 /// client in server mode, otherwise `state.http`.
 pub fn client_for(state: &AppState) -> reqwest::Client {
     guarded_client(state, None)
 }
 
-/// [`guarded_client`] trusting the stored source `source_id`'s authority
-/// (nothing when the source does not exist or cannot be read).
-pub async fn source_client(state: &AppState, source_id: &str) -> reqwest::Client {
+/// [`guarded_client`] for fetching `url` for the stored source `source_id`:
+/// trusting the source's authority when `url` is on exactly it
+/// ([`trust_for`]), else nothing (also when the source does not exist or
+/// cannot be read).
+pub async fn source_client(state: &AppState, source_id: &str, url: &str) -> reqwest::Client {
     if !is_server_mode(state) {
         return state.http.clone();
     }
@@ -935,16 +1051,21 @@ pub async fn source_client(state: &AppState, source_id: &str) -> reqwest::Client
             tracing::warn!(error = %err, "could not read the source's address; fetching untrusted");
             None
         });
-    guarded_client(state, trusted.as_ref())
+    guarded_client(state, trust_for(url, trusted.as_ref()))
 }
 
 /// Client for a source's own API (Xtream server, Stalker portal). In server
 /// mode this is the guarded client that trusts only the `host:port` of
 /// `own_url` (the configured server or portal URL), so redirects elsewhere
 /// stay guarded and no other request gains that trust; otherwise
-/// `state.http`.
+/// `state.http`. Only for URLs built on `own_url`.
 pub fn trusted_client(state: &AppState, own_url: &str) -> reqwest::Client {
     guarded_client(state, Authority::parse_lenient(own_url).as_ref())
+}
+
+/// [`trusted_client`] with [`LONG_READ_TIMEOUT`] ([`guarded_long_client`]).
+pub fn trusted_long_client(state: &AppState, own_url: &str) -> reqwest::Client {
+    guarded_long_client(state, Authority::parse_lenient(own_url).as_ref())
 }
 
 /// Validates a URL about to be fetched in server mode (no-op otherwise).
@@ -1035,17 +1156,22 @@ async fn read_body(
     // Content-Length is only a hint for the first allocation; never trust it
     // for more than a few MB.
     let mut buf = bytes::BytesMut::with_capacity((declared as usize).min(8 * 1024 * 1024));
+    let too_slow = || {
+        CoreError::Timeout(format!(
+            "{context}: the server took too long to send its answer. Try again later."
+        ))
+    };
     // The request's own deadline ([`send_metadata`]) also bounds these
-    // reads; a cancelled import stops at the next one.
-    while let Some(chunk) = cancellable(resp.chunk()).await?.map_err(|err| {
-        if err.is_timeout() {
-            CoreError::Timeout(format!(
-                "{context}: the server took too long to send its answer. Try again later."
-            ))
-        } else {
-            CoreError::from(err)
-        }
-    })? {
+    // reads, a gap between two chunks ends the read after [`READ_TIMEOUT`]
+    // even on a long-wait client, and a cancelled import stops at the next
+    // read.
+    loop {
+        let chunk = match cancellable(tokio::time::timeout(READ_TIMEOUT, resp.chunk())).await? {
+            Ok(Ok(Some(chunk))) => chunk,
+            Ok(Ok(None)) => break,
+            Ok(Err(err)) if !err.is_timeout() => return Err(CoreError::from(err)),
+            Ok(Err(_)) | Err(_) => return Err(too_slow()),
+        };
         if let Some(rate) = rate.as_mut() {
             rate.on_bytes(chunk.len(), &host).map_err(|err| match err {
                 CoreError::Timeout(m) => CoreError::Timeout(m.replace("the playlist", "the list")),

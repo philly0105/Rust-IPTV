@@ -42,7 +42,8 @@ export function AccountAlerts({ sources }: { sources: readonly Source[] }) {
   };
 
   return (
-    <section aria-label={t('accountAlertsLabel')} className="mx-8 flex flex-col gap-2" data-testid="account-alerts">
+    // The page gutter, as the hero copy and every rail use it (SH-alerts-gutter).
+    <section aria-label={t('accountAlertsLabel')} className="mx-(--page-gutter) flex flex-col gap-2" data-testid="account-alerts">
       {alerts.map((a) => {
         const name = byId.get(a.sourceId)?.name ?? '';
         const expired = a.state.kind === 'expired';

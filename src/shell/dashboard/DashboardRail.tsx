@@ -3,8 +3,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { ErrorState, PosterWidthContext, Skeleton, cn, useScaledPx } from '@/ui';
+import { ErrorState, PosterWidthContext, SectionHeader, Skeleton, cn, useScaledPx } from '@/ui';
 
+import { PHONE_QUERY } from '../navigation';
+import { useMediaQuery } from '../useMediaQuery';
 import { readRailEmpty, writeRailEmpty } from './railEmpty';
 
 /** Arrow scrolls jump instantly under prefers-reduced-motion, like the CSS animations. */
@@ -29,6 +31,12 @@ export function dashRailButtons(scrollLeft: number, scrollWidth: number, clientW
 export interface RailCardProps {
   tabIndex: number;
   'data-rail-card': '';
+  /**
+   * Not set by the rail: a card that looks something up adds its own callback ref here, and the
+   * card components spread these props onto their root, so it gets the card's element
+   * (useNearView in nearView.ts).
+   */
+  ref?: (el: HTMLElement | null) => void;
 }
 
 export interface DashboardRailProps<T> {
@@ -42,6 +50,11 @@ export interface DashboardRailProps<T> {
    * horizontally). The rail applies the active scale and density (C1).
    */
   cardWidth: number;
+  /**
+   * The width below sm. Defaults to about 70 % of `cardWidth`: a 168 px poster showed 1.7
+   * cards on a 390 px phone, 120 px shows three and a peek of the fourth.
+   */
+  phoneCardWidth?: number;
   /** Placeholder card aspect while loading (width / height). */
   skeletonAspect: number;
   loading?: boolean;
@@ -75,11 +88,12 @@ const TRACK_PAD = 'pt-1 pb-3';
 function SkeletonCard({ width, aspect }: { width: number; aspect: number }) {
   return (
     <div className="flex shrink-0 flex-col" style={{ width }} data-rail-skeleton-card="">
-      <div className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: aspect }} />
-      <div className="mt-2 flex h-[1lh] items-center text-sm">
+      <div className="skeleton-surface w-full rounded-lg motion-safe:animate-shimmer" style={{ aspectRatio: aspect }} />
+      {/* The cards' caption lines (CAPTION_TITLE, CAPTION_META in cards.tsx). */}
+      <div className="mt-2 flex h-[1lh] items-center text-body-sm">
         <Skeleton className="h-3.5 w-4/5" />
       </div>
-      <div className="flex h-[1lh] items-center text-sm">
+      <div className="flex h-[1lh] items-center text-caption">
         <Skeleton className="h-3 w-1/2 opacity-70" />
       </div>
     </div>
@@ -111,6 +125,7 @@ export function DashboardRail<T>({
   getKey,
   renderCard,
   cardWidth,
+  phoneCardWidth,
   skeletonAspect,
   loading,
   error,
@@ -121,7 +136,8 @@ export function DashboardRail<T>({
   meta,
 }: DashboardRailProps<T>) {
   const { t } = useTranslation('shell');
-  const width = useScaledPx(cardWidth, true);
+  const phone = useMediaQuery(PHONE_QUERY);
+  const width = useScaledPx(phone ? (phoneCardWidth ?? Math.round(cardWidth * 0.7)) : cardWidth, true);
   const sectionRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLUListElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
@@ -240,24 +256,34 @@ export function DashboardRail<T>({
       data-testid={`dashboard-rail-${id}`}
       className="group/rail relative flex flex-col gap-3"
     >
-      <div className="flex items-baseline justify-between gap-4 px-4 sm:px-8">
-        <div className="flex min-w-0 items-baseline gap-3">
-          <h2 id={headingId} title={title} className="truncate text-title-sm">
-            {title}
-          </h2>
-          {meta}
+      {meta ? (
+        // The kit's SectionHeader draws a count inside its heading; a rail's meta (My List's
+        // "11 titles") stays beside it, so the heading's name is the title alone. Same row.
+        <div className="flex min-h-8 items-center justify-between gap-4 px-(--page-gutter)">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h2 id={headingId} dir="auto" title={title} className="truncate text-title-sm text-fg">
+              {title}
+            </h2>
+            {meta}
+          </div>
+          {seeAll && (
+            <Link
+              to={seeAll.to}
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-sm font-medium text-fg-muted hover:text-fg active:text-accent-pressed motion-safe:transition-colors"
+            >
+              {seeAll.label ?? t('seeAll')}
+              <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
+            </Link>
+          )}
         </div>
-        {seeAll && (
-          <Link to={seeAll.to} className="shrink-0 rounded-sm text-sm font-medium text-fg-muted hover:text-accent active:text-accent-pressed motion-safe:transition-colors">
-            {seeAll.label ?? t('seeAll')}
-          </Link>
-        )}
-      </div>
+      ) : (
+        <SectionHeader id={headingId} title={title} seeAll={seeAll} className="px-(--page-gutter)" />
+      )}
 
       {error ? (
         // One grid cell holds an invisible skeleton card and the error, so the error box is
         // at least as tall as the skeleton it replaces; the row layout keeps it from being taller.
-        <div className="mx-4 grid rounded-lg border border-divider bg-surface sm:mx-8" data-testid="dashboard-rail-error">
+        <div className="mx-(--page-gutter) grid rounded-lg border border-edge bg-surface" data-testid="dashboard-rail-error">
           {/* -my-px: the box's 1px border plus this cell equal the bare skeleton row. */}
           <div aria-hidden className={cn('invisible col-start-1 row-start-1 -my-px', TRACK_PAD)} data-rail-error-spacer="">
             <SkeletonCard width={width} aspect={skeletonAspect} />
@@ -271,7 +297,7 @@ export function DashboardRail<T>({
           />
         </div>
       ) : loading && count === 0 ? (
-        <div className={cn('flex gap-4 overflow-hidden px-4 sm:px-8', TRACK_PAD)} aria-busy="true" aria-label={t('loadingRail', { title })}>
+        <div className={cn('flex gap-4 overflow-hidden px-(--page-gutter)', TRACK_PAD)} aria-busy="true" aria-label={t('loadingRail', { title })}>
           {Array.from({ length: 8 }, (_, i) => (
             <SkeletonCard key={i} width={width} aspect={skeletonAspect} />
           ))}
@@ -288,7 +314,9 @@ export function DashboardRail<T>({
             }}
             aria-labelledby={headingId}
             className={cn(
-              'flex snap-x snap-mandatory scroll-px-4 gap-4 overflow-x-auto overflow-y-visible px-4 scrollbar-none sm:scroll-px-8 sm:px-8 motion-safe:scroll-smooth',
+              // The track bleeds to the window edge; its padding is the page gutter, so the first card
+              // lines up with the header title and the page, and snapping keeps that inset.
+              'flex snap-x snap-mandatory scroll-px-(--page-gutter) gap-4 overflow-x-auto overflow-y-visible px-(--page-gutter) scrollbar-none motion-safe:scroll-smooth',
               TRACK_PAD,
             )}
           >

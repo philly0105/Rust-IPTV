@@ -30,6 +30,8 @@ export interface HeroSlide {
   /** Continue watching: share watched (0..1) and whole minutes left, when the duration is known. */
   fraction?: number;
   minutesLeft?: number;
+  /** Continue watching: the resume point itself, which the slide's menu acts on. */
+  position?: PlaybackPosition;
 }
 
 /** Continue-watching slides at most; the rest of the rotation is new arrivals. */
@@ -54,6 +56,7 @@ function fromPosition(p: PlaybackPosition): HeroSlide {
     posterUrl: p.snapshot?.posterUrl,
     fraction: watchedFraction(p),
     minutesLeft: minutesLeft(p),
+    position: p,
   };
 }
 

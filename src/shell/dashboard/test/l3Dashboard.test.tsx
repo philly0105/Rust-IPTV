@@ -51,7 +51,6 @@ afterEach(() => cleanup());
 describe('hero skeleton on glass (L3-visual-8)', () => {
   it('the skeleton and the loaded hero share the dark glass frame', () => {
     expect(HERO_FRAME).toContain('bg-glass-strong');
-    expect(HERO_FRAME).toContain('border-glass-border');
     expect(HERO_FRAME).not.toMatch(/\bbg-surface\b/);
     wrap(<HeroSkeleton />);
     const skeleton = screen.getByTestId('hero-skeleton');

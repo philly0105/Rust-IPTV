@@ -1,88 +1,45 @@
-import {
-  // recording:
-  AlarmClock,
-  Bookmark,
-  CalendarRange,
-  ChartColumn,
-  ChevronDown,
-  Download,
-  HardDrive,
-  Heart,
-  History,
-  House,
-  Keyboard,
-  LayoutGrid,
-  ListOrdered,
-  ListVideo,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Plus,
-  RotateCw,
-  Search,
-  Settings as SettingsIcon,
-  type LucideIcon,
-} from 'lucide-react';
-import { type CSSProperties, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { ChevronDown, Keyboard, ListVideo, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Settings as SettingsIcon } from 'lucide-react';
+import { type CSSProperties, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
-import type { Source, SourceKind } from '@/api/types';
-import { cn, hueOf, initialsOf, Skeleton, TEXT_LINK, Tooltip } from '@/ui';
+import type { Source } from '@/api/types';
+import { BrandMark, cn, hueOf, IconButton, initialsOf, Skeleton, Tooltip } from '@/ui';
 
+import { useOffline } from './connection';
+import { LIBRARY_LINKS, WATCH_LINKS, type NavLinkDef } from './navigation';
 import { railLinks, routeSourceId } from './railLinks';
+import { kindShortKey } from './sourceKind';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
-
-interface PrimaryLink {
-  to: string;
-  labelKey: string;
-  icon: LucideIcon;
-  end?: boolean;
-  /** First-run tour anchor (Run 3 C7, `src/features/onboarding/tour/steps.ts`). */
-  tour?: 'vod' | 'search';
-}
-
-// Home is a house, not a layout glyph: collapsed, the rail is icons only, and a
-// tile-shaped Home would echo Multi-view's grid (LayoutGrid, as in its page and menus).
-const PRIMARY: PrimaryLink[] = [
-  { to: '/dashboard', labelKey: 'navDashboard', icon: House },
-  // The tour's search step points here only while the rail is auto-collapsed (below lg), where
-  // the header's "Search everything" button folds away; from lg up the header keeps the anchor.
-  { to: '/search', labelKey: 'navSearch', icon: Search, tour: 'search' },
-  { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
-  { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },
-  { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
-  // The tour's "Movies, series and My List" step points here: unlike a source's Movies link, it
-  // is always on screen, also in the collapsed rail.
-  { to: '/my-list', labelKey: 'navMyList', icon: Bookmark, tour: 'vod' },
-  // Run 2: custom channel lists and watch stats reuse their pages' titles.
-  { to: '/lists', labelKey: 'lists:title', icon: ListOrdered },
-  { to: '/recent', labelKey: 'navRecent', icon: History },
-  { to: '/downloads', labelKey: 'navDownloads', icon: Download },
-  { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive },
-  // recording:
-  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock },
-  { to: '/stats', labelKey: 'stats:title', icon: ChartColumn },
-];
-
-const KIND_LABEL: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'XC', stalker: 'STB' };
 
 /**
  * One look for every rail row: rest (muted), hover (the see-through hover layer, full text),
  * pressed (the active layer), current (the neutral selected fill, tuning tick, accent icon). The
  * height is --rail-item-height, so compact density tightens the rail with everything else.
+ * `dim`: a Library link while there are no sources, where every one of them opens empty.
  */
-const itemClass = (active: boolean, collapsed: boolean) =>
+const itemClass = (active: boolean, collapsed: boolean, dim = false) =>
   cn(
     'group flex h-(--rail-item-height) items-center gap-3 rounded-md text-sm font-medium outline-offset-[-2px]',
     'motion-safe:transition-colors motion-safe:duration-150',
     collapsed ? 'justify-center px-0' : 'px-3',
-    active ? 'tuning-tick bg-selected text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
+    active
+      ? 'tuning-tick bg-selected text-fg active:bg-active'
+      : cn(dim ? 'text-fg-subtle' : 'text-fg-muted', 'hover:bg-hover hover:text-fg active:bg-active'),
   );
 
-function RailNavLink({ to, labelKey, icon: Icon, collapsed, end, tour }: PrimaryLink & { collapsed: boolean }) {
+function RailNavLink({
+  to,
+  labelKey,
+  icon: Icon,
+  collapsed,
+  end,
+  tour,
+  dim,
+}: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour'> & { collapsed: boolean; dim?: boolean; tour?: string }) {
   const { t } = useTranslation('shell');
   const label = t(labelKey);
   return (
@@ -92,7 +49,7 @@ function RailNavLink({ to, labelKey, icon: Icon, collapsed, end, tour }: Primary
         end={end}
         data-tour={tour}
         aria-label={collapsed ? label : undefined}
-        className={({ isActive }) => itemClass(isActive, collapsed)}
+        className={({ isActive }) => itemClass(isActive, collapsed, dim)}
       >
         {({ isActive }) => (
           <>
@@ -102,6 +59,161 @@ function RailNavLink({ to, labelKey, icon: Icon, collapsed, end, tour }: Primary
         )}
       </NavLink>
     </Tooltip>
+  );
+}
+
+/**
+ * A group's small label (Watch, Library, Sources). Collapsed, the rail has no room for words:
+ * the label stays for screen readers and a short rule marks the break between the groups.
+ * `disclosure`: the label is also the button that folds the group away (Library), inside the
+ * heading, so the group keeps its name and the button says whether it is open.
+ */
+function GroupLabel({
+  id,
+  label,
+  collapsed,
+  action,
+  disclosure,
+}: {
+  id: string;
+  label: string;
+  collapsed: boolean;
+  action?: ReactNode;
+  disclosure?: { open: boolean; controls: string; onToggle(): void };
+}) {
+  if (collapsed) {
+    return (
+      <>
+        <h2 id={id} className="sr-only">
+          {label}
+        </h2>
+        <span aria-hidden className="mx-3 my-1.5 block border-t border-divider" data-rail-group-rule="" />
+        {action && <div className="flex justify-center">{action}</div>}
+      </>
+    );
+  }
+  return (
+    <div className={cn('flex h-8 items-center justify-between pe-1 pt-2', disclosure ? 'ps-1' : 'ps-3')}>
+      {/*
+        With a disclosure the button's label truncates, not the heading: the heading's overflow
+        clip cut the button's focus ring off on three sides.
+      */}
+      <h2 id={id} className={cn('text-caption font-medium text-fg-subtle', disclosure ? 'min-w-0 flex-1' : 'truncate')}>
+        {disclosure ? (
+          <button
+            type="button"
+            aria-expanded={disclosure.open}
+            aria-controls={disclosure.controls}
+            onClick={disclosure.onToggle}
+            data-rail-group-toggle=""
+            className="group/label flex h-6 max-w-full items-center gap-1 rounded-sm px-2 text-match-parent hover:text-fg-muted motion-safe:transition-colors"
+          >
+            <span className="truncate">{label}</span>
+            {/* Shown while folded (the state), and on hover or focus (the way to fold it). */}
+            <ChevronDown
+              aria-hidden
+              size={12}
+              className={cn(
+                'shrink-0 motion-safe:transition-[transform,opacity]',
+                disclosure.open
+                  ? 'opacity-0 group-hover/label:opacity-100 group-focus-visible/label:opacity-100 pointer-coarse:opacity-100'
+                  : '-rotate-90 rtl:rotate-90',
+              )}
+            />
+          </button>
+        ) : (
+          label
+        )}
+      </h2>
+      {action}
+    </div>
+  );
+}
+
+/**
+ * Whether the Library group is open, kept across launches: folded, it hands its room to the
+ * sources on a laptop-height window. A UI preference, in localStorage like the rail's collapse.
+ */
+const RAIL_LIBRARY_KEY = 'tsrust.railLibrary';
+
+function readLibraryOpen(): boolean {
+  try {
+    return localStorage.getItem(RAIL_LIBRARY_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function writeLibraryOpen(open: boolean): void {
+  try {
+    localStorage.setItem(RAIL_LIBRARY_KEY, open ? '1' : '0');
+  } catch {
+    // storage blocked: the group still folds, until the next launch
+  }
+}
+
+/** A labelled group of rail links (Watch, Library). */
+function RailGroup({
+  id,
+  label,
+  links,
+  collapsed,
+  dim,
+  first,
+  foldable,
+}: {
+  id: string;
+  label: string;
+  links: readonly NavLinkDef[];
+  collapsed: boolean;
+  dim?: boolean;
+  /** The first group sits straight under the brand row: no rule above it when collapsed. */
+  first?: boolean;
+  /** The label folds the group away (Library). The icon-only rail always shows every link. */
+  foldable?: boolean;
+}) {
+  const { pathname } = useLocation();
+  const listId = useId();
+  const current = links.some((l) => pathname === l.to || pathname.startsWith(`${l.to}/`));
+  const [unfolded, setUnfolded] = useState(() => !foldable || readLibraryOpen() || current);
+  // Folded, the group opens again when one of its pages opens (from a card, the palette, a
+  // shortcut), so the current page is never a hidden link; in the same render, as a source's
+  // entry does. Only a press is remembered.
+  const [wasCurrent, setWasCurrent] = useState(current);
+  if (current !== wasCurrent) {
+    setWasCurrent(current);
+    if (current && !unfolded) setUnfolded(true);
+  }
+  const open = collapsed || unfolded;
+  const disclosure = foldable
+    ? {
+        open,
+        controls: listId,
+        onToggle: () => {
+          writeLibraryOpen(!unfolded);
+          setUnfolded(!unfolded);
+        },
+      }
+    : undefined;
+  return (
+    <div role="group" aria-labelledby={id} data-rail-group={id} className="flex flex-col">
+      {collapsed && first ? (
+        <h2 id={id} className="sr-only">
+          {label}
+        </h2>
+      ) : (
+        <GroupLabel id={id} label={label} collapsed={collapsed} disclosure={collapsed ? undefined : disclosure} />
+      )}
+      {open && (
+        <ul id={listId} className="flex flex-col gap-0.5">
+          {links.map((l) => (
+            <li key={l.to}>
+              <RailNavLink {...l} collapsed={collapsed} dim={dim} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -174,7 +286,58 @@ function useRailMenu(want: boolean): [MenuComponent | null, () => void] {
   return [menu, request];
 }
 
-function SourceEntry({ source, collapsed, active, tour }: { source: Source; collapsed: boolean; active: boolean; tour?: 'live' }) {
+/**
+ * Which sources the user opened or closed in the rail, by id, kept across launches (SH-rail-ia):
+ * a user who keeps one of three sources open finds it open next time. A UI preference, so in
+ * localStorage, not the core's settings. Only a press writes it; a source opened because its page
+ * is showing is not remembered as opened.
+ */
+const RAIL_SOURCES_KEY = 'tsrust.railSources';
+/** Entries kept: the most recently pressed, so deleted sources age out. */
+const RAIL_SOURCES_MAX = 32;
+
+function readRailSources(): Record<string, boolean> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(RAIL_SOURCES_KEY) ?? '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The source's remembered state, or undefined when the user never pressed it. */
+function railSourceOpen(id: string): boolean | undefined {
+  const v = readRailSources()[id];
+  return typeof v === 'boolean' ? v : undefined;
+}
+
+function rememberRailSource(id: string, open: boolean): void {
+  const all = readRailSources();
+  delete all[id];
+  all[id] = open;
+  const ids = Object.keys(all);
+  for (const old of ids.slice(0, Math.max(0, ids.length - RAIL_SOURCES_MAX))) delete all[old];
+  try {
+    localStorage.setItem(RAIL_SOURCES_KEY, JSON.stringify(all));
+  } catch {
+    // storage blocked: the rail still opens and closes, it just forgets
+  }
+}
+
+function SourceEntry({
+  source,
+  collapsed,
+  active,
+  only = false,
+  tour,
+}: {
+  source: Source;
+  collapsed: boolean;
+  active: boolean;
+  /** The only source: it opens expanded, so Live TV, Movies and Series are one click away (SH-rail-ia). */
+  only?: boolean;
+  tour?: 'live';
+}) {
   const { t } = useTranslation('shell');
   const [RailMenu, requestRailMenu] = useRailMenu(collapsed);
   const collapsedItemRef = useRef<HTMLLIElement>(null);
@@ -192,7 +355,9 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
   }, [RailMenu]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const [expanded, setExpanded] = useState(active);
+  // Collapsed, the entry is a menu and has nothing to expand (nor a radio probe to start). The
+  // source of the page on show opens; otherwise the user's last press, else the only source opens.
+  const [expanded, setExpanded] = useState(() => active || (!collapsed && (railSourceOpen(source.id) ?? only)));
   // Opening a source from a card or the palette expands its entry in the same render, not in an
   // effect a commit later: the rail's scroll effect runs once per route, and it must find the
   // active sub-link already on the page to bring it into view.
@@ -247,7 +412,9 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
       requestRailMenu();
     };
     return (
-      <li ref={collapsedItemRef} data-tour={tour} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
+      // data-rail-current: the menu trigger carries no aria-current, but the rail still scrolls
+      // the source of the page on show into view (useRailScroll).
+      <li ref={collapsedItemRef} data-tour={tour} data-rail-current={active || undefined} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
         {RailMenu ? (
           <RailMenu
             label={label}
@@ -311,7 +478,8 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
         data-tour={tour}
         onClick={() => {
           revealOnExpand.current = !expanded;
-          setExpanded((v) => !v);
+          rememberRailSource(source.id, !expanded);
+          setExpanded(!expanded);
         }}
         className={cn(
           'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
@@ -322,13 +490,13 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
         <span dir="auto" title={source.name} className="min-w-0 flex-1 truncate text-match-parent font-medium">
           {source.name}
         </span>
-        {source.lastError ? (
+        {/* The kind, spoken after the name; on screen the monogram and the name are enough (SH-kind-labels-copy). */}
+        <span className="sr-only">{`, ${t(kindShortKey(source.kind))}`}</span>
+        {source.lastError && (
           // aria-label is not allowed on a plain span; the sr-only text joins the button's name.
           <span className="h-2 w-2 shrink-0 rounded-full bg-danger" title={t('sourceHasError')}>
             <span className="sr-only">{t('sourceHasError')}</span>
           </span>
-        ) : (
-          <span className="shrink-0 text-2xs font-semibold text-fg-subtle">{KIND_LABEL[source.kind]}</span>
         )}
         <ChevronDown
           aria-hidden
@@ -366,9 +534,9 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
 }
 
 /**
- * The global links' most height: all of it while the sources keep RAIL_SOURCES_MIN (10rem: their
- * heading and two or three sources), and never under half the rail, so a very short window
- * splits the room. A percentage of the rail's middle, which has a definite flexed height.
+ * The Watch links' most height: all of it while the rest keeps RAIL_SOURCES_MIN (10rem: a group
+ * label and two or three rows), and never under half the rail, so a very short window splits
+ * the room. A percentage of the rail's middle, which has a definite flexed height.
  */
 const RAIL_PRIMARY_MAX = 'max-h-[max(50%,calc(100%-10rem))]';
 
@@ -409,7 +577,7 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
     };
     // Once per route, so a refetch never undoes the user's own scrolling of the rail. The route
     // only counts as handled once its link was found: the source links arrive with the sources.
-    const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"]');
+    const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"], [data-rail-current]');
     if (active) {
       scrolledFor.current = scrollKey;
       el.scrollTop += railRevealDelta(el.getBoundingClientRect(), active.getBoundingClientRect());
@@ -430,10 +598,14 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
   return fade;
 }
 
+/** Where the zero-sources state already shows the add flow, the rail adds no second call to action. */
+const ONBOARDING_ROUTES = new Set(['/dashboard', '/sources']);
+
 /** Memoized (performance audit SH-1): it follows the location itself, so the shell's own re-renders pass it by. */
 export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed: boolean; autoCollapsed: boolean }) {
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();
+  const offline = useOffline();
   const toggleRail = useShellStore((s) => s.toggleRail);
   const toggleRailHidden = useShellStore((s) => s.toggleRailHidden);
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
@@ -446,10 +618,87 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const primaryFade = useRailScroll(primaryRef, scrollKey, [collapsed]);
   const fade = useRailScroll(scrollRef, scrollKey, [sources.data, collapsed]);
   const tourSourceId = liveTourSource(sources.data)?.id;
+  const sourceCount = sources.data?.length ?? 0;
+  const noSources = sources.isSuccess && sourceCount === 0;
   // Collapsed, each source is a menu: start its chunk now, while the sources still load.
   useEffect(() => {
     if (collapsed) void loadRailMenu().catch(() => {});
   }, [collapsed]);
+
+  const addSource = (
+    <Tooltip content={t('addSource')} describe={false}>
+      <Link
+        to="/sources?add=1"
+        aria-label={t('addSource')}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
+      >
+        <Plus aria-hidden size={16} />
+      </Link>
+    </Tooltip>
+  );
+
+  let sourceList: ReactNode;
+  if (sources.isPending || (sources.isError && offline)) {
+    // Also while the shell's offline strip is up: one surface reports the outage (SH-offline-stack).
+    sourceList = (
+      <div className={cn('flex flex-col gap-2 py-1', collapsed ? 'items-center' : 'px-3')} aria-hidden data-testid="rail-sources-pending">
+        <Skeleton className={collapsed ? 'h-6 w-6' : 'h-6'} />
+        <Skeleton className={collapsed ? 'h-6 w-6' : 'h-6 w-4/5'} />
+      </div>
+    );
+  } else if (sources.isError) {
+    sourceList = (
+      <div data-testid="rail-sources-error" className={cn('flex items-center gap-2', collapsed ? 'justify-center' : 'justify-between ps-3 pe-1')}>
+        <p role="alert" className={cn('min-w-0 text-sm text-danger', collapsed && 'sr-only')}>
+          {t('sourcesLoadFailed')}
+        </p>
+        <IconButton
+          size="sm"
+          label={t('retry', { ns: 'common' })}
+          tooltipSide="inline-end"
+          onClick={() => void sources.refetch()}
+          disabled={sources.isFetching}
+          icon={<RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />}
+        />
+      </div>
+    );
+  } else if (sources.data && sources.data.length > 0) {
+    sourceList = (
+      <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
+        {sources.data.map((s) => (
+          <SourceEntry
+            key={s.id}
+            source={s}
+            collapsed={collapsed}
+            active={activeSourceId === s.id}
+            only={sourceCount === 1}
+            // The tour's "Live TV" step points at a source whose channels are there to watch.
+            tour={s.id === tourSourceId ? 'live' : undefined}
+          />
+        ))}
+      </ul>
+    );
+  } else if (!ONBOARDING_ROUTES.has(location.pathname)) {
+    // No sources: one dashed row in the shape of the rows it stands for (SH-welcome-generic).
+    sourceList = (
+      <Tooltip content={collapsed ? t('addSource') : null} side="inline-end" describe={false}>
+        <Link
+          to="/sources?add=1"
+          aria-label={collapsed ? t('addSource') : undefined}
+          data-testid="rail-add-source"
+          className={cn(
+            itemClass(false, collapsed),
+            'border border-dashed border-edge text-fg-muted hover:border-border hover:text-fg',
+          )}
+        >
+          <Plus aria-hidden size={18} className="shrink-0" />
+          {!collapsed && <span className="truncate">{t('addSource')}</span>}
+        </Link>
+      </Tooltip>
+    );
+  }
+
+  const footerButton = 'text-fg-muted pointer-coarse:hidden';
 
   return (
     <nav
@@ -463,37 +712,30 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
     >
       <div className={cn('flex h-(--header-height) shrink-0 items-center gap-2', collapsed ? 'justify-center px-2' : 'px-4')}>
         <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5 rounded-md" aria-label={t('appName')}>
-          <span aria-hidden className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-3">
-            <span className="absolute inset-x-2 bottom-2 h-0.5 rounded-full bg-fg-subtle/60" />
-            <span className="absolute bottom-2 left-[55%] h-4 w-0.5 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]" />
-          </span>
-          {!collapsed && <span className="truncate font-display text-lg font-semibold tracking-tight">{t('appName')}</span>}
+          {/* The colour mark is the app icon: the same in every theme and accent, never tinted. */}
+          <BrandMark size={collapsed ? 32 : 28} className="shrink-0" />
+          {!collapsed && <span className="truncate font-display text-title-sm tracking-tight">{t('appName')}</span>}
         </Link>
       </div>
 
       {/*
-        Two lists that scroll apart: the global links keep their full height (scrolling on their
-        own only when the window is too short to leave the sources 10rem), and the
-        sources take the rest. Opening a source's page reveals its link inside the sources list,
-        so Home, Search and the guide stay on screen (L3-visual-2); one shared scroller pushed
-        them out at every laptop height.
+        Two blocks that scroll apart: the Watch links stay put (scrolling on their own only when
+        the window is too short to leave the rest 10rem), and Library and the sources share the
+        rest. Opening a source's page reveals its link inside that block, so Home, Search and the
+        guide stay on screen (L3-visual-2); one shared scroller pushed them out at every laptop
+        height. Library scrolls with the sources rather than standing over them: pinned, it left
+        the sources about 10rem at 768 px, too little for one expanded source.
       */}
-      <div className="flex min-h-0 flex-1 flex-col gap-5">
+      <div className="flex min-h-0 flex-1 flex-col">
         <div
           ref={primaryRef}
           data-testid="rail-primary"
           data-fade-top={primaryFade.top || undefined}
           data-fade-bottom={primaryFade.bottom || undefined}
           style={railFadeMask(primaryFade.top, primaryFade.bottom)}
-          className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2', RAIL_PRIMARY_MAX)}
+          className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2 pb-1', RAIL_PRIMARY_MAX)}
         >
-          <ul className="flex flex-col gap-0.5">
-            {PRIMARY.map((l) => (
-              <li key={l.to}>
-                <RailNavLink {...l} collapsed={collapsed} tour={l.tour === 'search' && !autoCollapsed ? undefined : l.tour} />
-              </li>
-            ))}
-          </ul>
+          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={WATCH_LINKS} collapsed={collapsed} first />
         </div>
 
         <div
@@ -502,123 +744,73 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           data-fade-top={fade.top || undefined}
           data-fade-bottom={fade.bottom || undefined}
           style={railFadeMask(fade.top, fade.bottom)}
-          className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden px-2 pb-3"
+          className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
         >
-          <section aria-labelledby="rail-sources-heading" className="flex flex-col gap-1">
-            <div className={cn('flex items-center', collapsed ? 'justify-center' : 'justify-between px-3')}>
-              <h2 id="rail-sources-heading" className={cn('text-xs font-semibold text-fg-subtle', collapsed && 'sr-only')}>
-                {t('sources')}
-              </h2>
-              <Tooltip content={t('addSource')} describe={false}>
-                <Link
-                  to="/sources?add=1"
-                  aria-label={t('addSource')}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
-                >
-                  <Plus aria-hidden size={16} />
-                </Link>
-              </Tooltip>
-            </div>
-            {sources.isPending ? (
-              <div className="flex flex-col gap-2 px-3 py-1" aria-hidden>
-                <Skeleton className="h-6" />
-                <Skeleton className="h-6 w-4/5" />
-              </div>
-            ) : sources.isError ? (
-              <div
-                data-testid="rail-sources-error"
-                className={cn('flex items-center gap-2', collapsed ? 'justify-center' : 'justify-between ps-3 pe-1')}
-              >
-                <p role="alert" className={cn('min-w-0 text-sm text-danger', collapsed && 'sr-only')}>
-                  {t('sourcesLoadFailed')}
-                </p>
-                <Tooltip content={t('retry', { ns: 'common' })} describe={false}>
-                  <button
-                    type="button"
-                    onClick={() => void sources.refetch()}
-                    disabled={sources.isFetching}
-                    aria-label={t('retry', { ns: 'common' })}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors disabled:opacity-50"
-                  >
-                    <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
-                  </button>
-                </Tooltip>
-              </div>
-            ) : sources.data && sources.data.length > 0 ? (
-              <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
-                {sources.data.map((s) => (
-                  <SourceEntry
-                    key={s.id}
-                    source={s}
-                    collapsed={collapsed}
-                    active={activeSourceId === s.id}
-                    // The tour's "Live TV" step points at a source whose channels are there to watch.
-                    tour={s.id === tourSourceId ? 'live' : undefined}
-                  />
-                ))}
-              </ul>
-            ) : (
-              !collapsed && (
-                <p className="px-3 text-sm text-fg-muted">
-                  {t('noSourcesYet')}{' '}
-                  <Link to="/sources?add=1" className={TEXT_LINK}>
-                    {t('addFirstSource')}
-                  </Link>
-                </p>
-              )
-            )}
+          {/* With no sources every Library page opens empty: the group steps back (SH-welcome-generic). */}
+          <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} foldable />
+          <div role="group" aria-labelledby="rail-sources-heading" className="flex flex-col gap-0.5">
+            <GroupLabel
+              id="rail-sources-heading"
+              label={t('sources')}
+              collapsed={collapsed}
+              action={noSources || (sources.isError && !offline) ? undefined : addSource}
+            />
+            {sourceList}
             <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />
-          </section>
+          </div>
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-0.5 border-t border-divider p-2">
-        <RailNavLink to="/settings" labelKey="navSettings" icon={SettingsIcon} collapsed={collapsed} />
-        <Tooltip content={collapsed ? t('keyboardShortcuts') : null} side="inline-end" describe={false}>
-          <button
-            type="button"
+      {/* One row: Settings, then the keyboard reference and the sidebar toggle as icon buttons. */}
+      <div className={cn('flex shrink-0 gap-0.5 border-t border-divider p-2', collapsed ? 'flex-col items-stretch' : 'items-center')}>
+        <div className={cn(!collapsed && 'min-w-0 flex-1')}>
+          <RailNavLink to="/settings" labelKey="navSettings" icon={SettingsIcon} collapsed={collapsed} />
+        </div>
+        {/*
+          Keyboard-only: a phone or tablet has nothing to type the combos on (SH-touch-chrome).
+          Not in the icon-only rail either, where the footer stacks: its row went to the sources
+          on a short window, and `?`, the palette and Settings all open the same reference.
+        */}
+        {!collapsed && (
+          <IconButton
+            label={t('keyboardShortcuts')}
+            shortcut="?"
+            tooltipSide="top"
+            icon={<Keyboard aria-hidden size={18} />}
             onClick={() => setHelpOpen(true)}
-            aria-label={collapsed ? t('keyboardShortcuts') : undefined}
-            className={itemClass(false, collapsed)}
-          >
-            <Keyboard aria-hidden size={18} className="shrink-0" />
-            {!collapsed && <span className="truncate">{t('keyboardShortcuts')}</span>}
-          </button>
-        </Tooltip>
+            className={cn(footerButton, 'size-(--rail-item-height)')}
+            data-testid="rail-shortcuts"
+          />
+        )}
         {autoCollapsed ? (
-          // Below lg the rail never expands; on a phone its icon column is a fifth of the width,
-          // so it can go away entirely. The header's Show sidebar button brings it back.
-          <Tooltip content={t('hideRail')} side="inline-end" describe={false}>
-            <button
-              type="button"
-              onClick={() => {
-                // The rail and this button go: focus moves on to the header's Show sidebar button.
-                flushSync(toggleRailHidden);
-                document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
-              }}
-              aria-label={t('hideRail')}
-              data-rail-hide=""
-              className={itemClass(false, true)}
-            >
-              <PanelLeftClose aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
-            </button>
-          </Tooltip>
+          // Below lg the rail never expands; on a narrow window its icon column takes room, so it
+          // can go away entirely. The header's Show sidebar button brings it back.
+          <IconButton
+            label={t('hideRail')}
+            tooltipSide="inline-end"
+            icon={<PanelLeftClose aria-hidden size={18} className="rtl:-scale-x-100" />}
+            onClick={() => {
+              // The rail and this button go: focus moves on to the header's Show sidebar button.
+              flushSync(toggleRailHidden);
+              document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
+            }}
+            data-rail-hide=""
+            className="h-(--rail-item-height) w-full text-fg-muted"
+          />
         ) : (
-          <Tooltip content={collapsed ? t('expandRail') : null} side="inline-end" describe={false}>
-            <button
-              type="button"
-              onClick={toggleRail}
-              aria-label={collapsed ? t('expandRail') : t('collapseRail')}
-              className={itemClass(false, collapsed)}
-            >
-              {collapsed ? (
-                <PanelLeftOpen aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
+          <IconButton
+            label={collapsed ? t('expandRail') : t('collapseRail')}
+            tooltipSide={collapsed ? 'inline-end' : 'top'}
+            icon={
+              collapsed ? (
+                <PanelLeftOpen aria-hidden size={18} className="rtl:-scale-x-100" />
               ) : (
-                <PanelLeftClose aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
-              )}
-              {!collapsed && <span className="truncate">{t('collapseRail')}</span>}
-            </button>
-          </Tooltip>
+                <PanelLeftClose aria-hidden size={18} className="rtl:-scale-x-100" />
+              )
+            }
+            onClick={toggleRail}
+            className={cn('text-fg-muted', collapsed ? 'h-(--rail-item-height) w-full' : 'size-(--rail-item-height)')}
+          />
         )}
       </div>
     </nav>

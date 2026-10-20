@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 
@@ -13,17 +13,21 @@ import '@/i18n';
 import { cn, focusToasts, Skeleton, ToastViewport } from '@/ui';
 import { isTypingTarget } from '@/ui/focus';
 
+import { ConnectionBanner, ConnectionWatcher } from './connection';
 import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
 import { focusSearchWhenReady } from './focusSearch';
-import { Header } from './Header';
+import { Header, HEADER_SEARCH_WIDTH } from './Header';
+import { LIBRARY_LINKS, PHONE_QUERY, rememberRouteSource, WATCH_LINKS } from './navigation';
 import { Rail } from './Rail';
+import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
 import { modalOpen, useShortcut } from './shortcuts';
 import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
 import { useSettings, useSettingsValue } from './useSettings';
+import { SHELL_BOTTOM_INSET, TabBar, TAB_BAR_HEIGHT } from './TabBar';
 
 // player: the dock and the external-playback footer carry the whole playback UI (surfaces,
 // controls, engines, the store), about a third of the app's code, in their own chunk (C4 entry
@@ -234,6 +238,9 @@ function GlobalShortcuts() {
     },
     { description: t('scSearch'), area, allowInInput: true, allowInModal: true },
   );
+  // Desktop only: the app window has no reload, so Ctrl+R is free there. In a browser it is the
+  // reload key, and claiming it sent a user refreshing a stuck page to Recently watched instead
+  // (SH-ctrl-r-browser); there the palette and the rail lead to it.
   useShortcut(
     'mod+r',
     (e) => {
@@ -241,7 +248,7 @@ function GlobalShortcuts() {
       useShellStore.getState().setPaletteOpen(false);
       navigate('/recent');
     },
-    { description: t('scRecent'), area, allowInInput: true, allowInModal: true },
+    { description: t('scRecent'), area, allowInInput: true, allowInModal: true, enabled: isDesktop },
   );
   useShortcut(
     '?',
@@ -288,8 +295,12 @@ export function isTextEntry(el: HTMLElement): boolean {
  * Forward included, and the outlet keeps its scroll position and focus per history entry.
  */
 function ShellNavigationEffects() {
-  const { key } = useLocation();
+  const { key, pathname } = useLocation();
   const last = useRef(key);
+  // The phone tab bar's Live TV tab opens the source the user last opened.
+  useEffect(() => {
+    rememberRouteSource(pathname);
+  }, [pathname]);
   useEffect(() => {
     if (last.current === key) return;
     last.current = key;
@@ -329,51 +340,101 @@ function SettingsThemeSync() {
 const selectLanguage = (s: Settings) => s.language;
 
 /**
- * Text-free stand-in for the shell, shown on a fresh profile while the
- * server's language loads (no English first frame). Same geometry as the
- * real rail and header, so nothing jumps when it swaps out.
+ * Text-free stand-in for the shell (SH-boot-skeletons): the router's first frame while a deep
+ * link's page chunks load (routes.tsx AppLoading), and the shell's own while a fresh profile
+ * waits for the server's language (no English first frame). One geometry for both, laid out like
+ * the real rail and header (the brand row, the Watch and Library groups at --rail-item-height,
+ * the footer row, the search slot, the phone tab bar), so nothing jumps as the shell replaces it.
  */
-function ShellSkeleton({ collapsed, railHidden }: { collapsed: boolean; railHidden: boolean }) {
-  return (
-    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell-skeleton" aria-busy="true">
-      <div
-        aria-hidden
-        hidden={railHidden}
-        className={cn(
-          'flex h-full shrink-0 flex-col gap-3 border-e border-divider bg-surface px-3 pt-5',
-          collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)',
-        )}
-      >
-        <Skeleton className="mb-4 h-8 w-8 rounded-md" />
-        {Array.from({ length: 7 }, (_, i) => (
-          <Skeleton key={i} className={cn('h-8 rounded-md', collapsed ? 'w-10' : 'w-4/5')} />
-        ))}
+export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = 'shell-skeleton' }: { collapsed: boolean; railHidden: boolean; phone?: boolean; testId?: string }) {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => (
+      <div key={i} className={cn('flex h-(--rail-item-height) items-center gap-3', collapsed ? 'justify-center' : 'px-3')}>
+        <Skeleton className="size-[calc(18rem/15)] shrink-0 rounded-sm" />
+        {!collapsed && <Skeleton className={cn('h-3', i % 3 === 0 ? 'w-24' : i % 3 === 1 ? 'w-20' : 'w-28')} />}
       </div>
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider px-4 sm:gap-4 sm:px-5">
-          <Skeleton className="h-6 w-40" />
-          <div className="flex-1" />
-          <Skeleton className="hidden h-8 w-[clamp(10rem,22vw,20rem)] rounded-md lg:block" />
-          <Skeleton className="h-8 w-8 rounded-md" />
-          <Skeleton className="h-8 w-8 rounded-md" />
-        </div>
-        <div aria-hidden className="flex flex-col gap-6 p-4 sm:p-8">
-          <Skeleton className="h-48 w-full rounded-lg" />
-          <Skeleton className="h-5 w-48" />
-          <div className="flex gap-4 overflow-hidden">
-            {Array.from({ length: 6 }, (_, i) => (
-              <Skeleton key={i} className="aspect-[2/3] w-[11.2rem] shrink-0 rounded-md" />
+    ));
+  const label = () => (collapsed ? <span className="mx-3 my-1.5 block border-t border-divider" /> : <Skeleton className="ms-3 mt-4 mb-2 h-2.5 w-14" />);
+  return (
+    <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid={testId} aria-busy="true">
+      {!phone && (
+        <div
+          aria-hidden
+          hidden={railHidden}
+          className={cn('flex h-full shrink-0 flex-col border-e border-divider bg-surface', collapsed ? 'w-(--rail-width-collapsed)' : 'w-(--rail-width)')}
+        >
+          <div className={cn('flex h-(--header-height) shrink-0 items-center gap-2.5', collapsed ? 'justify-center' : 'px-4')}>
+            <Skeleton className={cn('shrink-0 rounded-[22%]', collapsed ? 'size-8' : 'size-7')} />
+            {!collapsed && <Skeleton className="h-4 w-28" />}
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden px-2">
+            {rows(WATCH_LINKS.length)}
+            {label()}
+            {rows(LIBRARY_LINKS.length)}
+          </div>
+          {/* The footer row: Settings, and beside it (expanded) the shortcuts and collapse buttons. */}
+          <div className={cn('flex shrink-0 items-center gap-0.5 border-t border-divider p-2', collapsed && 'flex-col')}>
+            <div className="min-w-0 flex-1">{rows(1)}</div>
+            {Array.from({ length: collapsed ? 1 : 2 }, (_, i) => (
+              <div key={i} className={cn('flex h-(--rail-item-height) shrink-0 items-center justify-center', collapsed ? 'w-full' : 'w-(--rail-item-height)')}>
+                <Skeleton className="size-[calc(18rem/15)] rounded-sm" />
+              </div>
             ))}
           </div>
         </div>
+      )}
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <div aria-hidden className="flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider px-(--page-gutter) sm:gap-4">
+          <Skeleton className="h-6 w-32" />
+          <div className="flex-1" />
+          {!phone && (
+            <>
+              <Skeleton className={cn('me-1 h-8 rounded-md', HEADER_SEARCH_WIDTH)} />
+              <Skeleton className="size-10 rounded-md" />
+            </>
+          )}
+        </div>
+        <div aria-hidden className="flex min-h-0 flex-1 flex-col gap-6 overflow-hidden px-(--page-gutter) py-6">
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-40 w-full max-w-[80rem] rounded-lg" />
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
+        </div>
+        {phone && (
+          <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
+                <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
+                <Skeleton className="h-2 w-10" />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 /**
- * Layout route (C7): rail, header, context panel, outlet, player dock, and
- * the external playback footer, plus palette, shortcut overlay, and toasts.
+ * While the phone tab bar shows, --shell-bottom-inset on <html> holds its height (safe area
+ * included), so overlays fixed to the bottom of the window (the mini player, toasts) can lift
+ * above it; 0px otherwise. On <html>, not the shell's root, because those overlays portal to
+ * <body>.
+ */
+function useShellBottomInset(tabBar: boolean): void {
+  useLayoutEffect(() => {
+    const html = document.documentElement;
+    html.style.setProperty('--shell-bottom-inset', tabBar ? SHELL_BOTTOM_INSET : '0px');
+    return () => {
+      html.style.removeProperty('--shell-bottom-inset');
+    };
+  }, [tabBar]);
+}
+
+/**
+ * Layout route (C7): rail (or, on a phone, the bottom tab bar), header, the offline strip,
+ * context panel, outlet, player dock, and the external playback footer, plus palette, shortcut
+ * overlay, and toasts.
  */
 export function ShellLayout() {
   const { t } = useTranslation('shell');
@@ -381,9 +442,12 @@ export function ShellLayout() {
   const railPref = useShellStore((s) => s.railCollapsed);
   const narrow = useMediaQuery('(max-width: 1023px)');
   const wide = useMediaQuery('(min-width: 1440px)');
+  // Below sm the tab bar replaces the rail (CB-PHONE-NAV).
+  const phone = useMediaQuery(PHONE_QUERY);
   const collapsed = railPref || narrow;
-  // Hiding the rail is a narrow-window choice: from 1024 px up it always shows.
-  const railHidden = useShellStore((s) => s.railHidden) && narrow;
+  // Hiding the rail is a narrow-window choice: from 1024 px up it always shows, and on a phone
+  // there is no rail to show.
+  const railHidden = useShellStore((s) => s.railHidden) && narrow && !phone;
 
   useParentalEvents();
   const player = usePlayerModule();
@@ -394,6 +458,7 @@ export function ShellLayout() {
   useEffect(() => registerGateHost(), []);
   const languageSettled = useLanguageSync(language.data, language.isError);
   useWindowStatePersistence();
+  useShellBottomInset(phone && languageSettled);
 
   useEffect(() => {
     if (playbackRestored) return;
@@ -411,6 +476,7 @@ export function ShellLayout() {
       <ShellEvents />
       <LastRoutePersistence />
       <SettingsThemeSync />
+      <ConnectionWatcher />
     </>
   );
 
@@ -418,7 +484,7 @@ export function ShellLayout() {
     return (
       <>
         {leaves}
-        <ShellSkeleton collapsed={collapsed} railHidden={railHidden} />
+        <ShellSkeleton collapsed={collapsed} railHidden={railHidden} phone={phone} />
       </>
     );
   }
@@ -426,7 +492,8 @@ export function ShellLayout() {
   return (
     <>
       {leaves}
-      <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg text-fg" data-testid="shell">
+      {/* The side safe areas: a phone on its side keeps the rail and the header off the notch. */}
+      <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
         <a
           href="#main"
           className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
@@ -434,9 +501,10 @@ export function ShellLayout() {
           {t('skipToContent')}
         </a>
         <GlobalShortcuts />
-        {!railHidden && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
+        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
         <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          <Header panelInline={wide} narrow={narrow} railHidden={railHidden} />
+          <Header panelInline={wide} railHidden={railHidden} phone={phone} />
+          <ConnectionBanner />
           <div className="flex min-h-0 flex-1">
             {/*
               The outlet is a bounded flex column at every width: the row above
@@ -457,6 +525,7 @@ export function ShellLayout() {
             <ContextPanel inline={wide} />
           </div>
           {player && <player.ExternalPlaybackFooter />}
+          {phone && <TabBar />}
         </div>
         {player && <player.PlayerDock />}
         <Suspense fallback={null}>
@@ -464,6 +533,7 @@ export function ShellLayout() {
           <ShortcutOverlay />
         </Suspense>
         <ToastViewport />
+        <SecureContextNotice />
         <Suspense fallback={null}>
           <ParentalGateHost />
         </Suspense>

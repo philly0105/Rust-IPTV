@@ -15,7 +15,7 @@ import { create } from 'zustand';
 import { onConnectionState, type ConnectionState } from '@/api/events';
 import { queryClient, rpcKey } from '@/api/query';
 import { onServerAnswered } from '@/api/reachability';
-import { RpcError, rpc } from '@/api/transport';
+import { isDesktop, RpcError, rpc } from '@/api/transport';
 import { ACCENTS, DENSITIES, UI_SCALE_MAX, UI_SCALE_MIN } from '@/api/types';
 import type { Accent, Density, Settings, Theme } from '@/api/types';
 import { setUiScaleState } from '@/ui/scale';
@@ -323,6 +323,36 @@ export function useReducedMotion(): boolean {
   return useSyncExternalStore(subscribeMotion, () => mql(MOTION_Q)?.matches ?? false, () => false);
 }
 
+/** What the window was last asked for: a theme, null (follow the OS), or undefined (nothing yet). */
+let windowTheme: ResolvedTheme | null | undefined;
+
+/**
+ * Desktop: the native title bar follows the app's theme, not the OS app mode (SH-titlebar-theme).
+ * Windows 11 ships in light app mode, so the default dark app sat under a white title bar, and a
+ * light app on a dark OS under a black one. Asks only when the wanted theme changes; a refusal
+ * (an older shell without the window theme permission) leaves the bar as the OS draws it.
+ *
+ * `theme` is the user's choice with System passed as null, which tells the window to follow the
+ * OS again. Pinning System to the theme it resolved to would fix the webview's
+ * prefers-color-scheme too (on macOS and Linux the theme is app-wide), so System would stop
+ * following the OS until a restart, and going from Light back to System would stay light.
+ */
+export function syncWindowTheme(theme: ResolvedTheme | null): void {
+  if (!isDesktop || windowTheme === theme) return;
+  windowTheme = theme;
+  void import('@tauri-apps/api/window')
+    .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme))
+    .catch(() => {
+      // Not in Tauri after all, or no permission: try again on the next change.
+      windowTheme = undefined;
+    });
+}
+
+/** Test hook. */
+export function resetWindowThemeForTests(): void {
+  windowTheme = undefined;
+}
+
 export interface ThemeSyncProps {
   settingsTheme?: Theme;
   /** The settings appearance fields; absent while settings load (the mirror holds until then). */
@@ -359,6 +389,7 @@ export function ThemeSync({ settingsTheme, appearance }: ThemeSyncProps) {
     const resolved = resolveTheme(theme, prefersDark);
     applyThemeToDocument(resolved, reducedMotion);
     applyAppearanceToDocument({ accent: effAccent, oledBlack: effOled, density: effDensity, uiScale: effScale }, resolved);
+    syncWindowTheme(theme === 'system' ? null : resolved);
   }, [theme, prefersDark, reducedMotion, effAccent, effOled, effDensity, effScale]);
   return null;
 }

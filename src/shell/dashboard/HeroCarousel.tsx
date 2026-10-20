@@ -3,11 +3,14 @@
  * arrivals over their backdrops (docs/architecture/appearance.md).
  *
  * Pattern: the WAI-ARIA "auto-rotating carousel with tabs for slide control".
- * A small on-screen-display pill in the top corner holds the rotation toggle,
- * previous/next and one dial tick per slide (a tablist: arrows move and choose,
- * Home/End jump). Rotation pauses while the pointer is over the hero or focus
- * is inside it, while the window is hidden, unfocused or the hero is scrolled
- * away, and never starts under prefers-reduced-motion. It also rests after
+ * A small on-screen-display pill holds the rotation toggle, previous/next and
+ * one dial tick per slide (a tablist: arrows move and choose, Home/End jump):
+ * beside the button row from lg up, in the top corner below it. On a touch
+ * screen a sideways swipe over the hero turns the slide too, and the pill's
+ * buttons grow to 44 px; a phone drops previous/next for that room. Rotation
+ * pauses while the pointer is over the hero or focus is inside it, while the
+ * window is hidden, unfocused or the hero is scrolled away, and never starts
+ * under prefers-reduced-motion. It also rests after
  * HERO_IDLE_ROUNDS full rounds without any pointer, key or wheel input in the
  * window (nobody is watching), and the next input resumes it.
  *
@@ -21,32 +24,34 @@
  * so it plays only when the user changes slides: an automatic turn swaps the
  * ticks at once (idle Home 3.2% -> 0.8% main-thread time, L2 XB2-22).
  *
- * Text sits on frosted glass (C8 tokens) that clears toward the inline end, so
- * it stays readable on any artwork in every theme; a slide with no artwork gets
- * a per-title tint instead. The frost is not a backdrop filter (C5): it is a
- * glass tint over a quarter-size, lightly blurred copy of the artwork, masked
- * to the text column, so nothing re-samples the page while the hero is on
- * screen. Artwork loads through the image cache; the visible slide's pictures
+ * The hero runs edge to edge under the header (the cinematic full-bleed hero):
+ * the artwork fills the frame, and two glass gradients, from the bottom and from
+ * the inline start, keep the copy readable on any picture in every theme; a
+ * slide with no artwork gets a per-title tint instead. Gradients only, no blur
+ * over the picture and no backdrop filter (C5), so nothing re-samples the page
+ * while the hero is on screen. A slide that has only a poster shows it upright
+ * at the inline end over a soft field made from its own colours (the cheap
+ * quarter-size blur). Artwork loads through the image cache; the visible slide's pictures
  * load at high priority, and the next slide's backdrop is mounted (and so
  * fetched at low priority) once the main thread is idle. Every slide body is laid into one grid cell, so the
  * hero keeps the height of its tallest slide and nothing below it moves when
  * the rotation turns.
  */
 
-import { ChevronLeft, ChevronRight, Info, Pause, Play, Star } from 'lucide-react';
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { ChevronLeft, ChevronRight, EllipsisVertical, Info, Pause, Play, Star } from 'lucide-react';
+import { memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { Poster, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
+import { MetaLine, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
-import { itemPath, joinList, usePrefetchTarget } from './cards';
-import { HERO_BODY, HERO_FRAME } from './HeroSkeleton';
+import { buttonMenuAnchor, CardMenuContext, itemPath, usePrefetchTarget, type CardMenuItem } from './cards';
+import { HERO_BODY, HERO_FRAME, HERO_PAGE_FADE } from './HeroSkeleton';
 import { HERO_DWELL_MS, titleEndsWithYear, wrapIndex, type HeroSlide } from './heroSlides';
 
 export interface HeroCarouselProps {
@@ -56,6 +61,12 @@ export interface HeroCarouselProps {
   /** The source still exists, so the slide can play. */
   canPlay: (ref: ItemRef) => boolean;
   onPlay: (slide: HeroSlide) => void;
+  /**
+   * The actions of a continue-watching slide (Go to details, Mark watched, Remove): the same
+   * menu as its card in the rail below (CB-CONTINUE-MENU), behind a third button. Asked for
+   * on the press, with the slide as shown (its catalog title). Stable, like the other props.
+   */
+  menuFor?: (slide: HeroSlide) => CardMenuItem[] | undefined;
   /** Dwell per slide; tests shorten it. */
   dwellMs?: number;
 }
@@ -181,6 +192,22 @@ export function dialFill(left: number, dwell: number): number {
   return dwell > 0 ? Math.min(1, Math.max(0, 1 - left / dwell)) : 1;
 }
 
+/** The least sideways travel, in CSS px, that turns the slide (a tap wobbles a few px). */
+export const HERO_SWIPE_PX = 48;
+/** How long after a swipe's lift its click may still arrive (and is dropped). */
+const SWIPE_CLICK_MS = 400;
+
+/**
+ * The slide step a touch that travelled (dx, dy) asks for: 1 (next), -1 (previous) or 0 (not a
+ * swipe). It has to be mostly sideways, so a scroll down the page that drifts never turns the
+ * hero. The next slide comes in from the inline end: a swipe to the left in LTR, to the right
+ * in RTL. Exported for tests.
+ */
+export function swipeStep(dx: number, dy: number, rtl: boolean): -1 | 0 | 1 {
+  if (Math.abs(dx) < HERO_SWIPE_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return 0;
+  return (rtl ? dx > 0 : dx < 0) ? 1 : -1;
+}
+
 /**
  * Advances `onAdvance` every `dwell` ms while `running`. Pausing keeps the
  * time already spent on the current slide, so resuming finishes the dwell
@@ -280,24 +307,36 @@ function Backdrop({ slide, active, title }: { slide: HeroSlide; active: boolean;
           onError={image.onError}
           className={cn(
             'motion-safe:transition-opacity motion-safe:duration-500',
-            wide ? 'absolute inset-0 h-full w-full object-cover object-[center_25%]' : cn(QUARTER_BLUR, 'saturate-150'),
-            shown ? (wide ? 'opacity-100' : 'opacity-70') : 'opacity-0',
+            wide ? 'absolute inset-0 h-full w-full object-cover object-[center_20%]' : cn(QUARTER_BLUR, 'saturate-150'),
+            shown ? (wide ? 'opacity-100' : 'opacity-60') : 'opacity-0',
           )}
         />
       )}
       {/*
-        The frost's texture: the same backdrop, quarter-size and blurred, under the
-        glass tint and masked like it. Mounted once the picture has loaded, so it
-        comes from the memory cache and never shows a broken image.
+        A poster standing in for the backdrop also stands upright at the inline end, from lg
+        up, so the wide frame is not an empty colour field. Mounted once the picture has
+        loaded, so it comes from the memory cache and never shows a broken image.
       */}
-      {wide && shown && (
-        <div data-hero-frost-art="" className="absolute inset-0 overflow-hidden hero-frost">
-          <img src={url} alt="" draggable={false} decoding="async" referrerPolicy="no-referrer" className={cn(QUARTER_BLUR, 'object-[center_25%] saturate-125')} />
-        </div>
+      {!wide && shown && (
+        <img
+          src={url}
+          alt=""
+          draggable={false}
+          decoding="async"
+          referrerPolicy="no-referrer"
+          data-hero-poster=""
+          className="absolute end-[max(var(--page-gutter),6%)] top-1/2 z-[3] hidden aspect-[2/3] h-[72%] w-auto -translate-y-1/2 rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block"
+        />
       )}
     </div>
   );
 }
+
+/** The hero's secondary buttons on glass: Details and the slide's menu. */
+const GLASS_BUTTON = cn(
+  'inline-flex h-12 shrink-0 items-center justify-center rounded-md border border-glass-border bg-on-glass/10 text-on-glass select-none',
+  'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
+);
 
 function SlideBody({
   slide,
@@ -306,6 +345,8 @@ function SlideBody({
   sourceName,
   canPlay,
   onPlay,
+  menuFor,
+  onMenuOpen,
   index,
   count,
 }: {
@@ -315,10 +356,14 @@ function SlideBody({
   sourceName: string | undefined;
   canPlay: boolean;
   onPlay: () => void;
+  menuFor: HeroCarouselProps['menuFor'];
+  /** The slide's menu opened (true) or closed (false): the rotation holds still meanwhile. */
+  onMenuOpen: (open: boolean) => void;
   index: number;
   count: number;
 }) {
   const { t, i18n } = useTranslation('shell');
+  const openMenu = useContext(CardMenuContext);
   const s = useSlideDetails(slide, active);
   const title = s.title || t('untitled');
   const vod = isVod(s.ref);
@@ -327,11 +372,14 @@ function SlideBody({
   const rating = s.rating ? new Intl.NumberFormat(intlLocale(i18n.language), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
   // A displayed title that still ends with "(2025)" (no titleBase from the core, or an older
   // continue-watching snapshot) does not get the year again below it.
-  const facts = joinList([!titleEndsWithYear(title, s.year) && s.year, s.genres?.slice(0, 2).join(' / ')], i18n.language);
+  const year = !titleEndsWithYear(title, s.year) ? s.year : undefined;
+  const genres = s.genres?.slice(0, 2).join(' / ');
   const eyebrow = continuing ? t('heroEyebrow') : sourceName ? t('heroNewIn', { source: sourceName }) : t('heroNew');
   const titleId = `${panelId}-title-${index}`;
   // Details warms the detail page (query, route chunk, artwork) on hover or focus (C4).
   const details = usePrefetchIntent(usePrefetchTarget(vod && active ? s.ref : undefined, s.posterUrl, s.backdropUrl));
+  const hasMenu = continuing && vod && !!menuFor && !!openMenu;
+  const moreLabel = t('moreActionsFor', { title });
 
   return (
     <div
@@ -340,54 +388,37 @@ function SlideBody({
         ? { id: panelId, role: 'tabpanel', 'aria-roledescription': t('heroSlide'), 'aria-label': t('heroSlideOf', { index: index + 1, total: count }), 'data-testid': 'hero-slide' }
         : { 'aria-hidden': true, inert: true })}
       data-hero-slide={s.key}
-      // Room above the copy for the slide controls in the top corner.
-      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, count > 1 && 'pt-14 sm:pt-14', !active && 'invisible')}
+      className={cn('col-start-1 row-start-1 min-w-0', HERO_BODY, !active && 'invisible')}
     >
-      <div className="hidden w-[10rem] shrink-0 lg:block">
-        {active || s.posterUrl ? (
-          <Poster
-            src={s.posterUrl}
-            alt=""
-            label={title}
-            aspect="poster"
-            sourceId={s.ref.sourceId}
-            priority={active}
-            className="shadow-2 ring-1 ring-glass-border"
-          />
-        ) : (
-          <div className="aspect-[2/3] w-full" />
-        )}
-      </div>
       {/* The copy column grows with wide heroes, so a title is not wrapped into a corner of an empty frame. */}
-      <div className={cn('flex min-w-0 max-w-[28rem] flex-1 flex-col gap-2.5 text-on-glass min-[1440px]:max-w-[40rem]', active && 'motion-safe:animate-hero-copy')}>
-        <p className="flex items-center gap-2 text-sm font-semibold text-on-glass-muted">
-          <span aria-hidden className="h-3.5 w-[3px] shrink-0 rounded-full bg-glass-accent shadow-[0_0_10px_var(--color-glass-accent)]" />
-          <span dir="auto" title={eyebrow} className="truncate">
-            {eyebrow}
-          </span>
+      <div className={cn('flex w-full min-w-0 max-w-[36rem] flex-col gap-3 text-on-glass min-[1440px]:max-w-[42rem]', active && 'motion-safe:animate-hero-copy')}>
+        <p dir="auto" title={eyebrow} className="truncate text-caption font-semibold tracking-wider text-on-glass-muted uppercase">
+          {eyebrow}
         </p>
-        <h2
-          id={titleId}
-          dir="auto"
-          className="line-clamp-2 text-match-parent text-display text-on-glass"
-        >
+        <h2 id={titleId} dir="auto" className="line-clamp-2 text-match-parent text-display text-on-glass [text-shadow:0_2px_24px_rgb(0_0_0/0.35)]">
           {title}
         </h2>
-        {(facts || rating || (continuing && s.subtitle)) && (
-          <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-on-glass-muted tabular">
-            {continuing && s.subtitle && <span dir="auto" className="truncate">{s.subtitle}</span>}
-            {facts && <span>{facts}</span>}
-            {rating && (
+        <MetaLine
+          className="text-body-sm text-on-glass-muted tabular [&>span[aria-hidden]]:text-on-glass-muted"
+          items={[
+            continuing && s.subtitle ? (
+              <span dir="auto" className="block truncate">
+                {s.subtitle}
+              </span>
+            ) : null,
+            year,
+            genres,
+            rating ? (
               <span className="inline-flex items-center gap-1">
                 <Star aria-hidden size={13} className="fill-current text-glass-accent" />
                 <span aria-hidden>{rating}</span>
                 <span className="sr-only">{t('ratedLabel', { rating })}</span>
               </span>
-            )}
-          </p>
-        )}
+            ) : null,
+          ]}
+        />
         {s.plot && !continuing && (
-          <p dir="auto" className="line-clamp-2 max-w-[60ch] text-match-parent text-sm text-on-glass-muted">
+          <p dir="auto" className="line-clamp-2 max-w-[60ch] text-match-parent text-body text-on-glass-muted max-sm:hidden">
             {s.plot}
           </p>
         )}
@@ -397,7 +428,11 @@ function SlideBody({
             {s.minutesLeft !== undefined && <span className="shrink-0 text-sm text-on-glass-muted tabular">{t('minutesLeft', { count: s.minutesLeft })}</span>}
           </div>
         )}
-        <div className="mt-1.5 flex flex-wrap gap-3">
+        {/*
+          On a phone Play takes the row and Details (and the slide's menu) fold into square icon
+          buttons beside it; a slide with nothing to play keeps Details labelled across the row.
+        */}
+        <div className="mt-2 flex gap-3 sm:flex-wrap">
           {playable && (
             <button
               type="button"
@@ -405,7 +440,7 @@ function SlideBody({
               disabled={!canPlay}
               aria-describedby={titleId}
               className={cn(
-                'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md bg-glass-accent px-5 text-base font-semibold text-glass-accent-fg shadow-2 select-none',
+                'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-md bg-glass-accent px-6 text-base font-semibold text-glass-accent-fg shadow-2 select-none max-sm:min-w-0 max-sm:flex-1',
                 'hover:brightness-110 active:brightness-90 disabled:cursor-not-allowed disabled:opacity-50',
                 'motion-safe:transition-[filter,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
               )}
@@ -422,14 +457,30 @@ function SlideBody({
               onPointerLeave={details.onPointerLeave}
               onFocus={details.onFocus}
               onBlur={details.onBlur}
-              className={cn(
-                'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md border border-glass-border bg-on-glass/10 px-5 text-base font-medium text-on-glass select-none',
-                'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
-              )}
+              className={cn(GLASS_BUTTON, 'gap-2 px-5 text-base font-medium', playable ? 'max-sm:w-12 max-sm:px-0' : 'max-sm:flex-1')}
             >
               <Info aria-hidden size={18} />
-              {t('details')}
+              <span className={cn(playable && 'max-sm:sr-only')}>{t('details')}</span>
             </Link>
+          )}
+          {hasMenu && (
+            <Tooltip content={moreLabel} tone="glass" side="top" describe={false}>
+              <button
+                type="button"
+                aria-label={moreLabel}
+                aria-haspopup="menu"
+                data-hero-menu=""
+                onClick={(e) => {
+                  const items = menuFor?.(s);
+                  if (!items?.length || !openMenu) return;
+                  onMenuOpen(true);
+                  openMenu({ pos: buttonMenuAnchor(e.currentTarget), label: title, items, onClose: () => onMenuOpen(false) });
+                }}
+                className={cn(GLASS_BUTTON, 'w-12')}
+              >
+                <EllipsisVertical aria-hidden size={18} />
+              </button>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -437,11 +488,20 @@ function SlideBody({
   );
 }
 
-const oscButton =
-  'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-on-glass-muted hover:bg-on-glass/15 hover:text-on-glass active:bg-on-glass/25 motion-safe:transition-colors';
+/**
+ * Under a coarse pointer the pill's buttons and ticks grow to 44 px square, like the kit's
+ * buttons (TOUCH_TARGET): a 17 x 30 px tick was the only way to another slide on a phone. The
+ * drawn dot keeps its size; six slides still fit a 360 px phone.
+ */
+const OSC_TOUCH = cn(TOUCH_TARGET, 'pointer-coarse:min-w-[calc(44rem/15)]');
+
+const oscButton = cn(
+  'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-on-glass-muted hover:bg-on-glass/15 hover:text-on-glass active:bg-on-glass/25 motion-safe:transition-colors',
+  OSC_TOUCH,
+);
 
 /** Memoized (SH-4): Home passes stable props, so another rail's answer does not re-render the hero. */
-export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, canPlay, onPlay, dwellMs = HERO_DWELL_MS }: HeroCarouselProps) {
+export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, canPlay, onPlay, menuFor, dwellMs = HERO_DWELL_MS }: HeroCarouselProps) {
   const { t } = useTranslation('shell');
   const baseId = useId();
   const panelId = `${baseId}-slide`;
@@ -465,10 +525,15 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
+  // A slide's menu draws outside the hero, so neither hover nor focus holds the slide under it.
+  const [menuOpen, setMenuOpen] = useState(false);
   const canRotate = count > 1 && !reducedMotion;
   const rest = useInputRest(HERO_IDLE_ROUNDS * count, canRotate);
-  const running = canRotate && !userPaused && !hovered && !focused && visible && windowFocused && onScreen && !rest.resting;
+  const running = canRotate && !userPaused && !hovered && !focused && !menuOpen && visible && windowFocused && onScreen && !rest.resting;
   const dialRef = useRef<HTMLSpanElement>(null);
+  // The touch a swipe may come from, and when the last swipe ended (the click its lift may fire is dropped).
+  const swipeFrom = useRef<{ id: number; x: number; y: number } | null>(null);
+  const swipedAt = useRef(-Infinity);
 
   const go = useCallback(
     (step: number, auto = false) => {
@@ -538,12 +603,40 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
       data-rotating={running || undefined}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
+      // Swipe (touch and pen; a mouse has the chevrons): measured from press to lift, with no
+      // drag that follows the finger, so nothing lays out while it moves. touch-action below
+      // keeps vertical scrolling and pinch zoom with the browser and leaves sideways moves to
+      // these handlers, so the browser does not cancel the touch (pointercancel) to pan.
+      onPointerDown={(e) => {
+        swipeFrom.current = count > 1 && e.pointerType !== 'mouse' && e.isPrimary ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+      }}
+      onPointerUp={(e) => {
+        const from = swipeFrom.current;
+        swipeFrom.current = null;
+        if (!from || from.id !== e.pointerId) return;
+        const step = swipeStep(e.clientX - from.x, e.clientY - from.y, getComputedStyle(e.currentTarget).direction === 'rtl');
+        if (step === 0) return;
+        swipedAt.current = e.timeStamp;
+        go(step);
+      }}
+      onPointerCancel={() => {
+        swipeFrom.current = null;
+      }}
+      // A swipe that starts and ends on Play or Details is not a press of it. Only the click
+      // right after the lift: a later one (a key, the next tap) goes through.
+      onClickCapture={(e) => {
+        if (e.timeStamp - swipedAt.current > SWIPE_CLICK_MS) return;
+        swipedAt.current = -Infinity;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
       }}
       className={cn(
         HERO_FRAME,
+        '[touch-action:pan-y_pinch-zoom]',
         // Over artwork the focus ring is the glass text colour in every theme (the light accent would vanish on it).
         'isolate [--color-focus:var(--color-on-glass)] [--color-glow:transparent]',
       )}
@@ -552,15 +645,25 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
         seen.has(s.key) || i === index ? <Backdrop key={s.key} slide={s} active={i === index} title={titleOf(s)} /> : null,
       )}
       {/*
-        Frosted glass over the artwork: solid behind the text column, clearing toward
-        the inline end so the picture shows. Narrow screens frost the whole frame,
-        because the text runs edge to edge there.
+        The scrims: glass from the inline start behind the copy column (from sm, where the copy
+        has a side), and from the bottom, taller on phones where the copy runs edge to edge
+        under the picture. Then, in the dark themes, the fade into the page.
       */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 z-[2] bg-glass hero-frost" />
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-1/3 bg-gradient-to-t from-glass to-transparent" />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 start-0 z-[2] w-[72%] bg-gradient-to-r from-glass-strong via-glass/55 to-transparent max-sm:hidden rtl:bg-gradient-to-l"
+      />
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-[72%] bg-gradient-to-t from-glass-strong via-glass/60 to-transparent sm:h-3/5" />
+      <div aria-hidden className={HERO_PAGE_FADE} />
 
       {count > 1 && (
-        <div className="absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1" data-testid="hero-controls">
+        // Top corner on smaller screens, beside the button row from lg up (the copy column has
+        // the room then). On a phone the chevrons go, so the ticks keep 44 px each: a swipe
+        // over the hero moves (onPointerUp on the section) and the ticks choose.
+        <div
+          className="absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-14"
+          data-testid="hero-controls"
+        >
           {canRotate && (
             <Tooltip content={userPaused ? t('heroPlayRotation') : t('heroPause')} tone="glass" side="bottom" describe={false}>
               <button
@@ -575,7 +678,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
             </Tooltip>
           )}
           <Tooltip content={t('heroPrevious')} tone="glass" side="bottom" describe={false}>
-            <button type="button" onClick={() => go(-1)} aria-label={t('heroPrevious')} className={oscButton} data-testid="hero-prev">
+            <button type="button" onClick={() => go(-1)} aria-label={t('heroPrevious')} className={cn(oscButton, 'max-sm:hidden')} data-testid="hero-prev">
               <ChevronLeft aria-hidden size={16} className="rtl:rotate-180" />
             </button>
           </Tooltip>
@@ -594,7 +697,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
                   data-hero-tab={s.key}
                   onClick={() => choose(i, false)}
                   onKeyDown={onTabKeyDown}
-                  className="group/tick flex h-8 items-center justify-center rounded-full px-1.5"
+                  className={cn('group/tick flex h-8 items-center justify-center rounded-full px-1.5', OSC_TOUCH)}
                 >
                   <span
                     aria-hidden
@@ -620,7 +723,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
             })}
           </div>
           <Tooltip content={t('heroNext')} tone="glass" side="bottom" describe={false}>
-            <button type="button" onClick={() => go(1)} aria-label={t('heroNext')} className={oscButton} data-testid="hero-next">
+            <button type="button" onClick={() => go(1)} aria-label={t('heroNext')} className={cn(oscButton, 'max-sm:hidden')} data-testid="hero-next">
               <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
             </button>
           </Tooltip>
@@ -645,6 +748,8 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
             sourceName={sourceName(s.ref.sourceId)}
             canPlay={canPlay(s.ref)}
             onPlay={() => onPlay(s)}
+            menuFor={menuFor}
+            onMenuOpen={setMenuOpen}
           />
         ))}
       </div>

@@ -8,7 +8,7 @@
  */
 
 import { Play } from 'lucide-react';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useRpcQuery } from '@/api/query';
@@ -21,7 +21,7 @@ import { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem'
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { useParentalStatus } from '@/features/parental/status';
 
-import { ChannelMenuContext, type ChannelMenuRequest } from './cards';
+import { CardMenuContext, ChannelMenuContext, type CardMenuRequest, type ChannelMenuRequest } from './cards';
 
 /**
  * The channel a favorite or recent entry stands for, from its saved snapshot:
@@ -45,11 +45,43 @@ const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /** A channel's group rarely changes; the lookup below is kept this long. */
 const GROUP_STALE_MS = 5 * 60_000;
 
-/** Provides the channel card menu to the cards below it and draws it. Mount once around the rails. */
+/**
+ * Provides the card menus to the cards below it and draws them: the channel menu, and the plain
+ * action menu of a Continue watching card (CardMenuContext). One menu shows at a time. Mount once
+ * around the rails.
+ */
 export function ChannelMenuHost({ children }: { children: ReactNode }) {
   const { t } = useTranslation('shell');
-  const [menu, setMenu] = useState<ChannelMenuRequest | null>(null);
-  const close = useCallback(() => setMenu(null), []);
+  const [menu, setMenuState] = useState<ChannelMenuRequest | null>(null);
+  const [actions, setActionsState] = useState<CardMenuRequest | null>(null);
+  // The open action menu, so whatever replaces or closes it tells its opener (the hero pauses for it).
+  const openRequest = useRef<CardMenuRequest | null>(null);
+  const setActions = useCallback((request: CardMenuRequest | null) => {
+    const was = openRequest.current;
+    openRequest.current = request;
+    if (was && was !== request) was.onClose?.();
+    setActionsState(request);
+  }, []);
+  const setMenu = useCallback(
+    (request: ChannelMenuRequest) => {
+      setActions(null);
+      setMenuState(request);
+    },
+    [setActions],
+  );
+  const openActions = useCallback(
+    (request: CardMenuRequest) => {
+      setMenuState(null);
+      setActions(request);
+    },
+    [setActions],
+  );
+  const close = useCallback(() => {
+    setMenuState(null);
+    setActions(null);
+  }, [setActions]);
+  // A host that goes (leaving Home) closes its menu for good.
+  useEffect(() => () => openRequest.current?.onClose?.(), []);
 
   const channel = menu?.channel ?? null;
   // C4: radio has no picture, so a station gets no multi-view entry.
@@ -83,8 +115,15 @@ export function ChannelMenuHost({ children }: { children: ReactNode }) {
 
   return (
     <ChannelMenuContext.Provider value={setMenu}>
-      {children}
-      <ContextMenu pos={menu?.pos ?? null} items={items} label={menu?.channel.name ?? ''} onClose={close} />
+      <CardMenuContext.Provider value={openActions}>
+        {children}
+        <ContextMenu
+          pos={menu?.pos ?? actions?.pos ?? null}
+          items={menu ? items : (actions?.items ?? [])}
+          label={menu?.channel.name ?? actions?.label ?? ''}
+          onClose={close}
+        />
+      </CardMenuContext.Provider>
     </ChannelMenuContext.Provider>
   );
 }

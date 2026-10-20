@@ -18,7 +18,9 @@ vi.mock('@/api/transport', async (orig) => ({
 }));
 
 const { queryClient } = await import('@/api/query');
-const { DIAL_TICK_MS, HERO_IDLE_ROUNDS, HeroCarousel, dialFill } = await import('../HeroCarousel');
+const { DIAL_TICK_MS, HERO_IDLE_ROUNDS, HERO_SWIPE_PX, HeroCarousel, dialFill, swipeStep } = await import('../HeroCarousel');
+const { CardMenuContext } = await import('../cards');
+type CardMenuRequest = import('../cards').CardMenuRequest;
 const { buildHeroSlides, wrapIndex, HERO_MAX_CONTINUE, HERO_MAX_SLIDES } = await import('../heroSlides');
 type HeroSlide = import('../heroSlides').HeroSlide;
 
@@ -147,6 +149,40 @@ describe('HeroCarousel', () => {
     tick(DWELL);
     tick(DWELL);
     expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
+  });
+
+  it("a continue slide's menu holds the rotation until it closes, though it draws outside the hero", () => {
+    vi.useFakeTimers();
+    const requests: CardMenuRequest[] = [];
+    const slides = [slide('a', { kind: 'continue', position: position('a') }), slide('b'), slide('c')];
+    const menuFor = vi.fn(() => [{ id: 'remove', label: 'Remove', onSelect: () => undefined }]);
+    queryClient.clear();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CardMenuContext.Provider value={(r) => requests.push(r)}>
+            <HeroCarousel slides={slides} sourceName={() => 'Home IPTV'} canPlay={() => true} onPlay={vi.fn()} menuFor={menuFor} dwellMs={DWELL} />
+          </CardMenuContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const hero = screen.getByTestId('dashboard-hero');
+    // Only the continue slide has the button; a new arrival has nothing to remove or mark.
+    expect(within(screen.getByTestId('hero-slide')).getByRole('button', { name: 'More actions for Title a' })).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('hero-slide')).getByRole('button', { name: 'More actions for Title a' }));
+    expect(menuFor).toHaveBeenCalledWith(expect.objectContaining({ key: slides[0]!.key }));
+    expect(requests.map((r) => r.label)).toEqual(['Title a']);
+    // The menu took focus and the pointer away from the hero: it still holds still.
+    fireEvent.blur(within(hero).getByRole('button', { name: 'More actions for Title a' }));
+    fireEvent.pointerLeave(hero);
+    expect(hero.dataset['rotating']).toBeUndefined();
+    tick(DWELL * 3);
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
+    act(() => requests[0]!.onClose?.());
+    expect(hero.dataset['rotating']).toBe('true');
+    tick(DWELL);
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
+    expect(within(screen.getByTestId('hero-slide')).queryByRole('button', { name: /More actions/ })).toBeNull();
   });
 
   it('pauses under the pointer and finishes the dwell it had left once the pointer goes', () => {
@@ -351,6 +387,62 @@ describe('HeroCarousel', () => {
     expect(screen.getAllByRole('tab').filter((t) => t.tabIndex === 0)).toEqual([selectedTab()]);
   });
 
+  it('a sideways swipe turns the slide on a touch screen; a short one, a scroll and a mouse drag do not', () => {
+    const { hero } = renderHero();
+    const swipe = (from: number, to: number, { type = 'touch', dy = 0 } = {}) => {
+      fireEvent.pointerDown(hero, { pointerId: 1, pointerType: type, isPrimary: true, clientX: from, clientY: 100 });
+      fireEvent.pointerUp(hero, { pointerId: 1, pointerType: type, isPrimary: true, clientX: to, clientY: 100 + dy });
+    };
+    const shown = () => selectedTab().getAttribute('aria-label');
+    swipe(300, 200);
+    expect(shown()).toBe('Title b');
+    swipe(200, 300);
+    expect(shown()).toBe('Title a');
+    // Wraps like previous and next.
+    swipe(200, 300);
+    expect(shown()).toBe('Title c');
+    swipe(300, 300 - HERO_SWIPE_PX + 1);
+    swipe(300, 200, { dy: 160 });
+    swipe(300, 200, { type: 'mouse' });
+    expect(shown()).toBe('Title c');
+    // Vertical scrolling and pinch zoom stay with the browser.
+    expect(hero.className).toContain('[touch-action:pan-y_pinch-zoom]');
+  });
+
+  it('swipes the other way round in RTL', () => {
+    expect(swipeStep(-100, 0, false)).toBe(1);
+    expect(swipeStep(100, 0, false)).toBe(-1);
+    expect(swipeStep(100, 0, true)).toBe(1);
+    expect(swipeStep(-100, 0, true)).toBe(-1);
+    expect(swipeStep(-100, 80, false)).toBe(0);
+    expect(swipeStep(-(HERO_SWIPE_PX - 1), 0, false)).toBe(0);
+  });
+
+  it('a swipe that ends on Play does not press it; the next tap does', () => {
+    vi.useFakeTimers();
+    const { hero, onPlay } = renderHero();
+    const play = within(screen.getByTestId('hero-slide')).getByRole('button', { name: 'Play' });
+    fireEvent.pointerDown(play, { pointerId: 2, pointerType: 'touch', isPrimary: true, clientX: 300, clientY: 100 });
+    fireEvent.pointerUp(play, { pointerId: 2, pointerType: 'touch', isPrimary: true, clientX: 150, clientY: 100 });
+    fireEvent.click(play);
+    expect(onPlay).not.toHaveBeenCalled();
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
+    tick(1000);
+    const next = within(hero).getByTestId('hero-slide');
+    fireEvent.click(within(next).getByRole('button', { name: 'Play' }));
+    expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('under a coarse pointer the ticks and the pill buttons are 44 px targets; the drawn dot stays small', () => {
+    renderHero();
+    const targets = [...screen.getAllByRole('tab'), screen.getByTestId('hero-rotation'), screen.getByTestId('hero-next')];
+    for (const el of targets) {
+      expect(el.className).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
+      expect(el.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+    }
+    expect(screen.getAllByRole('tab')[1]!.querySelector('span')!.className).toContain('w-1.5');
+  });
+
   it('clicking a tick shows that slide', () => {
     renderHero();
     fireEvent.click(screen.getByRole('tab', { name: 'Title c' }));
@@ -404,15 +496,25 @@ describe('HeroCarousel', () => {
     expect(layer.querySelector('img')).toBeNull();
   });
 
-  it('frosts the copy with a tint over a cheaply blurred copy of the backdrop, not a backdrop filter', () => {
+  it('keeps the copy readable with glass gradients only: no blur over a backdrop and no backdrop filter (C5)', () => {
     const { hero } = renderHero([slide('a', { backdropUrl: 'https://img.test/a-wide.jpg' })]);
     const layer = hero.querySelector('[data-hero-backdrop]')!;
-    expect(layer.querySelector('[data-hero-frost-art]')).toBeNull();
     fireEvent.load(layer.querySelector('img')!);
-    const art = layer.querySelector('[data-hero-frost-art] img')!;
-    expect(art.getAttribute('src')).toBe(layer.querySelector('img')!.getAttribute('src'));
-    expect(art.className).toContain('blur-md');
-    expect(hero.innerHTML).not.toMatch(/backdrop-blur|glass-blur/);
+    // The backdrop is one sharp picture: no second, blurred copy of it.
+    expect(layer.querySelectorAll('img')).toHaveLength(1);
+    expect(layer.querySelector('img')!.className).not.toMatch(/blur/);
+    expect(hero.innerHTML).not.toMatch(/backdrop-blur|glass-blur|hero-frost/);
+    expect(hero.querySelector('[class*="from-glass-strong"]')).toBeTruthy();
+  });
+
+  it('a poster-only slide also shows its poster upright at the inline end, once it has loaded', () => {
+    const { hero } = renderHero([slide('a', { posterUrl: 'https://img.test/upright.jpg' })]);
+    const layer = hero.querySelector('[data-hero-backdrop]')!;
+    expect(layer.querySelector('[data-hero-poster]')).toBeNull();
+    fireEvent.load(layer.querySelector('img')!);
+    const poster = layer.querySelector<HTMLImageElement>('[data-hero-poster]')!;
+    expect(poster.getAttribute('src')).toBe(layer.querySelector('img')!.getAttribute('src'));
+    expect(poster.className).toContain('lg:block');
   });
 
   it('titles a new arrival with titleBase like its detail page, and the year line follows what is shown', () => {

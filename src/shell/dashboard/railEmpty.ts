@@ -4,7 +4,9 @@ import type { QueryClient } from '@tanstack/react-query';
  * "This rail loaded empty last time" flags. A flagged rail skips its loading
  * skeleton on the next dashboard visit (it would most likely just collapse).
  * Set only by a rail whose own query succeeded with no items; cleared as soon
- * as data for that rail shows up anywhere in the query cache.
+ * as data for that rail shows up anywhere in the query cache. The hero keeps
+ * one too (`hero`, SH-hero-skeleton-flash): a new or M3U-only user has nothing
+ * to rotate, and its 22rem placeholder showed and collapsed on every start.
  */
 const RAIL_EMPTY_KEY = 'tsrust.dashRailEmpty.';
 
@@ -35,13 +37,13 @@ export function railsWithContent(cmd: string, data: unknown): string[] {
   const list = data as Ref[];
   switch (cmd) {
     case 'positions.continueWatching':
-      return ['continue-watching'];
+      return ['continue-watching', 'hero'];
     case 'favorites.list':
       return [...(list.some(isLive) ? ['live-favorites'] : []), ...(list.some(isVod) ? ['favorite-vod'] : [])];
     case 'recent.list':
       return list.some(isLive) ? ['recent-live'] : [];
     case 'catalog.recentlyAdded':
-      return ['recently-added'];
+      return ['recently-added', 'hero'];
     default:
       return [];
   }

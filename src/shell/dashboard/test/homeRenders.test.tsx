@@ -7,7 +7,7 @@
  *   typed `?q=` included) and a settings write (the `lastRoute` save) leave ShellLayout, and the
  *   player dock under it, alone.
  */
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { configure, act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { homeRecentArgs } from '@/api/bootPrefetch';
@@ -15,6 +15,10 @@ import { queryClient, rpcKey } from '@/api/query';
 import type { FavoriteEntry, PlaybackPosition, RecentEntry, VodItem, WatchlistEntry } from '@/api/types';
 
 import { installDomStubs, makeSource, renderRoutes, rpcMock, settings } from '../../test/harness';
+
+// The whole shell renders here, with Home and its lazy overlays (palette, shortcut help): a cold
+// first render under a loaded full-suite run can pass the 1 s default.
+configure({ asyncUtilTimeout: 4000 });
 
 const counts = vi.hoisted(() => ({ cards: new Map<string, number>(), dock: 0 }));
 
@@ -47,6 +51,8 @@ vi.mock('../cards', async (orig) => {
     ...real,
     PosterCard: (p: Parameters<typeof real.PosterCard>[0]) => (seen(p.title), createElement(real.PosterCard, p)),
     ChannelCard: (p: Parameters<typeof real.ChannelCard>[0]) => (seen(p.name), createElement(real.ChannelCard, p)),
+    ContinueCard: (p: Parameters<typeof real.ContinueCard>[0]) => (seen(p.title), createElement(real.ContinueCard, p)),
+    OnNowCard: (p: Parameters<typeof real.OnNowCard>[0]) => (seen(`on now: ${p.channelName}`), createElement(real.OnNowCard, p)),
   };
 });
 

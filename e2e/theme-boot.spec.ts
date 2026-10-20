@@ -7,7 +7,8 @@ import { expect, test } from './helpers/fixtures';
 
 // L2-visual-6: public/theme-boot.js applies the saved theme from localStorage before the first
 // paint. With every app script held back, a light user's page is already light: data-theme, the
-// page background and the browser chrome colour match tokens.css, not index.html's dark default.
+// page background, the boot splash and the browser chrome colour match tokens.css, not index.html's
+// dark default.
 
 const TOKENS = readFileSync(join(import.meta.dirname, '..', 'src', 'styles', 'tokens.css'), 'utf8');
 
@@ -56,16 +57,23 @@ test.describe('theme before first paint', () => {
       await expect(html).toHaveAttribute('data-theme', 'light');
       await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(bg.rgb);
       expect(await page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).toBe(bg.rgb);
-      await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', bg.hex);
-      // Nothing from the app ran yet: the entry module is still held and the root is empty.
+      // index.html has one theme-color per OS scheme; the boot script writes the saved theme into both.
+      const metas = page.locator('meta[name="theme-color"]');
+      await expect(metas).toHaveCount(2);
+      for (const meta of await metas.all()) await expect(meta).toHaveAttribute('content', bg.hex);
+      // Nothing from the app ran yet: the entry module is still held and the root still shows the
+      // static boot splash, on the light background.
       expect(heldUrls.some((u) => /\/assets\/index-[^/]+\.js/.test(u)), 'entry module request held').toBe(true);
-      await expect(page.locator('#root')).toBeEmpty();
+      const splash = page.locator('#root > [data-boot-splash]');
+      await expect(splash).toBeVisible();
+      expect(await splash.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(bg.rgb);
     } finally {
       release();
     }
 
-    // Once the app loads it keeps the theme.
+    // Once the app loads it replaces the splash and keeps the theme.
     await expect(page.getByRole('main')).toBeVisible();
+    await expect(page.locator('[data-boot-splash]')).toHaveCount(0);
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   });
 });

@@ -1,14 +1,38 @@
 {
+  "id": "/",
   "name": "Tsrust IPTV",
   "short_name": "Tsrust IPTV",
-  "description": "IPTV player with a Rust core",
+  "description": "Watch your M3U playlists, Xtream accounts and Stalker portals with a full TV guide.",
+  "lang": "en",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "theme_color": "#0c1320",
   "background_color": "#0c1320",
+  "categories": ["entertainment", "video"],
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "TV guide",
+      "description": "What is on now and next on your channels",
+      "url": "/epg",
+      "icons": [{ "src": "/icons/shortcut-guide.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Search",
+      "description": "Find channels, movies and series in every source",
+      "url": "/search",
+      "icons": [{ "src": "/icons/shortcut-search.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Favorites",
+      "description": "Your favorite channels, movies and series",
+      "url": "/favorites",
+      "icons": [{ "src": "/icons/shortcut-favorites.png", "sizes": "96x96", "type": "image/png" }]
+    }
   ]
 }

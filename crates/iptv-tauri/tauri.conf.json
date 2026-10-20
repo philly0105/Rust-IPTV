@@ -53,8 +53,11 @@
       "nsis"
     ],
     "publisher": "philly",
+    "copyright": "Copyright © 2026 philly. MIT License.",
+    "homepage": "https://github.com/philly0105/Rust-IPTV",
     "category": "Video",
-    "shortDescription": "IPTV player with a Rust core",
+    "shortDescription": "IPTV player for M3U playlists, Xtream accounts and Stalker portals",
+    "longDescription": "Tsrust IPTV plays your own M3U playlists, Xtream Codes accounts and Stalker portals. It has live TV with a searchable TV guide, catch-up, movies and series with a My List, custom channel lists, a four-channel multi-view, downloads for offline viewing, series recording rules, parental controls and a phone remote. No channels or other content come with the app.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

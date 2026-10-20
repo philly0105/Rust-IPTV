@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="10 8 44 44" fill="none" stroke="currentColor">
+  <!-- The glyph of mark.svg alone, in currentColor, for small UI use (16 to 32 px) on any surface.
+       Same 64-unit coordinates as mark.svg, cropped to a square around the glyph. -->
+  <rect x="14" y="18" width="36" height="24" rx="5" stroke-width="4"/>
+  <path d="M18 35h28M18 35v-4m4 4v-2m4 2v-4m4 4v-2m8 2v-2m4 2v-4m4 4v-2" stroke-opacity=".5" stroke-width="1.5" stroke-linecap="round"/>
+  <rect x="32" y="22" width="4" height="16" rx="2" fill="currentColor" stroke="none"/>
+</svg>

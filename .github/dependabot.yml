@@ -1,6 +1,9 @@
-# Weekly dependency updates. Minor and patch versions arrive grouped, one pull request per
-# ecosystem; major versions come one by one. GitHub's "Dependabot security updates" (repository
-# settings) add pull requests for advisories on top of this.
+# Weekly dependency updates. Updates that should not break the build arrive grouped, one pull
+# request per ecosystem; the rest come one by one. Dependabot calls 0.37 -> 0.41 a minor update,
+# but for a 0.x crate or package that is a breaking release, so the groups leave those out: npm
+# groups minor and patch except its 0.x packages, cargo groups patch updates only (most direct
+# Rust dependencies are 0.x). GitHub's "Dependabot security updates" (repository settings) add
+# pull requests for advisories on top of this.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -12,6 +15,9 @@ updates:
         update-types:
           - minor
           - patch
+        # 0.x in package.json: a minor update can break them.
+        exclude-patterns:
+          - tsc-rs
     ignore:
       # Patched through patches/ (package.json pnpm.patchedDependencies). Update the patch with it.
       - dependency-name: mpegts.js
@@ -28,9 +34,8 @@ updates:
     schedule:
       interval: weekly
     groups:
-      cargo-minor-and-patch:
+      cargo-patch:
         update-types:
-          - minor
           - patch
     ignore:
       # See the npm entry above.

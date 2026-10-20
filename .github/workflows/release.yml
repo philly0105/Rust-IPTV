@@ -6,9 +6,11 @@
 # - desktop: the Windows NSIS installer, built by tauri-action and attached to that draft. The
 #   installer carries THIRD_PARTY_NOTICES.md beside the app.
 # - image and image-manifest: the server image for linux/amd64 and linux/arm64, each built on a
-#   native runner, then pushed to ghcr.io/philly0105/tsrust-iptv as <version> and latest.
+#   native runner, then pushed to ghcr.io/philly0105/tsrust-iptv as <version> only.
 #
-# The draft stays a draft until the owner publishes it. Two things are off on purpose, as owner
+# The draft stays a draft until the owner publishes it. Publishing it runs image-latest.yml,
+# which points the image's latest tag at <version>; until then `docker compose pull` with the
+# default tag keeps getting the previous release. Two things are off on purpose, as owner
 # decisions: code signing (the installer is unsigned, so SmartScreen warns) and the auto-updater
 # (no --features updater, no updater signing key, no latest.json). See CONTRIBUTING.md, "Releases".
 # The only credential is the workflow's own GITHUB_TOKEN.
@@ -237,12 +239,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - uses: docker/setup-buildx-action@v3
-      # <version> from the tag (v0.2.0 -> 0.2.0), and latest unless it is a pre-release
-      # (v0.3.0-rc.1 gets no latest).
+      # <version> from the tag (v0.2.0 -> 0.2.0). No latest here: image-latest.yml moves it when
+      # the owner publishes the release.
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}}
       - name: Create and push the multi-arch tags

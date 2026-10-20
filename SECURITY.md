@@ -2,9 +2,16 @@
 
 ## Reporting a vulnerability
 
-Report it privately through GitHub: open the repository's Security tab and choose "Report a vulnerability". Only the maintainer sees the report, and the fix is discussed in that private advisory.
+Please do not put the details of a vulnerability in a public issue. Open an issue titled "Security contact" that names only the part affected (desktop app, server mode, or the release files), and the maintainer will reply with a private way to send the report.
 
-Please do not open a public issue for a vulnerability. If private reporting is unavailable for some reason, open an issue that only asks for a private contact, without details.
+<!--
+Owner: once private vulnerability reporting is on (repository Settings, under
+"Advanced Security" or "Code security", or
+`gh api -X PUT repos/philly0105/Rust-IPTV/private-vulnerability-reporting`),
+replace the paragraph above with:
+
+Report it privately through GitHub: open the repository's Security tab and choose "Report a vulnerability". Only the maintainer sees the report, and the fix is discussed in that private advisory. Please do not open a public issue for a vulnerability.
+-->
 
 A useful report says:
 
@@ -49,4 +56,4 @@ Anyone who can reach the API can use every source and setting, so the proxy's pa
 
 ### Releases
 
-Installers are built by GitHub Actions from a version tag (`.github/workflows/release.yml`). They are not code-signed yet, and the auto-updater is off, so the app never downloads or installs code by itself. Server images are published to `ghcr.io/philly0105/tsrust-iptv` by the same workflow.
+Installers are built by GitHub Actions from a version tag (`.github/workflows/release.yml`). They are not code-signed yet, and the auto-updater is off, so the app never downloads or installs code by itself. The same workflow pushes the server image to `ghcr.io/philly0105/tsrust-iptv` under its version; the `latest` tag moves to it only when the release is published (`.github/workflows/image-latest.yml`).

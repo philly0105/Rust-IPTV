@@ -91,9 +91,10 @@ This runs, in order: `pnpm typecheck` (tsc-rs), `pnpm test` (vitest), `cargo tes
 | `ci.yml` | Every push and pull request | Frontend (install, typecheck, test, build, size check) on Ubuntu; Rust fmt, clippy and tests on Windows; core, server and mock tests on Linux; cargo-deny (advisories report without failing; licences, bans and sources must pass) |
 | `ci.yml` | Pull requests and pushes to master | `cargo check` with the minimum Rust version; the Docker image built and started (health check, no push); the desktop release build without the installer |
 | `e2e.yml` | Pull requests, Mondays, by hand | Playwright in Edge on Ubuntu; uploads `test-results/screens/`, and the report when a test fails |
-| `release.yml` | `v*` tags | Draft GitHub Release with the Windows installer and `THIRD_PARTY_NOTICES.md`; server image for amd64 and arm64 on ghcr.io |
+| `release.yml` | `v*` tags | Draft GitHub Release with the Windows installer and `THIRD_PARTY_NOTICES.md`; server image for amd64 and arm64 on ghcr.io, tagged with the version |
+| `image-latest.yml` | A release is published | Points the image's `latest` tag at that release's version; skips pre-release tags such as `v0.3.0-rc.1` |
 
-Dependabot (`.github/dependabot.yml`) proposes npm, cargo and GitHub Actions updates weekly. It leaves Tauri's minor versions alone, because the npm and Rust Tauri packages have to move together, and `mpegts.js`, which is patched in `patches/`.
+Dependabot (`.github/dependabot.yml`) proposes npm, cargo and GitHub Actions updates weekly, grouped into one pull request per ecosystem where that is safe: all GitHub Actions updates, npm minor and patch updates, and cargo patch updates. The rest, cargo minor updates and 0.x npm packages included, come one pull request each, because a minor bump of a 0.x crate or package is a breaking release. Dependabot leaves Tauri's minor versions alone, because the npm and Rust Tauri packages have to move together, and `mpegts.js`, which is patched in `patches/`.
 
 ## Style
 
@@ -110,7 +111,7 @@ Dependabot (`.github/dependabot.yml`) proposes npm, cargo and GitHub Actions upd
 1. Move the Unreleased entries in `CHANGELOG.md` under a new `## [x.y.z] - YYYY-MM-DD` heading.
 2. Set that version in `package.json`, the workspace `Cargo.toml` (then `cargo update -w` for Cargo.lock), and `crates/iptv-tauri/tauri.conf.json`, and add a What's new entry to `src/features/onboarding/notes.ts` with its strings in every locale.
 3. Tag the commit `vx.y.z` and push the tag. `release.yml` stops if the tag and the three versions disagree, or if the changelog has no section for the version.
-4. Check the draft release (installer, notices, notes) and publish it. The images are already on ghcr.io as `x.y.z` and `latest` (`latest` is skipped for pre-release tags such as `v0.3.0-rc.1`).
+4. Check the draft release (installer, notices, notes) and publish it. The image is already on ghcr.io as `x.y.z`; publishing runs `image-latest.yml`, which moves `latest` to it (not for pre-release tags such as `v0.3.0-rc.1`). If you publish before the image jobs have finished, that run fails; re-run it from the Actions tab afterwards.
 
 Two parts are off until the owner decides on them:
 
@@ -121,6 +122,8 @@ Two parts are off until the owner decides on them:
 
 The project licence has not been chosen yet; the `license = "MIT"` in the workspace `Cargo.toml` is a placeholder.
 
-Third-party licences ship as `THIRD_PARTY_NOTICES.md`, which `tools/third-party-notices.mjs` writes from `pnpm licenses list --prod` and from `cargo about generate` with `about.toml` and `about.hbs`. The release workflow generates it; the file is not committed, because every dependency update would change it.
+IPTVnator's copyright and MIT licence notice, which covers what came from IPTVnator, is in `NOTICE` at the repository root.
+
+Third-party licences ship as `THIRD_PARTY_NOTICES.md`, which `tools/third-party-notices.mjs` writes from `pnpm licenses list --prod` and from `cargo about generate` with `about.toml` and `about.hbs`. The release workflow generates it; the file is not committed, because every dependency update would change it. Every crate in `crates/` needs `publish = false` in its `[package]` section: cargo-about and cargo-deny skip only those, and the script stops when a workspace crate shows up as third-party, because its `license` field is a placeholder.
 
 The mpv build bundled by `pnpm tauri:build:mpv` is GPL-2.0-or-later and ships with its licence and source notice in `vendor/mpv/LICENSE.txt`, which is installed beside `mpv.exe`. Tsrust IPTV runs mpv as a separate process and does not link it. That file is the only tracked file in `vendor/mpv/` and describes one specific build: when you replace the mpv build, update its version and commit lines (mpv, FFmpeg, libplacebo) to match the new one before building the installer. Whoever publishes that installer takes on the GPL's source obligation for mpv: attach the matching mpv, FFmpeg and libplacebo sources to the release, or honour the written offer in that file. The release workflow builds only the installer without mpv.

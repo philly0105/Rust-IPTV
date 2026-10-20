@@ -106,11 +106,15 @@ Right-click a channel with catch-up and choose "Browse archive" (also in the ful
 
 ### mpv and VLC
 
-Embedded playback in the desktop app uses mpv when it is installed: put `mpv.exe` in `vendor/mpv/` beside the app, install mpv with WinGet, Scoop or Chocolatey, or set its path in Settings > External players. VLC works as an external player. Without mpv, streams play in the built-in player. See [players.md](architecture/players.md) and [mpv not found](#mpv-not-found).
+The built-in player is the default. To play inside the window with mpv in the desktop app, make mpv available (put `mpv.exe` in `vendor/mpv/` beside the app, or install it with WinGet, Scoop or Chocolatey), then choose Embedded mpv under Settings > Playback > Player. If the app can't find mpv, set its path in Settings > External players. The same Player setting offers mpv and VLC as external players, in their own window. See [players.md](architecture/players.md) and [mpv not found](#mpv-not-found).
 
 ## Picture-in-picture
 
-The PiP button in the player controls shrinks the window to a small always-on-top player. Resizing keeps the video's aspect ratio. Esc, F, or the restore button in the PiP title bar returns to the full window at its previous size and position. If you quit while in PiP, the next launch opens at the normal window size, not the PiP size: the saved window state never records PiP bounds.
+The PiP button in the player controls, or "Picture in picture" in the video's right-click menu, works differently in the two in-app players.
+
+With the built-in player, in the desktop app and in the browser, the video moves into the browser engine's own floating PiP window, which stays on top of other windows. Press the PiP button again, or use the floating window's own controls, to bring the video back. The button is missing when the browser does not support picture-in-picture.
+
+With embedded mpv, the app window itself shrinks to a small always-on-top player. Resizing keeps the video's aspect ratio. Esc, F, or the restore button in the PiP title bar returns to the full window at its previous size and position. If you quit while in PiP, the next launch opens at the normal window size, not the PiP size: the saved window state never records PiP bounds.
 
 ## Multi-view
 
@@ -127,7 +131,7 @@ Scheduled recordings and reminders:
 - Recordings run without the player, as a direct copy for plain MPEG-TS streams (and Xtream live channels) or through a headless mpv for HLS and DASH, with 1 minute of padding before and 5 after by default. Files are named `<Channel> - <Programme> - <YYYY-MM-DD HHmm>.ts`. A dropped stream is retried into part files. A recording that was due while the app was closed is marked missed.
 - Library > Scheduled lists what is recording now, what is coming up, and recent results. My Videos > Recordings plays, shows and deletes the files (to the Recycle Bin, with Undo).
 - Series recording rules come from the guide search; see [TV guide](#tv-guide).
-- In the browser (server mode), recording needs mpv on the server. The Docker image includes it; elsewhere, install mpv on the server's `PATH`. Without it Record is hidden. Reminders show in-app only.
+- In the browser (server mode), recording needs mpv on the server. The Docker image includes it; elsewhere, install mpv on the server's `PATH`. Without it Record is hidden. Reminders show in the app with "Watch now". The app never asks for permission to show browser notifications. If you allowed notifications for the site in the browser's site settings, a browser notification appears as well; browsers allow that only over HTTPS or on localhost.
 
 See [recording.md](architecture/recording.md).
 
@@ -270,7 +274,7 @@ The same interface runs in a browser against `iptv-server`, the app's core behin
 - The stream proxy, downloads and playlist, guide, Xtream and Stalker requests only reach LAN addresses that belong to the source's own host and port. Pass `--allow-private-targets` (`IPTV_ALLOW_PRIVATE_TARGETS=true`, or `1`/`yes`/`on`) on a trusted network to lift that.
 - In the browser, playlists and EPG files cannot be opened from the server's disk (upload the playlist text or use an http(s) guide URL instead), and downloads always go to `<data dir>/downloads` (Settings shows the folder, read-only). Playback uses the built-in player only: MPV, VLC and the External players settings are desktop features.
 - The Docker image includes mpv for scheduled recordings (it is not used for playback).
-- The web build can be installed as an app (PWA manifest and service worker). Browsers allow that only on a secure origin: `localhost`, or HTTPS. Copy buttons, browser notifications and ClearKey channels have the same limit; see [deploy/README.md](../deploy/README.md#why-https).
+- The web build can be installed as an app (PWA manifest and service worker). Browsers allow that only on a secure origin: `localhost`, or HTTPS. Copy buttons and ClearKey channels have the same limit; see [deploy/README.md](../deploy/README.md#why-https).
 - `iptv-server --health` checks a running server; the Docker image uses it as its HEALTHCHECK.
 
 Server flags: `iptv-server --port 7180 --data-dir ./.data --static ./dist`. It binds 127.0.0.1 unless you pass `--host`. Details are in [server.md](architecture/server.md).

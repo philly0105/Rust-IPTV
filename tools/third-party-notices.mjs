@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Writes THIRD_PARTY_NOTICES.md: the IPTVnator MIT notice, the licence texts of
+// Writes THIRD_PARTY_NOTICES.md: the IPTVnator MIT notice (from NOTICE), the licence texts of
 // the npm packages in the web UI, and (when given) the Rust crates' licence
 // texts rendered by cargo-about.
 //
@@ -24,18 +24,6 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-// IPTVnator's LICENSE.md as published at https://github.com/4gray/iptvnator
-// (checked 2026-10-20).
-const IPTVNATOR_LICENSE = `MIT License
-
-Copyright (c) 2019-2026 4gray
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
 
 // LICENSE, LICENCE.md, LICENSE-MIT, COPYING, NOTICE and the like. SPDX
 // documents (LICENSE.spdx) name a licence but do not carry its text.
@@ -76,6 +64,23 @@ function pnpm(args) {
 
 function normalise(text) {
   return text.replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '').trim();
+}
+
+/** IPTVnator's copyright and MIT licence text, from NOTICE at the repository root. */
+function iptvnatorLicence() {
+  const notice = normalise(readFileSync(join(root, 'NOTICE'), 'utf8'));
+  const start = notice.indexOf('MIT License');
+  if (start < 0) fail('NOTICE does not contain IPTVnator\'s "MIT License" text');
+  return notice.slice(start);
+}
+
+/** Package names of the workspace crates (crates/<dir>/Cargo.toml). */
+function workspaceCrates() {
+  const dir = join(root, 'crates');
+  return readdirSync(dir)
+    .filter((d) => existsSync(join(dir, d, 'Cargo.toml')))
+    .map((d) => readFileSync(join(dir, d, 'Cargo.toml'), 'utf8').match(/^\[package\][^[]*?^name\s*=\s*"([^"]+)"/m)?.[1])
+    .filter(Boolean);
 }
 
 /** The licence texts a package ships, or [] when it has none. */
@@ -176,11 +181,29 @@ function rustSection(file) {
     ].join('\n');
   }
   if (!existsSync(file)) fail(`--rust file not found: ${file}`);
+  const rust = normalise(readFileSync(file, 'utf8'));
+
+  // The workspace's own crates carry the placeholder `license` from Cargo.toml, so listing one
+  // here would publish a licence the owner has not chosen. cargo-about leaves out crates with
+  // `publish = false` (about.toml, `private.ignore`); this catches a crate that lacks it.
+  // about.hbs writes each licence's users as "Used by: <name> <version>, <name> <version>".
+  const listed = new Set();
+  for (const line of rust.split('\n')) {
+    if (line.startsWith('Used by: ')) for (const entry of line.slice(9).split(', ')) listed.add(entry.split(' ')[0]);
+  }
+  const own = workspaceCrates().filter((name) => listed.has(name));
+  if (own.length > 0) {
+    fail(
+      `workspace crates listed as third-party in ${file}: ${own.join(', ')}. Add ` +
+        '`publish = false` under [package] in their Cargo.toml so cargo-about skips them, then run cargo about again.',
+    );
+  }
+
   return [
     'The desktop app and the server are compiled from the Rust crates below. The list covers the',
     'whole workspace for Windows and Linux, so the server image contains only part of it.',
     '',
-    normalise(readFileSync(file, 'utf8')),
+    rust,
     '',
   ].join('\n');
 }
@@ -207,7 +230,7 @@ const doc = [
   'distributed under the MIT licence:',
   '',
   '````text',
-  IPTVNATOR_LICENSE,
+  iptvnatorLicence(),
   '````',
   '',
   '## JavaScript packages',

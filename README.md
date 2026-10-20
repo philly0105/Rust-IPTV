@@ -20,7 +20,8 @@
   <a href="https://github.com/philly0105/Rust-IPTV/actions/workflows/ci.yml"><img src="https://github.com/philly0105/Rust-IPTV/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
 </p>
 
-![The Tsrust IPTV dashboard with a featured title, Continue watching and channel rails](docs/screenshots/home.png)
+<!-- The screenshots are commented out until the files exist; docs/screenshots/README.md lists them.
+![The Tsrust IPTV dashboard with a featured title, Continue watching and channel rails](docs/screenshots/home.png) -->
 
 No channels, films or other content come with the app. It plays the sources you add.
 
@@ -32,7 +33,7 @@ Get the `..._x64-setup.exe` installer from the [latest release](https://github.c
 
 The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC". Choose More info, then Run anyway.
 
-For playback inside the window through mpv, install mpv (WinGet, Scoop or Chocolatey) or point Settings > External players at it. Without mpv, everything plays in the built-in player.
+Everything plays in the built-in player unless you choose another. To play inside the window with mpv, install mpv (WinGet, Scoop or Chocolatey) and choose Embedded mpv under Settings > Playback > Player. If the app can't find mpv, set its path in Settings > External players.
 
 ### Run the server with Docker
 
@@ -52,7 +53,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 2. Add a source: paste a playlist URL (or choose an M3U file), enter an Xtream server, username and password, or a Stalker portal address and MAC.
 3. Open Live TV and pick a channel, or open the TV guide. A three-step tour shows you Live TV, My List and search.
 
-![The Sources page with an M3U playlist, an Xtream account and a Stalker portal](docs/screenshots/sources.png)
+<!-- ![The Sources page with an M3U playlist, an Xtream account and a Stalker portal](docs/screenshots/sources.png) -->
 
 ## What you can do
 
@@ -64,9 +65,9 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - When a channel stops working, the player switches to the same channel on another of your sources, with Undo.
 - Make your own channel lists across sources, and rename or hide channels without changing the provider's data.
 
-![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png)
+<!-- ![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png) -->
 
-![The TV guide grid with the now line](docs/screenshots/guide.png)
+<!-- ![The TV guide grid with the now line](docs/screenshots/guide.png) -->
 
 ### Watch movies and series
 
@@ -75,12 +76,12 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - Episodes in M3U playlists are grouped into series and seasons, like Xtream and Stalker series.
 - With your own TMDB API key, detail pages show plots, cast, trailers, ratings and similar titles.
 
-![A movie's detail page with artwork, Resume and My List](docs/screenshots/movie-detail.png)
+<!-- ![A movie's detail page with artwork, Resume and My List](docs/screenshots/movie-detail.png) -->
 
 ### Control playback
 
 - The built-in player handles HLS, MPEG-TS and DASH, including ClearKey-protected M3U channels. On Windows, mpv can play inside the window, and mpv or VLC can run as external players.
-- Set aspect ratio, crop and zoom; load subtitle files and style them; shift subtitles and audio in 100 ms steps; see the stream's codecs and bitrates.
+- Set aspect ratio, crop and zoom; load subtitle files and style them; shift subtitles in 100 ms steps (audio too, with embedded mpv); see the stream's codecs and bitrates.
 - A sleep timer that fades out, picture-in-picture, and screenshots with S.
 
 ### Keep a library
@@ -96,14 +97,14 @@ Multi-view plays two to four live channels side by side, in a grid of four, or o
 
 ### Record and get reminded
 
-Record a programme or a whole series from the guide, or the next 30 minutes to 3 hours of a channel. Recordings run without the player, with padding and retries, whenever the app is running, also from the tray. Reminders show a notification a few minutes before a programme starts, with a button to watch it.
+Record a programme or a whole series from the guide, or the next 30 minutes to 3 hours of a channel. Recordings run without the player, with padding and retries, whenever the app is running, also from the tray. A few minutes before a programme you asked to be reminded of, the app shows a message with a button to watch it; the desktop app also shows a Windows notification.
 
 ### Use a remote or a phone
 
 - A web remote in another browser tab, or on your phone after scanning a QR code in the desktop app: change channels, type a number, play, pause, seek and set the volume.
 - On phones and narrow windows, a layout with a hideable sidebar, a compact mini player and tap-to-show controls.
 
-![The phone layout](docs/screenshots/phone.png)
+<!-- ![The phone layout](docs/screenshots/phone.png) -->
 
 ### Lock content and keep your data private
 
@@ -124,7 +125,7 @@ Everything else stays on your computer or your server: sources and their logins,
 
 ## Self-hosting
 
-`iptv-server` (the Docker image above) serves the interface to any browser and keeps your data in one volume. It has no login, and over plain `http://` on your network browsers turn off the install button, copy buttons, notifications and ClearKey playback. [deploy/](deploy/README.md) runs it behind Caddy with HTTPS and a password, for your home network or a public domain, in a few steps.
+`iptv-server` (the Docker image above) serves the interface to any browser and keeps your data in one volume. It has no login, and over plain `http://` on your network browsers turn off the install button, copy buttons and ClearKey playback. [deploy/](deploy/README.md) runs it behind Caddy with HTTPS and a password, for your home network or a public domain, in a few steps.
 
 ## Documentation
 
@@ -150,7 +151,7 @@ pnpm check       # typecheck, unit tests, cargo test, clippy and rustfmt
 
 ## Credits
 
-Tsrust IPTV was rebuilt from [IPTVnator](https://github.com/4gray/iptvnator) by 4gray, which is MIT-licensed. Each release includes `THIRD_PARTY_NOTICES.md` with the licences of IPTVnator and of the npm packages and Rust crates the app is built from.
+Tsrust IPTV was rebuilt from [IPTVnator](https://github.com/4gray/iptvnator) by 4gray. IPTVnator's copyright and MIT licence notice is in [NOTICE](NOTICE). Each release also includes `THIRD_PARTY_NOTICES.md` with the licences of IPTVnator and of the npm packages and Rust crates the app is built from.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 

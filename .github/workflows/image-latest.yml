@@ -1,0 +1,47 @@
+# Points ghcr.io/philly0105/tsrust-iptv:latest at a release's server image when the owner
+# publishes the release. release.yml pushes only the <version> tag when a v* tag is pushed, so
+# latest, which deploy/compose.yaml and the README's `docker run` use, never names a build whose
+# draft release has not been reviewed.
+#
+# `released` fires when a release is published or a pre-release is turned into a release, not
+# for drafts or pre-releases. Tags with a pre-release part (v0.3.0-rc.1) are skipped too, because
+# release.yml creates every draft as a normal release.
+#
+# Publishing before release.yml has pushed the image makes this job fail at `imagetools create`.
+# Re-run it from the Actions tab once the image is there.
+name: Image latest tag
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/philly0105/tsrust-iptv
+
+jobs:
+  latest:
+    name: Point latest at the release image
+    if: startsWith(github.event.release.tag_name, 'v') && !contains(github.event.release.tag_name, '-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@v3
+      # Copies the multi-arch manifest list of <version> (v0.2.0 -> 0.2.0, as release.yml tags it)
+      # to latest. Nothing is rebuilt.
+      - name: Tag the release image as latest
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:${TAG#v}"
+          docker buildx imagetools inspect "$IMAGE:latest"

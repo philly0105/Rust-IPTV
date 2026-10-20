@@ -14,7 +14,6 @@ Browsers switch several features off on plain `http://` pages that are not `loca
 
 - Installing the app (the PWA install button) and its offline start: the service worker only registers on a secure origin.
 - The copy buttons (stream address, remote link, About details): `navigator.clipboard` does not exist there.
-- Browser notifications for guide reminders.
 - ClearKey-protected M3U channels: the browser's DRM interface (EME) only runs on a secure origin.
 
 With Caddy in front, the browser sees `https://` and all of these work.
@@ -88,6 +87,12 @@ Point the domain's DNS at the machine and forward ports 80 and 443 to it. Caddy 
 - Logs: `docker compose logs -f tsrust-iptv`. The app also writes rotating JSON logs to `/data/logs`.
 - Recording works in the container: the image includes mpv for it. Files go to `/data/downloads/recordings`.
 - On private addresses, the server only fetches from each source's own host and port. A playlist on your NAS works, but if its streams, guide or logos come from another machine on your network (a tvheadend box, say), add `IPTV_ALLOW_PRIVATE_TARGETS: "true"` under the app's `environment` in `compose.yaml`.
+
+## Safari on iPhone, iPad and Mac
+
+This setup has not been tested in Safari yet. Safari has been reported to leave the password off WebSocket connections to a site behind `basic_auth` ([an example with another app](https://github.com/adriankumpf/teslamate/issues/952)). The app gets live updates, such as import progress, over a WebSocket at `/api/events`. If that happens to you, pages still load, but "Lost connection to the server" stays on screen and the live updates stop.
+
+Do not fix it by taking `/api/events` out of the password: anyone who can reach the server could then read the event stream. Use a login that sets a cookie instead, such as Caddy's `forward_auth` to an auth service like Authelia or tinyauth (see the next section).
 
 ## Other setups
 

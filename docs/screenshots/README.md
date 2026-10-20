@@ -1,6 +1,8 @@
 # Screenshots
 
-The README shows these images. They are captured from the web build with fictional demo data: made-up channel names, programmes, posters and logos, no real provider or broadcaster. Retake them whenever the interface changes enough that the README would mislead.
+The README shows these images once they exist. Until then its image lines are commented out (`<!-- ![...](docs/screenshots/...) -->`); uncomment each one when you add its file. Retake them whenever the interface changes enough that the README would mislead.
+
+Capture them from the web build with made-up data only: no real provider, broadcaster, show or film. `iptv-mock` (`pnpm mock`) needs two changes first. Its movies, series, posters and backdrops are invented, and its logos are generated initials. But its live channels carry real broadcaster names (BBC One, CNN International, Sky News, Sky Sports and others), and so does `fixtures/sample.m3u`. Its guide mixes invented programme titles with real ones such as Newsnight, Grand Designs and Tom & Jerry Classics. Before capturing, replace those names in `crates/iptv-mock/src/catalog.rs` (`CHANNELS`, `NEWS_SHOWS`, `SPORTS_SHOWS`, `ENT_SHOWS`) on a scratch branch. Renaming channels in the app (Rename in a channel's right-click menu) fixes the channel names but not the programme titles that `live.png` and `guide.png` show.
 
 | File | Screen | Used in |
 | --- | --- | --- |

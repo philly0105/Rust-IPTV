@@ -329,8 +329,10 @@ label until the project licence is chosen). When the build context holds a
 copied to `/usr/share/doc/tsrust-iptv/`.
 
 Released images are on `ghcr.io/philly0105/tsrust-iptv` for linux/amd64 and
-linux/arm64, tagged with the version and `latest`
-(`.github/workflows/release.yml`). CI builds the image and checks
+linux/arm64. The version tag is pushed when the release is built
+(`.github/workflows/release.yml`); `latest` moves to it only when the owner
+publishes the draft release (`.github/workflows/image-latest.yml`). CI builds
+the image and checks
 `/api/health` on pull requests without pushing (`ci.yml`, job `docker`).
 
 ### Deployment for other devices
@@ -346,9 +348,19 @@ browsers fetch the manifest without credentials.
 
 HTTPS matters for more than the password. A page on plain
 `http://<lan-ip>:7180` is not a secure context, so the browser turns off the
-service worker and PWA install, `navigator.clipboard` (the copy buttons),
-`Notification` (guide reminders) and EME (ClearKey channels). `localhost` is a
-secure context, so none of this applies on the server machine itself.
+service worker and PWA install, `navigator.clipboard` (the copy buttons) and
+EME (ClearKey channels). `localhost` is a secure context, so none of this
+applies on the server machine itself. `Notification` is secure-context only
+too, but the UI never calls `Notification.requestPermission`: a guide reminder
+is an in-app toast, plus a browser notification only where the user already
+allowed notifications for the site (`src/features/recording/lib/fire.ts`).
+
+Safari has been reported to send no credentials on WebSocket upgrades behind
+HTTP basic authentication, which would make `/api/events` fail with 401 there. This is untested with this setup;
+`deploy/README.md` says what users see and points to `forward_auth` with a
+cookie login. Exempting `/api/events` from the password is not a fix: a
+non-browser client can send any `Origin`, so the event stream would be open to
+anyone who can reach Caddy.
 
 ## Tests
 

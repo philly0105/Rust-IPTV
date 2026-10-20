@@ -51,9 +51,9 @@ allow = [
 ]
 confidence-threshold = 0.9
 
-# The workspace crates marked `publish = false` are skipped. iptv-core still
-# carries the workspace's placeholder `license = "MIT"`; when the owner picks
-# the project's licence, add it to `allow` if it is not listed.
+# Workspace crates marked `publish = false` are skipped; every crate in crates/
+# should be (see about.toml). A workspace crate without it is checked against
+# `allow` with the placeholder `license = "MIT"` from Cargo.toml.
 [licenses.private]
 ignore = true
 

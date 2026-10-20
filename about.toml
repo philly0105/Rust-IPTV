@@ -35,5 +35,8 @@ targets = [
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 
-# The workspace's own crates are not third-party software.
+# Skips crates marked `publish = false`. Every crate in crates/ needs that: they
+# are not third-party software, and their `license` field is a placeholder until
+# the owner chooses a licence. tools/third-party-notices.mjs stops when one of
+# them shows up in the output anyway.
 private = { ignore = true }

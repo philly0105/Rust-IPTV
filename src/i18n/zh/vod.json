@@ -244,7 +244,7 @@
   "jumpBackIn": "最近看过",
   "browseCategories": "浏览分类",
   "knownForNoneHere": "此播放源中没有此人的作品。",
-  "topResults": "热门结果",
+  "topResults": "主要结果",
   "sourcesCount_one": "{{count}} 个播放源",
   "sourcesCount_other": "{{count}} 个播放源",
   "tmdbPromoLabel": "TMDB 元数据",

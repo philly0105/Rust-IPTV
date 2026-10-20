@@ -87,7 +87,7 @@
   "playFailed": "تعذّر بدء التشغيل",
   "minutesLeft_zero": "المتبقي {{count}} دقيقة",
   "minutesLeft_one": "المتبقي {{count}} دقيقة",
-  "minutesLeft_two": "المتبقي {{count}} دقيقتان",
+  "minutesLeft_two": "الدقائق المتبقية: {{count}}",
   "minutesLeft_few": "المتبقي {{count}} دقائق",
   "minutesLeft_many": "المتبقي {{count}} دقيقة",
   "minutesLeft_other": "المتبقي {{count}} دقيقة",

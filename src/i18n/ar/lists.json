@@ -100,7 +100,7 @@
   "groupAddTo": "إضافة المجموعة إلى {{list}}",
   "groupAdded_zero": "أُضيفت {{formatted}} قناة إلى {{list}}",
   "groupAdded_one": "أُضيفت {{formatted}} قناة إلى {{list}}",
-  "groupAdded_two": "أُضيفت {{formatted}} قناتان إلى {{list}}",
+  "groupAdded_two": "القنوات المضافة إلى {{list}}: {{formatted}}",
   "groupAdded_few": "أُضيفت {{formatted}} قنوات إلى {{list}}",
   "groupAdded_many": "أُضيفت {{formatted}} قناة إلى {{list}}",
   "groupAdded_other": "أُضيفت {{formatted}} قناة إلى {{list}}",

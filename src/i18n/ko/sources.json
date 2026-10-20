@@ -287,7 +287,7 @@
   "filterStatus_all": "모든 상태",
   "filterStatus_ok": "정상",
   "filterStatus_error": "마지막 새로 고침 실패",
-  "sortedHint": "카드는 내 순서에서만 끌어서 옮길 수 있습니다.",
+  "sortedHint": "카드는 '사용자 지정 순서'로 정렬할 때만 끌어서 옮길 수 있습니다.",
   "filteredHint": "{{total}}개 중 {{shown}}개를 표시합니다.",
   "showYourOrder": "사용자 지정 순서로 모두 보기",
   "filteredEmptyTitle": "일치하는 소스가 없습니다",

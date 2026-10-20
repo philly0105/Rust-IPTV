@@ -396,7 +396,7 @@
   "onboardYouNeed": "Ami kell hozzá",
   "onboardPrivacyDesktop": "A belépési adatai ezen a számítógépen maradnak, és csak a szolgáltatójához jutnak el.",
   "onboardPrivacyServer": "A belépési adatait az alkalmazást futtató kiszolgáló tárolja, és csak a szolgáltatójához jutnak el.",
-  "autoRefreshHintEvery": "A háttérben {{interval}}nként frissül. A gyakoriságot a Beállítások > Általános alatt módosíthatja.",
+  "autoRefreshHintEvery": "A háttérben történő frissítés időköze: {{interval}}. A gyakoriságot a Beállítások > Általános alatt módosíthatja.",
   "autoRefreshHintStartup": "Az alkalmazás minden indításakor frissül. A gyakoriságot a Beállítások > Általános alatt módosíthatja.",
   "viewDone": "Kész",
   "accountState_active": "Aktív",

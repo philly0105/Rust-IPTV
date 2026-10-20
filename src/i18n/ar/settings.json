@@ -490,7 +490,7 @@
   "catalogGroupHint": "تنطبق أينما تُعرض القنوات والأفلام والمسلسلات.",
   "storageGroup": "التخزين",
   "dangerZone": "منطقة الخطر",
-  "updatesServer": "يعمل هذا التطبيق على خادم، لذا يتحدث مع الخادم.",
+  "updatesServer": "يعمل هذا التطبيق على خادم، ويُحدَّث عند تحديث الخادم.",
   "updatesServerHint": "من يدير الخادم يثبّت الإصدارات الجديدة هناك، مثلًا بتحديث صورة Docker وإعادة تشغيلها. تبقى مكتبتك كما هي.",
   "updatesSeeReleases": "عرض الإصدارات",
   "aboutPlatformValue": "{{platform}} · {{kind}}",

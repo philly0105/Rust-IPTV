@@ -44,7 +44,7 @@
   "errorHintNotFound": "它可能已被删除，或此链接已过期。",
   "errorHintInvalid": "请检查输入的内容，然后重试。",
   "errorHintUnsupported": "此播放源或流类型不支持该操作。请尝试使用外部播放器。",
-  "errorHintUnsupportedWeb": "浏览器版本、此播放源或此流类型不支持该操作。",
+  "errorHintUnsupportedWeb": "网页版应用、此播放源或此流类型不支持该操作。",
   "errorHintConflict": "请重新加载以查看最新版本，然后重试。",
   "errorHintIo": "请确认文件夹存在，并且你有写入权限。",
   "errorHintDb": "请重启应用。如果问题仍然存在，请在设置中恢复备份。",

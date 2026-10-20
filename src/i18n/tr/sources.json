@@ -396,7 +396,7 @@
   "onboardYouNeed": "Gerekenler",
   "onboardPrivacyDesktop": "Giriş bilgileriniz bu bilgisayarda kalır ve yalnızca sağlayıcınıza gönderilir.",
   "onboardPrivacyServer": "Giriş bilgileriniz bu uygulamanın çalıştığı sunucuda saklanır ve yalnızca sağlayıcınıza gönderilir.",
-  "autoRefreshHintEvery": "Arka planda her {{interval}} yenilenir. Sıklığı Ayarlar > Genel bölümünden değiştirin.",
+  "autoRefreshHintEvery": "Arka planda yenileme aralığı: {{interval}}. Sıklığı Ayarlar > Genel bölümünden değiştirin.",
   "autoRefreshHintStartup": "Uygulama her açıldığında yenilenir. Sıklığı Ayarlar > Genel bölümünden değiştirin.",
   "viewDone": "Bitti",
   "accountState_active": "Etkin",

@@ -98,5 +98,5 @@
   "groupNothingNew": "Már benne vannak",
   "groupLoadFailed": "Nem sikerült betölteni a csoport csatornáit",
   "groupCapped": "Egy lista legfeljebb {{max}} csatornát tartalmazhat, ezért csak az első {{max}} kerül bele.",
-  "groupNewList": "Vagy kezdj új listát ezekkel a csatornákkal:"
+  "groupNewList": "Vagy kezdjen új listát ezekkel a csatornákkal:"
 }

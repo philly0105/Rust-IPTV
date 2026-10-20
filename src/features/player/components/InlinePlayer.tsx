@@ -134,6 +134,8 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
+  // A new play of the same URL (Start over, a recovery that resolved the same link) loads again.
+  const generation = usePlayerStore((s) => s.playGeneration);
   const settings = usePlayerSettings();
   // The VOD poster (C3): through the image cache, then its own URL once. It is the video's
   // poster and, with ambient mode on, the soft colour field behind the picture.
@@ -173,7 +175,7 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
     reportStatus('error', err.message);
   };
 
-  // Engine lifecycle: one per media url (and per retry).
+  // Engine lifecycle: one per media url, per play of it and per retry.
   useEffect(() => {
     const el = elRef.current;
     const src = usePlayerStore.getState().source;
@@ -283,9 +285,10 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
       engineRef.current?.destroy();
       engineRef.current = null;
     };
-    // The engine is rebuilt only when the media itself changes.
+    // The engine is rebuilt only when the media itself changes or a play starts it again, never
+    // for an update that only describes the item (a channel's new name).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, retryNonce]);
+  }, [key, generation, retryNonce]);
 
   // Subtitle files belong to one item: a new one empties and hides them (C6).
   useEffect(() => {

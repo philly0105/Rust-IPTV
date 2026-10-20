@@ -7,6 +7,10 @@
  * offered: the core filters what Hide mode hides from every list, but these chips are the UI's
  * own, and a parent's query for a locked title would wait there for the next person on the device
  * once the unlock ran out (docs/architecture/parental.md). Turning the pause on clears the list.
+ *
+ * Other tabs of the app share the stored list: their writes (a clear above all) reach this one
+ * through the `storage` event, and every change here starts from what is stored now, so a tab
+ * never writes back queries another one cleared.
  */
 
 import { useSyncExternalStore } from 'react';
@@ -18,21 +22,40 @@ export const RECENT_SEARCHES_MAX = 8;
 const listeners = new Set<() => void>();
 let cache: readonly string[] | null = null;
 let paused = false;
+/** The last write did not reach storage (full or blocked): the list holds in memory only. */
+let unsaved = false;
 const NONE: readonly string[] = [];
 
-function read(): readonly string[] {
-  if (paused) return NONE;
-  if (cache) return cache;
-  let out: string[] = [];
+/** The list as stored now. */
+function load(): string[] {
   try {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(RECENT_SEARCHES_KEY) : null;
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(parsed)) out = parsed.filter((q): q is string => typeof q === 'string' && q.trim() !== '').slice(0, RECENT_SEARCHES_MAX);
+    if (Array.isArray(parsed)) return parsed.filter((q): q is string => typeof q === 'string' && q.trim() !== '').slice(0, RECENT_SEARCHES_MAX);
   } catch {
-    out = [];
+    // Unreadable: none.
   }
-  cache = out;
-  return out;
+  return [];
+}
+
+function read(): readonly string[] {
+  if (paused) return NONE;
+  cache ??= load();
+  return cache;
+}
+
+/** What a change starts from: the stored list (another tab may have changed it), or memory when storage failed. */
+function latest(): readonly string[] {
+  return unsaved && cache ? cache : load();
+}
+
+// Another tab wrote the list, or cleared the whole storage (`key` null): read it again.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== null && e.key !== RECENT_SEARCHES_KEY) return;
+    cache = null;
+    listeners.forEach((l) => l());
+  });
 }
 
 function write(list: readonly string[]): void {
@@ -40,8 +63,10 @@ function write(list: readonly string[]): void {
   try {
     if (list.length === 0) localStorage.removeItem(RECENT_SEARCHES_KEY);
     else localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(list));
+    unsaved = false;
   } catch {
     // Storage full or blocked: the list still holds for this session.
+    unsaved = true;
   }
   listeners.forEach((l) => l());
 }
@@ -52,8 +77,11 @@ const same = (a: string, b: string) => a.trim().replace(/\s+/g, ' ').toLocaleLow
 export function rememberSearch(query: string): void {
   const q = query.trim().replace(/\s+/g, ' ');
   if (!q || paused) return;
-  const list = read();
-  if (list[0] !== undefined && same(list[0], q)) return;
+  const list = latest();
+  if (list[0] !== undefined && same(list[0], q)) {
+    write(list);
+    return;
+  }
   write([q, ...list.filter((x) => !same(x, q))].slice(0, RECENT_SEARCHES_MAX));
 }
 
@@ -63,7 +91,8 @@ export function recentSearchList(): readonly string[] {
 }
 
 export function forgetSearch(query: string): void {
-  write(read().filter((x) => !same(x, query)));
+  if (paused) return;
+  write(latest().filter((x) => !same(x, query)));
 }
 
 export function clearSearches(): void {
@@ -85,6 +114,7 @@ export function setRecentSearchesPaused(on: boolean): void {
 export function resetRecentSearchCache(): void {
   cache = null;
   paused = false;
+  unsaved = false;
 }
 
 function subscribe(listener: () => void): () => void {

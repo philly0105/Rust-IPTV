@@ -1,7 +1,8 @@
 /**
  * A zap between live channels keeps the last frame up until the next channel draws its own
  * (L3-player-ui-x4): no black flash between engines. A retry, a stop or a move to VOD does not.
- * Also: which element errors on an extensionless live channel get a retry through mpegts.js (PB-2).
+ * Also: which element errors on an extensionless live channel get a retry through mpegts.js (PB-2),
+ * and a new play of the same URL (Start over of the movie playing) builds the engine again.
  */
 
 import { act, cleanup, render } from '@testing-library/react';
@@ -156,5 +157,30 @@ describe('element errors on an extensionless live channel (PB-2)', () => {
     rejects();
     await vi.waitFor(() => expect(usePlayerStore.getState().status).toBe('error'));
     expect(createEngine).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a new play of the media playing (Start over, a recovery that resolved the same link)', () => {
+  beforeEach(() => vi.mocked(createEngine).mockClear());
+
+  it('builds the engine again, so it starts from 0; an update that only renames the item does not', async () => {
+    const destroy = vi.fn();
+    vi.mocked(createEngine).mockImplementation(async () => ({ destroy }) as never);
+    await act(async () => {
+      await usePlayerStore.getState().play(vod);
+    });
+    render(<InlinePlayer />);
+    await vi.waitFor(() => expect(createEngine).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      usePlayerStore.setState({ source: { ...usePlayerStore.getState().source!, title: 'Renamed' } });
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(createEngine).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await usePlayerStore.getState().play({ ...vod });
+    });
+    await vi.waitFor(() => expect(createEngine).toHaveBeenCalledTimes(2));
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createEngine).mock.calls[1]![2]).toBe(vod.url);
   });
 });

@@ -302,13 +302,16 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               myList={myListTarget}
               render={(item, i, rail) => card(item, i, rail, watched.has(itemKey(item.ref)))}
             />
-            <CatalogRail
-              title={t('topRated')}
-              seeAll={{ to: `${allHref}?sort=rating&dir=desc` }}
-              input={gridInput(ALL_CATEGORIES, 'rating')}
-              rootRef={scrollRef}
-              card={card}
-            />
+            {/* A Stalker portal sorts by name or by date added only: its "top rated" would be the newest. */}
+            {sourceKind !== 'stalker' && (
+              <CatalogRail
+                title={t('topRated')}
+                seeAll={{ to: `${allHref}?sort=rating&dir=desc` }}
+                input={gridInput(ALL_CATEGORIES, 'rating')}
+                rootRef={scrollRef}
+                card={card}
+              />
+            )}
             {railCats.map((c) => (
               <CatalogRail
                 key={c.id}

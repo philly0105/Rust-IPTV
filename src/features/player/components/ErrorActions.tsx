@@ -18,7 +18,7 @@ import { errorDescription } from '@/ui/States';
 import { hintWithoutOthers, isParentalRefusal, type ExternalRoute, type StreamErrorClass } from '../errors';
 import { useMediaStore } from '../media';
 import { exitPip, usePipStore } from '../pip';
-import { canZap, knownSourceKind, replayFromRef, setSettingsCache, usePlayerStore, zap } from '../store';
+import { canZap, knownSourceKind, recoveryPoint, replayFromRef, setSettingsCache, usePlayerStore, zap } from '../store';
 import type { StreamErrorView } from '../useStreamError';
 import { usePlayerSettings } from '../useSettings';
 import { glassButton, type GlassButtonSize } from './glassButton';
@@ -112,10 +112,15 @@ export function errorActionIds(c: ErrorActionContext): ErrorActionId[] {
   return out;
 }
 
-/** An Xtream source on the TS stream format: its streams come as HLS once the setting says so. */
+/**
+ * A live channel or radio station of an Xtream source on the TS stream format: its stream comes as
+ * HLS once the setting says so. Movies, episodes and catch-up keep their own container whatever
+ * the setting, so they get the external player or the link instead.
+ */
 function xtreamOnTs(source: PlayerSource | undefined, settings: Settings | null): boolean {
-  const sourceId = source?.ref?.sourceId;
-  return !!sourceId && knownSourceKind(sourceId) === 'xtream' && settings?.streamFormat === 'ts';
+  const ref = source?.ref;
+  if (!source || !ref || !source.isLive || (ref.contentType !== 'live' && ref.contentType !== 'radio')) return false;
+  return knownSourceKind(ref.sourceId) === 'xtream' && settings?.streamFormat === 'ts';
 }
 
 /**
@@ -162,8 +167,13 @@ function leavePlayerView(): void {
   if (usePipStore.getState().active) void exitPip();
 }
 
-/** The Xtream stream format to HLS, then the channel again: its stream URL follows the setting. */
+/**
+ * The Xtream stream format to HLS, then the channel again: its stream URL follows the setting.
+ * The channel is the one on screen at the press; a Stop or another play while the setting is
+ * saved keeps what the user chose (replayFromRef).
+ */
 async function playAsHls(failedTitle: string): Promise<void> {
+  const from = recoveryPoint();
   try {
     const next = await rpc('settings.update', { patch: { streamFormat: 'm3u8' } });
     setSettingsCache(next);
@@ -171,18 +181,23 @@ async function playAsHls(failedTitle: string): Promise<void> {
     toast({ title: failedTitle, description: errorDescription(err), variant: 'error' });
     return;
   }
-  await replayFromRef();
+  await replayFromRef(from);
 }
 
-/** Imports the item's source again, then looks the item up anew (a moved stream gets its new URL). */
+/**
+ * Imports the item's source again, then looks the item up anew (a moved stream gets its new URL).
+ * An import takes a while: the item is the one on screen at the press, and a Stop or another play
+ * meanwhile cancels the replay.
+ */
 async function refreshSource(sourceId: string, failedTitle: string): Promise<void> {
+  const from = recoveryPoint();
   try {
     await rpc('sources.refresh', { id: sourceId });
   } catch (err) {
     toast({ title: failedTitle, description: errorDescription(err), variant: 'error' });
     return;
   }
-  await replayFromRef();
+  await replayFromRef(from);
 }
 
 export interface ErrorActionsProps {

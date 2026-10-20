@@ -81,6 +81,33 @@ describe('My List grid view', () => {
     expect(await screen.findByText('movie page')).toBeTruthy();
   });
 
+  it('after Delete, focus moves to the card in its place (or the one before), so the keys keep working', async () => {
+    const core = h.installCore(rpc, [ARRIVAL, DARK, HEAT]);
+    open();
+    await screen.findAllByTestId('mylist-card');
+    itemOf('Dark').focus();
+    press(itemOf('Dark'), 'Delete');
+    await waitFor(() => expect(h.titles(core.entries)).toEqual(['Arrival', 'Heat']));
+    // Heat took Dark's place.
+    await waitFor(() => expect(document.activeElement).toBe(itemOf('Heat')));
+    press(document.activeElement as HTMLElement, 'Delete');
+    await waitFor(() => expect(h.titles(core.entries)).toEqual(['Arrival']));
+    // The last card went: the one before it.
+    await waitFor(() => expect(document.activeElement).toBe(itemOf('Arrival')));
+    expect(itemOf('Arrival').tabIndex).toBe(0);
+  });
+
+  it('after the remove button, focus stays in the grid on the next card', async () => {
+    const core = h.installCore(rpc, [ARRIVAL, DARK, HEAT]);
+    open();
+    await screen.findAllByTestId('mylist-card');
+    const button = cardOf('Arrival').querySelector<HTMLButtonElement>('[data-action="remove"]')!;
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => expect(h.titles(core.entries)).toEqual(['Dark', 'Heat']));
+    await waitFor(() => expect(document.activeElement).toBe(itemOf('Dark')));
+  });
+
   it('moves the focused card with Alt+ArrowDown / Alt+ArrowUp and keeps focus on it', async () => {
     const core = h.installCore(rpc, [ARRIVAL, DARK, HEAT]);
     open();

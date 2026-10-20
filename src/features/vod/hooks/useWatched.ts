@@ -65,16 +65,26 @@ function watchedKeyHash(key: QueryKey): string {
  * big grid spent its frames in garbage collection.
  */
 export function useWatchedKeys(items: readonly WithRef[] | undefined): ReadonlySet<string> {
+  return useWatchedLookup(items).keys;
+}
+
+/**
+ * {@link useWatchedKeys}, and whether the lookup has answered (or failed): a list that leaves
+ * watched titles out itself (a Stalker rail with Hide watched) waits for it, so it never shows a
+ * title it has not checked.
+ */
+export function useWatchedLookup(items: readonly WithRef[] | undefined): { keys: ReadonlySet<string>; settled: boolean } {
   const refs = sharedRefs(items);
   const q = useRpcQuery('positions.watchedContains', { refs }, { enabled: refs.length > 0, staleTime: WATCHED_STALE_MS, queryKeyHashFn: watchedKeyHash });
+  const settled = refs.length === 0 || q.isSuccess || q.isError;
   const data = q.data;
-  if (!data) return NO_KEYS;
+  if (!data) return { keys: NO_KEYS, settled };
   let keys = keysByAnswer.get(data);
   if (!keys) {
     keys = new Set(data.map(itemKey));
     keysByAnswer.set(data, keys);
   }
-  return keys;
+  return { keys, settled };
 }
 
 /**

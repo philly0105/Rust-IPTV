@@ -6,7 +6,7 @@ import { ErrorState, SectionHeader } from '@/ui';
 import { useVodPage } from '../hooks/queries';
 import { useNearViewport } from '../hooks/useNearViewport';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { useWatchedKeys } from '../hooks/useWatched';
+import { useWatchedLookup } from '../hooks/useWatched';
 import { filterByRating, ratingFilterInCore, type GridQueryInput } from '../lib/paging';
 import { myListTarget } from './PosterCard';
 import { PosterRail, type RailCardProps } from './PosterRail';
@@ -62,24 +62,34 @@ function CatalogRailBody({
   exclude,
 }: Omit<CatalogRailProps, 'rootRef' | 'eager'> & { cardWidth: number }) {
   const page = useVodPage(input, 0);
-  // Stalker portals cannot filter by rating, so the rail drops what the grid would drop on its loaded pages.
-  const items = useMemo(() => {
+  // Stalker portals filter neither by rating nor by watched, so the rail drops what the grid
+  // would drop on its loaded pages: titles under the minimum rating and, with Hide watched, the
+  // watched ones. Those go before the rail takes its slice, once their lookup has answered.
+  const portal = !!input && !ratingFilterInCore(input.sourceKind);
+  const hideWatched = portal && input?.hideWatched === true;
+  const candidates = useMemo(() => {
     const list = page.data?.items ?? [];
-    const rated = input && !ratingFilterInCore(input.sourceKind) && input.minRating ? filterByRating(list, input.minRating) : list;
+    const rated = portal && input?.minRating ? filterByRating(list, input.minRating) : list;
     const kept = exclude ? rated.filter((i) => !sameRef(i.ref, exclude)) : rated;
-    return kept.slice(0, CATALOG_RAIL_LIMIT);
-  }, [page.data, input, exclude]);
-  const watched = useWatchedKeys(items);
+    return hideWatched ? kept : kept.slice(0, CATALOG_RAIL_LIMIT);
+  }, [page.data, portal, input?.minRating, exclude, hideWatched]);
+  const lookup = useWatchedLookup(candidates);
+  const watched = lookup.keys;
+  const items = useMemo(
+    () => (hideWatched ? candidates.filter((i) => !watched.has(itemKey(i.ref))).slice(0, CATALOG_RAIL_LIMIT) : candidates),
+    [candidates, hideWatched, watched],
+  );
+  const checking = hideWatched && !lookup.settled;
   // A retry clears the error state until the next answer.
   const [retrying, setRetrying] = useState(false);
-  if (page.isSuccess && items.length === 0) return null;
+  if (page.isSuccess && !checking && items.length === 0) return null;
   return (
     <PosterRail<VodItem | SeriesItem>
       title={title}
       count={count}
       seeAll={seeAll}
       items={items}
-      loading={!input || page.isPending || retrying}
+      loading={!input || page.isPending || retrying || checking}
       cardWidth={cardWidth}
       bleed
       empty={

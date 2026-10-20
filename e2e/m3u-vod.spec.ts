@@ -1,3 +1,5 @@
+import type { APIRequestContext } from '@playwright/test';
+
 import type { Download, Page as RpcPage, SeriesDetail, SeriesItem, Source, VodItem } from '../src/api/types';
 import { resetApp, rpc } from './helpers/api';
 import { MOCK } from './helpers/env';
@@ -34,18 +36,23 @@ const PLAYLIST = [
   '',
 ].join('\n');
 
+/** Downloads outlive their source, and a start for a title already downloaded answers with that row: drop this spec's file. */
+async function removeMovieDownloads(request: APIRequestContext): Promise<void> {
+  for (const d of await rpc<Download[]>(request, 'downloads.list')) {
+    if (d.url === MOVIE_URL) await rpc(request, 'downloads.remove', { id: d.id, deleteFile: true });
+  }
+}
+
 test.describe.serial('m3u movies and series', () => {
   let source: Source;
 
   test.beforeAll(async ({ request }) => {
     await resetApp(request);
+    await removeMovieDownloads(request);
   });
 
   test.afterAll(async ({ request }) => {
-    // Downloads outlive their source; take this spec's file away again.
-    for (const d of await rpc<Download[]>(request, 'downloads.list')) {
-      if (d.url === MOVIE_URL) await rpc(request, 'downloads.remove', { id: d.id, deleteFile: true });
-    }
+    await removeMovieDownloads(request);
   });
 
   test('episodes group into one series with two seasons, and none of them is a movie', async ({ page }) => {

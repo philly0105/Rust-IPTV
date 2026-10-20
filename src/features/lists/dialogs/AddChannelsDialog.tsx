@@ -210,9 +210,10 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
             );
           })}
         </ul>
-        {!q && browse.channels.length < browse.total ? (
+        {browse.channels.length < browse.total ? (
           <div className="flex justify-center pt-2">
-            <Button variant="ghost" size="sm" loading={browse.isFetching} onClick={() => setLimit((l) => l + PAGE)}>
+            {/* A page that failed is asked again first: the pages after it would not show. */}
+            <Button variant="ghost" size="sm" loading={browse.isFetching} onClick={() => (browse.isError ? browse.refetch() : setLimit((l) => l + PAGE))}>
               {t('showMore')}
             </Button>
           </div>

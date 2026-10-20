@@ -1178,17 +1178,27 @@ export function EpgGridPage() {
   // LG-01: Live's guide link names the channel playing there (`focus`): the guide opens at its row,
   // on now, once per link. Its number lets the paged list find the row in a few reads. Picking
   // another source, group or view takes `focus` out of the address (setQuery).
+  // A link is its source and channel, and it counts as handled once the channel is found: a lookup
+  // cut short (the address changed under it, or React ran the effect twice) or failed is made again
+  // when the address changes. An address without `focus` ends the link, so a later link to the same
+  // channel opens there too.
   const focusParam = params.get('focus');
   const handledFocus = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusParam || !sourceId) return;
-    if (handledFocus.current === focusParam) return;
-    handledFocus.current = focusParam;
+    if (!focusParam) {
+      handledFocus.current = null;
+      return;
+    }
+    if (!sourceId) return;
+    const link = `${sourceId}|${focusParam}`;
+    if (handledFocus.current === link) return;
     const ref: ItemRef = { sourceId, contentType: 'live', itemId: focusParam };
     let cancelled = false;
     rpc('catalog.item', { ref })
       .then((item) => {
-        if (cancelled || !item || !('isRadio' in item)) return;
+        if (cancelled) return;
+        handledFocus.current = link;
+        if (!item || !('isRadio' in item)) return;
         const ch = item as Channel;
         setReveal({ key: itemKey(ref), ref, number: ch.number, time: Date.now(), channelName: displayChannelName(ch.name, prefs.stripCountryPrefix), categoryId, quiet: true });
       })

@@ -138,4 +138,33 @@ describe('Add channels on a list', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /^Sports 3,/ }));
     await waitFor(() => expect(core.lists[0]!.items.map((i) => i.ref.itemId)).toEqual(['n1']));
   });
+
+  it('searches inside the group picked, and "Show more" pages its matches', { timeout: 20_000 }, async () => {
+    const many = Array.from({ length: 150 }, (_, i) => h.channel(`m${i}`, `Match ${i}`, { categoryName: 'Sports' }));
+    rpc.handlers['catalog.channels'] = (raw) => {
+      const a = raw as { categoryId?: string; query: PageQuery };
+      const q = a.query.search?.toLowerCase();
+      const rows = (a.categoryId === 'sports' ? many : [...NEWS, ...many]).filter((c) => !q || c.name.toLowerCase().includes(q));
+      return { items: rows.slice(a.query.offset, a.query.offset + a.query.limit), total: rows.length, offset: a.query.offset, limit: a.query.limit };
+    };
+    rpc.handlers['catalog.search'] = () => ({ live: [NEWS[0]!], movies: [], series: [] });
+    h.installCore(rpc, [h.coreList('L1', 'Weekend', [])]);
+    renderHost();
+    act(() => openAddChannels('L1'));
+    const dialog = await screen.findByTestId('add-channels');
+    await within(dialog).findByRole('button', { name: /^News One,/ });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));
+    fireEvent.click(await screen.findByRole('option', { name: /^Sports/ }));
+    fireEvent.change(within(dialog).getByRole('searchbox', { name: 'Search channels' }), { target: { value: 'match' } });
+    await waitFor(() =>
+      expect(rpc.callsOf('catalog.channels')).toContainEqual({ sourceId: 'src1', categoryId: 'sports', query: { offset: 0, limit: 60, search: 'match' } }),
+    );
+    // The group's matches, not the catalog search's News One.
+    await within(dialog).findByRole('button', { name: /^Match 59,/ });
+    expect(within(dialog).queryByRole('button', { name: /^News One,/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Show more' }));
+    await within(dialog).findByRole('button', { name: /^Match 119,/ });
+    expect(rpc.callsOf('catalog.channels')).toContainEqual({ sourceId: 'src1', categoryId: 'sports', query: { offset: 60, limit: 60, search: 'match' } });
+    expect(rpc.callsOf('catalog.search')).toHaveLength(0);
+  });
 });

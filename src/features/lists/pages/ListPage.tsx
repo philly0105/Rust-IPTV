@@ -553,6 +553,7 @@ export function ListPage() {
             kind="live"
             last={idleCard}
             highlighted={!!cursorChannel}
+            locked={locks.channelLocked(idleCard?.channel)}
             now={now}
             stripPrefix={prefs.stripCountryPrefix}
             epgOffsetMinutes={prefs.epgOffsetMinutes}

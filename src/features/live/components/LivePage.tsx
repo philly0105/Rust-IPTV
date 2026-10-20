@@ -685,6 +685,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       kind={isRadio ? 'radio' : 'live'}
       last={idleCard}
       highlighted={!isRadio && !!cursorChannel}
+      locked={locks.channelLocked(idleCard?.channel)}
       now={now}
       stripPrefix={prefs.stripCountryPrefix}
       epgOffsetMinutes={prefs.epgOffsetMinutes}

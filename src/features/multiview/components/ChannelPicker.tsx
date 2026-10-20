@@ -26,10 +26,8 @@ export interface ChannelPickerProps {
   onClose(): void;
 }
 
-/** Channels per page when browsing a source; "Show more" adds another page. */
+/** Channels per page when browsing a source or a group's search; "Show more" adds another page. */
 export const PAGE_SIZE = 60;
-/** Most results a search asks for. */
-export const SEARCH_LIMIT = 60;
 const ALL = '';
 
 /** The source the picker opened on last time (this session). */
@@ -114,7 +112,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
 
   const searching = q.length > 0;
   const sections = useBrowseSections(source, open);
-  const active = useChannelBrowse({ enabled: open, sourceId: source, scope, query: q, limit: searching ? SEARCH_LIMIT : limit });
+  const active = useChannelBrowse({ enabled: open, sourceId: source, scope, query: q, limit });
   const { channels, total } = active;
   const sourceName = (id: string) => sources.find((s) => s.id === id)?.name ?? '';
 
@@ -283,9 +281,10 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
             );
           })}
         </ul>
-        {!searching && channels.length < total ? (
+        {channels.length < total ? (
           <div className="flex justify-center pt-2">
-            <Button variant="ghost" size="sm" loading={active.isFetching} onClick={() => setLimit((l) => l + PAGE_SIZE)}>
+            {/* A page that failed is asked again first: the pages after it would not show. */}
+            <Button variant="ghost" size="sm" loading={active.isFetching} onClick={() => (active.isError ? active.refetch() : setLimit((l) => l + PAGE_SIZE))}>
               {t('pickerShowMore')}
             </Button>
           </div>

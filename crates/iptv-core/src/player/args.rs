@@ -279,6 +279,16 @@ pub const LIVE_TIMESHIFT_OPTIONS: &[(&str, &str)] = &[
     ("force-seekable", "yes"),
 ];
 
+/// Per-file mpv options for movies and episodes: read far ahead, and after a
+/// stall refill a few seconds before playing again, so a stream that arrives
+/// barely faster than its bitrate pauses rarely instead of every few seconds.
+pub const VOD_BUFFER_OPTIONS: &[(&str, &str)] = &[
+    ("cache", "yes"),
+    ("cache-pause-wait", "5"),
+    ("demuxer-readahead-secs", "120"),
+    ("demuxer-max-bytes", "500MiB"),
+];
+
 /// Per-file options for `loadfile` in embedded mode: `force-media-title`,
 /// `user-agent`, `referrer`, `http-header-fields`, and `start=+<seconds>`
 /// for a resume position (live sources never seek).
@@ -324,6 +334,10 @@ pub fn loadfile_options(source: &PlayerSource) -> serde_json::Map<String, serde_
             opts.insert((*k).into(), Value::String((*v).to_string()));
         }
         opts.insert("keep-open".into(), Value::String("no".into()));
+    } else {
+        for (k, v) in VOD_BUFFER_OPTIONS {
+            opts.insert((*k).into(), Value::String((*v).to_string()));
+        }
     }
     opts
 }
@@ -367,5 +381,13 @@ mod loadfile_tests {
     fn live_items_end_instead_of_pausing_at_the_end() {
         assert_eq!(loadfile_options(&source(true))["keep-open"], json!("no"));
         assert!(!loadfile_options(&source(false)).contains_key("keep-open"));
+    }
+
+    /// Movies and episodes refill a few seconds after a stall; live keeps zapping fast.
+    #[test]
+    fn vod_items_buffer_ahead_and_live_items_do_not() {
+        assert_eq!(loadfile_options(&source(false))["cache-pause-wait"], json!("5"));
+        assert_eq!(loadfile_options(&source(false))["demuxer-readahead-secs"], json!("120"));
+        assert!(!loadfile_options(&source(true)).contains_key("cache-pause-wait"));
     }
 }

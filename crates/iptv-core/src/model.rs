@@ -808,12 +808,17 @@ pub struct PlayerSource {
     pub item_ref: Option<ItemRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub episode_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Whole seconds; the UI may send the player position as a fraction (8.967).
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_whole_seconds")]
     pub resume_seconds: Option<i64>,
     #[serde(default)]
     pub is_live: bool,
     #[serde(default)]
     pub is_radio: bool,
+}
+
+fn de_opt_whole_seconds<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+    Ok(Option::<f64>::deserialize(d)?.filter(|s| s.is_finite()).map(|s| s.trunc() as i64))
 }
 
 /// Configured playback backend.
@@ -1665,6 +1670,18 @@ pub struct WatchlistEntry {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn player_source_takes_a_fractional_resume_position() {
+        let src: super::PlayerSource =
+            serde_json::from_value(serde_json::json!({"url": "http://h/x", "kind": "direct", "title": "X", "resumeSeconds": 8.967}))
+                .unwrap();
+        assert_eq!(src.resume_seconds, Some(8));
+        let src: super::PlayerSource =
+            serde_json::from_value(serde_json::json!({"url": "http://h/x", "kind": "direct", "title": "X", "resumeSeconds": 300}))
+                .unwrap();
+        assert_eq!(src.resume_seconds, Some(300));
+    }
+
     use super::*;
 
     #[test]

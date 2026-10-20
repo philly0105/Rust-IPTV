@@ -42,7 +42,7 @@ Amber marks, and only marks: the primary action (one per view), focus, the activ
 | --- | --- |
 | `text-accent` (+ `-hover`, `-pressed`) | the text tone: links (`TEXT_LINK`), accent text, the active nav icon. Deep (#8f4f00) in light so it reads as text |
 | `bg-accent-mark`, `border-accent-mark` | the mark tone, for indicators that are not text: the tuning tick, progress fills (`ProgressBar`), tab underlines, the radio dot, the on switch's and the checked checkbox's outline, slider fills, drop markers, the guide's airing foot. The accent itself in dark; a mid shade in light (#c26900 for amber), 3:1 on every surface and the selected fill, because the deep text tone drawn as a bar reads as brown. A bar, tick or dot still written `bg-accent` moves to it when its file is next touched |
-| `bg-accent-solid text-accent-solid-fg` (+ `hover:bg-accent-solid-hover`, `active:bg-accent-solid-pressed`) | every filled accent control: the primary Button, the on Switch, checked Checkbox, CTA pills in the player. Bright amber with ink text in both themes |
+| `bg-accent-solid text-accent-solid-fg` (+ `hover:bg-accent-solid-hover`, `active:bg-accent-solid-pressed`) | every filled accent control: the primary Button, the on Switch, checked Checkbox, CTA pills in the player. The bright dial tone with ink text in both themes, for every accent |
 | `ring-focus`, `outline-focus` | focus styles. Never `ring-accent` |
 
 A chosen filter chip is inverted (`bg-fg text-bg`), not amber. A favourite is a state too: its star is neutral (`fill-current text-fg-subtle` inline, `text-fg` on a pressed toggle), never amber and never `text-warning`, which is a status tone (olive in light). On artwork the star beside a rating takes the glass accent.

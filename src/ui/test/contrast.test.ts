@@ -130,6 +130,20 @@ describe('accent and OLED blocks', () => {
     for (const k of ACCENT_KEYS) expect(OLED[k], `OLED must not set --color-${k}`).toBeUndefined();
   });
 
+  // Light theme review: amber, lime and coral filled in the bright tone with ink text while teal,
+  // violet, rose and sky filled in their deep shade with white text, so the swatch row (and the
+  // primary button) changed model with the accent. One model now: the bright fill in both themes.
+  it('the solid fill family is the bright dial tone with ink text in light as in dark, for every accent', () => {
+    const SOLID = ['accent-solid', 'accent-solid-hover', 'accent-solid-pressed', 'accent-solid-fg'] as const;
+    for (const accent of ACCENTS) {
+      const dark = { ...BASE.dark, ...accentBlock(accent, 'dark') };
+      const light = { ...BASE.light, ...accentBlock(accent, 'light') };
+      for (const k of SOLID) expect(light[k], `${accent} light --color-${k}`).toEqual(dark[k]);
+      // The ink is the dark end: the fill is the light one, text on it is dark.
+      expect(luminance(light['accent-solid-fg']!), `${accent} ink`).toBeLessThan(luminance(light['accent-solid']!));
+    }
+  });
+
   it('covers 21 combinations', () => {
     expect(Object.keys(THEMES)).toHaveLength(ACCENTS.length * 3);
   });

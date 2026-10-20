@@ -153,12 +153,15 @@ needs source headers or would be mixed content.
    up to 32 MiB ahead of the player, so the provider's connection keeps
    flowing while `<video>` pauses its own reads (it buffers about ten seconds
    of a progressive file). When that connection drops before the body is
-   complete and the server takes byte ranges (206, or `Accept-Ranges: bytes`),
-   the reader asks for the rest (`Range: bytes=<offset>-<end>`, with `If-Range`
-   from a strong ETag or Last-Modified, redirects followed again from the
-   requested URL), checks the 206 `Content-Range`, and carries on in the same
-   response; three failed tries in a row end it. The player never sees the
-   drop, and the log notes each resume with the host. The reader stops as soon
+   complete, the server takes byte ranges (206, or `Accept-Ranges: bytes`)
+   and its answer carried a strong ETag or a Last-Modified date, the reader
+   asks for the rest (`Range: bytes=<offset>-<end>`, with that validator as
+   `If-Range`, redirects followed again from the requested URL), checks the
+   206 `Content-Range`, and carries on in the same response; three failed
+   tries in a row end it. The player never sees the drop, and the log notes
+   each resume with the host. Without a validator the reader cannot tell the
+   same file from a replacement of the same length, so it does not resume
+   and the drop reaches the player. The reader stops as soon
    as the client lets go of the response, which frees the provider's
    connection. Bodies without a length (live MPEG-TS) pass through as they
    come.

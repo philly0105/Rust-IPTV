@@ -8,11 +8,14 @@
 //! playback. So a reader task keeps up to [`READAHEAD_BYTES`] in memory ahead
 //! of the player.
 //!
-//! When the upstream connection drops before the body is complete and the
-//! server takes byte ranges, the reader asks for the rest with a Range request
-//! (with `If-Range`, so a file that changed is never spliced in) and carries
-//! on in the same response, up to [`RESUME_ATTEMPTS`] failed tries in a row.
-//! The player never sees the drop.
+//! When the upstream connection drops before the body is complete, the
+//! server takes byte ranges and its first answer carried a validator (a
+//! strong ETag, else Last-Modified), the reader asks for the rest with a Range
+//! request (with that validator as `If-Range`, so a file that changed is
+//! never spliced in) and carries on in the same response, up to
+//! [`RESUME_ATTEMPTS`] failed tries in a row. The player never sees the drop.
+//! Without a validator a replacement of the same length could not be told
+//! apart, so the drop reaches the player.
 //!
 //! The reader stops as soon as the player lets go of the response (a seek,
 //! another item), which frees the provider's connection at once: many IPTV
@@ -106,11 +109,12 @@ pub(crate) struct Resume {
     /// provider that hands out expiring links gives a fresh one.
     url: Url,
     /// `If-Range`: a strong ETag, else Last-Modified.
-    validator: Option<HeaderValue>,
+    validator: HeaderValue,
 }
 
 impl Resume {
-    /// `None` unless the server takes byte ranges for this body.
+    /// `None` unless the server takes byte ranges for this body and gave a
+    /// validator for `If-Range`.
     pub(crate) fn new(
         upstream: Upstream,
         url: Url,
@@ -126,7 +130,7 @@ impl Resume {
             .get(header::ETAG)
             .filter(|v| !v.as_bytes().starts_with(b"W/"))
             .or_else(|| headers.get(header::LAST_MODIFIED))
-            .cloned();
+            .cloned()?;
         Some(Self {
             upstream,
             url,
@@ -148,9 +152,7 @@ impl Resume {
         let range = HeaderValue::from_str(&range).map_err(|e| e.to_string())?;
         let mut headers = HeaderMap::new();
         headers.insert(header::RANGE, range);
-        if let Some(v) = &self.validator {
-            headers.insert(header::IF_RANGE, v.clone());
-        }
+        headers.insert(header::IF_RANGE, self.validator.clone());
         let (resp, _) = self
             .upstream
             .fetch(&Method::GET, self.url.clone(), &headers, true)

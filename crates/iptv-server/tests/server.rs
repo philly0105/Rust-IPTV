@@ -525,12 +525,14 @@ async fn proxy_passes_range_through() {
     assert_eq!(r.headers()[header::CONTENT_LENGTH], "1000");
 }
 
-type RangeLog = Arc<std::sync::Mutex<Vec<Option<String>>>>;
+/// The Range and If-Range headers of every request.
+type RangeLog = Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
 
 /// A 1000-byte movie whose first answer drops after 300 bytes; later answers
 /// honour Range. `ranges: false` leaves `Accept-Ranges` out of the first
-/// answer. Returns the base URL and the Range header of every request.
-async fn spawn_dropping_movie(ranges: bool) -> (String, RangeLog) {
+/// answer, and `etag` is its ETag (none when `None`). Returns the base URL
+/// and the Range and If-Range headers of every request.
+async fn spawn_dropping_movie(ranges: bool, etag: Option<&'static str>) -> (String, RangeLog) {
     use futures::StreamExt;
     let log = RangeLog::default();
     let seen = Arc::clone(&log);
@@ -539,11 +541,17 @@ async fn spawn_dropping_movie(ranges: bool) -> (String, RangeLog) {
         get(move |req: Request| {
             let seen = Arc::clone(&seen);
             async move {
-                let range = req.headers().get(header::RANGE);
-                let range = range.and_then(|v| v.to_str().ok()).map(str::to_owned);
+                // Borrow the headers, not the request: its body is not Sync,
+                // and the handler's future has to be Send.
+                let headers = req.headers();
+                let text = |name: header::HeaderName| {
+                    let value = headers.get(name);
+                    value.and_then(|v| v.to_str().ok()).map(str::to_owned)
+                };
+                let asked = (text(header::RANGE), text(header::IF_RANGE));
                 let first = {
                     let mut seen = seen.lock().unwrap();
-                    seen.push(range);
+                    seen.push(asked);
                     seen.len() == 1
                 };
                 if !first {
@@ -563,6 +571,9 @@ async fn spawn_dropping_movie(ranges: bool) -> (String, RangeLog) {
                 if ranges {
                     res = res.header(header::ACCEPT_RANGES, "bytes");
                 }
+                if let Some(tag) = etag {
+                    res = res.header(header::ETAG, tag);
+                }
                 res.body(body).unwrap()
             }
         }),
@@ -577,7 +588,7 @@ async fn spawn_dropping_movie(ranges: bool) -> (String, RangeLog) {
 
 #[tokio::test]
 async fn proxy_resumes_a_movie_whose_connection_drops() {
-    let (stub, ranges) = spawn_dropping_movie(true).await;
+    let (stub, ranges) = spawn_dropping_movie(true, Some("\"v1\"")).await;
     let h = start().await;
     h.add_source(
         "x-1",
@@ -594,13 +605,36 @@ async fn proxy_resumes_a_movie_whose_connection_drops() {
     assert_eq!(r.bytes().await.unwrap().as_ref(), bytes_1000().as_slice());
     let ranges = ranges.lock().unwrap().clone();
     assert_eq!(ranges.len(), 2, "{ranges:?}");
-    assert_eq!(ranges[0], None);
-    assert_eq!(ranges[1].as_deref(), Some("bytes=300-999"));
+    assert_eq!(ranges[0], (None, None));
+    assert_eq!(ranges[1].0.as_deref(), Some("bytes=300-999"));
+    // If-Range: a file that changed is never spliced in.
+    assert_eq!(ranges[1].1.as_deref(), Some("\"v1\""));
+}
+
+/// GPT review (resume-without-validator): without an ETag or Last-Modified
+/// the proxy cannot tell the same file from a replacement of the same
+/// length, so a dropped connection is passed on instead of resumed.
+#[tokio::test]
+async fn proxy_does_not_resume_without_a_validator() {
+    let (stub, ranges) = spawn_dropping_movie(true, None).await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let url = h.proxy_url(&format!("{stub}/movie/u/p/1.mp4"), Some("x-1"));
+
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert!(r.bytes().await.is_err());
+    assert_eq!(ranges.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn proxy_passes_a_drop_on_when_the_server_takes_no_ranges() {
-    let (stub, ranges) = spawn_dropping_movie(false).await;
+    let (stub, ranges) = spawn_dropping_movie(false, Some("\"v1\"")).await;
     let h = start().await;
     h.add_source(
         "x-1",

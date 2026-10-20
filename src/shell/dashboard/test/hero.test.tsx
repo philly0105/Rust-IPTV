@@ -18,7 +18,7 @@ vi.mock('@/api/transport', async (orig) => ({
 }));
 
 const { queryClient } = await import('@/api/query');
-const { DIAL_TICK_MS, HERO_IDLE_ROUNDS, HeroCarousel, dialFill } = await import('../HeroCarousel');
+const { DIAL_TICK_MS, HERO_IDLE_ROUNDS, HERO_SWIPE_PX, HeroCarousel, dialFill, swipeStep } = await import('../HeroCarousel');
 const { CardMenuContext } = await import('../cards');
 type CardMenuRequest = import('../cards').CardMenuRequest;
 const { buildHeroSlides, wrapIndex, HERO_MAX_CONTINUE, HERO_MAX_SLIDES } = await import('../heroSlides');
@@ -385,6 +385,62 @@ describe('HeroCarousel', () => {
     expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
     // Roving tab stop: only the selected tab is in the tab order.
     expect(screen.getAllByRole('tab').filter((t) => t.tabIndex === 0)).toEqual([selectedTab()]);
+  });
+
+  it('a sideways swipe turns the slide on a touch screen; a short one, a scroll and a mouse drag do not', () => {
+    const { hero } = renderHero();
+    const swipe = (from: number, to: number, { type = 'touch', dy = 0 } = {}) => {
+      fireEvent.pointerDown(hero, { pointerId: 1, pointerType: type, isPrimary: true, clientX: from, clientY: 100 });
+      fireEvent.pointerUp(hero, { pointerId: 1, pointerType: type, isPrimary: true, clientX: to, clientY: 100 + dy });
+    };
+    const shown = () => selectedTab().getAttribute('aria-label');
+    swipe(300, 200);
+    expect(shown()).toBe('Title b');
+    swipe(200, 300);
+    expect(shown()).toBe('Title a');
+    // Wraps like previous and next.
+    swipe(200, 300);
+    expect(shown()).toBe('Title c');
+    swipe(300, 300 - HERO_SWIPE_PX + 1);
+    swipe(300, 200, { dy: 160 });
+    swipe(300, 200, { type: 'mouse' });
+    expect(shown()).toBe('Title c');
+    // Vertical scrolling and pinch zoom stay with the browser.
+    expect(hero.className).toContain('[touch-action:pan-y_pinch-zoom]');
+  });
+
+  it('swipes the other way round in RTL', () => {
+    expect(swipeStep(-100, 0, false)).toBe(1);
+    expect(swipeStep(100, 0, false)).toBe(-1);
+    expect(swipeStep(100, 0, true)).toBe(1);
+    expect(swipeStep(-100, 0, true)).toBe(-1);
+    expect(swipeStep(-100, 80, false)).toBe(0);
+    expect(swipeStep(-(HERO_SWIPE_PX - 1), 0, false)).toBe(0);
+  });
+
+  it('a swipe that ends on Play does not press it; the next tap does', () => {
+    vi.useFakeTimers();
+    const { hero, onPlay } = renderHero();
+    const play = within(screen.getByTestId('hero-slide')).getByRole('button', { name: 'Play' });
+    fireEvent.pointerDown(play, { pointerId: 2, pointerType: 'touch', isPrimary: true, clientX: 300, clientY: 100 });
+    fireEvent.pointerUp(play, { pointerId: 2, pointerType: 'touch', isPrimary: true, clientX: 150, clientY: 100 });
+    fireEvent.click(play);
+    expect(onPlay).not.toHaveBeenCalled();
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
+    tick(1000);
+    const next = within(hero).getByTestId('hero-slide');
+    fireEvent.click(within(next).getByRole('button', { name: 'Play' }));
+    expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('under a coarse pointer the ticks and the pill buttons are 44 px targets; the drawn dot stays small', () => {
+    renderHero();
+    const targets = [...screen.getAllByRole('tab'), screen.getByTestId('hero-rotation'), screen.getByTestId('hero-next')];
+    for (const el of targets) {
+      expect(el.className).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
+      expect(el.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+    }
+    expect(screen.getAllByRole('tab')[1]!.querySelector('span')!.className).toContain('w-1.5');
   });
 
   it('clicking a tick shows that slide', () => {

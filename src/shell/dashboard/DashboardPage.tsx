@@ -31,7 +31,7 @@ import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { formatRating } from '@/features/vod/lib/rating';
 import { isDesktop, RpcError, type RpcResult } from '@/api/transport';
 import { snapshotTitle } from '@/lib/title';
-import { Badge, EmptyState, ErrorState, useToast, errorDescription } from '@/ui';
+import { Badge, EmptyState, ErrorState, useToast, errorDescription, whenIdle } from '@/ui';
 
 import { useOffline } from '../connection';
 import { sourceBasePath, sourceHomePath } from '../railLinks';
@@ -46,6 +46,7 @@ import { DashboardRail, type RailCardProps } from './DashboardRail';
 import { HeroCarousel } from './HeroCarousel';
 import { HeroSkeleton } from './HeroSkeleton';
 import { buildHeroSlides, titleEndsWithYear, type HeroSlide } from './heroSlides';
+import { useNearView } from './nearView';
 import { minutesLeft, watchedFraction } from './progress';
 import { readRailEmpty, writeRailEmpty } from './railEmpty';
 
@@ -147,18 +148,20 @@ export const ON_NOW_LIMIT = 24;
 const NOW_NEXT_LIMIT = 48;
 
 /**
- * The channels Home asks the guide about, in order: live favourites, then recently watched
- * channels, then the first channels of the most used source (so a user with no favourites,
- * an M3U user above all, still sees live TV on Home: SH-home-empty-m3u, CB-PROGRAM-ART). One
- * entry per channel; radio stays out (stations rarely have a guide). Exported for tests.
+ * The channels On now asks the guide about, in order: recently watched channels, then the first
+ * channels of the most used source (so a user with nothing watched yet, an M3U user above all,
+ * still sees live TV on Home: SH-home-empty-m3u, CB-PROGRAM-ART). The channels in `skip` stay
+ * out: those another rail on Home already shows (the live favourites, whose rail sits just below
+ * with the same programmes, and recent channels while their rail is on). One entry per channel;
+ * radio stays out (stations rarely have a guide). Exported for tests.
  */
 export function liveCandidates(
-  favorites: readonly FavoriteEntry[],
+  skip: readonly { ref: ItemRef }[],
   recent: readonly RecentEntry[],
   fill: readonly Channel[],
   limit = NOW_NEXT_LIMIT,
 ): LiveCandidate[] {
-  const seen = new Set<string>();
+  const seen = new Set<string>(skip.map((e) => itemKey(e.ref)));
   const out: LiveCandidate[] = [];
   const add = (c: LiveCandidate) => {
     if (out.length >= limit || c.ref.contentType !== 'live') return;
@@ -167,7 +170,7 @@ export function liveCandidates(
     seen.add(key);
     out.push(c);
   };
-  for (const e of [...favorites, ...recent]) {
+  for (const e of recent) {
     add({ ref: e.ref, name: e.snapshot.title, logoUrl: e.snapshot.posterUrl, channel: snapshotChannel(e.ref, e.snapshot) });
   }
   for (const ch of fill) add({ ref: ch.ref, name: ch.name, logoUrl: ch.logoUrl, channel: ch });
@@ -317,9 +320,18 @@ function DashboardBody() {
   const fillWanted = hasSources && liveOn && !!topLiveSource;
   const fillSettled = !fillWanted || fill.isSuccess || fill.isError;
   const fillChannels = useMemo(() => (fill.data?.items ?? []).filter((c) => !c.isRadio && !removingSources.has(c.ref.sourceId)), [fill.data, removingSources]);
+  // On now leaves out the channels another live rail already shows: the live favourites (On now
+  // shares their switch, so their rail is on too) and, while its rail is on, recent channels.
+  // Otherwise it opened with the very cards of the rails below, in the same order.
+  const recentLiveOn = show('recentlyWatchedLive');
   const candidates = useMemo(
-    () => liveCandidates(liveOn ? liveFavorites : [], liveOn ? recentLive : [], liveOn ? fillChannels : []),
-    [liveOn, liveFavorites, recentLive, fillChannels],
+    () =>
+      liveOn
+        ? recentLiveOn
+          ? liveCandidates([...liveFavorites, ...recentLive], [], fillChannels)
+          : liveCandidates(liveFavorites, recentLive, fillChannels)
+        : [],
+    [liveOn, recentLiveOn, liveFavorites, recentLive, fillChannels],
   );
   // The favourites rail shows its programmes from the same answer, so it is in the list first.
   const nowRefs = useMemo(() => {
@@ -749,10 +761,14 @@ const WIDE_CARD_PHONE = 240;
  */
 const continueActions = () => import('./continueActions');
 
-/** The detail page's backdrop of a resumed movie or series (a local catalog read, shared with the hero's query). */
-function useBackdrop(ref: ItemRef): string | undefined {
+/**
+ * The detail page's backdrop of a resumed movie or series (a local catalog read, shared with the
+ * hero's query), read once the card is near the view: until then, and while it loads, the card
+ * draws its poster (SH-home-rpc-fanout).
+ */
+function useBackdrop(ref: ItemRef, near: boolean): string | undefined {
   const vod = ref.contentType === 'movie' || ref.contentType === 'series';
-  const item = useRpcQuery('catalog.item', { ref }, { enabled: vod, staleTime: 10 * 60_000 });
+  const item = useRpcQuery('catalog.item', { ref }, { enabled: vod && near, staleTime: 10 * 60_000 });
   const d = item.data as { backdropUrl?: string } | undefined;
   return d && 'backdropUrl' in d ? d.backdropUrl : undefined;
 }
@@ -774,7 +790,8 @@ function continueMenu(p: PlaybackPosition, title: string, navigate: NavigateFunc
 function ContinueItem({ p, rail, play, saved }: { p: PlaybackPosition; rail: RailCardProps; play: PlayFn; saved: boolean }) {
   const { t, i18n } = useTranslation('shell');
   const navigate = useNavigate();
-  const backdropUrl = useBackdrop(p.ref);
+  const [card, setCard] = useState<HTMLElement | null>(null);
+  const backdropUrl = useBackdrop(p.ref, useNearView(card));
   // L2-visual-3: a snapshot saved before the player stored the base title still carries
   // the provider's tags and year; show (and save to My List) what the detail page shows.
   const base = p.snapshot?.title ? snapshotTitle(p.ref, p.snapshot.title) : undefined;
@@ -784,7 +801,7 @@ function ContinueItem({ p, rail, play, saved }: { p: PlaybackPosition; rail: Rai
   const menu = continueMenu(p, title, navigate, t);
   return (
     <ContinueCard
-      rail={rail}
+      rail={{ ...rail, ref: setCard }}
       title={title}
       episode={series ? p.snapshot?.subtitle : undefined}
       left={left !== undefined ? t('minutesLeft', { count: left }) : !series ? p.snapshot?.subtitle : undefined}
@@ -831,7 +848,7 @@ const ContinueWatchingRail = memo(function ContinueWatchingRail({
   );
 });
 
-/** What is on air now on the user's channels, with the programme's picture (CB-PROGRAM-ART). */
+/** What is on air now, with the programme's picture (CB-PROGRAM-ART), on channels no other live rail below shows (liveCandidates). */
 const OnNowRail = memo(function OnNowRail({
   items,
   loading,
@@ -1136,15 +1153,23 @@ export function trendingMatch(b: TmdbBrief, found: CatalogSearchResult | undefin
  * A trending title, looked up in the local catalog. Found, it is an ordinary title card: it opens
  * the detail page and takes My List. Not found (or still looking), it stays a search, and says
  * so on hover and focus: a portal's catalog is only searched live, on the search page.
+ *
+ * The lookup waits until the card is near the view and the page has gone idle once (`ready`, from
+ * the rail), so a cold Home does not send one search per trending title (up to 40) ahead of its
+ * own reads, and a `sources.changed` searches again only for the cards on screen
+ * (SH-home-rpc-fanout).
  */
-function TrendingCard({ b, rail, sourceById }: { b: TmdbBrief; rail: RailCardProps; sourceById: ReadonlyMap<string, Source> }) {
+function TrendingCard({ b, rail, sourceById, ready }: { b: TmdbBrief; rail: RailCardProps; sourceById: ReadonlyMap<string, Source>; ready: boolean }) {
   const { t, i18n } = useTranslation('shell');
+  const [card, setCard] = useState<HTMLElement | null>(null);
+  const near = useNearView(card);
   const found = useRpcQuery(
     'catalog.search',
     { query: b.title, contentTypes: [b.mediaType === 'tv' ? 'series' : 'movie'], limit: 8 },
     // As long as the trending list itself: neither changes within the hour.
-    { staleTime: 60 * 60_000 },
+    { enabled: ready && near, staleTime: 60 * 60_000 },
   );
+  const cardRail: RailCardProps = { ...rail, ref: setCard };
   const match = trendingMatch(b, found.data);
   const rating = b.rating ? formatRating(b.rating, i18n.language) : undefined;
   const badge = rating ? <Badge variant="neutral" className="bg-glass-strong text-on-glass">{rating}</Badge> : undefined;
@@ -1154,7 +1179,7 @@ function TrendingCard({ b, rail, sourceById }: { b: TmdbBrief; rail: RailCardPro
     const year = match.year ?? b.year;
     return (
       <PosterCard
-        rail={rail}
+        rail={cardRail}
         title={title}
         subtitle={joinList([sourceName, !titleEndsWithYear(title, year) && year], i18n.language)}
         posterUrl={match.posterUrl ?? b.posterUrl}
@@ -1168,7 +1193,7 @@ function TrendingCard({ b, rail, sourceById }: { b: TmdbBrief; rail: RailCardPro
   }
   return (
     <PosterCard
-      rail={rail}
+      rail={cardRail}
       title={b.title}
       subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
       posterUrl={b.posterUrl}
@@ -1189,6 +1214,9 @@ const TrendingRail = memo(function TrendingRail({
   sourceById,
 }: RailQueryProps & { items: readonly TmdbBrief[] | undefined; sourceById: ReadonlyMap<string, Source> }) {
   const { t } = useTranslation('shell');
+  // The catalog lookups start once the page has gone idle after the rail appeared.
+  const [ready, setReady] = useState(false);
+  useEffect(() => whenIdle(() => setReady(true)), []);
   return (
     <DashboardRail<TmdbBrief>
       id="tmdb-trending"
@@ -1201,7 +1229,7 @@ const TrendingRail = memo(function TrendingRail({
       getKey={trendingKey}
       cardWidth={168}
       skeletonAspect={2 / 3}
-      renderCard={(b, rail) => <TrendingCard b={b} rail={rail} sourceById={sourceById} />}
+      renderCard={(b, rail) => <TrendingCard b={b} rail={rail} sourceById={sourceById} ready={ready} />}
     />
   );
 });

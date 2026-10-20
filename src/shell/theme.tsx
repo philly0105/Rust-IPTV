@@ -323,28 +323,34 @@ export function useReducedMotion(): boolean {
   return useSyncExternalStore(subscribeMotion, () => mql(MOTION_Q)?.matches ?? false, () => false);
 }
 
-let windowTheme: ResolvedTheme | null = null;
+/** What the window was last asked for: a theme, null (follow the OS), or undefined (nothing yet). */
+let windowTheme: ResolvedTheme | null | undefined;
 
 /**
  * Desktop: the native title bar follows the app's theme, not the OS app mode (SH-titlebar-theme).
  * Windows 11 ships in light app mode, so the default dark app sat under a white title bar, and a
- * light app on a dark OS under a black one. Asks only when the resolved theme changes; a refusal
+ * light app on a dark OS under a black one. Asks only when the wanted theme changes; a refusal
  * (an older shell without the window theme permission) leaves the bar as the OS draws it.
+ *
+ * `theme` is the user's choice with System passed as null, which tells the window to follow the
+ * OS again. Pinning System to the theme it resolved to would fix the webview's
+ * prefers-color-scheme too (on macOS and Linux the theme is app-wide), so System would stop
+ * following the OS until a restart, and going from Light back to System would stay light.
  */
-export function syncWindowTheme(resolved: ResolvedTheme): void {
-  if (!isDesktop || windowTheme === resolved) return;
-  windowTheme = resolved;
+export function syncWindowTheme(theme: ResolvedTheme | null): void {
+  if (!isDesktop || windowTheme === theme) return;
+  windowTheme = theme;
   void import('@tauri-apps/api/window')
-    .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(resolved))
+    .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme))
     .catch(() => {
       // Not in Tauri after all, or no permission: try again on the next change.
-      windowTheme = null;
+      windowTheme = undefined;
     });
 }
 
 /** Test hook. */
 export function resetWindowThemeForTests(): void {
-  windowTheme = null;
+  windowTheme = undefined;
 }
 
 export interface ThemeSyncProps {
@@ -383,7 +389,7 @@ export function ThemeSync({ settingsTheme, appearance }: ThemeSyncProps) {
     const resolved = resolveTheme(theme, prefersDark);
     applyThemeToDocument(resolved, reducedMotion);
     applyAppearanceToDocument({ accent: effAccent, oledBlack: effOled, density: effDensity, uiScale: effScale }, resolved);
-    syncWindowTheme(resolved);
+    syncWindowTheme(theme === 'system' ? null : resolved);
   }, [theme, prefersDark, reducedMotion, effAccent, effOled, effDensity, effScale]);
   return null;
 }

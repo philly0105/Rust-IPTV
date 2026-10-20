@@ -5,7 +5,9 @@
  * Pattern: the WAI-ARIA "auto-rotating carousel with tabs for slide control".
  * A small on-screen-display pill holds the rotation toggle, previous/next and
  * one dial tick per slide (a tablist: arrows move and choose, Home/End jump):
- * beside the button row from lg up, in the top corner below it. Rotation
+ * beside the button row from lg up, in the top corner below it. On a touch
+ * screen a sideways swipe over the hero turns the slide too, and the pill's
+ * buttons grow to 44 px; a phone drops previous/next for that room. Rotation
  * pauses while the pointer is over the hero or focus is inside it, while the
  * window is hidden, unfocused or the hero is scrolled away, and never starts
  * under prefers-reduced-motion. It also rests after
@@ -44,7 +46,7 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { MetaLine, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
+import { MetaLine, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
@@ -188,6 +190,22 @@ export const HERO_IDLE_ROUNDS = 2;
 /** The dial's fill for `left` ms of `dwell` remaining: 0 at the start, 1 when it turns. */
 export function dialFill(left: number, dwell: number): number {
   return dwell > 0 ? Math.min(1, Math.max(0, 1 - left / dwell)) : 1;
+}
+
+/** The least sideways travel, in CSS px, that turns the slide (a tap wobbles a few px). */
+export const HERO_SWIPE_PX = 48;
+/** How long after a swipe's lift its click may still arrive (and is dropped). */
+const SWIPE_CLICK_MS = 400;
+
+/**
+ * The slide step a touch that travelled (dx, dy) asks for: 1 (next), -1 (previous) or 0 (not a
+ * swipe). It has to be mostly sideways, so a scroll down the page that drifts never turns the
+ * hero. The next slide comes in from the inline end: a swipe to the left in LTR, to the right
+ * in RTL. Exported for tests.
+ */
+export function swipeStep(dx: number, dy: number, rtl: boolean): -1 | 0 | 1 {
+  if (Math.abs(dx) < HERO_SWIPE_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return 0;
+  return (rtl ? dx > 0 : dx < 0) ? 1 : -1;
 }
 
 /**
@@ -470,8 +488,17 @@ function SlideBody({
   );
 }
 
-const oscButton =
-  'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-on-glass-muted hover:bg-on-glass/15 hover:text-on-glass active:bg-on-glass/25 motion-safe:transition-colors';
+/**
+ * Under a coarse pointer the pill's buttons and ticks grow to 44 px square, like the kit's
+ * buttons (TOUCH_TARGET): a 17 x 30 px tick was the only way to another slide on a phone. The
+ * drawn dot keeps its size; six slides still fit a 360 px phone.
+ */
+const OSC_TOUCH = cn(TOUCH_TARGET, 'pointer-coarse:min-w-[calc(44rem/15)]');
+
+const oscButton = cn(
+  'inline-flex size-8 shrink-0 items-center justify-center rounded-full text-on-glass-muted hover:bg-on-glass/15 hover:text-on-glass active:bg-on-glass/25 motion-safe:transition-colors',
+  OSC_TOUCH,
+);
 
 /** Memoized (SH-4): Home passes stable props, so another rail's answer does not re-render the hero. */
 export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, canPlay, onPlay, menuFor, dwellMs = HERO_DWELL_MS }: HeroCarouselProps) {
@@ -504,6 +531,9 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
   const rest = useInputRest(HERO_IDLE_ROUNDS * count, canRotate);
   const running = canRotate && !userPaused && !hovered && !focused && !menuOpen && visible && windowFocused && onScreen && !rest.resting;
   const dialRef = useRef<HTMLSpanElement>(null);
+  // The touch a swipe may come from, and when the last swipe ended (the click its lift may fire is dropped).
+  const swipeFrom = useRef<{ id: number; x: number; y: number } | null>(null);
+  const swipedAt = useRef(-Infinity);
 
   const go = useCallback(
     (step: number, auto = false) => {
@@ -573,12 +603,40 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
       data-rotating={running || undefined}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
+      // Swipe (touch and pen; a mouse has the chevrons): measured from press to lift, with no
+      // drag that follows the finger, so nothing lays out while it moves. touch-action below
+      // keeps vertical scrolling and pinch zoom with the browser and leaves sideways moves to
+      // these handlers, so the browser does not cancel the touch (pointercancel) to pan.
+      onPointerDown={(e) => {
+        swipeFrom.current = count > 1 && e.pointerType !== 'mouse' && e.isPrimary ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+      }}
+      onPointerUp={(e) => {
+        const from = swipeFrom.current;
+        swipeFrom.current = null;
+        if (!from || from.id !== e.pointerId) return;
+        const step = swipeStep(e.clientX - from.x, e.clientY - from.y, getComputedStyle(e.currentTarget).direction === 'rtl');
+        if (step === 0) return;
+        swipedAt.current = e.timeStamp;
+        go(step);
+      }}
+      onPointerCancel={() => {
+        swipeFrom.current = null;
+      }}
+      // A swipe that starts and ends on Play or Details is not a press of it. Only the click
+      // right after the lift: a later one (a key, the next tap) goes through.
+      onClickCapture={(e) => {
+        if (e.timeStamp - swipedAt.current > SWIPE_CLICK_MS) return;
+        swipedAt.current = -Infinity;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
       }}
       className={cn(
         HERO_FRAME,
+        '[touch-action:pan-y_pinch-zoom]',
         // Over artwork the focus ring is the glass text colour in every theme (the light accent would vanish on it).
         'isolate [--color-focus:var(--color-on-glass)] [--color-glow:transparent]',
       )}
@@ -600,7 +658,8 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
 
       {count > 1 && (
         // Top corner on smaller screens, beside the button row from lg up (the copy column has
-        // the room then). On a phone the chevrons go: a swipe moves and the ticks choose.
+        // the room then). On a phone the chevrons go, so the ticks keep 44 px each: a swipe
+        // over the hero moves (onPointerUp on the section) and the ticks choose.
         <div
           className="absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1 lg:top-auto lg:end-(--page-gutter) lg:bottom-14"
           data-testid="hero-controls"
@@ -638,7 +697,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
                   data-hero-tab={s.key}
                   onClick={() => choose(i, false)}
                   onKeyDown={onTabKeyDown}
-                  className="group/tick flex h-8 items-center justify-center rounded-full px-1.5"
+                  className={cn('group/tick flex h-8 items-center justify-center rounded-full px-1.5', OSC_TOUCH)}
                 >
                   <span
                     aria-hidden

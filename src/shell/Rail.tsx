@@ -94,7 +94,11 @@ function GroupLabel({
   }
   return (
     <div className={cn('flex h-8 items-center justify-between pe-1 pt-2', disclosure ? 'ps-1' : 'ps-3')}>
-      <h2 id={id} className={cn('truncate text-caption font-medium text-fg-subtle', disclosure && 'min-w-0 flex-1')}>
+      {/*
+        With a disclosure the button's label truncates, not the heading: the heading's overflow
+        clip cut the button's focus ring off on three sides.
+      */}
+      <h2 id={id} className={cn('text-caption font-medium text-fg-subtle', disclosure ? 'min-w-0 flex-1' : 'truncate')}>
         {disclosure ? (
           <button
             type="button"

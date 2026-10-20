@@ -5,7 +5,8 @@
  * notice for a server reached over plain HTTP (SR-4).
  */
 
-import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
@@ -37,6 +38,7 @@ const { useShellStore } = await import('../store');
 const { isLiveRoute, liveTabTarget, rememberRouteSource, readLastSource } = await import('../navigation');
 const { SECURE_NOTICE_DELAY_MS } = await import('../SecureContextNotice');
 const { useToastStore } = await import('@/ui');
+const { TOAST_AVOID_SELECTOR } = await import('@/ui/Toast');
 
 function routes() {
   return [
@@ -151,6 +153,10 @@ describe('rail at laptop heights (stage 2)', () => {
     const toggle = within(library).getByRole('button', { name: 'Library' });
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBeTruthy();
+    // The label truncates inside the button; the heading around it does not clip, which cut the
+    // button's focus ring off on three sides.
+    expect(toggle.closest('h2')!.className).not.toMatch(/\btruncate\b|overflow-(hidden|clip)/);
+    expect(toggle.querySelector('span')!.className).toContain('truncate');
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(within(library).queryByRole('link', { name: 'My List' })).toBeNull();
@@ -224,10 +230,26 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     expect(within(bar).getAllByRole('link').map((l) => l.textContent)).toEqual(['Home', 'Live TV', 'TV guide', 'Search']);
     expect(within(bar).getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBe('page');
     expect(document.documentElement.style.getPropertyValue('--shell-bottom-inset')).toContain('safe-area-inset-bottom');
+    // Toasts lift above the bar instead of covering its labels (ui/Toast.tsx measures it).
+    expect(bar.matches(TOAST_AVOID_SELECTOR)).toBe(true);
     expect(screen.queryByTestId('open-palette')).toBeNull();
     expect(screen.queryByTestId('theme-toggle')).toBeNull();
     cleanup();
     expect(document.documentElement.style.getPropertyValue('--shell-bottom-inset')).toBe('');
+  });
+
+  it('the tabs have short labels of their own that fit a 360 px phone in every locale', async () => {
+    // Measured at 360 px (scratch shots): eleven letters fit a tab at its text size, and the
+    // rail's longer names (Programmführer, Telewizja na żywo) were cut off.
+    const { LANGUAGES } = await import('@/i18n');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    for (const { code } of LANGUAGES) {
+      const shell = JSON.parse(fs.readFileSync(path.join(__dirname, '../../i18n', code, 'shell.json'), 'utf8')) as Record<string, string>;
+      for (const key of ['tabHome', 'tabLive', 'tabGuide', 'navSearch', 'tabMore']) {
+        expect([...shell[key]!].length, `${code} ${key} "${shell[key]}"`).toBeLessThanOrEqual(11);
+      }
+    }
   });
 
   it('Live TV opens the source last opened, else the first that imported cleanly with channels', () => {
@@ -331,6 +353,35 @@ describe('plain HTTP notice (SR-4)', () => {
       expect(useToastStore.getState().toasts.find((t) => t.id === 'insecure-context')).toBeUndefined();
     } finally {
       Object.defineProperty(window, 'isSecureContext', { configurable: true, value: was });
+    }
+  });
+});
+
+describe('a page that could not load behind the offline strip (SH-offline-stack)', () => {
+  function Boom(): never {
+    throw new Error('Failed to fetch dynamically imported module: /assets/stats.js');
+  }
+
+  it('waits quietly: no second error title or Try again under the strip, and no error in the header', async () => {
+    const { RouteErrorPage, resetChunkFailureForTests } = await import('@/routes');
+    const { useConnectionStore } = await import('../connection');
+    act(() => useConnectionStore.setState({ offline: true }));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render(<RouterProvider router={createMemoryRouter([{ path: '/', element: <Boom />, errorElement: <RouteErrorPage /> }])} />);
+      expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Waiting for the server');
+      expect(screen.getByText('This page opens as soon as the server answers.')).toBeTruthy();
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+      expect(useShellStore.getState().header?.title).toBe('');
+      // Back online but not reloaded yet (or the strip went for another reason): the full error and its Try again.
+      act(() => useConnectionStore.setState({ offline: false }));
+      expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+      expect(useShellStore.getState().header?.title).toBe("Couldn't reach the server");
+    } finally {
+      spy.mockRestore();
+      act(() => useConnectionStore.setState({ offline: false, backOnline: false }));
+      resetChunkFailureForTests();
     }
   });
 });

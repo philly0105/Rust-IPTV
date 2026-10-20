@@ -211,14 +211,17 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
 describe('On now (CB-PROGRAM-ART)', () => {
   const fav = (ref: FavoriteEntry['ref'], title: string): FavoriteEntry => ({ ref, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: { title, contentType: 'live' } });
 
-  it('orders favourites, then history, then the source fill, one entry per channel, no radio', () => {
+  it('orders history, then the source fill, one entry per channel, no radio, and leaves the favourites out', () => {
     const radio = { sourceId: 's1', contentType: 'radio' as const, itemId: 'r1' };
+    const weather = { sourceId: 's1', contentType: 'live' as const, itemId: 'c3' };
+    const seen = (ref: RecentEntry['ref'], title: string): RecentEntry => ({ ref, viewedAt: '2026-10-12T00:00:00Z', snapshot: { title, contentType: ref.contentType } });
     const list = liveCandidates(
+      // Their own rail shows them with the same programmes, just below.
       [fav(news, 'News 24'), fav(radio, 'Jazz FM')],
-      [{ ref: news, viewedAt: '2026-10-12T00:00:00Z', snapshot: { title: 'News 24', contentType: 'live' } }],
-      [channel(news, 'News 24'), channel(sport, 'Sport 1')],
+      [seen(weather, 'Weather Now'), seen(news, 'News 24'), seen(radio, 'Jazz FM')],
+      [channel(news, 'News 24'), channel(sport, 'Sport 1'), channel(weather, 'Weather Now')],
     );
-    expect(list.map((c) => c.name)).toEqual(['News 24', 'Sport 1']);
+    expect(list.map((c) => c.name)).toEqual(['Weather Now', 'Sport 1']);
   });
 
   it('keeps only programmes on air, with their share and minutes left', () => {
@@ -239,7 +242,11 @@ describe('On now (CB-PROGRAM-ART)', () => {
   });
 
   it('draws what is on air with the programme picture and the channel logo, and plays the channel', async () => {
-    home({ favorites: [fav(news, 'News 24')], nowNext: { 's1|live|c1': onAir('Morning Bulletin', 'https://img.test/bulletin.jpg') } });
+    home({
+      channels: [channel(news, 'News 24'), channel(sport, 'Sport 1')],
+      favorites: [fav(sport, 'Sport 1')],
+      nowNext: { 's1|live|c1': onAir('Morning Bulletin', 'https://img.test/bulletin.jpg'), 's1|live|c2': onAir('Match Day') },
+    });
     renderRoutes(routes(), '/dashboard');
     const rail = await screen.findByTestId('dashboard-rail-on-now');
     const card = await within(rail).findByRole('button', { name: /Play News 24/ });
@@ -251,6 +258,33 @@ describe('On now (CB-PROGRAM-ART)', () => {
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: news, isLive: true })));
     // One guide call for the rail and the favourites under it.
     expect(rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext')).toHaveLength(1);
+  });
+
+  it('does not repeat a channel another live rail shows: a favourite, or a recent one while its rail is on', async () => {
+    const weather = { sourceId: 's1', contentType: 'live' as const, itemId: 'c3' };
+    const recent: RecentEntry[] = [{ ref: weather, viewedAt: '2026-10-12T00:00:00Z', snapshot: { title: 'Weather Now', contentType: 'live' } }];
+    const nowNext = { 's1|live|c1': onAir('Morning Bulletin'), 's1|live|c2': onAir('Match Day'), 's1|live|c3': onAir('Forecast') };
+    home({ favorites: [fav(news, 'News 24')], recent, channels: [channel(news, 'News 24'), channel(sport, 'Sport 1'), channel(weather, 'Weather Now')], nowNext });
+    renderRoutes(routes(), '/dashboard');
+    const onNow = await screen.findByTestId('dashboard-rail-on-now');
+    await within(onNow).findByRole('button', { name: /Play Sport 1/ });
+    const programmes = (rail: HTMLElement) =>
+      [...rail.querySelectorAll('[data-on-now]')].map((b) => ['Morning Bulletin', 'Match Day', 'Forecast'].find((p) => b.textContent!.includes(p)));
+    expect(programmes(onNow)).toEqual(['Match Day']);
+    // The favourites rail just below shows the programme itself; both read the one guide answer.
+    const favorite = within(await screen.findByTestId('dashboard-rail-live-favorites')).getByRole('button', { name: 'Play News 24' });
+    await waitFor(() => expect(within(favorite).getByText('Morning Bulletin')).toBeTruthy());
+    expect(within(screen.getByTestId('dashboard-rail-recent-live')).getByRole('button', { name: 'Play Weather Now' })).toBeTruthy();
+    expect(rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext')).toHaveLength(1);
+    cleanup();
+
+    // With the recent channels rail off, On now leads with them again.
+    queryClient.clear();
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, recentlyWatchedLive: false } });
+    renderRoutes(routes(), '/dashboard');
+    const again = await screen.findByTestId('dashboard-rail-on-now');
+    await within(again).findByRole('button', { name: /Play Weather Now/ });
+    expect(programmes(again)).toEqual(['Forecast', 'Match Day']);
   });
 
   it('with no guide data and nothing watched yet, Home lists the source’s channels (SH-home-empty-m3u)', async () => {
@@ -349,6 +383,66 @@ describe('quiet state and trending', () => {
     expect(trendingMatch({ tmdbId: 1, mediaType: 'movie', title: 'Far Shore', year: 2010 }, found)).toBeUndefined();
     expect(trendingMatch({ tmdbId: 1, mediaType: 'tv', title: 'Far Shore', year: 2026 }, found)).toBeUndefined();
     expect(trendingMatch({ tmdbId: 1, mediaType: 'movie', title: 'Amélie' }, { live: [], movies: [film('Amelie (2001)', 2001, 'Amelie')], series: [] })?.titleBase).toBe('Amelie');
+  });
+});
+
+describe('per-card lookups wait for the view (SH-home-rpc-fanout)', () => {
+  /** An IntersectionObserver that reports only what the test says is in view. */
+  function stubObserver() {
+    const observers: { report: IntersectionObserverCallback; targets: Set<Element> }[] = [];
+    vi.stubGlobal(
+      'IntersectionObserver',
+      vi.fn(function (this: object, report: IntersectionObserverCallback) {
+        const o = { report, targets: new Set<Element>() };
+        observers.push(o);
+        return Object.assign(this, {
+          observe: (el: Element) => o.targets.add(el),
+          unobserve: (el: Element) => o.targets.delete(el),
+          disconnect: () => o.targets.clear(),
+          takeRecords: () => [],
+        });
+      }),
+    );
+    return (el: Element) =>
+      act(() => {
+        for (const o of observers) if (o.targets.has(el)) o.report([{ target: el, isIntersecting: true } as unknown as IntersectionObserverEntry], {} as IntersectionObserver);
+      });
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('a trending card searches the catalog once it is near the view and the page went idle, not on mount', async () => {
+    const inView = stubObserver();
+    home();
+    rpcMock.handlers['settings.get'] = () => settings({ tmdb: { ...settings().tmdb, enabled: true } });
+    rpcMock.handlers['tmdb.trending'] = () => [
+      { tmdbId: 1, mediaType: 'movie', title: 'Far Shore', year: 2026 },
+      { tmdbId: 2, mediaType: 'tv', title: 'Elsewhere', year: 2025 },
+      { tmdbId: 3, mediaType: 'movie', title: 'Third Light', year: 2024 },
+    ];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-tmdb-trending');
+    // Past the idle wait (whenIdle falls back to 200 ms here): still nothing near, nothing asked.
+    await act(() => new Promise((r) => setTimeout(r, 400)));
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search')).toEqual([]);
+    inView(within(rail).getByRole('link', { name: 'Find Elsewhere in your sources' }));
+    await waitFor(() =>
+      expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toEqual([{ query: 'Elsewhere', contentTypes: ['series'], limit: 8 }]),
+    );
+  });
+
+  it('a Continue watching card reads its backdrop only once it is near the view', async () => {
+    const inView = stubObserver();
+    home({ continue: [position(movie, 'The Long Signal'), position(series, 'Harbor Nine')] });
+    // The hero reads its own slides' details; off, so only the cards ask here.
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false } });
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-continue-watching');
+    const card = await within(rail).findByRole('button', { name: 'Resume Harbor Nine' });
+    await act(() => new Promise((r) => setTimeout(r, 100)));
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.item')).toEqual([]);
+    inView(card);
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.item').map((c) => c.args)).toEqual([{ ref: series }]));
   });
 });
 

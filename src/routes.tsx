@@ -1,4 +1,4 @@
-import { Compass } from 'lucide-react';
+import { CloudOff, Compass } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createBrowserRouter, isRouteErrorResponse, Link, matchRoutes, Navigate, useParams, useRouteError, type RouteObject } from 'react-router';
@@ -16,6 +16,7 @@ import { sourcesRoutes } from '@/features/sources/routes';
 import { statsRoutes } from '@/features/stats/routes';
 import { vodRoutes } from '@/features/vod/routes';
 import { ShellLayout, sourceHomePath, useShellHeader, useShellStore } from '@/shell';
+import { useOffline } from '@/shell/connection';
 import { PHONE_QUERY } from '@/shell/navigation';
 import { ShellSkeleton } from '@/shell/ShellLayout';
 import { loadDashboard, StartupRedirect } from '@/shell/StartupRedirect';
@@ -107,15 +108,24 @@ export function resetChunkFailureForTests(): void {
  * Error boundary for every page (a render crash, a failed lazy chunk, a
  * loader error). It renders inside the shell, so the rail and the player
  * stay usable; Try again reloads the page, which refetches the chunk.
+ *
+ * A page chunk that failed while the shell's offline strip is up waits quietly
+ * instead (SH-offline-stack), as Home does: the strip already names the cause
+ * and has its own Try again, and the page loads by itself once the server
+ * answers. A second error title and Try again under the strip said the same
+ * thing three times.
  */
 export function RouteErrorPage() {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation(['common', 'shell']);
   const raw = useRouteError();
   const error = routeErrorAsRpc(raw);
   const chunk = isChunkLoadError(raw);
+  const waiting = useOffline() && chunk && !isDesktop;
   const title = t(error.code === 'not_found' ? 'pageNotFound' : (ERROR_TITLE_KEYS[error.code] ?? 'errorTitleInternal'));
   // The header names the failure too, instead of keeping a blank (or the last page's) title.
-  useShellHeader({ title }, [title]);
+  // While waiting it stays empty: the strip under it names the cause.
+  const headerTitle = waiting ? '' : title;
+  useShellHeader({ title: headerTitle }, [headerTitle]);
 
   useEffect(() => {
     if (!chunk || isDesktop) return;
@@ -128,6 +138,15 @@ export function RouteErrorPage() {
     });
   }, [chunk]);
 
+  if (waiting) {
+    const waitTitle = t('shell:dashboardWaitingTitle');
+    return (
+      <>
+        <h1 className="sr-only">{waitTitle}</h1>
+        <EmptyState icon={<CloudOff size={28} aria-hidden />} title={waitTitle} description={t('shell:routeWaitingBody')} className="min-h-[60vh]" />
+      </>
+    );
+  }
   return (
     <>
       <h1 className="sr-only">{title}</h1>

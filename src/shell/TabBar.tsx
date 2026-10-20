@@ -5,8 +5,13 @@
  * sheet with the Library pages, the sources and Settings.
  *
  * The bar sits in the shell's column under the outlet, not over it, so no page needs bottom
- * padding for it. Overlays that float over the page (the mini player, toasts) read its height
- * from --shell-bottom-inset on <html> (SHELL_BOTTOM_INSET), which the shell sets while it shows.
+ * padding for it. Overlays that float over the page read its height from --shell-bottom-inset on
+ * <html> (SHELL_BOTTOM_INSET), which the shell sets while it shows; the toast stack measures the
+ * bar itself (data-toast-avoid, ui/Toast.tsx) and lifts above it, as above the mini player.
+ *
+ * The tabs carry short labels of their own (tabHome, tabLive, tabGuide): a fifth of a 360 px
+ * phone holds about eleven letters at the tab's text size, and the rail's longer names were cut
+ * off in German, Greek, Polish and Belarusian.
  */
 
 import { CalendarRange, ChevronRight, House, LayoutGrid, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
@@ -56,10 +61,10 @@ export const TabBar = memo(function TabBar() {
 
   const live = liveTabTarget(sources.data, readLastSource());
   const tabs: Tab[] = [
-    { id: 'home', to: '/dashboard', label: t('navDashboard'), icon: House, active: pathname === '/dashboard' },
+    { id: 'home', to: '/dashboard', label: t('tabHome'), icon: House, active: pathname === '/dashboard' },
     // No sources yet: the tab leads to adding one, as Home does.
-    { id: 'live', to: live ?? '/sources', label: t('liveTv'), icon: Tv, active: isLiveRoute(pathname) },
-    { id: 'guide', to: '/epg', label: t('navGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
+    { id: 'live', to: live ?? '/sources', label: t('tabLive'), icon: Tv, active: isLiveRoute(pathname) },
+    { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
     { id: 'search', to: '/search', label: t('navSearch'), icon: Search, active: pathname === '/search', tour: 'search' },
   ];
   const moreActive = !tabs.some((tab) => tab.active);
@@ -68,6 +73,8 @@ export const TabBar = memo(function TabBar() {
     <nav
       aria-label={t('mainNavigation')}
       data-testid="tab-bar"
+      // Toasts lift above the bar instead of covering it (ui/Toast.tsx, TOAST_AVOID_SELECTOR).
+      data-toast-avoid=""
       className="shrink-0 border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]"
     >
       <ul className="grid grid-cols-5 px-1" style={{ height: TAB_BAR_HEIGHT }}>

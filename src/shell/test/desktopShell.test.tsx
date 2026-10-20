@@ -4,7 +4,7 @@
  * native title bar follows the app's theme (SH-titlebar-theme).
  */
 
-import { cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { installDomStubs, makeSource, Page, renderRoutes, rpcMock, settings } from './harness';
@@ -89,6 +89,7 @@ describe('desktop shell', () => {
   });
 
   it('the title bar takes the app theme, once per change', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ theme: 'dark' });
     renderRoutes(routes, '/favorites');
     await screen.findByText('favorites page');
     await waitFor(() => expect(win.setTheme).toHaveBeenCalledWith('dark'));
@@ -96,5 +97,21 @@ describe('desktop shell', () => {
     fireEvent.click(screen.getByTestId('theme-toggle'));
     await waitFor(() => expect(win.setTheme).toHaveBeenLastCalledWith('light'));
     expect(win.setTheme.mock.calls.length).toBe(calls + 1);
+  });
+
+  it('System lets the title bar follow the OS (null) instead of pinning what it resolved to; Light pins it again', async () => {
+    // Pinning would fix the webview's prefers-color-scheme too (app-wide on macOS and Linux), so
+    // System would stop following the OS.
+    rpcMock.handlers['settings.get'] = () => settings({ theme: 'system' });
+    useThemeStore.setState({ theme: 'system' });
+    renderRoutes(routes, '/favorites');
+    await screen.findByText('favorites page');
+    await waitFor(() => expect(win.setTheme).toHaveBeenCalledWith(null));
+    expect(win.setTheme).not.toHaveBeenCalledWith('dark');
+    expect(win.setTheme).not.toHaveBeenCalledWith('light');
+    act(() => useThemeStore.setState({ theme: 'light' }));
+    await waitFor(() => expect(win.setTheme).toHaveBeenLastCalledWith('light'));
+    act(() => useThemeStore.setState({ theme: 'system' }));
+    await waitFor(() => expect(win.setTheme).toHaveBeenLastCalledWith(null));
   });
 });

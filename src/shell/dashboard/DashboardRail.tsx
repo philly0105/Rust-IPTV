@@ -31,6 +31,12 @@ export function dashRailButtons(scrollLeft: number, scrollWidth: number, clientW
 export interface RailCardProps {
   tabIndex: number;
   'data-rail-card': '';
+  /**
+   * Not set by the rail: a card that looks something up adds its own callback ref here, and the
+   * card components spread these props onto their root, so it gets the card's element
+   * (useNearView in nearView.ts).
+   */
+  ref?: (el: HTMLElement | null) => void;
 }
 
 export interface DashboardRailProps<T> {

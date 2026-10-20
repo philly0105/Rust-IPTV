@@ -1,6 +1,6 @@
 /**
  * Review round 2 (movies, series, search): recent searches are not kept or offered while parental
- * controls are set; the row under the player is the hero's round icon set; a favourite shows in
+ * controls are set or unknown, and follow the other tabs' writes; the row under the player is the hero's round icon set; a favourite shows in
  * the hero; on a phone the icons carry captions and the resume bar sits under Resume; pages that
  * draw no player load it on the press; "More like this" asks the catalog only near the screen and
  * never for a Stalker portal; a small category drops its decade chips and search; the landing's
@@ -213,6 +213,21 @@ describe('recent searches across tabs', () => {
     forgetSearch('copper');
     expect(JSON.parse(localStorage.getItem(RECENT_SEARCHES_KEY)!)).toEqual(['dune']);
     expect(recentSearchList()).toEqual(['dune']);
+  });
+
+  it('with storage full or blocked, the list still builds up for this session', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError');
+    });
+    try {
+      rememberSearch('harbor');
+      rememberSearch('copper');
+      expect(recentSearchList()).toEqual(['copper', 'harbor']);
+      forgetSearch('harbor');
+      expect(recentSearchList()).toEqual(['copper']);
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });
 

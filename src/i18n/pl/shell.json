@@ -264,5 +264,7 @@
   "findInSources": "Szukaj w swoich źródłach",
   "groupRecentChannels": "Ostatnie kanały",
   "groupSuggested": "Sugerowane",
-  "paletteHintClose": "zamknij"
+  "paletteHintClose": "zamknij",
+  "getStartedGuideHint": "Co jest teraz, a co potem",
+  "getStartedSearchHint": "Kanały, filmy i seriale"
 }

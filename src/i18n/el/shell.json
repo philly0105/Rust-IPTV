@@ -254,5 +254,7 @@
   "findInSources": "Εύρεση στις πηγές σας",
   "groupRecentChannels": "Πρόσφατα κανάλια",
   "groupSuggested": "Προτάσεις",
-  "paletteHintClose": "για κλείσιμο"
+  "paletteHintClose": "για κλείσιμο",
+  "getStartedGuideHint": "Τι παίζει τώρα και μετά",
+  "getStartedSearchHint": "Κανάλια, ταινίες και σειρές"
 }

@@ -12,11 +12,12 @@ import { useTheme } from './theme';
  * The header's search slot (SH-header-search): one width on every page, so the field neither
  * moves nor resizes between Home, a source's Movies and the search page. A page that searches
  * its own content puts its field here in the same box; otherwise the slot is the trigger that
- * opens the command palette. In rem, so it follows the UI scale.
+ * opens the command palette. In rem, so it follows the UI scale. 15rem at the least: "Search
+ * everything" and its Ctrl K hint fit whole in it, which at 14rem they did not on a 900 px window.
  */
-export const HEADER_SEARCH_WIDTH = 'w-[clamp(14rem,24vw,22rem)]';
+export const HEADER_SEARCH_WIDTH = 'w-[clamp(15rem,24vw,22rem)]';
 /** The same width for a page's own field, from sm up (below sm it folds into an icon). Literal, for Tailwind's scanner. */
-export const HEADER_FIELD_WIDTH = 'sm:w-[clamp(14rem,24vw,22rem)]';
+export const HEADER_FIELD_WIDTH = 'sm:w-[clamp(15rem,24vw,22rem)]';
 
 /**
  * `phone`: below sm, where the tab bar

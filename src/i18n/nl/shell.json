@@ -254,5 +254,7 @@
   "findInSources": "Zoeken in je bronnen",
   "groupRecentChannels": "Recente kanalen",
   "groupSuggested": "Voorgesteld",
-  "paletteHintClose": "om te sluiten"
+  "paletteHintClose": "om te sluiten",
+  "getStartedGuideHint": "Wat er nu en straks op is",
+  "getStartedSearchHint": "Zenders, films en series"
 }

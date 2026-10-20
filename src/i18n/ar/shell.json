@@ -274,5 +274,7 @@
   "findInSources": "ابحث في مصادرك",
   "groupRecentChannels": "القنوات الأخيرة",
   "groupSuggested": "مقترحات",
-  "paletteHintClose": "للإغلاق"
+  "paletteHintClose": "للإغلاق",
+  "getStartedGuideHint": "ما يُعرض الآن وما يليه",
+  "getStartedSearchHint": "القنوات والأفلام والمسلسلات"
 }

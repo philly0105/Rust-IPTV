@@ -181,7 +181,7 @@ describe('header search below sm', () => {
     expect(box.className).toContain('max-sm:w-8');
     expect(box.className).toContain('max-sm:focus-within:flex-1');
     // From sm up it is the header's one search width, the same as the trigger on other pages.
-    expect(box.className).toContain('sm:w-[clamp(14rem,24vw,22rem)]');
+    expect(box.className).toContain('sm:w-[clamp(15rem,24vw,22rem)]');
     // The title yields to the search only while it is focused or holds a query.
     const titleBox = screen.getByTestId('page-title').parentElement!;
     expect(titleBox.className).toContain('max-sm:group-has-[[data-shell-search]:focus]/header:hidden');

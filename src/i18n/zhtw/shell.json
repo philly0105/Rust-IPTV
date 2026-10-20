@@ -254,5 +254,7 @@
   "findInSources": "在播放來源中尋找",
   "groupRecentChannels": "最近的頻道",
   "groupSuggested": "建議",
-  "paletteHintClose": "關閉"
+  "paletteHintClose": "關閉",
+  "getStartedGuideHint": "正在播出與接下來的節目",
+  "getStartedSearchHint": "頻道、電影與影集"
 }

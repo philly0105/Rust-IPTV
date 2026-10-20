@@ -254,5 +254,7 @@
   "findInSources": "In Ihren Quellen suchen",
   "groupRecentChannels": "Zuletzt gesehene Sender",
   "groupSuggested": "Vorschläge",
-  "paletteHintClose": "zum Schließen"
+  "paletteHintClose": "zum Schließen",
+  "getStartedGuideHint": "Was jetzt und danach läuft",
+  "getStartedSearchHint": "Sender, Filme und Serien"
 }

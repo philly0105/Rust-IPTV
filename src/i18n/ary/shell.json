@@ -274,5 +274,7 @@
   "findInSources": "قلّب فالمصادر ديالك",
   "groupRecentChannels": "القنوات الأخيرة",
   "groupSuggested": "مقترحات",
-  "paletteHintClose": "باش تسدّ"
+  "paletteHintClose": "باش تسدّ",
+  "getStartedGuideHint": "شنو كاين دابا ومن بعد",
+  "getStartedSearchHint": "القنوات والأفلام والمسلسلات"
 }

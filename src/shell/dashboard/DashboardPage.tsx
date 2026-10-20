@@ -1,12 +1,14 @@
 // Icons Home already shares with the shell: a lucide glyph that the player also uses (Trash2) was
 // grouped into a chunk with player code, which put the player store in Home's first render.
-import { CircleCheck, CloudOff, Info, Play, X } from 'lucide-react';
+import { CalendarRange, CircleCheck, Clapperboard, CloudOff, Info, Layers, Search, Tv, X, type LucideIcon } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate, type NavigateFunction } from 'react-router';
 
 import { HOME_RAIL_LIMIT, homeContinueArgs, homeFavoritesArgs, homeRecentArgs, homeRecentlyAddedArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
+import type { CatalogSearchResult } from '@/api/rpc';
 import {
   itemKey,
   type Channel,
@@ -21,6 +23,7 @@ import {
   type TmdbBrief,
   type VodItem,
 } from '@/api/types';
+import { useLists } from '@/features/lists/hooks/useLists';
 import { CustomListRails } from '@/features/lists/rails';
 import { MyListRail } from '@/features/mylist/components/MyListRail';
 import { useInMyList, useMyList } from '@/features/mylist/hooks/useMyList';
@@ -28,7 +31,7 @@ import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { formatRating } from '@/features/vod/lib/rating';
 import { isDesktop, RpcError, type RpcResult } from '@/api/transport';
 import { snapshotTitle } from '@/lib/title';
-import { Badge, Button, EmptyState, ErrorState, useToast, errorDescription } from '@/ui';
+import { Badge, EmptyState, ErrorState, useToast, errorDescription } from '@/ui';
 
 import { useOffline } from '../connection';
 import { sourceBasePath, sourceHomePath } from '../railLinks';
@@ -256,6 +259,9 @@ function DashboardBody() {
   // The shared My List query its rail reads (C3): one fetch, so the quiet state, the
   // pending check and the shared retry below see the same list the rail shows.
   const myList = useMyList({ enabled: hasSources });
+  // The custom list rails read this same query; the quiet state counts the lists they show.
+  const customLists = useLists();
+  const customListsShown = (customLists.data ?? []).some((l) => l.onDashboard && l.itemCount > 0);
   const trending = useRpcQuery('tmdb.trending', undefined, {
     enabled: hasSources && tmdbEnabled && show('tmdbTrending'),
     staleTime: 60 * 60_000,
@@ -411,6 +417,11 @@ function DashboardBody() {
     (s: HeroSlide) => play({ ref: s.ref, episodeId: s.episodeId, title: s.title ?? '', subtitle: s.subtitle, posterUrl: s.posterUrl }),
     [play],
   );
+  // A continue slide offers its card's menu (CB-CONTINUE-MENU), with the title the slide shows.
+  const slideMenu = useCallback(
+    (s: HeroSlide) => (s.position ? continueMenu(s.position, s.title || t('untitled'), navigate, t) : undefined),
+    [navigate, t],
+  );
   const retryAdded = useCallback(() => {
     void addedMovies.refetch();
     void addedSeries.refetch();
@@ -466,6 +477,7 @@ function DashboardBody() {
     (show('hero') && heroSlides.length > 0) ||
     (show('continueWatching') && continueRows.length > 0) ||
     (myListOn && myListCount > 0) ||
+    customListsShown ||
     (liveOn && onNow.length > 0) ||
     showChannels ||
     (show('liveFavorites') && liveFavorites.length > 0) ||
@@ -476,7 +488,8 @@ function DashboardBody() {
   // Wait for every rail on screen (and a hero still waiting for new arrivals), so
   // "Nothing to show yet" never flashes above content still loading.
   const onNowPending = liveOn && (favorites.isPending || !recentSettled || !fillSettled || (nowRefs.length > 0 && nowNext.isPending));
-  const anyRailPending = railQueries.some((q) => q.isPending) || (myListOn && myList.isPending) || (show('hero') && heroLoading) || onNowPending;
+  const anyRailPending =
+    railQueries.some((q) => q.isPending) || (myListOn && myList.isPending) || customLists.isPending || (show('hero') && heroLoading) || onNowPending;
 
   // Layout stability: nothing renders below the first section still loading. A skeleton
   // that collapses (empty rail, shared error) or a flagged rail that appears then moves
@@ -502,9 +515,6 @@ function DashboardBody() {
   const visible = (k: Slot) => on(k) && (firstPending < 0 || sections.findIndex(([x]) => x === k) <= firstPending);
 
   const heroShown = show('hero') && !showSharedError && ((heroLoading && !heroWasEmpty) || heroSlides.length > 0);
-  const quietTarget = rankedSources[0];
-  const quietPath = quietTarget ? sourceHomePath(quietTarget) : '/sources';
-  const quietLabel = !quietTarget || quietTarget.channelCount > 0 ? t('browseLive') : quietTarget.movieCount > 0 ? t('browseMovies') : t('browseSeries');
 
   return (
     // gap-10 follows density through --spacing. The hero runs flush under the header; with no
@@ -546,7 +556,7 @@ function DashboardBody() {
           (heroLoading ? (
             heroWasEmpty ? null : <HeroSkeleton />
           ) : heroSlides.length > 0 ? (
-            <HeroCarousel slides={heroSlides} sourceName={heroSourceName} canPlay={heroCanPlay} onPlay={playSlide} />
+            <HeroCarousel slides={heroSlides} sourceName={heroSourceName} canPlay={heroCanPlay} onPlay={playSlide} menuFor={slideMenu} />
           ) : null)}
 
         {visible('continueWatching') && (
@@ -631,25 +641,75 @@ function DashboardBody() {
             loaded={trending.isSuccess}
             error={railError(trending.error)}
             refetch={trending.refetch}
+            sourceById={sourceById}
           />
         )}
 
-        {hasSources && !anyRailVisible && !anyRailError && !anyRailPending && (
-          <EmptyState
-            size="inline"
-            icon={<Play size={22} />}
-            title={t('dashboardQuietTitle')}
-            description={t('dashboardQuietBody')}
-            action={
-              // The source's own home: a VOD-only account opens on its movies, not an empty Live page (SH-quiet-live-path).
-              <Button variant="primary" onClick={() => navigate(quietPath)}>
-                {quietLabel}
-              </Button>
-            }
-          />
-        )}
+        {hasSources && !anyRailVisible && !anyRailError && !anyRailPending && <GetStarted source={rankedSources[0]} hasLive={rankedSources.some((s) => s.channelCount > 0)} />}
       </div>
     </SourceKindContext.Provider>
+  );
+}
+
+/** A tile of the quiet state: an icon, what it opens, and a line on what is there. */
+interface StartTile {
+  id: string;
+  to: string;
+  icon: LucideIcon;
+  title: string;
+  hint: string;
+}
+
+/**
+ * Home with sources but nothing on it yet: a source still importing, a playlist of movies with
+ * no dates, every rail switched off. It says what will fill the page and offers three ways in
+ * rather than one button: the most used source's own home (a VOD-only account opens on its
+ * movies, SH-quiet-live-path), the TV guide when there are channels, and search.
+ */
+function GetStarted({ source, hasLive }: { source: Source | undefined; hasLive: boolean }) {
+  const { t } = useTranslation('shell');
+  const live = !source || source.channelCount > 0;
+  const tiles: StartTile[] = [
+    {
+      id: 'browse',
+      to: source ? sourceHomePath(source) : '/sources',
+      icon: live ? Tv : source.movieCount > 0 ? Clapperboard : Layers,
+      title: live ? t('browseLive') : source.movieCount > 0 ? t('browseMovies') : t('browseSeries'),
+      hint: source?.name ?? t('manageSources'),
+    },
+    ...(hasLive ? [{ id: 'guide', to: '/epg', icon: CalendarRange, title: t('navGuide'), hint: t('getStartedGuideHint') }] : []),
+    { id: 'search', to: '/search', icon: Search, title: t('navSearch'), hint: t('getStartedSearchHint') },
+  ];
+  return (
+    <section aria-labelledby="dashboard-quiet-title" className="flex flex-col gap-4 px-(--page-gutter)" data-testid="dashboard-quiet">
+      <div className="flex flex-col gap-1">
+        <h2 id="dashboard-quiet-title" className="text-title-sm text-fg">
+          {t('dashboardQuietTitle')}
+        </h2>
+        <p className="text-body-sm text-fg-muted">{t('dashboardQuietBody')}</p>
+      </div>
+      <ul className="grid max-w-5xl gap-3 sm:grid-cols-3">
+        {tiles.map(({ id, to, icon: Icon, title, hint }) => (
+          <li key={id} className="min-w-0">
+            <Link
+              to={to}
+              data-start-tile={id}
+              className="group flex h-full items-center gap-3 rounded-lg border border-edge bg-surface p-4 shadow-1 hover:border-border hover:bg-surface-2 active:bg-pressed motion-safe:transition-colors"
+            >
+              <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-md border border-edge bg-surface-2 text-fg-muted group-hover:text-fg">
+                <Icon size={18} />
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-body font-medium text-fg">{title}</span>
+                <span dir="auto" title={hint} className="truncate text-match-parent text-caption text-fg-muted">
+                  {hint}
+                </span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -697,6 +757,19 @@ function useBackdrop(ref: ItemRef): string | undefined {
   return d && 'backdropUrl' in d ? d.backdropUrl : undefined;
 }
 
+/**
+ * The menu of a title to resume (CB-CONTINUE-MENU): Go to details, Mark watched (the episode
+ * it resumes), Remove from continue watching, the last two with an Undo. Shared by the card in
+ * the rail and the hero's continue slide, so the two never offer different things.
+ */
+function continueMenu(p: PlaybackPosition, title: string, navigate: NavigateFunction, t: TFunction): CardMenuItem[] {
+  return [
+    { id: 'details', label: t('goToDetails'), icon: <Info className="size-4" />, onSelect: () => navigate(itemPath(p.ref)) },
+    { id: 'watched', label: t('vod:markWatched'), icon: <CircleCheck className="size-4" />, onSelect: () => void continueActions().then((m) => m.markContinueWatched(p, title, t)) },
+    { id: 'remove', label: t('removeFromContinue'), icon: <X className="size-4" />, onSelect: () => void continueActions().then((m) => m.removeFromContinue(p, title, t)) },
+  ];
+}
+
 /** One Continue watching card: the 16:9 still, the episode and the time left, and its menu (CB-CONTINUE-MENU). */
 function ContinueItem({ p, rail, play, saved }: { p: PlaybackPosition; rail: RailCardProps; play: PlayFn; saved: boolean }) {
   const { t, i18n } = useTranslation('shell');
@@ -708,12 +781,7 @@ function ContinueItem({ p, rail, play, saved }: { p: PlaybackPosition; rail: Rai
   const title = base?.title ?? t('untitled');
   const left = minutesLeft(p);
   const series = p.ref.contentType === 'series';
-  const details = itemPath(p.ref);
-  const menu: CardMenuItem[] = [
-    { id: 'details', label: t('goToDetails'), icon: <Info className="size-4" />, onSelect: () => navigate(details) },
-    { id: 'watched', label: t('vod:markWatched'), icon: <CircleCheck className="size-4" />, onSelect: () => void continueActions().then((m) => m.markContinueWatched(p, title, t)) },
-    { id: 'remove', label: t('removeFromContinue'), icon: <X className="size-4" />, onSelect: () => void continueActions().then((m) => m.removeFromContinue(p, title, t)) },
-  ];
+  const menu = continueMenu(p, title, navigate, t);
   return (
     <ContinueCard
       rail={rail}
@@ -1044,8 +1112,83 @@ const RecentlyAddedRail = memo(function RecentlyAddedRail({
   );
 });
 
-const TrendingRail = memo(function TrendingRail({ items, loading, loaded, error, refetch }: RailQueryProps & { items: readonly TmdbBrief[] | undefined }) {
+/** A title reduced for matching across catalogs: lower case, no accents, letters and digits only. */
+function matchKey(title: string): string {
+  return title.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * The catalog title a TMDB trending entry stands for (SH-trending-dead-end): the same name, of
+ * the same kind, and the same year give or take one (release dates differ between regions and
+ * providers) when both have a year. The first in the search's own order wins. Exported for tests.
+ */
+export function trendingMatch(b: TmdbBrief, found: CatalogSearchResult | undefined): VodItem | SeriesItem | undefined {
+  if (!found) return undefined;
+  const key = matchKey(b.title);
+  if (!key) return undefined;
+  const list: readonly (VodItem | SeriesItem)[] = b.mediaType === 'tv' ? found.series : found.movies;
+  return list.find(
+    (v) => matchKey(v.titleBase || v.title) === key && (b.year === undefined || v.year === undefined || Math.abs(v.year - b.year) <= 1),
+  );
+}
+
+/**
+ * A trending title, looked up in the local catalog. Found, it is an ordinary title card: it opens
+ * the detail page and takes My List. Not found (or still looking), it stays a search, and says
+ * so on hover and focus: a portal's catalog is only searched live, on the search page.
+ */
+function TrendingCard({ b, rail, sourceById }: { b: TmdbBrief; rail: RailCardProps; sourceById: ReadonlyMap<string, Source> }) {
   const { t, i18n } = useTranslation('shell');
+  const found = useRpcQuery(
+    'catalog.search',
+    { query: b.title, contentTypes: [b.mediaType === 'tv' ? 'series' : 'movie'], limit: 8 },
+    // As long as the trending list itself: neither changes within the hour.
+    { staleTime: 60 * 60_000 },
+  );
+  const match = trendingMatch(b, found.data);
+  const rating = b.rating ? formatRating(b.rating, i18n.language) : undefined;
+  const badge = rating ? <Badge variant="neutral" className="bg-glass-strong text-on-glass">{rating}</Badge> : undefined;
+  if (match) {
+    const title = match.titleBase || match.title;
+    const sourceName = sourceById.get(match.ref.sourceId)?.name;
+    const year = match.year ?? b.year;
+    return (
+      <PosterCard
+        rail={rail}
+        title={title}
+        subtitle={joinList([sourceName, !titleEndsWithYear(title, year) && year], i18n.language)}
+        posterUrl={match.posterUrl ?? b.posterUrl}
+        backdropUrl={match.backdropUrl}
+        badge={badge}
+        to={itemPath(match.ref)}
+        ariaLabel={joinList([title, sourceName, year, rating && t('ratedLabel', { rating })], i18n.language)}
+        myList={myListTarget(match)}
+      />
+    );
+  }
+  return (
+    <PosterCard
+      rail={rail}
+      title={b.title}
+      subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
+      posterUrl={b.posterUrl}
+      badge={badge}
+      to={`/search?q=${encodeURIComponent(b.title)}`}
+      search={t('findInSources')}
+      ariaLabel={t('findTitle', { title: b.title })}
+    />
+  );
+}
+
+const TrendingRail = memo(function TrendingRail({
+  items,
+  loading,
+  loaded,
+  error,
+  refetch,
+  sourceById,
+}: RailQueryProps & { items: readonly TmdbBrief[] | undefined; sourceById: ReadonlyMap<string, Source> }) {
+  const { t } = useTranslation('shell');
   return (
     <DashboardRail<TmdbBrief>
       id="tmdb-trending"
@@ -1058,19 +1201,7 @@ const TrendingRail = memo(function TrendingRail({ items, loading, loaded, error,
       getKey={trendingKey}
       cardWidth={168}
       skeletonAspect={2 / 3}
-      renderCard={(b, rail) => (
-        // A trending title may not be in any source: the card says it searches (SH-trending-dead-end).
-        <PosterCard
-          rail={rail}
-          title={b.title}
-          subtitle={joinList([b.mediaType === 'tv' ? t('series') : t('movie'), b.year], i18n.language)}
-          posterUrl={b.posterUrl}
-          badge={b.rating ? <Badge variant="neutral" className="bg-glass-strong text-on-glass">{formatRating(b.rating, i18n.language)}</Badge> : undefined}
-          to={`/search?q=${encodeURIComponent(b.title)}`}
-          search={t('findInSources')}
-          ariaLabel={t('findTitle', { title: b.title })}
-        />
-      )}
+      renderCard={(b, rail) => <TrendingCard b={b} rail={rail} sourceById={sourceById} />}
     />
   );
 });

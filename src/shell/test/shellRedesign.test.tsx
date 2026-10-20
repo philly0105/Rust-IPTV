@@ -143,6 +143,76 @@ describe('rail (SH-rail-ia)', () => {
   });
 });
 
+describe('rail at laptop heights (stage 2)', () => {
+  it('Library folds away from its label, stays folded next launch, and opens again for one of its pages', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const library = within(nav).getByRole('group', { name: 'Library' });
+    const toggle = within(library).getByRole('button', { name: 'Library' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(within(library).queryByRole('link', { name: 'My List' })).toBeNull();
+    // The group keeps its name; the Watch links and the sources are untouched.
+    expect(within(nav).getByRole('link', { name: 'TV guide' })).toBeTruthy();
+    cleanup();
+
+    renderRoutes(routes(), '/dashboard');
+    const again = await screen.findByRole('navigation', { name: 'Main navigation' });
+    expect(within(again).getByRole('button', { name: 'Library' }).getAttribute('aria-expanded')).toBe('false');
+    cleanup();
+
+    // A Library page opens it (from a card or the palette), so the current page is never a hidden link.
+    const { router } = renderRoutes(routes(), '/dashboard');
+    const nav2 = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const toggle2 = within(nav2).getByRole('button', { name: 'Library' });
+    expect(toggle2.getAttribute('aria-expanded')).toBe('false');
+    await act(() => router.navigate('/favorites'));
+    expect(toggle2.getAttribute('aria-expanded')).toBe('true');
+    expect(within(nav2).getByRole('link', { name: 'Favorites' }).getAttribute('aria-current')).toBe('page');
+    // Leaving keeps it open: only a press folds it.
+    await act(() => router.navigate('/dashboard'));
+    expect(toggle2.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('remembers which sources the user opened or closed', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const backup = await screen.findByRole('button', { name: /^Backup/ });
+    expect(backup.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(backup);
+    cleanup();
+    renderRoutes(routes(), '/dashboard');
+    expect((await screen.findByRole('button', { name: /^Backup/ })).getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
+    // The only source opens by itself, until the user closes it.
+    cleanup();
+    handlers([makeSource('s1', { name: 'Night Portal' })]);
+    renderRoutes(routes(), '/dashboard');
+    const only = await screen.findByRole('button', { name: /^Night Portal/ });
+    expect(only.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(only);
+    cleanup();
+    renderRoutes(routes(), '/dashboard');
+    expect((await screen.findByRole('button', { name: /^Night Portal/ })).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('collapsed: the footer keeps Settings and the toggle, and the current source is marked for the scroll', async () => {
+    act(() => useShellStore.setState({ railCollapsed: true }));
+    renderRoutes(routes(), '/s/s2/live');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await within(nav).findByRole('button', { name: 'Backup' });
+    expect(within(nav).queryByTestId('rail-shortcuts')).toBeNull();
+    expect(within(nav).getByRole('button', { name: 'Expand sidebar' })).toBeTruthy();
+    const current = nav.querySelectorAll('[data-rail-current]');
+    expect(current).toHaveLength(1);
+    expect(within(current[0] as HTMLElement).getByRole('button', { name: 'Backup' })).toBeTruthy();
+    // No group toggles in the icon-only rail: every link shows.
+    expect(nav.querySelector('[data-rail-group-toggle]')).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'My List' })).toBeTruthy();
+  });
+});
+
 describe('phone tab bar (CB-PHONE-NAV)', () => {
   it('replaces the rail below sm, exposes its height to overlays, and the header keeps only the title', async () => {
     media(...PHONE);

@@ -254,5 +254,7 @@
   "findInSources": "Find in your sources",
   "groupRecentChannels": "Recent channels",
   "groupSuggested": "Suggested",
-  "paletteHintClose": "to close"
+  "paletteHintClose": "to close",
+  "getStartedGuideHint": "What's on now and next",
+  "getStartedSearchHint": "Channels, movies and series"
 }

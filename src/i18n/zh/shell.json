@@ -254,5 +254,7 @@
   "findInSources": "在播放源中查找",
   "groupRecentChannels": "最近的频道",
   "groupSuggested": "建议",
-  "paletteHintClose": "关闭"
+  "paletteHintClose": "关闭",
+  "getStartedGuideHint": "正在播出和即将播出",
+  "getStartedSearchHint": "频道、电影和剧集"
 }

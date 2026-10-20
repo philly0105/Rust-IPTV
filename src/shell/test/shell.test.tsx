@@ -1552,8 +1552,8 @@ describe('L2 shell header', () => {
     // A page's own field takes the same slot, at the same width.
     await act(() => router.navigate('/scoped'));
     const field = await screen.findByRole('searchbox', { name: 'Search Night Portal' });
-    expect(field.parentElement!.className).toContain('sm:w-[clamp(14rem,24vw,22rem)]');
-    expect(trigger.className).toContain('w-[clamp(14rem,24vw,22rem)]');
+    expect(field.parentElement!.className).toContain('sm:w-[clamp(15rem,24vw,22rem)]');
+    expect(trigger.className).toContain('w-[clamp(15rem,24vw,22rem)]');
   });
 
   it('page actions sit in a shrinking wrapper, so the search trigger and theme button stay on screen (L2-visual-4)', async () => {

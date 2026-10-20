@@ -254,5 +254,7 @@
   "findInSources": "Kaynaklarınızda bulun",
   "groupRecentChannels": "Son kanallar",
   "groupSuggested": "Öneriler",
-  "paletteHintClose": "kapatmak için"
+  "paletteHintClose": "kapatmak için",
+  "getStartedGuideHint": "Şimdi ve sonra ne var",
+  "getStartedSearchHint": "Kanallar, filmler ve diziler"
 }

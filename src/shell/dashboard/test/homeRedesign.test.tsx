@@ -38,7 +38,7 @@ const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');
 const { queryClient } = await import('@/api/query');
 const { useConnectionStore } = await import('../../connection');
-const { liveCandidates, onNowItems } = await import('../DashboardPage');
+const { liveCandidates, onNowItems, trendingMatch } = await import('../DashboardPage');
 const { useToastStore } = await import('@/ui');
 
 function routes() {
@@ -176,6 +176,36 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
     await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'userstate.setWatched').map((c) => c.args)).toEqual([{ ref: series, episodeId: 'e4', watched: true }]));
     await waitFor(() => expect(useToastStore.getState().toasts.some((t) => t.title === 'Harbor Nine marked watched')).toBe(true));
   });
+
+  it("the hero's continue slide offers the same menu behind a third button", async () => {
+    home({ continue: cards });
+    rpcMock.handlers['positions.remove'] = () => null;
+    const { router } = renderRoutes(routes(), '/dashboard');
+    const slide = await screen.findByTestId('hero-slide');
+    const more = within(slide).getByRole('button', { name: 'More actions for The Long Signal' });
+    expect(more.getAttribute('aria-haspopup')).toBe('menu');
+    fireEvent.click(more);
+    let menu = await screen.findByRole('menu', { name: 'The Long Signal' });
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Go to details', 'Mark as watched', 'Remove from continue watching']);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Remove from continue watching' }));
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'positions.remove' && JSON.stringify(c.args) === JSON.stringify({ ref: movie }))).toBe(true));
+    fireEvent.click(within(await screen.findByTestId('hero-slide')).getByRole('button', { name: /^More actions for/ }));
+    menu = await screen.findByRole('menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Go to details' }));
+    await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/s\/s1\/(movie|series)\//));
+  });
+
+  it('a new arrival in the hero has no menu: there is nothing to remove or mark', async () => {
+    home();
+    rpcMock.handlers['catalog.recentlyAdded'] = (a) =>
+      (a as { contentType: string }).contentType === 'movie'
+        ? [{ ref: { sourceId: 's1', contentType: 'movie', itemId: 'n1' }, title: 'Fresh Arrival', posterUrl: 'https://img.test/p.jpg', added: '2026-10-09T00:00:00Z', categoryId: 'c' }]
+        : [];
+    renderRoutes(routes(), '/dashboard');
+    const slide = await screen.findByTestId('hero-slide');
+    expect(within(slide).getByRole('button', { name: 'Play' })).toBeTruthy();
+    expect(within(slide).queryByRole('button', { name: /More actions/ })).toBeNull();
+  });
 });
 
 describe('On now (CB-PROGRAM-ART)', () => {
@@ -239,8 +269,38 @@ describe('quiet state and trending', () => {
     home();
     rpcMock.handlers['sources.list'] = () => [makeSource('vod', { name: 'Films Only', channelCount: 0, movieCount: 30 })];
     const { router } = renderRoutes(routes(), '/dashboard');
-    fireEvent.click(await screen.findByRole('button', { name: 'Browse movies' }));
+    fireEvent.click(await screen.findByRole('link', { name: /^Browse movies/ }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/s/vod/movies'));
+  });
+
+  it('a custom list on Home is content: no quiet state under its rail', async () => {
+    home();
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, liveFavorites: false } });
+    rpcMock.handlers['lists.list'] = () => [{ id: 'l1', name: 'Weekend', position: 0, onDashboard: true, itemCount: 2, createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' }];
+    rpcMock.handlers['lists.items'] = () => [];
+    renderRoutes(routes(), '/dashboard');
+    await screen.findByTestId('dashboard-rail-recent-sources');
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(screen.queryByTestId('dashboard-quiet')).toBeNull();
+  });
+
+  it('the quiet state offers three ways in: the source, the guide and search; no guide without channels', async () => {
+    home();
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, liveFavorites: false } });
+    renderRoutes(routes(), '/dashboard');
+    const quiet = await screen.findByTestId('dashboard-quiet');
+    expect(within(quiet).getByRole('heading', { name: 'Nothing to show yet' })).toBeTruthy();
+    const links = within(quiet).getAllByRole('link');
+    expect(links.map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Browse live TVNight Portal', '/s/s1/live'],
+      ["TV guideWhat's on now and next", '/epg'],
+      ['SearchChannels, movies and series', '/search'],
+    ]);
+    cleanup();
+    rpcMock.handlers['sources.list'] = () => [makeSource('vod', { name: 'Films Only', channelCount: 0, movieCount: 0, seriesCount: 4 })];
+    renderRoutes(routes(), '/dashboard');
+    const vodOnly = await screen.findByTestId('dashboard-quiet');
+    expect(within(vodOnly).getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/s/vod/series', '/search']);
   });
 
   it('a trending card says it searches: a search mark, not the play disc (SH-trending-dead-end)', async () => {
@@ -253,6 +313,42 @@ describe('quiet state and trending', () => {
     expect(card.getAttribute('href')).toBe('/search?q=Far%20Shore');
     expect(card.querySelector('svg.lucide-search')).toBeTruthy();
     expect(card.textContent).toContain('Find in your sources');
+  });
+
+  it('a trending title the catalog has opens its detail page instead of a search (SH-trending-dead-end)', async () => {
+    home();
+    rpcMock.handlers['settings.get'] = () => settings({ tmdb: { ...settings().tmdb, enabled: true } });
+    rpcMock.handlers['tmdb.trending'] = () => [
+      { tmdbId: 1, mediaType: 'movie', title: 'Far Shore', year: 2026 },
+      { tmdbId: 2, mediaType: 'tv', title: 'Elsewhere', year: 2025 },
+    ];
+    rpcMock.handlers['catalog.search'] = (a) => {
+      const { query } = a as { query: string };
+      return query === 'Far Shore'
+        ? { live: [], movies: [{ ref: { sourceId: 's1', contentType: 'movie', itemId: 'fs' }, title: 'Far Shore (2026) [4K]', titleBase: 'Far Shore', year: 2026, categoryId: 'c' }], series: [] }
+        : { live: [], movies: [], series: [] };
+    };
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-tmdb-trending');
+    const found = await within(rail).findByRole('link', { name: /Far Shore.*Night Portal/ });
+    expect(found.getAttribute('href')).toBe('/s/s1/movie/fs');
+    expect(found.textContent).toContain('Night Portal');
+    expect(found.querySelector('svg.lucide-search')).toBeNull();
+    // Not in the catalog: still a search, and it says so.
+    expect(within(rail).getByRole('link', { name: 'Find Elsewhere in your sources' }).getAttribute('href')).toBe('/search?q=Elsewhere');
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toEqual([
+      { query: 'Far Shore', contentTypes: ['movie'], limit: 8 },
+      { query: 'Elsewhere', contentTypes: ['series'], limit: 8 },
+    ]);
+  });
+
+  it('matches a trending title by name and kind, with the year give or take one', () => {
+    const film = (title: string, year?: number, titleBase?: string) => ({ ref: { sourceId: 's1', contentType: 'movie' as const, itemId: title }, title, titleBase, year, categoryId: 'c' });
+    const found = { live: [], movies: [film('Far Shore 2', 2026), film('FAR SHORE!', 2025), film('Far Shore', 2019)], series: [] };
+    expect(trendingMatch({ tmdbId: 1, mediaType: 'movie', title: 'Far Shore', year: 2026 }, found)?.title).toBe('FAR SHORE!');
+    expect(trendingMatch({ tmdbId: 1, mediaType: 'movie', title: 'Far Shore', year: 2010 }, found)).toBeUndefined();
+    expect(trendingMatch({ tmdbId: 1, mediaType: 'tv', title: 'Far Shore', year: 2026 }, found)).toBeUndefined();
+    expect(trendingMatch({ tmdbId: 1, mediaType: 'movie', title: 'Amélie' }, { live: [], movies: [film('Amelie (2001)', 2001, 'Amelie')], series: [] })?.titleBase).toBe('Amelie');
   });
 });
 

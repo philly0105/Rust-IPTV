@@ -259,5 +259,7 @@
   "findInSources": "Chercher dans vos sources",
   "groupRecentChannels": "Chaînes récentes",
   "groupSuggested": "Suggestions",
-  "paletteHintClose": "pour fermer"
+  "paletteHintClose": "pour fermer",
+  "getStartedGuideHint": "Ce qui passe maintenant et ensuite",
+  "getStartedSearchHint": "Chaînes, films et séries"
 }

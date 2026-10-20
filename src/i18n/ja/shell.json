@@ -254,5 +254,7 @@
   "findInSources": "ソース内を探す",
   "groupRecentChannels": "最近のチャンネル",
   "groupSuggested": "おすすめ",
-  "paletteHintClose": "で閉じる"
+  "paletteHintClose": "で閉じる",
+  "getStartedGuideHint": "今と次の番組",
+  "getStartedSearchHint": "チャンネル、映画、シリーズ"
 }

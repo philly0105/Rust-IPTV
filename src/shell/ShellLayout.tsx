@@ -344,7 +344,7 @@ const selectLanguage = (s: Settings) => s.language;
  * link's page chunks load (routes.tsx AppLoading), and the shell's own while a fresh profile
  * waits for the server's language (no English first frame). One geometry for both, laid out like
  * the real rail and header (the brand row, the Watch and Library groups at --rail-item-height,
- * the search slot, the phone tab bar), so nothing jumps as the shell replaces it.
+ * the footer row, the search slot, the phone tab bar), so nothing jumps as the shell replaces it.
  */
 export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = 'shell-skeleton' }: { collapsed: boolean; railHidden: boolean; phone?: boolean; testId?: string }) {
   const rows = (n: number) =>
@@ -367,10 +367,19 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
             <Skeleton className={cn('shrink-0 rounded-[22%]', collapsed ? 'size-8' : 'size-7')} />
             {!collapsed && <Skeleton className="h-4 w-28" />}
           </div>
-          <div className="flex flex-col gap-0.5 px-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden px-2">
             {rows(WATCH_LINKS.length)}
             {label()}
             {rows(LIBRARY_LINKS.length)}
+          </div>
+          {/* The footer row: Settings, and beside it (expanded) the shortcuts and collapse buttons. */}
+          <div className={cn('flex shrink-0 items-center gap-0.5 border-t border-divider p-2', collapsed && 'flex-col')}>
+            <div className="min-w-0 flex-1">{rows(1)}</div>
+            {Array.from({ length: collapsed ? 1 : 2 }, (_, i) => (
+              <div key={i} className={cn('flex h-(--rail-item-height) shrink-0 items-center justify-center', collapsed ? 'w-full' : 'w-(--rail-item-height)')}>
+                <Skeleton className="size-[calc(18rem/15)] rounded-sm" />
+              </div>
+            ))}
           </div>
         </div>
       )}

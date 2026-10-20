@@ -254,5 +254,7 @@
   "findInSources": "소스에서 찾기",
   "groupRecentChannels": "최근 채널",
   "groupSuggested": "추천",
-  "paletteHintClose": "닫기"
+  "paletteHintClose": "닫기",
+  "getStartedGuideHint": "지금과 다음 방송",
+  "getStartedSearchHint": "채널, 영화, 시리즈"
 }

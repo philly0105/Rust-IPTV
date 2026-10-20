@@ -254,5 +254,7 @@
   "findInSources": "Keresés a forrásokban",
   "groupRecentChannels": "Legutóbbi csatornák",
   "groupSuggested": "Javaslatok",
-  "paletteHintClose": "bezárás"
+  "paletteHintClose": "bezárás",
+  "getStartedGuideHint": "Mi megy most és utána",
+  "getStartedSearchHint": "Csatornák, filmek és sorozatok"
 }

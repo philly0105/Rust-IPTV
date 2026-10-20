@@ -34,8 +34,11 @@ export function Welcome() {
     <div className="@container relative flex min-h-full flex-col" data-testid="dashboard-welcome">
       {/* A faint lift at the top of the page, so the welcome does not float on a flat field. */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-gradient-to-b from-surface/70 to-transparent" />
-      {/* The upper third, not the middle of the window: the tiles are the page's point. */}
-      <Page width="wide" className="relative flex flex-col gap-8 pt-[8vh] pb-12 @2xl:pt-[12vh]">
+      {/*
+        The upper third, not the middle of the window: the tiles are the page's point. The space
+        above shrinks with the window's height, so at 720 px the tiles are still in view.
+      */}
+      <Page width="wide" className="relative flex flex-col gap-8 pt-[max(1.5rem,calc(16vh-4rem))] pb-12">
         <div className="flex max-w-3xl flex-col gap-4">
           <BrandMark size={56} className="shrink-0" />
           <h2 className="text-display text-fg">{t('welcomeHeading')}</h2>

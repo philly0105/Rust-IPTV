@@ -336,6 +336,16 @@ function menuAnchor(el: HTMLElement): { x: number; y: number } {
   return { x: rtl ? r.right - 48 : r.left + 48, y: r.top + Math.min(r.height - 8, 96) };
 }
 
+/**
+ * Anchor for a menu a "more" button opens: just under the button, from its inline start (the
+ * menu grows toward the inline end and keeps inside the window).
+ */
+export function buttonMenuAnchor(el: HTMLElement): { x: number; y: number } {
+  const r = el.getBoundingClientRect();
+  const rtl = getComputedStyle(el).direction === 'rtl';
+  return { x: rtl ? r.right : r.left, y: r.bottom + 4 };
+}
+
 export interface ChannelCardProps {
   rail: RailCardProps;
   name: string;
@@ -476,6 +486,8 @@ export interface CardMenuRequest {
   pos: { x: number; y: number };
   label: string;
   items: CardMenuItem[];
+  /** Called once the menu closes (an item ran, Escape, a click elsewhere, another menu opened). */
+  onClose?(): void;
 }
 
 export interface CardMenuItem {
@@ -616,7 +628,7 @@ export function ContinueCard({ rail, title, episode, left, progress, posterUrl, 
           </span>
         )}
       </button>
-      {open && <CardMenuButton label={t('moreActionsFor', { title })} tabIndex={rail.tabIndex} onOpen={(el) => open(menuAnchor(el))} />}
+      {open && <CardMenuButton label={t('moreActionsFor', { title })} tabIndex={rail.tabIndex} onOpen={(el) => open(buttonMenuAnchor(el))} />}
     </div>
   );
 }

@@ -19,6 +19,8 @@ vi.mock('@/api/transport', async (orig) => ({
 
 const { queryClient } = await import('@/api/query');
 const { DIAL_TICK_MS, HERO_IDLE_ROUNDS, HeroCarousel, dialFill } = await import('../HeroCarousel');
+const { CardMenuContext } = await import('../cards');
+type CardMenuRequest = import('../cards').CardMenuRequest;
 const { buildHeroSlides, wrapIndex, HERO_MAX_CONTINUE, HERO_MAX_SLIDES } = await import('../heroSlides');
 type HeroSlide = import('../heroSlides').HeroSlide;
 
@@ -147,6 +149,40 @@ describe('HeroCarousel', () => {
     tick(DWELL);
     tick(DWELL);
     expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
+  });
+
+  it("a continue slide's menu holds the rotation until it closes, though it draws outside the hero", () => {
+    vi.useFakeTimers();
+    const requests: CardMenuRequest[] = [];
+    const slides = [slide('a', { kind: 'continue', position: position('a') }), slide('b'), slide('c')];
+    const menuFor = vi.fn(() => [{ id: 'remove', label: 'Remove', onSelect: () => undefined }]);
+    queryClient.clear();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CardMenuContext.Provider value={(r) => requests.push(r)}>
+            <HeroCarousel slides={slides} sourceName={() => 'Home IPTV'} canPlay={() => true} onPlay={vi.fn()} menuFor={menuFor} dwellMs={DWELL} />
+          </CardMenuContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const hero = screen.getByTestId('dashboard-hero');
+    // Only the continue slide has the button; a new arrival has nothing to remove or mark.
+    expect(within(screen.getByTestId('hero-slide')).getByRole('button', { name: 'More actions for Title a' })).toBeTruthy();
+    fireEvent.click(within(screen.getByTestId('hero-slide')).getByRole('button', { name: 'More actions for Title a' }));
+    expect(menuFor).toHaveBeenCalledWith(expect.objectContaining({ key: slides[0]!.key }));
+    expect(requests.map((r) => r.label)).toEqual(['Title a']);
+    // The menu took focus and the pointer away from the hero: it still holds still.
+    fireEvent.blur(within(hero).getByRole('button', { name: 'More actions for Title a' }));
+    fireEvent.pointerLeave(hero);
+    expect(hero.dataset['rotating']).toBeUndefined();
+    tick(DWELL * 3);
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title a');
+    act(() => requests[0]!.onClose?.());
+    expect(hero.dataset['rotating']).toBe('true');
+    tick(DWELL);
+    expect(selectedTab().getAttribute('aria-label')).toBe('Title b');
+    expect(within(screen.getByTestId('hero-slide')).queryByRole('button', { name: /More actions/ })).toBeNull();
   });
 
   it('pauses under the pointer and finishes the dwell it had left once the pointer goes', () => {

@@ -264,5 +264,7 @@
   "findInSources": "Найти в источниках",
   "groupRecentChannels": "Недавние каналы",
   "groupSuggested": "Предложения",
-  "paletteHintClose": "закрыть"
+  "paletteHintClose": "закрыть",
+  "getStartedGuideHint": "Что идёт сейчас и что дальше",
+  "getStartedSearchHint": "Каналы, фильмы и сериалы"
 }

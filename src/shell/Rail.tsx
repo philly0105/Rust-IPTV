@@ -65,8 +65,22 @@ function RailNavLink({
 /**
  * A group's small label (Watch, Library, Sources). Collapsed, the rail has no room for words:
  * the label stays for screen readers and a short rule marks the break between the groups.
+ * `disclosure`: the label is also the button that folds the group away (Library), inside the
+ * heading, so the group keeps its name and the button says whether it is open.
  */
-function GroupLabel({ id, label, collapsed, action }: { id: string; label: string; collapsed: boolean; action?: ReactNode }) {
+function GroupLabel({
+  id,
+  label,
+  collapsed,
+  action,
+  disclosure,
+}: {
+  id: string;
+  label: string;
+  collapsed: boolean;
+  action?: ReactNode;
+  disclosure?: { open: boolean; controls: string; onToggle(): void };
+}) {
   if (collapsed) {
     return (
       <>
@@ -79,13 +93,59 @@ function GroupLabel({ id, label, collapsed, action }: { id: string; label: strin
     );
   }
   return (
-    <div className="flex h-8 items-center justify-between ps-3 pe-1 pt-2">
-      <h2 id={id} className="truncate text-caption font-medium text-fg-subtle">
-        {label}
+    <div className={cn('flex h-8 items-center justify-between pe-1 pt-2', disclosure ? 'ps-1' : 'ps-3')}>
+      <h2 id={id} className={cn('truncate text-caption font-medium text-fg-subtle', disclosure && 'min-w-0 flex-1')}>
+        {disclosure ? (
+          <button
+            type="button"
+            aria-expanded={disclosure.open}
+            aria-controls={disclosure.controls}
+            onClick={disclosure.onToggle}
+            data-rail-group-toggle=""
+            className="group/label flex h-6 max-w-full items-center gap-1 rounded-sm px-2 text-match-parent hover:text-fg-muted motion-safe:transition-colors"
+          >
+            <span className="truncate">{label}</span>
+            {/* Shown while folded (the state), and on hover or focus (the way to fold it). */}
+            <ChevronDown
+              aria-hidden
+              size={12}
+              className={cn(
+                'shrink-0 motion-safe:transition-[transform,opacity]',
+                disclosure.open
+                  ? 'opacity-0 group-hover/label:opacity-100 group-focus-visible/label:opacity-100 pointer-coarse:opacity-100'
+                  : '-rotate-90 rtl:rotate-90',
+              )}
+            />
+          </button>
+        ) : (
+          label
+        )}
       </h2>
       {action}
     </div>
   );
+}
+
+/**
+ * Whether the Library group is open, kept across launches: folded, it hands its room to the
+ * sources on a laptop-height window. A UI preference, in localStorage like the rail's collapse.
+ */
+const RAIL_LIBRARY_KEY = 'tsrust.railLibrary';
+
+function readLibraryOpen(): boolean {
+  try {
+    return localStorage.getItem(RAIL_LIBRARY_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function writeLibraryOpen(open: boolean): void {
+  try {
+    localStorage.setItem(RAIL_LIBRARY_KEY, open ? '1' : '0');
+  } catch {
+    // storage blocked: the group still folds, until the next launch
+  }
 }
 
 /** A labelled group of rail links (Watch, Library). */
@@ -96,6 +156,7 @@ function RailGroup({
   collapsed,
   dim,
   first,
+  foldable,
 }: {
   id: string;
   label: string;
@@ -104,7 +165,32 @@ function RailGroup({
   dim?: boolean;
   /** The first group sits straight under the brand row: no rule above it when collapsed. */
   first?: boolean;
+  /** The label folds the group away (Library). The icon-only rail always shows every link. */
+  foldable?: boolean;
 }) {
+  const { pathname } = useLocation();
+  const listId = useId();
+  const current = links.some((l) => pathname === l.to || pathname.startsWith(`${l.to}/`));
+  const [unfolded, setUnfolded] = useState(() => !foldable || readLibraryOpen() || current);
+  // Folded, the group opens again when one of its pages opens (from a card, the palette, a
+  // shortcut), so the current page is never a hidden link; in the same render, as a source's
+  // entry does. Only a press is remembered.
+  const [wasCurrent, setWasCurrent] = useState(current);
+  if (current !== wasCurrent) {
+    setWasCurrent(current);
+    if (current && !unfolded) setUnfolded(true);
+  }
+  const open = collapsed || unfolded;
+  const disclosure = foldable
+    ? {
+        open,
+        controls: listId,
+        onToggle: () => {
+          writeLibraryOpen(!unfolded);
+          setUnfolded(!unfolded);
+        },
+      }
+    : undefined;
   return (
     <div role="group" aria-labelledby={id} data-rail-group={id} className="flex flex-col">
       {collapsed && first ? (
@@ -112,15 +198,17 @@ function RailGroup({
           {label}
         </h2>
       ) : (
-        <GroupLabel id={id} label={label} collapsed={collapsed} />
+        <GroupLabel id={id} label={label} collapsed={collapsed} disclosure={collapsed ? undefined : disclosure} />
       )}
-      <ul className="flex flex-col gap-0.5">
-        {links.map((l) => (
-          <li key={l.to}>
-            <RailNavLink {...l} collapsed={collapsed} dim={dim} />
-          </li>
-        ))}
-      </ul>
+      {open && (
+        <ul id={listId} className="flex flex-col gap-0.5">
+          {links.map((l) => (
+            <li key={l.to}>
+              <RailNavLink {...l} collapsed={collapsed} dim={dim} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -194,6 +282,44 @@ function useRailMenu(want: boolean): [MenuComponent | null, () => void] {
   return [menu, request];
 }
 
+/**
+ * Which sources the user opened or closed in the rail, by id, kept across launches (SH-rail-ia):
+ * a user who keeps one of three sources open finds it open next time. A UI preference, so in
+ * localStorage, not the core's settings. Only a press writes it; a source opened because its page
+ * is showing is not remembered as opened.
+ */
+const RAIL_SOURCES_KEY = 'tsrust.railSources';
+/** Entries kept: the most recently pressed, so deleted sources age out. */
+const RAIL_SOURCES_MAX = 32;
+
+function readRailSources(): Record<string, boolean> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(RAIL_SOURCES_KEY) ?? '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The source's remembered state, or undefined when the user never pressed it. */
+function railSourceOpen(id: string): boolean | undefined {
+  const v = readRailSources()[id];
+  return typeof v === 'boolean' ? v : undefined;
+}
+
+function rememberRailSource(id: string, open: boolean): void {
+  const all = readRailSources();
+  delete all[id];
+  all[id] = open;
+  const ids = Object.keys(all);
+  for (const old of ids.slice(0, Math.max(0, ids.length - RAIL_SOURCES_MAX))) delete all[old];
+  try {
+    localStorage.setItem(RAIL_SOURCES_KEY, JSON.stringify(all));
+  } catch {
+    // storage blocked: the rail still opens and closes, it just forgets
+  }
+}
+
 function SourceEntry({
   source,
   collapsed,
@@ -225,8 +351,9 @@ function SourceEntry({
   }, [RailMenu]);
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  // Collapsed, the entry is a menu and has nothing to expand (nor a radio probe to start).
-  const [expanded, setExpanded] = useState(active || (only && !collapsed));
+  // Collapsed, the entry is a menu and has nothing to expand (nor a radio probe to start). The
+  // source of the page on show opens; otherwise the user's last press, else the only source opens.
+  const [expanded, setExpanded] = useState(() => active || (!collapsed && (railSourceOpen(source.id) ?? only)));
   // Opening a source from a card or the palette expands its entry in the same render, not in an
   // effect a commit later: the rail's scroll effect runs once per route, and it must find the
   // active sub-link already on the page to bring it into view.
@@ -281,7 +408,9 @@ function SourceEntry({
       requestRailMenu();
     };
     return (
-      <li ref={collapsedItemRef} data-tour={tour} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
+      // data-rail-current: the menu trigger carries no aria-current, but the rail still scrolls
+      // the source of the page on show into view (useRailScroll).
+      <li ref={collapsedItemRef} data-tour={tour} data-rail-current={active || undefined} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
         {RailMenu ? (
           <RailMenu
             label={label}
@@ -345,7 +474,8 @@ function SourceEntry({
         data-tour={tour}
         onClick={() => {
           revealOnExpand.current = !expanded;
-          setExpanded((v) => !v);
+          rememberRailSource(source.id, !expanded);
+          setExpanded(!expanded);
         }}
         className={cn(
           'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
@@ -443,7 +573,7 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
     };
     // Once per route, so a refetch never undoes the user's own scrolling of the rail. The route
     // only counts as handled once its link was found: the source links arrive with the sources.
-    const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"]');
+    const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"], [data-rail-current]');
     if (active) {
       scrolledFor.current = scrollKey;
       el.scrollTop += railRevealDelta(el.getBoundingClientRect(), active.getBoundingClientRect());
@@ -613,7 +743,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
         >
           {/* With no sources every Library page opens empty: the group steps back (SH-welcome-generic). */}
-          <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} />
+          <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} foldable />
           <div role="group" aria-labelledby="rail-sources-heading" className="flex flex-col gap-0.5">
             <GroupLabel
               id="rail-sources-heading"
@@ -632,16 +762,22 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
         <div className={cn(!collapsed && 'min-w-0 flex-1')}>
           <RailNavLink to="/settings" labelKey="navSettings" icon={SettingsIcon} collapsed={collapsed} />
         </div>
-        <IconButton
-          label={t('keyboardShortcuts')}
-          shortcut="?"
-          tooltipSide={collapsed ? 'inline-end' : 'top'}
-          icon={<Keyboard aria-hidden size={18} />}
-          onClick={() => setHelpOpen(true)}
-          // Keyboard-only: a phone or tablet has nothing to type the combos on (SH-touch-chrome).
-          className={cn(footerButton, collapsed ? 'h-(--rail-item-height) w-full' : 'size-(--rail-item-height)')}
-          data-testid="rail-shortcuts"
-        />
+        {/*
+          Keyboard-only: a phone or tablet has nothing to type the combos on (SH-touch-chrome).
+          Not in the icon-only rail either, where the footer stacks: its row went to the sources
+          on a short window, and `?`, the palette and Settings all open the same reference.
+        */}
+        {!collapsed && (
+          <IconButton
+            label={t('keyboardShortcuts')}
+            shortcut="?"
+            tooltipSide="top"
+            icon={<Keyboard aria-hidden size={18} />}
+            onClick={() => setHelpOpen(true)}
+            className={cn(footerButton, 'size-(--rail-item-height)')}
+            data-testid="rail-shortcuts"
+          />
+        )}
         {autoCollapsed ? (
           // Below lg the rail never expands; on a narrow window its icon column takes room, so it
           // can go away entirely. The header's Show sidebar button brings it back.

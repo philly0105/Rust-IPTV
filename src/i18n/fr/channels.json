@@ -67,7 +67,7 @@
   "noHiddenTitle": "Aucune chaîne masquée",
   "noHiddenText": "Masquez une chaîne depuis son menu, ou appuyez sur Maj+Suppr dessus dans TV en direct.",
   "noMatch": "Aucune chaîne masquée ne correspond.",
-  "goneBadge": "Absente de la playlist",
+  "goneBadge": "Absente de la source",
   "radioBadge": "Radio",
   "done": "Terminé"
 }

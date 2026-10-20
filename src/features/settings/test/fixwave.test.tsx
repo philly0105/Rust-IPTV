@@ -46,21 +46,25 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('Section nav below the shell panel breakpoint', () => {
-  it('lists every section inline, hidden only from 1440 px (the shell inline-panel width)', async () => {
+describe('Section nav (SS-7)', () => {
+  it('lists every section in groups beside the page, and moves between them', async () => {
     const view = renderAt(settingsRoutes, '/settings/general');
     await screen.findByTestId('settings-general');
-    const wrap = screen.getByTestId('settings-nav-inline-wrap');
-    expect(wrap.className).toContain('min-[1440px]:hidden');
-    expect(wrap.className).not.toMatch(/(^|\s)lg:hidden/);
-    const nav = within(wrap).getByTestId('settings-nav-inline');
+    const nav = screen.getByTestId('settings-nav');
     // Browser: no External players section (the desktop app lists all 12).
     expect(within(nav).getAllByRole('link')).toHaveLength(11);
     expect(within(nav).queryByRole('link', { name: 'External players' })).toBeNull();
+    expect(within(nav).getAllByRole('list').map((l) => l.getAttribute('aria-labelledby') && document.getElementById(l.getAttribute('aria-labelledby')!)?.textContent)).toEqual([
+      'App',
+      'Watching',
+      'Household',
+      'System',
+    ]);
     expect(within(nav).getByRole('link', { name: 'General' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(within(nav).getByRole('link', { name: 'About' }));
     await screen.findByTestId('settings-about');
     expect(view.router.state.location.pathname).toBe('/settings/about');
+    expect(within(screen.getByTestId('settings-nav')).getByRole('link', { name: 'About' }).getAttribute('aria-current')).toBe('page');
   });
 
   it('desktop lists External players; the browser sends its address to General', async () => {
@@ -71,8 +75,15 @@ describe('Section nav below the shell panel breakpoint', () => {
     flags.desktop = true;
     renderAt(settingsRoutes, '/settings/players');
     await screen.findByTestId('settings-players');
-    const nav = within(screen.getByTestId('settings-nav-inline-wrap')).getByTestId('settings-nav-inline');
-    expect(within(nav).getAllByRole('link')).toHaveLength(12);
+    expect(within(screen.getByTestId('settings-nav')).getAllByRole('link')).toHaveLength(12);
+  });
+
+  it('puts every section in exactly one nav group', async () => {
+    const { NAV_GROUPS } = await import('../SettingsPage');
+    const { SECTION_IDS } = await import('../sections/types');
+    const grouped = NAV_GROUPS.flatMap((g) => g.sections);
+    expect([...grouped].sort()).toEqual([...SECTION_IDS].sort());
+    expect(new Set(grouped).size).toBe(grouped.length);
   });
 });
 
@@ -114,9 +125,9 @@ describe('Parity settings', () => {
     await waitFor(() => expect(patches()).toEqual([{ vodMinRating: 6.5 }]));
   });
 
-  it('Downloads: the recordings folder defaults inside downloads and is read-only in the browser', async () => {
-    renderAt(settingsRoutes, '/settings/general');
-    await screen.findByTestId('settings-general');
+  it('Recording: the recordings folder defaults inside downloads and is read-only in the browser', async () => {
+    renderAt(settingsRoutes, '/settings/recording');
+    await screen.findByTestId('settings-recording');
     const shown = await screen.findByTestId('recordings-dir-path');
     await waitFor(() => expect(shown.textContent).toBe('C:\\Users\\me\\Downloads\\tsrust\\recordings'));
     expect(screen.getByText('Live recordings are saved to this folder on the server. Only the desktop app can change it.')).toBeTruthy();
@@ -124,16 +135,16 @@ describe('Parity settings', () => {
     cleanup();
     // A folder set in the desktop app (a shared data folder) is named as it is, with no reset.
     current = settings({ recordingsDir: 'D:\\Rec' });
-    renderAt(settingsRoutes, '/settings/general');
+    renderAt(settingsRoutes, '/settings/recording');
     await waitFor(() => expect(screen.getByTestId('recordings-dir-path').textContent).toBe('D:\\Rec'));
     expect(screen.queryByTestId('recordings-dir-reset')).toBeNull();
     expect(patches()).toEqual([]);
   });
 
-  it('Downloads: the desktop app resets a custom recordings folder', async () => {
+  it('Recording: the desktop app resets a custom recordings folder', async () => {
     flags.desktop = true;
     current = settings({ recordingsDir: 'D:\\Rec' });
-    renderAt(settingsRoutes, '/settings/general');
+    renderAt(settingsRoutes, '/settings/recording');
     fireEvent.click(await screen.findByTestId('recordings-dir-reset'));
     await waitFor(() => expect(patches()).toEqual([{ recordingsDir: null }]));
   });

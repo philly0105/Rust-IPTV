@@ -10,16 +10,33 @@ import { addManualEpgUrl, epgRows, removeManualEpgUrl, setEpgUrlEnabled } from '
 import { redactUrl } from '../lib/redact';
 import { Field } from './Field';
 
+/** The shift field's text for stored links: blank for none. */
+export function shiftTextOf(links: EpgLinks): string {
+  return links.shiftMinutes ? String(links.shiftMinutes) : '';
+}
+
 /**
  * Per-source EPG URLs (detected from the playlist/portal, added by hand, and disabled), and the
- * source's guide time shift.
+ * source's guide time shift. The dialog owns the shift's typed text (`shiftText`), so it can
+ * refuse to save while the text is not a shift (SS-16) and keep it across tab switches.
  */
-export function EpgLinksEditor({ value, onChange, disabled }: { value: EpgLinks; onChange: (next: EpgLinks) => void; disabled?: boolean }) {
+export function EpgLinksEditor({
+  value,
+  onChange,
+  disabled,
+  shiftText,
+  onShiftTextChange,
+}: {
+  value: EpgLinks;
+  onChange: (next: EpgLinks) => void;
+  disabled?: boolean;
+  shiftText: string;
+  onShiftTextChange: (text: string) => void;
+}) {
   const { t } = useTranslation('sources');
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
-  // The typed text; the links take it only while it is a valid shift.
-  const [shiftText, setShiftText] = useState(value.shiftMinutes ? String(value.shiftMinutes) : '');
+  // The links take the typed text only while it is a valid shift.
   const shiftValid = parseGuideShift(shiftText) !== null;
   const rows = epgRows(value);
 
@@ -121,7 +138,7 @@ export function EpgLinksEditor({ value, onChange, disabled }: { value: EpgLinks;
               className="w-28 text-end tabular-nums"
               data-testid="epg-shift-minutes"
               onChange={(e) => {
-                setShiftText(e.target.value);
+                onShiftTextChange(e.target.value);
                 const minutes = parseGuideShift(e.target.value);
                 if (minutes !== null) onChange({ ...value, shiftMinutes: minutes });
               }}

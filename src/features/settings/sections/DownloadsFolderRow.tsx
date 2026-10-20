@@ -77,8 +77,11 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
         dir.isPending ? (
           <Skeleton className="h-10 w-full" />
         ) : dir.isError ? (
-          <div role="alert" className="flex w-full flex-wrap items-center gap-3 text-sm" data-testid="downloads-dir-error">
-            <span className="min-w-0 flex-1 text-danger">{t('downloadsFolderLoadFailed', { message: dir.error.message })}</span>
+          <div role="alert" className="flex w-full flex-wrap items-start gap-3 text-body-sm" data-testid="downloads-dir-error">
+            <span className="min-w-0 flex-1">
+              <span className="block text-danger">{t('downloadsFolderLoadFailed')}</span>
+              <span className="block text-fg-muted">{errorDescription(dir.error)}</span>
+            </span>
             <Button size="sm" variant="secondary" onClick={() => void dir.refetch()}>
               {t('retry')}
             </Button>

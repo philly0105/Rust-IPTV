@@ -1,7 +1,12 @@
-import { Navigate, type RouteObject } from 'react-router';
+import type { RouteObject } from 'react-router';
 
-/** SPEC C7: `/settings` -> `/settings/general`; `/settings/:section`. The page loads lazily. */
+const page = async () => ({ Component: (await import('./SettingsPage')).SettingsPage });
+
+/**
+ * SPEC C7: `/settings/:section`, and `/settings`, which is the list of sections on a phone and
+ * goes on to `/settings/general` on a wider window (SettingsPage decides). The page loads lazily.
+ */
 export const settingsRoutes: RouteObject[] = [
-  { path: 'settings', element: <Navigate to="/settings/general" replace /> },
-  { path: 'settings/:section', lazy: async () => ({ Component: (await import('./SettingsPage')).SettingsPage }) },
+  { path: 'settings', lazy: page },
+  { path: 'settings/:section', lazy: page },
 ];

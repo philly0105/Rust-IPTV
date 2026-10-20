@@ -1,7 +1,10 @@
 /**
  * The first-run tour (contract C7): three steps, each a card beside a
  * spotlight on its `[data-tour]` anchor, or a centred card when the anchor
- * is missing or off screen.
+ * is missing or off screen. The card points at its anchor with a small
+ * arrow. Opened automatically after the first source (SS-6) it is a single
+ * coach mark on search and the command palette, with "Show me around" to
+ * grow it into the three steps.
  *
  * It is modal: a full-window layer catches pointer input, focus stays in the
  * card (Tab wraps, a click on the card's text focuses the card, a focus that
@@ -19,13 +22,15 @@ import { createPortal } from 'react-dom';
 import { Button, cn, focusableIn, Kbd } from '@/ui';
 
 import { useOnboardingStrings } from '../strings';
-import { centred, placeCard, spotlightBox, type Box } from './placement';
-import { findAnchor, TOUR_STEPS, type TourAnchor } from './steps';
+import { centred, placeCard, spotlightBox, type Box, type CardArrow } from './placement';
+import { COACH_STEPS, findAnchor, TOUR_STEPS, type TourAnchor, type TourStep } from './steps';
 
 export type TourResult = 'finished' | 'skipped';
 
 export interface TourProps {
   onClose: (result: TourResult) => void;
+  /** The single coach mark of the automatic first-run tour (`COACH_STEPS`) instead of the three steps. */
+  coach?: boolean;
 }
 
 /** Until the card is measured: about its real size, so the first frame lands close. */
@@ -84,31 +89,63 @@ function useAnchorBox(anchor: TourAnchor): Box | null {
   return box;
 }
 
-/** Three rising bars, filled up to the current step: the tuner's signal meter. Decorative; the text says the step. */
-function SignalMeter({ step, total }: { step: number; total: number }) {
+/**
+ * Where the tour is: one dot per step, the current one stretched and in the accent (progress is
+ * an accent use). Decorative; the sr-only text beside it says the step.
+ */
+function StepDots({ step, total }: { step: number; total: number }) {
   return (
-    <span aria-hidden className="flex h-4 items-end gap-[3px]" data-testid="tour-meter">
+    <span aria-hidden className="flex items-center gap-1.5" data-testid="tour-dots">
       {Array.from({ length: total }, (_, i) => (
         <span
           key={i}
           className={cn(
-            'w-1 rounded-[1px] motion-safe:transition-colors motion-safe:duration-200',
-            i <= step ? 'bg-accent' : 'bg-surface-3',
+            'h-1.5 rounded-full motion-safe:transition-[width,background-color] motion-safe:duration-(--duration-base)',
+            i === step ? 'w-4 bg-accent' : i < step ? 'w-1.5 bg-fg-subtle' : 'w-1.5 bg-surface-3',
           )}
-          style={{ height: `${6 + (i * 10) / Math.max(1, total - 1)}px` }}
         />
       ))}
     </span>
   );
 }
 
-export function Tour({ onClose }: TourProps) {
+/**
+ * The card's pointer at its anchor: a small square turned 45 degrees, half outside the card's
+ * edge, in the card's own fill and outline, so card and arrow read as one shape.
+ */
+function Arrow({ arrow }: { arrow: CardArrow }) {
+  const at = arrow.offset - 6;
+  const style =
+    arrow.edge === 'left'
+      ? { left: -7, top: at }
+      : arrow.edge === 'right'
+        ? { right: -7, top: at }
+        : arrow.edge === 'top'
+          ? { top: -7, left: at }
+          : { bottom: -7, left: at };
+  const sides = { left: 'border-b border-l', right: 'border-t border-r', top: 'border-l border-t', bottom: 'border-r border-b' }[arrow.edge];
+  return (
+    <span
+      aria-hidden
+      dir="ltr"
+      data-testid="tour-arrow"
+      data-edge={arrow.edge}
+      className={cn('pointer-events-none absolute size-3 rotate-45 border-edge bg-surface', sides)}
+      style={style}
+    />
+  );
+}
+
+export function Tour({ onClose, coach: startCoach = false }: TourProps) {
   const { t, ready } = useOnboardingStrings();
+  // The coach mark can grow into the full tour ("Show me around") without closing.
+  const [steps, setSteps] = useState<readonly TourStep[]>(startCoach ? COACH_STEPS : TOUR_STEPS);
   const [step, setStep] = useState(0);
   const [announcement, setAnnouncement] = useState('');
-  const total = TOUR_STEPS.length;
-  const current = TOUR_STEPS[step]!;
+  const total = steps.length;
+  const current = steps[step]!;
   const last = step === total - 1;
+  const coach = total === 1;
   const box = useAnchorBox(current.anchor);
   const vp = useViewport();
   const layerRef = useRef<HTMLDivElement>(null);
@@ -133,11 +170,17 @@ export function Tour({ onClose }: TourProps) {
       const next = Math.min(Math.max(step + delta, 0), total - 1);
       if (next === step) return;
       setStep(next);
-      const s = TOUR_STEPS[next]!;
+      const s = steps[next]!;
       setAnnouncement(`${t('tourStep', { current: next + 1, total })}. ${t(s.titleKey)}`);
     },
-    [step, total, close, t],
+    [step, steps, total, close, t],
   );
+
+  const showAround = () => {
+    setSteps(TOUR_STEPS);
+    setStep(0);
+    setAnnouncement(`${t('tourStep', { current: 1, total: TOUR_STEPS.length })}. ${t(TOUR_STEPS[0]!.titleKey)}`);
+  };
 
   // Focus: into the card on open, back where it was on close (or the main region when that is gone).
   useLayoutEffect(() => {
@@ -156,7 +199,7 @@ export function Tour({ onClose }: TourProps) {
     const active = document.activeElement;
     if (active instanceof HTMLElement && cardRef.current?.contains(active)) return;
     primaryRef.current?.focus({ preventScroll: true });
-  }, [step]);
+  }, [step, steps]);
 
   // Focus that leaves the tour (a click on the page behind, a script) comes back to the card.
   // Focus inside another modal layer stays there, like the shared Dialog allows stacked modals:
@@ -273,25 +316,27 @@ export function Tour({ onClose }: TourProps) {
         data-testid="tour-card"
         data-side={place.side}
         className={cn(
-          'fixed top-0 left-0 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-edge bg-surface text-fg shadow-2 focus-visible:outline-none',
+          'fixed top-0 left-0 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-xl border border-edge bg-surface text-fg shadow-3 focus-visible:outline-none',
           'motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out',
         )}
         style={{ transform: translateTo(place.left, place.top) }}
       >
+        {spot && place.arrow ? <Arrow arrow={place.arrow} /> : null}
         <div className="flex items-center gap-3 px-5 pt-5">
-          <span aria-hidden className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-2 text-fg-muted">
-            <Icon size={20} />
+          <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-edge bg-surface-2 text-fg">
+            <Icon size={18} />
           </span>
-          <p className="min-w-0 flex-1 text-xs text-fg-muted" data-testid="tour-progress">
-            {t('tourStep', { current: step + 1, total })}
-          </p>
-          <SignalMeter step={step} total={total} />
+          {coach ? null : (
+            <p className="min-w-0 flex-1 text-caption text-fg-subtle" data-testid="tour-progress">
+              {t('tourStep', { current: step + 1, total })}
+            </p>
+          )}
         </div>
         <div key={step} className="px-5 pt-3 motion-safe:animate-fade-in" data-testid="tour-body">
-          <h2 id={titleId} className="font-display text-lg leading-snug">
+          <h2 id={titleId} className="text-title-sm">
             {t(current.titleKey)}
           </h2>
-          <p id={textId} className="mt-1.5 text-sm text-fg-muted">
+          <p id={textId} className="mt-1.5 text-body-sm text-fg-muted">
             {t(current.textKey)}
           </p>
           {current.anchor === 'search' && (
@@ -314,16 +359,27 @@ export function Tour({ onClose }: TourProps) {
           )}
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-divider px-5 py-3">
-          {!last && (
-            <Button variant="ghost" size="sm" onClick={() => close('skipped')} className="-ms-2">
-              {t('tourSkip')}
+          {coach ? (
+            // One card: nothing to skip and no steps to count; the full tour is offered instead.
+            <Button variant="ghost" size="sm" onClick={showAround} className="-ms-2 me-auto" data-testid="tour-show-around">
+              {t('tourShowAround')}
             </Button>
-          )}
-          <span className="flex-1" />
-          {step > 0 && (
-            <Button variant="secondary" size="sm" onClick={() => go(-1)}>
-              {t('tourBack')}
-            </Button>
+          ) : (
+            <>
+              {!last && (
+                <Button variant="ghost" size="sm" onClick={() => close('skipped')} className="-ms-2">
+                  {t('tourSkip')}
+                </Button>
+              )}
+              <span className="flex flex-1 justify-center">
+                <StepDots step={step} total={total} />
+              </span>
+              {step > 0 && (
+                <Button variant="secondary" size="sm" onClick={() => go(-1)}>
+                  {t('tourBack')}
+                </Button>
+              )}
+            </>
           )}
           <Button
             ref={primaryRef}
@@ -333,7 +389,7 @@ export function Tour({ onClose }: TourProps) {
             icon={last ? <Check aria-hidden size={16} /> : undefined}
             data-testid="tour-next"
           >
-            {last ? t('tourDone') : t('tourNext')}
+            {coach ? t('tourGotIt') : last ? t('tourDone') : t('tourNext')}
           </Button>
         </div>
         <p className="sr-only" aria-live="polite">

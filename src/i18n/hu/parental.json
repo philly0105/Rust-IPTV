@@ -38,7 +38,7 @@
   "setPin": "PIN-kód beállítása",
   "changePin": "PIN-kód módosítása",
   "pinSetToast": "A szülői felügyelet bekapcsolva",
-  "pinSetToastText": "Itt zárolhat csoportokat, egy csatornát, filmet vagy sorozatot pedig a menüjéből.",
+  "pinSetToastText": "Itt zárolhat csoportokat, egy csatornát, filmet vagy sorozatot pedig a menüjéből. Az elfelejtett PIN nem állítható vissza, ezért tartsa biztonságos helyen.",
   "pinChangedToast": "PIN-kód módosítva",
   "unlockTitle": "Adja meg a szülői PIN-kódot",
   "unlockText": "Ezt a szülői felügyelet zárolta.",
@@ -170,5 +170,13 @@
   "discardTitle": "Elveted a módosításokat?",
   "discardText": "Az itt bejelölt vagy kijelölésből kivett csoportok nem lesznek mentve.",
   "keepEditing": "Szerkesztés folytatása",
-  "discard": "Elvetés"
+  "discard": "Elvetés",
+  "pinNoRecovery": "Az elfelejtett PIN nem állítható vissza. Tartsa biztonságos helyen.",
+  "offBenefitLockTitle": "Zárolja, amit szeretne",
+  "offBenefitLockText": "Teljes csoportok, egyes csatornák, filmek vagy sorozatok.",
+  "offBenefitModeTitle": "Elrejtés vagy kérdés",
+  "offBenefitModeText": "A zárolt elemek eltűnnek, vagy megnyitáskor PIN-kódot kérnek.",
+  "offBenefitAdultTitle": "Felnőtt csoportok",
+  "offBenefitAdultText": "A felnőttnek jelölt csoportok automatikusan zárolhatók.",
+  "offPinNote": "Azt, hogy mit zárol, a PIN-kód beállítása után választja ki."
 }

@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { CircleAlert, GripVertical, IdCard, Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { CircleAlert, EyeOff, GripVertical, IdCard, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { memo, useId, type DragEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -8,7 +8,8 @@ import type { AccountStatus, ScheduleEntry } from '@/api/rpc';
 import type { Source, SourceKind } from '@/api/types';
 
 import { sourceHomePath } from '@/shell/railLinks';
-import { Badge, Button, IconButton } from '@/ui';
+import { useMediaQuery } from '@/shell/useMediaQuery';
+import { Badge, Button, IconButton, Menu, MetaLine, Tooltip, type MenuItem } from '@/ui';
 import { baseName } from '../lib/files';
 import { absoluteTime, formatCount, relativeTime } from '../lib/format';
 import { useSourceGuide } from '../lib/epgRefresh';
@@ -20,11 +21,21 @@ import { AccountBadges } from './AccountBadges';
 import { hasAccountInfo } from './AccountPanel';
 import { GuideProgressView } from './GuideProgressView';
 import { ImportProgressView } from './ImportProgressView';
+import { SourceMonogram } from './SourceMonogram';
 
-export const KIND_MARK: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'XC', stalker: 'STB' };
+/** The kind's short name for the card's badge ("Xtream"); the full one is the badge's accessible text. */
+const KIND_SHORT: Record<SourceKind, string> = { m3u: 'kindM3uShort', xtream: 'kindXtreamShort', stalker: 'kindStalkerShort' };
 
-/** Stat columns of the wide layout, in order. */
-const STAT_SLOTS = ['channels', 'radio', 'movies', 'series'] as const;
+/**
+ * Phone widths: the card keeps one action button, More, beside the name, and Refresh and Edit
+ * move into its menu; three 44 px touch targets there would leave the name a few letters.
+ */
+const PHONE_QUERY = '(max-width: 639.98px)';
+
+/** A pasted or uploaded playlist: nothing to download again, so its refresh re-imports the stored text. */
+export function isTextSource(s: Pick<Source, 'm3u'>): boolean {
+  return s.m3u?.origin === 'text';
+}
 
 /** One-line description of where a source comes from. Never shows secrets. */
 export function sourceOrigin(s: Source, t: (k: string, o?: Record<string, unknown>) => string): string {
@@ -148,6 +159,8 @@ export interface SourceCardProps {
   onEdit: (s: Source) => void;
   /** Opens the subscription details (Xtream and Stalker only). */
   onAccount?: (s: Source) => void;
+  /** Opens the source's hidden and renamed channels, with Reset all edits (SS-3). */
+  onChannelEdits?: (s: Source) => void;
   onRemove: (s: Source) => void;
   /** Stops the running import or refresh (C8). */
   onCancelImport?: (id: string) => void;
@@ -182,6 +195,12 @@ function nextRefreshText(entry: ScheduleEntry, lang: string, t: (k: string, o?: 
  * The card is memoised (VD-5): its import progress and cancel state come from the progress store
  * per source, and its handlers take the source (or its id), so the page can pass the same
  * functions to every card. An import event then re-renders only the card it is about.
+ *
+ * Layout: the monogram, then the identity (name, kind, the subscription) over one line of
+ * status (where it comes from, when it last and next refreshes), then the counts it has, and
+ * the actions. Below @3xl the counts join the status as a line of text and the actions sit at
+ * the top end beside the name. Only the stats a source has are shown, right-aligned, so the
+ * last one always meets the actions and no card shows an empty column.
  */
 export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   const { source: s, index, total, refreshing, reorderable = true } = props;
@@ -195,6 +214,9 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   const guide = useSourceGuide(s.epg);
   // Names the source for the error strip's buttons: several cards can show "Try again" at once.
   const nameId = useId();
+  const text = isTextSource(s);
+  // One card has nowhere to move: no grip, and Alt+Arrow does nothing.
+  const canMove = reorderable && total > 1;
 
   // `channelCount` is live channels only; radio gets its own stat when the source has any.
   const radio = radioCount(s);
@@ -203,13 +225,11 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   if (radio > 0) stats.push({ key: 'radio', value: radio, label: t('statRadio', { count: radio }) });
   if (s.kind !== 'm3u' || s.movieCount > 0) stats.push({ key: 'movies', value: s.movieCount, label: t('statMovies', { count: s.movieCount }) });
   if (s.kind !== 'm3u' || s.seriesCount > 0) stats.push({ key: 'series', value: s.seriesCount, label: t('statSeries', { count: s.seriesCount }) });
-  // Wide layout: one fixed slot per stat, empty when the source has none, so the columns line up across cards.
-  const slots = STAT_SLOTS.map((key) => ({ key, stat: stats.find((st) => st.key === key) }));
 
   const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     // Alt+Arrow anywhere on the card, or plain arrows on the grip, move it.
     const onGrip = (e.target as HTMLElement).dataset.grip === 'true';
-    if (!reorderable || !(e.altKey || onGrip)) return;
+    if (!canMove || !(e.altKey || onGrip)) return;
     if (e.key === 'ArrowUp' && index > 0) {
       e.preventDefault();
       props.onMove(s.id, index - 1);
@@ -228,6 +248,43 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
   const refreshed = relativeTime(s.lastRefreshAt, lang);
   const failed = s.lastError ? relativeTime(s.lastErrorAt, lang) : undefined;
   const next = s.autoRefresh && props.schedule && !busy ? nextRefreshText(props.schedule, lang, t) : undefined;
+  const origin = sourceOrigin(s, t);
+
+  const times = [
+    // With an error and no good refresh yet, the error strip says it all; "Not refreshed yet" beside it reads as a contradiction.
+    refreshed || !s.lastError ? (
+      <span key="refreshed" className="whitespace-nowrap" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
+        {refreshed ? t('refreshedAgo', { when: refreshed }) : t('neverRefreshed')}
+      </span>
+    ) : null,
+    failed ? (
+      <span key="failed" className="whitespace-nowrap text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
+        {t('failedAgo', { when: failed })}
+      </span>
+    ) : null,
+    next ? (
+      <span key="next" className="whitespace-nowrap text-fg-subtle" title={absoluteTime(props.schedule?.nextRefreshAt, lang)} data-testid="source-next-refresh">
+        {next}
+      </span>
+    ) : null,
+  ].filter((x) => x !== null);
+
+  const phone = useMediaQuery(PHONE_QUERY);
+  const refreshLabel = t(text ? 'reimportSource' : 'refreshSource', { name: s.name });
+  const menu: MenuItem[] = [];
+  if (phone) {
+    menu.push({ id: 'refresh', label: refreshLabel, icon: <RefreshCw aria-hidden size={16} />, disabled: busy, onSelect: () => props.onRefresh(s) });
+    menu.push({ id: 'edit', label: t('editSource', { name: s.name }), icon: <Pencil aria-hidden size={16} />, onSelect: () => props.onEdit(s) });
+  }
+  if (hasAccountInfo(s) && props.onAccount) {
+    menu.push({ id: 'account', label: t('accountMenu'), icon: <IdCard aria-hidden size={16} />, onSelect: () => props.onAccount?.(s) });
+  }
+  // Renamed channels have no other way back to their provider's names in bulk.
+  if (props.onChannelEdits && (live > 0 || radio > 0)) {
+    menu.push({ id: 'edits', label: t('channelEditsMenu'), icon: <EyeOff aria-hidden size={16} />, onSelect: () => props.onChannelEdits?.(s) });
+  }
+  if (menu.length > 0) menu.push({ id: 'sep', type: 'separator' });
+  menu.push({ id: 'remove', label: t('removeMenu'), icon: <Trash2 aria-hidden size={16} />, danger: true, disabled: busy, onSelect: () => props.onRemove(s) });
 
   return (
     <li
@@ -237,8 +294,8 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
       onDragOver={(e) => props.onDragOver(s.id, e)}
       onDrop={(e) => props.onDrop(s.id, e)}
       className={clsx(
-        'relative rounded-lg border bg-surface shadow-1',
-        s.lastError && !busy ? 'border-danger/60' : 'border-edge',
+        'group/card relative rounded-lg border bg-surface motion-safe:transition-colors',
+        s.lastError && !busy ? 'border-danger/60' : 'border-edge hover:border-border',
         props.dragging && 'opacity-50',
       )}
     >
@@ -248,74 +305,80 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
           className={clsx('pointer-events-none absolute inset-x-3 h-0.5 rounded-full bg-accent', props.dropTarget === 'before' ? '-top-1.5' : '-bottom-1.5')}
         />
       ) : null}
-      {/* Below @2xl the actions take a row of their own, so the name and status keep the card's full width. */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 @2xl:flex-nowrap @2xl:gap-4 @2xl:p-4">
-        {reorderable ? (
-        <button
-          type="button"
-          draggable
-          data-grip="true"
-          onDragStart={(e) => props.onDragStart(s.id, e)}
-          onDragEnd={props.onDragEnd}
-          aria-label={t('reorderHandle', { name: s.name, position: index + 1, total })}
-          aria-describedby="sources-reorder-help"
-          // Not on touch screens (they cannot drag it) or narrow cards (the name needs the room): Alt+Arrow on the card still moves it.
-          className="hidden h-11 w-6 shrink-0 cursor-grab items-center justify-center rounded-sm text-fg-subtle hover:text-fg active:cursor-grabbing @sm:pointer-fine:flex"
-        >
-          <GripVertical aria-hidden className="size-4" />
-        </button>
+      {/*
+        Narrow cards are a grid: monogram, name and actions on the first row, status and counts
+        across the card's full width below. From @3xl one flex row; the identity column then
+        stops being `contents` and holds its lines itself.
+      */}
+      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 p-3 @2xl:p-4 @3xl:flex @3xl:gap-4">
+        {canMove ? (
+          // The instructions ride on the grip (its tooltip and #sources-reorder-help), not on a line above the list.
+          <Tooltip content={t('reorderHint')} describe={false} side="inline-end">
+            <button
+              type="button"
+              draggable
+              data-grip="true"
+              onDragStart={(e) => props.onDragStart(s.id, e)}
+              onDragEnd={props.onDragEnd}
+              aria-label={t('reorderHandle', { name: s.name, position: index + 1, total })}
+              aria-describedby="sources-reorder-help"
+              // Not on touch screens (they cannot drag it) or narrow cards (the name needs the room): Alt+Arrow on the card still moves it.
+              className="-ms-1 hidden h-11 w-5 shrink-0 cursor-grab items-center justify-center rounded-sm text-fg-subtle opacity-60 hover:text-fg hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing group-hover/card:opacity-100 @3xl:pointer-fine:flex"
+            >
+              <GripVertical aria-hidden size={16} />
+            </button>
+          </Tooltip>
         ) : null}
 
-        <span
-          aria-hidden
-          className="flex size-11 shrink-0 items-center justify-center rounded-md border border-edge bg-surface-2 font-numeric text-base tracking-wide text-fg-muted"
-        >
-          {KIND_MARK[s.kind]}
-        </span>
+        <SourceMonogram source={s} className="row-start-1" />
 
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="contents @3xl:flex @3xl:min-w-0 @3xl:flex-1 @3xl:flex-col @3xl:gap-1">
+          <div className="col-start-2 row-start-1 flex min-h-6 min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <Link
               to={sourceHomePath(s)}
               id={nameId}
               dir="auto"
               title={s.name}
-              className="truncate text-title-sm text-fg underline-offset-4 hover:underline"
+              className="min-w-0 truncate rounded-xs text-body font-semibold text-fg underline-offset-4 hover:underline"
               data-testid="source-name"
             >
               {s.name}
             </Link>
-            <span className="sr-only">{t(`kindLabel_${s.kind}`)}</span>
-            {s.autoRefresh ? <Badge>{t('autoRefreshBadge')}</Badge> : null}
+            <Badge variant="outline" className="shrink-0" data-testid="source-kind">
+              <span aria-hidden>{t(KIND_SHORT[s.kind])}</span>
+              <span className="sr-only">{t(`kindLabel_${s.kind}`)}</span>
+            </Badge>
+            {/* Auto refresh is the default, so the card names the exception. Pasted text has no choice. */}
+            {!s.autoRefresh && !text ? <Badge data-testid="source-manual-refresh">{t('manualRefreshBadge')}</Badge> : null}
             <AccountBadges status={props.account} warnDays={props.warnDays ?? 0} />
           </div>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-3 text-sm text-fg-muted">
-            <span className="max-w-full truncate" dir="auto" title={sourceOrigin(s, t)} data-testid="source-origin">
-              {sourceOrigin(s, t)}
+          {/*
+            Where it comes from, then when it refreshed. A narrow card gives the address its own
+            line, so a long one truncates there and the times never wrap with a separator left
+            hanging at the start of a line; from @3xl the two share one line.
+          */}
+          <div className="col-span-full row-start-2 flex min-w-0 flex-col gap-y-0.5 text-body-sm text-fg-muted @3xl:flex-row @3xl:items-center @3xl:gap-x-1.5">
+            <span className="block min-w-0 truncate" dir="auto" title={origin} data-testid="source-origin">
+              {origin}
             </span>
-            {/* With an error and no good refresh yet, the error strip says it all; "Not refreshed yet" beside it reads as a contradiction. */}
-            {refreshed || !s.lastError ? (
-              <span className="max-w-full text-fg-subtle" title={absoluteTime(s.lastRefreshAt, lang)} data-testid="source-refreshed">
-                {refreshed ? t('refreshedAgo', { when: refreshed }) : t('neverRefreshed')}
-              </span>
+            {times.length > 0 ? (
+              <>
+                <span aria-hidden className="hidden text-fg-subtle @3xl:inline">
+                  ·
+                </span>
+                <span className="sr-only">, </span>
+                {/* Narrow: one time per line, no separators to hang at a line's end. */}
+                <MetaLine as="span" className="shrink-0 text-body-sm @max-3xl:flex-col @max-3xl:items-start @max-3xl:[&>[aria-hidden]]:hidden" items={times} />
+              </>
             ) : null}
-            {failed ? (
-              <span className="max-w-full text-danger" title={absoluteTime(s.lastErrorAt, lang)} data-testid="source-failed-at">
-                {t('failedAgo', { when: failed })}
-              </span>
-            ) : null}
-            {next ? (
-              <span className="max-w-full text-fg-subtle" title={absoluteTime(props.schedule?.nextRefreshAt, lang)} data-testid="source-next-refresh">
-                {next}
-              </span>
-            ) : null}
-          </p>
-          <dl className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 @3xl:hidden">
+          </div>
+          {/* Narrow cards: the counts as one line of text. */}
+          <dl className="col-span-full row-start-3 flex flex-wrap gap-x-4 gap-y-0.5 @3xl:hidden">
             {stats.map((st) => (
-              <div key={st.key} className="flex items-baseline gap-1 text-sm">
+              <div key={st.key} className="flex items-baseline gap-1 text-body-sm">
                 <dt className="sr-only">{st.label}</dt>
                 <dd className="flex items-baseline gap-1">
-                  <span className="font-display font-semibold tabular-nums text-fg">{formatCount(st.value, lang)}</span>
+                  <span className="font-semibold tabular-nums text-fg">{formatCount(st.value, lang)}</span>
                   <span aria-hidden className="text-fg-muted">
                     {st.label}
                   </span>
@@ -325,46 +388,30 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
           </dl>
         </div>
 
-        <dl className="hidden shrink-0 gap-4 @3xl:flex">
-          {slots.map(({ key, stat }) =>
-            stat ? (
-              <div key={key} className="flex w-20 flex-col-reverse items-end" data-testid="source-stat-slot">
-                <dt className="max-w-full truncate text-xs text-fg-muted">{stat.label}</dt>
-                <dd className="font-display text-xl font-semibold tabular-nums leading-tight text-fg">{formatCount(stat.value, lang)}</dd>
-              </div>
-            ) : (
-              <div key={key} aria-hidden className="w-20" data-testid="source-stat-slot" />
-            ),
-          )}
+        <dl className="hidden shrink-0 items-center gap-6 @3xl:flex" data-testid="source-stats">
+          {stats.map((st) => (
+            <div key={st.key} className="flex min-w-14 flex-col-reverse items-end" data-testid="source-stat">
+              <dt className="max-w-full truncate text-caption text-fg-muted">{st.label}</dt>
+              <dd className="text-title-sm tabular-nums text-fg">{formatCount(st.value, lang)}</dd>
+            </div>
+          ))}
         </dl>
 
-        {/* On its own row when narrow. In one row the account button's place is kept when there is none, so icons line up across cards. */}
-        <div className="-mb-1 flex w-full shrink-0 items-center justify-end gap-0.5 @2xl:mb-0 @2xl:w-auto" data-testid="source-actions">
-          <IconButton
-            label={t('refreshSource', { name: s.name })}
-            icon={<RefreshCw aria-hidden className={clsx('size-4', busy && 'motion-safe:animate-spin')} />}
-            disabled={busy || s.m3u?.origin === 'text'}
-            onClick={() => props.onRefresh(s)}
-            data-testid="source-refresh"
-          />
-          {hasAccountInfo(s) && props.onAccount ? (
-            <IconButton
-              label={t('accountFor', { name: s.name })}
-              icon={<IdCard aria-hidden className="size-4" />}
-              onClick={() => props.onAccount?.(s)}
-              data-testid="source-account"
-            />
-          ) : (
-            <span aria-hidden className="hidden h-10 w-10 @2xl:block" />
+        {/* The same three places on every card, so the actions line up down the list (one on a phone). */}
+        <div className="col-start-3 row-start-1 -me-1 flex shrink-0 items-center gap-0.5 @3xl:ms-2" data-testid="source-actions">
+          {phone ? null : (
+            <>
+              <IconButton
+                label={refreshLabel}
+                icon={<RefreshCw aria-hidden size={16} className={clsx(busy && 'motion-safe:animate-spin')} />}
+                disabled={busy}
+                onClick={() => props.onRefresh(s)}
+                data-testid="source-refresh"
+              />
+              <IconButton label={t('editSource', { name: s.name })} icon={<Pencil aria-hidden size={16} />} onClick={() => props.onEdit(s)} data-testid="source-edit" />
+            </>
           )}
-          <IconButton label={t('editSource', { name: s.name })} icon={<Pencil aria-hidden className="size-4" />} onClick={() => props.onEdit(s)} data-testid="source-edit" />
-          <IconButton
-            label={t('removeSource', { name: s.name })}
-            icon={<Trash2 aria-hidden className="size-4" />}
-            onClick={() => props.onRemove(s)}
-            disabled={busy}
-            data-testid="source-remove"
-          />
+          <Menu label={t('moreActionsFor', { name: s.name })} items={menu} />
         </div>
       </div>
 
@@ -380,18 +427,16 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
           />
         </div>
       ) : s.lastError ? (
-        <div role="alert" className="flex flex-wrap items-center gap-3 border-t border-danger/40 bg-danger/10 px-4 py-2.5 text-sm" data-testid="source-error">
-          <CircleAlert aria-hidden className="size-4 shrink-0 text-danger" />
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-b-lg border-t border-danger/40 bg-danger/10 px-4 py-2.5 text-sm" data-testid="source-error">
+          <CircleAlert aria-hidden size={16} className="shrink-0 text-danger" />
           <SourceErrorText source={s} />
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" onClick={() => props.onEdit(s)} aria-describedby={nameId}>
               {t('checkSettings')}
             </Button>
-            {s.m3u?.origin !== 'text' ? (
-              <Button size="sm" variant="secondary" onClick={() => props.onRefresh(s)} aria-describedby={nameId} data-testid="source-error-retry">
-                {t('tryAgain')}
-              </Button>
-            ) : null}
+            <Button size="sm" variant="secondary" onClick={() => props.onRefresh(s)} aria-describedby={nameId} data-testid="source-error-retry">
+              {t('tryAgain')}
+            </Button>
           </div>
         </div>
       ) : guide ? (

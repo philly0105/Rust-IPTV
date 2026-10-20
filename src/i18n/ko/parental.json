@@ -37,7 +37,7 @@
   "setPin": "PIN 설정",
   "changePin": "PIN 변경",
   "pinSetToast": "자녀 보호가 켜졌습니다",
-  "pinSetToastText": "여기에서 그룹을 잠그고, 채널, 영화, 시리즈는 각 메뉴에서 잠그세요.",
+  "pinSetToastText": "여기에서 그룹을 잠그고, 채널, 영화, 시리즈는 각 메뉴에서 잠그세요. PIN을 잊으면 초기화할 수 없으니 안전한 곳에 보관하세요.",
   "pinChangedToast": "PIN이 변경되었습니다",
   "unlockTitle": "자녀 보호 PIN 입력",
   "unlockText": "자녀 보호로 잠긴 콘텐츠입니다.",
@@ -159,5 +159,13 @@
   "discardTitle": "변경 사항을 버릴까요?",
   "discardText": "여기서 선택하거나 해제한 그룹은 저장되지 않습니다.",
   "keepEditing": "계속 편집",
-  "discard": "버리기"
+  "discard": "버리기",
+  "pinNoRecovery": "PIN을 잊으면 초기화할 수 없습니다. 안전한 곳에 보관하세요.",
+  "offBenefitLockTitle": "원하는 항목 잠금",
+  "offBenefitLockText": "그룹 전체, 개별 채널, 영화 또는 시리즈.",
+  "offBenefitModeTitle": "숨기기 또는 묻기",
+  "offBenefitModeText": "잠긴 항목은 숨겨지거나 열 때 PIN을 묻습니다.",
+  "offBenefitAdultTitle": "성인 그룹",
+  "offBenefitAdultText": "성인용으로 표시된 그룹을 자동으로 잠글 수 있습니다.",
+  "offPinNote": "잠글 항목은 PIN을 설정한 뒤 선택합니다."
 }

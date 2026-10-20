@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "Canlı TV",
-  "tourLiveText": "Gruplara ayrılmış kanallar, şimdiki ve sonraki programlar ve eksiksiz TV rehberi.",
+  "tourLiveTitle": "Kaynaklarınız",
+  "tourLiveText": "Canlı kanalları, TV rehberi, filmleri ve dizileri için buradan bir kaynak açın.",
   "tourVodTitle": "Filmler, diziler ve Listem",
   "tourVodText": "Her kaynağın film ve dizi afişlerine göz atın, on yıllara göre filtreleyin ve içerikleri tek bir yerde toplamak için Listeme kaydedin.",
   "tourSearchTitle": "Her şeyi arayın",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Büyütülmüş veya tam ekran başlatın",
   "noteWindowStartText": "Pencerenin nasıl açılacağını Ayarlar'dan seçin.",
   "noteFixesTitle": "Yüzlerce düzeltme",
-  "noteFixesText": "İçe aktarma, rehber, oynatma, kayıt, indirmeler ve yedekler daha güvenilir."
+  "noteFixesText": "İçe aktarma, rehber, oynatma, kayıt, indirmeler ve yedekler daha güvenilir.",
+  "tourCoachTitle": "Kaynağınız hazır",
+  "tourCoachText": "Arama tüm kaynaklarınızdaki kanalları, filmleri ve dizileri bulur. Komut paleti sizi başka her yere götürür.",
+  "tourShowAround": "Tura başla",
+  "tourGotIt": "Anladım"
 }

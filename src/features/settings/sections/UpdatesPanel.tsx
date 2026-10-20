@@ -1,10 +1,11 @@
-import { CircleAlert, CircleCheck, Download, RefreshCw } from 'lucide-react';
+import { CircleAlert, CircleCheck, Download, ExternalLink, RefreshCw, Server } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Button, ProgressBar } from '@/ui';
+import { Button, ProgressBar, buttonClass } from '@/ui';
 import { absoluteTime } from '../../sources/lib/format';
 import { SettingsGroup } from '../components';
+import { RELEASES_URL, openExternal } from '../lib/links';
 import { checkForUpdate, type AvailableUpdate } from '../lib/updater';
 
 type State =
@@ -22,9 +23,11 @@ function message(e: unknown): string {
 
 /**
  * "Check for updates" in About. `available` = this build ships the updater
- * plugin with a signing key (`app.info.updaterAvailable`); otherwise it says so.
+ * plugin with a signing key (`app.info.updaterAvailable`). Without it the panel says where new
+ * versions come from (SR-6): the releases page for a desktop build, and for the browser, that
+ * the server is updated where it runs. No build or README wording for end users.
  */
-export function UpdatesPanel({ available }: { available: boolean }) {
+export function UpdatesPanel({ available, server = false }: { available: boolean; server?: boolean }) {
   const { t, i18n } = useTranslation('settings');
   const [state, setState] = useState<State>({ step: 'idle' });
   const received = useRef(0);
@@ -32,9 +35,18 @@ export function UpdatesPanel({ available }: { available: boolean }) {
   if (!available) {
     return (
       <SettingsGroup title={t('updates')}>
-        <div className="flex flex-col gap-1 px-4 py-4" data-testid="updates-unavailable">
-          <p className="text-fg">{t('updatesNotConfigured')}</p>
-          <p className="text-sm text-fg-muted">{t('updatesNotConfiguredHint')}</p>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-4" data-testid="updates-unavailable" data-mode={server ? 'server' : 'manual'}>
+          <div className="flex min-w-0 flex-[1_1_18rem] items-start gap-3">
+            {server ? <Server aria-hidden size={16} className="mt-1 shrink-0 text-fg-subtle" /> : null}
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <p className="text-body font-medium text-fg">{server ? t('updatesServer') : t('updatesNotConfigured')}</p>
+              <p className="text-body-sm text-fg-muted">{server ? t('updatesServerHint') : t('updatesNotConfiguredHint')}</p>
+            </div>
+          </div>
+          <a href={RELEASES_URL} target="_blank" rel="noreferrer noopener" onClick={openExternal} className={buttonClass('secondary', 'sm', 'shrink-0')} data-testid="updates-releases">
+            {t('updatesSeeReleases')}
+            <ExternalLink aria-hidden size={14} />
+          </a>
         </div>
       </SettingsGroup>
     );

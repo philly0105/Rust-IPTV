@@ -49,13 +49,17 @@ async function openPlayback() {
 }
 
 describe('Settings > Playback while the player capabilities load (L3-visual-10)', () => {
+  // The browser has one player: it is named as the one in use, not offered as a radio with nothing else to pick.
   it('browser: only the built-in player is listed, with no placeholder, and it stays put', async () => {
     await openPlayback();
-    const group = screen.getByRole('radiogroup', { name: 'Player' });
-    expect(group.querySelector('.animate-pulse')).toBeNull();
-    expect(values()).toEqual(['html5']);
+    const only = screen.getByTestId('player-only');
+    expect(only.textContent).toContain('Built-in player');
+    expect(only.textContent).toContain('In use');
+    expect(screen.queryByRole('radiogroup', { name: 'Player' })).toBeNull();
+    expect(screen.getByTestId('settings-playback').querySelector('.animate-pulse')).toBeNull();
     await act(async () => answer({ embeddedMpv: false, vlcPath: 'C:/VLC/vlc.exe', reason: 'desktop app only' }));
-    expect(values()).toEqual(['html5']);
+    expect(screen.getByTestId('player-only')).toBe(only);
+    expect(screen.queryByRole('radiogroup', { name: 'Player' })).toBeNull();
     expect(screen.queryByText(/wasn't found/)).toBeNull();
   });
 
@@ -63,8 +67,10 @@ describe('Settings > Playback while the player capabilities load (L3-visual-10)'
     rpcMock.handlers['settings.get'] = () => settings({ player: 'vlc' });
     await openPlayback();
     await act(async () => answer({ embeddedMpv: false, reason: 'desktop app only' }));
-    expect(values()).toEqual(['html5']);
-    expect(radios()[0]!.checked).toBe(true);
+    const only = screen.getByTestId('player-only');
+    expect(only.textContent).toContain('Built-in player');
+    expect(only.textContent).toContain('In use');
+    expect(screen.queryByRole('radiogroup', { name: 'Player' })).toBeNull();
   });
 
   it('desktop: embedded mpv is listed and usable from the start', async () => {

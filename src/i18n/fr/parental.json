@@ -39,7 +39,7 @@
   "setPin": "Définir le code PIN",
   "changePin": "Changer le code PIN",
   "pinSetToast": "Le contrôle parental est activé",
-  "pinSetToastText": "Verrouillez des groupes ici, ou une chaîne, un film ou une série depuis son menu.",
+  "pinSetToastText": "Verrouillez des groupes ici, ou une chaîne, un film ou une série depuis son menu. Un code PIN oublié ne peut pas être réinitialisé : conservez-le en lieu sûr.",
   "pinChangedToast": "Code PIN modifié",
   "unlockTitle": "Saisissez le code PIN parental",
   "unlockText": "Ce contenu est verrouillé par le contrôle parental.",
@@ -181,5 +181,13 @@
   "discardTitle": "Ignorer vos modifications ?",
   "discardText": "Les groupes cochés ou décochés ici ne seront pas enregistrés.",
   "keepEditing": "Continuer",
-  "discard": "Ignorer"
+  "discard": "Ignorer",
+  "pinNoRecovery": "Un code PIN oublié ne peut pas être réinitialisé. Conservez-le en lieu sûr.",
+  "offBenefitLockTitle": "Verrouillez ce que vous voulez",
+  "offBenefitLockText": "Des groupes entiers, des chaînes, des films ou des séries.",
+  "offBenefitModeTitle": "Masquer ou demander",
+  "offBenefitModeText": "Les éléments verrouillés disparaissent, ou demandent le code PIN à l'ouverture.",
+  "offBenefitAdultTitle": "Groupes pour adultes",
+  "offBenefitAdultText": "Les groupes marqués pour adultes peuvent se verrouiller automatiquement.",
+  "offPinNote": "Vous choisissez quoi verrouiller après avoir défini le code PIN."
 }

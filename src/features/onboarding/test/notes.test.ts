@@ -10,7 +10,7 @@ import pkg from '../../../../package.json';
 
 import { compareVersions } from '../decide';
 import { RELEASE_NOTES } from '../notes';
-import { TOUR_STEPS } from '../tour/steps';
+import { COACH_STEPS, TOUR_STEPS } from '../tour/steps';
 
 const strings = en as Record<string, string>;
 /** `settings.lastSeenVersion` accepts '' or 1-32 of these characters (contract C1). */
@@ -44,8 +44,8 @@ describe('RELEASE_NOTES', () => {
 
   it('keeps every English string the feature uses', () => {
     const used = [
-      ...TOUR_STEPS.flatMap((s) => [s.titleKey, s.textKey]),
-      ...['tourStep', 'tourNext', 'tourBack', 'tourSkip', 'tourDone', 'tourHintSearch', 'tourHintPalette', 'tourHintShortcuts'],
+      ...[...TOUR_STEPS, ...COACH_STEPS].flatMap((s) => [s.titleKey, s.textKey]),
+      ...['tourStep', 'tourNext', 'tourBack', 'tourSkip', 'tourDone', 'tourHintSearch', 'tourHintPalette', 'tourHintShortcuts', 'tourGotIt', 'tourShowAround'],
       ...['whatsNewTitle', 'whatsNewVersion', 'whatsNewClose', 'whatsNewTour', 'whatsNewEmpty'],
       ...RELEASE_NOTES.flatMap((r) => r.items.flatMap((i) => [`${i.key}Title`, `${i.key}Text`])),
     ];

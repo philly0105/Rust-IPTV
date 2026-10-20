@@ -1,6 +1,7 @@
 import {
   ChevronDown,
   Clapperboard,
+  EyeOff,
   Film,
   FolderLock,
   KeyRound,
@@ -336,13 +337,10 @@ function StatusPanel({
   let text: ReactNode;
   let action: ReactNode;
   if (state === 'off') {
+    // The off card below draws its own button.
     title = t('statusOff');
     text = t('statusOffText');
-    action = (
-      <Button icon={<KeyRound aria-hidden size={16} />} onClick={onSetPin} data-testid="parental-set-pin">
-        {t('setPin')}
-      </Button>
-    );
+    action = null;
   } else if (state === 'locked') {
     title = t('statusLocked');
     text = status.mode === 'hide' ? t('statusLockedHide') : t('statusLockedAsk');
@@ -364,6 +362,49 @@ function StatusPanel({
   const total = status.unlockMinutes * 60_000;
   const lockoutLeft = lockout ? Math.max(0, (status.retryAfterSeconds ?? 0) * 1000 - (Math.max(now, Date.now()) - dataUpdatedAt)) : 0;
 
+  // Off: the whole page is this card, so it says what turning controls on gives, with the one
+  // next step as the page's primary button.
+  if (state === 'off') {
+    const benefits = [
+      { icon: FolderLock, title: t('offBenefitLockTitle'), text: t('offBenefitLockText') },
+      { icon: EyeOff, title: t('offBenefitModeTitle'), text: t('offBenefitModeText') },
+      { icon: ShieldAlert, title: t('offBenefitAdultTitle'), text: t('offBenefitAdultText') },
+    ];
+    return (
+      <div className="flex flex-col gap-5 rounded-lg border border-edge bg-surface p-5 @2xl:p-6" data-testid="parental-status" data-state={state}>
+        {/* A phone-width column puts the shield above the title, so the text keeps the full width. */}
+        <div className="flex flex-col gap-3 @md:flex-row @md:items-start @md:gap-4">
+          <span aria-hidden className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-edge bg-surface-2 text-fg-muted">
+            <ShieldCheck size={24} />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <p className="text-title-sm text-fg" role="status">
+              {title}
+            </p>
+            <p className="max-w-[38rem] text-body-sm text-fg-muted">{text}</p>
+          </div>
+        </div>
+        <ul className="grid gap-4 @2xl:grid-cols-3" data-testid="parental-benefits">
+          {benefits.map(({ icon: BenefitIcon, title: bt, text: bx }) => (
+            <li key={bt} className="flex items-start gap-2.5">
+              <BenefitIcon aria-hidden size={16} className="mt-0.5 shrink-0 text-fg-subtle" />
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-body-sm font-medium text-fg">{bt}</span>
+                <span className="text-body-sm text-fg-muted">{bx}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-divider pt-4">
+          <Button variant="primary" icon={<KeyRound aria-hidden size={16} />} onClick={onSetPin} data-testid="parental-set-pin">
+            {t('setPin')}
+          </Button>
+          <span className="text-caption text-fg-subtle">{t('offPinNote')}</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -379,16 +420,15 @@ function StatusPanel({
           'flex size-12 shrink-0 items-center justify-center rounded-full',
           state === 'locked' && 'bg-success/15 text-success',
           state === 'unlocked' && 'bg-warning/15 text-warning',
-          state === 'off' && 'bg-surface-3 text-fg-muted',
         )}
       >
         <Icon size={24} />
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="font-display text-lg font-semibold text-fg" role="status">
+        <p className="text-title-sm text-fg" role="status">
           {title}
         </p>
-        <p className="text-sm text-fg-muted">{text}</p>
+        <p className="text-body-sm text-fg-muted">{text}</p>
         {state === 'unlocked' && left !== null && total > 0 ? (
           <div className="mt-1 flex max-w-sm items-center gap-3">
             <ProgressBar value={left} max={Math.max(total, left)} size="xs" label={t('unlockTimeLeft')} className="flex-1" />

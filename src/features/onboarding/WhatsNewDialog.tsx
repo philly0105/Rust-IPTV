@@ -14,10 +14,11 @@ import { Compass } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefCallback } from 'react';
 
 import { useRpcQuery } from '@/api/query';
-import { Button, cn, Dialog, Skeleton } from '@/ui';
+import { isDesktop } from '@/api/transport';
+import { Badge, Button, cn, Dialog, Skeleton } from '@/ui';
 
 import { releasesToShow } from './decide';
-import { RELEASE_NOTES, type ReleaseNotes } from './notes';
+import { RELEASE_NOTES, notesFor, type ReleaseNoteItem, type ReleaseNotes } from './notes';
 import { saveOnboarding } from './persist';
 import { openTour } from './store';
 import { useOnboardingStrings } from './strings';
@@ -92,42 +93,94 @@ function EdgeFade({ edge, shown }: { edge: 'top' | 'bottom'; shown: boolean }) {
 
 function NotesSkeleton({ label }: { label: string }) {
   return (
-    <div role="status" aria-busy="true" className="grid gap-x-6 gap-y-5 sm:grid-cols-2" data-testid="whats-new-loading">
+    <div role="status" aria-busy="true" className="flex flex-col gap-5" data-testid="whats-new-loading">
       <span className="sr-only">{label}</span>
-      {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="flex items-start gap-3.5">
-          <Skeleton className="h-9 w-9 shrink-0 rounded-md" />
-          <div className="flex min-w-0 flex-1 flex-col gap-2 pt-1">
-            <Skeleton className="h-3.5 w-2/5" />
-            <Skeleton className="h-3 w-11/12" />
-            <Skeleton className="h-3 w-3/4" />
+      <div className="grid gap-3 sm:grid-cols-3">
+        {Array.from({ length: 3 }, (_, i) => (
+          <Skeleton key={i} className="h-36 rounded-lg" />
+        ))}
+      </div>
+      <div className="flex flex-col gap-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="flex items-start gap-3">
+            <Skeleton className="size-4 shrink-0 rounded-xs" />
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <Skeleton className="h-3.5 w-2/5" />
+              <Skeleton className="h-3 w-11/12" />
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
 
-function Release({ release, showVersion }: { release: ReleaseNotes; showVersion: boolean }) {
+/** How many items of the newest release lead as larger cards; the rest follow as a compact list. */
+const HIGHLIGHTS = 3;
+
+/** One of the newest release's leading changes: a card with its icon, title and a short text. */
+function Highlight({ item }: { item: ReleaseNoteItem }) {
   const { t } = useOnboardingStrings();
+  const Icon = item.icon;
   return (
-    <section aria-label={showVersion ? t('whatsNewVersion', { version: release.version }) : undefined}>
+    // On a phone the three cards stack: the icon moves beside the text, so they stay short.
+    <li className="flex items-start gap-3 rounded-lg border border-edge bg-surface-2 p-4 sm:flex-col" data-testid="whats-new-item" data-highlight="">
+      <span aria-hidden className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-edge bg-surface text-fg">
+        <Icon size={18} />
+      </span>
+      <div className="flex min-w-0 flex-col gap-1">
+        <p className="text-body font-semibold leading-snug text-fg">{t(`${item.key}Title`)}</p>
+        <p className="text-body-sm text-fg-muted">{t(`${item.key}Text`)}</p>
+      </div>
+    </li>
+  );
+}
+
+/** Any other change: one row, the icon small and quiet, the text in full. */
+function Row({ item }: { item: ReleaseNoteItem }) {
+  const { t } = useOnboardingStrings();
+  const Icon = item.icon;
+  return (
+    <li className="flex items-start gap-3 py-3" data-testid="whats-new-item">
+      <Icon aria-hidden size={16} className="mt-0.5 shrink-0 text-fg-subtle" />
+      <div className="min-w-0">
+        <p className="text-body-sm font-medium text-fg">{t(`${item.key}Title`)}</p>
+        <p className="text-body-sm text-fg-muted">{t(`${item.key}Text`)}</p>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * One release. The newest leads with its first three changes as cards, then the rest as a
+ * single-column list; older releases (opened by hand from About) are lists under a version
+ * badge. With one release the dialog's description already names the version, so no heading.
+ */
+function Release({ release, showVersion, lead }: { release: ReleaseNotes; showVersion: boolean; lead: boolean }) {
+  const { t } = useOnboardingStrings();
+  const highlights = lead ? release.items.slice(0, HIGHLIGHTS) : [];
+  const rest = lead ? release.items.slice(HIGHLIGHTS) : release.items;
+  return (
+    <section aria-label={showVersion ? t('whatsNewVersion', { version: release.version }) : undefined} className="flex flex-col gap-3">
       {showVersion && (
-        <h3 className="mb-3 font-display text-sm font-semibold text-fg-muted">{t('whatsNewVersion', { version: release.version })}</h3>
+        <h3 className="flex items-center gap-2">
+          <Badge className="tabular-nums">{t('whatsNewVersion', { version: release.version })}</Badge>
+        </h3>
       )}
-      <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
-        {release.items.map(({ key, icon: Icon }) => (
-          <li key={key} className="flex items-start gap-3.5" data-testid="whats-new-item">
-            <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-fg-muted">
-              <Icon size={18} />
-            </span>
-            <div className="min-w-0">
-              <p className="font-medium leading-snug text-fg">{t(`${key}Title`)}</p>
-              <p className="mt-0.5 text-sm text-fg-muted">{t(`${key}Text`)}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {highlights.length > 0 && (
+        <ul className="grid gap-3 sm:grid-cols-3">
+          {highlights.map((item) => (
+            <Highlight key={item.key} item={item} />
+          ))}
+        </ul>
+      )}
+      {rest.length > 0 && (
+        <ul className="flex flex-col divide-y divide-divider">
+          {rest.map((item) => (
+            <Row key={item.key} item={item} />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
@@ -140,9 +193,10 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
   const version = info.data?.version;
 
   const releases = useMemo<ReleaseNotes[]>(() => {
-    if (version) return releasesToShow(RELEASE_NOTES, version, since);
+    // Only what applies here: a browser does not hear about the desktop window (SR-9).
+    if (version) return notesFor(releasesToShow(RELEASE_NOTES, version, since), isDesktop);
     // Version unknown (app.info failed): a hand-made open still lists what there is.
-    return info.isError && since === null ? [...RELEASE_NOTES] : [];
+    return info.isError && since === null ? notesFor(RELEASE_NOTES, isDesktop) : [];
   }, [version, since, info.isError]);
   const loading = info.isPending;
   const [listRef, edges] = useScrollEdges<HTMLDivElement>(`${loading}|${releases.map((r) => r.version).join(',')}`);
@@ -175,7 +229,8 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
       open
       onClose={() => close()}
       title={t('whatsNewTitle')}
-      description={version ? t('whatsNewVersion', { version }) : undefined}
+      // With several releases listed each has its own version badge, so the header does not say it again.
+      description={version && releases.length <= 1 ? t('whatsNewVersion', { version }) : undefined}
       size="lg"
       testId="whats-new"
       // The list scrolls inside its own region (a Tab stop while it overflows), not the dialog body.
@@ -209,9 +264,9 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
               {t('whatsNewEmpty')}
             </p>
           ) : (
-            <div className="flex flex-col gap-7">
-              {releases.map((r) => (
-                <Release key={r.version} release={r} showVersion={releases.length > 1} />
+            <div className="flex flex-col gap-8">
+              {releases.map((r, i) => (
+                <Release key={r.version} release={r} showVersion={releases.length > 1} lead={i === 0} />
               ))}
             </div>
           )}

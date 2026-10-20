@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "Live TV",
-  "tourLiveText": "Channels sorted into groups, with what's on now and next and a full TV guide.",
+  "tourLiveTitle": "Your sources",
+  "tourLiveText": "Open a source here for its live channels, TV guide, movies and series.",
   "tourVodTitle": "Movies, series and My List",
   "tourVodText": "Browse each source's movie and series posters, filter by decade, and save titles to My List to keep them in one place.",
   "tourSearchTitle": "Search everything",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Start maximized or fullscreen",
   "noteWindowStartText": "Choose in Settings how the window opens.",
   "noteFixesTitle": "Hundreds of fixes",
-  "noteFixesText": "Imports, the guide, playback, recording, downloads and backups are more reliable."
+  "noteFixesText": "Imports, the guide, playback, recording, downloads and backups are more reliable.",
+  "tourCoachTitle": "Your source is ready",
+  "tourCoachText": "Search finds channels, movies and series in all your sources. The command palette gets you anywhere else.",
+  "tourShowAround": "Show me around",
+  "tourGotIt": "Got it"
 }

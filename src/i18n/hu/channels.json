@@ -61,7 +61,7 @@
   "noHiddenTitle": "Nincsenek rejtett csatornák",
   "noHiddenText": "Rejtsen el egy csatornát a menüjéből, vagy nyomja meg rajta a Shift+Delete billentyűt az Élő tévéadásban.",
   "noMatch": "Egy rejtett csatorna sem egyezik.",
-  "goneBadge": "Már nincs a lejátszási listában",
+  "goneBadge": "Már nincs a forrásban",
   "radioBadge": "Rádió",
   "done": "Kész"
 }

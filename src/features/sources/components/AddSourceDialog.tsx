@@ -1,4 +1,4 @@
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, LoaderCircle } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
@@ -34,8 +34,10 @@ import {
 import { flushPendingRemovals, isRemovalPending, removeOnUnload, scheduleRemoval } from '../lib/pendingRemoval';
 import { redactText } from '../lib/redact';
 import { useFocusInvalid } from '../lib/useFocusInvalid';
+import { useAutoRefreshHint } from '../lib/useAutoRefreshHint';
 import { useNextFrame } from '../lib/useNextFrame';
 import { checkHttpUrl, displayHost, parseXtreamLink, suggestName } from '../lib/validate';
+import { PHONE_SHEET, PHONE_SHEET_BODY, sameDraft, useDiscardGuard } from './DiscardGuard';
 import { Field } from './Field';
 import { ImportProgressView } from './ImportProgressView';
 import { M3uForm } from './M3uForm';
@@ -78,6 +80,9 @@ export function draftHost(d: SourceDraft): string | undefined {
   return check.ok ? displayHost(check.url) : undefined;
 }
 
+/** The kind's name, for the import heading while the source has no name yet. */
+const KIND_NAME: Record<SourceKind, string> = { m3u: 'kindM3u', xtream: 'kindXtream', stalker: 'kindStalker' };
+
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -91,13 +96,15 @@ export function AddSourceDialog({
   open: boolean;
   onClose: () => void;
   initial?: AddSourceInitial;
-  onAdded?: (source: Source) => void;
+  /** `first`: the list was empty when the add started (SS-6: the host opens the new source). */
+  onAdded?: (source: Source, first: boolean) => void;
 }) {
   const { t } = useTranslation('sources');
   const navigate = useNavigate();
   const { toast } = useToast();
   useImportProgressFeed();
   useGuideProgressFeed();
+  const refreshHint = useAutoRefreshHint();
 
   const [draft, setDraft] = useState<SourceDraft>(() => initialDraft(initial));
   const [errors, setErrors] = useState<DraftErrors>({});
@@ -217,10 +224,18 @@ export function AddSourceDialog({
 
   const onFieldBlur = (path: string) => setErrors((e) => withFieldError(e, path, blurError(draft, path)));
 
+  // A kind picked with the pointer moves focus to its address field, the one the user came to
+  // fill (SS-2). Arrow keys keep focus on the tabs, so the kinds stay one keypress apart.
+  const pointerPick = useRef(false);
+  const focusFrame = useNextFrame();
   const setKind = (kind: SourceKind) => {
     setDraft((d) => ({ ...d, kind }));
     setErrors({});
     setSubmitError(null);
+    if (pointerPick.current) {
+      pointerPick.current = false;
+      focusFrame(() => bodyRef.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus());
+    }
   };
 
   // After the render that marks the field and re-enables the form, not a frame later (L3-app-9).
@@ -274,8 +289,9 @@ export function AddSourceDialog({
       });
       // Closed meanwhile ("Close, keep importing"): the toast is the whole answer.
       if (!live()) return;
+      const first = (claimRef.current.knownAtSubmit?.size ?? knownIds.length) === 0;
       claimRef.current = { failedId: null, knownAtSubmit: null };
-      onAdded?.(source);
+      onAdded?.(source, first);
       onClose();
     } catch (e) {
       const err = RpcError.from(e);
@@ -374,6 +390,21 @@ export function AddSourceDialog({
     onClose();
   };
 
+  // Typed details (SS-1): anything that differs from the form the dialog opened with. Switching
+  // the kind alone changes nothing the user typed. A running import is never lost by closing
+  // ("Close, keep importing"), so it needs no prompt.
+  const baseline = useMemo(() => initialDraft(initial), [initialKey]);
+  const dirty =
+    !submitting &&
+    !(
+      draft.name === baseline.name &&
+      draft.autoRefresh === baseline.autoRefresh &&
+      sameDraft(draft.m3u, baseline.m3u) &&
+      sameDraft(draft.xtream, baseline.xtream) &&
+      sameDraft(draft.stalker, baseline.stalker)
+    );
+  const guard = useDiscardGuard({ open, dirty, onClose: dismiss });
+
   // The source a refused add duplicates: the error offers to open or refresh it instead.
   const duplicateId = submitError ? duplicateSourceId(submitError) : null;
   const duplicateName = duplicateId && submitError ? (sources.data?.find((s) => s.id === duplicateId)?.name ?? duplicateSourceName(submitError)) : null;
@@ -466,179 +497,211 @@ export function AddSourceDialog({
     disabled: submitting && id !== draft.kind,
   }));
 
+  // The name comes after the address: it is optional, and the app suggests one from the address.
+  const nameField = (
+    <Field label={t('sourceName')} optional optionalLabel={t('optional')} error={errors.name ? t(errors.name) : null}>
+      {(p) => (
+        <Input
+          {...p}
+          autoComplete="off"
+          disabled={submitting}
+          maxLength={120}
+          placeholder={suggested || t('sourceNamePlaceholder')}
+          value={draft.name}
+          // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
+          onFocus={(e) => {
+            if (!nameTouched && draft.name) e.currentTarget.select();
+          }}
+          onChange={(e) => {
+            setNameTouched(e.target.value.length > 0);
+            setDraft((d) => ({ ...d, name: e.target.value }));
+          }}
+        />
+      )}
+    </Field>
+  );
+
   const isTextOrigin = draft.kind === 'm3u' && draft.m3u.origin !== 'url' && !(draft.m3u.origin === 'file' && isDesktop);
 
   return (
-    <Dialog
-      open={open}
-      onClose={dismiss}
-      title={t('addSource')}
-      size="lg"
-      footer={
-        <>
-          <Button variant="ghost" onClick={dismiss}>
-            {submitting ? t('closeKeepImporting') : t('cancel')}
-          </Button>
-          <Button variant="primary" loading={submitting} onClick={() => void submit()} data-testid="add-source-submit">
-            {submitting ? t(failed ? 'retrying' : 'adding') : t(failed ? 'retryImport' : 'addSourceSubmit')}
-          </Button>
-        </>
-      }
-    >
-      <form
-        ref={bodyRef}
-        noValidate
-        className="flex flex-col gap-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
+    <>
+      <Dialog
+        open={open}
+        onClose={guard.request}
+        // A click on the backdrop never throws typed details away (SS-1); Escape and Cancel ask first.
+        dismissible={!dirty}
+        title={t('addSource')}
+        description={t('addSourceLead')}
+        size="lg"
+        className={PHONE_SHEET}
+        bodyClassName={PHONE_SHEET_BODY}
+        testId="add-source-dialog"
+        footer={
+          <>
+            <Button variant="ghost" onClick={guard.request}>
+              {submitting ? t('closeKeepImporting') : t('cancel')}
+            </Button>
+            <Button variant="primary" loading={submitting} onClick={() => void submit()} data-testid="add-source-submit">
+              {submitting ? t(failed ? 'retrying' : 'adding') : t(failed ? 'retryImport' : 'addSourceSubmit')}
+            </Button>
+          </>
+        }
       >
-        <Tabs items={kinds} value={draft.kind} onChange={(id) => setKind(id as SourceKind)} />
-
-        <Field label={t('sourceName')} error={errors.name ? t(errors.name) : null}>
-          {(p) => (
-            <Input
-              {...p}
-              autoComplete="off"
-              disabled={submitting}
-              maxLength={120}
-              placeholder={suggested || t('sourceNamePlaceholder')}
-              value={draft.name}
-              // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
-              onFocus={(e) => {
-                if (!nameTouched && draft.name) e.currentTarget.select();
-              }}
-              onChange={(e) => {
-                setNameTouched(e.target.value.length > 0);
-                setDraft((d) => ({ ...d, name: e.target.value }));
-              }}
-            />
-          )}
-        </Field>
-
-        {draft.kind === 'm3u' ? (
-          <M3uForm
-            mode="add"
-            value={draft.m3u}
-            onChange={(m3u) => setDraft((d) => ({ ...d, m3u }))}
-            errors={errors}
-            isDesktop={isDesktop}
-            disabled={submitting}
-            onSuggestName={suggest}
-            onFieldBlur={onFieldBlur}
-            onUseXtream={(xtream) => {
-              setDraft((d) => ({ ...d, kind: 'xtream', xtream: { ...d.xtream, ...xtream } }));
-              setSuggested(suggestName(xtream.serverUrl));
-              setErrors({});
+        <form
+          ref={bodyRef}
+          noValidate
+          className="flex flex-col gap-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <div
+            onPointerDown={() => {
+              pointerPick.current = true;
             }}
-          />
-        ) : null}
-        {draft.kind === 'xtream' ? (
-          <XtreamForm
-            value={draft.xtream}
-            onChange={(xtream) => setDraft((d) => ({ ...d, xtream }))}
-            errors={errors}
-            onErrors={setErrors}
-            disabled={submitting}
-            onSuggestName={suggest}
-            onFieldBlur={onFieldBlur}
-          />
-        ) : null}
-        {draft.kind === 'stalker' ? (
-          <StalkerForm
-            value={draft.stalker}
-            onChange={(stalker) => setDraft((d) => ({ ...d, stalker }))}
-            errors={errors}
-            onErrors={setErrors}
-            disabled={submitting}
-            onSuggestName={suggest}
-            onFieldBlur={onFieldBlur}
-          />
-        ) : null}
-
-        <Toggle
-          checked={draft.autoRefresh && !isTextOrigin}
-          disabled={submitting || isTextOrigin}
-          onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
-          label={t('autoRefresh')}
-          description={isTextOrigin ? t('autoRefreshUnavailable') : t('autoRefreshHint')}
-        />
-
-        {submitting ? (
-          <div ref={progressRef} className="scroll-my-4">
-            <ImportProgressView
-              entry={progress}
-              kind={draft.kind}
-              host={draftHost(draft)}
-              startedAt={startedAt ?? undefined}
-              onCancel={progress ? onCancelImport : undefined}
-              cancelling={cancellingImport}
-            />
+            onKeyDown={() => {
+              pointerPick.current = false;
+            }}
+          >
+            <Tabs items={kinds} value={draft.kind} label={t('sourceType')} onChange={(id) => setKind(id as SourceKind)} />
           </div>
-        ) : null}
 
-        {cancelled && !submitting ? (
-          <div ref={cancelledRef} tabIndex={-1} role="status" className="rounded-md border border-edge bg-surface-2/60 p-3 outline-none" data-testid="add-source-cancelled">
-            <ImportProgressView
-              entry={{ sourceId: '', phase: 'cancelled', done: 0, at: 0 }}
-              cancelledNote={t(failed ? 'cancelledRetryNote' : 'cancelledAddNote')}
+          {draft.kind === 'm3u' ? (
+            <M3uForm
+              mode="add"
+              autoFocusAddress
+              value={draft.m3u}
+              onChange={(m3u) => setDraft((d) => ({ ...d, m3u }))}
+              errors={errors}
+              isDesktop={isDesktop}
+              disabled={submitting}
+              onSuggestName={suggest}
+              onFieldBlur={onFieldBlur}
+              onUseXtream={(xtream) => {
+                setDraft((d) => ({ ...d, kind: 'xtream', xtream: { ...d.xtream, ...xtream } }));
+                setSuggested(suggestName(xtream.serverUrl));
+                setErrors({});
+              }}
             />
-          </div>
-        ) : null}
+          ) : null}
+          {draft.kind === 'xtream' ? (
+            <XtreamForm
+              value={draft.xtream}
+              onChange={(xtream) => setDraft((d) => ({ ...d, xtream }))}
+              errors={errors}
+              onErrors={setErrors}
+              disabled={submitting}
+              autoFocusAddress
+              onSuggestName={suggest}
+              onFieldBlur={onFieldBlur}
+            />
+          ) : null}
+          {draft.kind === 'stalker' ? (
+            <StalkerForm
+              value={draft.stalker}
+              onChange={(stalker) => setDraft((d) => ({ ...d, stalker }))}
+              errors={errors}
+              onErrors={setErrors}
+              disabled={submitting}
+              autoFocusAddress
+              onSuggestName={suggest}
+              onFieldBlur={onFieldBlur}
+            />
+          ) : null}
 
-        {submitError ? (
-          <div ref={errorRef} tabIndex={-1} role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm outline-none" data-testid="add-source-error">
-            <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
-            <div className="flex min-w-0 flex-col gap-1">
-              {duplicateId ? (
-                // Nothing failed: the address is already a source. Name it, and offer it right here.
-                <p className="font-medium text-fg" dir="auto">
-                  {duplicateName ? t('duplicateTitle', { name: duplicateName }) : t('errorSummaryConflict')}
-                </p>
-              ) : (
-                <>
-                  <p className="font-medium text-fg">{t('addFailed')}</p>
-                  <p className="text-fg">{t(summaryKey(submitError))}</p>
-                  <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
-                  {failed ? (
-                    <p className="text-fg-muted" data-testid="add-source-retry-note">
-                      {t('addRetryNote', { name: failed.name })}
-                    </p>
-                  ) : null}
-                </>
-              )}
-              {/* The way out comes before the technical details, so it stays in view on a short window. */}
-              {duplicateId ? (
-                <div className="mt-1 flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => openDuplicate(duplicateId)} data-testid="add-source-open-existing">
-                    {t('open')}
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => refreshDuplicate(duplicateId)} data-testid="add-source-refresh-existing">
-                    {t('refresh')}
-                  </Button>
-                </div>
-              ) : failed ? null : (
-                /* With a failed source on file the footer button already reads "Try again". */
-                <div className="mt-1 flex flex-wrap gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => void submit()} data-testid="add-source-retry">
-                    {t('tryAgain')}
-                  </Button>
-                </div>
-              )}
-              <details className="mt-1 text-fg-muted">
-                <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
-                <p className="mt-1 break-words font-mono text-xs" dir="ltr">
-                  {redactText(submitError.message)}
-                </p>
-              </details>
+          {nameField}
+
+          <Toggle
+            checked={draft.autoRefresh && !isTextOrigin}
+            disabled={submitting || isTextOrigin}
+            onChange={(autoRefresh) => setDraft((d) => ({ ...d, autoRefresh }))}
+            label={t('autoRefresh')}
+            description={isTextOrigin ? t('autoRefreshUnavailable') : refreshHint}
+          />
+
+          {submitting ? (
+            <div ref={progressRef} className="flex scroll-my-4 flex-col gap-3 rounded-lg border border-edge bg-surface-2 p-4" data-testid="add-source-progress">
+              <p className="flex items-center gap-2 text-body-sm font-medium text-fg">
+                <LoaderCircle aria-hidden size={16} className="shrink-0 text-accent motion-safe:animate-spin" />
+                <span className="min-w-0 truncate" dir="auto">
+                  {t('importingTitle', { name: draft.name.trim() || suggested || t(KIND_NAME[draft.kind]) })}
+                </span>
+              </p>
+              <ImportProgressView
+                entry={progress}
+                kind={draft.kind}
+                host={draftHost(draft)}
+                startedAt={startedAt ?? undefined}
+                onCancel={progress ? onCancelImport : undefined}
+                cancelling={cancellingImport}
+              />
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {/* Enter in any field submits. */}
-        <button type="submit" hidden tabIndex={-1} aria-hidden />
-      </form>
-    </Dialog>
+          {cancelled && !submitting ? (
+            <div ref={cancelledRef} tabIndex={-1} role="status" className="rounded-md border border-edge bg-surface-2/60 p-3 outline-none" data-testid="add-source-cancelled">
+              <ImportProgressView
+                entry={{ sourceId: '', phase: 'cancelled', done: 0, at: 0 }}
+                cancelledNote={t(failed ? 'cancelledRetryNote' : 'cancelledAddNote')}
+              />
+            </div>
+          ) : null}
+
+          {submitError ? (
+            <div ref={errorRef} tabIndex={-1} role="alert" className="flex gap-3 rounded-md border border-danger/50 bg-danger/10 p-3 text-sm outline-none" data-testid="add-source-error">
+              <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
+              <div className="flex min-w-0 flex-col gap-1">
+                {duplicateId ? (
+                  // Nothing failed: the address is already a source. Name it, and offer it right here.
+                  <p className="font-medium text-fg" dir="auto">
+                    {duplicateName ? t('duplicateTitle', { name: duplicateName }) : t('errorSummaryConflict')}
+                  </p>
+                ) : (
+                  <>
+                    <p className="font-medium text-fg">{t('addFailed')}</p>
+                    <p className="text-fg">{t(summaryKey(submitError))}</p>
+                    <p className="text-fg-muted">{t(nextStepKey(submitError, draft.kind))}</p>
+                    {failed ? (
+                      <p className="text-fg-muted" data-testid="add-source-retry-note">
+                        {t('addRetryNote', { name: failed.name })}
+                      </p>
+                    ) : null}
+                  </>
+                )}
+                {/* The way out comes before the technical details, so it stays in view on a short window. */}
+                {duplicateId ? (
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => openDuplicate(duplicateId)} data-testid="add-source-open-existing">
+                      {t('open')}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => refreshDuplicate(duplicateId)} data-testid="add-source-refresh-existing">
+                      {t('refresh')}
+                    </Button>
+                  </div>
+                ) : failed ? null : (
+                  /* With a failed source on file the footer button already reads "Try again". */
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => void submit()} data-testid="add-source-retry">
+                      {t('tryAgain')}
+                    </Button>
+                  </div>
+                )}
+                <details className="mt-1 text-fg-muted">
+                  <summary className="w-fit cursor-pointer select-none rounded-sm text-xs hover:underline">{t('technicalDetails')}</summary>
+                  <p className="mt-1 break-words font-mono text-xs" dir="ltr">
+                    {redactText(submitError.message)}
+                  </p>
+                </details>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Enter in any field submits. */}
+          <button type="submit" hidden tabIndex={-1} aria-hidden />
+        </form>
+      </Dialog>
+      {guard.prompt}
+    </>
   );
 }

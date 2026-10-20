@@ -40,5 +40,14 @@ export function absoluteTime(iso: string | undefined, lang: string): string | un
   }
 }
 
+/** "12 hours", "7 days" in the UI language, without plural keys. */
+export function formatUnit(value: number, unit: 'hour' | 'day', lang: string): string {
+  try {
+    return new Intl.NumberFormat(intlLocale(lang), { style: 'unit', unit, unitDisplay: 'long' }).format(value);
+  } catch {
+    return new Intl.NumberFormat('en', { style: 'unit', unit, unitDisplay: 'long' }).format(value);
+  }
+}
+
 // Lives in @/lib/numbers so the shell's entry chunk can format counts without this whole module.
 export { formatCount } from '@/lib/numbers';

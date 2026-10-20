@@ -1,4 +1,4 @@
-/** Settings > Recording: recording padding and guide reminders. */
+/** Settings > Recording: where recordings go, recording padding and guide reminders. */
 
 import { useTranslation } from 'react-i18next';
 
@@ -7,7 +7,8 @@ import { Select, type SelectOption } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
-import type { SectionProps } from './types';
+import { RecordingsFolderRow } from './RecordingsFolderRow';
+import { parity, type SectionProps } from './types';
 
 export const PADDING_BEFORE_CHOICES = [0, 1, 2, 3, 5, 10, 15] as const;
 export const PADDING_AFTER_CHOICES = [0, 1, 2, 5, 10, 15, 20, 30] as const;
@@ -31,29 +32,47 @@ export function RecordingSection({ settings, update }: SectionProps) {
 
   return (
     <SettingsSection title={t('sectionRecording')} description={t('recordingSectionHint')} testId="settings-recording">
-      <SettingsGroup title={t('recordingPaddingGroup')} description={t('recordingPaddingHint')}>
-        <SettingsRow label={t('recordingPaddingBefore')}>
+      {/* SS-8: the folder sits with the rest of recording, where people look for it. The padding is
+          one row with its two minutes side by side, not two label-only rows. */}
+      <SettingsGroup>
+        <RecordingsFolderRow value={parity(settings).recordingsDir} update={update} />
+        <SettingsRow label={t('recordingPaddingGroup')} description={t('recordingPaddingHint')}>
           {({ id, describedBy }) => (
-            <Select
-              id={id}
-              aria-describedby={describedBy}
-              value={String(before)}
-              options={options(PADDING_BEFORE_CHOICES, before)}
-              onValueChange={(v) => void update({ recordingPaddingBeforeMinutes: Number(v) })}
-              data-testid="recording-padding-before"
-            />
-          )}
-        </SettingsRow>
-        <SettingsRow label={t('recordingPaddingAfter')}>
-          {({ id, describedBy }) => (
-            <Select
-              id={id}
-              aria-describedby={describedBy}
-              value={String(after)}
-              options={options(PADDING_AFTER_CHOICES, after)}
-              onValueChange={(v) => void update({ recordingPaddingAfterMinutes: Number(v) })}
-              data-testid="recording-padding-after"
-            />
+            // Each select is named by the row and its own short label: "Recording padding, Before".
+            // Phone width: a two-column grid, so both selects line up under their labels.
+            <div className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 @md:flex @md:w-auto @md:flex-wrap @md:gap-x-4">
+              <span id={`${id}-label`} className="sr-only">
+                {t('recordingPaddingGroup')}
+              </span>
+              <span className="contents @md:flex @md:items-center @md:gap-2">
+                <label id={`${id}-before`} htmlFor={id} className="text-body-sm text-fg-muted">
+                  {t('recordingPaddingBeforeShort')}
+                </label>
+                <Select
+                  id={id}
+                  aria-labelledby={`${id}-label ${id}-before`}
+                  aria-describedby={describedBy}
+                  value={String(before)}
+                  options={options(PADDING_BEFORE_CHOICES, before)}
+                  onValueChange={(v) => void update({ recordingPaddingBeforeMinutes: Number(v) })}
+                  data-testid="recording-padding-before"
+                />
+              </span>
+              <span className="contents @md:flex @md:items-center @md:gap-2">
+                <label id={`${id}-after`} htmlFor={`${id}-a`} className="text-body-sm text-fg-muted">
+                  {t('recordingPaddingAfterShort')}
+                </label>
+                <Select
+                  id={`${id}-a`}
+                  aria-labelledby={`${id}-label ${id}-after`}
+                  aria-describedby={describedBy}
+                  value={String(after)}
+                  options={options(PADDING_AFTER_CHOICES, after)}
+                  onValueChange={(v) => void update({ recordingPaddingAfterMinutes: Number(v) })}
+                  data-testid="recording-padding-after"
+                />
+              </span>
+            </div>
           )}
         </SettingsRow>
       </SettingsGroup>

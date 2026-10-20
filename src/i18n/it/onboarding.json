@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "TV in diretta",
-  "tourLiveText": "Canali ordinati in gruppi, con cosa va in onda ora e dopo e una guida TV completa.",
+  "tourLiveTitle": "Le tue sorgenti",
+  "tourLiveText": "Apri qui una sorgente per i suoi canali in diretta, la guida TV, i film e le serie.",
   "tourVodTitle": "Film, serie e La mia lista",
   "tourVodText": "Sfoglia le locandine di film e serie di ogni sorgente, filtra per decennio e salva i titoli nella mia lista per averli in un unico posto.",
   "tourSearchTitle": "Cerca ovunque",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Avvio ingrandito o a schermo intero",
   "noteWindowStartText": "Scegli nelle Impostazioni come si apre la finestra.",
   "noteFixesTitle": "Centinaia di correzioni",
-  "noteFixesText": "Importazioni, guida TV, riproduzione, registrazione, download e backup sono più affidabili."
+  "noteFixesText": "Importazioni, guida TV, riproduzione, registrazione, download e backup sono più affidabili.",
+  "tourCoachTitle": "La tua sorgente è pronta",
+  "tourCoachText": "La ricerca trova canali, film e serie in tutte le tue sorgenti. La tavolozza dei comandi ti porta ovunque.",
+  "tourShowAround": "Fammi fare un giro",
+  "tourGotIt": "Ho capito"
 }

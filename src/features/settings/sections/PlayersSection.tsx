@@ -3,15 +3,15 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate, useRpcQuery } from '@/api/query';
-import { RpcError, rpc } from '@/api/transport';
+import { rpc } from '@/api/transport';
 
-import { Button, IconButton } from '@/ui';
+import { Button, IconButton, errorDescription } from '@/ui';
 import { pickExecutableDesktop } from '../../sources/lib/files';
 import { CommitInput, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { cleanPath, optionalStringPatch, playerPathStatus, validateArgs } from '../lib/patch';
 import { parity, type SectionProps } from './types';
 
-type DetectState = { status: 'idle' } | { status: 'running' } | { status: 'done'; mpv?: string; vlc?: string } | { status: 'failed'; message: string };
+type DetectState = { status: 'idle' } | { status: 'running' } | { status: 'done'; mpv?: string; vlc?: string } | { status: 'failed'; error: unknown };
 
 /** Desktop only: the settings page hides this section in the browser (`sectionAvailable`). */
 export function PlayersSection({ settings, update }: SectionProps) {
@@ -46,7 +46,7 @@ export function PlayersSection({ settings, update }: SectionProps) {
       if (found.vlcPath && found.vlcPath !== settings.vlcPath) patch.vlcPath = found.vlcPath;
       if (Object.keys(patch).length > 0 && (await update(patch))) void invalidate('player.');
     } catch (e) {
-      setDetect({ status: 'failed', message: RpcError.from(e).message });
+      setDetect({ status: 'failed', error: e });
     }
   };
 
@@ -55,7 +55,7 @@ export function PlayersSection({ settings, update }: SectionProps) {
       const path = await pickExecutableDesktop(key === 'mpvPath' ? t('chooseMpv') : t('chooseVlc'));
       if (path) await savePath(key, path);
     } catch (e) {
-      setDetect({ status: 'failed', message: RpcError.from(e).message });
+      setDetect({ status: 'failed', error: e });
     }
   };
 
@@ -120,16 +120,19 @@ export function PlayersSection({ settings, update }: SectionProps) {
         }
       >
         {detect.status === 'done' || detect.status === 'failed' ? (
-          <p aria-live="polite" className="px-4 py-3 text-sm" data-testid="detect-result">
+          <div aria-live="polite" className="px-4 py-3 text-body-sm" data-testid="detect-result">
             {detect.status === 'failed' ? (
-              <span className="text-danger">{t('detectFailed', { message: detect.message })}</span>
+              <span className="block">
+                <span className="block text-danger">{t('detectFailed')}</span>
+                <span className="block text-fg-muted">{errorDescription(detect.error)}</span>
+              </span>
             ) : (
               <span className="text-fg-muted">
                 {detect.mpv ? t('detectFound', { player: 'mpv', path: detect.mpv }) : t('detectMissing', { player: 'mpv' })}{' '}
                 {detect.vlc ? t('detectFound', { player: 'VLC', path: detect.vlc }) : t('detectMissing', { player: 'VLC' })}
               </span>
             )}
-          </p>
+          </div>
         ) : null}
         {pathRow('mpvPath', t('mpvPath'), 'C:\\Program Files\\mpv\\mpv.exe')}
         {pathRow('vlcPath', t('vlcPath'), 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe')}

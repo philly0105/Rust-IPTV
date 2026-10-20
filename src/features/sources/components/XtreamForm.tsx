@@ -18,6 +18,7 @@ export function XtreamForm({
   disabled,
   onSuggestName,
   onFieldBlur,
+  autoFocusAddress,
 }: {
   value: XtreamDraft;
   onChange: (next: XtreamDraft) => void;
@@ -28,6 +29,8 @@ export function XtreamForm({
   onSuggestName?: (input: string) => void;
   /** Validates one field (error path, e.g. `xtream.serverUrl`) when the user leaves it. */
   onFieldBlur?: (path: string) => void;
+  /** The Add dialog opens on the server address (SS-2). */
+  autoFocusAddress?: boolean;
 }) {
   const { t } = useTranslation('sources');
   const set = (patch: Partial<XtreamDraft>) => onChange({ ...value, ...patch });
@@ -55,6 +58,7 @@ export function XtreamForm({
             spellCheck={false}
             disabled={disabled}
             placeholder="http://provider.example:8080"
+            data-autofocus={autoFocusAddress ? '' : undefined}
             value={value.serverUrl}
             onChange={(e) => onServerChange(e.target.value)}
             onBlur={() => {

@@ -6,7 +6,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { eagerRoutes, installDomStubs, renderAt, rpcMock } from './harness';
+import { confirmDiscard, eagerRoutes, installDomStubs, renderAt, rpcMock } from './harness';
 
 /** Every rpcRaw call with its options, to see which went out with keepalive. */
 const raw = vi.hoisted(() => [] as { cmd: string; args: unknown; opts: unknown }[]);
@@ -63,6 +63,8 @@ async function failAddAndClose() {
   fireEvent.click(screen.getByTestId('add-source-submit'));
   await screen.findByTestId('add-source-retry-note');
   fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
+  // Typed details: Cancel asks before dropping them (SS-1).
+  confirmDiscard();
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   // Waiting behind the undo window, nothing sent yet.
   expect(isRemovalPending('new1')).toBe(true);

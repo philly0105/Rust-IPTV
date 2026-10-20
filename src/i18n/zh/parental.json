@@ -37,7 +37,7 @@
   "setPin": "设置 PIN 码",
   "changePin": "更改 PIN 码",
   "pinSetToast": "家长控制已开启",
-  "pinSetToastText": "可在此处锁定分组，或从频道、电影、剧集的菜单中单独锁定。",
+  "pinSetToastText": "可在此处锁定分组，或从频道、电影、剧集的菜单中单独锁定。忘记的 PIN 无法重置，请妥善保存。",
   "pinChangedToast": "PIN 码已更改",
   "unlockTitle": "输入家长控制 PIN 码",
   "unlockText": "此内容已被家长控制锁定。",
@@ -159,5 +159,13 @@
   "discardTitle": "放弃更改？",
   "discardText": "你在此勾选或取消勾选的分组不会被保存。",
   "keepEditing": "继续编辑",
-  "discard": "放弃"
+  "discard": "放弃",
+  "pinNoRecovery": "忘记的 PIN 无法重置。请妥善保存。",
+  "offBenefitLockTitle": "锁定你选的内容",
+  "offBenefitLockText": "整个分组、单个频道、电影或剧集。",
+  "offBenefitModeTitle": "隐藏或询问",
+  "offBenefitModeText": "锁定的内容会被隐藏，或在打开时要求输入 PIN 码。",
+  "offBenefitAdultTitle": "成人分组",
+  "offBenefitAdultText": "标记为成人的分组可以自动锁定。",
+  "offPinNote": "设置 PIN 码后再选择要锁定的内容。"
 }

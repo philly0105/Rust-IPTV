@@ -69,12 +69,17 @@ describe('Settings page states', () => {
     expect(b.router.state.location.pathname).toBe('/settings/general');
   });
 
-  it('puts the section nav in the context panel', async () => {
+  it('shows the section nav beside the section, not in the shell context panel (SS-7)', async () => {
     renderAt(settingsRoutes, '/settings/playback');
     await screen.findByTestId('settings-playback');
-    await waitFor(() => expect(useShellStore.getState().contextPanel).toBeTruthy());
-    // Below 1440 px the page lists the sections inline: no drawer (and no header toggle) repeats them.
-    expect(useShellStore.getState().panelDrawer).toBe(false);
+    const nav = screen.getByTestId('settings-nav');
+    expect(screen.getByTestId('settings-sidebar').contains(nav)).toBe(true);
+    expect(within(nav).getByRole('link', { name: 'Playback' }).getAttribute('aria-current')).toBe('page');
+    // Grouped under headings: each group is a list named by its heading.
+    expect(within(nav).getByRole('list', { name: 'Watching' })).toBeTruthy();
+    expect(useShellStore.getState().contextPanel).toBeNull();
+    // The header names the page only; the section's h2 names the section.
+    expect(useShellStore.getState().header?.subtitle).toBeUndefined();
   });
 });
 
@@ -87,8 +92,8 @@ describe('Settings patch shape', () => {
   });
 
   it('a dashboard rail sends the whole dashboardRails object', async () => {
-    renderAt(settingsRoutes, '/settings/general');
-    await screen.findByTestId('settings-general');
+    renderAt(settingsRoutes, '/settings/appearance');
+    await screen.findByTestId('settings-appearance');
     fireEvent.click(screen.getByTestId('toggle-rail-hero'));
     await waitFor(() => expect(rpcMock.callsOf('settings.update')).toHaveLength(1));
     expect(rpcMock.callsOf('settings.update')[0]).toEqual({
@@ -236,9 +241,9 @@ describe('Section-level error states', () => {
 });
 
 describe('Run 3 wiring', () => {
-  it('General shows the image cache row', async () => {
+  it('Backup and storage shows the image cache row', async () => {
     rpcMock.handlers['images.stats'] = () => ({ bytes: 3 * 1024 * 1024, files: 12, maxBytes: 500 * 1024 * 1024 });
-    renderAt(settingsRoutes, '/settings/general');
+    renderAt(settingsRoutes, '/settings/backup');
     const row = await screen.findByTestId('image-cache-row');
     expect(await within(row).findByTestId('image-cache-size')).toBeTruthy();
   });

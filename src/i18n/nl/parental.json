@@ -38,7 +38,7 @@
   "setPin": "Pincode instellen",
   "changePin": "Pincode wijzigen",
   "pinSetToast": "Ouderlijk toezicht staat aan",
-  "pinSetToastText": "Vergrendel hier groepen, of vergrendel een zender, film of serie via het menu.",
+  "pinSetToastText": "Vergrendel hier groepen, of vergrendel een zender, film of serie via het menu. Een vergeten pincode kan niet worden hersteld, dus bewaar hem op een veilige plek.",
   "pinChangedToast": "Pincode gewijzigd",
   "unlockTitle": "Voer de pincode voor ouderlijk toezicht in",
   "unlockText": "Dit is vergrendeld door ouderlijk toezicht.",
@@ -170,5 +170,13 @@
   "discardTitle": "Wijzigingen verwerpen?",
   "discardText": "De groepen die je hier hebt aan- of uitgevinkt, worden niet opgeslagen.",
   "keepEditing": "Verder bewerken",
-  "discard": "Verwerpen"
+  "discard": "Verwerpen",
+  "pinNoRecovery": "Een vergeten pincode kan niet worden hersteld. Bewaar hem op een veilige plek.",
+  "offBenefitLockTitle": "Vergrendel wat je kiest",
+  "offBenefitLockText": "Hele groepen, losse zenders, films of series.",
+  "offBenefitModeTitle": "Verbergen of vragen",
+  "offBenefitModeText": "Vergrendelde items verdwijnen, of vragen om de pincode als iemand ze opent.",
+  "offBenefitAdultTitle": "Groepen voor volwassenen",
+  "offBenefitAdultText": "Groepen die als volwassen zijn gemarkeerd, kunnen automatisch worden vergrendeld.",
+  "offPinNote": "Wat je vergrendelt, kies je nadat je de pincode hebt ingesteld."
 }

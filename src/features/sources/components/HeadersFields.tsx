@@ -27,14 +27,16 @@ export function HeadersFields({
     return key ? t(key) : null;
   };
   return (
-    <details className="group rounded-md border border-edge bg-surface-2/50" open={hasValue || hasError || undefined}>
-      <summary className="flex cursor-pointer select-none items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-fg hover:bg-hover active:bg-active [&::-webkit-details-marker]:hidden">
-        <ChevronRight aria-hidden className="size-4 shrink-0 text-fg-subtle motion-safe:transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90" />
+    // An advanced option, so a quiet text disclosure rather than a box heavier than the address
+    // field above it; the opened fields sit indented under a rule (critique, add-source).
+    <details className="group" open={hasValue || hasError || undefined}>
+      <summary className="-ms-2 flex w-fit cursor-pointer select-none items-center gap-1.5 rounded-md px-2 py-1.5 text-body-sm font-medium text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors [&::-webkit-details-marker]:hidden">
+        <ChevronRight aria-hidden size={16} className="shrink-0 text-fg-subtle motion-safe:transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90" />
         {t('requestHeaders')}
-        {hasValue ? <span className="text-xs font-normal text-fg-subtle">{t('requestHeadersSet')}</span> : null}
+        {hasValue ? <span className="text-caption font-normal text-fg-subtle">{t('requestHeadersSet')}</span> : null}
       </summary>
-      <div className="grid gap-4 px-3 pb-4 pt-1">
-        <p className="text-sm text-fg-muted">{t('requestHeadersHint')}</p>
+      <div className="mt-2 ms-2 grid gap-4 border-s border-divider ps-4 pb-1">
+        <p className="text-body-sm text-fg-muted">{t('requestHeadersHint')}</p>
         <Field label={t('userAgent')} optional optionalLabel={t('optional')} error={err('userAgent')}>
           {(p) => (
             <Input

@@ -108,7 +108,7 @@ describe('HiddenChannelsDialog', () => {
     expect(within(bbcRow!).getByText('My News')).toBeTruthy();
     expect(bbcRow!.textContent).toContain("Provider's name: BBC One");
     expect(within(jazzRow!).getByText('Radio')).toBeTruthy();
-    await waitFor(() => expect(cnnRow!.textContent).toContain('No longer in the playlist'));
+    await waitFor(() => expect(cnnRow!.textContent).toContain('No longer in the source'));
     const unhide = within(bbcRow!).getByTestId('hidden-channel-unhide');
     expect(unhide.getAttribute('aria-label')).toBe('Unhide My News');
   });
@@ -138,9 +138,9 @@ describe('HiddenChannelsDialog', () => {
     open();
     await waitFor(() => expect(rows()).toHaveLength(3));
     const [tveRow, cnnRow] = rows();
-    await waitFor(() => expect(tveRow!.textContent).toContain('No longer in the playlist'));
+    await waitFor(() => expect(tveRow!.textContent).toContain('No longer in the source'));
     await waitFor(() => expect(core.callsOf('catalog.item')).toHaveLength(3));
-    expect(cnnRow!.textContent).not.toContain('No longer in the playlist');
+    expect(cnnRow!.textContent).not.toContain('No longer in the source');
 
     fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
     // The locked channel is back (not removed); only the dropped one is counted apart.
@@ -190,7 +190,7 @@ describe('HiddenChannelsDialog', () => {
     await waitFor(() => expect(rows()).toHaveLength(1));
     fireEvent.click(screen.getByTestId('hidden-channel-unhide'));
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
-    expect(lastToast()?.title).toBe('Could not unhide BBC One');
+    expect(lastToast()?.title).toBe("Couldn't unhide BBC One");
     expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('Database is locked.');
     expect(rowNames()).toEqual(['BBC One']);
   });
@@ -237,7 +237,7 @@ describe('HiddenChannelsDialog', () => {
     core.drop(cnn.ref);
     act(() => back.action!.onClick());
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
-    expect(lastToast()?.title).toBe('1 channel could not be hidden again');
+    expect(lastToast()?.title).toBe("1 channel couldn't be hidden again");
     expect(lastToast()?.description).toBe('The provider no longer lists this channel.');
     // The batch was refused for the dropped ref, so each ref went alone.
     expect(core.isHidden(bbc.ref)).toBe(true);
@@ -253,7 +253,7 @@ describe('HiddenChannelsDialog', () => {
     core.override('channels.setHidden', () => fail('internal', 'Database is locked.'));
     act(() => useToastStore.getState().toasts.find((t) => t.title === '2 channels are back')!.action!.onClick());
     await waitFor(() => expect(lastToast()?.variant).toBe('error'));
-    expect(lastToast()?.title).toBe('Could not undo');
+    expect(lastToast()?.title).toBe("Couldn't undo");
     expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('Database is locked.');
   });
 
@@ -276,7 +276,7 @@ describe('HiddenChannelsDialog', () => {
     core.drop(cnn.ref);
     open();
     await waitFor(() => expect(rows()).toHaveLength(2));
-    await waitFor(() => expect(rows()[0]!.textContent).toContain('No longer in the playlist'));
+    await waitFor(() => expect(rows()[0]!.textContent).toContain('No longer in the source'));
     // The row has asked catalog.item already; the toast reuses that answer
     // (asking again now would fail differently and count as listed).
     core.override('catalog.item', () => fail('internal', 'Database is locked.'));
@@ -301,7 +301,7 @@ describe('HiddenChannelsDialog', () => {
     await waitFor(() => expect(rows()).toHaveLength(3));
     fireEvent.click(screen.getByTestId('hidden-channels-unhide-all'));
     await waitFor(() => expect(toastTitles()).toContain('2 channels are back'));
-    expect(toastTitles()).toContain('1 channel could not be unhidden');
+    expect(toastTitles()).toContain("1 channel couldn't be unhidden");
     const failed = useToastStore.getState().toasts.find((t) => t.variant === 'error')!;
     expect(failed.description).toBe('The provider no longer lists this channel.');
     // One batch, refused for the missing ref, then each ref alone.

@@ -22,6 +22,36 @@ export function statusTone(status: string | undefined): Tone {
   return 'warning';
 }
 
+/** Provider statuses with a translated label (SS-18); anything else shows as the provider sent it. */
+const KNOWN_STATUS: Record<string, string> = {
+  active: 'accountState_active',
+  ok: 'accountState_active',
+  enabled: 'accountState_active',
+  expired: 'accountState_expired',
+  banned: 'accountState_banned',
+  blocked: 'accountState_banned',
+  disabled: 'accountState_disabled',
+  inactive: 'accountState_disabled',
+  suspended: 'accountState_suspended',
+  trial: 'accountState_trial',
+};
+
+/** The translation key for a provider's account status, or null for one the app does not know. */
+export function statusKey(status: string | undefined): string | null {
+  return KNOWN_STATUS[(status ?? '').trim().toLowerCase()] ?? null;
+}
+
+/** The status badge: a known status in the UI language, with the provider's own word as its title. */
+function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation('sources');
+  const key = statusKey(status);
+  return (
+    <Badge variant={statusTone(status)} title={key ? status : undefined}>
+      {key ? t(key) : status}
+    </Badge>
+  );
+}
+
 /**
  * The panel's clock as text. A valid IANA zone formats the time in that zone
  * and names it ("Oct 11, 2026, 5:14 PM, Europe/Berlin"); an unknown zone falls
@@ -135,7 +165,7 @@ function XtreamAccountView({ sourceId }: { sourceId: string }) {
     <Frame onRefresh={refresh} fetching={q.isFetching}>
       <dl className="flex flex-col divide-y divide-divider rounded-lg border border-edge bg-surface">
         <Row label={t('accountStatus')} testId="account-status">
-          <Badge variant={statusTone(a.status)}>{a.status}</Badge>
+          <StatusBadge status={a.status} />
         </Row>
         <Row label={t('accountExpires')} testId="account-expires">
           <When iso={a.expDate} lang={lang} expiry />
@@ -196,7 +226,7 @@ function StalkerAccountView({ sourceId }: { sourceId: string }) {
           <span className="font-mono text-sm">{a.mac}</span>
         </Row>
         <Row label={t('accountStatus')} testId="account-status">
-          {a.status ? <Badge variant={statusTone(a.status)}>{a.status}</Badge> : <span className="text-fg-muted">{t('accountUnknown')}</span>}
+          {a.status ? <StatusBadge status={a.status} /> : <span className="text-fg-muted">{t('accountUnknown')}</span>}
         </Row>
         <Row label={t('accountExpires')} testId="account-expires">
           <When iso={a.expDate} lang={lang} expiry />

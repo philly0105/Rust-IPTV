@@ -412,19 +412,20 @@ describe('refresh failures', () => {
     await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toHaveLength(2));
   });
 
-  it('Refresh all says which source it is on, and skips pasted playlists', async () => {
+  it('Refresh all says which source it is on, and re-imports pasted playlists too (FW-M3U-SERIES-MIGRATION)', async () => {
     rpcMock.handlers['sources.list'] = () => [xtream('a'), makeSource('p', { m3u: { origin: 'text', headers: {} } }), xtream('b')];
     const waiters: ((v: unknown) => void)[] = [];
     rpcMock.handlers['sources.refresh'] = (a) => new Promise((r) => waiters.push(() => r(xtream((a as { id: string }).id))));
     renderAt(routes(), '/sources');
     const btn = await screen.findByTestId('sources-refresh-all');
     fireEvent.click(btn);
-    await waitFor(() => expect(btn.textContent).toBe('Refreshing 1 of 2'));
-    await act(async () => waiters.shift()!(undefined));
-    await waitFor(() => expect(btn.textContent).toBe('Refreshing 2 of 2'));
-    await act(async () => waiters.shift()!(undefined));
+    for (const step of [1, 2, 3]) {
+      await waitFor(() => expect(btn.textContent).toBe(`Refreshing ${step} of 3`));
+      await act(async () => waiters.shift()!(undefined));
+    }
     await waitFor(() => expect(btn.textContent).toBe('Refresh all'));
-    expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'a' }, { id: 'b' }]);
+    // The core re-imports stored text without the network, so it picks up new import rules.
+    expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'a' }, { id: 'p' }, { id: 'b' }]);
   });
 
   it('Refresh all skips a source that is importing already (ST-2)', async () => {
@@ -456,11 +457,16 @@ describe('refresh failures', () => {
     expect(queryClient.getQueryState(key)?.isInvalidated).toBe(false);
   });
 
-  it('disables Refresh all when every source is a pasted playlist', async () => {
-    rpcMock.handlers['sources.list'] = () => [makeSource('p', { m3u: { origin: 'text', headers: {} } })];
+  it('offers Re-import on a pasted playlist, and Refresh all for it (FW-M3U-SERIES-MIGRATION)', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('p', { name: 'Pasted', m3u: { origin: 'text', headers: {} } })];
+    rpcMock.handlers['sources.refresh'] = () => makeSource('p', { name: 'Pasted', m3u: { origin: 'text', headers: {} } });
     renderAt(routes(), '/sources');
     const btn = await screen.findByTestId('sources-refresh-all');
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    const reimport = screen.getByRole('button', { name: 'Re-import Pasted' });
+    expect(reimport.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(reimport);
+    await waitFor(() => expect(rpcMock.callsOf('sources.refresh')).toEqual([{ id: 'p' }]));
   });
 });
 

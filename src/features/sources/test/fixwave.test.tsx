@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { eagerRoutes, installDomStubs, makeSource, pending, renderAt, rpcMock } from './harness';
+import { chooseCardAction, confirmDiscard, eagerRoutes, installDomStubs, makeSource, pending, renderAt, rpcMock } from './harness';
 import { serverTimeText } from '../components/AccountPanel';
 import { absoluteTime } from '../lib/format';
 
@@ -165,7 +165,8 @@ describe('Account panel', () => {
       allowedOutputFormats: ['m3u8', 'ts'],
     });
     renderAt(routes(), '/sources');
-    fireEvent.click(await screen.findByTestId('source-account'));
+    await screen.findByTestId('source-card');
+    chooseCardAction('Subscription details');
     const panel = await within(dialog()).findByTestId('account-panel');
     expect(rpcMock.callsOf('xtream.accountInfo')).toEqual([{ sourceId: 'x' }]);
     expect(within(panel).getByTestId('account-status').textContent).toContain('Active');
@@ -180,7 +181,8 @@ describe('Account panel', () => {
     rpcMock.handlers['sources.list'] = () => [xtream('x')];
     rpcMock.handlers['xtream.accountInfo'] = pending;
     renderAt(routes(), '/sources');
-    fireEvent.click(await screen.findByTestId('source-account'));
+    await screen.findByTestId('source-card');
+    chooseCardAction('Subscription details');
     expect(within(dialog()).getByTestId('account-loading')).toBeTruthy();
     cleanup();
 
@@ -190,9 +192,10 @@ describe('Account panel', () => {
       return { status: 'Expired', activeCons: 0, maxConnections: 0, isTrial: true };
     };
     renderAt(routes(), '/sources');
-    fireEvent.click(await screen.findByTestId('source-account'));
+    await screen.findByTestId('source-card');
+    chooseCardAction('Subscription details');
     const alert = await within(dialog()).findByRole('alert');
-    expect(alert.textContent).toContain('Could not load the account details');
+    expect(alert.textContent).toContain("Couldn't load the account details");
     fail = false;
     fireEvent.click(within(alert).getByRole('button'));
     const status = await within(dialog()).findByTestId('account-status');
@@ -210,7 +213,8 @@ describe('Account panel', () => {
       raw: { phone: '555', account_balance: 12, token: 'tok-secret', nested: { password: 'pw-secret', city: 'Oslo' } },
     });
     renderAt(routes(), '/sources');
-    fireEvent.click(await screen.findByTestId('source-account'));
+    await screen.findByTestId('source-card');
+    chooseCardAction('Subscription details');
     const panel = await within(dialog()).findByTestId('account-panel');
     expect(rpcMock.callsOf('stalker.accountInfo')).toEqual([{ sourceId: 's' }]);
     expect(panel.textContent).toContain('Gold');
@@ -243,7 +247,8 @@ describe('Account panel', () => {
     rpcMock.handlers['sources.list'] = () => [xtream('x')];
     rpcMock.handlers['xtream.accountInfo'] = () => ({ status: 'Active', activeCons: 0, maxConnections: 1, isTrial: false, serverTime: at, timezone: 'Europe/Berlin' });
     renderAt(routes(), '/sources');
-    fireEvent.click(await screen.findByTestId('source-account'));
+    await screen.findByTestId('source-card');
+    chooseCardAction('Subscription details');
     const time = await within(dialog()).findByTestId('account-server-time');
     expect(time.textContent).toBe(berlin);
   });
@@ -252,7 +257,9 @@ describe('Account panel', () => {
     rpcMock.handlers['sources.list'] = () => [makeSource('m')];
     renderAt(routes(), '/sources');
     await screen.findByTestId('source-card');
-    expect(screen.queryByTestId('source-account')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^More actions for/ }));
+    expect(screen.queryByRole('menuitem', { name: 'Subscription details' })).toBeNull();
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
     fireEvent.click(screen.getByTestId('source-edit'));
     expect(within(dialog()).queryByRole('tab', { name: 'Account' })).toBeNull();
   });
@@ -298,7 +305,7 @@ describe('Sort, filter and remove all', () => {
     expect(names()).toHaveLength(3);
   });
 
-  it('removes all playlists only after typing the word', async () => {
+  it('removes all sources only after typing the word', async () => {
     let sources = list();
     rpcMock.handlers['sources.list'] = () => sources;
     rpcMock.handlers['sources.removeAll'] = () => {
@@ -308,9 +315,9 @@ describe('Sort, filter and remove all', () => {
     renderAt(routes(), '/sources');
     await screen.findAllByTestId('source-card');
     fireEvent.click(screen.getByRole('button', { name: 'More source actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Remove all playlists/ }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Remove all sources/ }));
     const confirm = screen.getByTestId('sources-remove-all-confirm') as HTMLButtonElement;
-    expect(within(dialog()).getByRole('heading').textContent).toContain('Remove all 3 playlists?');
+    expect(within(dialog()).getByRole('heading').textContent).toContain('Remove all 3 sources?');
     expect(confirm.disabled).toBe(true);
     fireEvent.change(screen.getByTestId('sources-remove-all-input'), { target: { value: 'nope' } });
     expect(confirm.disabled).toBe(true);
@@ -399,6 +406,7 @@ describe('Retrying a failed add reuses the source it created', () => {
     await failFirstAdd();
     expect(importErrorClaimed('f1')).toBe(true);
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    confirmDiscard();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(importErrorClaimed('f1')).toBe(false);
   });

@@ -63,10 +63,10 @@ afterEach(() => {
 describe('Tour', () => {
   it('opens on the first step as a labelled modal dialog with focus on Next', () => {
     open();
-    const dialog = screen.getByRole('dialog', { name: 'Live TV' });
+    const dialog = screen.getByRole('dialog', { name: 'Your sources' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     const described = document.getElementById(dialog.getAttribute('aria-describedby') ?? '');
-    expect(described?.textContent).toMatch(/what's on now and next/);
+    expect(described?.textContent).toMatch(/Open a source here/);
     expect(screen.getByTestId('tour-progress')?.textContent).toContain('Step 1 of 3');
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Next' }));
     expect(screen.getByRole('button', { name: 'Skip tour' })).toBeTruthy();
@@ -298,6 +298,34 @@ describe('Tour', () => {
     expect(at(spot)).toEqual({ x: 2, y: 114 });
     expect(card().getAttribute('data-side')).toBe('end');
     expect(at(card()).x).toBeGreaterThan(64);
+  });
+
+  it('points an arrow at the anchor from the card edge that faces it, and none from a centred card', () => {
+    open();
+    expect(screen.queryByTestId('tour-arrow')).toBeNull();
+    cleanup();
+    addAnchor('live');
+    open();
+    const arrow = screen.getByTestId('tour-arrow');
+    expect(arrow.getAttribute('data-edge')).toBe('left');
+    expect(arrow.getAttribute('aria-hidden')).toBe('true');
+    expect(card().contains(arrow)).toBe(true);
+  });
+
+  it('as a coach mark shows one card with Got it and a way into the full tour', () => {
+    addAnchor('search', { top: 10, left: 900, width: 200, height: 36 });
+    const onClose = vi.fn();
+    h.renderUi(<Tour onClose={onClose} coach />);
+    expect(step()).toBe('search');
+    expect(screen.getByRole('dialog', { name: 'Your source is ready' })).toBeTruthy();
+    expect(screen.getByTestId('tour-hints')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByTestId('tour-next'));
+    expect(screen.getByTestId('tour-next').textContent).toBe('Got it');
+    fireEvent.click(screen.getByTestId('tour-show-around'));
+    expect(step()).toBe('live');
+    expect(screen.queryByTestId('tour-show-around')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Skip tour' }));
+    expect(onClose).toHaveBeenCalledWith('skipped');
   });
 
   it('moves the spotlight and card by transform only, so the motion is no layout shift (L2-sources-home-11)', () => {

@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "Élő tévéadás",
-  "tourLiveText": "Csoportokba rendezett csatornák, az aktuális és a következő műsor, teljes műsorújság.",
+  "tourLiveTitle": "A forrásai",
+  "tourLiveText": "Itt nyithat meg egy forrást az élő csatornáihoz, a műsorújsághoz, a filmekhez és a sorozatokhoz.",
   "tourVodTitle": "Filmek, sorozatok és Saját lista",
   "tourVodText": "Böngésszen az egyes források film- és sorozatborítói között, szűrjön évtizedre, és mentse a címeket a Saját listába, hogy egy helyen legyenek.",
   "tourSearchTitle": "Keresés mindenben",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Indítás teljes méretben vagy teljes képernyőn",
   "noteWindowStartText": "A Beállításokban választhatja ki, hogyan nyíljon meg az ablak.",
   "noteFixesTitle": "Több száz javítás",
-  "noteFixesText": "Az importálás, a műsorújság, a lejátszás, a felvétel, a letöltések és a biztonsági mentések megbízhatóbbak."
+  "noteFixesText": "Az importálás, a műsorújság, a lejátszás, a felvétel, a letöltések és a biztonsági mentések megbízhatóbbak.",
+  "tourCoachTitle": "A forrás készen áll",
+  "tourCoachText": "A keresés minden forrásban megtalálja a csatornákat, filmeket és sorozatokat. A parancspaletta bárhová máshová elviszi.",
+  "tourShowAround": "Körbevezetés",
+  "tourGotIt": "Rendben"
 }

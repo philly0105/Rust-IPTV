@@ -80,7 +80,7 @@ describe('Reset settings (D9)', () => {
       current = settings();
       return current;
     };
-    renderAt(settingsRoutes, '/settings/general');
+    renderAt(settingsRoutes, '/settings/backup');
     fireEvent.click(await screen.findByTestId('settings-reset'));
     const dialog = await screen.findByRole('dialog', { name: 'Reset all settings?' });
     expect(rpcMock.callsOf('settings.reset')).toEqual([]);
@@ -98,7 +98,7 @@ describe('Reset settings (D9)', () => {
     rpcMock.handlers['settings.reset'] = () => {
       throw new Error('disk full');
     };
-    renderAt(settingsRoutes, '/settings/general');
+    renderAt(settingsRoutes, '/settings/backup');
     fireEvent.click(await screen.findByTestId('settings-reset'));
     fireEvent.click(within(await screen.findByRole('dialog')).getByTestId('settings-reset-confirm'));
     await waitFor(() => expect(lastToast()?.title).toBe("Couldn't reset settings"));
@@ -162,7 +162,7 @@ describe('Backup file checks match the core (D10)', () => {
     const file = Object.assign(new File([body], 'b.json', { type: 'application/json' }), { text: async () => body });
     fireEvent.change(input, { target: { files: [file] } });
     expect((await screen.findByTestId('backup-skipped')).textContent).toBe(
-      'No playlists in this file. Only its guide URLs and settings will be imported.',
+      'No sources in this file. Only its guide URLs and settings will be imported.',
     );
   });
 });
@@ -259,7 +259,7 @@ describe('Background merge import (L2-settings-3, L2-settings-6)', () => {
     await waitFor(() => expect(lastToast()?.title).toBe('Backup imported'));
     expect(rpcMock.callsOf('backup.import')).toEqual([{ json: body, mode: 'merge', background: true }]);
     expect(lastToast()?.description).toBe(
-      'Added or updated: 2. Skipped: 0. 2 playlists are still loading; their favorites and history appear as each one finishes.',
+      'Added or updated: 2. Skipped: 0. 2 sources are still loading; their favorites and history appear as each one finishes.',
     );
     // One hold, taken before the RPC and released after it.
     expect(during).toEqual([1]);
@@ -466,7 +466,7 @@ describe('Round 3', () => {
     renderAt(settingsRoutes, '/settings/epg');
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe(
-      "Part of this guide couldn't be read: 1,200 of 1,500 programs have a time in a format the app doesn't recognize. Check the URL or ask your provider.",
+      "Part of this guide couldn't be read: 1,200 of 1,500 programmes have a time in a format the app doesn't recognize. Check the URL or ask your provider.",
     );
   });
 

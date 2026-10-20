@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "直播电视",
-  "tourLiveText": "频道按分组排列，可查看当前和下一个节目，以及完整的节目指南。",
+  "tourLiveTitle": "你的播放源",
+  "tourLiveText": "在这里打开播放源，查看其直播频道、电视指南、电影和剧集。",
   "tourVodTitle": "电影、剧集和我的片单",
   "tourVodText": "浏览每个来源的电影和剧集海报，按年代筛选，并把作品加入我的片单，集中在一处。",
   "tourSearchTitle": "搜索全部内容",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "以最大化或全屏启动",
   "noteWindowStartText": "在设置中选择窗口的打开方式。",
   "noteFixesTitle": "数百项修复",
-  "noteFixesText": "导入、节目指南、播放、录制、下载和备份都更可靠了。"
+  "noteFixesText": "导入、节目指南、播放、录制、下载和备份都更可靠了。",
+  "tourCoachTitle": "播放源已就绪",
+  "tourCoachText": "搜索可在所有播放源中查找频道、电影和剧集。其他任何地方都可通过命令面板前往。",
+  "tourShowAround": "带我看看",
+  "tourGotIt": "知道了"
 }

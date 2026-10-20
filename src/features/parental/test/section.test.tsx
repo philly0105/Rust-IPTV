@@ -78,6 +78,19 @@ describe('ParentalSection', () => {
     expect(screen.getByTestId('settings-loading')).toBeTruthy();
   });
 
+  it('while off, says what controls give and offers Set PIN as the page action', async () => {
+    renderUi(<Section />, queryClient);
+    await screen.findByText('Parental controls are off');
+    const benefits = within(screen.getByTestId('parental-benefits')).getAllByRole('listitem');
+    expect(benefits.map((li) => li.textContent)).toEqual([
+      expect.stringContaining('Lock what you choose'),
+      expect.stringContaining('Hide or ask'),
+      expect.stringContaining('Adult groups'),
+    ]);
+    // The one primary button on the page.
+    expect(screen.getByTestId('parental-set-pin').className).toContain('bg-accent-solid');
+  });
+
   it('turns parental controls on with a first PIN', async () => {
     renderUi(<Section />, queryClient);
     expect(await screen.findByText('Parental controls are off')).toBeTruthy();

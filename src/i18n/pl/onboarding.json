@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "Telewizja na żywo",
-  "tourLiveText": "Kanały w grupach, bieżący i następny program oraz pełny przewodnik TV.",
+  "tourLiveTitle": "Twoje źródła",
+  "tourLiveText": "Otwórz tutaj źródło, aby zobaczyć jego kanały na żywo, przewodnik TV, filmy i seriale.",
   "tourVodTitle": "Filmy, seriale i Moja lista",
   "tourVodText": "Przeglądaj plakaty filmów i seriali z każdego źródła, filtruj według dekad i zapisuj tytuły na Mojej liście, aby mieć je w jednym miejscu.",
   "tourSearchTitle": "Szukaj wszędzie",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Start zmaksymalizowany lub na pełnym ekranie",
   "noteWindowStartText": "Wybierz w Ustawieniach, jak otwiera się okno.",
   "noteFixesTitle": "Setki poprawek",
-  "noteFixesText": "Importy, przewodnik TV, odtwarzanie, nagrywanie, pobieranie i kopie zapasowe działają pewniej."
+  "noteFixesText": "Importy, przewodnik TV, odtwarzanie, nagrywanie, pobieranie i kopie zapasowe działają pewniej.",
+  "tourCoachTitle": "Źródło jest gotowe",
+  "tourCoachText": "Wyszukiwanie znajduje kanały, filmy i seriale we wszystkich źródłach. Paleta poleceń przeniesie Cię wszędzie indziej.",
+  "tourShowAround": "Oprowadź mnie",
+  "tourGotIt": "Rozumiem"
 }

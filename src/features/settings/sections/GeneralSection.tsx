@@ -1,46 +1,18 @@
-import { RotateCcw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { isDesktop, rpc } from '@/api/transport';
-import type { CoverSize, DashboardRails, StartupBehavior, WindowStart } from '@/api/types';
+import { isDesktop } from '@/api/transport';
+import type { StartupBehavior, WindowStart } from '@/api/types';
 import { LANGUAGES, applyLanguage } from '@/i18n';
 
-import { Button, Dialog, Select, useToast } from '@/ui';
+import { Select } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
-import { clampRating, diffSettings, railsPatch, type SettingsPatch } from '../lib/patch';
-import { useResetSettings } from '../lib/useUpdateSettings';
+import { clampRating, type SettingsPatch } from '../lib/patch';
 import { DownloadsFolderRow } from './DownloadsFolderRow';
-import { ImageCacheRow } from './ImageCacheRow';
-import { RecordingsFolderRow } from './RecordingsFolderRow';
 // account:
 import { SourceRefreshGroup } from './SourceRefreshGroup';
 import { parity, type SectionProps } from './types';
-
-const RAILS: (keyof DashboardRails)[] = [
-  'hero',
-  'continueWatching',
-  'myList',
-  'liveFavorites',
-  'recentlyWatchedLive',
-  'favoriteMoviesAndSeries',
-  'recentSources',
-  'recentlyAdded',
-  'tmdbTrending',
-];
-
-const RAIL_KEY: Record<keyof DashboardRails, string> = {
-  hero: 'railHero',
-  continueWatching: 'railContinueWatching',
-  liveFavorites: 'railLiveFavorites',
-  recentlyWatchedLive: 'railRecentlyWatchedLive',
-  favoriteMoviesAndSeries: 'railFavoriteMoviesAndSeries',
-  recentSources: 'railRecentSources',
-  recentlyAdded: 'railRecentlyAdded',
-  tmdbTrending: 'railTmdbTrending',
-  myList: 'railMyList',
-};
 
 const LANGUAGE_OPTIONS = LANGUAGES.map((l) => ({ value: l.code, label: l.name }));
 
@@ -86,72 +58,6 @@ function MinRatingRow({ value, update }: { value: number; update: (patch: Settin
   );
 }
 
-/**
- * Puts every setting back to its default after a confirm. Sources, favorites,
- * history and downloads are untouched. The toast offers Undo, which sends
- * back only what the reset changed.
- */
-function ResetGroup({ update }: { update: (patch: SettingsPatch) => Promise<boolean> }) {
-  const { t } = useTranslation('settings');
-  const { toast } = useToast();
-  const reset = useResetSettings();
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  const confirm = async () => {
-    setBusy(true);
-    const before = await reset();
-    setBusy(false);
-    setOpen(false);
-    if (!before) return;
-    toast({
-      variant: 'success',
-      title: t('resetDone'),
-      action: {
-        label: t('undo'),
-        onClick: () => {
-          // A failed save already says so, with a retry.
-          void rpc('settings.get')
-            .catch(() => null)
-            .then((now) => {
-              const patch = now ? diffSettings(now, before) : before;
-              if (Object.keys(patch).length > 0) void update(patch);
-            });
-        },
-      },
-    });
-  };
-
-  return (
-    <SettingsGroup title={t('resetGroup')}>
-      <SettingsRow label={t('resetButton')} description={t('resetHint')}>
-        {({ id, describedBy }) => (
-          <Button id={id} aria-describedby={describedBy} variant="secondary" icon={<RotateCcw aria-hidden className="size-4" />} onClick={() => setOpen(true)} data-testid="settings-reset">
-            {t('resetButton')}
-          </Button>
-        )}
-      </SettingsRow>
-      <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
-        title={t('resetConfirmTitle')}
-        description={t('resetConfirmBody')}
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              {t('cancel')}
-            </Button>
-            <Button variant="danger" loading={busy} onClick={() => void confirm()} data-testid="settings-reset-confirm">
-              {t('resetConfirm')}
-            </Button>
-          </>
-        }
-      />
-    </SettingsGroup>
-  );
-}
-
 export function GeneralSection({ settings, update }: SectionProps) {
   const { t } = useTranslation('settings');
   const extra = parity(settings);
@@ -161,9 +67,11 @@ export function GeneralSection({ settings, update }: SectionProps) {
     void update({ language });
   };
 
+  // SS-8: General keeps the app-wide choices. Poster size and the home screen are in Appearance,
+  // the recordings folder in Recording, the image cache and Reset in Backup and storage.
   return (
     <SettingsSection title={t('sectionGeneral')} description={t('sectionGeneralLead')} testId="settings-general">
-      <SettingsGroup>
+      <SettingsGroup title={t('startupGroup')}>
         <SettingsRow label={t('language')} description={t('languageHint')}>
           {({ id, describedBy }) => (
             <Select
@@ -207,21 +115,12 @@ export function GeneralSection({ settings, update }: SectionProps) {
             )}
           </SettingsRow>
         )}
-        <SettingsRow label={t('coverSize')} description={t('coverSizeHint')}>
-          {({ id }) => (
-            <Segmented<CoverSize>
-              id={id}
-              label={t('coverSize')}
-              value={settings.coverSize}
-              options={[
-                { value: 'small', label: t('coverSmall') },
-                { value: 'medium', label: t('coverMedium') },
-                { value: 'large', label: t('coverLarge') },
-              ]}
-              onChange={(coverSize) => void update({ coverSize })}
-            />
-          )}
-        </SettingsRow>
+      </SettingsGroup>
+
+      {/* account: background refresh and subscription warnings. The source cards link here. */}
+      <SourceRefreshGroup settings={settings} update={update} />
+
+      <SettingsGroup title={t('catalogGroup')} description={t('catalogGroupHint')}>
         <SwitchRow
           label={t('stripCountryPrefix')}
           description={t('stripCountryPrefixHint')}
@@ -236,46 +135,12 @@ export function GeneralSection({ settings, update }: SectionProps) {
           onChange={(englishOnly) => void update({ englishOnly })}
           testId="toggle-englishOnly"
         />
-      </SettingsGroup>
-
-      {/* account: background refresh and subscription warnings. */}
-      <SourceRefreshGroup settings={settings} update={update} />
-
-      <SettingsGroup title={t('vodGroup')} description={t('vodGroupHint')}>
         <MinRatingRow value={extra.vodMinRating} update={update} />
       </SettingsGroup>
 
       <SettingsGroup title={t('downloads')} description={t('downloadsHint')}>
         <DownloadsFolderRow custom={Boolean(settings.downloadsDir?.trim())} />
-        <RecordingsFolderRow value={extra.recordingsDir} update={update} />
       </SettingsGroup>
-
-      {/* Run 3 C3: the disk image cache (size against the cap, the cap, Clear). Server mode has one too. */}
-      <SettingsGroup>
-        <ImageCacheRow update={update} />
-      </SettingsGroup>
-
-      <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? t('dashboardHint') : t('railsOffHint')}>
-        <SwitchRow
-          label={t('showDashboard')}
-          description={t('showDashboardHint')}
-          checked={settings.showDashboard}
-          onChange={(showDashboard) => void update({ showDashboard })}
-          testId="toggle-showDashboard"
-        />
-        {RAILS.map((rail) => (
-          <SwitchRow
-            key={rail}
-            label={t(RAIL_KEY[rail])}
-            checked={settings.dashboardRails[rail]}
-            disabled={!settings.showDashboard}
-            onChange={(v) => void update(railsPatch(settings, rail, v))}
-            testId={`toggle-rail-${rail}`}
-          />
-        ))}
-      </SettingsGroup>
-
-      <ResetGroup update={update} />
     </SettingsSection>
   );
 }

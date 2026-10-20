@@ -55,7 +55,7 @@
   "noHiddenTitle": "沒有已隱藏的頻道",
   "noHiddenText": "從頻道選單隱藏，或在直播電視中選取頻道後按 Shift+Delete。",
   "noMatch": "沒有符合的已隱藏頻道。",
-  "goneBadge": "已不在播放清單中",
+  "goneBadge": "已不在播放來源中",
   "radioBadge": "電台",
   "done": "完成"
 }

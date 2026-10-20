@@ -8,7 +8,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
+import { chooseCardAction, confirmDiscard, eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
 
 /** Every rpcRaw call with its options, to see which went out with keepalive. */
 const raw = vi.hoisted(() => [] as { cmd: string; args: unknown; opts: unknown }[]);
@@ -86,6 +86,8 @@ describe('a failed add does not outlive a reload (L3-app-5)', () => {
   it('leaves it to the dialog once it closed (Cancel schedules an undoable removal instead)', async () => {
     await failAdd();
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
+    // Typed details: Cancel asks before dropping them (SS-1).
+    confirmDiscard();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     resetPendingRemovalsForTests();
     act(() => {
@@ -274,7 +276,7 @@ describe('a removal in its undo window survives a reload or quit (L3-app-pages-x
     rpcMock.handlers['sources.remove'] = () => null;
     renderAt(routes(), '/sources');
     await waitFor(() => expect(screen.queryAllByTestId('source-card')).toHaveLength(2));
-    fireEvent.click(screen.getAllByTestId('source-remove')[0]!);
+    chooseCardAction('Remove');
     await waitFor(() => expect(screen.queryAllByTestId('source-card')).toHaveLength(1));
     expect(rpcMock.callsOf('sources.remove')).toEqual([]);
     act(() => {

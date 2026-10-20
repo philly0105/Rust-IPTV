@@ -55,7 +55,7 @@
   "noHiddenTitle": "非表示のチャンネルはありません",
   "noHiddenText": "チャンネルのメニューから非表示にするか、ライブTVで Shift+Delete を押します。",
   "noMatch": "一致する非表示のチャンネルはありません。",
-  "goneBadge": "プレイリストにありません",
+  "goneBadge": "ソースにありません",
   "radioBadge": "ラジオ",
   "done": "完了"
 }

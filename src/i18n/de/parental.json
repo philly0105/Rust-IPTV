@@ -38,7 +38,7 @@
   "setPin": "PIN festlegen",
   "changePin": "PIN ändern",
   "pinSetToast": "Jugendschutz ist eingeschaltet",
-  "pinSetToastText": "Sperren Sie hier Gruppen oder einzelne Sender, Filme und Serien über ihr Menü.",
+  "pinSetToastText": "Sperren Sie hier Gruppen oder einzelne Sender, Filme und Serien über ihr Menü. Eine vergessene PIN lässt sich nicht zurücksetzen, bewahren Sie sie also sicher auf.",
   "pinChangedToast": "PIN geändert",
   "unlockTitle": "Jugendschutz-PIN eingeben",
   "unlockText": "Dieser Inhalt ist durch den Jugendschutz gesperrt.",
@@ -170,5 +170,13 @@
   "discardTitle": "Änderungen verwerfen?",
   "discardText": "Die hier an- oder abgehakten Gruppen werden nicht gespeichert.",
   "keepEditing": "Weiter bearbeiten",
-  "discard": "Verwerfen"
+  "discard": "Verwerfen",
+  "pinNoRecovery": "Eine vergessene PIN lässt sich nicht zurücksetzen. Bewahren Sie sie sicher auf.",
+  "offBenefitLockTitle": "Sperren, was Sie wählen",
+  "offBenefitLockText": "Ganze Gruppen, einzelne Sender, Filme oder Serien.",
+  "offBenefitModeTitle": "Ausblenden oder nachfragen",
+  "offBenefitModeText": "Gesperrte Inhalte verschwinden oder verlangen beim Öffnen die PIN.",
+  "offBenefitAdultTitle": "Gruppen für Erwachsene",
+  "offBenefitAdultText": "Als für Erwachsene markierte Gruppen lassen sich automatisch sperren.",
+  "offPinNote": "Was gesperrt wird, wählen Sie nach dem Festlegen der PIN."
 }

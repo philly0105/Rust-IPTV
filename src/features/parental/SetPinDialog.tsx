@@ -1,3 +1,4 @@
+import { KeyRound } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -158,7 +159,7 @@ export function SetPinDialog({ open, mode, onDone, onCancel, testId = 'set-pin-d
       }
     >
       <form id={formId} noValidate onSubmit={(e) => void submit(e)} className="flex flex-col items-center gap-4 pt-1">
-        <p className="text-[calc(13rem/15)] text-fg-subtle tabular" data-testid={`${testId}-step`}>
+        <p className="text-body-sm text-fg-subtle tabular" data-testid={`${testId}-step`}>
           {t('stepOf', { step: index + 1, total: steps.length })}
         </p>
         <PinField
@@ -181,6 +182,13 @@ export function SetPinDialog({ open, mode, onDone, onCancel, testId = 'set-pin-d
           message={<PinMessage id={messageId} feedback={{ ...feedback, lockedOut: lockedHere }} hint={hint} />}
           testId={`${testId}-field`}
         />
+        {/* SS-15: there is no recovery yet, so say it before the PIN is set, while it can still be written down. */}
+        {step === 'confirm' ? (
+          <p className="flex max-w-xs items-start gap-2 rounded-md border border-edge bg-surface-2 px-3 py-2 text-body-sm text-fg-muted" data-testid={`${testId}-no-recovery`}>
+            <KeyRound aria-hidden size={16} className="mt-0.5 shrink-0 text-warning" />
+            {t('pinNoRecovery')}
+          </p>
+        ) : null}
       </form>
     </Dialog>
   );

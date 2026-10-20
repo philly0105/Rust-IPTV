@@ -190,7 +190,7 @@ describe('useLockMenuItems', () => {
     const lock = await screen.findByRole('button', { name: 'Lock channel' });
     await waitFor(() => expect((lock as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(lock);
-    await waitFor(() => expect(lastToast()?.title).toBe('Could not change the lock'));
+    await waitFor(() => expect(lastToast()?.title).toBe("Couldn't change the lock"));
     expect(lastToast()?.variant).toBe('error');
     // The core's raw text follows the translated next step in small print.
     expect(render(<>{lastToast()?.description}</>).container.querySelector('[data-error-message]')?.textContent).toBe('database is locked');

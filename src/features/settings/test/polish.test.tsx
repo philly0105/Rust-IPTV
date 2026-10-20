@@ -87,8 +87,8 @@ describe('Settings save feedback', () => {
 
 describe('Segmented keyboard', () => {
   it('End and Home jump to the last and first option', async () => {
-    renderAt(settingsRoutes, '/settings/general');
-    await screen.findByTestId('settings-general');
+    renderAt(settingsRoutes, '/settings/appearance');
+    await screen.findByTestId('settings-appearance');
     const group = screen.getByRole('radiogroup', { name: 'Poster size' });
     const radios = within(group).getAllByRole('radio');
     const selected = radios.find((r) => r.getAttribute('aria-checked') === 'true')!;
@@ -124,8 +124,8 @@ describe('Shortcuts section matches the ? overlay', () => {
 describe('Dashboard rails', () => {
   it('explains why the rail switches are disabled while the dashboard is off', async () => {
     current = { ...current, showDashboard: false };
-    renderAt(settingsRoutes, '/settings/general');
-    await screen.findByTestId('settings-general');
+    renderAt(settingsRoutes, '/settings/appearance');
+    await screen.findByTestId('settings-appearance');
     expect(screen.getByText('Turn on the dashboard to use these rows.')).toBeTruthy();
     expect((screen.getByTestId('toggle-rail-hero') as HTMLButtonElement).disabled).toBe(true);
   });
@@ -150,7 +150,8 @@ describe('Backup import errors', () => {
     await screen.findByTestId('settings-backup');
     pick('not json');
     expect(await screen.findByText("This file isn't valid JSON.")).toBeTruthy();
-    expect((screen.getByTestId('backup-import') as HTMLButtonElement).disabled).toBe(true);
+    // Nothing valid was picked, so there is nothing to import: the button only appears with a file.
+    expect(screen.queryByTestId('backup-import')).toBeNull();
     expect(rpcMock.callsOf('backup.import')).toHaveLength(0);
   });
 

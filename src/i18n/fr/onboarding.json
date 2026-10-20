@@ -1,6 +1,6 @@
 {
-  "tourLiveTitle": "TV en direct",
-  "tourLiveText": "Des chaînes classées par groupe, avec le programme en cours et à suivre, et un guide TV complet.",
+  "tourLiveTitle": "Vos sources",
+  "tourLiveText": "Ouvrez ici une source pour ses chaînes en direct, son guide TV, ses films et séries.",
   "tourVodTitle": "Films, séries et Ma liste",
   "tourVodText": "Parcourez les affiches des films et séries de chaque source, filtrez par décennie et gardez des titres dans Ma liste pour les retrouver au même endroit.",
   "tourSearchTitle": "Tout rechercher",
@@ -65,5 +65,9 @@
   "noteWindowStartTitle": "Démarrer agrandi ou en plein écran",
   "noteWindowStartText": "Choisissez dans les Paramètres comment la fenêtre s'ouvre.",
   "noteFixesTitle": "Des centaines de corrections",
-  "noteFixesText": "Les imports, le guide TV, la lecture, l'enregistrement, les téléchargements et les sauvegardes sont plus fiables."
+  "noteFixesText": "Les imports, le guide TV, la lecture, l'enregistrement, les téléchargements et les sauvegardes sont plus fiables.",
+  "tourCoachTitle": "Votre source est prête",
+  "tourCoachText": "La recherche trouve chaînes, films et séries dans toutes vos sources. La palette de commandes mène partout ailleurs.",
+  "tourShowAround": "Faire le tour",
+  "tourGotIt": "Compris"
 }

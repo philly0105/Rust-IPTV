@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 64 64">
+  <!-- Manifest shortcut icon: the mark's tile with a Lucide glyph (ISC licence) in the dial amber. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1d283b"/>
+      <stop offset=".5" stop-color="#111827"/>
+      <stop offset="1" stop-color="#0a0e17"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="2" x2="0" y2="22" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffc964"/>
+      <stop offset="1" stop-color="#e3972a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#tile)"/>
+  <g transform="translate(14 14) scale(1.5)" fill="none" stroke="url(#amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m21 21-4.34-4.34"/>
+    <circle cx="11" cy="11" r="8"/>
+  </g>
+</svg>

@@ -5,10 +5,16 @@
 // for light, OLED only while dark, UI scale clamped to 0.9-1.25.
 (function () {
   var html = document.documentElement;
-  var meta = document.querySelector('meta[name="theme-color"]');
+  // index.html has one theme-color per OS colour scheme; both get the app's colour, so the one
+  // the browser picks matches the theme the user chose.
+  var metas = document.querySelectorAll('meta[name="theme-color"]');
   var COLORS = { dark: '#0c1320', light: '#edf0f5', oled: '#000000' };
   function color(resolved, oled) {
     return resolved === 'light' ? COLORS.light : oled ? COLORS.oled : COLORS.dark;
+  }
+  function sync() {
+    var value = color(html.getAttribute('data-theme'), html.hasAttribute('data-oled'));
+    for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', value);
   }
   try {
     var stored = localStorage.getItem('tsrust.theme');
@@ -28,14 +34,13 @@
     if (typeof a.uiScale === 'number' && isFinite(a.uiScale)) {
       html.style.setProperty('--ui-scale', String(Math.min(1.25, Math.max(0.9, a.uiScale))));
     }
-    if (meta) meta.setAttribute('content', color(resolved, oled));
   } catch (e) {
     // Storage blocked: the dark default in index.html stands.
   }
+  // Also when storage is blocked: the page is dark then, whatever the OS scheme.
+  sync();
   // Keeps the browser chrome colour in step when the theme changes later.
-  if (meta && typeof MutationObserver === 'function') {
-    new MutationObserver(function () {
-      meta.setAttribute('content', color(html.getAttribute('data-theme'), html.hasAttribute('data-oled')));
-    }).observe(html, { attributes: true, attributeFilter: ['data-theme', 'data-oled'] });
+  if (metas.length && typeof MutationObserver === 'function') {
+    new MutationObserver(sync).observe(html, { attributes: true, attributeFilter: ['data-theme', 'data-oled'] });
   }
 })();

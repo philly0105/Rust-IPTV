@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { formatClock, ms } from '@/features/live/lib/epgTime';
 import { dismissToast, toast } from '@/ui/Toast';
+import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
 import { focusIfPlayerOwnsFocus } from '../format';
@@ -52,25 +53,26 @@ export function SleepChip({ compact, onOpen }: { compact?: boolean; onOpen(): vo
   const text = endsAt === null ? null : sleepLeftText(endsAt, now);
   const label = text === null ? t('sleepChipWaiting') : t('sleepChipLabel', { time: text });
   return (
-    <button
-      type="button"
-      data-ctl="sleep"
-      data-testid="sleep-chip"
-      aria-label={label}
-      title={label}
-      aria-keyshortcuts="Z"
-      onClick={onOpen}
-      className={cn(
-        'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric font-semibold tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors',
-        compact ? 'h-6 gap-1 px-1.5 text-[calc(11rem/15)]' : 'h-7 gap-1.5 px-2 text-xs',
-        // The last minute lights up: the dial's accent on the dark themes, a brighter edge on the light one.
-        last ? 'bg-white/10 text-white ring-white/70 dark:text-accent-hover dark:ring-accent/70' : 'text-white ring-white/25 hover:ring-white/45',
-        fading && 'player-sleep-fading',
-      )}
-    >
-      <Moon className={cn('shrink-0', compact ? 'size-3' : 'size-3.5')} aria-hidden />
-      {text === null ? <InlineSpinner /> : text}
-    </button>
+    <Tooltip content={label} tone="glass" describe={false}>
+      <button
+        type="button"
+        data-ctl="sleep"
+        data-testid="sleep-chip"
+        aria-label={label}
+        aria-keyshortcuts="Z"
+        onClick={onOpen}
+        className={cn(
+          'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric font-semibold tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors',
+          compact ? 'h-6 gap-1 px-1.5 text-[calc(11rem/15)]' : 'h-7 gap-1.5 px-2 text-xs',
+          // The last minute lights up: the dial's accent on the dark themes, a brighter edge on the light one.
+          last ? 'bg-white/10 text-white ring-white/70 dark:text-accent-hover dark:ring-accent/70' : 'text-white ring-white/25 hover:ring-white/45',
+          fading && 'player-sleep-fading',
+        )}
+      >
+        <Moon className={cn('shrink-0', compact ? 'size-3' : 'size-3.5')} aria-hidden />
+        {text === null ? <InlineSpinner /> : text}
+      </button>
+    </Tooltip>
   );
 }
 

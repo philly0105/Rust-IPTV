@@ -346,6 +346,71 @@
     cursor: pointer;
   }
 
+  /*
+   * Icons follow the interface size (DS-ICON-SCALE). Lucide writes `size={16}` as px width and
+   * height attributes, which the UI scale never touches, so at 125 % a 16 px icon sat small in a
+   * button that had grown by a quarter. These rules restate each size in use in rem against the
+   * 15 px root: 16 px at 100 %, 20 px at 125 %. The scale for new icons: 12 (inline meta), 14
+   * (dense rows), 16 (buttons, menus; the default), 18 (rail, header, dialog close), 24 (hero and
+   * empty-state art). A size utility on the icon (size-4, h-5 w-5) is in a later layer and wins.
+   */
+  svg.lucide[width='11'] {
+    width: calc(11rem / 15);
+    height: calc(11rem / 15);
+  }
+  svg.lucide[width='12'] {
+    width: calc(12rem / 15);
+    height: calc(12rem / 15);
+  }
+  svg.lucide[width='13'] {
+    width: calc(13rem / 15);
+    height: calc(13rem / 15);
+  }
+  svg.lucide[width='14'] {
+    width: calc(14rem / 15);
+    height: calc(14rem / 15);
+  }
+  svg.lucide[width='15'] {
+    width: calc(15rem / 15);
+    height: calc(15rem / 15);
+  }
+  svg.lucide[width='16'] {
+    width: calc(16rem / 15);
+    height: calc(16rem / 15);
+  }
+  svg.lucide[width='17'] {
+    width: calc(17rem / 15);
+    height: calc(17rem / 15);
+  }
+  svg.lucide[width='18'] {
+    width: calc(18rem / 15);
+    height: calc(18rem / 15);
+  }
+  svg.lucide[width='20'] {
+    width: calc(20rem / 15);
+    height: calc(20rem / 15);
+  }
+  svg.lucide[width='22'] {
+    width: calc(22rem / 15);
+    height: calc(22rem / 15);
+  }
+  svg.lucide[width='24'] {
+    width: calc(24rem / 15);
+    height: calc(24rem / 15);
+  }
+  svg.lucide[width='28'] {
+    width: calc(28rem / 15);
+    height: calc(28rem / 15);
+  }
+  svg.lucide[width='30'] {
+    width: calc(30rem / 15);
+    height: calc(30rem / 15);
+  }
+  svg.lucide[width='32'] {
+    width: calc(32rem / 15);
+    height: calc(32rem / 15);
+  }
+
   /* Scrollbars: thin, low-contrast; thumb brightens on hover. */
   * {
     scrollbar-width: thin;

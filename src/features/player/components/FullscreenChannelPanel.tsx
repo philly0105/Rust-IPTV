@@ -7,6 +7,7 @@ import { itemKey, type Channel } from '@/api/types';
 import { useImageChain } from '@/ui/image';
 import { gateImage } from '@/ui/imageGate';
 import { useListVirtualizer } from '@/ui/virtualizer';
+import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
 import { focusIsLost, safeImageUrl } from '../format';
@@ -444,26 +445,27 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
         />
       )}
       {!open && !statsOpen && (
-        <button
-          type="button"
-          aria-label={t('openChannelPanel')}
-          title={`${t('openChannelPanel')} (C)`}
-          aria-keyshortcuts="C"
-          onClick={(e) => {
-            e.stopPropagation();
-            setOpen(true);
-          }}
-          onDoubleClick={(e) => e.stopPropagation()}
-          onPointerDown={(e) => e.stopPropagation()}
-          // Fades with the controls; hidden, it lets the pointer through like the rest of the chrome.
-          className={cn(
-            'player-glass glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-white/90 hover:bg-white/12 hover:text-white',
-            'motion-safe:transition-opacity motion-safe:duration-200',
-            !chromeVisible && 'pointer-events-none opacity-0',
-          )}
-        >
-          <PanelLeftOpen className="size-5 rtl:-scale-x-100" aria-hidden />
-        </button>
+        <Tooltip content={t('openChannelPanel')} shortcut="c" tone="glass" describe={false}>
+          <button
+            type="button"
+            aria-label={t('openChannelPanel')}
+            aria-keyshortcuts="C"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen(true);
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            // Fades with the controls; hidden, it lets the pointer through like the rest of the chrome.
+            className={cn(
+              'player-glass glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-white/90 hover:bg-white/12 hover:text-white',
+              'motion-safe:transition-opacity motion-safe:duration-200',
+              !chromeVisible && 'pointer-events-none opacity-0',
+            )}
+          >
+            <PanelLeftOpen className="size-5 rtl:-scale-x-100" aria-hidden />
+          </button>
+        </Tooltip>
       )}
       {open && (
         <div

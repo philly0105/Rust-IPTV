@@ -1,4 +1,3 @@
-import { clsx } from 'clsx';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -8,7 +7,7 @@ import type { Settings, StreamFormat, VideoPlayer } from '@/api/types';
 import { BackgroundChoice, ColorChoice, PositionSlider, SizeChoice, SubtitlePreview } from '@/features/player/components/SubtitleStyleFields';
 import { styleFromSettings } from '@/features/player/subtitles/style';
 
-import { Button } from '@/ui';
+import { Button, RadioGroup } from '@/ui';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
 
@@ -133,7 +132,7 @@ export function PlaybackSection({ settings, update }: SectionProps) {
   return (
     <SettingsSection title={t('sectionPlayback')} description={t('sectionPlaybackLead')} testId="settings-playback">
       <SettingsGroup title={t('player')} description={t('playerHint')}>
-        <div role="radiogroup" aria-label={t('player')} className="flex flex-col p-2">
+        <div className="flex flex-col p-2">
           {caps.isError ? (
             <div role="alert" className="m-2 flex flex-wrap items-center gap-3 rounded-md bg-danger/10 px-3 py-2 text-sm" data-testid="player-caps-error">
               <span className="min-w-0 flex-1 text-danger">{t('capabilitiesFailed', { message: caps.error.message })}</span>
@@ -142,35 +141,21 @@ export function PlaybackSection({ settings, update }: SectionProps) {
               </Button>
             </div>
           ) : null}
-          {players.map((p) => {
-            const selected = current === p.value;
-            return (
-              <label
-                key={p.value}
-                className={clsx(
-                  'flex cursor-pointer items-start gap-3 rounded-md px-3 py-3 hover:bg-hover',
-                  selected && 'bg-surface-2',
-                  !p.available && 'cursor-not-allowed opacity-60',
-                )}
-              >
-                <input
-                  type="radio"
-                  name="settings-player"
-                  value={p.value}
-                  checked={selected}
-                  disabled={!p.available && !selected}
-                  onChange={() => void update({ player: p.value })}
-                  className="mt-1 size-4 accent-[var(--color-accent)]"
-                  data-testid={`player-${p.value}`}
-                />
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <span className="font-medium text-fg">{p.label}</span>
-                  <span className="text-sm text-fg-muted">{p.hint}</span>
-                  {p.note ? <span className="text-sm text-warning">{p.note}</span> : null}
-                </span>
-              </label>
-            );
-          })}
+          <RadioGroup<VideoPlayer>
+            label={t('player')}
+            name="settings-player"
+            value={current}
+            onValueChange={(player) => void update({ player })}
+            options={players.map((p) => ({
+              value: p.value,
+              label: p.label,
+              description: p.hint,
+              note: p.note,
+              // The saved choice stays selectable even when its player has gone missing.
+              disabled: !p.available && current !== p.value,
+              testId: `player-${p.value}`,
+            }))}
+          />
         </div>
       </SettingsGroup>
 

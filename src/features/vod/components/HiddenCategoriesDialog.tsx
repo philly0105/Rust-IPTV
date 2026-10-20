@@ -1,11 +1,11 @@
-import { Check, EyeOff } from 'lucide-react';
+import { EyeOff } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate, useRpcMutation, useRpcQuery } from '@/api/query';
 import type { ContentType } from '@/api/types';
 
-import { Button, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { Button, Checkbox, Dialog, ErrorState, SearchInput, SkeletonGrid, cn, useListVirtualizer, useToast, errorDescription } from '@/ui';
 
 export interface HiddenCategoriesDialogProps {
   open: boolean;
@@ -126,22 +126,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
                     )}
                     style={{ top: row.start, height: ROW_H }}
                   >
-                    <input
-                      type="checkbox"
-                      className="peer sr-only"
-                      checked={!isHidden}
-                      onChange={() => toggle(c.id)}
-                    />
-                    <span
-                      aria-hidden
-                      className={cn(
-                        'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border',
-                        'peer-focus-visible:ring-2 peer-focus-visible:ring-focus',
-                        isHidden ? 'border-border' : 'border-accent-solid bg-accent-solid text-accent-solid-fg',
-                      )}
-                    >
-                      {!isHidden && <Check size={14} strokeWidth={3} />}
-                    </span>
+                    <Checkbox checked={!isHidden} onChange={() => toggle(c.id)} />
                     <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">{c.name}</span>
                     {isHidden && <EyeOff aria-hidden size={14} />}
                     {c.itemCount > 0 && <span className="tabular text-xs text-fg-subtle">{c.itemCount}</span>}

@@ -3,8 +3,11 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
+import { IconButton, TOUCH_TARGET } from './Button';
 import { cn } from './cn';
 import { portalContainer } from './portal';
+import { usePresence } from './presence';
+import { Tooltip, type TooltipPlacement } from './Tooltip';
 
 export interface MenuAction {
   id: string;
@@ -28,9 +31,12 @@ export interface MenuProps {
   items: MenuItem[];
   /** Accessible name of the trigger. Defaults to "More actions". */
   label?: string;
-  /** Trigger content; defaults to an ellipsis icon. */
+  /** Trigger content; defaults to an ellipsis icon (an IconButton whose tooltip is `label`). */
   trigger?: ReactNode;
   triggerClassName?: string;
+  /** Tooltip for a custom icon-only `trigger` (the default trigger already shows `label`). */
+  tooltip?: ReactNode;
+  tooltipSide?: TooltipPlacement;
   align?: 'start' | 'end';
   /**
    * `block` (default): below the trigger (or above it). `inline-end`: beside the trigger on its
@@ -117,13 +123,15 @@ export function placeMenu(
  * first item, ArrowUp opens on the last; roving focus with arrows, Home/End,
  * type-ahead; Escape/Tab close and restore focus to the trigger.
  */
-export function Menu({ items, label, trigger, triggerClassName, align = 'end', placement = 'block', className }: MenuProps) {
+export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltipSide, align = 'end', placement = 'block', className }: MenuProps) {
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ rect: MenuAnchor; rtl: boolean } | null>(null);
   const [pos, setPos] = useState<ReturnType<typeof placeMenu> | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Closing keeps the menu on screen for its pop-out, inert, at the place it opened.
+  const { present, closing } = usePresence(open, menuRef);
   const focusOnOpen = useRef<'first' | 'last'>('first');
   const menuId = useId();
   const actions = items.filter(isAction);
@@ -138,7 +146,12 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
   // Measure the rendered (still hidden) menu, then flip and clamp it into the viewport before paint.
   useLayoutEffect(() => {
     const menu = menuRef.current;
-    if (!open || !anchor || !menu) {
+    if (!open) {
+      // A closing menu stays where it was; once it is gone the next open measures afresh.
+      if (!present) setPos(null);
+      return;
+    }
+    if (!anchor || !menu) {
       setPos(null);
       return;
     }
@@ -150,7 +163,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
         placement,
       }),
     );
-  }, [open, anchor, align, placement, items.length]);
+  }, [open, present, anchor, align, placement, items.length]);
 
   const openMenu = (where: 'first' | 'last') => {
     focusOnOpen.current = where;
@@ -253,35 +266,40 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
     e.stopPropagation();
   };
 
+  const triggerProps = {
+    'aria-haspopup': 'menu' as const,
+    'aria-expanded': open,
+    'aria-controls': open ? menuId : undefined,
+    onClick: () => (open ? close(false) : openMenu('first')),
+    onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        openMenu('first');
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        openMenu('last');
+      }
+    },
+  };
+
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        aria-label={trigger ? label : (label ?? t('moreActions'))}
-        title={trigger ? undefined : (label ?? t('moreActions'))}
-        onClick={() => (open ? close(false) : openMenu('first'))}
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            openMenu('first');
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            openMenu('last');
-          }
-        }}
-        className={cn(
-          !trigger &&
-            'inline-flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
-          triggerClassName,
-        )}
-      >
-        {trigger ?? <Ellipsis aria-hidden size={18} />}
-      </button>
-      {open &&
+      {trigger ? (
+        <Tooltip content={open ? null : tooltip} side={tooltipSide} describe={false}>
+          <button ref={triggerRef} type="button" aria-label={label} {...triggerProps} className={triggerClassName}>
+            {trigger}
+          </button>
+        </Tooltip>
+      ) : (
+        <IconButton
+          ref={triggerRef}
+          label={label ?? t('moreActions')}
+          icon={<Ellipsis aria-hidden size={18} />}
+          {...triggerProps}
+          className={triggerClassName}
+        />
+      )}
+      {present &&
         anchor &&
         createPortal(
           <div
@@ -290,6 +308,8 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
             role="menu"
             tabIndex={-1}
             data-dialog-layer=""
+            data-state={closing ? 'closed' : 'open'}
+            inert={closing || undefined}
             aria-label={label}
             onKeyDown={onMenuKey}
             // Rendered hidden for one layout pass so placeMenu can measure it. A menu placed above its
@@ -300,7 +320,8 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
                 : { top: 0, left: 0, visibility: 'hidden' }
             }
             className={cn(
-              'fixed z-[60] min-w-48 max-w-80 rounded-lg border border-edge bg-surface p-1 shadow-2 motion-safe:animate-pop-in',
+              'fixed z-[60] min-w-48 max-w-80 rounded-lg border border-edge bg-surface p-1 shadow-2',
+              closing ? 'pointer-events-none motion-safe:animate-pop-out' : 'motion-safe:animate-pop-in',
               className,
             )}
           >
@@ -327,6 +348,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
                   }}
                   className={cn(
                     'flex h-9 cursor-pointer items-center gap-3 rounded-md px-3 text-sm outline-hidden select-none',
+                    TOUCH_TARGET,
                     'hover:bg-hover focus:bg-active active:bg-pressed focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
                     item.danger ? 'text-danger' : 'text-fg',
                   )}

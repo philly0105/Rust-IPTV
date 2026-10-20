@@ -41,6 +41,17 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** Hovers `el` and returns its kit tooltip's text and key caps (the tooltip replaced the native title). */
+async function tooltipOf(el: HTMLElement): Promise<{ text: string; keys: string[] }> {
+  expect(el.hasAttribute('title')).toBe(false);
+  fireEvent.mouseEnter(el);
+  const tip = await screen.findByRole('tooltip');
+  const keys = [...tip.querySelectorAll('kbd')].map((k) => k.textContent ?? '');
+  const text = [...tip.childNodes].filter((n) => !(n instanceof HTMLElement && n.querySelector('kbd'))).map((n) => n.textContent).join('');
+  fireEvent.mouseLeave(el);
+  return { text, keys };
+}
+
 describe('MyListButton', () => {
   it('adds a title: aria-pressed flips at once, the core gets the snapshot, the toast opens My List', async () => {
     const core = h.installCore(rpc, [h.entry(dark, 'Dark')]);
@@ -234,7 +245,7 @@ describe('MyListButton before the list is known (V1-10)', () => {
       expect(b.getAttribute('aria-busy')).toBe('true');
       expect(b.getAttribute('aria-disabled')).toBe('true');
       expect(b.hasAttribute('aria-pressed')).toBe(false);
-      expect(b.getAttribute('title')).toBe('Checking My List…');
+      expect((await tooltipOf(b)).text).toBe('Checking My List…');
       fireEvent.click(b);
     }
     expect(rpc.callsOf('watchlist.toggle')).toHaveLength(0);
@@ -258,7 +269,7 @@ describe('MyListButton before the list is known (V1-10)', () => {
     await waitFor(() => expect(button().dataset['state']).toBe('error'));
     expect(button().hasAttribute('aria-pressed')).toBe(false);
     expect(button().hasAttribute('aria-disabled')).toBe(false);
-    expect(button().getAttribute('title')).toBe("Couldn't load My List. Press to try again.");
+    expect((await tooltipOf(button())).text).toBe("Couldn't load My List. Press to try again.");
 
     fireEvent.click(button());
     await waitFor(() => expect(button().getAttribute('aria-pressed')).toBe('true'));

@@ -8,7 +8,7 @@ import { MyListButton, canSave, useInMyList } from '@/features/mylist';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { intlLocale, listSeparator } from '@/lib/intl';
-import { Badge, CARD_ART, CARD_ROOT, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
+import { CARD_ART, CARD_ROOT, LivePill, Poster, ProgressBar, cn, hueOf, initialsOf } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 import { sourceHomePath } from '../railLinks';
@@ -331,22 +331,6 @@ export interface ChannelCardProps {
   sourceId?: string;
 }
 
-/**
- * The LIVE pill without the ui LiveBadge's pulse: a rail of channel cards ran one infinite CSS
- * animation per card, and any running animation keeps the browser compositing at the display's
- * refresh rate. On the idle dashboard the dots alone cost about 33% of a core, paused 8% (headed
- * Edge, process tree, 20 s; L3-perf-desktop-1). The red pill already says live.
- */
-function StillLiveBadge() {
-  const { t } = useTranslation('common');
-  return (
-    <Badge variant="live">
-      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-bg" />
-      {t('live')}
-    </Badge>
-  );
-}
-
 /** 16:9 channel tile with the logo centered on a per-channel tint. */
 export function ChannelCard({
   rail,
@@ -402,7 +386,12 @@ export function ChannelCard({
         />
         <PlayGlyph />
         <span className="absolute top-2 start-2">
-          <StillLiveBadge />
+          {/*
+            The still dot: a rail of channel cards ran one pulse animation per card, and any running
+            animation keeps the browser compositing at the display's refresh rate (about 33 % of a
+            core on the idle dashboard, L3-perf-desktop-1). The red pill already says live.
+          */}
+          <LivePill dot="still" />
         </span>
         {nowProgress !== undefined && (
           // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.

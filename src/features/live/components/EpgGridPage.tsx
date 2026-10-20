@@ -21,7 +21,7 @@ import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, Select, Skeleton, useListVirtualizer, useToast, type MenuAction, type SelectOption, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, IconButton, Select, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useToast, type MenuAction, type SelectOption, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShell, useShortcut } from '@/shell';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
@@ -1346,18 +1346,18 @@ export function EpgGridPage() {
                   // The cursor row's channel (the first one until the keys moved it).
                   <button
                     type="button"
-                    className="shrink-0 text-accent hover:underline"
+                    className={cn(TEXT_LINK, 'shrink-0')}
                     data-testid="guide-no-match-map"
                     onClick={() => setMapping(paged.getChannel(cursor.row) ?? paged.getChannel(first) ?? null)}
                   >
                     {t('mapEpg')}
                   </button>
                 ) : nowInWindow ? (
-                  <Link to="/settings/epg" className="shrink-0 text-accent hover:underline">
+                  <Link to="/settings/epg" className={cn(TEXT_LINK, 'shrink-0')}>
                     {t('epgSettings')}
                   </Link>
                 ) : (
-                  <button type="button" className="shrink-0 text-accent hover:underline" onClick={toNow}>
+                  <button type="button" className={cn(TEXT_LINK, 'shrink-0')} onClick={toNow}>
                     {t('guideBackToNow')}
                   </button>
                 )}
@@ -1537,32 +1537,33 @@ const GuideToolbar = memo(function GuideToolbar({
       {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
       <div className={stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'} role="group" aria-label={t('guideTime')} data-testid="guide-time">
         {bar !== 'phone' ? (
-          <Button size="sm" variant="ghost" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(-1)} aria-label={t('previousDay')} title={t('previousDay')} />
+          <IconButton size="sm" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(-1)} label={t('previousDay')} />
         ) : null}
-        <Button size="sm" variant="ghost" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => onShift(-3 * HOUR)} aria-label={t('earlier')} title={t('earlier')} />
+        <IconButton size="sm" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => onShift(-3 * HOUR)} label={t('earlier')} />
         {/* The window's span; pressing it opens Jump to date and time (`t`). The text is the same in
             both layouts (day, space, times); stacked, the day sits small over the times. */}
-        <button
-          type="button"
-          aria-haspopup="dialog"
-          title={tg('jumpTitle')}
-          onClick={onJump}
-          data-testid="guide-window"
-          className={cn(
-            'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-            stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
-          )}
-        >
-          {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-          <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
-            <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
-            <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
-          </span>
-          <span className="sr-only">, {tg('jumpTitle')}</span>
-        </button>
-        <Button size="sm" variant="ghost" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => onShift(3 * HOUR)} aria-label={t('later')} title={t('later')} />
+        <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={onJump}
+            data-testid="guide-window"
+            className={cn(
+              'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
+              stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+            )}
+          >
+            {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
+            <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
+              <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
+              <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
+            </span>
+            <span className="sr-only">, {tg('jumpTitle')}</span>
+          </button>
+        </Tooltip>
+        <IconButton size="sm" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => onShift(3 * HOUR)} label={t('later')} />
         {bar !== 'phone' ? (
-          <Button size="sm" variant="ghost" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(1)} aria-label={t('nextDay')} title={t('nextDay')} />
+          <IconButton size="sm" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(1)} label={t('nextDay')} />
         ) : null}
         <Button size="sm" variant={nowInWindow ? 'ghost' : 'primary'} className="shrink-0" onClick={onNow}>
           {t('jumpToNow')}
@@ -1570,8 +1571,8 @@ const GuideToolbar = memo(function GuideToolbar({
         {/* The time scale (Ctrl+scroll over the grid too); a phone keeps its row for the times. */}
         {bar !== 'phone' ? (
           <>
-            <Button size="sm" variant="ghost" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} aria-label={tg('zoomOut')} title={tg('zoomOut')} data-testid="guide-zoom-out" />
-            <Button size="sm" variant="ghost" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} aria-label={tg('zoomIn')} title={tg('zoomIn')} data-testid="guide-zoom-in" />
+            <IconButton size="sm" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} label={tg('zoomOut')} data-testid="guide-zoom-out" />
+            <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" />
           </>
         ) : null}
       </div>

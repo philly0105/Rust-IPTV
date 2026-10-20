@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { SEGMENT_TRACK, segmentClass } from './Segmented';
 
 export interface TabItem {
   id: string;
@@ -17,7 +18,10 @@ export interface TabsProps {
   /** Accessible name of the tab list. */
   label?: string;
   className?: string;
-  /** `underline` (default) for page sections, `pill` for compact toolbars. */
+  /**
+   * `underline` (default) for page sections: an accent bar under the chosen tab. `pill` for
+   * compact toolbars: the SegmentedControl look, a raised neutral thumb in a recessed track.
+   */
   variant?: 'underline' | 'pill';
   /**
    * When set, each tab gets aria-controls=`${panelIdPrefix}-${id}`; render
@@ -145,7 +149,7 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
       style={fade}
       className={cn(
         'flex max-w-full items-center overflow-x-auto scrollbar-none',
-        variant === 'underline' ? 'gap-1 border-b border-divider' : 'gap-1 rounded-md border border-edge bg-surface-2 p-1',
+        variant === 'underline' ? 'gap-1 border-b border-divider' : SEGMENT_TRACK.default,
         className,
       )}
     >
@@ -174,11 +178,8 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
                     '-mb-px h-10 border-b-2 px-3',
                     selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg hover:border-divider active:border-border motion-safe:transition-colors',
                   )
-                : cn(
-                    'h-8 rounded-sm px-3',
-                    // One raised thumb for every segmented choice (DS-STATE-FILLS): neutral, never an amber fill.
-                    selected ? 'bg-raised text-fg shadow-1' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
-                  ),
+                : // One raised thumb for every segmented choice (DS-STATE-FILLS): neutral, never an amber fill.
+                  cn(segmentClass(selected), 'h-8 shrink-0'),
             )}
           >
             {item.label}

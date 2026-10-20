@@ -4,7 +4,7 @@ import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { IconButton, Kbd, SearchInput, cn, comboKeys } from '@/ui';
+import { IconButton, Kbd, SearchInput, cn } from '@/ui';
 
 import { openSearch } from './focusSearch';
 import { useShellStore } from './store';
@@ -37,7 +37,8 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
   return (
     <header
       data-testid="shell-header"
-      className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/95 px-4 sm:gap-4 sm:px-5"
+      // The page gutter (tokens.css), shared with ui Page, so the title and page content start on one line.
+      className="group/header flex h-(--header-height) shrink-0 items-center gap-3 border-b border-divider bg-bg/95 px-(--page-gutter) sm:gap-4"
     >
       {railHidden && (
         <IconButton
@@ -154,7 +155,7 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
         )}
         <IconButton
           label={t('openPalette')}
-          title={`${t('openPalette')} (${comboKeys('mod+k').join('+')})`}
+          shortcut="mod+k"
           // A command-prompt glyph, not the Mac ⌘ key: the shortcut is Ctrl+K outside macOS.
           icon={<SquareChevronRight size={18} className="rtl:-scale-x-100" />}
           onClick={() => setPaletteOpen(true)}
@@ -162,7 +163,7 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
         />
         <IconButton
           label={resolved === 'dark' ? t('switchToLight') : t('switchToDark')}
-          title={`${resolved === 'dark' ? t('switchToLight') : t('switchToDark')} (${comboKeys('mod+shift+l').join('+')})`}
+          shortcut="mod+shift+l"
           icon={resolved === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           onClick={toggle}
           data-testid="theme-toggle"

@@ -10,6 +10,7 @@
 
 export {
   Button,
+  Checkbox,
   Dialog,
   EmptyState,
   ErrorState,
@@ -17,6 +18,7 @@ export {
   Input,
   Skeleton,
   Toggle,
+  Tooltip,
   buttonClass,
   cn,
   errorDescription,

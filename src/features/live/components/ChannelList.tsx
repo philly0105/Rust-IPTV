@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { UNSAFE_LocationContext } from 'react-router';
 
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
-import { useListVirtualizer, useRowHeight } from '@/ui';
+import { TEXT_LINK, cn, useListVirtualizer, useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { ParentalLocks } from '../hooks/useParentalLocks';
@@ -453,7 +453,7 @@ export function GuideUnavailableNotice({ onRetry }: { onRetry(): void }) {
       <button
         type="button"
         onClick={onRetry}
-        className="shrink-0 rounded-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-focus"
+        className={cn(TEXT_LINK, 'shrink-0')}
       >
         {t('retry')}
       </button>

@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { useEffect, useId, useState, type ReactNode } from 'react';
 
-import { ErrorState, Skeleton } from '@/ui';
+import { ErrorState, SegmentedControl, Skeleton, Switch, cn, fieldClass } from '@/ui';
 
 /** One settings page: heading, optional lead, and grouped rows. */
 export function SettingsSection({ title, description, children, testId }: { title: string; description?: string; children: ReactNode; testId?: string }) {
@@ -82,7 +82,7 @@ export function SettingsRow({
   );
 }
 
-/** A switch row: the whole row is the label. */
+/** A switch row: label and description, and the kit Switch on the end (a label click toggles it). */
 export function SwitchRow({
   label,
   description,
@@ -111,28 +111,14 @@ export function SwitchRow({
           </p>
         ) : null}
       </div>
-      <button
+      <Switch
         id={id}
-        type="button"
-        role="switch"
-        aria-checked={checked}
+        checked={checked}
+        onCheckedChange={onChange}
         aria-describedby={description ? `${id}-desc` : undefined}
         disabled={disabled}
         data-testid={testId}
-        onClick={() => onChange(!checked)}
-        className={clsx(
-          'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border disabled:opacity-50 motion-safe:transition-colors',
-          checked ? 'border-accent-solid bg-accent-solid' : 'border-border bg-surface-3',
-        )}
-      >
-        <span
-          aria-hidden
-          className={clsx(
-            'inline-block size-4 rounded-full shadow-1 motion-safe:transition-transform',
-            checked ? 'translate-x-6 bg-accent-solid-fg rtl:-translate-x-6' : 'translate-x-1 bg-fg-muted rtl:-translate-x-1',
-          )}
-        />
-      </button>
+      />
     </div>
   );
 }
@@ -141,6 +127,8 @@ export function SwitchRow({
  * Text input that keeps a local draft and commits on blur or Enter after
  * validation. Escape restores the saved value. `invalid` (from
  * `SettingsRow`'s render prop) sets aria-invalid and the danger border.
+ * It wears the kit's field look (fieldClass), and `className` merges through
+ * tailwind-merge, so a width such as `w-28` replaces the default `w-full`.
  */
 export function CommitInput({
   value,
@@ -210,19 +198,15 @@ export function CommitInput({
           onError(null);
         }
       }}
-      className={clsx(
-        'h-10 w-full rounded-md border border-border bg-surface-2 px-3 text-fg placeholder:text-fg-subtle disabled:opacity-50 aria-[invalid=true]:border-danger motion-safe:transition-colors',
-        mono && 'font-mono text-sm',
-        className,
-      )}
+      className={fieldClass('md', cn(mono && 'font-mono', className))}
     />
   );
 }
 
 /**
- * Segmented single choice (radio group) for 2..4 options. In a narrow
- * container (a phone) it spans the row with equal segments whose labels wrap
- * inside them; from @2xl it shrinks to its content.
+ * Segmented single choice (radio group) for 2..4 options: the kit SegmentedControl. In a narrow
+ * container (a phone) it spans the row with equal segments whose labels wrap inside them; from
+ * @2xl it shrinks to its content.
  */
 export function Segmented<T extends string>({
   value,
@@ -238,54 +222,15 @@ export function Segmented<T extends string>({
   id?: string;
 }) {
   return (
-    <div
+    <SegmentedControl<T>
       id={id}
-      role="radiogroup"
-      aria-label={label}
-      className="flex w-full gap-1 rounded-md border border-edge bg-surface-2 p-1 @2xl:inline-flex @2xl:w-fit"
-    >
-      {options.map((o) => {
-        const selected = o.value === value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            tabIndex={selected ? 0 : -1}
-            onClick={() => onChange(o.value)}
-            onKeyDown={(e) => {
-              const i = options.findIndex((x) => x.value === value);
-              // Arrow keys follow the visual direction, so they flip in right-to-left locales.
-              const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
-              const fwd = rtl ? 'ArrowLeft' : 'ArrowRight';
-              const back = rtl ? 'ArrowRight' : 'ArrowLeft';
-              let target: number | null = null;
-              if (e.key === fwd || e.key === 'ArrowDown') target = (i + 1) % options.length;
-              else if (e.key === back || e.key === 'ArrowUp') target = (i - 1 + options.length) % options.length;
-              else if (e.key === 'Home') target = 0;
-              else if (e.key === 'End') target = options.length - 1;
-              if (target === null) return;
-              e.preventDefault();
-              const next = options[target];
-              if (next?.value === value) return;
-              if (next) {
-                onChange(next.value);
-                const group = e.currentTarget.parentElement;
-                requestAnimationFrame(() => group?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
-              }
-            }}
-            className={clsx(
-              'min-w-0 flex-1 rounded-sm px-3 py-1.5 text-center text-sm font-medium text-balance break-words motion-safe:transition-colors @2xl:flex-none',
-              // A neutral raised thumb, as in the pill tabs: amber marks actions, not choices.
-              selected ? 'bg-raised text-fg shadow-1' : 'text-fg-muted hover:bg-hover hover:text-fg',
-            )}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+      label={label}
+      value={value}
+      options={options}
+      onChange={onChange}
+      className="w-full @2xl:inline-flex @2xl:w-fit"
+      itemClassName="flex-1 py-1.5 text-center text-balance break-words @2xl:flex-none"
+    />
   );
 }
 

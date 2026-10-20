@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 
+import { TOUCH_TARGET } from './Button';
 import { cn } from './cn';
 import { reportToastStackBottom, useCenteredDialogOpen } from './Dialog';
 import { announceFocusAfterCommit, isAnnouncedFocus } from './focus';
@@ -39,6 +40,8 @@ interface ToastStore {
 }
 
 const MAX_VISIBLE = 5;
+/** Longest a leaving toast stays when its animation never reports the end. */
+const EXIT_CAP_MS = 400;
 
 /**
  * Trims the stack to MAX_VISIBLE. The oldest plain toast that would time out
@@ -136,17 +139,22 @@ function leaveToasts(): void {
   if (main && document.activeElement === main) announceFocusAfterCommit(main);
 }
 
+/** The nearest toast before or after `li` in the stack, skipping toasts on their way out. */
+function siblingToast(li: Element, dir: 'next' | 'previous'): Element | null {
+  let el = dir === 'next' ? li.nextElementSibling : li.previousElementSibling;
+  while (el && !el.matches(TOAST_SELECTOR)) el = dir === 'next' ? el.nextElementSibling : el.previousElementSibling;
+  return el;
+}
+
 /**
- * Called as a toast that holds focus is removed: focus moves to the
- * neighbouring toast, or out of the stack when it was the last one.
- * It runs in a layout cleanup, inside React's commit, where React drops focus
+ * Called as a toast that holds focus leaves (it starts its exit, or it unmounts): focus moves
+ * to the neighbouring toast, or out of the stack when it was the last one.
+ * It runs in a layout effect or cleanup, inside React's commit, where React drops focus
  * events, so the new focus is announced again afterwards (focus.ts).
  */
 function handOffFocus(li: HTMLElement): void {
   if (!li.contains(document.activeElement)) return;
-  const all = Array.from(li.closest(VIEWPORT_SELECTOR)?.querySelectorAll<HTMLElement>(TOAST_SELECTOR) ?? []);
-  const i = all.indexOf(li);
-  const next = all[i + 1] ?? all[i - 1];
+  const next = siblingToast(li, 'next') ?? siblingToast(li, 'previous');
   const control = next ? toastControls(next)[0] : undefined;
   if (control) {
     control.focus();
@@ -176,7 +184,12 @@ function defaultDuration(t: ToastRecord): number {
   return t.variant === 'error' ? 8000 : 5000;
 }
 
-function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
+/**
+ * `leaving`: the toast has left the store and plays its exit (toast-out). It is inert and
+ * hidden from assistive tech, drops its data-toast-id so the stack's keys and F8 skip it, and
+ * calls `onLeft` when the animation ends.
+ */
+function ToastItem({ t, paused, leaving = false, onLeft }: { t: ToastRecord; paused: boolean; leaving?: boolean; onLeft?: (id: string) => void }) {
   const { t: tr } = useTranslation('common');
   const dismiss = useToastStore((s) => s.dismiss);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -194,6 +207,16 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
       if (el) handOffFocus(el);
     };
   }, []);
+  // Leaving with an exit animation: the toast is still mounted, so focus moves on now.
+  useLayoutEffect(() => {
+    if (leaving && liRef.current) handOffFocus(liRef.current);
+  }, [leaving]);
+  // A stalled exit (a hidden tab runs no animations) still goes.
+  useEffect(() => {
+    if (!leaving) return;
+    const cap = setTimeout(() => onLeft?.(t.id), EXIT_CAP_MS);
+    return () => clearTimeout(cap);
+  }, [leaving]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLLIElement>) => {
     if (e.key === 'Escape') {
@@ -226,30 +249,36 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
   // Hovering anywhere over the stack pauses every toast; focus inside one keeps it.
   // Re-arms whenever the toast content is updated in place or the pointer leaves.
   useEffect(() => {
-    if (paused || liRef.current?.contains(document.activeElement)) pause();
+    if (leaving || paused || liRef.current?.contains(document.activeElement)) pause();
     else arm();
     return pause;
-  }, [t, duration, paused]);
+  }, [t, duration, paused, leaving]);
 
   const Icon = t.variant === 'success' ? CircleCheck : t.variant === 'error' ? CircleAlert : Info;
   return (
     <li
       ref={liRef}
-      data-toast-id={t.id}
+      data-toast-id={leaving ? undefined : t.id}
+      data-toast-leaving={leaving ? '' : undefined}
       data-variant={t.variant}
-      onKeyDown={onKeyDown}
+      inert={leaving || undefined}
+      aria-hidden={leaving || undefined}
+      onKeyDown={leaving ? undefined : onKeyDown}
       data-paused={paused || undefined}
       onFocus={(e) => {
         noteFocusEntry(e.nativeEvent);
         pause();
       }}
       onBlur={(e) => {
-        if (!paused && !e.currentTarget.contains(e.relatedTarget as Node | null)) arm();
+        if (!leaving && !paused && !e.currentTarget.contains(e.relatedTarget as Node | null)) arm();
+      }}
+      onAnimationEnd={(e) => {
+        if (leaving && e.target === e.currentTarget) onLeft?.(t.id);
       }}
       className={cn(
         // shrink-0: in the capped flex column a long stack must scroll, not squash each toast.
         'pointer-events-auto relative flex w-full shrink-0 gap-3 overflow-hidden rounded-lg border border-edge bg-surface-2 py-3 pe-2 ps-4 shadow-2',
-        'motion-safe:animate-toast-in',
+        leaving ? 'pointer-events-none motion-safe:animate-toast-out' : 'motion-safe:animate-toast-in',
       )}
     >
       <span
@@ -297,12 +326,57 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
         aria-label={tr('dismiss')}
         onClick={close}
         data-toast-dismiss=""
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
+        className={cn(
+          'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
+          TOUCH_TARGET,
+          'pointer-coarse:min-w-[calc(44rem/15)]',
+        )}
       >
         <X aria-hidden size={14} />
       </button>
     </li>
   );
+}
+
+/** One toast on screen: in the store, or just out of it and playing its exit. */
+export interface ShownToast {
+  t: ToastRecord;
+  leaving: boolean;
+}
+
+/**
+ * The toasts to draw after the store changed from what `prev` showed to `next`: every toast in
+ * `next`, in order, plus (when `animate`) each one that just left, kept where it was so its exit
+ * plays in place. A toast that comes back under the same id is live again. Exported for tests.
+ */
+export function mergeShownToasts(prev: readonly ShownToast[], next: readonly ToastRecord[], animate: boolean): ShownToast[] {
+  const live = new Set(next.map((t) => t.id));
+  // Leaving toasts, grouped before the next toast that is still in the store (or at the end).
+  const before = new Map<string, ShownToast[]>();
+  let pending: ShownToast[] = [];
+  for (const p of prev) {
+    if (!live.has(p.t.id)) {
+      if (animate) pending.push({ t: p.t, leaving: true });
+    } else if (pending.length > 0) {
+      before.set(p.t.id, pending);
+      pending = [];
+    }
+  }
+  const out: ShownToast[] = [];
+  for (const t of next) {
+    const leaving = before.get(t.id);
+    if (leaving) out.push(...leaving);
+    out.push({ t, leaving: false });
+  }
+  out.push(...pending);
+  return out;
+}
+
+/** Exits play only where they can: a browser with the Web Animations API and motion allowed. */
+function exitsAnimate(): boolean {
+  if (typeof document === 'undefined' || typeof document.documentElement.getAnimations !== 'function') return false;
+  if (document.documentElement.dataset['reducedMotion'] === 'true') return false;
+  return !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
 
 interface Announcement {
@@ -414,6 +488,15 @@ function useToastClearance(sectionRef: { current: HTMLElement | null }, active: 
 export function ToastViewport() {
   const { t } = useTranslation('common');
   const toasts = useToastStore((s) => s.toasts);
+  // What is drawn: the store's toasts plus those playing their exit (stored while rendering,
+  // so a toast that leaves keeps its element and its exit starts in the same frame).
+  const [shown, setShown] = useState<ShownToast[]>(() => toasts.map((t) => ({ t, leaving: false })));
+  const [shownFor, setShownFor] = useState(toasts);
+  if (shownFor !== toasts) {
+    setShownFor(toasts);
+    setShown(mergeShownToasts(shown, toasts, exitsAnimate()));
+  }
+  const dropLeft = (id: string) => setShown((list) => list.filter((x) => !(x.leaving && x.t.id === id)));
   const [hovered, setHovered] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [polite, setPolite] = useState<Announcement | null>(null);
@@ -521,8 +604,8 @@ export function ToastViewport() {
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        {toasts.map((x) => (
-          <ToastItem key={x.id} t={x} paused={hovered} />
+        {shown.map((x) => (
+          <ToastItem key={x.t.id} t={x.t} paused={hovered} leaving={x.leaving} onLeft={dropLeft} />
         ))}
       </ol>
     </section>,

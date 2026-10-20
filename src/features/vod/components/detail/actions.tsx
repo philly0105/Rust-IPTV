@@ -9,7 +9,7 @@ import { captureWatched } from '@/features/library/lib/watchedUndo';
 
 import { useSetWatched } from '../../hooks/queries';
 import { seriesWatchedTargets, watchedToastId, watchedUndoAll } from '../../lib/seriesWatched';
-import { Button, IconButton, buttonClass, cn, useToast, errorDescription } from '@/ui';
+import { Button, IconButton, Tooltip, buttonClass, cn, useToast, errorDescription } from '@/ui';
 
 export function FavoriteButton({ itemRef, snapshot, isFavorite, compact }: { itemRef: ItemRef; snapshot: ItemSnapshot; isFavorite: boolean; compact?: boolean }) {
   const { t } = useTranslation('vod');
@@ -130,9 +130,11 @@ export function DownloadButton({
 
   if (status === 'completed') {
     return compact ? (
-      <Link to="/my-videos" aria-label={`${t('downloaded')}${ctx}`} title={t('downloaded')} className={buttonClass('ghost', 'sm', 'w-8 px-0 text-success')}>
-        <Check aria-hidden size={16} />
-      </Link>
+      <Tooltip content={t('downloaded')} describe={false}>
+        <Link to="/my-videos" aria-label={`${t('downloaded')}${ctx}`} className={buttonClass('ghost', 'sm', 'w-8 px-0 text-success')}>
+          <Check aria-hidden size={16} />
+        </Link>
+      </Tooltip>
     ) : (
       <Link to="/my-videos" className={buttonClass('secondary', size)}>
         <Check aria-hidden size={18} className="text-success" />
@@ -144,18 +146,22 @@ export function DownloadButton({
     const pct = download ? downloadPercent(download) : undefined;
     const text = pct !== undefined ? t('downloadingPercent', { percent: pct }) : status === 'queued' ? t('downloadQueuedShort') : t('downloading');
     return (
-      <Link to="/downloads" aria-label={`${text}${ctx}`} title={text} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? 'w-auto px-2 text-xs' : undefined)}>
-        <LoaderCircle aria-hidden size={compact ? 14 : 18} className="motion-safe:animate-spin" />
-        {compact ? (pct !== undefined ? `${pct}%` : null) : text}
-      </Link>
+      <Tooltip content={compact ? text : null} describe={false}>
+        <Link to="/downloads" aria-label={`${text}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? 'w-auto px-2 text-xs' : undefined)}>
+          <LoaderCircle aria-hidden size={compact ? 14 : 18} className="motion-safe:animate-spin" />
+          {compact ? (pct !== undefined ? `${pct}%` : null) : text}
+        </Link>
+      </Tooltip>
     );
   }
   if (status === 'paused') {
     return (
-      <Link to="/downloads" aria-label={`${t('downloadPaused')}${ctx}`} title={t('downloadPaused')} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? 'w-8 px-0' : undefined)}>
-        <Pause aria-hidden size={compact ? 14 : 18} />
-        {!compact && t('downloadPaused')}
-      </Link>
+      <Tooltip content={compact ? t('downloadPaused') : null} describe={false}>
+        <Link to="/downloads" aria-label={`${t('downloadPaused')}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? 'w-8 px-0' : undefined)}>
+          <Pause aria-hidden size={compact ? 14 : 18} />
+          {!compact && t('downloadPaused')}
+        </Link>
+      </Tooltip>
     );
   }
   const failed = status === 'failed';

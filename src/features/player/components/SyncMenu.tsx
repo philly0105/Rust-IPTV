@@ -2,6 +2,8 @@ import { Minus, Plus, RotateCcw } from 'lucide-react';
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Tooltip } from '@/ui/Tooltip';
+
 import { cn } from '../cn';
 import { useMediaStore } from '../media';
 import { usePlayerStore } from '../store';
@@ -43,17 +45,18 @@ function DelayRow({ kind }: { kind: DelayKind }) {
     <div role="group" aria-label={label} title={blocked ?? undefined} data-testid={`sync-${kind}`} className="rounded-sm px-3 py-2">
       <div className="flex items-center gap-2">
         <span className={cn('min-w-0 flex-1 truncate text-sm', disabled ? 'text-white/50' : 'text-white')}>{label}</span>
-        <button
-          type="button"
-          role="menuitem"
-          aria-label={t('syncEarlier', { ms: step })}
-          title={blocked ?? t('syncEarlier', { ms: step })}
-          disabled={disabled}
-          onClick={() => adjustDelay(kind, -1)}
-          className={STEP_BUTTON}
-        >
-          <Minus aria-hidden />
-        </button>
+        <Tooltip content={t('syncEarlier', { ms: step })} tone="glass" describe={false}>
+          <button
+            type="button"
+            role="menuitem"
+            aria-label={t('syncEarlier', { ms: step })}
+            disabled={disabled}
+            onClick={() => adjustDelay(kind, -1)}
+            className={STEP_BUTTON}
+          >
+            <Minus aria-hidden />
+          </button>
+        </Tooltip>
         <output
           aria-live="polite"
           className={cn(
@@ -63,33 +66,35 @@ function DelayRow({ kind }: { kind: DelayKind }) {
         >
           {formatDelay(ms, i18n.language)}
         </output>
-        <button
-          ref={laterRef}
-          type="button"
-          role="menuitem"
-          aria-label={t('syncLater', { ms: step })}
-          title={blocked ?? t('syncLater', { ms: step })}
-          disabled={disabled}
-          onClick={() => adjustDelay(kind, 1)}
-          className={STEP_BUTTON}
-        >
-          <Plus aria-hidden />
-        </button>
-        <button
-          type="button"
-          role="menuitem"
-          aria-label={`${label}: ${t('syncReset')}`}
-          title={blocked ?? t('syncReset')}
-          disabled={disabled || ms === 0}
-          onClick={() => {
-            resetDelay(kind);
-            // Reset disables itself at zero: keep keyboard focus in the row.
-            laterRef.current?.focus();
-          }}
-          className={STEP_BUTTON}
-        >
-          <RotateCcw aria-hidden />
-        </button>
+        <Tooltip content={t('syncLater', { ms: step })} tone="glass" describe={false}>
+          <button
+            ref={laterRef}
+            type="button"
+            role="menuitem"
+            aria-label={t('syncLater', { ms: step })}
+            disabled={disabled}
+            onClick={() => adjustDelay(kind, 1)}
+            className={STEP_BUTTON}
+          >
+            <Plus aria-hidden />
+          </button>
+        </Tooltip>
+        <Tooltip content={t('syncReset')} tone="glass" describe={false}>
+          <button
+            type="button"
+            role="menuitem"
+            aria-label={`${label}: ${t('syncReset')}`}
+            disabled={disabled || ms === 0}
+            onClick={() => {
+              resetDelay(kind);
+              // Reset disables itself at zero: keep keyboard focus in the row.
+              laterRef.current?.focus();
+            }}
+            className={STEP_BUTTON}
+          >
+            <RotateCcw aria-hidden />
+          </button>
+        </Tooltip>
       </div>
       {blocked && <p className="player-on-glass-muted mt-0.5 text-xs">{blocked}</p>}
     </div>

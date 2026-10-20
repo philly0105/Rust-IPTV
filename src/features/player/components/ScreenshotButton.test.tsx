@@ -110,13 +110,24 @@ describe('the s shortcut', () => {
   });
 });
 
+/** Hovers `el` and returns its kit tooltip's text and key caps (the tooltip replaced the native title). */
+async function tooltipOf(el: HTMLElement): Promise<{ text: string; keys: string[] }> {
+  expect(el.hasAttribute('title')).toBe(false);
+  fireEvent.mouseEnter(el);
+  const tip = await screen.findByRole('tooltip');
+  const keys = [...tip.querySelectorAll('kbd')].map((k) => k.textContent ?? '');
+  const text = [...tip.childNodes].filter((n) => !(n instanceof HTMLElement && n.querySelector('kbd'))).map((n) => n.textContent).join('');
+  fireEvent.mouseLeave(el);
+  return { text, keys };
+}
+
 describe('the camera button', () => {
   it('takes a screenshot and names its key', async () => {
     act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing' }));
     render(<ScreenshotButton />);
     const btn = screen.getByTestId('screenshot-button');
     expect(btn.getAttribute('aria-label')).toBe('Take screenshot');
-    expect(btn.getAttribute('title')).toBe('Take screenshot (S)');
+    expect(await tooltipOf(btn)).toEqual({ text: 'Take screenshot', keys: ['S'] });
     expect(btn.getAttribute('aria-keyshortcuts')).toBe('S');
     expect(btn.getAttribute('aria-disabled')).toBeNull();
     await act(async () => {
@@ -125,12 +136,12 @@ describe('the camera button', () => {
     expect(takeScreenshot).toHaveBeenCalledTimes(1);
   });
 
-  it('is disabled with the reason for radio, and says it when pressed', () => {
+  it('is disabled with the reason for radio, and says it when pressed', async () => {
     act(() => usePlayerStore.setState({ source: radio, mode: 'radio', status: 'playing' }));
     render(<ScreenshotButton />);
     const btn = screen.getByTestId('screenshot-button');
     expect(btn.getAttribute('aria-disabled')).toBe('true');
-    expect(btn.getAttribute('title')).toBe('Take screenshot: Radio has no picture to capture.');
+    expect(await tooltipOf(btn)).toEqual({ text: 'Take screenshot: Radio has no picture to capture.', keys: [] });
     const describedBy = btn.getAttribute('aria-describedby');
     expect(describedBy && document.getElementById(describedBy)?.textContent).toBe('Radio has no picture to capture.');
     fireEvent.click(btn);
@@ -138,12 +149,12 @@ describe('the camera button', () => {
     expect(takeScreenshot).not.toHaveBeenCalled();
   });
 
-  it("points an external player's viewer at that player's own key", () => {
+  it("points an external player's viewer at that player's own key", async () => {
     act(() => usePlayerStore.setState({ source: vod, mode: 'external', status: 'playing' }));
     render(<ScreenshotButton stage />);
     const btn = screen.getByTestId('screenshot-button');
     expect(btn.getAttribute('aria-disabled')).toBe('true');
-    expect(btn.getAttribute('title')).toBe('Take screenshot: This plays in an external player. Use its own screenshot key.');
+    expect(await tooltipOf(btn)).toEqual({ text: 'Take screenshot: This plays in an external player. Use its own screenshot key.', keys: [] });
     expect(btn.getAttribute('aria-keyshortcuts')).toBeNull();
     fireEvent.click(btn);
     expect(explainBlock).toHaveBeenCalledWith('external');

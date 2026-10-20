@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 
 import { cursorInViewport } from '@/api/window';
 
+import { LivePill } from '@/ui/Misc';
+
 import { cn } from '../cn';
 import { bindInputModality, focusFromPointer, focusIfPlayerOwnsFocus, focusIsLost, formatTime } from '../format';
 import { showOsd, UP_NEXT_SECONDS, useMediaStore } from '../media';
@@ -809,9 +811,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         >
           <div className="flex items-center gap-2">
             {source.isLive && (
-              <span className="inline-flex items-center gap-1 rounded-xs bg-live-solid px-1.5 py-px font-numeric text-xs tracking-wide text-white uppercase">
-                {t('live')}
-              </span>
+              <LivePill dot="none" />
             )}
             {/*
               Hovering the channel title brings up the zap banner (live TV) and, like the bar,

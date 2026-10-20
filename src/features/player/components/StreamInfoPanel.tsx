@@ -2,6 +2,8 @@ import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Tooltip } from '@/ui/Tooltip';
+
 import { cn } from '../cn';
 import { usePlayerStore } from '../store';
 import { readStats, statsRows, useStreamInfoStore, type StreamStats } from '../streamInfo';
@@ -59,15 +61,16 @@ function OpenPanel({ className }: { className?: string }) {
     >
       <header className="flex items-center gap-1 border-b border-white/10 ps-3 pe-1">
         <h2 className="min-w-0 flex-1 truncate py-1.5 text-sm font-medium">{t('streamInfo')}</h2>
-        <button
-          type="button"
-          aria-label={t('streamInfoClose')}
-          title={`${t('streamInfoClose')} (I)`}
-          onClick={() => useStreamInfoStore.setState({ open: false })}
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
-        >
-          <X className="size-4" aria-hidden />
-        </button>
+        <Tooltip content={t('streamInfoClose')} shortcut="i" tone="glass" describe={false}>
+          <button
+            type="button"
+            aria-label={t('streamInfoClose')}
+            onClick={() => useStreamInfoStore.setState({ open: false })}
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+        </Tooltip>
       </header>
       {stats ? (
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 px-3 py-2 text-xs">

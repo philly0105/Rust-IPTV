@@ -11,7 +11,7 @@ import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
 import { useStable } from '@/features/live/guide/useStable';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
-import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, useToast, errorDescription } from '@/ui';
+import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, TEXT_LINK, useToast, errorDescription } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
 import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
@@ -585,7 +585,7 @@ export function SourcesPage() {
               {' '}
               <button
                 type="button"
-                className="font-medium text-accent underline-offset-2 hover:underline"
+                className={TEXT_LINK}
                 onClick={() => setView(DEFAULT_VIEW)}
                 data-testid="sources-view-reset"
               >

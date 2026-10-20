@@ -396,7 +396,7 @@ describe('Live list: 10k channels (SC7)', () => {
       },
     ]);
     expect(screen.getAllByRole('link').length).toBeLessThan(80);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter groups' }), { target: { value: 'Group 9999' } });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter groups' }), { target: { value: 'Group 9999' } });
     expect(await screen.findByText('Group 9999')).toBeTruthy();
     // "All channels" + the one match
     expect(screen.getAllByRole('link')).toHaveLength(2);
@@ -494,7 +494,7 @@ describe('Empty groups and group filter', () => {
         ),
       },
     ]);
-    const box = screen.getByRole('textbox', { name: 'Filter groups' }) as HTMLInputElement;
+    const box = screen.getByRole('searchbox', { name: 'Filter groups' }) as HTMLInputElement;
     fireEvent.change(box, { target: { value: 'sport' } });
     expect(screen.getByText('No groups match "sport"')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));

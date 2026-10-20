@@ -7,7 +7,7 @@ import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
 import { parseGuideShift } from '@/lib/guideShift';
 
-import { Button, Dialog, ErrorState, Skeleton, useToast, errorDescription } from '@/ui';
+import { Button, Dialog, ErrorState, SearchInput, Skeleton, fieldClass, useToast, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -126,7 +126,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
             aria-invalid={shiftMinutes === null || undefined}
             aria-describedby="epg-mapping-shift-hint"
             data-testid="epg-mapping-shift"
-            className="h-9 w-24 rounded-md border border-border bg-surface-2 px-3 text-end text-sm tabular-nums text-fg outline-none focus:ring-2 focus:ring-focus"
+            className={fieldClass('sm', 'w-24 text-end tabular-nums')}
           />
           <span className="text-sm text-fg-muted">{t('mappingShiftUnit')}</span>
           <Button type="submit" size="sm" variant="secondary" disabled={busy || !channel || !shiftChanged}>
@@ -137,14 +137,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
           {shiftMinutes === null ? t('mappingShiftError') : t('mappingShiftHint')}
         </p>
       </form>
-      <input
-        autoFocus
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder={t('mappingSearch')}
-        aria-label={t('mappingSearch')}
-        className="mb-3 h-9 w-full rounded-md border border-border bg-surface-2 px-3 text-sm text-fg outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-focus"
-      />
+      <SearchInput autoFocus className="mb-3" value={query} onChange={setQuery} placeholder={t('mappingSearch')} label={t('mappingSearch')} />
       {results.error ? (
         <ErrorState error={results.error} onRetry={() => void results.refetch()} />
       ) : debounced && results.isLoading ? (

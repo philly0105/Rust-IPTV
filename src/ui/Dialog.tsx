@@ -13,9 +13,11 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 
+import { IconButton } from './Button';
 import { cn } from './cn';
 import { announceFocusAfterCommit, focusableIn } from './focus';
 import { portalContainer } from './portal';
+import { usePresence } from './presence';
 
 export type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
 /** `center`: floating card. `end`: full-height drawer on the inline-end edge (right in LTR, left in RTL). */
@@ -143,6 +145,9 @@ export function reportToastStackBottom(stackBottom: number): void {
 /**
  * Modal dialog: portal to body (or the fullscreen element, see portalContainer), focus trap,
  * Escape and backdrop close, focus restore, scroll lock, aria-modal with labelled title.
+ * Closing plays the exit (the card pops out, the drawer slides back, the scrim fades) while the
+ * dialog is already closed for everything else: focus is back, scrolling unlocked, and the
+ * leaving layer is inert (usePresence).
  */
 export function Dialog({
   open,
@@ -165,6 +170,8 @@ export function Dialog({
   const { t } = useTranslation('common');
   const toastReserve = useToastReserve((s) => s.px);
   const panelRef = useRef<HTMLDivElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  const { present, closing } = usePresence(open, layerRef);
   const titleId = useId();
   const descId = useId();
   const onCloseRef = useRef(onClose);
@@ -172,6 +179,12 @@ export function Dialog({
   // Set while the dialog closes or unmounts, so the focusin trap below does not pull
   // the restored focus back into a panel that is about to disappear.
   const closingRef = useRef(false);
+  // `open` as last rendered, read by the focus cleanup to tell a close (the dialog stays mounted
+  // for its exit) from an unmount.
+  const openRef = useRef(open);
+  openRef.current = open;
+  // A dialog that closed in this commit and still has its focus to give back (see below).
+  const pendingRestore = useRef<OpenDialog | null>(null);
 
   // Focus management + scroll lock.
   useLayoutEffect(() => {
@@ -206,9 +219,21 @@ export function Dialog({
       closedNow.push(self);
       // The opener may be gone (a menu item, a row that re-rendered), disabled, or inside a dialog
       // closing with this one: restoreFocus falls back so focus never drops to <body>.
-      restoreFocus(self);
+      // Unmounting, the panel leaves the document in this commit: focus moves now. Closing, the
+      // panel stays mounted for its exit, and once this commit's DOM changes are in React puts
+      // focus back on the element inside it that had it; so the move waits for the layout
+      // effect below, which runs after that.
+      if (openRef.current) restoreFocus(self);
+      else pendingRestore.current = self;
     };
     // initialFocus is a ref; it is read once on open.
+  }, [open]);
+
+  useLayoutEffect(() => {
+    const self = pendingRestore.current;
+    if (!self) return;
+    pendingRestore.current = null;
+    restoreFocus(self);
   }, [open]);
 
   // Counted for the toast viewport (useCenteredDialogOpen).
@@ -233,11 +258,12 @@ export function Dialog({
     return () => document.removeEventListener('focusin', onFocusIn);
   }, [open]);
 
-  if (!open) return null;
+  if (!present) return null;
 
   const hasBody = children !== undefined && children !== null && children !== false && children !== '';
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (closing) return;
     if (e.key === 'Escape') {
       // Escape that ends an IME composition (Japanese, Chinese, Korean input) cancels the candidate, not the dialog.
       if (e.nativeEvent.isComposing) return;
@@ -269,9 +295,13 @@ export function Dialog({
 
   return createPortal(
     <div
+      ref={layerRef}
       data-dialog-layer=""
+      data-state={closing ? 'closed' : 'open'}
+      inert={closing || undefined}
       className={cn(
         'fixed inset-0 z-50 flex',
+        closing && 'pointer-events-none',
         drawer
           ? 'items-stretch justify-end'
           : // Below sm, start under the toast stack when it is taller than the 8vh gap (toastReserveFor).
@@ -285,12 +315,12 @@ export function Dialog({
         // Marks the dimming layer by role, not by class names, for code that has to find it
         // (mpvBounds dims the native video to match).
         data-scrim=""
-        className="fixed inset-0 bg-scrim motion-safe:animate-fade-in"
+        className={cn('fixed inset-0 bg-scrim', closing ? 'motion-safe:animate-fade-out' : 'motion-safe:animate-fade-in')}
         onMouseDown={(e) => {
           // The press's default would move focus to <body> after the close put it back on the
           // opener (or, when not dismissible, out of the dialog).
           e.preventDefault();
-          if (dismissible) onCloseRef.current();
+          if (dismissible && !closing) onCloseRef.current();
         }}
       />
       {/* Plain divs for the title row and footer: a portaled <header>/<footer> would map to a second banner/contentinfo landmark. */}
@@ -306,8 +336,11 @@ export function Dialog({
           // The panel itself only takes focus when it holds nothing focusable; a ring around the whole dialog would read as a stray highlight.
           'relative flex flex-col border-edge bg-surface text-fg shadow-3 focus-visible:shadow-3 focus-visible:outline-none',
           drawer
-            ? 'h-full w-[min(var(--panel-width),90vw)] border-s motion-safe:animate-drawer-in'
-            : 'w-full max-h-[calc(100vh-12vh-24px)] max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)] rounded-xl border motion-safe:animate-pop-in',
+            ? cn('h-full w-[min(var(--panel-width),90vw)] border-s', closing ? 'motion-safe:animate-drawer-out' : 'motion-safe:animate-drawer-in')
+            : cn(
+                'w-full max-h-[calc(100vh-12vh-24px)] max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)] rounded-xl border',
+                closing ? 'motion-safe:animate-pop-out' : 'motion-safe:animate-pop-in',
+              ),
           !drawer && sizes[size],
           className,
         )}
@@ -331,22 +364,22 @@ export function Dialog({
             )}
           </div>
           {!hideClose && (
-            <button
-              type="button"
+            <IconButton
               data-dialog-close=""
-              aria-label={t('close')}
+              label={t('close')}
+              shortcut="escape"
+              icon={<X aria-hidden size={18} />}
               onClick={() => onCloseRef.current()}
-              className={cn(
-                drawer ? 'ms-auto' : '-me-2',
-                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
-              )}
-            >
-              <X aria-hidden size={18} />
-            </button>
+              className={drawer ? 'ms-auto' : '-me-2'}
+            />
           )}
         </div>
         {/* No body, no empty band: a confirm with only a description sits straight on its footer. */}
-        {hasBody && <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-6', bodyClassName)}>{children}</div>}
+        {/*
+          -mt-1 pt-1: a field at the top of a scrolling body keeps its focus glow, which the
+          scroll clip would otherwise cut along the top edge; the box itself does not move.
+        */}
+        {hasBody && <div className={cn('-mt-1 min-h-0 flex-1 overflow-y-auto px-6 pt-1 pb-6', bodyClassName)}>{children}</div>}
         {footer && (
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-divider px-6 py-4">
             {footer}

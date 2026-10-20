@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Settings } from '@/api/types';
+import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
 import { bindExternalEvents, stopExternalPlayback } from '../external';
@@ -65,15 +66,16 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
         {t('externalStop', { player: name })}
       </button>
       {latest && (
-        <button
-          type="button"
-          aria-label={t('dismiss')}
-          title={t('dismiss')}
-          onClick={() => setDismissed(latest.startedAt)}
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
-        >
-          <X className="size-4" />
-        </button>
+        <Tooltip content={t('dismiss')} describe={false}>
+          <button
+            type="button"
+            aria-label={t('dismiss')}
+            onClick={() => setDismissed(latest.startedAt)}
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
+          >
+            <X className="size-4" />
+          </button>
+        </Tooltip>
       )}
     </div>
   );

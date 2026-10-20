@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { ParentalMode } from '@/api/types';
 
-import { cn } from '../deps';
+import { cn, Tooltip } from '../deps';
 import { classifyTileFault, retriesWhenOnline, tileFaultCopy } from '../errors';
 import { GLASS, GLASS_ACCENT_BORDER, GLASS_ACCENT_FILL, GLASS_ACCENT_TEXT, GLASS_BLUR, GLASS_BUTTON, GLASS_STRONG, ON_GLASS_MUTED } from '../styles';
 import type { MultiviewTile } from '../types';
@@ -396,50 +396,54 @@ export const Tile = memo(function Tile({
           swapping && 'hidden',
         )}
       >
-        <button
-          type="button"
-          className={cn(GLASS_BUTTON, 'px-0', hasSound && GLASS_ACCENT_TEXT)}
-          aria-label={hasSound ? t('hasSound', { name }) : t('listen', { name })}
-          title={hasSound ? t('hasSound', { name }) : t('listen', { name })}
-          aria-pressed={hasSound}
-          data-testid="multiview-tile-listen"
-          onClick={listen}
-        >
-          {hasSound ? <Volume2 aria-hidden className="size-4" /> : <VolumeX aria-hidden className="size-4" />}
-        </button>
-        <button
-          type="button"
-          className={cn(GLASS_BUTTON, 'px-0')}
-          aria-label={t('swapLabel', { name })}
-          title={t('swapLabel', { name })}
-          aria-keyshortcuts="S"
-          data-testid="multiview-tile-swap"
-          onClick={() => onSwapStart(tile.key)}
-        >
-          <ArrowLeftRight aria-hidden className="size-4" />
-        </button>
-        <button
-          type="button"
-          className={cn(GLASS_BUTTON, 'px-0')}
-          aria-label={t('replaceLabel', { slot: number, name })}
-          title={t('replaceLabel', { slot: number, name })}
-          aria-keyshortcuts="R"
-          data-testid="multiview-tile-replace"
-          onClick={() => onReplace(tile.key)}
-        >
-          <Replace aria-hidden className="size-4" />
-        </button>
-        <button
-          type="button"
-          className={cn(GLASS_BUTTON, 'px-0')}
-          aria-label={t('closeLabel', { name })}
-          title={t('closeLabel', { name })}
-          aria-keyshortcuts="Delete"
-          data-testid="multiview-tile-close"
-          onClick={() => onClose(tile.key)}
-        >
-          <X aria-hidden className="size-4" />
-        </button>
+        <Tooltip content={hasSound ? t('hasSound', { name }) : t('listen', { name })} tone="glass" describe={false}>
+          <button
+            type="button"
+            className={cn(GLASS_BUTTON, 'px-0', hasSound && GLASS_ACCENT_TEXT)}
+            aria-label={hasSound ? t('hasSound', { name }) : t('listen', { name })}
+            aria-pressed={hasSound}
+            data-testid="multiview-tile-listen"
+            onClick={listen}
+          >
+            {hasSound ? <Volume2 aria-hidden className="size-4" /> : <VolumeX aria-hidden className="size-4" />}
+          </button>
+        </Tooltip>
+        <Tooltip content={t('swapLabel', { name })} shortcut="s" tone="glass" describe={false}>
+          <button
+            type="button"
+            className={cn(GLASS_BUTTON, 'px-0')}
+            aria-label={t('swapLabel', { name })}
+            aria-keyshortcuts="S"
+            data-testid="multiview-tile-swap"
+            onClick={() => onSwapStart(tile.key)}
+          >
+            <ArrowLeftRight aria-hidden className="size-4" />
+          </button>
+        </Tooltip>
+        <Tooltip content={t('replaceLabel', { slot: number, name })} shortcut="r" tone="glass" describe={false}>
+          <button
+            type="button"
+            className={cn(GLASS_BUTTON, 'px-0')}
+            aria-label={t('replaceLabel', { slot: number, name })}
+            aria-keyshortcuts="R"
+            data-testid="multiview-tile-replace"
+            onClick={() => onReplace(tile.key)}
+          >
+            <Replace aria-hidden className="size-4" />
+          </button>
+        </Tooltip>
+        <Tooltip content={t('closeLabel', { name })} shortcut="delete" tone="glass" describe={false}>
+          <button
+            type="button"
+            className={cn(GLASS_BUTTON, 'px-0')}
+            aria-label={t('closeLabel', { name })}
+            aria-keyshortcuts="Delete"
+            data-testid="multiview-tile-close"
+            onClick={() => onClose(tile.key)}
+          >
+            <X aria-hidden className="size-4" />
+          </button>
+        </Tooltip>
       </div>
 
       {/* The label strip (UMD): slot plate, logo, name, programme. */}

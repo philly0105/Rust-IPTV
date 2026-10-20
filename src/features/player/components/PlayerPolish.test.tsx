@@ -19,7 +19,7 @@ const { useMediaStore, resetMedia } = await import('../media');
 const { usePlaybackShortcuts } = await import('../usePlaybackShortcuts');
 const { __resetInputModality, focusIfPlayerOwnsFocus, positionReadout, SEEK_STEP } = await import('../format');
 const { PlayerSurface } = await import('./PlayerSurface');
-const { Controls, ctlTitle } = await import('./Controls');
+const { Controls, ctlCombo } = await import('./Controls');
 const { SeekBar } = await import('./SeekBar');
 const { moveKeepingFocus, PlayerDock } = await import('./PlayerDock');
 const { toast, TOAST_AVOID_GAP, TOAST_AVOID_SELECTOR, ToastViewport, useToastStore } = await import('@/ui/Toast');
@@ -233,17 +233,38 @@ describe('positionReadout', () => {
 });
 
 describe('control tooltips', () => {
-  it('name the matching shortcut without changing the accessible name', () => {
-    act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', positionSeconds: 1, durationSeconds: 60 }));
-    render(<Controls variant="overlay" visible />);
-    const pause = screen.getByRole('button', { name: 'Pause' });
-    expect(pause.getAttribute('title')).toBe('Pause (Space)');
-    expect(pause.getAttribute('aria-keyshortcuts')).toBe('Space K');
-    expect(screen.getByRole('button', { name: 'Fullscreen' }).getAttribute('title')).toBe('Fullscreen (F)');
-    expect(screen.getByRole('button', { name: 'Mute' }).getAttribute('title')).toBe('Mute (M)');
-    // No made-up shortcut where there is none.
-    expect(screen.getByRole('button', { name: 'Stop' }).getAttribute('title')).toBe('Stop');
-    expect(ctlTitle('X')).toBe('X');
+  it('name the matching shortcut as key caps in a glass tooltip, without changing the accessible name', () => {
+    vi.useFakeTimers();
+    try {
+      act(() => usePlayerStore.setState({ source: vod, mode: 'inline', status: 'playing', positionSeconds: 1, durationSeconds: 60 }));
+      render(<Controls variant="overlay" visible />);
+      /** Hovers the control and returns its tooltip; leaving it warms the next one up. */
+      const tip = (name: string) => {
+        const button = screen.getByRole('button', { name });
+        // The kit tooltip replaces the OS title box (PL-NATIVE-TOOLTIPS).
+        expect(button.hasAttribute('title')).toBe(false);
+        fireEvent.mouseEnter(button);
+        act(() => vi.advanceTimersByTime(400));
+        const el = screen.getByRole('tooltip');
+        const out = { text: el.textContent ?? '', keys: [...el.querySelectorAll('kbd')].map((k) => k.textContent), tone: el.dataset['tone'] };
+        fireEvent.mouseLeave(button);
+        return out;
+      };
+      const pause = tip('Pause');
+      expect(pause.text).toMatch(/^Pause/);
+      expect(pause.keys).toEqual(['Space']);
+      expect(pause.tone).toBe('glass');
+      expect(screen.getByRole('button', { name: 'Pause' }).getAttribute('aria-keyshortcuts')).toBe('Space K');
+      expect(tip('Fullscreen').keys).toEqual(['F']);
+      expect(tip('Mute').keys).toEqual(['M']);
+      // No made-up shortcut where there is none.
+      const stop = tip('Stop');
+      expect(stop.text).toBe('Stop');
+      expect(stop.keys).toEqual([]);
+      expect(ctlCombo(undefined)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

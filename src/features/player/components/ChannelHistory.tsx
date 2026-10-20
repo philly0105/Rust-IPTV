@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 import { useImageChain } from '@/ui/image';
+import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
 import { safeImageUrl } from '../format';
@@ -111,15 +112,16 @@ export function ChannelHistory() {
     >
       <div className="mb-1 flex items-center gap-1 border-b border-white/10">
         <span className="flex-1 px-2 py-2 text-sm font-medium">{t('channelHistory')}</span>
-        <button
-          type="button"
-          aria-label={tc('close')}
-          title={tc('close')}
-          onClick={() => setHistoryOpen(false)}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
-        >
-          <X className="size-4" aria-hidden />
-        </button>
+        <Tooltip content={tc('close')} tone="glass" describe={false}>
+          <button
+            type="button"
+            aria-label={tc('close')}
+            onClick={() => setHistoryOpen(false)}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-sm text-white/80 hover:bg-white/10 hover:text-white"
+          >
+            <X className="size-4" aria-hidden />
+          </button>
+        </Tooltip>
       </div>
       {entries.length === 0 ? (
         <p className="px-3 py-3 text-sm text-white/70">{t('channelHistoryEmpty')}</p>

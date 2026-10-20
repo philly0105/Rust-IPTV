@@ -37,7 +37,7 @@ import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
 import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
-import { Button, EmptyState, ErrorState, IconButton, Skeleton, useToast, errorDescription } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, Skeleton, Tooltip, useToast, errorDescription } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
@@ -377,15 +377,16 @@ export function SeriesDetailPage() {
         {watch.active && (
           <div className="flex flex-wrap items-center gap-2">
             {previous && (
-              <Button
-                variant="secondary"
-                icon={<SkipBack aria-hidden size={18} />}
-                title={`${episodeCode(previous.season, previous.episode)} (Shift+P)`}
-                aria-keyshortcuts="Shift+P"
-                onClick={() => playEpisode(previous)}
-              >
-                {t('previousEpisode')}
-              </Button>
+              <Tooltip content={episodeCode(previous.season, previous.episode)} shortcut="shift+p">
+                <Button
+                  variant="secondary"
+                  icon={<SkipBack aria-hidden size={18} />}
+                  aria-keyshortcuts="Shift+P"
+                  onClick={() => playEpisode(previous)}
+                >
+                  {t('previousEpisode')}
+                </Button>
+              </Tooltip>
             )}
             {favorite}
           </div>

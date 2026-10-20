@@ -1,13 +1,26 @@
-import { ChevronDown, Search, X } from 'lucide-react';
-import { useId, type ComponentPropsWithRef, type ReactNode } from 'react';
+import { Check, ChevronDown, Minus, Search, X } from 'lucide-react';
+import { useId, useLayoutEffect, useRef, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from './cn';
+import { useMergedRef } from './Tooltip';
 
+/**
+ * The text field look shared by Input, Textarea, Select, SearchInput and any field a feature
+ * has to build itself (CommitInput, a filter box in a dialog): the 3:1 control border, a hover
+ * firm-up, and on focus the focus-colour border with a 3px glow (the global rule in globals.css
+ * draws the glow; there is no offset outline on fields). The glow sits outside the box, so a
+ * scroll container holding fields keeps a little padding on every side (Dialog's body does).
+ */
 const fieldBase =
   'w-full rounded-md border border-border bg-surface text-fg placeholder:text-fg-subtle ' +
   'hover:border-fg-subtle focus-visible:border-focus disabled:cursor-not-allowed disabled:opacity-50 ' +
   'aria-[invalid=true]:border-danger motion-safe:transition-colors';
+
+/** Field classes for a hand-built input: `fieldClass('sm', 'font-mono')`. Sizes match Input (md) and SearchInput (sm). */
+export function fieldClass(size: 'sm' | 'md' = 'md', className?: string): string {
+  return cn(fieldBase, 'px-3 text-sm', size === 'sm' ? 'h-8' : 'h-10', className);
+}
 
 interface FieldChrome {
   /** Visible label rendered above the control and wired with htmlFor. */
@@ -205,6 +218,47 @@ export function Select({
   );
 }
 
+export interface SwitchProps extends Omit<ComponentPropsWithRef<'button'>, 'onChange' | 'role' | 'children' | 'value' | 'type'> {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}
+
+/**
+ * The one switch (role="switch"; Space and Enter toggle, as on any button). Off: a recessed
+ * track with the 3:1 control border. On: the solid accent fill. The knob is white in both
+ * states and slides with motion allowed. Name it with a <label htmlFor> (a label click toggles
+ * it) or aria-label. Toggle and the settings SwitchRow render it.
+ */
+export function Switch({ checked, onCheckedChange, className, onClick, ...rest }: SwitchProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={(e) => {
+        onClick?.(e);
+        if (!e.defaultPrevented) onCheckedChange(!checked);
+      }}
+      className={cn(
+        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border motion-safe:transition-colors',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        checked ? 'border-accent-solid bg-accent-solid hover:bg-accent-solid-hover' : 'border-border bg-surface-3 hover:border-fg-subtle',
+        className,
+      )}
+      {...rest}
+    >
+      <span
+        aria-hidden
+        data-switch-knob=""
+        className={cn(
+          'inline-block size-4.5 rounded-full bg-white shadow-1 motion-safe:transition-transform motion-safe:duration-(--duration-fast)',
+          checked ? 'translate-x-5.5 rtl:-translate-x-5.5' : 'translate-x-0.5 rtl:-translate-x-0.5',
+        )}
+      />
+    </button>
+  );
+}
+
 export interface ToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -217,7 +271,7 @@ export interface ToggleProps {
   hideLabel?: boolean;
 }
 
-/** Switch with role="switch"; Space and Enter toggle (native button behavior). */
+/** A labelled Switch: label and description on the start side, the switch on the end. */
 export function Toggle({ checked, onChange, label, description, disabled, id: idProp, className, hideLabel }: ToggleProps) {
   const autoId = useId();
   const id = idProp ?? autoId;
@@ -233,28 +287,155 @@ export function Toggle({ checked, onChange, label, description, disabled, id: id
           </p>
         )}
       </div>
-      <button
+      <Switch
         id={id}
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-describedby={description ? `${id}-desc` : undefined}
+        checked={checked}
+        onCheckedChange={onChange}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
+        aria-describedby={description ? `${id}-desc` : undefined}
+      />
+    </div>
+  );
+}
+
+export interface CheckboxProps extends Omit<ComponentPropsWithRef<'input'>, 'type' | 'size'> {
+  /** The mixed state (some of a group chosen). Drawn as a bar; the input's `indeterminate` is set too. */
+  indeterminate?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  /** Classes for the box's wrapper (margins, alignment). `className` styles the input itself. */
+  wrapperClassName?: string;
+}
+
+/**
+ * Checkbox: a native input (so labels, forms, Space and screen readers work as usual) drawn as
+ * an 18px box with the 3:1 control border; checked and mixed fill with the solid accent. Wrap it
+ * in a <label> with its text, or give it aria-label.
+ */
+export function Checkbox({ indeterminate = false, onChange, onCheckedChange, className, wrapperClassName, ref, ...rest }: CheckboxProps) {
+  const inner = useRef<HTMLInputElement | null>(null);
+  const mergedRef = useMergedRef(ref, inner);
+  useLayoutEffect(() => {
+    if (inner.current) inner.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <span className={cn('relative inline-flex size-4.5 shrink-0', wrapperClassName)}>
+      <input
+        ref={mergedRef}
+        type="checkbox"
+        onChange={(e) => {
+          onChange?.(e);
+          onCheckedChange?.(e.target.checked);
+        }}
         className={cn(
-          'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border motion-safe:transition-colors',
+          'peer m-0 size-full cursor-pointer appearance-none rounded-xs border border-border bg-surface motion-safe:transition-colors',
+          'not-checked:not-indeterminate:hover:border-fg-subtle checked:border-accent-solid checked:bg-accent-solid indeterminate:border-accent-solid indeterminate:bg-accent-solid',
           'disabled:cursor-not-allowed disabled:opacity-50',
-          checked ? 'border-accent-solid bg-accent-solid' : 'border-border bg-surface-3',
+          className,
         )}
-      >
-        <span
-          aria-hidden
-          className={cn(
-            'inline-block h-4.5 w-4.5 rounded-full shadow-1 motion-safe:transition-transform',
-            checked ? 'translate-x-5.5 bg-accent-solid-fg rtl:-translate-x-5.5' : 'translate-x-0.75 bg-fg-muted rtl:-translate-x-0.75',
-          )}
-        />
-      </button>
+        {...rest}
+      />
+      <Check
+        aria-hidden
+        strokeWidth={3}
+        className="pointer-events-none absolute inset-0 m-auto size-3 text-accent-solid-fg opacity-0 peer-checked:opacity-100 peer-indeterminate:opacity-0"
+      />
+      <Minus
+        aria-hidden
+        strokeWidth={3}
+        className="pointer-events-none absolute inset-0 m-auto size-3 text-accent-solid-fg opacity-0 peer-indeterminate:opacity-100"
+      />
+    </span>
+  );
+}
+
+export interface RadioProps extends Omit<ComponentPropsWithRef<'input'>, 'type' | 'size'> {
+  /** Classes for the circle's wrapper (margins, alignment). */
+  wrapperClassName?: string;
+}
+
+/**
+ * Radio: a native input (arrow keys move within its `name` group) drawn as an 18px circle with
+ * the control border; checked draws the accent ring and dot. Most screens want RadioGroup.
+ */
+export function Radio({ className, wrapperClassName, ...rest }: RadioProps) {
+  return (
+    <span className={cn('relative inline-flex size-4.5 shrink-0', wrapperClassName)}>
+      <input
+        type="radio"
+        className={cn(
+          'peer m-0 size-full cursor-pointer appearance-none rounded-full border border-border bg-surface motion-safe:transition-colors',
+          'not-checked:hover:border-fg-subtle checked:border-2 checked:border-accent disabled:cursor-not-allowed disabled:opacity-50',
+          className,
+        )}
+        {...rest}
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 m-auto size-2 scale-0 rounded-full bg-accent peer-checked:scale-100 motion-safe:transition-transform motion-safe:duration-(--duration-fast)"
+      />
+    </span>
+  );
+}
+
+export interface RadioGroupOption<T extends string> {
+  value: T;
+  label: ReactNode;
+  description?: ReactNode;
+  /** A line under the description (a warning, a missing dependency). */
+  note?: ReactNode;
+  disabled?: boolean;
+  testId?: string;
+}
+
+export interface RadioGroupProps<T extends string> {
+  /** Accessible name of the group. */
+  label: string;
+  value: T;
+  options: RadioGroupOption<T>[];
+  onValueChange: (value: T) => void;
+  /** Shared `name` of the inputs; generated when left out. */
+  name?: string;
+  className?: string;
+}
+
+/**
+ * A vertical list of choices with a line of help each (pick a player, a quality). Each row is
+ * a label, so the whole row picks it; the chosen row takes the neutral selected fill. For two
+ * to four short options in a row use SegmentedControl.
+ */
+export function RadioGroup<T extends string>({ label, value, options, onValueChange, name: nameProp, className }: RadioGroupProps<T>) {
+  const autoName = useId();
+  const name = nameProp ?? autoName;
+  return (
+    <div role="radiogroup" aria-label={label} className={cn('flex flex-col gap-0.5', className)}>
+      {options.map((o) => {
+        const selected = o.value === value;
+        return (
+          <label
+            key={o.value}
+            className={cn(
+              'flex cursor-pointer items-start gap-3 rounded-md px-3 py-3 motion-safe:transition-colors',
+              selected ? 'bg-selected' : 'hover:bg-hover',
+              o.disabled && 'cursor-not-allowed opacity-60',
+            )}
+          >
+            <Radio
+              name={name}
+              value={o.value}
+              checked={selected}
+              disabled={o.disabled}
+              onChange={() => onValueChange(o.value)}
+              wrapperClassName="mt-0.5"
+              data-testid={o.testId}
+            />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="font-medium text-fg">{o.label}</span>
+              {o.description ? <span className="text-sm text-fg-muted">{o.description}</span> : null}
+              {o.note ? <span className="text-sm text-warning">{o.note}</span> : null}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -278,13 +459,17 @@ export function SearchInput({
   className,
   size = 'md',
   onKeyDown,
+  ref,
   ...rest
 }: SearchInputProps) {
   const { t } = useTranslation('common');
+  const input = useRef<HTMLInputElement | null>(null);
+  const mergedRef = useMergedRef(ref, input);
   return (
     <div className={cn('relative flex items-center', className)}>
       <Search aria-hidden size={16} className="pointer-events-none absolute start-3 text-fg-subtle" />
       <input
+        ref={mergedRef}
         type="search"
         role="searchbox"
         value={value}
@@ -311,8 +496,12 @@ export function SearchInput({
         <button
           type="button"
           aria-label={t('clearSearch')}
-          onClick={() => onChange('')}
-          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
+          onClick={() => {
+            onChange('');
+            // The button goes with the text; focus stays in the field instead of dropping to the page.
+            input.current?.focus();
+          }}
+          className="absolute end-1 inline-flex size-[calc(28rem/15)] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
         >
           <X aria-hidden size={14} />
         </button>

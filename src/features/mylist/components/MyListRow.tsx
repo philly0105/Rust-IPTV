@@ -219,7 +219,7 @@ function MyListRowImpl({
             size="sm"
             tabIndex={-1}
             label={t('markWatched', { title })}
-            title={watched ? t('watchedHintOn') : t('watchedHintOff')}
+            tooltip={watched ? t('watchedHintOn') : t('watchedHintOff')}
             pressed={watched}
             disabled={busy}
             icon={watched ? <CircleCheck aria-hidden size={18} /> : <Circle aria-hidden size={18} />}

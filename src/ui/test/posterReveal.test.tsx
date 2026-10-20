@@ -10,7 +10,7 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
-import { LiveBadge } from '@/ui/Misc';
+import { LivePill } from '@/ui/Misc';
 import { forgetRevealedPosters, INSTANT_REVEAL_MS, Poster } from '@/ui/Poster';
 import { OFFSCREEN_ATTR, resetOffscreenObserver } from '@/ui/offscreen';
 
@@ -74,7 +74,7 @@ describe('offscreen loops', () => {
   });
 
   it('the live dot pauses out of view and stops being watched on unmount', () => {
-    const { container, unmount } = render(<LiveBadge />);
+    const { container, unmount } = render(<LivePill />);
     const dot = container.querySelector('[class*="animate-live-pulse"]')!;
     const io = FakeIO.last!;
     expect(dot.hasAttribute(OFFSCREEN_ATTR)).toBe(true);

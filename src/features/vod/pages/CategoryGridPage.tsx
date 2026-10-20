@@ -1,6 +1,5 @@
 import {
   ArrowDownWideNarrow,
-  ArrowLeft,
   ArrowUpNarrowWide,
   CalendarX2,
   CircleCheck,
@@ -63,7 +62,7 @@ import {
 } from '../lib/paging';
 import { detailHref } from '../lib/search';
 import { filterByYear, hasYearRange, writeYearRange, yearRangeKey, type YearRange } from '../lib/years';
-import { EmptyState, ErrorState, IconButton, SearchInput, Select, SkeletonGrid, VirtualGrid, buttonClass, cn, type VirtualItemState } from '@/ui';
+import { BackButton, EmptyState, ErrorState, IconButton, SearchInput, TEXT_LINK, Select, SkeletonGrid, VirtualGrid, buttonClass, cn, type VirtualItemState } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -566,10 +565,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
     <GridMyListProvider>
       <div className="flex h-full min-h-0 flex-col" data-testid={`vod-grid-${kind}`}>
         <div className="flex flex-wrap items-center gap-2 border-b border-divider px-4 py-3 md:px-8">
-          <Link to={backHref} className={buttonClass('ghost', 'sm')}>
-            <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
-            {kind === 'movie' ? t('movies') : t('series')}
-          </Link>
+          <BackButton to={backHref} label={kind === 'movie' ? t('movies') : t('series')} />
           {/*
             Takes only the room the row leaves (flex-basis 0), so the count arriving after load
             truncates instead of wrapping the Filters button onto a new row (L3-visual-9).
@@ -663,12 +659,12 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
             {filtered ? (
               <>
                 <span>{t('ratingFilterNote', { rating: formatRating(minRating, i18n.language) })}</span>
-                <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(true)}>
+                <button type="button" className={TEXT_LINK} onClick={() => setAllRatings(true)}>
                   {t('ratingFilterClear')}
                 </button>
               </>
             ) : (
-              <button type="button" className="font-medium text-accent hover:underline" onClick={() => setAllRatings(false)}>
+              <button type="button" className={TEXT_LINK} onClick={() => setAllRatings(false)}>
                 {t('ratingFilterApply', { rating: formatRating(settingMinRating, i18n.language) })}
               </button>
             )}

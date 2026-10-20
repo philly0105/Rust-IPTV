@@ -1,7 +1,8 @@
 import { LoaderCircle } from 'lucide-react';
-import type { ComponentPropsWithRef, ReactNode } from 'react';
+import type { ComponentPropsWithRef, ReactNode, Ref } from 'react';
 
 import { cn } from './cn';
+import { useMergedRef, useTooltip, withTooltipProps, type TooltipPlacement, type TooltipTone } from './Tooltip';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -42,9 +43,16 @@ export const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
 };
 const variants = BUTTON_VARIANTS;
 
+/**
+ * Touch screens (pointer: coarse) get a 44 px floor (DS-TOUCH-TARGETS), written against the
+ * 15 px root so it follows the UI scale but not compact density: a finger does not shrink.
+ */
+export const TOUCH_TARGET = 'pointer-coarse:min-h-[calc(44rem/15)]';
+const TOUCH_TARGET_SQUARE = 'pointer-coarse:min-h-[calc(44rem/15)] pointer-coarse:min-w-[calc(44rem/15)]';
+
 const sizes: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-sm',
-  md: 'h-10 px-4 text-sm',
+  sm: cn('h-8 px-3 text-sm', TOUCH_TARGET),
+  md: cn('h-10 px-4 text-sm', TOUCH_TARGET),
   lg: 'h-12 px-6 text-base',
 };
 
@@ -89,22 +97,38 @@ export function Button({
   );
 }
 
-export interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, 'children'> {
-  /** Accessible name; also shown as the native tooltip unless `title` is set. */
+export interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, 'children' | 'title'> {
+  /** Accessible name; also the tooltip unless `tooltip` says otherwise. */
   label: string;
   icon: ReactNode;
   variant?: ButtonVariant;
   size?: ButtonSize;
   /** For toggle buttons. */
   pressed?: boolean;
+  /**
+   * Tooltip content. Defaults to `label`; pass other text when the tooltip should say more
+   * (the state behind a toggle: "Marked as watched. Press to undo."), or `false` for none (a
+   * control whose name is visible beside it). A disabled button gets no pointer events, so a
+   * reason it is disabled goes in visible text or aria-describedby, not here.
+   */
+  tooltip?: ReactNode;
+  /** Key combo shown as key caps in the tooltip (`mod+k`, `shift+b`). Display only. */
+  shortcut?: string;
+  tooltipSide?: TooltipPlacement;
+  /** `glass` over video and artwork (the player, multi-view, the hero). */
+  tooltipTone?: TooltipTone;
 }
 
 const iconSizes: Record<ButtonSize, string> = {
-  sm: 'h-8 w-8',
-  md: 'h-10 w-10',
+  sm: cn('h-8 w-8', TOUCH_TARGET_SQUARE),
+  md: cn('h-10 w-10', TOUCH_TARGET_SQUARE),
   lg: 'h-12 w-12',
 };
 
+/**
+ * Icon-only button. It shows the kit Tooltip (themed, on hover after a short delay and at once
+ * on keyboard focus) instead of the native title box, with the shortcut as key caps.
+ */
 export function IconButton({
   label,
   icon,
@@ -112,27 +136,44 @@ export function IconButton({
   size = 'md',
   pressed,
   className,
-  title,
+  tooltip,
+  shortcut,
+  tooltipSide,
+  tooltipTone,
   type = 'button',
+  ref,
   ...rest
 }: IconButtonProps) {
+  const content = tooltip === undefined ? label : tooltip;
+  const { triggerProps, tooltip: tip } = useTooltip({
+    content,
+    shortcut,
+    side: tooltipSide,
+    tone: tooltipTone,
+    // A tooltip that repeats the accessible name would be read twice.
+    describe: content !== label,
+  });
+  const mergedRef = useMergedRef<HTMLElement>(ref as Ref<HTMLElement> | undefined, triggerProps.ref);
   return (
-    <button
-      type={type}
-      aria-label={label}
-      title={title ?? label}
-      aria-pressed={pressed}
-      className={cn(
-        base,
-        variants[variant],
-        iconSizes[size],
-        'px-0',
-        pressed && 'bg-selected text-fg',
-        className,
-      )}
-      {...rest}
-    >
-      {icon}
-    </button>
+    <>
+      <button
+        type={type}
+        aria-label={label}
+        aria-pressed={pressed}
+        className={cn(
+          base,
+          variants[variant],
+          iconSizes[size],
+          'px-0',
+          pressed && 'bg-selected text-fg',
+          className,
+        )}
+        {...rest}
+        {...withTooltipProps(rest, triggerProps, mergedRef)}
+      >
+        {icon}
+      </button>
+      {tip}
+    </>
   );
 }

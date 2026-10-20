@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
 import { listSeparator } from '@/lib/intl';
+import { Tooltip } from '@/ui/Tooltip';
 
 import { displayChannelName } from '../lib/channelName';
 import { formatClock, hasUsableArchive, isValidProgram, minutesLeft, ms, programProgress, shiftNowNext } from '../lib/epgTime';
@@ -159,19 +160,20 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           // The slot stays when a row has no archive, so progress bars and times line up row to row.
           <span aria-hidden className="size-6" />
         )}
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-pressed={favorite}
-          aria-label={favorite ? t('removeFavorite') : t('addFavorite')}
-          title={favorite ? t('removeFavorite') : t('addFavorite')}
-          onClick={() => props.onToggleFavorite(channel, favorite)}
-          className={`inline-flex size-7 items-center justify-center rounded-md hover:bg-surface-3 ${
-            favorite ? 'text-warning' : 'text-fg-subtle opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
-          }`}
-        >
-          <Star className="size-4" fill={favorite ? 'currentColor' : 'none'} />
-        </button>
+        <Tooltip content={favorite ? t('removeFavorite') : t('addFavorite')} describe={false}>
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-pressed={favorite}
+            aria-label={favorite ? t('removeFavorite') : t('addFavorite')}
+            onClick={() => props.onToggleFavorite(channel, favorite)}
+            className={`inline-flex size-7 items-center justify-center rounded-md hover:bg-surface-3 ${
+              favorite ? 'text-warning' : 'text-fg-subtle opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+            }`}
+          >
+            <Star className="size-4" fill={favorite ? 'currentColor' : 'none'} />
+          </button>
+        </Tooltip>
       </span>
     </div>
   );

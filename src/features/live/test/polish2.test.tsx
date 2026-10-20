@@ -296,7 +296,7 @@ describe('groups sidebar', () => {
     renderIn('/', [{ path: '/', element: sidebar(cats) }]);
     const links = () => [...document.querySelectorAll<HTMLElement>('[data-cat-index]')];
     expect(links().filter((l) => l.tabIndex === 0 && l.dataset.catIndex !== 'all')).toHaveLength(1);
-    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Filter groups' }), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filter groups' }), { key: 'ArrowDown' });
     expect(document.activeElement?.textContent).toContain('Group 0');
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
@@ -322,10 +322,10 @@ describe('groups sidebar', () => {
 
   it('the filter ignores accents and case', () => {
     renderIn('/', [{ path: '/', element: sidebar([cat(1, { name: 'España' }), cat(2, { name: 'Ελλάδα' }), cat(3, { name: 'France' })]) }]);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter groups' }), { target: { value: 'ESPANA' } });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter groups' }), { target: { value: 'ESPANA' } });
     expect(screen.getByText('España')).toBeTruthy();
     expect(screen.queryByText('France')).toBeNull();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter groups' }), { target: { value: 'ελλαδα' } });
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter groups' }), { target: { value: 'ελλαδα' } });
     expect(screen.getByText('Ελλάδα')).toBeTruthy();
   });
 });

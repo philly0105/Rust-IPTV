@@ -1,4 +1,4 @@
-import { ArrowLeft, CircleAlert, Star } from 'lucide-react';
+import { CircleAlert, Star } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -7,7 +7,7 @@ import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
-import { Poster, QUARTER_BLUR, Skeleton, cn, useImageChain } from '@/ui';
+import { BackButton, Poster, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, useImageChain } from '@/ui';
 import { formatList } from '@/lib/intl';
 import { CastRow } from './CastRow';
 
@@ -47,7 +47,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
       <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} />
       {/* L1-vod-2: the window has no browser chrome, so Back is on the page. */}
       <div className="absolute inset-x-0 top-0 z-10 mx-auto w-full max-w-[1800px] px-4 pt-4 md:px-8">
-        <BackButton fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />
+        <DetailBack fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />
       </div>
       <div className="relative mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-4 pt-[clamp(120px,22vh,280px)] pb-8 sm:flex-row sm:items-end md:px-8">
         <div className="w-36 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:w-44 lg:w-56" data-testid="vod-detail-poster">
@@ -99,7 +99,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
             <div className="max-w-[72ch]">
               <p dir="auto" className={cn('text-[calc(15rem/15)] leading-relaxed text-fg-muted text-match-parent', !expanded && plotLong && 'line-clamp-4')}>{model.plot}</p>
               {plotLong && (
-                <button type="button" className="mt-1 text-sm font-medium text-accent hover:underline" onClick={() => setExpanded((v) => !v)}>
+                <button type="button" className={cn(TEXT_LINK, 'mt-1 text-sm')} onClick={() => setExpanded((v) => !v)}>
                   {expanded ? t('showLess') : t('showMore')}
                 </button>
               )}
@@ -120,40 +120,14 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
 
 /**
  * Back to where you came from (the grid or search restores its place), or to the
- * movies/series landing when the page was opened cold. A frosted pill, so it
- * reads on any backdrop.
+ * movies/series landing when the page was opened cold. The kit back button on glass,
+ * so it reads on any backdrop.
  */
-function BackButton({ fallbackHref }: { fallbackHref: string }) {
-  const { t } = useTranslation('common');
+function DetailBack({ fallbackHref }: { fallbackHref: string }) {
   const goBack = useGoBack(fallbackHref);
-  return (
-    <button
-      type="button"
-      onClick={goBack}
-      data-testid="vod-detail-back"
-      className={cn(
-        'inline-flex h-9 items-center gap-1.5 rounded-full border border-glass-border bg-glass ps-2.5 pe-3.5 text-sm font-medium text-on-glass shadow-1 glass-blur',
-        'hover:bg-glass-strong active:bg-glass-strong focus-visible:outline-2 focus-visible:outline-offset-2',
-        'motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
-      )}
-    >
-      <ArrowLeft aria-hidden size={16} className="rtl:rotate-180" />
-      {t('back')}
-    </button>
-  );
+  return <BackButton tone="glass" onClick={goBack} data-testid="vod-detail-back" />;
 }
 
-/**
- * Decorative only. It is taller than the hero and bleeds behind the content
- * below (season tabs, episodes), so it must never take pointer events, and
- * it relies on the page root being the stacking context (`isolate`) so the
- * -z-10 puts it under that content rather than over it.
- *
- * The backdrop loads at high priority through the image cache (then directly,
- * then the poster the same way). A poster standing in for a missing backdrop
- * is drawn quarter-size, blurred and scaled up (C5): a soft colour field for a
- * sixteenth of the filter work of a full-size blur.
- */
 function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; posterUrl?: string; sourceId: string }) {
   const image = useImageChain([backdropUrl, posterUrl], sourceId);
   const wide = !!image.url && image.source === backdropUrl?.trim();

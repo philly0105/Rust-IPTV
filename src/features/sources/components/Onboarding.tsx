@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { SourceKind } from '@/api/types';
+import { TEXT_LINK } from '@/ui';
 
 import { KIND_MARK } from './SourceCard';
 
@@ -50,7 +51,7 @@ export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
 
       <p className="text-sm text-fg-muted">
         {t('onboardBackupLead')}{' '}
-        <Link to="/settings/backup" className="font-medium text-accent underline-offset-4 hover:underline">
+        <Link to="/settings/backup" className={TEXT_LINK}>
           {t('onboardBackupLink')}
         </Link>
       </p>

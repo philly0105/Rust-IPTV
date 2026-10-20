@@ -1,7 +1,7 @@
 import { MonitorPlay, TriangleAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '../deps';
+import { cn, Tooltip } from '../deps';
 import type { SourceLoad } from '../useWallData';
 
 const bannerClass =
@@ -39,15 +39,16 @@ export function LimitBanners({ over, onDismiss }: { over: readonly SourceLoad[];
               {l.own > 0 ? ` ${t('limitOwn')}` : null}
             </span>
           </p>
-          <button
-            type="button"
-            aria-label={t('limitDismiss')}
-            title={t('limitDismiss')}
-            onClick={() => onDismiss(l)}
-            className="-me-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <X aria-hidden className="size-4" />
-          </button>
+          <Tooltip content={t('limitDismiss')} describe={false}>
+            <button
+              type="button"
+              aria-label={t('limitDismiss')}
+              onClick={() => onDismiss(l)}
+              className="-me-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <X aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
         </div>
       ))}
     </div>

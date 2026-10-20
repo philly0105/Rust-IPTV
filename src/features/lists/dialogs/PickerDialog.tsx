@@ -4,14 +4,13 @@
  * channel. Lists at the 2000-channel limit cannot take one more.
  */
 
-import { Check } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, CustomList } from '@/api/types';
 import { intlLocale } from '@/lib/intl';
 
-import { Button, ChannelLogo, Dialog, ErrorState, Skeleton, cn, displayChannelName, useDisplayPrefs } from '../deps';
+import { Button, ChannelLogo, Checkbox, Dialog, ErrorState, Skeleton, cn, displayChannelName, useDisplayPrefs } from '../deps';
 import { NewListForm } from '../components/NewListForm';
 import { useListActions } from '../hooks/useListActions';
 import { useLists, useListsContaining } from '../hooks/useLists';
@@ -83,25 +82,16 @@ export function PickerDialog({ channel, onClose }: { channel: Channel; onClose()
                   full && 'opacity-60',
                 )}
               >
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
+                <Checkbox
                   checked={checked}
                   disabled={full}
                   aria-busy={busy || undefined}
                   aria-describedby={full ? `full-${list.id}` : undefined}
                   onChange={(e) => void toggle(list, e.target.checked)}
+                  // The row draws the focus ring; a disabled (full) row is dimmed as a whole.
+                  className="focus-visible:shadow-none focus-visible:outline-none disabled:opacity-100"
+                  wrapperClassName={cn(busy && 'motion-safe:animate-pulse')}
                 />
-                <span
-                  aria-hidden
-                  className={cn(
-                    'inline-flex size-5 shrink-0 items-center justify-center rounded-xs border motion-safe:transition-colors',
-                    checked ? 'border-accent-solid bg-accent-solid text-accent-solid-fg' : 'border-border bg-surface',
-                    busy && 'motion-safe:animate-pulse',
-                  )}
-                >
-                  {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
-                </span>
                 <span dir="auto" className="min-w-0 flex-1 truncate text-sm text-fg">
                   {list.name}
                 </span>

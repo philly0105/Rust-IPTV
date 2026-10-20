@@ -62,7 +62,9 @@ describe('Tooltip', () => {
         </Tooltip>
       </>,
     );
-    const one = screen.getByText('one').parentElement!;
+    // No wrapper: the handlers sit on the trigger itself, so it keeps its place in the layout.
+    const one = screen.getByText('one');
+    expect(one.parentElement?.tagName).not.toBe('SPAN');
     fireEvent.mouseEnter(one);
     expect(screen.queryByRole('tooltip')).toBeNull();
     act(() => vi.advanceTimersByTime(400));
@@ -71,7 +73,7 @@ describe('Tooltip', () => {
     fireEvent.pointerDown(one);
     expect(screen.queryByRole('tooltip')).toBeNull();
     // Within the warm window the next tooltip shows with no delay.
-    fireEvent.mouseEnter(screen.getByText('two').parentElement!);
+    fireEvent.mouseEnter(screen.getByText('two'));
     expect(screen.getByRole('tooltip').textContent).toBe('Second tip');
   });
 
@@ -82,7 +84,7 @@ describe('Tooltip', () => {
         <button type="button">btn</button>
       </Tooltip>,
     );
-    fireEvent.mouseEnter(screen.getByText('btn').parentElement!);
+    fireEvent.mouseEnter(screen.getByText('btn'));
     act(() => vi.advanceTimersByTime(1));
     expect(screen.getByRole('tooltip')).toBeTruthy();
     act(() => {

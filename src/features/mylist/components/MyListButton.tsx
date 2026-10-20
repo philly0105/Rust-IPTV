@@ -25,7 +25,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type ItemRef, type ItemSnapshot } from '@/api/types';
 
-import { Button, cn } from '../deps';
+import { Button, Tooltip, cn } from '../deps';
 import { useMyListState, type MyListStatus } from '../hooks/useMyList';
 import { useMyListToggle } from '../hooks/useMyListToggle';
 import { canSave } from '../lib/list';
@@ -107,61 +107,63 @@ function MyListButtonBody({
 
   if (variant === 'icon') {
     return (
-      <button
-        type="button"
-        aria-label={t('toggleLabel', { title })}
-        aria-pressed={pressed}
-        aria-busy={busy}
-        // aria-disabled, not disabled: focus stays put while the list loads.
-        aria-disabled={loading || undefined}
-        title={hint}
-        tabIndex={tabIndex}
-        onClick={onClick}
-        data-testid="mylist-button"
-        data-variant="icon"
-        data-state={status}
-        data-in-list={inList || undefined}
-        className={cn(
-          'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border shadow-1',
-          'focus-visible:outline-2 focus-visible:outline-offset-2',
-          'motion-safe:transition-[background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
-          // C5: blur only while the corner is up on one card (its `group/poster` hovered, or the
-          // button focused). Without hover it shows on every card at once, so it is opaque there.
-          inList
-            ? 'border-glass-border bg-glass-strong text-on-glass hover:bg-glass active:bg-glass-strong'
-            : cn(
-                'border-glass-border bg-glass text-on-glass hover:bg-glass-strong',
-                'group-hover/poster:glass-blur focus-visible:glass-blur [@media(hover:none)]:bg-glass-strong',
-              ),
-          (pending || loading) && 'cursor-progress',
-          loading && 'opacity-70',
-          className,
-        )}
-      >
-        <Icon aria-hidden size={17} strokeWidth={2.25} className={cn(loading && 'motion-safe:animate-pulse')} />
-      </button>
+      <Tooltip content={hint}>
+        <button
+          type="button"
+          aria-label={t('toggleLabel', { title })}
+          aria-pressed={pressed}
+          aria-busy={busy}
+          // aria-disabled, not disabled: focus stays put while the list loads.
+          aria-disabled={loading || undefined}
+          tabIndex={tabIndex}
+          onClick={onClick}
+          data-testid="mylist-button"
+          data-variant="icon"
+          data-state={status}
+          data-in-list={inList || undefined}
+          className={cn(
+            'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border shadow-1',
+            'focus-visible:outline-2 focus-visible:outline-offset-2',
+            'motion-safe:transition-[background-color,color,transform] motion-safe:duration-150 motion-safe:active:scale-95',
+            // C5: blur only while the corner is up on one card (its `group/poster` hovered, or the
+            // button focused). Without hover it shows on every card at once, so it is opaque there.
+            inList
+              ? 'border-glass-border bg-glass-strong text-on-glass hover:bg-glass active:bg-glass-strong'
+              : cn(
+                  'border-glass-border bg-glass text-on-glass hover:bg-glass-strong',
+                  'group-hover/poster:glass-blur focus-visible:glass-blur [@media(hover:none)]:bg-glass-strong',
+                ),
+            (pending || loading) && 'cursor-progress',
+            loading && 'opacity-70',
+            className,
+          )}
+        >
+          <Icon aria-hidden size={17} strokeWidth={2.25} className={cn(loading && 'motion-safe:animate-pulse')} />
+        </button>
+      </Tooltip>
     );
   }
 
   return (
-    <Button
-      size={size}
-      variant="secondary"
-      icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} className={cn(inList && 'text-accent')} />}
-      // Spinner in place of the glyph, aria-disabled and aria-busy while the list loads.
-      loading={loading}
-      aria-pressed={pressed}
-      aria-busy={busy}
-      title={hint}
-      tabIndex={tabIndex}
-      onClick={onClick}
-      data-testid="mylist-button"
-      data-variant="button"
-      data-state={status}
-      data-in-list={inList || undefined}
-      className={cn(inList && 'border-accent/70', (pending || loading) && 'cursor-progress', className)}
-    >
-      {t('buttonLabel')}
-    </Button>
+    <Tooltip content={hint}>
+      <Button
+        size={size}
+        variant="secondary"
+        icon={<Icon aria-hidden size={size === 'sm' ? 16 : 18} className={cn(inList && 'text-accent')} />}
+        // Spinner in place of the glyph, aria-disabled and aria-busy while the list loads.
+        loading={loading}
+        aria-pressed={pressed}
+        aria-busy={busy}
+        tabIndex={tabIndex}
+        onClick={onClick}
+        data-testid="mylist-button"
+        data-variant="button"
+        data-state={status}
+        data-in-list={inList || undefined}
+        className={cn(inList && 'border-accent/70', (pending || loading) && 'cursor-progress', className)}
+      >
+        {t('buttonLabel')}
+      </Button>
+    </Tooltip>
   );
 }

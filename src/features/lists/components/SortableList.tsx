@@ -11,7 +11,7 @@ import type { TFunction } from 'i18next';
 import { memo, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { IconButton, cn } from '../deps';
+import { IconButton, Tooltip, cn } from '../deps';
 
 export interface SortableListProps<T> {
   items: readonly T[];
@@ -198,24 +198,25 @@ const SortableRow = memo(function SortableRow<T>({ item, index, count, rowKey: k
           className={cn('pointer-events-none absolute inset-x-0 h-0.5 rounded-full bg-accent', over === 'before' ? '-top-px' : '-bottom-px')}
         />
       ) : null}
-      <button
-        type="button"
-        draggable={!isLocked}
-        disabled={isLocked}
-        data-sort-part="grip"
-        aria-label={t('dragHandle', { name })}
-        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-        title={t('reorderHint')}
-        onDragStart={(e) => {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', name);
-          handlers.dragStart(key);
-        }}
-        onDragEnd={handlers.dragEnd}
-        className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-fg-subtle outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
-      >
-        <GripVertical className="size-4" aria-hidden />
-      </button>
+      <Tooltip content={t('reorderHint')}>
+        <button
+          type="button"
+          draggable={!isLocked}
+          disabled={isLocked}
+          data-sort-part="grip"
+          aria-label={t('dragHandle', { name })}
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', name);
+            handlers.dragStart(key);
+          }}
+          onDragEnd={handlers.dragEnd}
+          className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-fg-subtle outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
+        >
+          <GripVertical className="size-4" aria-hidden />
+        </button>
+      </Tooltip>
       {renderRow(item, index)}
       {/* Touch screens have no drag and drop: arrows instead, below tablet width.
           At the row's end, also when a row wraps onto a second line. */}

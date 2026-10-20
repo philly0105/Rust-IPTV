@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { ACCENTS, DENSITIES, UI_SCALE_MAX, UI_SCALE_MIN } from '@/api/types';
 import type { Accent, Density, Theme } from '@/api/types';
 import { clampUiScale, previewAppearance, useTheme } from '@/shell';
-import { Button, Poster, ProgressBar } from '@/ui';
+import { Button, Poster, ProgressBar, Radio as RadioInput } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
@@ -405,24 +405,16 @@ export function AppearanceSection({ settings, update }: SectionProps) {
               >
                 <ThemePreview mode={o.value} oled={oledBlack} accent={accent} />
                 <span className="flex items-start gap-2">
-                  <input
-                    type="radio"
+                  <RadioInput
                     name="settings-theme"
                     value={o.value}
                     checked={selected}
                     onChange={() => choose(o.value)}
-                    className="sr-only"
+                    // The card draws the focus ring.
+                    className="focus-visible:shadow-none focus-visible:outline-none"
+                    wrapperClassName="mt-0.5"
                     data-testid={`theme-${o.value}`}
                   />
-                  <span
-                    aria-hidden
-                    className={clsx(
-                      'mt-1 flex size-4 shrink-0 items-center justify-center rounded-full border-2',
-                      selected ? 'border-accent' : 'border-fg-subtle',
-                    )}
-                  >
-                    {selected ? <span className="size-2 rounded-full bg-accent" /> : null}
-                  </span>
                   <span className="flex flex-col">
                     <span className="font-medium text-fg">{o.label}</span>
                     <span className="text-sm text-fg-muted">{o.hint}</span>

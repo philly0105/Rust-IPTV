@@ -83,7 +83,7 @@ function EpisodeRowImpl({
               size="sm"
               variant={a === actions[0] ? 'secondary' : 'ghost'}
               label={t(k('episode', a) + 'Aria', { title: ep.name || code || d.title })}
-              title={t(k('episode', a))}
+              tooltip={t(k('episode', a))}
               icon={<Icon size={16} aria-hidden />}
               disabled={busy}
               tabIndex={tabbable ? 0 : -1}

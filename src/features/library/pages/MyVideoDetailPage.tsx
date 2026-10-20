@@ -12,6 +12,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { RpcError, isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
+import { BackButton } from '@/ui/Page';
 import { cn } from '@/ui/cn';
 import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { intlLocale } from '@/lib/intl';
@@ -170,17 +171,7 @@ export function MyVideoDetailPage() {
 
   const backAction = useMemo(
     () => (
-      <Link
-        to={back}
-        className={buttonClass('ghost', 'sm')}
-        onClick={(ev) => {
-          ev.preventDefault();
-          goBack();
-        }}
-      >
-        <ArrowLeft size={16} aria-hidden className="rtl:rotate-180" />
-        {t('backToLibrary')}
-      </Link>
+      <BackButton to={back} onClick={goBack} label={t('backToLibrary')} />
     ),
     [back, goBack, t],
   );

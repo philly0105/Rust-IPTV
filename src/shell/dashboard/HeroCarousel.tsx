@@ -41,7 +41,7 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { Poster, ProgressBar, QUARTER_BLUR, cn, hueOf, useImageChain, whenIdle } from '@/ui';
+import { Poster, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
@@ -562,20 +562,23 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
       {count > 1 && (
         <div className="absolute end-3 top-3 z-[4] flex items-center gap-0.5 rounded-full border border-glass-border glass p-0.5 shadow-1" data-testid="hero-controls">
           {canRotate && (
-            <button
-              type="button"
-              onClick={() => setUserPaused((p) => !p)}
-              aria-label={userPaused ? t('heroPlayRotation') : t('heroPause')}
-              title={userPaused ? t('heroPlayRotation') : t('heroPause')}
-              data-testid="hero-rotation"
-              className={oscButton}
-            >
-              {userPaused ? <Play aria-hidden size={14} fill="currentColor" /> : <Pause aria-hidden size={14} fill="currentColor" />}
-            </button>
+            <Tooltip content={userPaused ? t('heroPlayRotation') : t('heroPause')} tone="glass" side="bottom" describe={false}>
+              <button
+                type="button"
+                onClick={() => setUserPaused((p) => !p)}
+                aria-label={userPaused ? t('heroPlayRotation') : t('heroPause')}
+                data-testid="hero-rotation"
+                className={oscButton}
+              >
+                {userPaused ? <Play aria-hidden size={14} fill="currentColor" /> : <Pause aria-hidden size={14} fill="currentColor" />}
+              </button>
+            </Tooltip>
           )}
-          <button type="button" onClick={() => go(-1)} aria-label={t('heroPrevious')} title={t('heroPrevious')} className={oscButton} data-testid="hero-prev">
-            <ChevronLeft aria-hidden size={16} className="rtl:rotate-180" />
-          </button>
+          <Tooltip content={t('heroPrevious')} tone="glass" side="bottom" describe={false}>
+            <button type="button" onClick={() => go(-1)} aria-label={t('heroPrevious')} className={oscButton} data-testid="hero-prev">
+              <ChevronLeft aria-hidden size={16} className="rtl:rotate-180" />
+            </button>
+          </Tooltip>
           <div ref={tabsRef} role="tablist" aria-label={t('heroControls')} className="flex items-center">
             {slides.map((s, i) => {
               const on = i === index;
@@ -616,9 +619,11 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
               );
             })}
           </div>
-          <button type="button" onClick={() => go(1)} aria-label={t('heroNext')} title={t('heroNext')} className={oscButton} data-testid="hero-next">
-            <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
-          </button>
+          <Tooltip content={t('heroNext')} tone="glass" side="bottom" describe={false}>
+            <button type="button" onClick={() => go(1)} aria-label={t('heroNext')} className={oscButton} data-testid="hero-next">
+              <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
+            </button>
+          </Tooltip>
         </div>
       )}
 

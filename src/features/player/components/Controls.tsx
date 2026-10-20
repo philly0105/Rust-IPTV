@@ -30,6 +30,7 @@ import { isDesktop, rpc } from '@/api/transport';
 import { intlLocale } from '@/lib/intl';
 
 import { useToast } from '@/ui/Toast';
+import { Tooltip } from '@/ui/Tooltip';
 import { errorDescription } from '@/ui/States';
 import { cn } from '../cn';
 import { formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV } from '../format';
@@ -58,22 +59,25 @@ import { SyncRows, useSyncSummary } from './SyncMenu';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
-/** Key names as shown in tooltips, and their `aria-keyshortcuts` form. */
+/**
+ * The key behind each control: `combo` is drawn as key caps in the tooltip, with key names in the
+ * UI language (Kbd: "Leertaste", "Umschalt"); `aria` is the `aria-keyshortcuts` form.
+ */
 const KEYS = {
-  playPause: { hint: 'Space', aria: 'Space K' },
-  fullscreen: { hint: 'F', aria: 'F' },
-  exitPip: { hint: 'F', aria: 'F' },
-  mute: { hint: 'M', aria: 'M' },
-  captions: { hint: 'C', aria: 'C' },
-  history: { hint: 'Shift+B', aria: 'Shift+B' },
-  previousItem: { hint: 'Shift+P', aria: 'Shift+P' },
-  nextItem: { hint: 'N', aria: 'N' },
+  playPause: { combo: 'space', aria: 'Space K' },
+  fullscreen: { combo: 'f', aria: 'F' },
+  exitPip: { combo: 'f', aria: 'F' },
+  mute: { combo: 'm', aria: 'M' },
+  captions: { combo: 'c', aria: 'C' },
+  history: { combo: 'shift+b', aria: 'Shift+B' },
+  previousItem: { combo: 'shift+p', aria: 'Shift+P' },
+  nextItem: { combo: 'n', aria: 'N' },
 } as const;
 export type CtlShortcut = keyof typeof KEYS;
 
-/** Tooltip text: the label, plus the key that does the same thing. */
-export function ctlTitle(label: string, shortcut?: CtlShortcut): string {
-  return shortcut ? `${label} (${KEYS[shortcut].hint})` : label;
+/** The key combo a control's tooltip shows (`space`, `shift+b`), for Kbd. */
+export function ctlCombo(shortcut?: CtlShortcut): string | undefined {
+  return shortcut ? KEYS[shortcut].combo : undefined;
 }
 
 export function CtlButton({
@@ -100,25 +104,28 @@ export function CtlButton({
   /** `menuitem` in the options menu's row of moved controls. */
   role?: 'menuitem';
 }) {
+  // A glass tooltip (PL-NATIVE-TOOLTIPS): the label and the key as key caps, instead of the OS's
+  // pale title box. It repeats the accessible name, so it does not describe the button again.
   return (
-    <button
-      type="button"
-      role={role}
-      data-ctl={id}
-      aria-label={label}
-      title={ctlTitle(label, shortcut)}
-      aria-keyshortcuts={shortcut ? KEYS[shortcut].aria : undefined}
-      aria-pressed={pressed}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'inline-flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-white/12 hover:text-white disabled:opacity-40 motion-safe:transition-colors [&_svg]:size-5',
-        pressed ? 'bg-white/12 text-white dark:text-accent-hover' : 'text-white/90',
-        className,
-      )}
-    >
-      {children}
-    </button>
+    <Tooltip content={label} shortcut={ctlCombo(shortcut)} tone="glass" describe={false}>
+      <button
+        type="button"
+        role={role}
+        data-ctl={id}
+        aria-label={label}
+        aria-keyshortcuts={shortcut ? KEYS[shortcut].aria : undefined}
+        aria-pressed={pressed}
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          'inline-flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-white/12 hover:text-white disabled:opacity-40 motion-safe:transition-colors [&_svg]:size-5',
+          pressed ? 'bg-white/12 text-white dark:text-accent-hover' : 'text-white/90',
+          className,
+        )}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -492,17 +499,18 @@ function OptionsMenu({
                         : t('speed')}
         </button>
       )}
-      <button
-        type="button"
-        role={styleView ? undefined : 'menuitem'}
-        data-menu-close
-        aria-label={tc('close')}
-        title={tc('close')}
-        onClick={() => setView(null)}
-        className="player-on-glass-muted inline-flex size-8 shrink-0 items-center justify-center rounded-sm hover:bg-white/10 hover:text-white"
-      >
-        <X className="size-4" aria-hidden />
-      </button>
+      <Tooltip content={tc('close')} tone="glass" describe={false}>
+        <button
+          type="button"
+          role={styleView ? undefined : 'menuitem'}
+          data-menu-close
+          aria-label={tc('close')}
+          onClick={() => setView(null)}
+          className="player-on-glass-muted inline-flex size-8 shrink-0 items-center justify-center rounded-sm hover:bg-white/10 hover:text-white"
+        >
+          <X className="size-4" aria-hidden />
+        </button>
+      </Tooltip>
     </div>
   );
 
@@ -809,23 +817,25 @@ function LiveEdge({
   }
   return (
     <>
-      <button
-        type="button"
-        data-ctl="golive"
-        onClick={(e) => {
-          // At the edge this button gives way to the LIVE badge: hand focus to play/pause
-          // first, or it would fall to the page and the player's keys would stop working.
-          const bar = e.currentTarget.closest('[data-player-controls]');
-          bar?.querySelector<HTMLElement>('[data-ctl="play"]')?.focus({ preventScroll: true });
-          usePlayerStore.getState().seekTo(mpv ? liveWindow.end - 1 : liveWindow.end);
-        }}
-        aria-label={t('goLive')}
-        title={t('goLive')}
-        className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-numeric text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
-      >
-        <span className="size-2 rounded-full bg-white/50" aria-hidden />
-        {short ? t('live') : t('goLive')}
-      </button>
+      {/* Short, it reads "Live": the tooltip says what it does. */}
+      <Tooltip content={short ? t('goLive') : null} tone="glass" describe={false}>
+        <button
+          type="button"
+          data-ctl="golive"
+          onClick={(e) => {
+            // At the edge this button gives way to the LIVE badge: hand focus to play/pause
+            // first, or it would fall to the page and the player's keys would stop working.
+            const bar = e.currentTarget.closest('[data-player-controls]');
+            bar?.querySelector<HTMLElement>('[data-ctl="play"]')?.focus({ preventScroll: true });
+            usePlayerStore.getState().seekTo(mpv ? liveWindow.end - 1 : liveWindow.end);
+          }}
+          aria-label={t('goLive')}
+          className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-numeric text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
+        >
+          <span className="size-2 rounded-full bg-white/50" aria-hidden />
+          {short ? t('live') : t('goLive')}
+        </button>
+      </Tooltip>
       <span
         className={cn('ms-1.5 min-w-0 truncate font-numeric text-sm whitespace-nowrap text-white/90 tabular-nums', narrow && NARROW_YIELD_TO_VOLUME)}
         data-testid="behind-live"

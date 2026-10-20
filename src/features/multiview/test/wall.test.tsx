@@ -752,7 +752,10 @@ describe('empty wall', () => {
     // The visible name is hidden below the intro's 42rem width, never dropped.
     for (const name of ['Side by side', 'Grid of four', 'One large, three small']) {
       const button = screen.getByRole('button', { name });
-      expect(button.getAttribute('title')).toBe(name);
+      // Hovering a glyph shows its name in the kit tooltip.
+      fireEvent.mouseEnter(button);
+      expect((await screen.findByRole('tooltip')).textContent).toBe(name);
+      fireEvent.mouseLeave(button);
       expect(within(button).getByTestId('multiview-empty-layout-label').className).toContain('sr-only');
     }
   });

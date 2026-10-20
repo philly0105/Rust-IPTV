@@ -40,10 +40,20 @@ describe('errorDescription', () => {
     expect(container.querySelector('[data-error-message]')?.textContent).toBe('operation timed out after 30s');
   });
 
-  it('treats anything thrown as an internal error and can redact the raw text', () => {
+  it('leads with the message of an error the UI raised itself, with no guessed hint, and can redact it', () => {
+    // FW-ERROR-HINT-LEAD: a plain Error carries the UI's own (often translated) words; the
+    // internal-error hint ("Try again...") would be generic advice in front of them.
     const { container } = render(<p>{errorDescription(new Error('GET http://u:p@host/x failed'), (s) => s.replace('u:p@', '***@'))}</p>);
-    expect(container.textContent).toMatch(/^Try again/);
+    expect(container.textContent).toBe('GET http://***@host/x failed');
     expect(container.querySelector('[data-error-message]')?.textContent).toBe('GET http://***@host/x failed');
+  });
+
+  it('keeps the code hint for errors from the core, and drops the external player advice in the browser', () => {
+    const { container } = render(<p>{errorDescription(new RpcError('unsupported', 'screenshots need the desktop app'))}</p>);
+    // Tests run as the browser build (no Tauri), where external players are not offered.
+    expect(container.textContent).toMatch(/^The browser version, this source or this stream type/);
+    expect(container.textContent).not.toMatch(/external player/);
+    expect(container.querySelector('[data-error-message]')?.textContent).toBe('screenshots need the desktop app');
   });
 });
 

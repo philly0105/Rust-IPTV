@@ -2,6 +2,7 @@ import { Pause, Play, Radio, SkipBack, SkipForward, Volume1, Volume2, VolumeX } 
 import { useTranslation } from 'react-i18next';
 
 import { useImageChain } from '@/ui/image';
+import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
 import { safeImageUrl } from '../format';
@@ -91,51 +92,55 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
 
       <div className={cn('flex items-center', stage ? 'gap-3' : 'gap-1')}>
         {canZap && (
-          <button
-            type="button"
-            aria-label={t('previousStation')}
-            title={t('previousStation')}
-            onClick={() => void zap('up').catch(() => undefined)}
-            className="inline-flex size-10 items-center justify-center rounded-full text-white/85 hover:bg-white/10 hover:text-white"
-          >
-            <SkipBack className="size-5" />
-          </button>
+          <Tooltip content={t('previousStation')} tone="glass" describe={false}>
+            <button
+              type="button"
+              aria-label={t('previousStation')}
+              onClick={() => void zap('up').catch(() => undefined)}
+              className="inline-flex size-10 items-center justify-center rounded-full text-white/85 hover:bg-white/10 hover:text-white"
+            >
+              <SkipBack className="size-5" />
+            </button>
+          </Tooltip>
         )}
-        <button
-          type="button"
-          aria-label={playing ? t('pause') : t('play')}
-          title={playing ? t('pause') : t('play')}
-          onClick={() => store.togglePlay()}
-          className={cn(
-            'inline-flex items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg hover:bg-accent-solid-hover',
-            stage ? 'size-14' : 'size-10',
-          )}
-        >
-          {playing ? <Pause className="size-6 fill-current" /> : <Play className="size-6 fill-current" />}
-        </button>
-        {canZap && (
+        <Tooltip content={playing ? t('pause') : t('play')} tone="glass" describe={false}>
           <button
             type="button"
-            aria-label={t('nextStation')}
-            title={t('nextStation')}
-            onClick={() => void zap('down').catch(() => undefined)}
-            className="inline-flex size-10 items-center justify-center rounded-full text-white/85 hover:bg-white/10 hover:text-white"
+            aria-label={playing ? t('pause') : t('play')}
+            onClick={() => store.togglePlay()}
+            className={cn(
+              'inline-flex items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg hover:bg-accent-solid-hover',
+              stage ? 'size-14' : 'size-10',
+            )}
           >
-            <SkipForward className="size-5" />
+            {playing ? <Pause className="size-6 fill-current" /> : <Play className="size-6 fill-current" />}
           </button>
+        </Tooltip>
+        {canZap && (
+          <Tooltip content={t('nextStation')} tone="glass" describe={false}>
+            <button
+              type="button"
+              aria-label={t('nextStation')}
+              onClick={() => void zap('down').catch(() => undefined)}
+              className="inline-flex size-10 items-center justify-center rounded-full text-white/85 hover:bg-white/10 hover:text-white"
+            >
+              <SkipForward className="size-5" />
+            </button>
+          </Tooltip>
         )}
       </div>
 
       <div className={cn('flex items-center gap-1', stage ? 'w-64 max-w-full' : 'w-32')}>
-        <button
-          type="button"
-          aria-label={muted ? t('unmute') : t('mute')}
-          title={muted ? t('unmute') : t('mute')}
-          onClick={() => store.toggleMute()}
-          className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-white/85 hover:bg-white/10"
-        >
-          <VolIcon className="size-5" />
-        </button>
+        <Tooltip content={muted ? t('unmute') : t('mute')} tone="glass" describe={false}>
+          <button
+            type="button"
+            aria-label={muted ? t('unmute') : t('mute')}
+            onClick={() => store.toggleMute()}
+            className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-white/85 hover:bg-white/10"
+          >
+            <VolIcon className="size-5" />
+          </button>
+        </Tooltip>
         <input
           type="range"
           min={0}

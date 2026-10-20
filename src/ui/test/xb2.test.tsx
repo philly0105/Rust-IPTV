@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import '@/i18n';
 
-import { Badge, LiveBadge, Tabs, Tooltip } from '..';
+import { Badge, LivePill, Tabs, Tooltip } from '..';
 import { placeMenu } from '../Menu';
 import { hiddenTabEdges } from '../Tabs';
 
@@ -30,7 +30,7 @@ describe('Tooltip in element fullscreen (XB2-20)', () => {
         <button type="button">M</button>
       </Tooltip>,
     );
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'M' }).parentElement!);
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'M' }));
     await act(() => new Promise((r) => setTimeout(r, 10)));
     expect(stage.contains(screen.getByRole('tooltip'))).toBe(true);
   });
@@ -65,8 +65,8 @@ describe('Badge text truncates (XB2-24)', () => {
     expect(kids[1]!.className).toBe('min-w-0 truncate leading-normal');
   });
 
-  it('LiveBadge keeps its pulse dot as a sized flex item', () => {
-    const { container } = render(<LiveBadge />);
+  it('LivePill keeps its pulse dot as a sized flex item', () => {
+    const { container } = render(<LivePill />);
     const kids = Array.from(container.firstElementChild!.children);
     expect(kids).toHaveLength(2);
     expect(kids[0]!.className).toContain('h-1.5 w-1.5');

@@ -20,7 +20,7 @@ import { IMAGE_WIDTH_BUCKETS, imageUrl, imageWidthBucket, sizedImageUrl, WEB_IMA
 import { Dialog } from '../Dialog';
 import { Select } from '../Field';
 import { gateImage, imageGateStats, MAX_ACTIVE, noteImageLoaded, pageIsScrolling, resetImageGate, SETTLE_MS } from '../imageGate';
-import { comboKeys, Kbd, LiveBadge } from '../Misc';
+import { comboKeys, Kbd, LivePill } from '../Misc';
 import { Poster, PosterWidthContext } from '../Poster';
 import { EmptyState } from '../States';
 import { dismissToast, focusToasts, toast, TOAST_AVOID_GAP, toastClearanceFor, ToastViewport, useToastStore } from '../Toast';
@@ -401,7 +401,7 @@ describe('the live dot stops pulsing (L3-ui-data-x3)', () => {
   });
 
   it('the LIVE badge dot animates only without reduced motion', () => {
-    const { container } = render(<LiveBadge />);
+    const { container } = render(<LivePill />);
     const dot = container.querySelector('[class*="animate-live-pulse"]')!;
     expect(dot.className.split(/\s+/)).toContain('motion-safe:animate-live-pulse');
     expect(dot.className).not.toMatch(/(^|\s)animate-live-pulse/);

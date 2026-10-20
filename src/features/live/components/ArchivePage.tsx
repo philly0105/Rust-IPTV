@@ -7,7 +7,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
 import { useShell } from '@/shell';
-import { Badge, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LiveBadge, Skeleton, useToast, errorDescription } from '@/ui';
+import { Badge, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LivePill, Skeleton, useToast, errorDescription } from '@/ui';
 
 import { useArchiveDay } from '../hooks/useArchiveDay';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -377,7 +377,7 @@ function ProgramRow({ program, state, tabIndex, buttonRef, onFocus, onPlay, onDo
             <span dir="auto" className={cn('truncate text-sm', disabled ? '' : 'font-medium')}>
               {program.title}
             </span>
-            {onNow ? <LiveBadge /> : null}
+            {onNow ? <LivePill /> : null}
           </span>
           {program.description ? (
             <span dir="auto" className="mt-0.5 line-clamp-1 text-xs text-fg-muted">

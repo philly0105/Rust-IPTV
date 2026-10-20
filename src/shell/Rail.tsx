@@ -29,7 +29,7 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Source, SourceKind } from '@/api/types';
-import { cn, hueOf, initialsOf, Skeleton } from '@/ui';
+import { cn, hueOf, initialsOf, Skeleton, TEXT_LINK, Tooltip } from '@/ui';
 
 import { railLinks, routeSourceId } from './railLinks';
 import { useShellStore } from './store';
@@ -86,21 +86,22 @@ function RailNavLink({ to, labelKey, icon: Icon, collapsed, end, tour }: Primary
   const { t } = useTranslation('shell');
   const label = t(labelKey);
   return (
-    <NavLink
-      to={to}
-      end={end}
-      data-tour={tour}
-      title={collapsed ? label : undefined}
-      aria-label={collapsed ? label : undefined}
-      className={({ isActive }) => itemClass(isActive, collapsed)}
-    >
-      {({ isActive }) => (
-        <>
-          <Icon aria-hidden size={18} className={cn('shrink-0', isActive && 'text-accent')} />
-          {!collapsed && <span className="truncate">{label}</span>}
-        </>
-      )}
-    </NavLink>
+    <Tooltip content={collapsed ? label : null} side="inline-end" describe={false}>
+      <NavLink
+        to={to}
+        end={end}
+        data-tour={tour}
+        aria-label={collapsed ? label : undefined}
+        className={({ isActive }) => itemClass(isActive, collapsed)}
+      >
+        {({ isActive }) => (
+          <>
+            <Icon aria-hidden size={18} className={cn('shrink-0', isActive && 'text-accent')} />
+            {!collapsed && <span className="truncate">{label}</span>}
+          </>
+        )}
+      </NavLink>
+    </Tooltip>
   );
 }
 
@@ -237,7 +238,7 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
     // left a phone with no way to its movies or series.
     const triggerClassName = cn(itemClass(active, true), 'w-full');
     const trigger = (
-      <span title={label} className="inline-flex">
+      <span className="inline-flex">
         <SourceMark source={source} errorDot={!!source.lastError} />
       </span>
     );
@@ -255,6 +256,8 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
             placement="inline-end"
             triggerClassName={triggerClassName}
             trigger={trigger}
+            tooltip={label}
+            tooltipSide="inline-end"
             items={links.map((l) => {
               const current = pathname === l.to || pathname.startsWith(`${l.to}/`);
               return {
@@ -268,30 +271,32 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
           />
         ) : (
           // The menu's own trigger, as it renders closed, until the menu's chunk is in.
-          <button
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={false}
-            aria-label={label}
-            className={triggerClassName}
-            data-rail-menu-pending=""
-            onClick={open}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                e.preventDefault();
-                open();
-              }
-            }}
-            onFocus={() => {
-              intent.current ??= 'focus';
-            }}
-            onBlur={(e) => {
-              // Focus moved on to another control; a blur with no next element is this button leaving.
-              if (e.relatedTarget && intent.current === 'focus') intent.current = null;
-            }}
-          >
-            {trigger}
-          </button>
+          <Tooltip content={label} side="inline-end" describe={false}>
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={false}
+              aria-label={label}
+              className={triggerClassName}
+              data-rail-menu-pending=""
+              onClick={open}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  open();
+                }
+              }}
+              onFocus={() => {
+                intent.current ??= 'focus';
+              }}
+              onBlur={(e) => {
+                // Focus moved on to another control; a blur with no next element is this button leaving.
+                if (e.relatedTarget && intent.current === 'focus') intent.current = null;
+              }}
+            >
+              {trigger}
+            </button>
+          </Tooltip>
         )}
       </li>
     );
@@ -504,14 +509,15 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
               <h2 id="rail-sources-heading" className={cn('text-xs font-semibold text-fg-subtle', collapsed && 'sr-only')}>
                 {t('sources')}
               </h2>
-              <Link
-                to="/sources?add=1"
-                title={t('addSource')}
-                aria-label={t('addSource')}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
-              >
-                <Plus aria-hidden size={16} />
-              </Link>
+              <Tooltip content={t('addSource')} describe={false}>
+                <Link
+                  to="/sources?add=1"
+                  aria-label={t('addSource')}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
+                >
+                  <Plus aria-hidden size={16} />
+                </Link>
+              </Tooltip>
             </div>
             {sources.isPending ? (
               <div className="flex flex-col gap-2 px-3 py-1" aria-hidden>
@@ -526,16 +532,17 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
                 <p role="alert" className={cn('min-w-0 text-sm text-danger', collapsed && 'sr-only')}>
                   {t('sourcesLoadFailed')}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => void sources.refetch()}
-                  disabled={sources.isFetching}
-                  title={t('retry', { ns: 'common' })}
-                  aria-label={t('retry', { ns: 'common' })}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors disabled:opacity-50"
-                >
-                  <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
-                </button>
+                <Tooltip content={t('retry', { ns: 'common' })} describe={false}>
+                  <button
+                    type="button"
+                    onClick={() => void sources.refetch()}
+                    disabled={sources.isFetching}
+                    aria-label={t('retry', { ns: 'common' })}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors disabled:opacity-50"
+                  >
+                    <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
+                  </button>
+                </Tooltip>
               </div>
             ) : sources.data && sources.data.length > 0 ? (
               <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
@@ -554,7 +561,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
               !collapsed && (
                 <p className="px-3 text-sm text-fg-muted">
                   {t('noSourcesYet')}{' '}
-                  <Link to="/sources?add=1" className="rounded-sm font-medium text-accent hover:underline active:text-accent-pressed">
+                  <Link to="/sources?add=1" className={TEXT_LINK}>
                     {t('addFirstSource')}
                   </Link>
                 </p>
@@ -567,48 +574,51 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
 
       <div className="flex shrink-0 flex-col gap-0.5 border-t border-divider p-2">
         <RailNavLink to="/settings" labelKey="navSettings" icon={SettingsIcon} collapsed={collapsed} />
-        <button
-          type="button"
-          onClick={() => setHelpOpen(true)}
-          title={collapsed ? t('keyboardShortcuts') : undefined}
-          aria-label={collapsed ? t('keyboardShortcuts') : undefined}
-          className={itemClass(false, collapsed)}
-        >
-          <Keyboard aria-hidden size={18} className="shrink-0" />
-          {!collapsed && <span className="truncate">{t('keyboardShortcuts')}</span>}
-        </button>
+        <Tooltip content={collapsed ? t('keyboardShortcuts') : null} side="inline-end" describe={false}>
+          <button
+            type="button"
+            onClick={() => setHelpOpen(true)}
+            aria-label={collapsed ? t('keyboardShortcuts') : undefined}
+            className={itemClass(false, collapsed)}
+          >
+            <Keyboard aria-hidden size={18} className="shrink-0" />
+            {!collapsed && <span className="truncate">{t('keyboardShortcuts')}</span>}
+          </button>
+        </Tooltip>
         {autoCollapsed ? (
           // Below lg the rail never expands; on a phone its icon column is a fifth of the width,
           // so it can go away entirely. The header's Show sidebar button brings it back.
-          <button
-            type="button"
-            onClick={() => {
-              // The rail and this button go: focus moves on to the header's Show sidebar button.
-              flushSync(toggleRailHidden);
-              document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
-            }}
-            aria-label={t('hideRail')}
-            title={t('hideRail')}
-            data-rail-hide=""
-            className={itemClass(false, true)}
-          >
-            <PanelLeftClose aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={toggleRail}
-            aria-label={collapsed ? t('expandRail') : t('collapseRail')}
-            title={collapsed ? t('expandRail') : t('collapseRail')}
-            className={itemClass(false, collapsed)}
-          >
-            {collapsed ? (
-              <PanelLeftOpen aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
-            ) : (
+          <Tooltip content={t('hideRail')} side="inline-end" describe={false}>
+            <button
+              type="button"
+              onClick={() => {
+                // The rail and this button go: focus moves on to the header's Show sidebar button.
+                flushSync(toggleRailHidden);
+                document.querySelector<HTMLElement>('[data-testid="rail-show"]')?.focus();
+              }}
+              aria-label={t('hideRail')}
+              data-rail-hide=""
+              className={itemClass(false, true)}
+            >
               <PanelLeftClose aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
-            )}
-            {!collapsed && <span className="truncate">{t('collapseRail')}</span>}
-          </button>
+            </button>
+          </Tooltip>
+        ) : (
+          <Tooltip content={collapsed ? t('expandRail') : null} side="inline-end" describe={false}>
+            <button
+              type="button"
+              onClick={toggleRail}
+              aria-label={collapsed ? t('expandRail') : t('collapseRail')}
+              className={itemClass(false, collapsed)}
+            >
+              {collapsed ? (
+                <PanelLeftOpen aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
+              ) : (
+                <PanelLeftClose aria-hidden size={18} className="shrink-0 rtl:-scale-x-100" />
+              )}
+              {!collapsed && <span className="truncate">{t('collapseRail')}</span>}
+            </button>
+          </Tooltip>
         )}
       </div>
     </nav>

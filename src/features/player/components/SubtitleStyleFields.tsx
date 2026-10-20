@@ -5,7 +5,7 @@
  * the swatches and samples show exactly what the players draw.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -18,6 +18,8 @@ import {
   type SubtitleColor,
   type SubtitleSize,
 } from '@/api/types';
+
+import { SegmentedControl } from '@/ui/Segmented';
 
 import { cn } from '../cn';
 import { clampSubtitlePosition, cueCssVars, SUBTITLE_HEX, SUBTITLE_SCALE, type SubtitleStyle } from '../subtitles/style';
@@ -38,8 +40,9 @@ function varsOf(style: SubtitleStyle): CSSProperties {
 const SAMPLE_CLASS = '[background:var(--sub-bg)] [color:var(--sub-color)] [text-shadow:var(--sub-shadow)]';
 
 /**
- * A radio group with roving focus: Left/Right (mirrored in right-to-left text), Home and End
- * pick; on the settings page Up/Down do too (in the player menu they move between rows).
+ * The kit SegmentedControl in the field's tone: Left/Right (mirrored in right-to-left text),
+ * Home and End pick; on the settings page Up/Down do too (in the player menu they move between
+ * rows). Each segment shows a sample and names itself in a tooltip.
  */
 function ChoiceGroup<T extends string>({
   id,
@@ -62,68 +65,18 @@ function ChoiceGroup<T extends string>({
   testId: string;
   className?: string;
 }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
-    const i = options.findIndex((o) => o.value === value);
-    const rtl = getComputedStyle(e.currentTarget).direction === 'rtl';
-    let target: number | null = null;
-    if (e.key === (rtl ? 'ArrowLeft' : 'ArrowRight') || (tone === 'page' && e.key === 'ArrowDown')) target = (i + 1) % options.length;
-    else if (e.key === (rtl ? 'ArrowRight' : 'ArrowLeft') || (tone === 'page' && e.key === 'ArrowUp')) target = (i - 1 + options.length) % options.length;
-    else if (e.key === 'Home') target = 0;
-    else if (e.key === 'End') target = options.length - 1;
-    if (target === null) return;
-    // Claimed here: the menu (Left = back) and the player's arrow shortcuts must not see it.
-    e.preventDefault();
-    e.stopPropagation();
-    const next = options[target];
-    if (!next || next.value === value) return;
-    onChange(next.value);
-    const group = e.currentTarget.parentElement;
-    requestAnimationFrame(() => group?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
-  };
   return (
-    <div
+    <SegmentedControl<T>
       id={id}
-      role="radiogroup"
-      aria-label={label}
-      aria-describedby={describedBy}
-      data-testid={testId}
-      className={cn(
-        'flex flex-wrap gap-1',
-        tone === 'page' ? 'rounded-md border border-edge bg-surface-2 p-1' : 'rounded-md bg-white/6 p-0.5',
-        className,
-      )}
-    >
-      {options.map((o) => {
-        const selected = o.value === value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            aria-label={o.label}
-            title={o.label}
-            tabIndex={selected ? 0 : -1}
-            data-value={o.value}
-            onClick={() => onChange(o.value)}
-            onKeyDown={onKeyDown}
-            className={cn(
-              'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-sm text-sm font-medium motion-safe:transition-colors',
-              tone === 'page'
-                ? selected
-                  ? 'bg-raised text-fg shadow-1'
-                  : 'text-fg-muted hover:bg-hover hover:text-fg'
-                : selected
-                  ? 'bg-white/16 text-white ring-1 ring-white/35'
-                  : 'text-white/80 hover:bg-white/10 hover:text-white',
-              o.className,
-            )}
-          >
-            {o.content}
-          </button>
-        );
-      })}
-    </div>
+      label={label}
+      describedBy={describedBy}
+      value={value}
+      options={options}
+      onChange={onChange}
+      tone={tone === 'page' ? 'default' : 'glass'}
+      testId={testId}
+      className={cn('flex-wrap', className)}
+    />
   );
 }
 
@@ -148,7 +101,7 @@ export function SizeChoice(props: { id?: string; describedBy?: string; value: Su
               {props.tone === 'page' && <span>{label}</span>}
             </>
           ),
-          className: props.tone === 'page' ? 'px-3' : 'w-11',
+          className: props.tone === 'page' ? 'px-3' : 'w-11 px-0',
         };
       })}
     />
@@ -174,7 +127,7 @@ export function ColorChoice(props: { id?: string; describedBy?: string; value: S
               {props.tone === 'page' && <span>{label}</span>}
             </>
           ),
-          className: props.tone === 'page' ? 'px-3' : 'w-11',
+          className: props.tone === 'page' ? 'px-3' : 'w-11 px-0',
         };
       })}
     />

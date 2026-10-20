@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { invalidate } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 
-import { Button, IconButton, Select, useToast, errorDescription } from '@/ui';
+import { Button, IconButton, Select, fieldClass, useToast, errorDescription } from '@/ui';
 import { SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { TMDB_LANGUAGES } from '../lib/languages';
 import { tmdbPatch } from '../lib/patch';
@@ -98,7 +98,7 @@ export function MetadataSection({ settings, update }: SectionProps) {
                         void commitKey();
                       }
                     }}
-                    className="h-10 w-full rounded-md border border-border bg-surface-2 px-3 pe-11 font-mono text-sm text-fg placeholder:font-sans placeholder:text-fg-subtle disabled:opacity-50"
+                    className={fieldClass('md', 'pe-11 font-mono placeholder:font-sans')}
                     data-testid="input-tmdb-key"
                   />
                   <div className="absolute inset-y-0 end-0.5 flex items-center">

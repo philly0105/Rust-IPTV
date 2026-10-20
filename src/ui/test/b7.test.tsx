@@ -59,7 +59,7 @@ describe('Tooltip inside a dialog', () => {
       </Dialog>,
     );
     const btn = screen.getByRole('button', { name: 'Help' });
-    fireEvent.mouseEnter(btn.parentElement!);
+    fireEvent.mouseEnter(btn);
     await act(() => new Promise((r) => setTimeout(r, 10)));
     expect(screen.getByRole('tooltip').textContent).toBe('Explains the field');
     fireEvent.keyDown(btn, { key: 'Escape' });

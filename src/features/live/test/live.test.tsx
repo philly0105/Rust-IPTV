@@ -225,7 +225,8 @@ describe('EpgRibbon', () => {
 
     const ribbon = await screen.findByTestId('epg-ribbon');
     await waitFor(() => expect(ribbon.textContent).toContain('Midday Report'));
-    expect(ribbon.textContent).toContain('LIVE');
+    // The kit LIVE pill (upper case through CSS).
+    expect(ribbon.querySelector('[data-live-pill]')).not.toBeNull();
     expect(screen.getByRole('button', { name: /Evening Film/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Midday Report.*on now/ })).toBeTruthy();
     // archive channel: the ended programme offers catch-up

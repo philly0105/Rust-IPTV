@@ -2,6 +2,8 @@ import { Camera } from 'lucide-react';
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Tooltip } from '@/ui/Tooltip';
+
 import { cn } from '../cn';
 import { blockReasonKey, explainBlock, screenshotBlock, takeScreenshot } from '../screenshot';
 import { usePlayerStore } from '../store';
@@ -47,30 +49,31 @@ export function ScreenshotButton({
 
   return (
     <>
-      <button
-        type="button"
-        role={menuItem ? 'menuitem' : undefined}
-        data-ctl="screenshot"
-        data-testid="screenshot-button"
-        aria-label={label}
-        title={reason ? `${label}: ${reason}` : `${label} (S)`}
-        aria-keyshortcuts={reason ? undefined : 'S'}
-        aria-disabled={reason ? true : undefined}
-        aria-describedby={reason ? reasonId : undefined}
-        aria-busy={busy || undefined}
-        onClick={press}
-        className={cn(
-          'inline-flex shrink-0 items-center justify-center motion-safe:transition-colors',
-          stage
-            ? 'size-9 rounded-md border border-white/25 text-white hover:bg-white/10 [&_svg]:size-4'
-            : 'size-10 rounded-full text-white/90 hover:bg-white/12 hover:text-white [&_svg]:size-5',
-          (reason || busy) && 'opacity-40',
-          reason && 'cursor-not-allowed',
-          className,
-        )}
-      >
-        <Camera aria-hidden className={cn(busy && 'motion-safe:animate-pulse')} />
-      </button>
+      <Tooltip content={reason ? `${label}: ${reason}` : label} shortcut={reason ? undefined : 's'} tone="glass" describe={false}>
+        <button
+          type="button"
+          role={menuItem ? 'menuitem' : undefined}
+          data-ctl="screenshot"
+          data-testid="screenshot-button"
+          aria-label={label}
+          aria-keyshortcuts={reason ? undefined : 'S'}
+          aria-disabled={reason ? true : undefined}
+          aria-describedby={reason ? reasonId : undefined}
+          aria-busy={busy || undefined}
+          onClick={press}
+          className={cn(
+            'inline-flex shrink-0 items-center justify-center motion-safe:transition-colors',
+            stage
+              ? 'size-9 rounded-md border border-white/25 text-white hover:bg-white/10 [&_svg]:size-4'
+              : 'size-10 rounded-full text-white/90 hover:bg-white/12 hover:text-white [&_svg]:size-5',
+            (reason || busy) && 'opacity-40',
+            reason && 'cursor-not-allowed',
+            className,
+          )}
+        >
+          <Camera aria-hidden className={cn(busy && 'motion-safe:animate-pulse')} />
+        </button>
+      </Tooltip>
       {reason && (
         <span id={reasonId} hidden>
           {reason}

@@ -12,7 +12,6 @@ import {
   Search,
   Star,
   Tv,
-  X,
 } from 'lucide-react';
 import {
   memo,
@@ -42,7 +41,7 @@ import {
   type PlayerSource,
 } from '@/api/types';
 
-import { Button, buttonClass, EmptyState, ErrorState, IconButton, useRowHeight, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
 import { canZap, isPendingZap } from '@/features/player/store';
@@ -856,50 +855,34 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             icon={<ListTree className="size-4" />}
             onClick={toggleSidebar}
           />
-          <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface-2 px-2 text-sm focus-within:ring-2 focus-within:ring-focus">
-            <Search className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => {
-                const toList = () =>
-                  document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
-                if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.nativeEvent.isComposing)) {
-                  e.preventDefault();
-                  if (search.trim() !== debouncedSearch) {
-                    // The typed query has not reached the list yet: run it now, focus its first row when it lands.
-                    commitSearch(search);
-                    focusListPending.current = true;
-                  } else toList();
-                } else if (e.key === 'Escape') {
-                  // First Escape clears the query, the second hands focus back to the list.
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (search) clearSearch();
-                  else toList();
-                }
-              }}
-              ref={searchRef}
-              placeholder={category ? t('searchInGroup', { group: category.name }) : t(isRadio ? 'searchStations' : 'searchChannels')}
-              aria-label={t(isRadio ? 'searchStations' : 'searchChannels')}
-              className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-fg-subtle [&::-webkit-search-cancel-button]:hidden"
-            />
-            {search ? (
-              <button
-                type="button"
-                aria-label={t('clearSearch')}
-                title={t('clearSearch')}
-                onClick={() => {
-                  clearSearch();
-                  searchRef.current?.focus();
-                }}
-                className="inline-flex size-5 items-center justify-center rounded-sm text-fg-subtle hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
-              >
-                <X className="size-3.5" />
-              </button>
-            ) : null}
-          </label>
+          <SearchInput
+            size="sm"
+            className="min-w-0 flex-1"
+            value={search}
+            // Clearing (the clear button) commits at once, like Escape.
+            onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}
+            onKeyDown={(e) => {
+              const toList = () =>
+                document.querySelector<HTMLButtonElement>('[data-testid="channel-list"] [data-row-index][tabindex="0"]')?.focus();
+              if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.nativeEvent.isComposing)) {
+                e.preventDefault();
+                if (search.trim() !== debouncedSearch) {
+                  // The typed query has not reached the list yet: run it now, focus its first row when it lands.
+                  commitSearch(search);
+                  focusListPending.current = true;
+                } else toList();
+              } else if (e.key === 'Escape') {
+                // First Escape clears the query, the second hands focus back to the list.
+                e.preventDefault();
+                e.stopPropagation();
+                if (search) clearSearch();
+                else toList();
+              }
+            }}
+            ref={searchRef}
+            placeholder={category ? t('searchInGroup', { group: category.name }) : t(isRadio ? 'searchStations' : 'searchChannels')}
+            label={t(isRadio ? 'searchStations' : 'searchChannels')}
+          />
         </div>
         <div className="flex items-baseline justify-between px-3 pt-2 pb-1 text-xs text-fg-subtle">
           <span className="truncate">{subtitle}</span>

@@ -24,7 +24,7 @@ describe('Toggle in RTL (R6-r2 F1)', () => {
         <Toggle label="Autoplay" checked={false} onChange={() => {}} />
       </div>,
     );
-    expect(thumb().className).toContain('rtl:-translate-x-0.75');
+    expect(thumb().className).toContain('rtl:-translate-x-0.5');
   });
 });
 

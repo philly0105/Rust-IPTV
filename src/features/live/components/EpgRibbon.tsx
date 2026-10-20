@@ -9,7 +9,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
-import { Button, IconButton, Skeleton, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { Button, IconButton, LivePill, Skeleton, Tooltip, useListVirtualizer, useToast, errorDescription } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -139,7 +139,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
             {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
             <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
               {programWhen(shown, now) === 'now' ? (
-                <span className="inline-flex items-center gap-1 rounded-xs bg-live-solid px-1.5 py-px font-numeric text-2xs tracking-wide text-white uppercase">{t('liveBadge')}</span>
+                <LivePill size="sm" dot="none" />
               ) : null}
               <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                 {programWhen(shown, now) !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ?`${formatDay(ms(shown.start), i18n.language)} ` : ''}
@@ -184,17 +184,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
         {channel && !props.watchingLive ? (
           // Icon-only below 1440 px, where the pane is too narrow for the label and the programme line together.
           // "Back to live" only means something while this channel's catch-up plays; otherwise it starts the stream.
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<Radio className="size-3.5" />}
-            aria-label={liveLabel}
-            title={liveLabel}
-            data-testid="ribbon-back-to-live"
-            onClick={() => props.onPlayLive(channel)}
-          >
-            <span className="hidden min-[1440px]:inline">{liveLabel}</span>
-          </Button>
+          <Tooltip content={liveLabel} describe={false}>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Radio className="size-3.5" />}
+              aria-label={liveLabel}
+              data-testid="ribbon-back-to-live"
+              onClick={() => props.onPlayLive(channel)}
+            >
+              <span className="hidden min-[1440px]:inline">{liveLabel}</span>
+            </Button>
+          </Tooltip>
         ) : null}
         <div role="group" aria-label={t('guideView')} className="flex rounded-md border border-edge bg-surface-2 p-0.5">
           <IconButton
@@ -215,14 +216,15 @@ export function EpgRibbon(props: EpgRibbonProps) {
           />
         </div>
         {props.guideHref ? (
-          <Link
-            to={props.guideHref}
-            title={t('openGuide')}
-            aria-label={t('openGuide')}
-            className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
-          >
-            <CalendarClock className="size-4" />
-          </Link>
+          <Tooltip content={t('openGuide')} describe={false}>
+            <Link
+              to={props.guideHref}
+              aria-label={t('openGuide')}
+              className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
+            >
+              <CalendarClock className="size-4" />
+            </Link>
+          </Tooltip>
         ) : null}
       </div>
     </div>
@@ -667,7 +669,7 @@ function ProgramList(props: ViewProps) {
                   </span>
                 ) : null}
                 {when === 'now' ? (
-                  <span className="shrink-0 rounded-xs bg-live-solid px-1.5 py-px font-numeric text-2xs tracking-wide text-white uppercase">{t('liveBadge')}</span>
+                  <LivePill size="sm" dot="none" />
                 ) : when === 'past' && catchup ? (
                   <span className="inline-flex shrink-0 items-center gap-1 text-xs text-accent">
                     <History className="size-3.5" aria-hidden />

@@ -6,7 +6,7 @@ import { useRpcQuery } from '@/api/query';
 import { itemKey, type ItemRef } from '@/api/types';
 
 import { addToWall } from '../addChannel';
-import { Button, cn, toast } from '../deps';
+import { Button, cn, toast, Tooltip } from '../deps';
 import { LAYOUTS } from '../layout';
 import type { MultiviewChannelInput, MultiviewLayout } from '../types';
 import { ChannelMark } from './ChannelMark';
@@ -131,24 +131,24 @@ export function EmptyIntro({ layout, onLayout, onPick }: EmptyIntroProps) {
               const checked = l === layout;
               const label = t(LAYOUT_LABEL_KEYS[l]);
               return (
-                <button
-                  key={l}
-                  type="button"
-                  aria-pressed={checked}
-                  title={label}
-                  data-testid={`multiview-empty-layout-${l}`}
-                  onClick={() => onLayout(l)}
-                  className={cn(
-                    'inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-sm font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-focus',
-                    'motion-safe:transition-colors motion-safe:duration-150',
-                    checked ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
-                  )}
-                >
-                  <LayoutGlyph layout={l} className="h-4 w-7 shrink-0" />
-                  <span data-testid="multiview-empty-layout-label" className="sr-only @2xl/intro:not-sr-only">
-                    {label}
-                  </span>
-                </button>
+                <Tooltip key={l} content={label} describe={false}>
+                  <button
+                    type="button"
+                    aria-pressed={checked}
+                    data-testid={`multiview-empty-layout-${l}`}
+                    onClick={() => onLayout(l)}
+                    className={cn(
+                      'inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-sm font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-focus',
+                      'motion-safe:transition-colors motion-safe:duration-150',
+                      checked ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
+                    )}
+                  >
+                    <LayoutGlyph layout={l} className="h-4 w-7 shrink-0" />
+                    <span data-testid="multiview-empty-layout-label" className="sr-only @2xl/intro:not-sr-only">
+                      {label}
+                    </span>
+                  </button>
+                </Tooltip>
               );
             })}
           </div>

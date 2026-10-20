@@ -129,7 +129,8 @@ describe('live search answers within 150 ms of the last key (L2-live-2)', () => 
     await screen.findByText('Channel 0');
     rpcMock.calls.length = 0;
     const started = performance.now();
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'Channel 3' } });
+    // The group filter is a search field too now (the kit SearchInput).
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search channels' }), { target: { value: 'Channel 3' } });
     await waitFor(() => expect(channelCalls().some((q) => q.search === 'Channel 3')).toBe(true));
     const waited = performance.now() - started;
     // The request waits for the pause (jsdom render time varies too much to time the upper bound here).

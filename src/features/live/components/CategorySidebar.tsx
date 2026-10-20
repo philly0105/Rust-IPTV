@@ -1,11 +1,11 @@
-import { EyeOff, Lock, Search, SlidersHorizontal } from 'lucide-react';
+import { EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
 
-import { Button, ErrorState, IconButton, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
+import { Button, ErrorState, IconButton, SearchInput, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { documentIsRtl } from '../lib/rtl';
 
@@ -186,31 +186,28 @@ export function CategorySidebar(props: CategorySidebarProps) {
         <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} />
       </div>
       <div className="px-3 pb-2">
-        <label className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface-2 px-2 text-sm focus-within:ring-2 focus-within:ring-focus">
-          <Search className="size-3.5 text-fg-subtle" aria-hidden />
-          <input
-            value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value);
-              setCursor(ALL);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && filter) {
-                e.preventDefault();
-                e.stopPropagation();
-                setFilter('');
-              } else if (e.key === 'ArrowDown' && visible.length > 0) {
-                // Down from the filter goes straight to the first match.
-                e.preventDefault();
-                e.stopPropagation();
-                moveTo(0);
-              }
-            }}
-            placeholder={t('filterGroups')}
-            aria-label={t('filterGroups')}
-            className="min-w-0 flex-1 bg-transparent text-fg outline-none placeholder:text-fg-subtle"
-          />
-        </label>
+        <SearchInput
+          size="sm"
+          value={filter}
+          onChange={(v) => {
+            setFilter(v);
+            setCursor(ALL);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && filter) {
+              e.preventDefault();
+              e.stopPropagation();
+              setFilter('');
+            } else if (e.key === 'ArrowDown' && visible.length > 0) {
+              // Down from the filter goes straight to the first match.
+              e.preventDefault();
+              e.stopPropagation();
+              moveTo(0);
+            }
+          }}
+          placeholder={t('filterGroups')}
+          label={t('filterGroups')}
+        />
       </div>
 
       <div className="px-2" style={{ height: rowHeight }}>

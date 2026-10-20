@@ -416,6 +416,21 @@
   --panel-width: calc(340px * var(--ui-scale));
   /* Height of a rail link (Rail.tsx and the Appearance preview). */
   --rail-item-height: 2.5rem;
+  /*
+   * Side padding of the shell header and of every Page (src/ui/Page.tsx), so page content
+   * starts on the header title's line: 1rem on phones, 1.5rem from sm, 2rem from lg.
+   */
+  --page-gutter: 1rem;
+}
+@media (width >= 40rem) {
+  :root {
+    --page-gutter: 1.5rem;
+  }
+}
+@media (width >= 64rem) {
+  :root {
+    --page-gutter: 2rem;
+  }
 }
 
 /*

@@ -98,7 +98,12 @@ describe('row actions on the keyboard (L1-guide-library-17)', () => {
     const rows = await screen.findAllByTestId('download-row');
     const tabbable = rows.map((r) => within(r).getAllByRole('button').some((b) => b.tabIndex === 0));
     expect(tabbable).toEqual([true, false, false]);
-    expect(within(rows[0]!).getByRole('button', { name: 'Pause T0' }).getAttribute('title')).toMatch(/\(P\)$/);
+    // The shortcut shows as a key cap in the button's tooltip (no native title).
+    const pause = within(rows[0]!).getByRole('button', { name: 'Pause T0' });
+    expect(pause.hasAttribute('title')).toBe(false);
+    fireEvent.mouseEnter(pause);
+    const tip = await screen.findByRole('tooltip');
+    expect([...tip.querySelectorAll('kbd')].map((k) => k.textContent)).toEqual(['P']);
   });
 });
 

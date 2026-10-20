@@ -10,7 +10,7 @@ import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemRef, RecordingRule } from '@/api/types';
-import { Button, Dialog } from '@/ui';
+import { Button, Checkbox, Dialog } from '@/ui';
 
 import { useRuleActions } from '../hooks';
 
@@ -119,12 +119,11 @@ export function RemoveRuleDialog({ rule, onClose }: { rule: RecordingRule | null
           </p>
           {rule.upcoming > 0 ? (
             <label htmlFor={checkId} className="flex cursor-pointer items-start gap-3 rounded-md border border-divider bg-surface-2 px-3 py-2.5 text-sm text-fg">
-              <input
+              <Checkbox
                 id={checkId}
-                type="checkbox"
                 checked={cancelScheduled}
                 onChange={(e) => setCancelScheduled(e.target.checked)}
-                className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
+                wrapperClassName="mt-0.5"
                 data-testid="rule-remove-cancel-scheduled"
               />
               <span>{t('removeAlsoCancel', { n: rule.upcoming })}</span>

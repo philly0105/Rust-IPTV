@@ -1,5 +1,5 @@
 import i18next from 'i18next';
-import { Children, type ComponentPropsWithRef, type ReactNode } from 'react';
+import { Children, Fragment, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from './cn';
@@ -188,16 +188,79 @@ export function Badge({ variant = 'neutral', className, children, ...rest }: Bad
   );
 }
 
-/** Red LIVE pill with a slow pulse dot (pulse only under motion-safe, and only while on screen). */
-export function LiveBadge({ className }: { className?: string }) {
+export interface LivePillProps {
+  /** `md` (default): a badge-sized pill for cards and lists. `sm`: the small pill inside guide and ribbon cells. */
+  size?: 'sm' | 'md';
+  /**
+   * `pulse` (default): a dot that pulses a few times as it appears (motion-safe, and only while
+   * on screen). `still`: the dot without the pulse, for rails of many cards, where every running
+   * animation keeps the compositor busy. `none`: the word alone.
+   */
+  dot?: 'pulse' | 'still' | 'none';
+  className?: string;
+}
+
+/**
+ * The one LIVE mark: white on the solid live red, upper case in the tuner-dial face
+ * (DS-SEMANTIC-FILLS). Use it wherever a programme or channel is on air now; the player's own
+ * status readout (on air, standby, no signal) is a different control.
+ */
+export function LivePill({ size = 'md', dot = 'pulse', className }: LivePillProps) {
   const { t } = useTranslation('common');
   return (
-    <Badge variant="live" className={className}>
-      <span ref={pauseWhenOffscreen} aria-hidden className="h-1.5 w-1.5 rounded-full bg-white motion-safe:animate-live-pulse" />
+    <Badge variant="live" data-live-pill="" className={cn(size === 'sm' && 'h-4 gap-1 rounded-xs px-1 text-2xs', className)}>
+      {dot !== 'none' && (
+        <span
+          ref={dot === 'pulse' ? pauseWhenOffscreen : undefined}
+          aria-hidden
+          className={cn('h-1.5 w-1.5 rounded-full bg-white', dot === 'pulse' && 'motion-safe:animate-live-pulse')}
+        />
+      )}
       {t('live')}
     </Badge>
   );
 }
+
+export interface MetaLineProps extends Omit<ComponentPropsWithRef<'p'>, 'children'> {
+  /** The facts, in order (year, runtime, rating, source). Empty ones (null, false, '') drop out. */
+  items: ReactNode[];
+  /** Element to render; `span` inside a button or another line of text. */
+  as?: 'p' | 'div' | 'span';
+}
+
+/**
+ * A line of metadata joined by one separator: "2021 · 1 h 52 min · PG-13". The dots are drawn,
+ * not spoken; a screen reader hears the facts with a comma between them. Wraps between items,
+ * never inside one. Caption size and muted colour by default; pass classes to change either.
+ */
+export function MetaLine({ items, as: Tag = 'p', className, ...rest }: MetaLineProps) {
+  const shown = items.filter((i) => i !== null && i !== undefined && i !== false && i !== '');
+  if (shown.length === 0) return null;
+  return (
+    <Tag className={cn('flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-caption text-fg-muted', className)} {...rest}>
+      {shown.map((item, i) => (
+        <Fragment key={i}>
+          {i > 0 && (
+            <>
+              <span aria-hidden className="text-fg-subtle">
+                ·
+              </span>
+              <span className="sr-only">, </span>
+            </>
+          )}
+          <span className="min-w-0">{item}</span>
+        </Fragment>
+      ))}
+    </Tag>
+  );
+}
+
+/**
+ * The inline text link: accent text, underline on hover, the pressed accent while held. Use it
+ * on <a> and router <Link> elements inside running text and empty states, and on link-styled
+ * buttons. A link that acts like a button (a call to action) is a Button or buttonClass instead.
+ */
+export const TEXT_LINK = 'rounded-xs font-medium text-accent underline-offset-2 hover:underline active:text-accent-pressed';
 
 export interface ProgressBarProps {
   value: number;

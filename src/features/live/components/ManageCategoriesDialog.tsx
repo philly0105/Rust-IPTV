@@ -5,7 +5,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { ContentType } from '@/api/types';
 
-import { Button, Dialog, ErrorState, Skeleton, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { Button, Checkbox, Dialog, ErrorState, SearchInput, Skeleton, useListVirtualizer, useToast, errorDescription } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { foldForFilter } from './CategorySidebar';
 
@@ -115,13 +115,7 @@ export function ManageCategoriesDialog({
     >
       <p className="mb-3 text-sm text-fg-muted">{t('manageCategoriesHint')}</p>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder={t('filterGroups')}
-          aria-label={t('filterGroups')}
-          className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-focus"
-        />
+        <SearchInput size="sm" className="min-w-0 flex-1" value={filter} onChange={setFilter} placeholder={t('filterGroups')} label={t('filterGroups')} />
         <Button size="sm" variant="ghost" onClick={() => setMany(true)}>
           {t('selectAll')}
         </Button>
@@ -154,8 +148,7 @@ export function ManageCategoriesDialog({
                   style={{ position: 'absolute', top: 0, left: 0, right: 0, height: ROW, transform: `translateY(${v.start}px)` }}
                   className="flex cursor-pointer items-center gap-3 px-3 text-sm hover:bg-hover"
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={checked}
                     onChange={() =>
                       setVisibleIds((prev) => {
@@ -165,7 +158,6 @@ export function ManageCategoriesDialog({
                         return next;
                       })
                     }
-                    className="size-4 accent-[var(--color-accent)]"
                   />
                   <span dir="auto" className={`flex-1 truncate text-match-parent ${checked ? 'text-fg' : 'text-fg-subtle line-through'}`}>{c.name}</span>
                   <span className="text-xs tabular-nums text-fg-subtle">{fmt.format(c.itemCount)}</span>

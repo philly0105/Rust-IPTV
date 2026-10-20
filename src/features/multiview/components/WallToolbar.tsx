@@ -2,7 +2,7 @@ import { Eraser, Maximize2, Minimize2, Plus, Volume1, Volume2, VolumeX } from 'l
 import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cn } from '../deps';
+import { cn, Tooltip } from '../deps';
 import { layoutFits, LAYOUTS, MAX_TILES } from '../layout';
 import { GLASS_BUTTON } from '../styles';
 import type { MultiviewLayout } from '../types';
@@ -89,32 +89,34 @@ export function WallToolbar({
           const fits = layoutFits(l, count);
           const checked = l === layout;
           const label = t(LAYOUT_LABEL_KEYS[l]);
+          // A disabled button gets no pointer events in every browser, so its reason stays a native title.
           return (
-            <button
-              key={l}
-              type="button"
-              aria-pressed={checked}
-              aria-label={label}
-              title={fits ? label : t('layout1x2Disabled')}
-              disabled={!fits}
-              data-testid={`multiview-layout-${l}`}
-              onClick={() => onLayout(l)}
-              className={cn(
-                'inline-flex h-8 items-center gap-2 rounded-md px-2 text-sm font-medium outline-none focus-visible:ring-2',
-                overlay ? 'focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]' : 'focus-visible:ring-focus',
-                'disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors motion-safe:duration-150',
-                overlay
-                  ? checked
-                    ? 'bg-[color:var(--color-glass-border,rgb(255_255_255/0.14))] text-[color:var(--color-on-glass,#f4f6fa)]'
-                    : 'text-[color:var(--color-on-glass-muted,#c8cfdc)] hover:text-[color:var(--color-on-glass,#f4f6fa)]'
-                  : checked
-                    ? 'bg-surface text-fg shadow-1'
-                    : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
-              )}
-            >
-              <LayoutGlyph layout={l} tally={checked && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
-              <span className="hidden lg:inline">{label}</span>
-            </button>
+            <Tooltip key={l} content={fits ? label : null} tone={overlay ? 'glass' : 'default'} describe={false}>
+              <button
+                type="button"
+                aria-pressed={checked}
+                aria-label={label}
+                title={fits ? undefined : t('layout1x2Disabled')}
+                disabled={!fits}
+                data-testid={`multiview-layout-${l}`}
+                onClick={() => onLayout(l)}
+                className={cn(
+                  'inline-flex h-8 items-center gap-2 rounded-md px-2 text-sm font-medium outline-none focus-visible:ring-2',
+                  overlay ? 'focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]' : 'focus-visible:ring-focus',
+                  'disabled:cursor-not-allowed disabled:opacity-40 motion-safe:transition-colors motion-safe:duration-150',
+                  overlay
+                    ? checked
+                      ? 'bg-[color:var(--color-glass-border,rgb(255_255_255/0.14))] text-[color:var(--color-on-glass,#f4f6fa)]'
+                      : 'text-[color:var(--color-on-glass-muted,#c8cfdc)] hover:text-[color:var(--color-on-glass,#f4f6fa)]'
+                    : checked
+                      ? 'bg-surface text-fg shadow-1'
+                      : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
+                )}
+              >
+                <LayoutGlyph layout={l} tally={checked && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
+                <span className="hidden lg:inline">{label}</span>
+              </button>
+            </Tooltip>
           );
         })}
       </div>
@@ -125,17 +127,18 @@ export function WallToolbar({
       </button>
 
       <div className="ms-auto flex items-center gap-1">
-        <button
-          type="button"
-          className={toolButton(overlay, 'px-0')}
-          aria-label={muted ? t('unmuteAll') : t('muteAll')}
-          title={muted ? t('unmuteAll') : t('muteAll')}
-          aria-pressed={muted}
-          onClick={onToggleMute}
-          data-testid="multiview-mute"
-        >
-          <VolumeIcon aria-hidden className="size-4" />
-        </button>
+        <Tooltip content={muted ? t('unmuteAll') : t('muteAll')} tone={overlay ? 'glass' : 'default'} describe={false}>
+          <button
+            type="button"
+            className={toolButton(overlay, 'px-0')}
+            aria-label={muted ? t('unmuteAll') : t('muteAll')}
+            aria-pressed={muted}
+            onClick={onToggleMute}
+            data-testid="multiview-mute"
+          >
+            <VolumeIcon aria-hidden className="size-4" />
+          </button>
+        </Tooltip>
         <label htmlFor={volumeId} className="sr-only">
           {t('volume')}
         </label>
@@ -156,18 +159,21 @@ export function WallToolbar({
           )}
           data-testid="multiview-volume"
         />
-        <button
-          type="button"
-          className={toolButton(overlay, 'px-0')}
-          aria-label={fullscreen ? t('exitFullscreen') : t('fullscreen')}
-          title={fullscreenSupported ? (fullscreen ? t('exitFullscreen') : t('fullscreen')) : t('fullscreenUnavailable')}
-          aria-pressed={fullscreen}
-          disabled={!fullscreenSupported}
-          onClick={onToggleFullscreen}
-          data-testid="multiview-fullscreen"
-        >
-          {fullscreen ? <Minimize2 aria-hidden className="size-4" /> : <Maximize2 aria-hidden className="size-4" />}
-        </button>
+        <Tooltip content={fullscreenSupported ? (fullscreen ? t('exitFullscreen') : t('fullscreen')) : t('fullscreenUnavailable')} tone={overlay ? 'glass' : 'default'} describe={!fullscreenSupported}>
+          <button
+            type="button"
+            className={toolButton(overlay, 'px-0')}
+            aria-label={fullscreen ? t('exitFullscreen') : t('fullscreen')}
+            // A disabled button gets no pointer events in every browser, so its reason stays a native title.
+            title={fullscreenSupported ? undefined : t('fullscreenUnavailable')}
+            aria-pressed={fullscreen}
+            disabled={!fullscreenSupported}
+            onClick={onToggleFullscreen}
+            data-testid="multiview-fullscreen"
+          >
+            {fullscreen ? <Minimize2 aria-hidden className="size-4" /> : <Maximize2 aria-hidden className="size-4" />}
+          </button>
+        </Tooltip>
         {!overlay ? (
           <button type="button" className={toolButton(false)} onClick={onClear} disabled={count === 0} data-testid="multiview-clear">
             <Eraser aria-hidden className="size-4" />

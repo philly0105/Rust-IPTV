@@ -3,14 +3,14 @@ import { CircleAlert, RotateCw } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { RpcError } from '@/api/transport';
+import { isDesktop, RpcError } from '@/api/transport';
 import type { RpcErrorCode } from '@/api/types';
 
 import { Button } from './Button';
 import { cn } from './cn';
 
 export interface EmptyStateProps {
-  /** Icon element, e.g. `<Tv size={28} />`. */
+  /** Icon element, e.g. `<Tv />`. EmptyState sizes it (28 px on a page, 20 px inline), whatever size it was given. */
   icon?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
@@ -35,7 +35,7 @@ export function EmptyState({ icon, title, description, action, className, size =
           aria-hidden
           className={cn(
             'flex items-center justify-center rounded-full border border-divider bg-surface-2 text-fg-muted',
-            size === 'page' ? 'h-16 w-16' : 'h-11 w-11',
+            size === 'page' ? 'h-16 w-16 [&>svg]:size-7' : 'h-11 w-11 [&>svg]:size-5',
           )}
         >
           {icon}
@@ -115,14 +115,35 @@ export function isServerUnreachable(err: RpcError): boolean {
 }
 
 /**
- * Description for an error toast: the translated next step for the error's code leads, and the
- * raw message (the core's English text, a browser error) follows in small print for support.
- * `redact` strips credentials from the raw text where it may carry a provider URL.
+ * The i18n key of the next-step hint for `err`. An unreachable app server says so. In the
+ * browser, "unsupported" is about the browser build and external players are not offered, so
+ * the hint stops at what is not supported (FW-ERROR-HINT-LEAD).
+ */
+function hintKey(err: RpcError): string {
+  if (isServerUnreachable(err)) return 'errorHintServerUnreachable';
+  if (err.code === 'unsupported' && !isDesktop) return 'errorHintUnsupportedWeb';
+  return ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal';
+}
+
+/**
+ * Description for an error toast. For an error from the core, the translated next step for its
+ * code leads, and the raw message (the core's English text, a browser error) follows in small
+ * print for support. An error the UI raised itself (a plain Error, often already translated,
+ * such as "That download is not a file") says what went wrong in its own words: its message
+ * leads and no code hint is guessed (FW-ERROR-HINT-LEAD). `redact` strips credentials from the
+ * raw text where it may carry a provider URL.
  */
 export function errorDescription(error: unknown, redact?: (text: string) => string): ReactNode {
   const err = RpcError.from(error);
-  const hint = i18next.t(isServerUnreachable(err) ? 'errorHintServerUnreachable' : (ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal'), { ns: 'common' });
   const raw = (redact ? redact(err.message) : err.message).trim();
+  if (error instanceof Error && !(error instanceof RpcError) && raw) {
+    return (
+      <span dir="auto" data-error-message="">
+        {raw}
+      </span>
+    );
+  }
+  const hint = i18next.t(hintKey(err), { ns: 'common' });
   return (
     <>
       {hint}
@@ -168,7 +189,7 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
         <h2 className={cn(size === 'page' ? 'text-title-sm' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code] ?? 'errorTitleInternal')}</h2>
         {unreachable && <p className="text-sm break-words text-fg-muted">{t('errorBodyServerUnreachable')}</p>}
         <p className="text-sm text-fg">
-          {unreachable ? t('errorHintServerUnreachable') : (hint ?? t(ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal'))}
+          {unreachable ? t('errorHintServerUnreachable') : (hint ?? t(hintKey(err)))}
         </p>
         {/* The code and raw message are what support asks for; they stay folded away so the translated text leads. */}
         <details className="text-xs text-fg-subtle">

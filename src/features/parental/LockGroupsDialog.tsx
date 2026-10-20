@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { useRpcQuery } from '@/api/query';
 import { rpc, RpcError } from '@/api/transport';
 import type { ContentType, ParentalLock, ParentalLockTarget, ParentalStatus, Source } from '@/api/types';
-import { Badge, Button, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, Tabs, cn, toast, tabPanelProps, useListVirtualizer, errorDescription } from '@/ui';
+import { Badge, Button, Checkbox, Dialog, EmptyState, ErrorState, SearchInput, Skeleton, Tabs, cn, toast, tabPanelProps, useListVirtualizer, errorDescription } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { useContentTypeText } from './labels';
@@ -366,12 +366,12 @@ function GroupList({
                   )}
                   data-testid="lock-group-row"
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={checked}
                     disabled={r.auto}
                     onChange={(e) => onToggle(r.id, r.name, e.target.checked)}
-                    className="size-4 shrink-0 accent-[var(--color-accent)] focus-visible:outline-none"
+                    // The row draws the focus ring.
+                    className="focus-visible:shadow-none focus-visible:outline-none"
                   />
                   <span dir="auto" className={cn('min-w-0 flex-1 truncate text-match-parent', checked ? 'text-fg' : 'text-fg-muted')}>
                     {r.name}

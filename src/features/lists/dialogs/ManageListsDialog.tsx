@@ -171,7 +171,7 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
                   data-sort-part="home"
                   pressed={list.onDashboard}
                   label={t('showOnHome', { list: list.name })}
-                  title={list.onDashboard ? t('onHome') : t('notOnHome')}
+                  tooltip={list.onDashboard ? t('onHome') : t('notOnHome')}
                   icon={<LayoutDashboard className={cn('size-4', list.onDashboard && 'text-accent')} />}
                   onClick={() => actions.setOnDashboard(list, !list.onDashboard)}
                 />

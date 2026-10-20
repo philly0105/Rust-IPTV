@@ -113,8 +113,9 @@ describe('SearchInput', () => {
     const onChange = vi.fn();
     render(<SearchInput value="news" onChange={onChange} size="sm" />);
     const clear = screen.getByRole('button', { name: 'Clear search' });
-    // 28 px regardless of the 15 px root font size (h-6 was 22.5 px, under WCAG 2.5.8's 24 px).
-    expect(clear.className).toContain('size-[28px]');
+    // 28 px at 100 % against the 15 px root, and never under WCAG 2.5.8's 24 px at the smallest UI
+    // scale (h-6 was 22.5 px). Written in rem so it follows the scale, but not compact density.
+    expect(clear.className).toContain('size-[calc(28rem/15)]');
     expect(clear.className).not.toMatch(/h-6|w-6/);
     fireEvent.click(clear);
     expect(onChange).toHaveBeenCalledWith('');

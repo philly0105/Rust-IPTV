@@ -182,7 +182,8 @@ function DownloadRowImpl({ download: d, source, actions, busy, tabbable = false,
               size="sm"
               variant={a === actions[0] ? 'secondary' : 'ghost'}
               label={t(k('action', a) + 'Aria', { title: d.title })}
-              title={SHORTCUT_KEYS[a] ? `${t(k('action', a))} (${SHORTCUT_KEYS[a]})` : t(k('action', a))}
+              tooltip={t(k('action', a))}
+              shortcut={SHORTCUT_KEYS[a]?.toLowerCase()}
               icon={<Icon size={16} aria-hidden />}
               disabled={busy}
               tabIndex={tabbable ? 0 : -1}

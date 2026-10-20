@@ -10,7 +10,7 @@ import { TmdbAttribution } from '../components/TmdbAttribution';
 import { TmdbRail } from '../components/TmdbRail';
 import { useSettings } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { EmptyState, Poster, Skeleton, buttonClass, cn } from '@/ui';
+import { EmptyState, Poster, Skeleton, TEXT_LINK, buttonClass, cn } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 const BIO_CLAMP = 600;
@@ -92,7 +92,7 @@ export function ActorPage() {
               <div className="max-w-[72ch]">
                 <p className={cn('whitespace-pre-line text-[calc(15rem/15)] leading-relaxed text-fg-muted', !expanded && long && 'line-clamp-6')}>{p.biography}</p>
                 {long && (
-                  <button type="button" className="mt-1 text-sm font-medium text-accent hover:underline" onClick={() => setExpanded((v) => !v)}>
+                  <button type="button" className={cn(TEXT_LINK, 'mt-1 text-sm')} onClick={() => setExpanded((v) => !v)}>
                     {expanded ? t('showLess') : t('showMore')}
                   </button>
                 )}

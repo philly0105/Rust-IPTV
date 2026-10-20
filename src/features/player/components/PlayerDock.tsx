@@ -6,6 +6,8 @@ import { useInRouterContext, useNavigate } from 'react-router';
 
 import '../player.css';
 
+import { Tooltip } from '@/ui/Tooltip';
+
 import { cn } from '../cn';
 import { bindExternalEvents } from '../external';
 import { bindRecovery } from '../reconnect';
@@ -94,16 +96,17 @@ function RouterExpand({ label }: { label: string }) {
 
 function ExpandBase({ label, onExpand }: { label: string; onExpand(): void }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onExpand}
-      onPointerDown={(e) => e.stopPropagation()}
-      className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
-    >
-      <Maximize2 className="size-4" />
-    </button>
+    <Tooltip content={label} describe={false}>
+      <button
+        type="button"
+        aria-label={label}
+        onClick={onExpand}
+        onPointerDown={(e) => e.stopPropagation()}
+        className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
+      >
+        <Maximize2 className="size-4" />
+      </button>
+    </Tooltip>
   );
 }
 
@@ -314,28 +317,29 @@ export const PlayerDock = memo(function PlayerDock() {
           onPointerUp={onDragEnd}
           onPointerCancel={onDragEnd}
         >
-          <button
-            type="button"
-            aria-label={t('dragToMove')}
-            title={t('dragToMove')}
-            onKeyDown={(e) => {
-              const step = e.shiftKey ? 64 : 16;
-              const map: Record<string, [number, number]> = {
-                ArrowLeft: [-step, 0],
-                ArrowRight: [step, 0],
-                ArrowUp: [0, -step],
-                ArrowDown: [0, step],
-              };
-              const d = map[e.key];
-              if (!d) return;
-              e.preventDefault();
-              e.stopPropagation();
-              nudge(d[0], d[1]);
-            }}
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:text-fg"
-          >
-            <GripHorizontal className="size-4" />
-          </button>
+          <Tooltip content={t('dragToMove')} describe={false}>
+            <button
+              type="button"
+              aria-label={t('dragToMove')}
+              onKeyDown={(e) => {
+                const step = e.shiftKey ? 64 : 16;
+                const map: Record<string, [number, number]> = {
+                  ArrowLeft: [-step, 0],
+                  ArrowRight: [step, 0],
+                  ArrowUp: [0, -step],
+                  ArrowDown: [0, step],
+                };
+                const d = map[e.key];
+                if (!d) return;
+                e.preventDefault();
+                e.stopPropagation();
+                nudge(d[0], d[1]);
+              }}
+              className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:text-fg"
+            >
+              <GripHorizontal className="size-4" />
+            </button>
+          </Tooltip>
           {source?.isLive && <span className="size-1.5 shrink-0 rounded-full bg-live" aria-hidden />}
           <span
             className="flex min-w-0 flex-1 text-sm font-medium text-fg"
@@ -346,16 +350,17 @@ export const PlayerDock = memo(function PlayerDock() {
             {miniZap && source ? <ZapHeaderLine title={source.title} /> : <span className="min-w-0 truncate">{source?.title}</span>}
           </span>
           <ExpandButton label={t('expand')} />
-          <button
-            type="button"
-            aria-label={t('close')}
-            title={t('close')}
-            onClick={() => usePlayerStore.getState().stop()}
-            onPointerDown={(e) => e.stopPropagation()}
-            className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
-          >
-            <X className="size-4" />
-          </button>
+          <Tooltip content={t('close')} describe={false}>
+            <button
+              type="button"
+              aria-label={t('close')}
+              onClick={() => usePlayerStore.getState().stop()}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
+            >
+              <X className="size-4" />
+            </button>
+          </Tooltip>
         </div>
         <div ref={miniSlotRef} className={cn('relative bg-black', isRadio ? 'h-16' : mode === 'embedded-mpv' ? 'aspect-[16/11]' : 'aspect-video')} />
       </div>

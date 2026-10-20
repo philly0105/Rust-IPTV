@@ -4,10 +4,26 @@
  */
 
 export { cn } from './cn';
-export { Button, IconButton, buttonClass } from './Button';
+export { Button, IconButton, TOUCH_TARGET, buttonClass } from './Button';
 export type { ButtonProps, ButtonSize, ButtonVariant, IconButtonProps } from './Button';
-export { Input, SearchInput, Select, Textarea, Toggle } from './Field';
-export type { InputProps, SearchInputProps, SelectOption, SelectProps, TextareaProps, ToggleProps } from './Field';
+export { Checkbox, Input, Radio, RadioGroup, SearchInput, Select, Switch, Textarea, Toggle, fieldClass } from './Field';
+export type {
+  CheckboxProps,
+  InputProps,
+  RadioGroupOption,
+  RadioGroupProps,
+  RadioProps,
+  SearchInputProps,
+  SelectOption,
+  SelectProps,
+  SwitchProps,
+  TextareaProps,
+  ToggleProps,
+} from './Field';
+export { SEGMENT_TRACK, SegmentedControl, segmentClass } from './Segmented';
+export type { SegmentedControlProps, SegmentedOption, SegmentedTone } from './Segmented';
+export { BackButton, Page, PageHeader, SectionHeader } from './Page';
+export type { BackButtonProps, PageHeaderProps, PageProps, PageWidth, SectionHeaderProps } from './Page';
 export { Dialog } from './Dialog';
 export type { DialogProps, DialogSize } from './Dialog';
 export { Tabs, tabPanelProps } from './Tabs';
@@ -23,8 +39,8 @@ export { useListVirtualizer } from './virtualizer';
 export type { GridAspect, VirtualGridProps } from './VirtualGrid';
 export { ToastProvider, ToastViewport, dismissToast, focusToasts, toast, useToast, useToastStore } from './Toast';
 export type { ToastOptions, ToastRecord, ToastVariant } from './Toast';
-export { Badge, Kbd, LiveBadge, ProgressBar, comboKeys } from './Misc';
-export type { BadgeProps, BadgeVariant, KbdProps, ProgressBarProps } from './Misc';
+export { Badge, Kbd, LivePill, MetaLine, ProgressBar, TEXT_LINK, comboKeys } from './Misc';
+export type { BadgeProps, BadgeVariant, KbdProps, LivePillProps, MetaLineProps, ProgressBarProps } from './Misc';
 export { Poster, PosterWidthContext, hueOf, initialsOf } from './Poster';
 export type { PosterAspect, PosterProps } from './Poster';
 export { QUARTER_BLUR, useImageChain, whenIdle } from './image';
@@ -34,8 +50,9 @@ export { Pagination, pageWindow } from './Pagination';
 export type { PaginationProps } from './Pagination';
 export { Menu } from './Menu';
 export type { MenuAction, MenuItem, MenuProps, MenuSeparator } from './Menu';
-export { Tooltip } from './Tooltip';
-export type { TooltipProps } from './Tooltip';
+export { Tooltip, mergeRefs, useMergedRef, useTooltip } from './Tooltip';
+export type { TooltipOptions, TooltipPlacement, TooltipProps, TooltipTone } from './Tooltip';
+export { usePresence } from './presence';
 export { focusableIn, isTypingTarget } from './focus';
 export { DENSITY_FACTOR, scalePx, scaleRowPx, setUiScaleState, useDensity, useRowHeight, useScaledPx, useUiScale } from './scale';
 export { CARD_ART, CARD_ART_CURSOR, CARD_ROOT } from './card';

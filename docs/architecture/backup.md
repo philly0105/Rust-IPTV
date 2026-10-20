@@ -28,7 +28,7 @@ One entry per source, in `sources.list` order. Common fields: `portalType`, `exp
   - `favorites`: channel URLs, in favorite order.
   - `recentlyViewed`: `{source:'m3u', id, url, title, category_id:'live', added_at, poster_url?, tvg_id?, group_title?}`.
   - `hiddenGroupTitles`: names of hidden categories.
-- xtream: `connection {serverUrl, username, password?, userAgent?, referrer?, origin?}`. The three headers are a Tsrust extension, named as in the Stalker connection, written only when the source sets them and read back on import. User state:
+- xtream: `connection {serverUrl, username, password?, userAgent?, referrer?, origin?}`. The three headers are a Tsrust extension, named as in the Stalker connection, written only when the source sets them and `includeSecrets` is true (a provider may tie them to the account), and read back on import. User state:
   - `hiddenCategories {categoryType: live|movies|series, xtreamId}`.
   - `favorites {contentType: live|movie|series, xtreamId, addedAt, position}`.
   - `recentlyViewed {contentType, xtreamId, viewedAt}`.
@@ -119,7 +119,7 @@ Every other settings field is in `backup::APP_SETTING_EXCLUDED` with its reason,
 
 The remote pairing token is a secret and never appears in a backup.
 
-Secrets (the Xtream password, and the Stalker password and signatures) are written only when `includeSecrets` is true. Nothing in this module logs a connection or a secret. Log lines carry counts and source ids only.
+Secrets (the Xtream password and request headers, and the Stalker password and signatures) are written only when `includeSecrets` is true. Nothing in this module logs a connection or a secret. Log lines carry counts and source ids only.
 
 ## Import
 

@@ -1731,6 +1731,40 @@ async fn channel_guide_shifts_round_trip() {
     );
 }
 
+/// Xtream request headers are exported only with `includeSecrets`, like the
+/// password: a provider may tie them to the account.
+#[tokio::test]
+async fn xtream_request_headers_export_only_with_secrets() {
+    let (_d, st) = app(false).await;
+    let r = router();
+    let manifest = json!({
+        "kind": "iptvnator-playlist-backup",
+        "version": 1,
+        "playlists": [{
+            "portalType": "xtream", "exportedId": "xt-h", "title": "Header Xtream",
+            "connection": {
+                "serverUrl": "http://127.0.0.1:9/xtream", "username": "h", "password": "p",
+                "userAgent": "Agent/1", "referrer": "http://ref.example/", "origin": "http://o.example"
+            },
+            "userState": { "favorites": [], "recentlyViewed": [], "playbackPositions": [] }
+        }]
+    })
+    .to_string();
+    import(&r, &st, &manifest, "merge").await;
+    let without = export(&r, &st, false).await;
+    let conn = &without["playlists"][0]["connection"];
+    for key in ["password", "userAgent", "referrer", "origin"] {
+        assert!(conn.get(key).is_none(), "{key}: {conn}");
+    }
+    assert_eq!(conn["username"], "h");
+    let with = export(&r, &st, true).await;
+    let conn = &with["playlists"][0]["connection"];
+    assert_eq!(conn["password"], "p");
+    assert_eq!(conn["userAgent"], "Agent/1");
+    assert_eq!(conn["referrer"], "http://ref.example/");
+    assert_eq!(conn["origin"], "http://o.example");
+}
+
 /// Review round 3: the Tsrust position extension (M3U and Stalker) follows
 /// the same rules as the Xtream positions: an older dated row and an undated
 /// row never overwrite newer stored progress; an undated row fills a gap.

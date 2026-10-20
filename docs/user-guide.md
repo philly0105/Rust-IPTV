@@ -265,7 +265,7 @@ Settings > Backup and storage exports and imports the IPTVnator playlist backup 
 
 A backup made here also keeps My List, your custom channel lists, channel renames and hidden channels, series recording rules, the watch history behind the Stats page, the subtitle style and the Hide watched setting of the movie and series grids, parental locks and the parental options, never the PIN. While parental controls are locked, a "Replace" import is refused until you unlock them with the PIN.
 
-Export leaves passwords out unless you tick "Include passwords and keys". Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See [backup.md](architecture/backup.md).
+Export leaves passwords and Xtream request headers out unless you tick "Include passwords and keys". Xtream and Stalker entries are re-synced on import. If a portal cannot be reached, the source is still added, and its favorites and history are applied once the portal has synced (at the latest on the next app start after a successful refresh). See [backup.md](architecture/backup.md).
 
 ## Using it in a browser (server mode)
 

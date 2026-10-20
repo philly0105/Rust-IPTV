@@ -75,5 +75,9 @@
   "openSourceGuide": "Open {{name}}",
   "shortcutDigits": "Jump to a channel by its number",
   "resultCount_one": "{{count, number}} result",
-  "resultCount_other": "{{count, number}} results"
+  "resultCount_other": "{{count, number}} results",
+  "previewNext": "Next",
+  "genreFilterOn": "Filtered to {{genre}}. Matching programmes: {{count, number}}",
+  "genreFilterOff": "Genre filter off",
+  "allGenres": "All genres"
 }

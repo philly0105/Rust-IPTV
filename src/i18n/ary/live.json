@@ -257,5 +257,6 @@
   "pickerShow": "بيّن",
   "filterSources": "فلتر المصادر",
   "recentStations": "تشغّلو مؤخرا",
-  "playNamed": "شغّل {{name}}"
+  "playNamed": "شغّل {{name}}",
+  "highlightedChannel": "اللي مختار"
 }

@@ -5,7 +5,7 @@ import type { Channel, Page, PageQuery } from '@/api/types';
 
 import { EpgGridPage, GRID_SLOT_MIN, GRID_SLOT_PX } from '../components/EpgGridPage';
 import { EpgRibbon } from '../components/EpgRibbon';
-import { HOUR, MINUTE } from '../lib/epgTime';
+import { floorLocal, HOUR, MINUTE } from '../lib/epgTime';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep } from '../lib/rtl';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
@@ -115,6 +115,18 @@ afterEach(() => {
 
 const px = (v: string) => Number.parseFloat(v);
 
+/**
+ * Runs the clock 15 minutes into a local half hour (it keeps ticking): the guide then rests one
+ * slot into its window, whatever the time of the run. Just past a half hour it rests a slot
+ * earlier, at 0, where the scroll's sign says nothing.
+ */
+function midSlotClock(): number {
+  const real = Date.now.bind(Date);
+  const shift = floorLocal(real(), 30) + 15 * MINUTE - real();
+  vi.spyOn(Date, 'now').mockImplementation(() => real() + shift);
+  return Date.now();
+}
+
 describe('rtl helpers', () => {
   it('map inline-start offsets, scrollLeft and arrow keys to the reading direction', () => {
     expect(inlineStart(40, false)).toEqual({ left: 40 });
@@ -135,7 +147,7 @@ describe('rtl helpers', () => {
 describe('EpgGridPage RTL (F2)', () => {
   it('positions blocks and the now-line from the right and scrolls with a negative scrollLeft', async () => {
     document.documentElement.dir = 'rtl';
-    const now = Date.now();
+    const now = midSlotClock();
     rpcMock.handlers['epg.grid'] = gridHandler(now);
     renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
 
@@ -151,13 +163,14 @@ describe('EpgGridPage RTL (F2)', () => {
     expect(right).toBeGreaterThan(CHANNEL_COL + 30 * GRID_PX_PER_MIN - 2);
     expect(right).toBeLessThan(CHANNEL_COL + 60 * GRID_PX_PER_MIN);
 
-    // initial scroll to just before now runs once the grid mounts, counted down from 0 in RTL
+    // The initial scroll to the half hour now is in (one slot into the window, now 15 minutes
+    // past it) runs once the grid mounts, counted down from 0 in RTL.
     await waitFor(() => expect(grid.scrollLeft).toBeLessThan(0));
-    expect(-grid.scrollLeft).toBeCloseTo(right + 1 - CHANNEL_COL - GRID_SLOT_PX, 0);
+    expect(-grid.scrollLeft).toBe(GRID_SLOT_PX);
   });
 
   it('keeps physical left offsets and a positive scrollLeft in LTR', async () => {
-    const now = Date.now();
+    const now = midSlotClock();
     rpcMock.handlers['epg.grid'] = gridHandler(now);
     renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
     const cell = await screen.findByRole('button', { name: /Now c0/ });

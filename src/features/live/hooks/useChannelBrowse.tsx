@@ -128,8 +128,14 @@ export function useChannelBrowse({ enabled, sourceId, scope, query, limit }: Cha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searching, search.data, group, listId, list.data, sourceId, limit, favorites, recent, refEntries, browse.data, items.map((q) => q.dataUpdatedAt + q.errorUpdatedAt).join()]);
 
-  const refs = useMemo((): ItemRef[] => channels.map((c) => c.ref), [channels]);
-  const nowNext = useRpcQuery('epg.nowNext', { refs, withDescription: false }, { enabled: enabled && refs.length > 0, staleTime: STALE });
+  // Favorites and recent know their refs before any `catalog.item` answers: the guide is asked
+  // for those once. Keyed on the channels as they arrived, it was asked again for every wave of
+  // answers (6, 12, 18 … 60 refs, ten requests for one page), and blanked the titles between.
+  const refs = useMemo(
+    (): ItemRef[] => (favorites || recent ? refEntries.slice(0, limit).map((e) => e.ref) : channels.map((c) => c.ref)),
+    [favorites, recent, refEntries, limit, channels],
+  );
+  const nowNext = useRpcQuery('epg.nowNext', { refs, withDescription: false }, { enabled: enabled && refs.length > 0, staleTime: STALE, keepPrevious: true });
   const itemsPending = (favorites || recent) && items.slice(0, limit).some((q) => q.isPending);
 
   return {

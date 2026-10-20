@@ -15,7 +15,7 @@ import { resetChannelListMemory } from '../components/ChannelList';
 import { ChannelRow } from '../components/ChannelRow';
 import { ContextMenu, tidyEntries, type MenuEntry } from '../components/ContextMenu';
 import { LivePage } from '../components/LivePage';
-import { ScopePicker } from '../components/ScopePicker';
+import { preloadScopePickerList, ScopePicker } from '../components/ScopePicker';
 import { StageIdle } from '../components/StageIdle';
 import { LONG_PRESS_MS } from '../hooks/useLongPress';
 import { liveViewOf } from '../hooks/useLiveViewChannels';
@@ -224,6 +224,8 @@ describe('Favorites and Recently watched (LG-12)', () => {
 });
 
 describe('the scope picker (LG-11)', () => {
+  // The popover's list is its own chunk (SH-10); with it in, the picker opens it at once.
+  beforeAll(() => preloadScopePickerList());
   const sections = [
     { id: 'all', options: [{ value: '', label: 'All channels' }] },
     { id: 'groups', heading: 'Groups', options: Array.from({ length: 12 }, (_, i) => ({ value: `g${i}`, label: `Group ${i}`, count: i })) },

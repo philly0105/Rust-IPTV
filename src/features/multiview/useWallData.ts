@@ -14,6 +14,7 @@ import { itemKey, type EpgNowNext, type ItemKey, type ParentalMode, type Source 
 import { accountStatusQuery } from './accountStatus';
 import { gateItem } from './addChannel';
 import { usePlayerStore } from './deps';
+import { fillTileLogo } from './store';
 import type { MultiviewTile } from './types';
 
 /** Sources by id, plus whether the list has arrived (a tile of an unknown source is stale only then). */
@@ -113,6 +114,32 @@ export function inUse(l: SourceLoad): number {
 /** Sources whose streams in use outnumber the account's connections. */
 export function overLimit(loads: readonly SourceLoad[]): SourceLoad[] {
   return loads.filter((l) => l.max > 0 && inUse(l) > l.max);
+}
+
+/**
+ * Tiles saved without a logo get their channel's from the catalog (the channel record Live reads,
+ * shared through the query cache), once: the logo is then saved with the wall (`fillTileLogo`).
+ */
+export function useTileLogoBackfill(tiles: readonly MultiviewTile[]): void {
+  const bare = tiles.filter((t) => !t.logo);
+  const items = useQueries({
+    queries: bare.map((t) => ({
+      queryKey: rpcKey('catalog.item', { ref: t.ref }),
+      queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('catalog.item', { ref: t.ref }, { signal })) as RpcResult<'catalog.item'>,
+      staleTime: 5 * 60_000,
+      retry: false,
+    })),
+  });
+  const logos = bare.map((t, i) => {
+    const item = items[i]?.data;
+    return item && 'logoUrl' in item && item.logoUrl ? ([t.ref, item.logoUrl] as const) : null;
+  });
+  const signature = logos.map((l) => l?.[1] ?? '').join('\n');
+  useEffect(() => {
+    for (const l of logos) if (l) fillTileLogo(l[0], l[1]);
+    // `signature` names the logos found; the tiles they belong to come with them.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
 }
 
 /** The programme on air per tile (guide data), refreshed every minute. */

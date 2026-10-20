@@ -92,6 +92,8 @@ export interface GuideRowProps {
   playing: boolean;
   /** The genre the guide is filtered to: cells of other genres step back (CB-GUIDE-GENRE). */
   genreFilter: Genre | null;
+  /** Each genre's name in the UI language: a cell's accessible name ends with its genre. */
+  genreNames: Record<Genre, string>;
   /**
    * The keyboard cursor, when it is on this row: the start of the programme it is on, or '' when
    * it is on none (the channel cell takes it). null when the cursor is on another row.
@@ -120,6 +122,7 @@ export const GuideRow = memo(function GuideRow({
   highlighted,
   playing,
   genreFilter,
+  genreNames,
   cursorStart,
   lang,
   stripCountryPrefix,
@@ -195,26 +198,34 @@ export const GuideRow = memo(function GuideRow({
             {compact ? (
               // Phones: the logo over the number; the name is the button's label and tooltip.
               <>
-                <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
-                <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-accent' : 'text-fg-muted')}>{ch.number ?? ''}</span>
+                {/* Catch-up rides on the logo's corner, as on the wide guide. */}
+                <span className="relative shrink-0">
+                  <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
+                  {hasUsableArchive(ch, kind) ? (
+                    <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
+                      <History size={10} aria-label={t('archive')} />
+                    </span>
+                  ) : null}
+                </span>
+                <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <span className="sr-only">{playing ? `${chName}, ${t('playingNow')}` : chName}</span>
-                {hasUsableArchive(ch, kind) ? <History className="absolute end-1 top-1 size-3 text-fg-subtle" aria-label={t('archive')} /> : null}
               </>
             ) : (
               <>
-                <span className={cn('w-7 shrink-0 text-end font-numeric text-sm tabular-nums', playing ? 'text-accent' : 'text-fg-muted')}>{ch.number ?? ''}</span>
+                {/* Playing: the tick and the playing mark are the amber; the number steps up to the text colour. */}
+                <span className={cn('w-7 shrink-0 text-end font-numeric text-sm tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <span className="relative shrink-0">
                   <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                   {/* Catch-up rides on the logo's corner, so the name keeps the column's width. */}
                   {hasUsableArchive(ch, kind) ? (
-                    <span className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
+                    <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
                       <History size={10} aria-label={t('archive')} />
                     </span>
                   ) : null}
                 </span>
                 <span className={cn('min-w-0 flex-1 truncate text-body-sm text-fg', playing && 'font-semibold')}>{chName}</span>
                 {playing ? (
-                  <span className="inline-flex shrink-0 text-accent" data-testid="guide-playing-mark">
+                  <span className="inline-flex shrink-0 text-accent-mark" data-testid="guide-playing-mark">
                     <AudioLines size={14} aria-label={t('playingNow')} />
                   </span>
                 ) : null}
@@ -241,8 +252,9 @@ export const GuideRow = memo(function GuideRow({
             </span>
           </div>
         ) : programs.length === 0 ? (
-          // A flat, quiet band: a wall of dashed boxes read as a broken guide (LG-10).
-          <div className="absolute inset-y-1 inset-x-0.5 flex items-center rounded-md bg-surface-2/40 text-xs text-fg-subtle">
+          // A flat, quiet band: a wall of dashed boxes read as a broken guide (LG-10). Opaque, like
+          // the cells, so the now line (drawn before the rows) does not cross its label.
+          <div data-testid="no-guide-band" className="absolute inset-y-1 inset-x-0.5 flex items-center rounded-md bg-surface-2 text-xs text-fg-subtle dark:bg-surface">
             {/* Sticks just past the channel column, so a grid scrolled to now still shows it. */}
             <span data-testid="no-guide-label" className="sticky px-3" style={{ insetInlineStart: channelCol }}>
               {t('noGuideShort')}
@@ -271,7 +283,8 @@ export const GuideRow = memo(function GuideRow({
                   data-cell-row={index}
                   data-start={p.start}
                   tabIndex={cursorStart === p.start ? 0 : -1}
-                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}`}
+                  // The genre too: the filter dims cells, which a screen reader does not see.
+                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}${genre ? `, ${genreNames[genre]}` : ''}`}
                   // The full title on hover: a narrow or clipped cell truncates it (L3-visual-12).
                   title={p.title}
                   onPointerDown={() => {
@@ -289,15 +302,18 @@ export const GuideRow = memo(function GuideRow({
                   // Flat fills with 2 px gutters, no outlines: a wall of boxed cells read as a spreadsheet.
                   className={cn(
                     'absolute top-1 bottom-1 overflow-clip rounded-md px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus',
+                    // Every cell a now line can cross is opaque: the line (drawn before the rows)
+                    // shows only in the gutters, the ruler and the airing cell's foot, so it never
+                    // strikes through a title or a time. A see-through airing cell let it through
+                    // every glyph gap.
                     muted
-                      ? 'bg-transparent text-fg-subtle hover:bg-hover'
-                      : // On now: the see-through active layer, so the live now line (drawn before the
-                        // rows) shows through at nearly full strength; an opaque or 85 % fill greyed
-                        // it out across the whole now column. No amber wash either.
-                        // Light rows sit on the grey page: there a cell is the white panel; dark
-                        // keeps the lifted surface step.
+                      ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
+                        'bg-bg text-fg-subtle hover:bg-surface'
+                      : // On now: the raised cell (white with a shadow in light, the next surface step
+                        // in dark), never a grey or amber wash. Light rows sit on the grey page:
+                        // there a cell is the white panel; dark keeps the lifted surface step.
                         b.when === 'now'
-                        ? 'bg-active font-medium text-fg'
+                        ? 'bg-surface font-medium text-fg shadow-1 hover:bg-surface-3 dark:bg-surface-3 dark:hover:bg-pressed'
                         : b.when === 'past'
                           ? 'bg-surface/50 text-fg-muted hover:bg-surface dark:bg-surface-2/50 dark:hover:bg-surface-2'
                           : 'bg-surface text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
@@ -315,6 +331,16 @@ export const GuideRow = memo(function GuideRow({
                       data-testid="cell-progress"
                       className="absolute start-0 bottom-0 h-0.5 bg-accent-mark"
                       style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
+                    />
+                  ) : null}
+                  {/* The now line's stub at the cell's foot: the line runs on in the gutters
+                      above and below, and the opaque cell keeps it off the title. */}
+                  {b.when === 'now' ? (
+                    <span
+                      aria-hidden
+                      data-testid="cell-now-tick"
+                      className="absolute bottom-0 h-1.5 w-0.5 bg-live"
+                      style={{ insetInlineStart: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 2}px))` }}
                     />
                   ) : null}
                   {/* A show that began before the visible edge keeps its title readable: the text sticks

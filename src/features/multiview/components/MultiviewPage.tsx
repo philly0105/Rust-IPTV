@@ -13,7 +13,7 @@ import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useM
 import type { MultiviewLayout, MultiviewTile } from '../types';
 import { focusTileOf } from '../paths';
 import { useMainPlayerHandoff } from '../useMainPlayerHandoff';
-import { overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources } from '../useWallData';
+import { overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
 import { focusSlot, useWallKeyboard } from '../useWallKeyboard';
 import { useWallFullscreen } from '../useWallFullscreen';
 import { LimitBanners, loadKey, MainPlayingBanner } from './Banners';
@@ -120,6 +120,7 @@ export function MultiviewPage() {
     [sources.loaded, sources.byId, tiles],
   );
   const programmes = useNowPlaying(tiles);
+  useTileLogoBackfill(tiles);
   const soundSlot = tiles.findIndex((x) => x.key === audioKey);
   const silent = muted || mainPlaying;
 

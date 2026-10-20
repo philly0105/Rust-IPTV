@@ -28,6 +28,8 @@ Every action keeps these invariants:
 
 Actions: `add`, `remove`, `replace` (keeps the tile key and slot, refuses a channel on another tile), `swap`, `setAudio`, `setLayout`, `clear`.
 
+A tile saved without a logo (a wall from an older version, or one added where only the name was known) gets its channel's logo once the page is open: `useTileLogoBackfill` (`useWallData.ts`) asks `catalog.item` for those tiles, under the same query key as the channel pickers, and `fillTileLogo` writes the logo into the tile, so it is saved with the wall. A tile that has a logo keeps it, and is not asked about.
+
 Undo helpers for the toasts:
 
 - `reinsertTile(tile, index, hadSound)`: refused when the wall is full or the channel is back.

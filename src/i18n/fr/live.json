@@ -239,5 +239,6 @@
   "pickerShow": "Afficher",
   "filterSources": "Filtrer les sources",
   "recentStations": "Écoutées récemment",
-  "playNamed": "Lire {{name}}"
+  "playNamed": "Lire {{name}}",
+  "highlightedChannel": "En surbrillance"
 }

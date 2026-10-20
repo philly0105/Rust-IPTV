@@ -20,6 +20,7 @@ import { EpgRibbon } from '@/features/live/components/EpgRibbon';
 import { LiveStageColumn } from '@/features/live/components/LiveStageColumn';
 import { StageIdle } from '@/features/live/components/StageIdle';
 import { useLastChannel } from '@/features/live/hooks/useLastChannel';
+import { useListEngaged } from '@/features/live/hooks/useListEngaged';
 import { intlLocale } from '@/lib/intl';
 
 import {
@@ -104,10 +105,6 @@ export function ListPage() {
   const [reported, setReported] = useState<{ key: string; channel: Channel | undefined }>({ key: '', channel: undefined });
   const onActiveChange = useCallback((channel: Channel | undefined) => setReported({ key: listId, channel }), [listId]);
   const activeChannel = reported.key === listId && reported.channel && inList.has(itemKey(reported.channel.ref)) ? reported.channel : undefined;
-  const ribbonChannel = playingChannel ?? activeChannel;
-  const ribbonKind: SourceKind | undefined = ribbonChannel ? sourceById.get(ribbonChannel.ref.sourceId)?.kind : undefined;
-  const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
-  const watchingArchive = !!playerSource && !playerSource.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
   const [mapping, setMapping] = useState<Channel | null>(null);
 
   const play = useCallback(
@@ -145,6 +142,23 @@ export function ListPage() {
     enabled: !stageBusy && rowsAreThisList && inList.size > 0,
     epgOffsetMinutes: prefs.epgOffsetMinutes,
   });
+  // While nothing plays, the idle card and the ribbon under it describe one channel: the one last
+  // watched, until the user moves into the list; from then on the list's cursor row (as on Live).
+  const [listEngaged, onListFocus] = useListEngaged(listId);
+  const cursorChannel = listEngaged ? activeChannel : undefined;
+  const cursorIndex = cursorChannel ? paged.loaded.find((l) => sameRef(l.channel.ref, cursorChannel.ref))?.index : undefined;
+  const idleCard = cursorChannel
+    ? { channel: cursorChannel, nowNext: cursorIndex === undefined ? undefined : paged.getNowNext(cursorIndex) }
+    : last?.channel
+      ? { channel: last.channel, nowNext: last.nowNext }
+      : undefined;
+  const idleChannel = stageBusy ? undefined : idleCard?.channel;
+  const ribbonChannel = playingChannel ?? idleChannel ?? activeChannel;
+  const ribbonKind: SourceKind | undefined = ribbonChannel ? sourceById.get(ribbonChannel.ref.sourceId)?.kind : undefined;
+  const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
+  const watchingArchive = !!playerSource && !playerSource.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
+  // The idle card's button starts the channel the ribbon describes: the ribbon leaves out its own.
+  const stageOffersChannel = !!idleChannel && !!ribbonChannel && sameRef(idleChannel.ref, ribbonChannel.ref);
 
   // `l` on a focused row: the picker for that row's channel.
   useAddToListShortcut(activeChannel, paged.getChannel);
@@ -461,6 +475,7 @@ export function ListPage() {
       <section
         aria-label={tl('channels')}
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:flex-none md:shrink-0 md:border-e"
+        onFocus={onListFocus}
       >
         {/* The list's name is in the header (and on its sidebar row): the bar holds the tools. */}
         <div className="flex items-center gap-2 border-b border-divider px-2 py-2">
@@ -536,7 +551,8 @@ export function ListPage() {
         idle={
           <StageIdle
             kind="live"
-            last={last?.channel ? { channel: last.channel, nowNext: last.nowNext } : undefined}
+            last={idleCard}
+            highlighted={!!cursorChannel}
             now={now}
             stripPrefix={prefs.stripCountryPrefix}
             epgOffsetMinutes={prefs.epgOffsetMinutes}
@@ -550,6 +566,7 @@ export function ListPage() {
             sourceKind={ribbonKind}
             watchingLive={watchingLive}
             watchingArchive={watchingArchive}
+            stageOffersChannel={stageOffersChannel}
             onPlayLive={(c) => play(c)}
             onMapEpg={setMapping}
             guideHref={ribbonChannel ? `/epg?${new URLSearchParams({ source: ribbonChannel.ref.sourceId, view: `list:${listId}`, focus: ribbonChannel.ref.itemId }).toString()}` : undefined}

@@ -233,5 +233,6 @@
   "pickerShow": "Tonen",
   "filterSources": "Bronnen filteren",
   "recentStations": "Onlangs beluisterd",
-  "playNamed": "{{name}} afspelen"
+  "playNamed": "{{name}} afspelen",
+  "highlightedChannel": "Gemarkeerd"
 }

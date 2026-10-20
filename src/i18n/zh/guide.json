@@ -74,5 +74,9 @@
   "noLiveChannelsHint": "它只有电影或剧集，因此节目指南为空。请选择有直播电视的来源。",
   "openSourceGuide": "打开 {{name}}",
   "shortcutDigits": "按编号跳到频道",
-  "resultCount_other": "{{count, number}} 条结果"
+  "resultCount_other": "{{count, number}} 条结果",
+  "previewNext": "接下来",
+  "genreFilterOn": "已按{{genre}}筛选。匹配的节目：{{count, number}} 个",
+  "genreFilterOff": "已关闭类型筛选",
+  "allGenres": "全部类型"
 }

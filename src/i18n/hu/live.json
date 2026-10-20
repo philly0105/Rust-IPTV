@@ -233,5 +233,6 @@
   "pickerShow": "Megjelenítés",
   "filterSources": "Források szűrése",
   "recentStations": "Nemrég hallgatott",
-  "playNamed": "{{name}} lejátszása"
+  "playNamed": "{{name}} lejátszása",
+  "highlightedChannel": "Kijelölt"
 }

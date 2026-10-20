@@ -257,5 +257,6 @@
   "pickerShow": "عرض",
   "filterSources": "تصفية المصادر",
   "recentStations": "شُغّلت مؤخرًا",
-  "playNamed": "تشغيل {{name}}"
+  "playNamed": "تشغيل {{name}}",
+  "highlightedChannel": "المحدد"
 }

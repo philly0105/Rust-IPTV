@@ -233,5 +233,6 @@
   "pickerShow": "Εμφάνιση",
   "filterSources": "Φιλτράρισμα πηγών",
   "recentStations": "Παίχτηκαν πρόσφατα",
-  "playNamed": "Αναπαραγωγή {{name}}"
+  "playNamed": "Αναπαραγωγή {{name}}",
+  "highlightedChannel": "Επιλεγμένο"
 }

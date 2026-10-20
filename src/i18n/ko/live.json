@@ -233,5 +233,6 @@
   "pickerShow": "표시",
   "filterSources": "소스 필터",
   "recentStations": "최근 재생",
-  "playNamed": "{{name}} 재생"
+  "playNamed": "{{name}} 재생",
+  "highlightedChannel": "선택됨"
 }

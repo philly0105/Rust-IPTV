@@ -239,5 +239,6 @@
   "pickerShow": "Mostrar",
   "filterSources": "Filtrar fontes",
   "recentStations": "Ouvidas recentemente",
-  "playNamed": "Reproduzir {{name}}"
+  "playNamed": "Reproduzir {{name}}",
+  "highlightedChannel": "Destacado"
 }

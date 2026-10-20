@@ -11,8 +11,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
 import { useToastStore } from '@/ui';
 
-import { defaultStart, EpgGridPage, extendDirection, GRID_EXTEND_EDGE_PX, GRID_SLOT_PX, nowLead } from '../../components/EpgGridPage';
-import { HOUR } from '../../lib/epgTime';
+import { defaultStart, EpgGridPage, extendDirection, GRID_EXTEND_EDGE_PX, GRID_SLOT_PX, nowScroll, rulerLabelCovered } from '../../components/EpgGridPage';
+import { HOUR, MINUTE } from '../../lib/epgTime';
 import { __resetGuideSourceForTests, rememberGuideSource } from '../lastSource';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
@@ -98,10 +98,34 @@ const focusedLabel = () => (document.activeElement as HTMLElement | null)?.getAt
 const atParam = () => Number(new URLSearchParams(router.location?.search).get('at'));
 
 describe('helpers', () => {
-  it('nowLead keeps one slot of the past, at most a quarter of a narrow track', () => {
-    expect(nowLead(0)).toBe(GRID_SLOT_PX); // not measured yet
-    expect(nowLead(812)).toBe(GRID_SLOT_PX); // a laptop's track
-    expect(nowLead(318)).toBe(80); // a phone's track beside the compact column
+  it('nowScroll starts the visible track on the half hour now is in, so rows open on whole cells', () => {
+    const px = GRID_SLOT_PX / 30;
+    const slot = new Date(2026, 9, 20, 17, 30).getTime();
+    const start = slot - 30 * MINUTE; // defaultStart: half an hour before the slot
+    // 5:46 PM: the track starts at 5:30, one slot in, and now sits 16 minutes into it.
+    expect(nowScroll(slot + 16 * MINUTE, start, px, 812)).toBe(GRID_SLOT_PX);
+    expect(nowScroll(slot + 16 * MINUTE, start, px, 0)).toBe(GRID_SLOT_PX); // not measured yet
+    // Just past the slot line the now pill would be cut by the channel column (":02 PM"): the
+    // track starts on the half hour before, and the pill sits a slot and two minutes in.
+    expect(nowScroll(slot + 2 * MINUTE, start, px, 812)).toBe(0);
+    expect(nowScroll(slot, start, px, 318)).toBe(0); // on the line itself
+    expect(nowScroll(slot + 8 * MINUTE, start, px, 318)).toBe(GRID_SLOT_PX); // 40 px in: room for the pill
+    // A track too narrow for the slot: a quarter of it before now instead, so now stays in view.
+    expect(nowScroll(slot + 29 * MINUTE, start, px, 160)).toBe(Math.round(GRID_SLOT_PX + 29 * px - 40));
+    // Before the window: never a negative scroll.
+    expect(nowScroll(start - HOUR, start, px, 812)).toBe(0);
+  });
+
+  it('rulerLabelCovered hides a label only where the now pill lands on it', () => {
+    // The 5:46 pill 80 px into the 5:30 slot leaves the short "5:30" whole.
+    expect(rulerLabelCovered(80, '5:46 PM', 0, '5:30')).toBe(false);
+    // On the slot line, or a few px in, it covers the label.
+    expect(rulerLabelCovered(4, '5:31 PM', 0, '5:30')).toBe(true);
+    // A long label reaches further.
+    expect(rulerLabelCovered(60, '12:42 PM', 0, '12:30 PM')).toBe(true);
+    // Just before the next slot's label, the pill does not touch it.
+    expect(rulerLabelCovered(115, '7:53 PM', 150, '8:00 PM')).toBe(false);
+    expect(rulerLabelCovered(140, '7:58 PM', 150, '8:00 PM')).toBe(true);
   });
 
   it('extendDirection moves the window only when scrolling toward a near edge', () => {
@@ -206,6 +230,11 @@ describe('phone layout (L1-guide-library-5, L1-guide-library-10)', () => {
     expect(sheet.className).toContain('bottom-0');
     const scrim = sheet.previousElementSibling as HTMLElement;
     expect(scrim.className).toContain('bg-scrim');
+    // In the overlay layer, not the page: in the page the mini player (later in the DOM, at the
+    // same z-index) covered the sheet and stayed bright over its scrim (review round 2).
+    expect(screen.getByTestId('epg-grid-page').contains(sheet)).toBe(false);
+    expect(sheet.closest('[data-portal-host]')).toBeTruthy();
+    expect(scrim.className).toContain('z-50');
     fireEvent.mouseDown(scrim);
     await waitFor(() => expect(screen.queryByTestId('program-popover')).toBeNull());
   });
@@ -249,6 +278,10 @@ describe('rows and windows without guide data (L1-guide-library-14, L1-perf-1)',
     expect(label.textContent).toBe('No guide data');
     expect(label.className).toContain('sticky');
     expect(label.style.insetInlineStart).toBe('220px');
+    // The band under it is opaque, so the now line drawn before the rows does not cross the label.
+    const band = screen.getAllByTestId('no-guide-band')[0]!;
+    expect(band.contains(label)).toBe(true);
+    expect(band.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
   });
 
   it('the no-guide notice floats over the grid and stays while the next window loads', async () => {

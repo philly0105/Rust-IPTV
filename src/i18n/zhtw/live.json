@@ -233,5 +233,6 @@
   "pickerShow": "顯示",
   "filterSources": "篩選來源",
   "recentStations": "最近播放",
-  "playNamed": "播放 {{name}}"
+  "playNamed": "播放 {{name}}",
+  "highlightedChannel": "目前選取"
 }

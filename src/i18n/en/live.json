@@ -233,5 +233,6 @@
   "pickerShow": "Show",
   "filterSources": "Filter sources",
   "recentStations": "Played lately",
-  "playNamed": "Play {{name}}"
+  "playNamed": "Play {{name}}",
+  "highlightedChannel": "Highlighted"
 }

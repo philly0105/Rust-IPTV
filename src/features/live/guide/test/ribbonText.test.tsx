@@ -7,8 +7,8 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { EpgRibbon } from '../../components/EpgRibbon';
-import { HOUR, MINUTE } from '../../lib/epgTime';
+import { EpgRibbon, RIBBON_NOW_LEAD_PX, RIBBON_PX_PER_MIN } from '../../components/EpgRibbon';
+import { floorLocal, HOUR, MINUTE } from '../../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from '../../test/harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -82,10 +82,46 @@ describe('ribbon timeline text', () => {
     const line = screen.getByTestId('ribbon-now-line');
     expect(line.className).not.toMatch(/(^|\s)z-/);
     expect(line.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The airing block is see-through, so the line runs through it in its own red: an opaque
-    // selected fill hid it under the block (L3-visual-3).
+    // The airing block is opaque, so the line never shows through its title (a see-through
+    // block let it through every glyph gap); its stub sits at the block's foot, in the line's red.
     expect(block.getAttribute('data-when')).toBe('now');
-    expect(block.className.split(/\s+/)).toContain('bg-active');
-    expect(block.className).not.toMatch(/(^|\s)bg-(selected|surface[\w-]*)(\/\d+)?(\s|$)/);
+    const classes = block.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['bg-surface', 'dark:bg-surface-3']));
+    expect(block.className).not.toMatch(/(^|\s)bg-(active|hover|selected)(\s|$)/);
+    expect(block.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
+    const tick = within(block).getByTestId('ribbon-now-tick');
+    expect(tick.className.split(/\s+/)).toContain('bg-live');
+  });
+});
+
+describe('the ribbon opens on the half hour (review round 2)', () => {
+  it('rests on the local half hour now is in, and an hour label cut at the edge steps aside', async () => {
+    const lefts: number[] = [];
+    const spy = vi.spyOn(Element.prototype, 'scrollTo').mockImplementation(function (this: Element, o?: ScrollToOptions | number) {
+      if (typeof o === 'object' && o.left !== undefined) lefts.push(o.left);
+    });
+    try {
+      const now = Date.now();
+      rpcMock.handlers['epg.programs'] = () => [program('Midday Report', now - 30 * MINUTE, now + 30 * MINUTE), program('Late Show', now + 30 * MINUTE, now + 2 * HOUR)];
+      renderRibbon();
+      await screen.findByRole('button', { name: /^Midday Report,/ });
+      const left = lefts.at(-1)!;
+      const line = screen.getByTestId('ribbon-now-line');
+      // The visible start is the local half hour now is in (4 px a minute), or the one before when
+      // now is too close to it for the line's head to clear the first label.
+      const into = Number.parseFloat(line.style.left) + 1 - left;
+      const past = ((now - floorLocal(now, 30)) / MINUTE) * RIBBON_PX_PER_MIN;
+      expect(into).toBeCloseTo(past < RIBBON_NOW_LEAD_PX ? past + 30 * RIBBON_PX_PER_MIN : past, 0);
+      expect(into).toBeGreaterThanOrEqual(RIBBON_NOW_LEAD_PX);
+      // An hour label that starts before the visible edge steps aside; the others show.
+      const labels = screen.getAllByTestId('ribbon-hour-label');
+      expect(labels.length).toBeGreaterThan(2);
+      for (const label of labels) {
+        const x = Number.parseFloat((label.parentElement as HTMLElement).style.left);
+        expect(label.className.includes('invisible'), `label at ${x}, edge at ${left}`).toBe(x < left);
+      }
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

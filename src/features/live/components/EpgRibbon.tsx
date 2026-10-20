@@ -31,6 +31,7 @@ import {
   lookbackMs,
   minutesLeft,
   ms,
+  nowRestLeft,
   programProgress,
   programWhen,
   shiftPrograms,
@@ -45,6 +46,11 @@ import { ChannelLogo } from './ChannelLogo';
 import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;
+/**
+ * An hour label ("10:00 PM" at 11 px) and the now line's dot, in px: the timeline keeps this much
+ * before now when it rests, so the dot never sits under the label at the edge.
+ */
+export const RIBBON_NOW_LEAD_PX = 60;
 const AHEAD = 12 * HOUR;
 const LIST_ROW = 52;
 
@@ -63,6 +69,11 @@ export interface EpgRibbonProps {
   /** true when a catch-up of `channel` is what is playing: the live button then reads "Back to live" */
   watchingArchive?: boolean;
   onPlayLive(channel: Channel): void;
+  /**
+   * The idle stage above already offers `channel` (its Resume or Play button): the ribbon leaves
+   * its own Watch live out, so the column has one way to start it.
+   */
+  stageOffersChannel?: boolean;
   onMapEpg(channel: Channel): void;
   guideHref?: string;
   /**
@@ -131,6 +142,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const awayFromNow = !!shown && !!current && !samePrograms(shown, current);
   // LG-17: below md the ribbon is one line until it is opened, so a phone keeps room for the list.
   const [phoneOpen, setPhoneOpen] = useState(false);
+  // Where the timeline's view ends while it rests on now: Up next starts after it, so the column
+  // never lists a programme twice (the timeline above already shows the next hour or two).
+  const [timelineEnd, setTimelineEnd] = useState<number | undefined>(undefined);
 
   const setMode = async (m: Mode) => {
     setLocalMode(m);
@@ -164,8 +178,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
   );
 
   const liveLabel = props.watchingArchive ? t('backToLive') : t('watchLive');
-  // With nothing of this channel playing, the button names the channel it starts: the ribbon then
-  // follows the list's cursor, not the "Last watched" channel the idle stage offers above it.
+  // With nothing of this channel playing, the button names the channel it starts: something else
+  // plays, and the ribbon follows the list's cursor.
   const liveName = props.watchingArchive || !channelName ? liveLabel : [liveLabel, channelName].join(listSeparator(i18n.language));
   const details = !!props.details;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
@@ -197,8 +211,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
           {shown ? (
             <>
               {details && channel ? (
-                // The card names its channel: with nothing playing it describes the list's cursor
-                // row, which is not marked while the list lacks focus (as the guide's band does).
+                // The card names its channel: with nothing playing it describes the channel the
+                // idle stage above offers (the last watched, or the list's cursor once used).
                 <p className="mb-0.5 flex min-w-0 items-center gap-1.5 text-caption text-fg-muted" data-testid="ribbon-channel">
                   <ChannelLogo src={channel.logoUrl} name={channelName} size={20} sourceId={channel.ref.sourceId} />
                   {channel.number !== undefined ? <span className="shrink-0 font-numeric tabular-nums">{channel.number}</span> : null}
@@ -267,7 +281,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       <div className={cn('flex shrink-0 items-center gap-1', details ? '@max-[26rem]/now:ms-auto' : 'max-[480px]:ms-auto')}>
         {/* recording: */}
         {channel ? <RibbonActions channel={channel} channelName={channelName} program={shown} now={now} /> : null}
-        {channel && !props.watchingLive ? (
+        {channel && !props.watchingLive && !props.stageOffersChannel ? (
           // Icon-only below 1440 px, where the pane is too narrow for the label and the programme line together.
           // "Back to live" only means something while this channel's catch-up plays; otherwise it starts the stream.
           <Tooltip content={liveName} describe={false}>
@@ -430,13 +444,15 @@ export function EpgRibbon(props: EpgRibbonProps) {
         onFocusProgram={pick}
         onPreview={preview}
         pinned={chosen}
+        onRestEnd={details ? setTimelineEnd : undefined}
       />
     );
   } else {
     body = <ProgramList programs={list} now={now} channel={channel} kind={sourceKind} watchingLive={props.watchingLive} onActivate={activate} onFocusProgram={pick} />;
   }
 
-  const showUpNext = details && !!channel && !locked && !programs.error && !programs.isLoading && list.length > 0;
+  // The list view already lists every programme, so Up next comes with the timeline only.
+  const showUpNext = details && mode === 'timeline' && !!channel && !locked && !programs.error && !programs.isLoading && list.length > 0;
   return (
     <section
       aria-label={t('guide')}
@@ -449,7 +465,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       <div className={cn(BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
         {body}
       </div>
-      {showUpNext ? <UpNext programs={list} now={now} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
+      {showUpNext ? <UpNext programs={list} now={now} after={timelineEnd} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
     </section>
   );
 }
@@ -539,10 +555,12 @@ function Timeline(
     onPreview(p: EpgProgram | undefined): void;
     /** The block the header was set to by a click or a key: it is ringed. */
     pinned?: EpgProgram;
+    /** Told the time the view ends at each time it settles on now (Up next starts there). */
+    onRestEnd?(time: number): void;
   },
 ) {
   const { t, i18n } = useTranslation('live');
-  const { programs, from, to, now, channel, kind } = props;
+  const { programs, from, to, now, channel, kind, onRestEnd } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const rtl = useIsRtl();
   // `view.left` is the distance from the track's inline start (time `from`), in both directions.
@@ -556,12 +574,16 @@ function Timeline(
       const el = scroller.current;
       if (!el) return;
       const w = el.clientWidth || 1200;
-      const left = Math.max(0, nowX - w * 0.25);
+      // From the local half hour now is in, as the guide opens: the airing block and the first
+      // hour label start whole at the edge, not as a clipped sliver. Just past the half hour, the
+      // half hour before, so the now line's head is not under the first label at the edge.
+      const left = nowRestLeft(now, from, RIBBON_PX_PER_MIN, w, RIBBON_NOW_LEAD_PX);
       const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       el.scrollTo({ left: scrollLeftFor(left, rtl), behavior: smooth && !reduced ? 'smooth' : 'auto' });
       setView({ left, width: w });
+      onRestEnd?.(from + ((left + w) / RIBBON_PX_PER_MIN) * MINUTE);
     },
-    [nowX, rtl],
+    [now, rtl, from, onRestEnd],
   );
 
   useLayoutEffect(() => {
@@ -619,9 +641,9 @@ function Timeline(
         aria-label={t('timelineView')}
       >
         <div style={{ width, height: '100%', position: 'relative', minHeight: 92 }}>
-          {/* First: the hour labels and the blocks' text paint over it, so it shows through the
-              airing block's tint and never strikes through a title, a time or a tick label
-              (L3-visual-3). */}
+          {/* First: the hour labels and the opaque airing block paint over it, so it never strikes
+              through a title, a time or a tick label (L3-visual-3). It shows above and below the
+              block, and the block carries its stub at the foot. */}
           <div aria-hidden data-testid="ribbon-now-line" className="pointer-events-none absolute top-3 bottom-1 w-0.5 bg-live" style={inlineStart(nowX - 1, rtl)}>
             <span className="absolute -top-1 -start-[3px] size-2 rounded-full bg-live" />
           </div>
@@ -630,8 +652,15 @@ function Timeline(
             const midnight = localDayKey(tt) !== localDayKey(i > 0 ? ticks[i - 1]! : from);
             return (
               <div key={tt} className="absolute top-0 bottom-0" style={inlineStart(x, rtl)}>
-                {/* On the ribbon's own surface, so the now line passes behind the label, not through it. */}
-                <span className="absolute top-0 start-0.5 rounded-xs bg-surface px-0.5 text-[calc(11rem/15)] whitespace-nowrap text-fg-subtle tabular-nums">
+                {/* On the ribbon's own surface, so the now line passes behind the label, not through it.
+                    One the scroll has cut at the edge ("M" of "5:00 PM") steps aside. */}
+                <span
+                  className={cn(
+                    'absolute top-0 start-0.5 rounded-xs bg-surface px-0.5 text-[calc(11rem/15)] whitespace-nowrap text-fg-subtle tabular-nums',
+                    x < view.left && 'invisible',
+                  )}
+                  data-testid="ribbon-hour-label"
+                >
                   {midnight ? formatDay(tt, i18n.language) : formatClock(tt, i18n.language)}
                 </span>
                 <span className={`absolute top-4 bottom-0 w-px ${midnight ? 'bg-border' : 'bg-divider'}`} />
@@ -707,9 +736,10 @@ const TimelineBlock = memo(function TimelineBlock({
   const progress = block.when === 'now' ? programProgress(p, now) : 0;
   const tone =
     block.when === 'now'
-      ? // On now: the see-through active layer, not the opaque selected fill, so the live now line
-        // (painted first) shows through at nearly full strength; amber only in the elapsed share below.
-        'border-edge bg-active text-fg'
+      ? // On now: the raised block (white with a shadow in light, the next surface step in dark).
+        // Opaque, so the now line (painted first) and the hour lines stay off its title; the line
+        // shows above and below it and as a stub at its foot. Amber only in the elapsed share below.
+        'border-edge bg-surface text-fg shadow-1 dark:bg-surface-3'
       : block.when === 'past'
         ? catchup
           ? 'border-edge bg-surface-2 text-fg-muted hover:border-border hover:text-fg'
@@ -744,9 +774,13 @@ const TimelineBlock = memo(function TimelineBlock({
       style={{ ...inlineStart(block.left + 1, rtl), width: Math.max(2, block.width - 2) }}
     >
       {block.when === 'now' ? (
-        <span aria-hidden className="absolute start-0 end-0 bottom-0 h-0.5 bg-surface-3">
-          <span className="block h-full bg-accent-mark" style={{ width: `${progress * 100}%` }} />
-        </span>
+        <>
+          <span aria-hidden className="absolute start-0 end-0 bottom-0 h-0.5 bg-surface-3 dark:bg-pressed">
+            <span className="block h-full bg-accent-mark" style={{ width: `${progress * 100}%` }} />
+          </span>
+          {/* The now line's stub at the foot, where the progress ends. */}
+          <span aria-hidden data-testid="ribbon-now-tick" className="absolute bottom-0 h-1.5 w-0.5 bg-live" style={{ insetInlineStart: `calc(${progress * 100}% - 1px)` }} />
+        </>
       ) : null}
       {/* A show that began before the visible edge keeps its title in view: the text sticks 8 px
           past the edge until the block's end pushes it out, and ends in an ellipsis inside the

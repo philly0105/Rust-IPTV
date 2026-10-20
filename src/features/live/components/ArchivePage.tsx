@@ -1,5 +1,5 @@
 import { AudioLines, CalendarX2, Download, History, Play, Radio, SearchX } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router';
 
@@ -8,7 +8,7 @@ import { rpc } from '@/api/transport';
 import { sameRef, type Channel, type EpgProgram, type ItemRef, type SourceKind } from '@/api/types';
 import { PlayerStage, usePlayerStore } from '@/features/player';
 import { useShell } from '@/shell';
-import { BackButton, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LivePill, MetaLine, Page, Skeleton, Tabs, useToast, errorDescription } from '@/ui';
+import { BackButton, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LivePill, Page, Skeleton, Tabs, useToast, errorDescription } from '@/ui';
 
 import { useArchiveDay } from '../hooks/useArchiveDay';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -25,7 +25,7 @@ import {
   type ArchiveProgramState,
 } from '../lib/archive';
 import { displayChannelName } from '../lib/channelName';
-import { formatClock, formatDay, formatRange, HOUR, ms } from '../lib/epgTime';
+import { formatClock, formatDay, formatRange, HOUR, minutesLeft, ms } from '../lib/epgTime';
 import { canDownloadCatchup, catchupDownloadArgs, playCatchup, playChannel } from '../lib/playback';
 import { ChannelLogo } from './ChannelLogo';
 
@@ -46,10 +46,14 @@ export function ArchivePage() {
   const name = channel ? displayChannelName(channel.name, prefs.stripCountryPrefix) : '';
 
   const shell = useShell();
-  const subtitle = name || source.data?.name;
+  // The channel's name is the title (the content does not repeat it); the archive's reach and the
+  // source are the subtitle.
+  const title = name || t('archiveTitle');
+  const browsable = !!channel && !!kind && canBrowseArchive(channel, kind);
+  const subtitle = [browsable ? t('archiveDays', { count: archiveDayCount(channel) }) : '', source.data?.name ?? ''].filter(Boolean).join(' · ') || undefined;
   useEffect(() => {
-    shell.setHeader({ title: t('archiveTitle'), subtitle });
-  }, [shell, t, subtitle]);
+    shell.setHeader({ title, subtitle });
+  }, [shell, title, subtitle]);
 
   const livePath = `/s/${encodeURIComponent(sourceId)}/live`;
   // Navigation to the Live TV page, not "Back to live" (which returns a catch-up to the stream), LG-08.
@@ -66,8 +70,8 @@ export function ArchivePage() {
     body = <EmptyState icon={<SearchX size={28} />} title={t('archiveNotFound')} description={t('archiveNotFoundHint')} action={backLink} />;
   } else if (item.error || source.error) {
     body = <ErrorState error={item.error ?? source.error} onRetry={() => void Promise.all([item.refetch(), source.refetch()])} action={backLink} />;
-  } else if (channel && kind && canBrowseArchive(channel, kind)) {
-    body = <ArchiveBrowser channel={channel} kind={kind} name={name} sourceName={source.data?.name} offsetMinutes={prefs.epgOffsetMinutes} />;
+  } else if (browsable) {
+    body = <ArchiveBrowser channel={channel} kind={kind} name={name} offsetMinutes={prefs.epgOffsetMinutes} />;
   } else {
     body = <EmptyState icon={<CalendarX2 size={28} />} title={t('archiveUnsupported')} description={t('archiveUnsupportedHint')} action={backLink} />;
   }
@@ -102,11 +106,10 @@ interface BrowserProps {
   channel: Channel;
   kind: SourceKind;
   name: string;
-  sourceName?: string;
   offsetMinutes: number;
 }
 
-function ArchiveBrowser({ channel, kind, name, sourceName, offsetMinutes }: BrowserProps) {
+function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   const { t, i18n } = useTranslation('live');
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -227,6 +230,12 @@ function ArchiveBrowser({ channel, kind, name, sourceName, offsetMinutes }: Brow
 
   const panelPrefix = 'archive-day';
   const panelId = `${panelPrefix}-${selected}`;
+  // The programme under the player: the one the list's cursor is on (the airing or latest
+  // playable one until the user moves), with what a press on its row does.
+  const shownProgram = current >= 0 ? programs[current] : undefined;
+  const shownState = current >= 0 ? (states[current] ?? 'future') : 'future';
+  // What airs now, beside the logo (today only).
+  const airing = selected === 0 ? programs.find((_, i) => states[i] === 'airing' || states[i] === 'live') : undefined;
 
   return (
     <>
@@ -234,16 +243,20 @@ function ArchiveBrowser({ channel, kind, name, sourceName, offsetMinutes }: Brow
         <div className="flex flex-wrap items-center gap-3">
           <BackButton to={`/s/${encodeURIComponent(channel.ref.sourceId)}/live`} label={t('liveTv')} />
         </div>
-        {/* A narrow column (a phone, the sticky column of a 1024 px window) puts Watch live under the
-            name: beside it, the name was cut to "Wildf…" and the line under it wrapped a word to a line. */}
+        {/* The header names the channel and the archive's reach; here, its logo, what airs now and
+            Watch live. A narrow column (a phone, the sticky column of a 1024 px window) puts Watch
+            live on a line of its own. */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
           <ChannelLogo src={channel.logoUrl} name={name} size={56} sourceId={channel.ref.sourceId} />
-          <div className="min-w-0 flex-1">
-            <p dir="auto" className="truncate text-title text-fg" title={name}>
-              {name}
-            </p>
-            <MetaLine className="mt-0.5" items={[t('archiveDays', { count }), sourceName]} />
-          </div>
+          {/* From lg the details under the player describe the cursor's programme: while that is the
+              airing one, this line would say it twice, so it steps aside (keeping its room). */}
+          <p
+            dir="auto"
+            className={cn('min-w-0 flex-1 truncate text-body-sm text-fg-muted', airing && shownProgram === airing && 'lg:invisible')}
+            data-testid="archive-airing"
+          >
+            {airing ? t('idleNowOn', { title: airing.title, left: t('minutesLeft', { count: minutesLeft(airing, now) }) }) : null}
+          </p>
           <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">
             {t('watchLive')}
           </Button>
@@ -251,12 +264,25 @@ function ArchiveBrowser({ channel, kind, name, sourceName, offsetMinutes }: Brow
         {/* LG-09: catch-up plays here, in a full player, not in the corner mini player. */}
         <div className="relative aspect-video max-h-[50vh] w-full overflow-hidden rounded-xl bg-black shadow-2 ring-1 ring-edge" data-testid="archive-stage">
           <PlayerStage className="h-full w-full">
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[radial-gradient(120%_90%_at_50%_20%,rgb(38_48_66)_0%,transparent_70%)] px-6 text-center">
-              <History size={24} aria-hidden className="text-on-glass-muted" />
-              <p className="text-body-sm text-on-glass-muted">{t('archiveStageIdle')}</p>
+            {/* The idle stage's look on Live with nothing to resume: a slate glow, the mark in a ring, a line and a hint. */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(120%_90%_at_50%_18%,hsl(220_20%_18%/0.85),transparent_68%)] px-6 text-center" data-testid="archive-stage-idle">
+              <span aria-hidden className="inline-flex size-14 items-center justify-center rounded-full bg-on-glass/8 text-on-glass-muted ring-1 ring-on-glass/10">
+                <History size={24} />
+              </span>
+              <p className="text-body font-medium text-on-glass">{t('stageIdle')}</p>
+              <p className="text-caption text-on-glass-muted">{t('archiveStageIdle')}</p>
             </div>
           </PlayerStage>
         </div>
+        {shownProgram ? (
+          <ProgramDetails
+            program={shownProgram}
+            state={shownState}
+            playing={playingStart === shownProgram.start}
+            onPlay={() => play(shownProgram, shownState)}
+            onDownload={shownState === 'playable' && downloadable ? () => download(shownProgram) : undefined}
+          />
+        ) : null}
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 lg:max-w-3xl">
@@ -336,26 +362,38 @@ interface RowProps {
   onDownload?: () => void;
 }
 
-/** Shown on hover, while the row has focus, and always on touch, where nothing hovers. */
-const REVEAL = 'opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 pointer-coarse:opacity-100';
+/**
+ * A row's action and Download, revealed on hover and while the row has focus: they float over the
+ * row's end in a small raised pill (ChannelRow's row actions), so the programme's text keeps the
+ * row's whole width at rest. On touch, where nothing hovers, they sit in the row's flow.
+ */
+const ROW_ACTIONS =
+  'absolute inset-y-0 end-2 my-auto flex h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 opacity-0 shadow-2 group-hover/row:opacity-100 group-focus-within/row:opacity-100 pointer-coarse:static pointer-coarse:me-1 pointer-coarse:border-transparent pointer-coarse:bg-transparent pointer-coarse:p-0 pointer-coarse:opacity-100 pointer-coarse:shadow-none';
+
+/** What a press on a programme's row does, by its state; null for one that cannot play. */
+function useRowAction(state: ArchiveProgramState): { icon: ReactNode; label: string } | null {
+  const { t } = useTranslation('live');
+  return state === 'playable'
+    ? { icon: <Play className="size-3.5" />, label: t('watchCatchup') }
+    : state === 'airing'
+      ? { icon: <History className="size-3.5" />, label: t('archiveWatchFromStart') }
+      : state === 'live'
+        ? { icon: <Radio className="size-3.5" />, label: t('watchLive') }
+        : null;
+}
 
 function ProgramRow({ program, state, playing, tabIndex, buttonRef, onFocus, onPlay, onDownload }: RowProps) {
   const { t, i18n } = useTranslation('live');
   const disabled = state === 'future' || state === 'expired';
-  const action =
-    state === 'playable'
-      ? { icon: <Play className="size-3.5" />, label: t('watchCatchup') }
-      : state === 'airing'
-        ? { icon: <History className="size-3.5" />, label: t('archiveWatchFromStart') }
-        : state === 'live'
-          ? { icon: <Radio className="size-3.5" />, label: t('watchLive') }
-          : null;
+  const action = useRowAction(state);
   // The time column already says when a future programme starts: only expiry needs a note.
   const note = state === 'expired' ? t('archiveExpired') : null;
   const onNow = state === 'airing' || state === 'live';
+  // The airing row always shows its action, in its own flow; the others float theirs on hover.
+  const floating = (action && !playing && !onNow) || onDownload;
 
   return (
-    <li className={cn('group/row flex items-center gap-1 rounded-md', playing || onNow ? 'tuning-tick bg-selected' : '')}>
+    <li className={cn('group/row relative flex items-center gap-1 rounded-md', playing || onNow ? 'tuning-tick bg-selected' : '')}>
       <button
         ref={buttonRef}
         type="button"
@@ -389,39 +427,105 @@ function ProgramRow({ program, state, playing, tabIndex, buttonRef, onFocus, onP
             ) : null}
           </span>
           {program.description ? (
-            <span dir="auto" className="mt-0.5 line-clamp-1 text-caption text-fg-muted">
+            // A programme that cannot play steps back as a whole: its description is no brighter than its title.
+            <span dir="auto" className={cn('mt-0.5 line-clamp-2 text-caption', disabled ? 'text-fg-subtle' : 'text-fg-muted')} data-testid="archive-description">
               {program.description}
             </span>
           ) : null}
           {note ? <span className="mt-0.5 block text-caption">{note}</span> : null}
         </span>
-        {action && !playing ? (
-          // What a press does, as a quiet button shape: on hover or focus, and always on the airing row.
-          <span
-            aria-hidden
-            className={cn(
-              'order-2 ms-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-caption font-medium sm:order-3',
-              onNow ? 'bg-surface-3 text-fg' : cn('text-fg-muted group-hover/row:bg-hover group-hover/row:text-fg', REVEAL),
-            )}
-          >
+        {action && onNow && !playing ? (
+          // What a press does, as a quiet button shape, always on the airing row.
+          <span aria-hidden className="order-2 ms-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-surface-3 px-2.5 text-caption font-medium text-fg sm:order-3">
             {action.icon}
-            {/* A phone's row keeps the time and the action on one line: the icon says it there, and
-                the whole row is the button. The airing row keeps its words. */}
-            <span className={onNow ? undefined : 'max-sm:hidden'}>{action.label}</span>
+            <span>{action.label}</span>
           </span>
         ) : null}
       </button>
-      {onDownload ? (
-        <IconButton
-          size="sm"
-          label={t('downloadCatchup', { title: program.title })}
-          icon={<Download aria-hidden className="size-4" />}
-          tabIndex={tabIndex}
-          onClick={onDownload}
-          className={cn('shrink-0', REVEAL, 'focus-visible:opacity-100')}
-          data-testid="archive-download"
-        />
+      {floating ? (
+        <span className={ROW_ACTIONS} data-testid="archive-row-actions">
+          {action && !playing && !onNow ? (
+            // What a press does, for the pointer: the row's own button is the control (and its name).
+            <span
+              aria-hidden
+              onClick={onPlay}
+              className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-caption font-medium text-fg hover:bg-hover"
+            >
+              {action.icon}
+              {/* A phone's row keeps the time and the action on one line: the icon says it there. */}
+              <span className="max-sm:hidden">{action.label}</span>
+            </span>
+          ) : null}
+          {onDownload ? (
+            <IconButton
+              size="sm"
+              label={t('downloadCatchup', { title: program.title })}
+              icon={<Download aria-hidden className="size-4" />}
+              tabIndex={tabIndex}
+              onClick={onDownload}
+              className="shrink-0 hover:bg-hover"
+              data-testid="archive-download"
+            />
+          ) : null}
+        </span>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * The programme the list's cursor is on, under the player beside the list (lg up): its time,
+ * title, three lines of description and what can be done with it, so the column under the player
+ * says what a press will play. The stacked layout leaves it out, as the list follows right under.
+ */
+function ProgramDetails({
+  program,
+  state,
+  playing,
+  onPlay,
+  onDownload,
+}: {
+  program: EpgProgram;
+  state: ArchiveProgramState;
+  playing: boolean;
+  onPlay(): void;
+  onDownload?: () => void;
+}) {
+  const { t, i18n } = useTranslation('live');
+  const action = useRowAction(state);
+  const at = ms(program.start);
+  const onNow = state === 'airing' || state === 'live';
+  return (
+    <section aria-label={program.title} className="hidden flex-col gap-2 lg:flex" data-testid="archive-details">
+      <p className="flex items-center gap-2 text-caption text-fg-muted">
+        {onNow ? <LivePill size="sm" dot="none" /> : null}
+        <span className="tabular-nums">
+          {formatDay(at, i18n.language)} {formatRange(program, i18n.language)}
+        </span>
+        {state === 'expired' ? <span>{t('archiveExpired')}</span> : null}
+      </p>
+      <h2 dir="auto" className="text-title-sm text-fg">
+        {program.title}
+      </h2>
+      {program.description ? (
+        <p dir="auto" className="line-clamp-3 text-body-sm text-fg-muted">
+          {program.description}
+        </p>
+      ) : null}
+      {action || onDownload ? (
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          {action && !playing ? (
+            <Button variant="primary" icon={action.icon} onClick={onPlay} data-testid="archive-details-play">
+              {action.label}
+            </Button>
+          ) : null}
+          {onDownload ? (
+            <Button variant="secondary" icon={<Download className="size-4" />} onClick={onDownload} data-testid="archive-details-download">
+              {t('download', { ns: 'vod' })}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }

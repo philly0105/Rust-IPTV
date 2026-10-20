@@ -77,5 +77,9 @@
   "resultCount_one": "{{count, number}} вынік",
   "resultCount_few": "{{count, number}} вынікі",
   "resultCount_many": "{{count, number}} вынікаў",
-  "resultCount_other": "{{count, number}} выніку"
+  "resultCount_other": "{{count, number}} выніку",
+  "previewNext": "Далей",
+  "genreFilterOn": "Фільтр: {{genre}}. Адпаведных перадач: {{count, number}}",
+  "genreFilterOff": "Фільтр па жанры выключаны",
+  "allGenres": "Усе жанры"
 }

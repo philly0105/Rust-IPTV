@@ -245,5 +245,6 @@
   "pickerShow": "Паказаць",
   "filterSources": "Фільтр крыніц",
   "recentStations": "Нядаўна слуханыя",
-  "playNamed": "Прайграць {{name}}"
+  "playNamed": "Прайграць {{name}}",
+  "highlightedChannel": "Вылучаны"
 }

@@ -233,5 +233,6 @@
   "pickerShow": "表示",
   "filterSources": "ソースを絞り込む",
   "recentStations": "最近再生した局",
-  "playNamed": "{{name}}を再生"
+  "playNamed": "{{name}}を再生",
+  "highlightedChannel": "選択中"
 }

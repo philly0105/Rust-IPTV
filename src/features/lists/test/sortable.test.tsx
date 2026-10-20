@@ -50,6 +50,10 @@ describe('SortableList drag and drop (LV-6)', () => {
     rendered.length = 0;
     fireEvent.dragOver(rowOf(6), { dataTransfer: dataTransfer() });
     expect(rendered.sort((a, b) => a - b)).toEqual([5, 6]);
+    // The marker is a mark: the accent's mark tone, not the text tone (brown in light).
+    const marker = within(rowOf(6)).getByTestId('drop-marker');
+    expect(marker.className.split(/\s+/)).toContain('bg-accent-mark');
+    expect(marker.className.split(/\s+/)).not.toContain('bg-accent');
     fireEvent.drop(rowOf(6), { dataTransfer: dataTransfer() });
     // jsdom rows have no height, so the pointer is past the middle: after row 6.
     expect(onMove).toHaveBeenCalledWith(0, 6);

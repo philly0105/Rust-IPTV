@@ -44,6 +44,7 @@ import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuI
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useLastChannel } from '../hooks/useLastChannel';
+import { useListEngaged } from '../hooks/useListEngaged';
 import { LIVE_VIEW_ID, liveViewOf, useLiveViewChannels } from '../hooks/useLiveViewChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useNow } from '../hooks/useNow';
@@ -213,7 +214,21 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const onActiveChange = useCallback((channel: Channel | undefined) => setReported({ key: listKeyRef.current, channel }), []);
   const activeChannel =
     listShown && reported.key === listKey && reported.channel?.ref.sourceId === sourceId ? reported.channel : undefined;
-  const ribbonChannel = playingChannel ?? activeChannel;
+  // While nothing plays, the idle card and the ribbon under it describe one channel: the one last
+  // watched, until the user moves into the list; from then on the list's cursor row.
+  const [listEngaged, onListFocus] = useListEngaged(listKey);
+  const cursorChannel = listEngaged ? activeChannel : undefined;
+  // CB-AUTOPLAY-LAST without autoplay: the stage offers the channel last watched on this source.
+  const last = useLastChannel({
+    contentType,
+    sourceId,
+    accept: (r) => r.sourceId === sourceId,
+    enabled: !!sourceId && !stageBusy,
+    epgOffsetMinutes: prefs.epgOffsetMinutes,
+  });
+  const lastChannel = last?.channel;
+  const idleChannel = stageBusy ? undefined : (cursorChannel ?? lastChannel);
+  const ribbonChannel = playingChannel ?? idleChannel ?? activeChannel;
   // C3 `l`: add the focused row to a list.
   useAddToListShortcut(activeChannel, paged.getChannel);
   // C2 F2 / Shift+Delete: rename / hide the row that has focus when the key is pressed. It is read
@@ -240,8 +255,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const watchingArchive = !!detailSource && !detailSource.isLive && !!ribbonChannel && sameRef(detailSource.ref, ribbonChannel.ref);
   // The guide ribbon follows a tune in a background render: the click's own commit (row marked,
   // player up) paints first, and the ribbon's programmes come right after (L1-live-20).
+  // The idle card's button starts the channel the ribbon describes: the ribbon leaves out its own.
+  const stageOffersChannel = !!idleChannel && !!ribbonChannel && sameRef(idleChannel.ref, ribbonChannel.ref);
   const ribbon = useDeferredValue(
-    useMemo(() => ({ channel: ribbonChannel, watchingLive, watchingArchive }), [ribbonChannel, watchingLive, watchingArchive]),
+    useMemo(
+      () => ({ channel: ribbonChannel, watchingLive, watchingArchive, stageOffersChannel }),
+      [ribbonChannel, watchingLive, watchingArchive, stageOffersChannel],
+    ),
   );
   const offset = prefs.epgOffsetMinutes;
   const playingNowNext = useRpcQuery(
@@ -458,6 +478,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // ---- header -------------------------------------------------------------
   const shell = useShell();
   const title = source.data?.name ?? '';
+  const allGroup = liveView !== 'favorites' && liveView !== 'recent' && !category;
   const subtitle =
     liveView === 'favorites'
       ? t('favoritesGroup')
@@ -466,7 +487,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         : (category?.name ?? (isRadio ? t('allStations') : t('allChannels')));
   const countText = paged.total !== undefined ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
   // The group and its count once, in the header: the list no longer repeats them over its rows.
-  const headerSubtitle = countText ? t('groupWithCount', { group: subtitle, count: countText }) : subtitle;
+  // "All channels · 140": that group's name already says what is counted ("All channels · 140
+  // channels" said it twice). A named group keeps the unit ("Sports · 18 channels").
+  const headerCount = allGroup && paged.total !== undefined ? fmt.format(paged.total) : countText;
+  const headerSubtitle = headerCount ? t('groupWithCount', { group: subtitle, count: headerCount }) : subtitle;
   useEffect(() => {
     if (!title) return;
     shell.setHeader({
@@ -646,29 +670,28 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- idle stage ---------------------------------------------------------
   const selectRefPlay = useCallback((ref: ItemRef) => void selectRef(ref), [selectRef]);
-  // CB-AUTOPLAY-LAST without autoplay: the stage offers the channel last watched on this source.
-  const last = useLastChannel({
-    contentType,
-    sourceId,
-    accept: (r) => r.sourceId === sourceId,
-    enabled: !!sourceId && !stageBusy,
-    epgOffsetMinutes: prefs.epgOffsetMinutes,
-  });
-  const lastChannel = last?.channel;
-  // Radio's idle stage, with no station to resume, offers the list's first stations as tiles.
   const loadedRows = paged.loaded;
-  const firstStations = useMemo(() => (isRadio ? loadedRows.slice(0, 12).map((l) => l.channel) : undefined), [isRadio, loadedRows]);
+  // The cursor row's now/next, when the card follows the cursor (Live only: Radio has no ribbon).
+  const cursorIndex = cursorChannel && !isRadio ? loadedRows.find((l) => sameRef(l.channel.ref, cursorChannel.ref))?.index : undefined;
+  const cursorNowNext = cursorIndex === undefined ? undefined : paged.getNowNext(cursorIndex);
+  const idleCard =
+    !isRadio && cursorChannel
+      ? { channel: cursorChannel, nowNext: cursorNowNext }
+      : lastChannel
+        ? { channel: lastChannel, nowNext: last?.nowNext }
+        : undefined;
   const idle = (
     <StageIdle
       kind={isRadio ? 'radio' : 'live'}
-      last={lastChannel ? { channel: lastChannel, nowNext: last?.nowNext } : undefined}
+      last={idleCard}
+      highlighted={!isRadio && !!cursorChannel}
       now={now}
       stripPrefix={prefs.stripCountryPrefix}
       epgOffsetMinutes={prefs.epgOffsetMinutes}
       onResume={onPlayLive}
       // Radio's stage has room below Resume: the other stations played lately, one press each.
+      // Not the list's first stations when nothing was played: they repeated the list beside it.
       recent={isRadio ? last?.others : undefined}
-      stations={isRadio && !lastChannel ? firstStations : undefined}
       onPlayRef={selectRefPlay}
     />
   );
@@ -688,9 +711,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const hrefFor = hrefForCategory;
 
   // Run 2: the Lists group above the groups (C3), and the source's hidden channels below them (C2).
+  // Lists hold TV channels: Radio leaves them out.
   const sidebar = (
     <>
-      <ListsSidebarSection onNavigate={closeDrawer} />
+      {isRadio ? null : <ListsSidebarSection onNavigate={closeDrawer} />}
       <div className="flex min-h-0 flex-1 flex-col">
         <MemoSidebar
           categories={groups}
@@ -704,6 +728,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onManage={openManage}
           onNavigate={closeDrawer}
           totalLabel={isRadio ? t('allStations') : t('allChannels')}
+          hideLoneGroup={isRadio}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
         />
@@ -858,6 +883,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
         className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:min-w-60 md:flex-initial md:border-e"
+        onFocus={onListFocus}
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
           <IconButton
@@ -922,6 +948,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               sourceKind={ribbon.channel && source.data?.id === ribbon.channel.ref.sourceId ? kind : undefined}
               watchingLive={ribbon.watchingLive}
               watchingArchive={ribbon.watchingArchive}
+              stageOffersChannel={ribbon.stageOffersChannel}
               onPlayLive={onPlayLive}
               onMapEpg={setMapping}
               guideHref={guideHref}

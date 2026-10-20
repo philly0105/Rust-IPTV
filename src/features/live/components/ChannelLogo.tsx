@@ -1,21 +1,40 @@
-import { useCallback, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useState, type SyntheticEvent } from 'react';
 
 import { cn, gateImage, useImageChain } from '@/ui';
 
-import { monogramFill, monogramText } from '../lib/monogram';
+import { monogramFill, monogramHue, monogramText } from '../lib/monogram';
 
 export type LogoPlate = 'light' | 'dark';
 
-/** Plate per logo address, measured once per session (see {@link measurePlate}). */
-const plates = new Map<string, LogoPlate | null>();
+/** What a logo's pixels say: the plate it needs and its colour's hue (null: none to read). */
+export interface LogoReading {
+  plate: LogoPlate | null;
+  hue: number | null;
+}
+
+/** Reading per logo address, measured once per session (see {@link measureLogo}). */
+const readings = new Map<string, LogoReading>();
+const UNREAD: LogoReading = { plate: null, hue: null };
 let probe: CanvasRenderingContext2D | null | undefined;
 
+/** Hue in degrees of an RGB colour (0 to 255 per channel); its chroma must not be 0. */
+function hueOfRgb(r: number, g: number, b: number): number {
+  const max = Math.max(r, g, b);
+  const c = max - Math.min(r, g, b);
+  const h = max === r ? ((g - b) / c) % 6 : max === g ? (b - r) / c + 2 : (r - g) / c + 4;
+  return Math.round((h * 60 + 360) % 360);
+}
+
 /**
- * Which plate a transparent logo needs: a light one for dark ink (a black wordmark vanishes on the
- * dark plate), the dark one otherwise. Read from a 16 px copy of the loaded image; null for an opaque
- * logo (it brings its own background) or one the canvas may not read (a cross-origin fallback).
+ * Reads a logo from a 16 px copy of the loaded image (an unreadable one, such as a cross-origin
+ * fallback, reads as {@link UNREAD}):
+ * - `plate`: which plate a transparent logo needs, a light one for dark ink (a black wordmark
+ *   vanishes on the dark plate), the dark one otherwise; null for an opaque logo, which brings its
+ *   own background.
+ * - `hue`: the hue of its coloured pixels, weighted by how coloured each is; null when under a
+ *   sixth of the logo is coloured (a grey, black or white wordmark).
  */
-export function measurePlate(img: HTMLImageElement): LogoPlate | null {
+export function measureLogo(img: HTMLImageElement): LogoReading {
   if (probe === undefined) {
     try {
       probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
@@ -23,7 +42,7 @@ export function measurePlate(img: HTMLImageElement): LogoPlate | null {
       probe = null;
     }
   }
-  if (!probe || !img.naturalWidth) return null;
+  if (!probe || !img.naturalWidth) return UNREAD;
   try {
     probe.clearRect(0, 0, 16, 16);
     probe.drawImage(img, 0, 0, 16, 16);
@@ -31,19 +50,35 @@ export function measurePlate(img: HTMLImageElement): LogoPlate | null {
     let clear = 0;
     let ink = 0;
     let n = 0;
+    let coloured = 0;
+    let weight = 0;
+    let wr = 0;
+    let wg = 0;
+    let wb = 0;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3]! < 128) {
         clear++;
         continue;
       }
-      ink += (0.2126 * d[i]! + 0.7152 * d[i + 1]! + 0.0722 * d[i + 2]!) / 255;
+      const [r, g, b] = [d[i]!, d[i + 1]!, d[i + 2]!];
+      ink += (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
       n++;
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+      if (chroma > 40) {
+        coloured++;
+        weight += chroma;
+        wr += r * chroma;
+        wg += g * chroma;
+        wb += b * chroma;
+      }
     }
     // Under a tenth see-through: the logo fills its own box, the plate hardly shows.
-    if (n === 0 || clear < 26) return null;
-    return ink / n < 0.32 ? 'light' : 'dark';
+    const plate = n === 0 || clear < 26 ? null : ink / n < 0.32 ? 'light' : 'dark';
+    const [r, g, b] = [wr / weight, wg / weight, wb / weight];
+    const hue = weight > 0 && coloured * 6 >= n && Math.max(r, g, b) > Math.min(r, g, b) ? hueOfRgb(r, g, b) : null;
+    return { plate, hue };
   } catch {
-    return null; // tainted by a cross-origin image
+    return UNREAD; // tainted by a cross-origin image
   }
 }
 
@@ -71,12 +106,18 @@ export function ChannelLogo({
   size = 36,
   sourceId,
   className,
+  onHue,
 }: {
   src?: string;
   name: string;
   size?: number;
   sourceId?: string;
   className?: string;
+  /**
+   * Told the hue of what the tile shows: the monogram's, or the loaded logo's (null while it
+   * loads, or when it has no colour to read). The idle stage tints its glow with it.
+   */
+  onHue?(hue: number | null): void;
 }) {
   // The chain is keyed by address: virtual rows are reused for other channels, and one broken logo must not
   // stick to the slot and hide the next channel's good one.
@@ -85,12 +126,22 @@ export function ChannelLogo({
   // One <img> per address (key below), so this runs once per attempt; React renders no `src`, the gate sets it.
   const imgRef = useCallback((el: HTMLImageElement | null) => (el && url ? gateImage(el, url) : undefined), [url]);
   const [, setMeasured] = useState(0);
-  const plate = url ? plates.get(url) : undefined;
+  const plate = url ? readings.get(url)?.plate : undefined;
   const onLoad = (e: SyntheticEvent<HTMLImageElement>) => {
-    if (!url || plates.has(url)) return;
-    plates.set(url, measurePlate(e.currentTarget));
-    if (plates.get(url)) setMeasured((n) => n + 1);
+    if (!url) return;
+    let reading = readings.get(url);
+    if (!reading) {
+      reading = measureLogo(e.currentTarget);
+      readings.set(url, reading);
+      if (reading.plate) setMeasured((n) => n + 1);
+    }
+    onHue?.(reading.hue);
   };
+  // The monogram's hue is known from the name; a logo's once it has loaded (onLoad, or an
+  // earlier load of the same address).
+  useEffect(() => {
+    onHue?.(url ? (readings.get(url)?.hue ?? null) : monogramHue(name));
+  }, [url, name, onHue]);
   // Rounded to the tile: large tiles (the idle stage, the archive header) round more.
   const radius = size >= 56 ? 'rounded-lg' : size >= 28 ? 'rounded-md' : 'rounded-sm';
   const style = { width: size, height: size };

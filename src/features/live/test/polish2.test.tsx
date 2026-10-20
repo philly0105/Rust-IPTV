@@ -977,7 +977,12 @@ describe('guide ribbon follows the list it came from (round 3)', () => {
     rowButton(0)!.focus();
     for (let i = 0; i < row; i++) fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     await waitFor(() => expect(askedRibbonFor().some((r) => r.itemId === `c${row}`)).toBe(true));
-    await screen.findByTestId('ribbon-back-to-live');
+    // The idle card and the ribbon follow the cursor together; the card's Play starts it, so the
+    // ribbon leaves its own Watch live out.
+    await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain(`Channel ${row}`));
+    expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
+    expect(screen.getByTestId('stage-resume').textContent).toContain(`Play Channel ${row}`);
+    expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();
   };
 
   it('a search with no results clears the ribbon instead of keeping the old channel and its Watch live', async () => {

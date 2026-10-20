@@ -176,7 +176,7 @@ export function Tooltip({ content, children, side = 'top', delay = 400, classNam
             data-side={pos?.side ?? side}
             style={style}
             className={cn(
-              'pointer-events-none fixed z-[70] max-w-64 rounded-sm border border-border bg-surface-3 px-2 py-1 text-xs text-fg shadow-1 motion-safe:animate-fade-in',
+              'pointer-events-none fixed z-[70] max-w-64 rounded-md border border-edge bg-surface-3 px-2 py-1 text-xs text-fg shadow-2 motion-safe:animate-fade-in',
               className,
             )}
           >

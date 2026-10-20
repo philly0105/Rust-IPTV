@@ -1,0 +1,89 @@
+/*
+ * Self-hosted type (DS-FONTS-PLATFORM, SH-no-webfont, CB-TYPEFACE). The Windows faces this app
+ * was drawn with (Segoe UI Variable, Bahnschrift) exist only on Windows, so a browser or PWA on
+ * Android, ChromeOS, Linux or macOS rendered a different, unbranded app. Both families here are
+ * OFL 1.1 and come from npm (@fontsource-variable/inter, @fontsource/barlow-semi-condensed);
+ * globals.css imports this file, so Vite copies each woff2 into dist/assets with a content hash
+ * (never into a JS chunk) and the service worker caches it like any other asset.
+ *
+ * Inter Variable: every UI label, body text and heading (--font-sans, --font-display). One
+ * variable file per script range, upright only (the UI has no italics), weight axis 100-900 so
+ * the 400/500/600 weights all come from the same file. Ranges: Latin and Latin Extended (the
+ * Western and Central European locales, Turkish), Cyrillic and Cyrillic Extended (ru, by) and
+ * Greek (el). A browser fetches a file only once text in its unicode-range is on screen. Arabic,
+ * Japanese, Korean and Chinese have no Inter glyphs and fall back per glyph to the system faces
+ * later in the stacks (tokens.css).
+ *
+ * Barlow Semi Condensed 600: the tuner-dial numerals (--font-numeric) for channel numbers,
+ * clocks, the channel-number OSD and LIVE pills, standing in for Bahnschrift's DIN look on every
+ * platform. Latin and Latin Extended only, one weight.
+ *
+ * font-display: swap paints text at once in the fallback face and swaps when the file arrives
+ * (from the HTTP or service-worker cache after the first visit).
+ */
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-cyrillic-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-cyrillic-ext-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-greek-wght-normal.woff2') format('woff2-variations');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+
+@font-face {
+  font-family: 'Barlow Semi Condensed';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('@fontsource/barlow-semi-condensed/files/barlow-semi-condensed-latin-600-normal.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F,
+    U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Barlow Semi Condensed';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('@fontsource/barlow-semi-condensed/files/barlow-semi-condensed-latin-ext-600-normal.woff2') format('woff2');
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}

@@ -88,7 +88,7 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
             <output
               id={id}
               aria-describedby={describedBy}
-              className="flex h-10 min-w-0 flex-1 items-center truncate rounded-md border border-border bg-surface-2 px-3 font-mono text-sm text-fg"
+              className="flex h-10 min-w-0 flex-1 items-center truncate rounded-md border border-edge bg-surface-2 px-3 font-mono text-sm text-fg"
               title={path}
               data-testid="downloads-dir-path"
             >
@@ -110,7 +110,7 @@ export function DownloadsFolderRow({ custom }: { custom: boolean }) {
           <output
             id={id}
             aria-describedby={describedBy}
-            className="flex h-10 w-full min-w-0 items-center truncate rounded-md border border-border bg-surface-2 px-3 font-mono text-sm text-fg"
+            className="flex h-10 w-full min-w-0 items-center truncate rounded-md border border-edge bg-surface-2 px-3 font-mono text-sm text-fg"
             title={path}
             data-testid="downloads-dir-path"
           >

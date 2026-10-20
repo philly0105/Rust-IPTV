@@ -198,10 +198,13 @@ describe('settings palettes follow the tokens', () => {
     for (const accent of ACCENTS) {
       const dark = accent === 'amber' ? DARK : block(new RegExp(String.raw`:root\[data-accent='${accent}'\]\s*\{([^}]*)\}`));
       const light = accent === 'amber' ? LIGHT : block(new RegExp(String.raw`:root\[data-theme='light'\]\[data-accent='${accent}'\]\s*\{([^}]*)\}`));
-      expect(ACCENT_PALETTE[accent], accent).toEqual({
-        dark: { accent: token(dark, 'accent'), fg: token(dark, 'accent-fg') },
-        light: { accent: token(light, 'accent'), fg: token(light, 'accent-fg') },
+      const tones = (body: string) => ({
+        accent: token(body, 'accent'),
+        fg: token(body, 'accent-fg'),
+        solid: token(body, 'accent-solid'),
+        solidFg: token(body, 'accent-solid-fg'),
       });
+      expect(ACCENT_PALETTE[accent], accent).toEqual({ dark: tones(dark), light: tones(light) });
     }
   });
 

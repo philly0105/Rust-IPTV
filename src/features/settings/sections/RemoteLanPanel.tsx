@@ -207,7 +207,7 @@ function PairingCard({ addresses, warning }: { addresses: RemoteLanAddress[]; wa
     <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-start" data-testid="remote-pairing">
       <div className="shrink-0">
         {reveal === null ? (
-          <div className="flex size-48 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border p-3 text-center">
+          <div className="flex size-48 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-edge p-3 text-center">
             <QrCode aria-hidden className="size-10 text-fg-subtle" />
             <Button size="sm" variant="primary" onClick={() => setReveal({ since: Date.now() })} data-testid="remote-show-code">
               {t('remoteLanShowCode')}
@@ -226,7 +226,7 @@ function PairingCard({ addresses, warning }: { addresses: RemoteLanAddress[]; wa
             <path d={shown.qr.path} fill="currentColor" />
           </svg>
         ) : error ? (
-          <div className="flex size-48 items-center justify-center rounded-md border border-border p-3 text-center text-sm text-danger" role="alert">
+          <div className="flex size-48 items-center justify-center rounded-md border border-edge p-3 text-center text-sm text-danger" role="alert">
             {t('remoteLanPairingFailed', { message: error.message })}
           </div>
         ) : (
@@ -235,7 +235,7 @@ function PairingCard({ addresses, warning }: { addresses: RemoteLanAddress[]; wa
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <p className="flex items-center gap-2 font-medium text-fg">
-          <Smartphone aria-hidden className="size-4 text-accent" />
+          <Smartphone aria-hidden className="size-4 text-fg-muted" />
           {t('remoteLanScan')}
         </p>
         <p className="text-sm text-fg-muted">{t(reveal === null ? 'remoteLanShowCodeHint' : 'remoteLanScanHint')}</p>

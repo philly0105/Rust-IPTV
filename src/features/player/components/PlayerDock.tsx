@@ -100,7 +100,7 @@ function ExpandBase({ label, onExpand }: { label: string; onExpand(): void }) {
       title={label}
       onClick={onExpand}
       onPointerDown={(e) => e.stopPropagation()}
-      className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-surface-3 hover:text-fg"
+      className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
     >
       <Maximize2 className="size-4" />
     </button>
@@ -299,7 +299,7 @@ export const PlayerDock = memo(function PlayerDock() {
         data-player-mini=""
         hidden={!inMini}
         className={cn(
-          'fixed z-50 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-2',
+          'fixed z-50 flex flex-col overflow-hidden rounded-lg border border-edge bg-surface shadow-2',
           // Below sm (a phone) the video frame takes under half the screen's width (190 px at
           // least), not the 280 px that covered nearly all of a 390 px phone's content column.
           isRadio ? 'w-[min(420px,calc(100vw-32px))]' : 'w-[max(190px,45vw)] sm:w-[clamp(280px,26vw,440px)]',
@@ -352,7 +352,7 @@ export const PlayerDock = memo(function PlayerDock() {
             title={t('close')}
             onClick={() => usePlayerStore.getState().stop()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-surface-3 hover:text-fg"
+            className="inline-flex size-7 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
           >
             <X className="size-4" />
           </button>

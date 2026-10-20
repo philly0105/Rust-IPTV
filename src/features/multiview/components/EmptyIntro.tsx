@@ -71,7 +71,7 @@ function QuickPicksSkeleton() {
       </div>
       <div className="flex gap-2 overflow-hidden">
         {SKELETON_NAMES.map((w) => (
-          <div key={w} className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-border bg-surface-2 ps-1 pe-3">
+          <div key={w} className="flex h-10 shrink-0 items-center gap-2 rounded-md border border-edge bg-surface-2 ps-1 pe-3">
             <div className="size-8 rounded-sm bg-surface-3" />
             <div className={cn('h-3 rounded-sm bg-surface-3', w)} />
           </div>
@@ -117,7 +117,7 @@ export function EmptyIntro({ layout, onLayout, onPick }: EmptyIntroProps) {
     >
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-8">
         <div className="max-w-[60ch]">
-          <h2 id="multiview-empty-title" className="font-display text-xl font-semibold text-balance text-fg">
+          <h2 id="multiview-empty-title" className="text-title text-balance text-fg">
             {t('emptyTitle')}
           </h2>
           <p className="mt-1 text-sm text-pretty text-fg-muted">{t('emptyBody')}</p>
@@ -141,7 +141,7 @@ export function EmptyIntro({ layout, onLayout, onPick }: EmptyIntroProps) {
                   className={cn(
                     'inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-2.5 text-sm font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-focus',
                     'motion-safe:transition-colors motion-safe:duration-150',
-                    checked ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:bg-surface-3 hover:text-fg active:bg-pressed',
+                    checked ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
                   )}
                 >
                   <LayoutGlyph layout={l} className="h-4 w-7 shrink-0" />
@@ -186,7 +186,7 @@ export function EmptyIntro({ layout, onLayout, onPick }: EmptyIntroProps) {
                     disabled={pending !== null && !busy}
                     onClick={() => void quickAdd(p)}
                     className={cn(
-                      'inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-md border border-border bg-surface-2 ps-1 pe-3 text-sm font-medium text-fg outline-none',
+                      'inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-md border border-edge bg-surface-2 ps-1 pe-3 text-sm font-medium text-fg outline-none',
                       'hover:bg-surface-3 active:bg-pressed focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50',
                       'motion-safe:transition-colors motion-safe:duration-150',
                     )}

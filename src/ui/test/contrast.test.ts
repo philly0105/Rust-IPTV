@@ -1,8 +1,10 @@
 /**
  * WCAG contrast computed straight from src/styles/tokens.css, for every
  * accent (C1) in the dark, light and OLED themes, plus the glass tokens (C8).
- * Text: 4.5:1 (1.4.3). Component boundaries, focus indicators, and state
- * indicators: 3:1 (1.4.11). Change a token and this fails before anyone sees it.
+ * Text: 4.5:1 (1.4.3). Control boundaries (--color-border), focus indicators,
+ * and state indicators: 3:1 (1.4.11). Container edges (--color-edge) and the
+ * divider are decorative and only have to stay quieter than the control border.
+ * Change a token and this fails before anyone sees it.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -62,7 +64,17 @@ function accentBlock(accent: string, theme: 'dark' | 'light'): Record<string, Rg
   return themeBlock(sel);
 }
 
-const ACCENT_KEYS = ['accent', 'accent-hover', 'accent-pressed', 'accent-fg', 'focus'] as const;
+const ACCENT_KEYS = [
+  'accent',
+  'accent-hover',
+  'accent-pressed',
+  'accent-fg',
+  'accent-solid',
+  'accent-solid-hover',
+  'accent-solid-pressed',
+  'accent-solid-fg',
+  'focus',
+] as const;
 
 /** Every theme the user can end up in: 7 accents x (dark, light, OLED). Amber dark/light keep their old names. */
 const THEMES: Record<string, Record<string, Rgb>> = {};
@@ -74,6 +86,7 @@ for (const accent of ACCENTS) {
 }
 
 const SURFACES = ['bg', 'surface', 'surface-2', 'surface-3'] as const;
+const WHITE_TEXT: Rgb = [255, 255, 255];
 
 describe('accent and OLED blocks', () => {
   it('every non-amber accent defines its whole family for dark and for light', () => {
@@ -112,7 +125,25 @@ for (const [name, c] of Object.entries(THEMES)) {
 
   describe(`${name} theme`, () => {
     it('parses every colour token', () => {
-      for (const k of ['border', 'divider', 'focus', 'accent', 'accent-fg', 'fg', 'fg-muted', 'fg-subtle', ...SURFACES]) tok(k);
+      for (const k of [
+        'border',
+        'edge',
+        'divider',
+        'focus',
+        'accent',
+        'accent-fg',
+        'accent-solid',
+        'accent-solid-fg',
+        'danger-solid',
+        'live-solid',
+        'selected',
+        'raised',
+        'fg',
+        'fg-muted',
+        'fg-subtle',
+        ...SURFACES,
+      ])
+        tok(k);
     });
 
     it('component borders reach 3:1 against bg and every surface (WCAG 1.4.11)', () => {
@@ -123,11 +154,12 @@ for (const [name, c] of Object.entries(THEMES)) {
       for (const s of SURFACES) expect(contrast(tok('focus'), tok(s)), `focus on ${s}`).toBeGreaterThanOrEqual(3);
     });
 
-    it('state indicators reach 3:1: selected tab bar, switch on, switch thumb, progress fill', () => {
+    it('state indicators reach 3:1: selected tab bar, tuning tick, switch on, switch thumb, progress fill', () => {
       for (const s of SURFACES) expect(contrast(tok('accent'), tok(s)), `accent on ${s}`).toBeGreaterThanOrEqual(3);
-      // Switch off: thumb (fg-muted) on its track (surface-3); on: thumb (accent-fg) on accent.
+      expect(contrast(tok('accent'), tok('selected')), 'tick on selected').toBeGreaterThanOrEqual(3);
+      // Switch off: thumb (fg-muted) on its track (surface-3); on: thumb (accent-solid-fg) on the solid fill.
       expect(contrast(tok('fg-muted'), tok('surface-3'))).toBeGreaterThanOrEqual(3);
-      expect(contrast(tok('accent-fg'), tok('accent'))).toBeGreaterThanOrEqual(3);
+      expect(contrast(tok('accent-solid-fg'), tok('accent-solid'))).toBeGreaterThanOrEqual(3);
     });
 
     it('every text colour reaches 4.5:1 on bg and every surface', () => {
@@ -136,11 +168,27 @@ for (const [name, c] of Object.entries(THEMES)) {
       }
     });
 
-    it('text on filled controls reaches 4.5:1 (primary, hover, danger button, live badge)', () => {
+    it('text on filled controls reaches 4.5:1 (primary at rest, hover and pressed, danger button, live badge)', () => {
       expect(contrast(tok('accent-fg'), tok('accent'))).toBeGreaterThanOrEqual(4.5);
       expect(contrast(tok('accent-fg'), tok('accent-hover'))).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(tok('bg'), tok('danger')), 'danger button').toBeGreaterThanOrEqual(4.5);
-      expect(contrast(tok('bg'), tok('live')), 'live badge').toBeGreaterThanOrEqual(4.5);
+      for (const k of ['accent-solid', 'accent-solid-hover', 'accent-solid-pressed']) {
+        expect(contrast(tok('accent-solid-fg'), tok(k)), `primary text on ${k}`).toBeGreaterThanOrEqual(4.5);
+      }
+      for (const k of ['danger-solid', 'danger-solid-hover', 'danger-solid-pressed']) expect(contrast(WHITE_TEXT, tok(k)), `danger button (${k})`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(WHITE_TEXT, tok('live-solid')), 'live badge').toBeGreaterThanOrEqual(4.5);
+    });
+
+    it('text reaches 4.5:1 on the selected and raised fills', () => {
+      for (const fg of ['fg', 'fg-muted', 'fg-subtle', 'accent']) {
+        expect(contrast(tok(fg), tok('selected')), `${fg} on selected`).toBeGreaterThanOrEqual(4.5);
+      }
+      for (const fg of ['fg', 'fg-muted']) expect(contrast(tok(fg), tok('raised')), `${fg} on raised`).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it('the selected fill stands apart from the page and the panels', () => {
+      for (const s of ['bg', 'surface'] as const) {
+        expect(contrast(tok('selected'), tok(s)), `selected on ${s}`).toBeGreaterThanOrEqual(1.08);
+      }
     });
 
     it('tinted badges keep 4.5:1 text on their 15 % wash over each surface', () => {
@@ -157,16 +205,89 @@ for (const [name, c] of Object.entries(THEMES)) {
         expect(contrast(tok('divider'), tok(s))).toBeLessThan(contrast(tok('border'), tok(s)));
       }
     });
+
+    // DS-BORDER-WEIGHT: containers get the quiet edge, form controls keep the 3:1 border.
+    it('the container edge sits between the divider and the control border, and still shows on a panel', () => {
+      for (const s of ['bg', 'surface'] as const) {
+        const edge = contrast(tok('edge'), tok(s));
+        expect(edge, `edge on ${s}`).toBeGreaterThanOrEqual(contrast(tok('divider'), tok(s)));
+        expect(edge, `edge on ${s}`).toBeLessThan(contrast(tok('border'), tok(s)));
+      }
+      expect(contrast(tok('edge'), tok('surface')), 'edge on surface').toBeGreaterThanOrEqual(1.2);
+    });
   });
 }
 
 describe('Tailwind theme mapping', () => {
-  it('exposes the divider token as a utility colour', () => {
-    const globals = readFileSync(join(STYLES, 'globals.css'), 'utf8');
-    const theme = globals.split('@layer base')[0]!;
-    expect(theme).toMatch(/--color-divider:\s*#[0-9a-f]{6}/i);
-    expect(theme).toMatch(/--color-border:\s*#[0-9a-f]{6}/i);
+  const globals = readFileSync(join(STYLES, 'globals.css'), 'utf8');
+  const theme = globals.split('@layer base')[0]!;
+
+  it('exposes the line, state and fill tokens as utility colours', () => {
+    for (const k of ['divider', 'edge', 'border', 'selected', 'raised', 'accent-solid', 'accent-solid-fg', 'danger-solid', 'live-solid']) {
+      expect(theme, `--color-${k}`).toMatch(new RegExp(String.raw`--color-${k}:\s*#[0-9a-f]{6}`, 'i'));
+    }
+    for (const k of ['hover', 'active']) expect(theme, `--color-${k}`).toMatch(new RegExp(String.raw`--color-${k}:\s*rgb\(`));
   });
+
+  it('keeps the @theme defaults equal to the dark block, so a utility never shows a stale colour', () => {
+    const dark = BASE.dark;
+    for (const m of theme.matchAll(/--color-([\w-]+):\s*(#[0-9a-f]{6})\s*;/gi)) {
+      const k = m[1]!;
+      if (dark[k]) expect(hex(m[2]!), `--color-${k}`).toEqual(dark[k]);
+    }
+  });
+
+  // DS-ELEVATION-THEMES: Tailwind 4 inlines a literal @theme shadow into the utility, so the light
+  // and OLED values in tokens.css never applied. The utilities must point at the theme variables.
+  it('maps shadow-1 to shadow-3 onto the per-theme --elevation-N variables', () => {
+    for (const n of [1, 2, 3]) expect(theme).toMatch(new RegExp(String.raw`--shadow-${n}:\s*var\(--elevation-${n}\)\s*;`));
+    expect(theme).not.toMatch(/--shadow-\d+:(?!\s*var\(--elevation-)/);
+    const blocks = [
+      /:root,\s*:root\[data-theme='dark'\]\s*\{([^}]*)\}/,
+      /:root\[data-theme='light'\]\s*\{([^}]*)\}/,
+      /:root\[data-oled\]:not\(\[data-theme='light'\]\)\s*\{([^}]*)\}/,
+    ];
+    for (const re of blocks) {
+      const body = re.exec(tokensCss)?.[1] ?? '';
+      for (const n of [1, 2, 3]) expect(body, `${re} --elevation-${n}`).toMatch(new RegExp(String.raw`--elevation-${n}:\s*[^;]+;`));
+    }
+    // The old per-theme --shadow-N values were dead (nothing read them); none may come back.
+    expect(tokensCss).not.toMatch(/--shadow-\d+\s*:/);
+  });
+});
+
+/** The hover and active layers: see-through, so they are checked composited over each surface. */
+describe('state layers (DS-STATE-FILLS)', () => {
+  const layerBlocks = {
+    dark: blockBody(/:root,\s*:root\[data-theme='dark'\]\s*\{([^}]*)\}/),
+    light: blockBody(/:root\[data-theme='light'\]\s*\{([^}]*)\}/),
+    oled: blockBody(/:root\[data-oled\]:not\(\[data-theme='light'\]\)\s*\{([^}]*)\}/),
+  };
+  for (const [name, body] of Object.entries(layerBlocks)) {
+    const c = THEMES[name]!;
+    const hover = rgbaToken(body, 'hover');
+    const active = rgbaToken(body, 'active');
+
+    it(`${name}: hover is visible on the page and on panels, and active is stronger`, () => {
+      for (const s of ['bg', 'surface', 'surface-2'] as const) {
+        const rest = c[s]!;
+        expect(contrast(over(hover.rgb, hover.alpha, rest), rest), `hover on ${s}`).toBeGreaterThanOrEqual(1.1);
+        expect(active.alpha, 'active alpha').toBeGreaterThan(hover.alpha);
+      }
+    });
+
+    it(`${name}: text stays readable on hovered and pressed rows`, () => {
+      for (const s of SURFACES) {
+        for (const layer of [hover, active]) {
+          const fill = over(layer.rgb, layer.alpha, c[s]!);
+          for (const fg of ['fg', 'fg-muted']) expect(contrast(c[fg]!, fill), `${fg} on ${s} + layer ${layer.alpha}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+      for (const s of ['bg', 'surface', 'surface-2'] as const) {
+        expect(contrast(c['fg-subtle']!, over(hover.rgb, hover.alpha, c[s]!)), `fg-subtle on hovered ${s}`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  }
 });
 
 describe('pressed fills (review round 1)', () => {

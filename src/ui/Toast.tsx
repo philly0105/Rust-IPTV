@@ -248,7 +248,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
       }}
       className={cn(
         // shrink-0: in the capped flex column a long stack must scroll, not squash each toast.
-        'pointer-events-auto relative flex w-full shrink-0 gap-3 overflow-hidden rounded-md border border-border bg-surface-2 py-3 pe-2 ps-4 shadow-2',
+        'pointer-events-auto relative flex w-full shrink-0 gap-3 overflow-hidden rounded-lg border border-edge bg-surface-2 py-3 pe-2 ps-4 shadow-2',
         'motion-safe:animate-toast-in',
       )}
     >
@@ -256,7 +256,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
         aria-hidden
         className={cn(
           'absolute inset-y-0 start-0 w-1',
-          t.variant === 'success' ? 'bg-success' : t.variant === 'error' ? 'bg-danger' : 'bg-accent',
+          t.variant === 'success' ? 'bg-success' : t.variant === 'error' ? 'bg-danger' : 'bg-fg-subtle',
         )}
       />
       <Icon
@@ -264,7 +264,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
         size={18}
         className={cn(
           'mt-0.5 shrink-0',
-          t.variant === 'success' ? 'text-success' : t.variant === 'error' ? 'text-danger' : 'text-accent',
+          t.variant === 'success' ? 'text-success' : t.variant === 'error' ? 'text-danger' : 'text-fg-muted',
         )}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -286,7 +286,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
               t.action?.onClick();
               close();
             }}
-            className="-ms-1.5 mt-0.5 inline-flex min-h-8 items-center self-start rounded-sm px-1.5 text-sm font-semibold text-accent hover:underline hover:bg-surface-3 active:bg-pressed motion-safe:transition-colors"
+            className="-ms-1.5 mt-0.5 inline-flex min-h-8 items-center self-start rounded-sm px-1.5 text-sm font-semibold text-accent hover:underline hover:bg-hover active:bg-pressed motion-safe:transition-colors"
           >
             {t.action.label}
           </button>
@@ -297,7 +297,7 @@ function ToastItem({ t, paused }: { t: ToastRecord; paused: boolean }) {
         aria-label={tr('dismiss')}
         onClick={close}
         data-toast-dismiss=""
-        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-3 hover:text-fg active:bg-pressed motion-safe:transition-colors"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
       >
         <X aria-hidden size={14} />
       </button>

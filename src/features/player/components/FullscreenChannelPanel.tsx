@@ -570,7 +570,7 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
                           isCurrent(c) && 'bg-white/10 text-white dark:text-accent-hover',
                         )}
                       >
-                        <span className="w-10 shrink-0 text-end font-display text-sm text-white/70 tabular-nums">
+                        <span className="w-10 shrink-0 text-end font-numeric text-sm text-white/70 tabular-nums">
                           {c.number ?? ''}
                         </span>
                         <RowLogo url={c.logoUrl} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />

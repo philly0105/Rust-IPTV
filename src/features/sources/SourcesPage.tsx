@@ -52,7 +52,7 @@ function SourcesSkeleton() {
   return (
     <div role="status" aria-busy="true" className="flex flex-col gap-3" data-testid="sources-loading">
       {Array.from({ length: 3 }, (_, i) => (
-        <div key={i} className="flex items-center gap-4 rounded-lg border border-border bg-surface p-4">
+        <div key={i} className="flex items-center gap-4 rounded-lg border border-edge bg-surface p-4">
           <Skeleton className="size-11 shrink-0" />
           <div className="flex flex-1 flex-col gap-2">
             <Skeleton className="h-5 w-48 max-w-full" />

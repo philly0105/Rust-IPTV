@@ -232,7 +232,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                   onClick={() => void pick(ch)}
                   className={cn(
                     'flex w-full min-w-0 items-center gap-3 rounded-md px-2.5 py-2 text-start outline-none',
-                    'hover:bg-surface-2 active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus',
+                    'hover:bg-hover active:bg-active focus-visible:ring-2 focus-visible:ring-focus',
                     'disabled:cursor-default disabled:hover:bg-transparent',
                     'motion-safe:transition-colors motion-safe:duration-100',
                   )}
@@ -240,7 +240,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                   <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={ch.name} className="size-9 rounded-md" />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span dir="auto" className={cn('truncate text-start text-sm font-medium', disabled && !onWall ? 'text-fg-muted' : 'text-fg')}>
-                      {ch.number !== undefined ? <span className="me-2 font-display tabular-nums text-fg-muted">{ch.number}</span> : null}
+                      {ch.number !== undefined ? <span className="me-2 font-numeric tabular-nums text-fg-muted">{ch.number}</span> : null}
                       {ch.name}
                     </span>
                     <span className="flex min-w-0 gap-2 text-xs text-fg-muted">
@@ -263,8 +263,8 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                   {busy ? (
                     <LoaderCircle aria-hidden className="size-4 shrink-0 text-fg-muted motion-safe:animate-spin" />
                   ) : onWall ? (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-accent/15 px-1.5 py-0.5 text-xs font-medium text-fg">
-                      <Check aria-hidden className="size-3.5 text-accent" />
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-surface-3 px-1.5 py-0.5 text-xs font-medium text-fg">
+                      <Check aria-hidden className="size-3.5 text-fg-muted" />
                       {t('pickerOnSlot', { slot: slotOf + 1 })}
                     </span>
                   ) : !disabled ? (

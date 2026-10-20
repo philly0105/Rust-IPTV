@@ -58,7 +58,7 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
       className={cn(
         'flex items-center text-white',
         stage
-          ? 'h-full w-full flex-col justify-center gap-6 bg-[radial-gradient(ellipse_at_center,rgb(245_181_68/0.14),transparent_65%)] p-6'
+          ? 'h-full w-full flex-col justify-center gap-6 bg-[radial-gradient(ellipse_at_center,color-mix(in_srgb,var(--color-glass-accent)_14%,transparent),transparent_65%)] p-6'
           : 'gap-3 bg-[#070b12] px-3 py-2',
         className,
       )}
@@ -107,7 +107,7 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
           title={playing ? t('pause') : t('play')}
           onClick={() => store.togglePlay()}
           className={cn(
-            'inline-flex items-center justify-center rounded-full bg-accent text-accent-fg hover:bg-accent-hover',
+            'inline-flex items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg hover:bg-accent-solid-hover',
             stage ? 'size-14' : 'size-10',
           )}
         >

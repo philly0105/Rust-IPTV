@@ -257,7 +257,7 @@ function ZapChip({
       <div className="flex min-w-0 items-center gap-2">
         {logo}
         {number !== undefined && (
-          <span data-testid="zap-number" className="shrink-0 font-display text-base leading-none text-white tabular-nums dark:text-accent-hover">
+          <span data-testid="zap-number" className="shrink-0 font-numeric text-base leading-none text-white tabular-nums dark:text-accent-hover">
             {number}
           </span>
         )}
@@ -362,7 +362,7 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
       className={cn(
         'player-glass player-glass-edge glass-blur pointer-events-auto absolute z-[12] border motion-safe:animate-pop-in',
         // Full: a size container, so the guide rows can fit a phone-width banner.
-        compact ? 'rounded-md px-2.5 py-2' : '@container w-[min(30rem,calc(100%-1.5rem))] rounded-xl p-3 sm:p-3.5',
+        compact ? 'rounded-md px-2.5 py-2' : '@container w-[min(30rem,calc(100%-1.5rem))] rounded-lg p-3 sm:p-3.5',
         className,
       )}
       onPointerEnter={hover.onPointerEnter}
@@ -380,7 +380,7 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
               <span
                 data-testid="zap-number"
                 className={cn(
-                  'shrink-0 font-display leading-none text-white tabular-nums dark:text-accent-hover',
+                  'shrink-0 font-numeric leading-none text-white tabular-nums dark:text-accent-hover',
                   compact ? 'text-lg' : 'text-3xl @max-md:text-2xl',
                 )}
               >
@@ -420,7 +420,7 @@ export function ZapHeaderLine({ title }: { title: string }) {
   return (
     <span data-testid="mini-zap-line" className="flex min-w-0 flex-1 items-baseline gap-1.5">
       {number !== undefined && (
-        <span data-testid="zap-number" className="shrink-0 font-display text-sm leading-none text-accent tabular-nums motion-safe:animate-fade-in">
+        <span data-testid="zap-number" className="shrink-0 font-numeric text-sm leading-none text-accent tabular-nums motion-safe:animate-fade-in">
           {number}
         </span>
       )}

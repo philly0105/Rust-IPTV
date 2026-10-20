@@ -139,7 +139,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
             {/* Clipped, never overflowing: in long locales (ar, ru) the remaining time truncates rather than running under the buttons. */}
             <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
               {programWhen(shown, now) === 'now' ? (
-                <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px text-2xs font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
+                <span className="inline-flex items-center gap-1 rounded-xs bg-live-solid px-1.5 py-px font-numeric text-2xs tracking-wide text-white uppercase">{t('liveBadge')}</span>
               ) : null}
               <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                 {programWhen(shown, now) !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ?`${formatDay(ms(shown.start), i18n.language)} ` : ''}
@@ -196,12 +196,12 @@ export function EpgRibbon(props: EpgRibbonProps) {
             <span className="hidden min-[1440px]:inline">{liveLabel}</span>
           </Button>
         ) : null}
-        <div role="group" aria-label={t('guideView')} className="flex rounded-md border border-border p-0.5">
+        <div role="group" aria-label={t('guideView')} className="flex rounded-md border border-edge bg-surface-2 p-0.5">
           <IconButton
             size="sm"
             label={t('timelineView')}
             pressed={mode === 'timeline'}
-            className={mode === 'timeline' ? 'bg-surface-3 text-fg' : ''}
+            className={mode === 'timeline' ? 'bg-raised text-fg shadow-1' : ''}
             icon={<ChartGantt className="size-4" />}
             onClick={() => void setMode('timeline')}
           />
@@ -209,7 +209,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
             size="sm"
             label={t('listView')}
             pressed={mode === 'list'}
-            className={mode === 'list' ? 'bg-surface-3 text-fg' : ''}
+            className={mode === 'list' ? 'bg-raised text-fg shadow-1' : ''}
             icon={<LayoutList className="size-4" />}
             onClick={() => void setMode('list')}
           />
@@ -219,7 +219,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
             to={props.guideHref}
             title={t('openGuide')}
             aria-label={t('openGuide')}
-            className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+            className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
           >
             <CalendarClock className="size-4" />
           </Link>
@@ -288,7 +288,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
         </Button>
         <Link
           to="/settings/epg"
-          className="inline-flex h-8 shrink-0 items-center rounded-md px-2 text-sm whitespace-nowrap text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+          className="inline-flex h-8 shrink-0 items-center rounded-md px-2 text-sm whitespace-nowrap text-accent hover:underline focus-visible:outline-2 focus-visible:outline-focus"
         >
           {t('epgSettings')}
         </Link>
@@ -444,7 +444,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         onKeyDown={onKeyDown}
         tabIndex={scrollerTabbable ? 0 : undefined}
         data-testid="ribbon-timeline"
-        className="relative h-full overflow-x-auto overflow-y-hidden pb-2 outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        className="relative h-full overflow-x-auto overflow-y-hidden pb-2 outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
         role="group"
         aria-label={t('timelineView')}
       >
@@ -488,7 +488,7 @@ function Timeline(props: ViewProps & { from: number; to: number; resetKey: strin
         <button
           type="button"
           onClick={() => scrollToNow(true)}
-          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-live px-3 py-1 text-xs font-semibold text-white shadow-2 hover:brightness-110 active:brightness-95 dark:text-bg"
+          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-live-solid px-3 py-1 text-xs font-semibold text-white shadow-2 hover:brightness-110 active:brightness-95"
         >
           <RotateCcw className="size-3" aria-hidden />
           {t('jumpToNow')}
@@ -529,12 +529,13 @@ const TimelineBlock = memo(function TimelineBlock({
   const progress = block.when === 'now' ? programProgress(p, now) : 0;
   const tone =
     block.when === 'now'
-      ? 'border-accent bg-accent/12 text-fg'
+      ? // On now: the neutral selected fill; amber only in the elapsed share below.
+        'border-edge bg-selected text-fg'
       : block.when === 'past'
         ? catchup
-          ? 'border-border bg-surface-2 text-fg-muted hover:border-accent hover:text-fg'
-          : 'border-border/60 bg-surface-2/50 text-fg-subtle'
-        : 'border-border bg-surface-2 text-fg hover:bg-surface-3';
+          ? 'border-edge bg-surface-2 text-fg-muted hover:border-border hover:text-fg'
+          : 'border-edge/60 bg-surface-2/50 text-fg-subtle'
+        : 'border-edge bg-surface-2 text-fg hover:bg-surface-3';
   const label = [
     p.title,
     formatRange(p, i18n.language),
@@ -556,11 +557,13 @@ const TimelineBlock = memo(function TimelineBlock({
       onMouseEnter={() => onFocusProgram(p)}
       onFocus={() => onFocusProgram(p)}
       // overflow-clip, not hidden: the block is then no scroll container, so its text can stick.
-      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${tone}`}
+      className={`absolute top-5 bottom-2 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus ${tone}`}
       style={{ ...inlineStart(block.left + 1, rtl), width: Math.max(2, block.width - 2) }}
     >
       {block.when === 'now' ? (
-        <span aria-hidden className="absolute inset-y-0 start-0 bg-accent/15" style={{ width: `${progress * 100}%` }} />
+        <span aria-hidden className="absolute start-0 end-0 bottom-0 h-0.5 bg-surface-3">
+          <span className="block h-full bg-accent" style={{ width: `${progress * 100}%` }} />
+        </span>
       ) : null}
       {/* A show that began before the visible edge keeps its title in view: the text sticks 8 px
           past the edge until the block's end pushes it out, and ends in an ellipsis inside the
@@ -627,8 +630,8 @@ function ProgramList(props: ViewProps) {
                 tabIndex={v.index === (nowIndex >= 0 ? nowIndex : 0) ? 0 : -1}
                 onClick={() => props.onActivate(p)}
                 onFocus={() => props.onFocusProgram(p)}
-                className={`flex h-full w-full items-center gap-3 border-b border-divider px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset ${
-                  when === 'now' ? 'bg-accent/10' : 'hover:bg-surface-2'
+                className={`flex h-full w-full items-center gap-3 border-b border-divider px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset ${
+                  when === 'now' ? 'tuning-tick bg-selected' : 'hover:bg-hover'
                 } ${when === 'past' && !catchup ? 'text-fg-subtle' : 'text-fg'}`}
               >
                 <span className="flex w-24 shrink-0 flex-col text-xs tabular-nums text-fg-muted">
@@ -664,7 +667,7 @@ function ProgramList(props: ViewProps) {
                   </span>
                 ) : null}
                 {when === 'now' ? (
-                  <span className="shrink-0 rounded-sm bg-live px-1.5 py-px text-2xs font-semibold text-white dark:text-bg">{t('liveBadge')}</span>
+                  <span className="shrink-0 rounded-xs bg-live-solid px-1.5 py-px font-numeric text-2xs tracking-wide text-white uppercase">{t('liveBadge')}</span>
                 ) : when === 'past' && catchup ? (
                   <span className="inline-flex shrink-0 items-center gap-1 text-xs text-accent">
                     <History className="size-3.5" aria-hidden />

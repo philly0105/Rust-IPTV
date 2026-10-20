@@ -128,7 +128,7 @@ function MyListButtonBody({
           // C5: blur only while the corner is up on one card (its `group/poster` hovered, or the
           // button focused). Without hover it shows on every card at once, so it is opaque there.
           inList
-            ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover active:bg-accent-pressed'
+            ? 'border-glass-border bg-glass-strong text-on-glass hover:bg-glass active:bg-glass-strong'
             : cn(
                 'border-glass-border bg-glass text-on-glass hover:bg-glass-strong',
                 'group-hover/poster:glass-blur focus-visible:glass-blur [@media(hover:none)]:bg-glass-strong',

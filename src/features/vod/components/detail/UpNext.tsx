@@ -55,7 +55,7 @@ export function UpNextRail({
               <button
                 type="button"
                 onClick={() => onPlay(ep)}
-                className="group flex w-full items-center gap-3 rounded-md p-1.5 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
+                className="group flex w-full items-center gap-3 rounded-md p-1.5 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-28 shrink-0">
                   <Poster
@@ -124,7 +124,7 @@ export function NextEpisodeCard({
     <div
       role="status"
       aria-live="polite"
-      className={cn('flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-2 px-4 py-3 shadow-1')}
+      className={cn('flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface-2 px-4 py-3 shadow-1')}
     >
       <SkipForward aria-hidden size={18} className="text-accent" />
       <div className="min-w-0 flex-1">

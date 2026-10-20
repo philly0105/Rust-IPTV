@@ -30,14 +30,14 @@ function LibraryCardImpl({ entry }: { entry: LibraryEntry }) {
     <div className="flex h-full flex-col gap-2" data-testid="library-card" data-kind={entry.kind} data-missing={missing || undefined}>
       <div
         className={cn(
-          'relative overflow-hidden rounded-lg ring-1 ring-border motion-safe:transition-transform motion-safe:duration-150',
-          'group-hover:ring-accent/60 group-focus-visible:ring-2 group-focus-visible:ring-accent',
+          'relative overflow-hidden rounded-lg ring-1 ring-edge motion-safe:transition-transform motion-safe:duration-150',
+          'group-hover:ring-border group-focus-visible:ring-2 group-focus-visible:ring-focus',
           missing && 'opacity-60 grayscale',
         )}
       >
         <Poster src={entry.posterUrl} sourceId={(entry.kind === 'movie' ? entry.download : entry.latest).ref?.sourceId} alt="" label={entry.title} aspect="poster" />
         {entry.kind === 'series' && (
-          <span className="absolute end-2 top-2 rounded-sm bg-bg/85 px-1.5 py-0.5 font-display text-xs font-semibold tabular-nums text-fg">
+          <span className="absolute end-2 top-2 rounded-sm border border-glass-border bg-glass-strong px-1.5 py-0.5 text-xs font-semibold tabular-nums text-on-glass">
             {entry.episodes.length}
           </span>
         )}

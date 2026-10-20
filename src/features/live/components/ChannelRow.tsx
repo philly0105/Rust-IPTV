@@ -45,11 +45,11 @@ export interface ChannelRowProps {
 export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
   return (
     <div className={`flex h-full items-center gap-3 ps-3 pe-3 ${pulse ? 'motion-safe:animate-pulse' : ''}`} aria-hidden>
-      <span className="h-3 w-8 shrink-0 rounded bg-surface-3" />
+      <span className="h-3 w-8 shrink-0 rounded-xs bg-surface-3" />
       <span className="size-9 shrink-0 rounded-md bg-surface-3" />
       <span className="flex flex-1 flex-col gap-1.5">
-        <span className="h-3 w-2/5 rounded bg-surface-3" />
-        <span className="h-2.5 w-3/5 rounded bg-surface-2" />
+        <span className="h-3 w-2/5 rounded-xs bg-surface-3" />
+        <span className="h-2.5 w-3/5 rounded-xs bg-surface-2" />
       </span>
     </div>
   );
@@ -74,7 +74,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   return (
     <div
       className={`group relative flex h-full items-stretch border-b border-divider ${
-        playing ? 'bg-accent/10' : active ? 'bg-surface-2' : 'hover:bg-surface-2/70'
+        playing ? 'bg-selected' : active ? 'bg-hover' : 'hover:bg-hover'
       }`}
       onContextMenu={(e) => props.onContextMenu(e, channel, index)}
     >
@@ -95,9 +95,9 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           .join(listSeparator(i18n.language))}
         onClick={() => props.onActivate(index, 'click')}
         onDoubleClick={() => props.onActivate(index, 'double')}
-        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-3 pe-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-3 pe-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       >
-        <span className="w-8 shrink-0 text-end text-xs tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
+        <span className="w-8 shrink-0 text-end font-numeric text-sm tabular-nums text-fg-subtle">{channel.number ?? ''}</span>
         {!compact ? <ChannelLogo src={channel.logoUrl} name={name} sourceId={channel.ref.sourceId} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-1.5">

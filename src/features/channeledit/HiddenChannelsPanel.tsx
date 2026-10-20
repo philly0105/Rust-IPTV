@@ -210,7 +210,7 @@ export function HiddenChannelsPanel({ sourceId, onClose }: HiddenChannelsPanelPr
             role="list"
             aria-label={t('hiddenTitle')}
             onKeyDown={onListKey}
-            className="max-h-[min(380px,48vh)] overflow-y-auto overscroll-contain rounded-md border border-border bg-surface"
+            className="max-h-[min(380px,48vh)] overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface"
             data-testid="hidden-channels-list"
           >
             <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>

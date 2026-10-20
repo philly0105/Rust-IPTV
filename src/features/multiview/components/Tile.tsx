@@ -449,7 +449,7 @@ export const Tile = memo(function Tile({
             aria-hidden
             data-testid="multiview-slot-plate"
             className={cn(
-              'flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded-sm px-1 font-display text-sm font-semibold tabular-nums',
+              'flex h-6 min-w-6 shrink-0 items-center justify-center gap-1 rounded-sm px-1 font-numeric text-sm font-semibold tabular-nums',
               hasSound ? GLASS_ACCENT_FILL : GLASS_STRONG,
             )}
           >
@@ -460,7 +460,7 @@ export const Tile = memo(function Tile({
           <span className="flex min-w-0 flex-col leading-tight">
             {/* text-match-parent: with dir="auto" a Latin name in an RTL UI keeps to the parent's start edge. */}
             <span dir="auto" className="truncate text-match-parent text-sm font-medium">
-              {tile.number !== undefined ? <span className="me-1.5 font-display tabular-nums opacity-80">{tile.number}</span> : null}
+              {tile.number !== undefined ? <span className="me-1.5 font-numeric tabular-nums opacity-80">{tile.number}</span> : null}
               {name}
             </span>
             {programme ? (

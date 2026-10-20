@@ -304,10 +304,10 @@ export function Dialog({
         data-testid={testId}
         className={cn(
           // The panel itself only takes focus when it holds nothing focusable; a ring around the whole dialog would read as a stray highlight.
-          'relative flex flex-col border-border bg-surface text-fg shadow-2 focus-visible:shadow-2 focus-visible:outline-none',
+          'relative flex flex-col border-edge bg-surface text-fg shadow-3 focus-visible:shadow-3 focus-visible:outline-none',
           drawer
-            ? 'h-full w-[min(var(--panel-width),90vw)] border-s motion-safe:animate-fade-in'
-            : 'w-full max-h-[calc(100vh-12vh-24px)] max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)] rounded-lg border motion-safe:animate-pop-in',
+            ? 'h-full w-[min(var(--panel-width),90vw)] border-s motion-safe:animate-drawer-in'
+            : 'w-full max-h-[calc(100vh-12vh-24px)] max-sm:max-h-[calc(100vh-max(8vh,var(--toast-reserve,0px))-4vh-24px)] rounded-xl border motion-safe:animate-pop-in',
           !drawer && sizes[size],
           className,
         )}
@@ -321,7 +321,7 @@ export function Dialog({
           )}
         >
           <div className={cn('min-w-0 flex-1', hideTitle && 'sr-only')}>
-            <h2 id={titleId} className="text-lg">
+            <h2 id={titleId} className="text-title-sm">
               {title}
             </h2>
             {description && (
@@ -338,7 +338,7 @@ export function Dialog({
               onClick={() => onCloseRef.current()}
               className={cn(
                 drawer ? 'ms-auto' : '-me-2',
-                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors',
+                'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
               )}
             >
               <X aria-hidden size={18} />

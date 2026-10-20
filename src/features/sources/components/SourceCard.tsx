@@ -238,7 +238,7 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
       onDrop={(e) => props.onDrop(s.id, e)}
       className={clsx(
         'relative rounded-lg border bg-surface shadow-1',
-        s.lastError && !busy ? 'border-danger/60' : 'border-border',
+        s.lastError && !busy ? 'border-danger/60' : 'border-edge',
         props.dragging && 'opacity-50',
       )}
     >
@@ -268,7 +268,7 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
 
         <span
           aria-hidden
-          className="flex size-11 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 font-display text-sm font-semibold tracking-wide text-accent"
+          className="flex size-11 shrink-0 items-center justify-center rounded-md border border-edge bg-surface-2 font-numeric text-base tracking-wide text-fg-muted"
         >
           {KIND_MARK[s.kind]}
         </span>
@@ -280,7 +280,7 @@ export const SourceCard = memo(function SourceCard(props: SourceCardProps) {
               id={nameId}
               dir="auto"
               title={s.name}
-              className="truncate font-display text-lg font-semibold text-fg hover:text-accent"
+              className="truncate text-title-sm text-fg underline-offset-4 hover:underline"
               data-testid="source-name"
             >
               {s.name}

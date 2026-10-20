@@ -152,7 +152,7 @@ function VolumeControl({ compact }: { compact?: boolean }) {
         <span
           aria-hidden
           data-testid="volume-readout"
-          className="w-0 overflow-hidden text-end font-display text-xs whitespace-nowrap text-white/80 tabular-nums opacity-0 group-focus-within/vol:w-10 group-focus-within/vol:opacity-100 group-hover/vol:w-10 group-hover/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-200"
+          className="w-0 overflow-hidden text-end font-numeric text-xs whitespace-nowrap text-white/80 tabular-nums opacity-0 group-focus-within/vol:w-10 group-focus-within/vol:opacity-100 group-hover/vol:w-10 group-hover/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-200"
         >
           {percent}%
         </span>
@@ -221,7 +221,7 @@ export function RecordControl({ compact }: { compact?: boolean }) {
         <span
           data-testid="rec-indicator"
           title={recordPath ? t('recordingTo', { path: recordPath }) : undefined}
-          className="ms-1 inline-flex items-center gap-1.5 rounded-full bg-[color:var(--color-danger,#ff7a7a)]/15 px-2 py-0.5 font-display text-xs font-semibold text-[color:var(--color-danger,#ff7a7a)] tabular-nums ring-1 ring-[color:var(--color-danger,#ff7a7a)]/45"
+          className="ms-1 inline-flex items-center gap-1.5 rounded-full bg-[color:var(--color-danger,#ff7a7a)]/15 px-2 py-0.5 font-numeric text-xs font-semibold text-[color:var(--color-danger,#ff7a7a)] tabular-nums ring-1 ring-[color:var(--color-danger,#ff7a7a)]/45"
         >
           <span
             data-testid="rec-dot"
@@ -237,7 +237,7 @@ export function RecordControl({ compact }: { compact?: boolean }) {
           pressed={recording}
           disabled={busy}
           onClick={toggle}
-          className={recording ? 'text-[#ff7a7a]!' : undefined}
+          className={recording ? 'text-danger!' : undefined}
         >
           <CircleDot />
         </CtlButton>
@@ -285,7 +285,7 @@ export function BarReadout({
       aria-live="polite"
       data-testid="bar-readout"
       data-tauri-drag-region={dragRegion ? '' : undefined}
-      className={cn('me-2 min-w-0 truncate font-display text-sm whitespace-nowrap text-white tabular-nums', className)}
+      className={cn('me-2 min-w-0 truncate font-numeric text-sm whitespace-nowrap text-white tabular-nums', className)}
     >
       {!shown && fallback}
       {shown && (
@@ -337,7 +337,7 @@ export function MenuToggle({ label, checked, hint, onClick }: { label: string; c
     >
       <Check className={cn('size-4 shrink-0', !checked && 'invisible', checked && 'dark:text-accent-hover')} aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {hint && <kbd className="font-sans text-xs text-white/50">{hint}</kbd>}
+      {hint && <kbd className="player-on-glass-muted font-sans text-xs">{hint}</kbd>}
     </button>
   );
 }
@@ -582,13 +582,13 @@ function OptionsMenu({
           {header}
           {/* Choices keep the menu open, so the effect can be compared on the picture. */}
           <div role="group" aria-label={t('pictureAspect')}>
-            <p className="px-3 pt-1 pb-0.5 text-xs text-white/50">{t('pictureAspect')}</p>
+            <p className="player-on-glass-muted px-3 pt-1 pb-0.5 text-xs">{t('pictureAspect')}</p>
             {ASPECTS.map((a) => (
               <MenuChoice key={a} label={aspectLabel(a)} selected={picture.aspect === a} onClick={() => setPicture({ aspect: a })} />
             ))}
           </div>
           <div role="group" aria-label={t('pictureZoom')} className="mt-1 border-t border-white/10 pt-1">
-            <p className="px-3 pt-1 pb-0.5 text-xs text-white/50">{t('pictureZoom')}</p>
+            <p className="player-on-glass-muted px-3 pt-1 pb-0.5 text-xs">{t('pictureZoom')}</p>
             {ZOOMS.map((z) => (
               <MenuChoice key={z} label={zoomLabel(z)} selected={picture.zoom === z} onClick={() => setPicture({ zoom: z })} />
             ))}
@@ -693,7 +693,7 @@ function LiveBadge({ status, pulseKey, className }: { status: PlayerState['statu
       data-testid="live-badge"
       data-state={failed ? 'no-signal' : onAir ? 'on-air' : 'standby'}
       className={cn(
-        'ms-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 font-display text-xs font-semibold tracking-wide whitespace-nowrap',
+        'ms-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-0.5 font-numeric text-xs font-semibold tracking-wide whitespace-nowrap',
         onAir ? 'text-white' : 'text-white/70',
         className,
       )}
@@ -771,7 +771,7 @@ function PositionSeekBar({
 function TimeReadout({ shown, duration, narrow, tiny }: { shown: boolean; duration: number | undefined; narrow: boolean; tiny: boolean }) {
   const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
   return (
-    <span className={cn('ms-1 font-display whitespace-nowrap text-white/90 tabular-nums', narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : tiny ? 'text-xs' : 'text-sm')}>
+    <span className={cn('ms-1 font-numeric whitespace-nowrap text-white/90 tabular-nums', narrow ? cn('text-xs', NARROW_YIELD_TO_VOLUME) : tiny ? 'text-xs' : 'text-sm')}>
       {formatTime(position)}
       {!tiny && <span className="text-white/70"> / {formatTime(duration)}</span>}
     </span>
@@ -821,13 +821,13 @@ function LiveEdge({
         }}
         aria-label={t('goLive')}
         title={t('goLive')}
-        className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-display text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
+        className="ms-1 inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 font-numeric text-xs font-semibold tracking-wide text-white ring-1 ring-white/30 hover:bg-white/12 hover:ring-white/50 motion-safe:transition-colors"
       >
         <span className="size-2 rounded-full bg-white/50" aria-hidden />
         {short ? t('live') : t('goLive')}
       </button>
       <span
-        className={cn('ms-1.5 min-w-0 truncate font-display text-sm whitespace-nowrap text-white/90 tabular-nums', narrow && NARROW_YIELD_TO_VOLUME)}
+        className={cn('ms-1.5 min-w-0 truncate font-numeric text-sm whitespace-nowrap text-white/90 tabular-nums', narrow && NARROW_YIELD_TO_VOLUME)}
         data-testid="behind-live"
       >
         {short ? `-${formatTime(behindLive)}` : t('behindLive', { time: formatTime(behindLive) })}
@@ -850,7 +850,7 @@ function RecordMenuAction({ onDone }: { onDone(): void }) {
         toggle();
         onDone();
       }}
-      className={recording ? 'text-[#ff7a7a]!' : undefined}
+      className={recording ? 'text-danger!' : undefined}
     >
       <CircleDot />
     </CtlButton>
@@ -1179,7 +1179,7 @@ export function Controls({ variant, visible, compact, onMenuOpenChange, readoutI
         data-testid="controls-pane"
         className={cn(
           variant === 'overlay' && 'player-glass glass-blur',
-          floating && 'player-glass-edge rounded-xl border px-1.5 pt-1 sm:px-2.5',
+          floating && 'player-glass-edge rounded-lg border px-1.5 pt-1 sm:px-2.5',
           variant === 'overlay' && compact && 'border-t px-1',
         )}
       >

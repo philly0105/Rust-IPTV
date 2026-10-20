@@ -123,7 +123,7 @@ export function StatsPage() {
     const split = rangeTotals(data.days);
     headline = (
       <div className="min-w-0 flex-1">
-        <p className="max-w-[36ch] font-display text-[1.625rem] font-semibold leading-tight text-balance sm:text-[2rem]" data-testid="stats-total">
+        <p className="max-w-[36ch] text-title text-balance sm:text-headline" data-testid="stats-total">
           {t(range === 7 ? 'totalWeek' : 'totalMonth', { time: time(data.totalSeconds) })}
         </p>
         <ul className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-fg-muted" data-testid="stats-split">

@@ -61,7 +61,7 @@ export function SleepChip({ compact, onOpen }: { compact?: boolean; onOpen(): vo
       aria-keyshortcuts="Z"
       onClick={onOpen}
       className={cn(
-        'ms-1 inline-flex shrink-0 items-center rounded-full font-display font-semibold tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors',
+        'ms-1 inline-flex shrink-0 items-center rounded-full font-numeric font-semibold tabular-nums ring-1 hover:bg-white/12 motion-safe:transition-colors',
         compact ? 'h-6 gap-1 px-1.5 text-[calc(11rem/15)]' : 'h-7 gap-1.5 px-2 text-xs',
         // The last minute lights up: the dial's accent on the dark themes, a brighter edge on the light one.
         last ? 'bg-white/10 text-white ring-white/70 dark:text-accent-hover dark:ring-accent/70' : 'text-white ring-white/25 hover:ring-white/45',
@@ -330,7 +330,7 @@ export function SleepPrompt({ small = false, className }: { small?: boolean; cla
           ref={keepRef}
           type="button"
           onClick={() => useSleepTimer.getState().extend(SLEEP_EXTEND_MINUTES)}
-          className={cn('rounded-md bg-accent font-medium text-accent-fg hover:bg-accent-hover', small ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm')}
+          className={cn('rounded-md bg-accent-solid font-medium text-accent-solid-fg hover:bg-accent-solid-hover', small ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm')}
         >
           {t('sleepKeepWatching', { minutes: SLEEP_EXTEND_MINUTES })}
         </button>

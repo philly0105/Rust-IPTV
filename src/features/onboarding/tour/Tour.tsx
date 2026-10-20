@@ -273,13 +273,13 @@ export function Tour({ onClose }: TourProps) {
         data-testid="tour-card"
         data-side={place.side}
         className={cn(
-          'fixed top-0 left-0 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-border bg-surface text-fg shadow-2 focus-visible:outline-none',
+          'fixed top-0 left-0 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-edge bg-surface text-fg shadow-2 focus-visible:outline-none',
           'motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out',
         )}
         style={{ transform: translateTo(place.left, place.top) }}
       >
         <div className="flex items-center gap-3 px-5 pt-5">
-          <span aria-hidden className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-2 text-accent">
+          <span aria-hidden className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-2 text-fg-muted">
             <Icon size={20} />
           </span>
           <p className="min-w-0 flex-1 text-xs text-fg-muted" data-testid="tour-progress">

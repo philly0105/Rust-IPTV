@@ -1,28 +1,65 @@
 /*
- * Design tokens (SPEC C10). Visual direction: "Night Tuner".
- * Deep ink-navy surfaces, one amber accent borrowed from a backlit radio dial,
- * Bahnschrift (DIN-style, ships with Windows) for channel numbers and display type.
- * Every text colour meets WCAG AA (4.5:1) on bg and all surfaces. Non-text
- * contrast (WCAG 1.4.11): --color-border marks the edge of a component (inputs,
- * secondary buttons, switches, cards, dialogs, menus, toasts) and reaches 3:1
- * against bg and every surface in both themes, as does the focus colour.
- * --color-divider is the quiet hairline between regions that are already told
- * apart by spacing or a heading (rail edge, header rule, list separators); it is
- * decorative and stays low-contrast on purpose. src/ui/test/contrast.test.ts
- * computes every pair from this file.
+ * Design tokens (SPEC C10). Visual direction: "Night Tuner 2".
+ * Deep ink-navy surfaces, one amber accent borrowed from a backlit radio dial, Inter for the
+ * interface and Barlow Semi Condensed for the dial numerals (fonts.css). Every text colour meets
+ * WCAG AA (4.5:1) on bg and all surfaces; src/ui/test/contrast.test.ts computes every pair from
+ * this file.
+ *
+ * Lines. Three tokens, from quiet to strong:
+ *   --color-divider  the hairline between regions already told apart by spacing or a heading
+ *                    (rail edge, header rule, list separators, footer rules). Decorative.
+ *   --color-edge     the outline of a container: cards, panels, dialogs, menus, toasts,
+ *                    tooltips, settings groups, source cards, guide cells, chips, key caps,
+ *                    poster rings, secondary buttons. About 1.3:1; decorative, because a
+ *                    container is identified by its surface, shadow and content. Surface steps
+ *                    and elevation carry the structure.
+ *   --color-border   --color-border marks the edge of a component the user operates, where
+ *                    the edge is what identifies it (WCAG 1.4.11): inputs, selects, the off
+ *                    switch track, checkboxes, radios, PIN cells. It reaches 3:1 against bg and
+ *                    every surface in every theme. Nothing else uses it.
+ *
+ * States. --color-hover and --color-active are see-through layers (white in dark, ink in light)
+ * that read on any surface, for ghost buttons, rail links, menu items and list rows.
+ * --color-selected is the opaque neutral fill of the current item (rail link, category, channel
+ * row, list row, chosen day), paired with the amber tuning tick (globals.css); --color-raised is
+ * the thumb of a segmented control or pill tab. Selection is never an amber wash.
+ *
+ * Accent. Amber marks the primary action (one per view), focus, the active nav tick, progress,
+ * the playing / now marker and live progress. Nothing decorative. Two tones per theme:
+ *   --color-accent (+ -hover, -pressed, -fg)  the text and indicator tone: links, active icons,
+ *     the tick, progress fills, tab underlines. 4.5:1 as text in every theme, so the light theme
+ *     takes a deep shade (#8f4f00).
+ *   --color-accent-solid (+ -hover, -pressed, -fg)  the fill of primary buttons, the on switch
+ *     and other filled accent controls, with its own text colour. In dark it equals the accent.
+ *     In light, amber, lime and coral fill with the bright dial tone and ink text, because their
+ *     deep shades read as brown or olive; teal, violet, rose and sky keep the deep shade with
+ *     white text, which still reads as the hue.
+ * Status fills (white text): --color-live-solid for LIVE pills, --color-danger-solid (+ -hover)
+ * for destructive buttons. --color-live and --color-danger stay the text tones.
+ *
+ * Elevation: --elevation-1 (cards, raised thumbs, the primary button), --elevation-2 (menus,
+ * popovers, toasts, tooltips, floating panels), --elevation-3 (dialogs, drawers, sheets). They
+ * differ per theme (inner top highlight in dark, navy-tinted in light, a faint white ring on
+ * OLED black), so globals.css maps the shadow-1/2/3 utilities to these variables instead of
+ * values: Tailwind 4 inlines literal @theme shadows into the utility, which froze every theme on
+ * the dark values (DS-ELEVATION-THEMES; the contrast test guards the mapping).
  *
  * Appearance (C1, docs/architecture/appearance.md): theme.tsx sets these
  * attributes on <html>, and the blocks below key off them.
  *   data-theme   dark | light (the two base blocks, amber accent)
  *   data-accent  amber | teal | violet | rose | lime | sky | coral; each non-amber
  *                accent swaps only the accent family (accent, hover, pressed,
- *                accent-fg, focus, glow), once for dark and once for light
+ *                accent-fg, the solid fill family, focus, glow), once for dark and once for light
  *   data-oled    present when OLED black is on and the dark theme is in effect;
  *                swaps the surfaces to true black and keeps the accent
  *   data-density comfortable | compact (spacing scale and chrome sizes)
  *   --ui-scale   inline custom property, 0.9 to 1.25; html font-size follows it
  * The contrast test checks all 7 accents in dark, light and OLED, plus the
  * glass tokens (C8) composited over black and over white.
+ *
+ * The page background (--color-bg) of each theme is copied into public/theme-boot.js and the
+ * theme-color meta in index.html (src/ui/test/themeBoot.test.ts), so it changes only together
+ * with them.
  *
  * Glass (C8) is for chrome drawn over video or artwork: player controls, the
  * zap banner, the dashboard hero, multi-view tile chrome. It stays dark in
@@ -36,28 +73,43 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
   --color-bg: #0c1320;
-  --color-surface: #131c2d;
-  --color-surface-2: #1a2539;
-  --color-surface-3: #233049;
-  --color-pressed: #2c3b58;
-  --color-border: #6b7b99;
-  --color-divider: #2f3d57;
-  --color-fg: #e9edf5;
-  --color-fg-muted: #a9b3c6;
-  --color-fg-subtle: #8f9bb2;
+  --color-surface: #121a29;
+  --color-surface-2: #182131;
+  --color-surface-3: #202a3c;
+  --color-pressed: #293447;
+  --color-raised: #263146;
+  --color-selected: #233047;
+  --color-border: #6c7a95;
+  --color-edge: #252f40;
+  --color-divider: #1d2637;
+  --color-fg: #eef1f6;
+  --color-fg-muted: #a9b3c5;
+  --color-fg-subtle: #8f9ab0;
   --color-accent: #f5b544;
   --color-accent-hover: #ffc865;
   --color-accent-pressed: #e09a26;
   --color-accent-fg: #1b1204;
+  --color-accent-solid: #f5b544;
+  --color-accent-solid-hover: #ffc865;
+  --color-accent-solid-pressed: #e09a26;
+  --color-accent-solid-fg: #1b1204;
   --color-danger: #ff7a7a;
+  --color-danger-solid: #d6333d;
+  --color-danger-solid-hover: #c02a34;
+  --color-danger-solid-pressed: #ab232c;
   --color-success: #4fd49b;
   --color-warning: #eccb5c;
   --color-live: #ff6a70;
+  --color-live-solid: #d92d3a;
+
+  /* State layers: see-through, so one value reads on every surface. */
+  --color-hover: rgb(238 241 246 / 0.06);
+  --color-active: rgb(238 241 246 / 0.1);
 
   /* Derived (not in C10; used by shell chrome). */
   --color-scrim: rgb(4 8 16 / 0.72);
   --color-focus: #ffc865;
-  --color-glow: rgb(245 181 68 / 0.28);
+  --color-glow: rgb(245 181 68 / 0.22);
 
   /* Glass (C8): overlays drawn over video or artwork. */
   --color-glass: rgb(12 19 32 / 0.72);
@@ -73,34 +125,50 @@
   --color-glass-accent: #f5b544;
   --color-glass-accent-fg: #1b1204;
 
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.25);
-  --shadow-2: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
+  /* A lit top edge on raised panels, then the drop shadow. */
+  --elevation-1: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 8px rgb(0 0 0 / 0.22);
+  --elevation-2: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 2px 6px rgb(0 0 0 / 0.3), 0 12px 32px rgb(0 0 0 / 0.45);
+  --elevation-3: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 4px 12px rgb(0 0 0 / 0.32), 0 24px 64px rgb(0 0 0 / 0.55);
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
   --color-bg: #edf0f5;
   --color-surface: #ffffff;
-  --color-surface-2: #f4f6fa;
-  --color-surface-3: #e3e8f0;
-  --color-pressed: #d4dbe7;
-  --color-border: #76829a;
-  --color-divider: #c6cedc;
-  --color-fg: #121a2a;
-  --color-fg-muted: #445169;
-  --color-fg-subtle: #586480;
+  --color-surface-2: #f3f5f8;
+  --color-surface-3: #e6e9ef;
+  --color-pressed: #d8dde6;
+  --color-raised: #ffffff;
+  --color-selected: #dde5f1;
+  --color-border: #78839a;
+  --color-edge: #d8dee7;
+  --color-divider: #e1e5ec;
+  --color-fg: #0f1626;
+  --color-fg-muted: #465165;
+  --color-fg-subtle: #556073;
   --color-accent: #8f4f00;
   --color-accent-hover: #743f00;
   --color-accent-pressed: #5c3200;
   --color-accent-fg: #ffffff;
+  --color-accent-solid: #f5b544;
+  --color-accent-solid-hover: #ffc865;
+  --color-accent-solid-pressed: #e09a26;
+  --color-accent-solid-fg: #1b1204;
   --color-danger: #a81f1f;
+  --color-danger-solid: #b42020;
+  --color-danger-solid-hover: #961a1a;
+  --color-danger-solid-pressed: #7d1515;
   --color-success: #136641;
   --color-warning: #755200;
   --color-live: #c41f2a;
+  --color-live-solid: #c41f2a;
+
+  --color-hover: rgb(15 22 38 / 0.05);
+  --color-active: rgb(15 22 38 / 0.09);
 
   --color-scrim: rgb(18 26 42 / 0.45);
   --color-focus: #8f4f00;
-  --color-glow: rgb(143 79 0 / 0.18);
+  --color-glow: rgb(143 79 0 / 0.16);
 
   /* Glass stays dark in the light theme: it sits on video and artwork, not on the page. */
   --color-glass: rgb(18 26 42 / 0.74);
@@ -109,44 +177,60 @@
   --color-on-glass: #f4f6fa;
   --color-on-glass-muted: #c8cfdc;
 
-  --shadow-1: 0 1px 2px rgb(18 26 42 / 0.08), 0 2px 8px rgb(18 26 42 / 0.06);
-  --shadow-2: 0 12px 32px rgb(18 26 42 / 0.16), 0 2px 6px rgb(18 26 42 / 0.08);
+  /* Navy-tinted, softer than the dark theme's black shadows. */
+  --elevation-1: 0 1px 2px rgb(15 22 38 / 0.06), 0 1px 4px rgb(15 22 38 / 0.06);
+  --elevation-2: 0 2px 6px rgb(15 22 38 / 0.07), 0 12px 32px rgb(15 22 38 / 0.14);
+  --elevation-3: 0 4px 12px rgb(15 22 38 / 0.08), 0 24px 64px rgb(15 22 38 / 0.2);
 }
 
 /*
  * OLED black: true-black page and panels for OLED screens, raised controls kept
  * a step lighter so they still read as controls. Only the dark theme has it.
+ * A shadow is invisible on black, so depth comes from a faint white ring.
  */
 :root[data-oled]:not([data-theme='light']) {
   --color-bg: #000000;
   --color-surface: #000000;
-  --color-surface-2: #0c0f15;
-  --color-surface-3: #161b25;
-  --color-pressed: #222a38;
-  --color-divider: #232a38;
+  --color-surface-2: #0b0e13;
+  --color-surface-3: #151a23;
+  --color-pressed: #212835;
+  --color-raised: #1c222c;
+  --color-selected: #1a2130;
+  --color-edge: #1d232d;
+  --color-divider: #151a22;
+
+  --color-hover: rgb(238 241 246 / 0.07);
+  --color-active: rgb(238 241 246 / 0.11);
 
   --color-scrim: rgb(0 0 0 / 0.78);
   --color-glass: rgb(0 0 0 / 0.72);
   --color-glass-strong: rgb(0 0 0 / 0.88);
   --color-glass-border: rgb(255 255 255 / 0.14);
 
-  --shadow-1: 0 0 0 1px rgb(255 255 255 / 0.04), 0 2px 8px rgb(0 0 0 / 0.6);
-  --shadow-2: 0 0 0 1px rgb(255 255 255 / 0.06), 0 12px 32px rgb(0 0 0 / 0.8);
+  --elevation-1: 0 0 0 1px rgb(255 255 255 / 0.05), 0 2px 8px rgb(0 0 0 / 0.6);
+  --elevation-2: 0 0 0 1px rgb(255 255 255 / 0.07), 0 12px 32px rgb(0 0 0 / 0.8);
+  --elevation-3: 0 0 0 1px rgb(255 255 255 / 0.09), 0 24px 64px rgb(0 0 0 / 0.9);
 }
 
 /*
  * Accents. Amber is the base blocks above. Each other accent is one hue tuned
  * twice: a bright dial colour with ink text for dark (and OLED), and a deep
  * shade with white text for light. Focus is the hover tone in dark and the
- * accent itself in light, as with amber.
+ * accent itself in light, as with amber. The solid fill family repeats the
+ * accent in dark; in light it is the bright tone for lime and coral (as for
+ * amber) and the deep shade for the others (see the header).
  */
 :root[data-accent='teal'] {
   --color-accent: #3ccfbd;
   --color-accent-hover: #62e0d0;
   --color-accent-pressed: #22b5a4;
   --color-accent-fg: #03201c;
+  --color-accent-solid: #3ccfbd;
+  --color-accent-solid-hover: #62e0d0;
+  --color-accent-solid-pressed: #22b5a4;
+  --color-accent-solid-fg: #03201c;
   --color-focus: #62e0d0;
-  --color-glow: rgb(60 207 189 / 0.28);
+  --color-glow: rgb(60 207 189 / 0.22);
   --color-glass-accent: #3ccfbd;
   --color-glass-accent-fg: #03201c;
 }
@@ -155,8 +239,12 @@
   --color-accent-hover: #00544b;
   --color-accent-pressed: #00423b;
   --color-accent-fg: #ffffff;
+  --color-accent-solid: #00685d;
+  --color-accent-solid-hover: #00544b;
+  --color-accent-solid-pressed: #00423b;
+  --color-accent-solid-fg: #ffffff;
   --color-focus: #00685d;
-  --color-glow: rgb(0 104 93 / 0.18);
+  --color-glow: rgb(0 104 93 / 0.16);
 }
 
 :root[data-accent='violet'] {
@@ -164,8 +252,12 @@
   --color-accent-hover: #c9b8ff;
   --color-accent-pressed: #9f85f5;
   --color-accent-fg: #170c33;
+  --color-accent-solid: #b7a0ff;
+  --color-accent-solid-hover: #c9b8ff;
+  --color-accent-solid-pressed: #9f85f5;
+  --color-accent-solid-fg: #170c33;
   --color-focus: #c9b8ff;
-  --color-glow: rgb(183 160 255 / 0.28);
+  --color-glow: rgb(183 160 255 / 0.22);
   --color-glass-accent: #b7a0ff;
   --color-glass-accent-fg: #170c33;
 }
@@ -174,8 +266,12 @@
   --color-accent-hover: #5833b6;
   --color-accent-pressed: #47279a;
   --color-accent-fg: #ffffff;
+  --color-accent-solid: #6a42cf;
+  --color-accent-solid-hover: #5833b6;
+  --color-accent-solid-pressed: #47279a;
+  --color-accent-solid-fg: #ffffff;
   --color-focus: #6a42cf;
-  --color-glow: rgb(106 66 207 / 0.18);
+  --color-glow: rgb(106 66 207 / 0.16);
 }
 
 :root[data-accent='rose'] {
@@ -183,8 +279,12 @@
   --color-accent-hover: #ffaac6;
   --color-accent-pressed: #f2709b;
   --color-accent-fg: #2e0614;
+  --color-accent-solid: #ff8fb3;
+  --color-accent-solid-hover: #ffaac6;
+  --color-accent-solid-pressed: #f2709b;
+  --color-accent-solid-fg: #2e0614;
   --color-focus: #ffaac6;
-  --color-glow: rgb(255 143 179 / 0.28);
+  --color-glow: rgb(255 143 179 / 0.22);
   --color-glass-accent: #ff8fb3;
   --color-glass-accent-fg: #2e0614;
 }
@@ -193,8 +293,12 @@
   --color-accent-hover: #971a4b;
   --color-accent-pressed: #7b143d;
   --color-accent-fg: #ffffff;
+  --color-accent-solid: #b3215a;
+  --color-accent-solid-hover: #971a4b;
+  --color-accent-solid-pressed: #7b143d;
+  --color-accent-solid-fg: #ffffff;
   --color-focus: #b3215a;
-  --color-glow: rgb(179 33 90 / 0.18);
+  --color-glow: rgb(179 33 90 / 0.16);
 }
 
 :root[data-accent='lime'] {
@@ -202,8 +306,12 @@
   --color-accent-hover: #c7ee78;
   --color-accent-pressed: #9ccb3d;
   --color-accent-fg: #141f02;
+  --color-accent-solid: #b4e05a;
+  --color-accent-solid-hover: #c7ee78;
+  --color-accent-solid-pressed: #9ccb3d;
+  --color-accent-solid-fg: #141f02;
   --color-focus: #c7ee78;
-  --color-glow: rgb(180 224 90 / 0.28);
+  --color-glow: rgb(180 224 90 / 0.22);
   --color-glass-accent: #b4e05a;
   --color-glass-accent-fg: #141f02;
 }
@@ -212,8 +320,12 @@
   --color-accent-hover: #3a5500;
   --color-accent-pressed: #2e4400;
   --color-accent-fg: #ffffff;
+  --color-accent-solid: #b4e05a;
+  --color-accent-solid-hover: #c7ee78;
+  --color-accent-solid-pressed: #9ccb3d;
+  --color-accent-solid-fg: #141f02;
   --color-focus: #476800;
-  --color-glow: rgb(71 104 0 / 0.18);
+  --color-glow: rgb(71 104 0 / 0.16);
 }
 
 :root[data-accent='sky'] {
@@ -221,8 +333,12 @@
   --color-accent-hover: #8fd2ff;
   --color-accent-pressed: #4aa9ee;
   --color-accent-fg: #03182b;
+  --color-accent-solid: #6cc2ff;
+  --color-accent-solid-hover: #8fd2ff;
+  --color-accent-solid-pressed: #4aa9ee;
+  --color-accent-solid-fg: #03182b;
   --color-focus: #8fd2ff;
-  --color-glow: rgb(108 194 255 / 0.28);
+  --color-glow: rgb(108 194 255 / 0.22);
   --color-glass-accent: #6cc2ff;
   --color-glass-accent-fg: #03182b;
 }
@@ -231,8 +347,12 @@
   --color-accent-hover: #084c8a;
   --color-accent-pressed: #063d70;
   --color-accent-fg: #ffffff;
+  --color-accent-solid: #0a5ca6;
+  --color-accent-solid-hover: #084c8a;
+  --color-accent-solid-pressed: #063d70;
+  --color-accent-solid-fg: #ffffff;
   --color-focus: #0a5ca6;
-  --color-glow: rgb(10 92 166 / 0.18);
+  --color-glow: rgb(10 92 166 / 0.16);
 }
 
 :root[data-accent='coral'] {
@@ -240,8 +360,12 @@
   --color-accent-hover: #ffac92;
   --color-accent-pressed: #f2795a;
   --color-accent-fg: #2b0d04;
+  --color-accent-solid: #ff9474;
+  --color-accent-solid-hover: #ffac92;
+  --color-accent-solid-pressed: #f2795a;
+  --color-accent-solid-fg: #2b0d04;
   --color-focus: #ffac92;
-  --color-glow: rgb(255 148 116 / 0.28);
+  --color-glow: rgb(255 148 116 / 0.22);
   --color-glass-accent: #ff9474;
   --color-glass-accent-fg: #2b0d04;
 }
@@ -250,18 +374,36 @@
   --color-accent-hover: #923012;
   --color-accent-pressed: #78270e;
   --color-accent-fg: #ffffff;
+  --color-accent-solid: #ff9474;
+  --color-accent-solid-hover: #ffac92;
+  --color-accent-solid-pressed: #f2795a;
+  --color-accent-solid-fg: #2b0d04;
   --color-focus: #ad3b16;
-  --color-glow: rgb(173 59 22 / 0.18);
+  --color-glow: rgb(173 59 22 / 0.16);
 }
 
 :root {
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 16px;
-
-  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-  --font-display: Bahnschrift, 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  /*
+   * Type. Inter first everywhere (fonts.css); the Windows faces follow, so a blocked font file
+   * still looks like the app on Windows, then system-ui for scripts Inter has no glyphs for
+   * (Arabic, CJK), per glyph. --font-numeric is the tuner-dial face for channel numbers, clocks,
+   * the channel-number OSD and LIVE pills only; Bahnschrift and DIN Alternate are its fallbacks.
+   */
+  --font-sans: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Inter Variable', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-numeric: 'Barlow Semi Condensed', Bahnschrift, 'DIN Alternate', 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, 'SF Mono', monospace;
+
+  /*
+   * Motion. Three durations (read as duration-(--duration-fast) and in the animate-* tokens);
+   * the two curves are the ease-enter / ease-exit utilities in globals.css @theme. Enter
+   * decelerates into place, exit accelerates away and takes the next shorter step (about 70 %
+   * of the enter time). The reduced-motion rules in globals.css cut every animation and
+   * transition to nothing.
+   */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
 
   /* UI scale (C1). theme.tsx sets --ui-scale inline on <html>; px chrome sizes follow it. */
   --ui-scale: 1;

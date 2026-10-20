@@ -81,7 +81,7 @@ function PlayGlyph() {
       aria-hidden
       className="absolute inset-0 flex items-center justify-center bg-scrim/0 opacity-0 group-hover/card:bg-scrim/40 group-hover/card:opacity-100 group-focus-visible/card:opacity-100 motion-safe:transition-opacity"
     >
-      <span className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-fg shadow-2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-active/card:scale-90">
+      <span className="flex size-12 items-center justify-center rounded-full bg-accent-solid text-accent-solid-fg shadow-2 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-active/card:scale-90">
         <Play size={20} fill="currentColor" className="translate-x-px" />
       </span>
     </span>
@@ -244,7 +244,8 @@ function SavedMarkerCard({ itemRef, ...props }: PosterCardProps & { itemRef: Ite
           aria-hidden
           data-testid="mylist-saved-marker"
           className={cn(
-            'absolute end-1.5 inline-flex h-9 w-9 items-center justify-center rounded-full border border-transparent bg-accent text-accent-fg shadow-1',
+            // Saved is a state, not an action: a small glass chip, so amber stays on the play action.
+            'absolute end-1.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-glass-border bg-glass-strong text-on-glass shadow-1',
             cornerOffset(props.progress),
           )}
         >

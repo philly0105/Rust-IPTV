@@ -54,8 +54,8 @@ export function AboutSection(_props: SectionProps) {
       ) : (
         <>
           <div className="flex flex-col gap-1">
-            <p className="font-display text-4xl font-semibold text-fg">Tsrust IPTV</p>
-            <p className="font-display text-lg tabular-nums text-accent" data-testid="about-version">
+            <p className="text-headline text-fg">Tsrust IPTV</p>
+            <p className="text-lg tabular-nums text-fg-muted" data-testid="about-version">
               {t('aboutVersion', { version: info.data.version })}
             </p>
           </div>

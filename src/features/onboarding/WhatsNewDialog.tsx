@@ -118,7 +118,7 @@ function Release({ release, showVersion }: { release: ReleaseNotes; showVersion:
       <ul className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
         {release.items.map(({ key, icon: Icon }) => (
           <li key={key} className="flex items-start gap-3.5" data-testid="whats-new-item">
-            <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-accent">
+            <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-2 text-fg-muted">
               <Icon size={18} />
             </span>
             <div className="min-w-0">

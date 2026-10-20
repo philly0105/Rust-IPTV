@@ -52,7 +52,7 @@ export function ContinueRail({
   const { t } = useTranslation('library');
   return (
     <section aria-labelledby="continue-heading" className="flex flex-col gap-3 pb-4" style={{ height: CONTINUE_RAIL_HEIGHT }}>
-      <h2 id="continue-heading" className="font-display text-[calc(15rem/15)] font-semibold text-fg">
+      <h2 id="continue-heading" className="text-title-sm text-fg">
         {t('continueWatching')}
       </h2>
       {/* scroll-px-1 matches px-1: snap-start then aligns the first card with the heading, not the padding edge. */}
@@ -82,7 +82,7 @@ export function ContinueRail({
                 className="flex w-full flex-col gap-2 rounded-lg text-start"
                 aria-label={t('continueTitle', { title, time: formatClock(p.positionSeconds) })}
               >
-                <div className="overflow-hidden rounded-lg ring-1 ring-border group-hover:ring-accent/60">
+                <div className="overflow-hidden rounded-lg ring-1 ring-edge group-hover:ring-border">
                   <Poster src={p.snapshot?.posterUrl} sourceId={p.ref.sourceId} alt="" label={title} aspect="poster" />
                 </div>
                 {fraction !== undefined && <ProgressBar value={fraction * 100} max={100} size="xs" label={t('watchedPercent', { percent: Math.round(fraction * 100) })} />}

@@ -110,7 +110,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
               {t('hideAll')}
             </Button>
           </div>
-          <div ref={scrollRef} className="h-[min(50vh,440px)] overflow-y-auto rounded-md border border-border" role="group" aria-label={t('manageCategories')}>
+          <div ref={scrollRef} className="h-[min(50vh,440px)] overflow-y-auto rounded-md border border-edge" role="group" aria-label={t('manageCategories')}>
             <div style={{ height: v.getTotalSize(), position: 'relative' }}>
               {v.getVirtualItems().map((row) => {
                 const c = visible[row.index];
@@ -121,7 +121,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
                     key={c.id}
                     className={cn(
                       'absolute start-0 flex w-full cursor-pointer items-center gap-3 border-b border-divider px-3 text-sm',
-                      'hover:bg-surface-2 has-focus-visible:bg-surface-2',
+                      'hover:bg-hover has-focus-visible:bg-hover',
                       isHidden ? 'text-fg-subtle' : 'text-fg',
                     )}
                     style={{ top: row.start, height: ROW_H }}
@@ -137,7 +137,7 @@ export function HiddenCategoriesDialog({ open, onClose, sourceId, contentType }:
                       className={cn(
                         'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border',
                         'peer-focus-visible:ring-2 peer-focus-visible:ring-focus',
-                        isHidden ? 'border-border' : 'border-accent bg-accent text-accent-fg',
+                        isHidden ? 'border-border' : 'border-accent-solid bg-accent-solid text-accent-solid-fg',
                       )}
                     >
                       {!isHidden && <Check size={14} strokeWidth={3} />}

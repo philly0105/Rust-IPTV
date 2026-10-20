@@ -191,19 +191,27 @@ html[data-reduced-motion='true'] .player-osd {
   background-color: var(--color-glass, rgb(12 19 32 / 0.72));
 }
 /*
- * Glass stays dark in the light theme, where the page accent is a deep tone (2.9:1 on black):
- * inside glass the accent utilities (bg-accent, the seek fill, focus rings) take the bright
- * glass accent instead, and danger the bright tone the dark theme uses. Dark themes need none
- * of this: their accent is the glass accent already.
+ * Glass and the picture stay dark in the light theme, where the page accent is a deep tone
+ * (2.9:1 on black): inside glass and everywhere over the video (the player host, the stage the
+ * engines draw in, the PiP layer: the loading dial, the channel-number OSD, the error overlay,
+ * the radio and external stages) the accent utilities (bg-accent, bg-accent-solid, the seek
+ * fill, focus rings) take the bright glass accent instead, and danger and warning the bright
+ * tones the dark theme uses (PL-LIGHT-THEME-ACCENT). Dark themes need none of this: their
+ * accent is the glass accent already.
  */
-:root[data-theme='light'] :is(.player-glass, .player-glass-strong) {
+:root[data-theme='light'] :is(.player-glass, .player-glass-strong, [data-player-host], [data-player-stage], [data-pip-layer]) {
   --color-accent: var(--color-glass-accent, #f5b544);
   --color-accent-hover: color-mix(in srgb, var(--color-glass-accent, #f5b544) 80%, var(--color-on-glass, #f4f6fa));
   --color-accent-pressed: var(--color-glass-accent, #f5b544);
   --color-accent-fg: var(--color-glass-accent-fg, #1b1204);
+  --color-accent-solid: var(--color-glass-accent, #f5b544);
+  --color-accent-solid-hover: color-mix(in srgb, var(--color-glass-accent, #f5b544) 80%, var(--color-on-glass, #f4f6fa));
+  --color-accent-solid-pressed: var(--color-glass-accent, #f5b544);
+  --color-accent-solid-fg: var(--color-glass-accent-fg, #1b1204);
   --color-focus: var(--color-glass-accent, #f5b544);
   --color-glow: color-mix(in srgb, var(--color-glass-accent, #f5b544) 28%, transparent);
   --color-danger: #ff7a7a;
+  --color-warning: #eccb5c;
 }
 /* Secondary text on glass (passes 4.5:1 on the glass surface over black or white). */
 .player-on-glass-muted {
@@ -213,7 +221,7 @@ html[data-reduced-motion='true'] .player-osd {
 .player-glass-edge {
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--color-on-glass, #f4f6fa) 8%, transparent),
-    var(--shadow-2, 0 12px 32px rgb(0 0 0 / 0.5));
+    var(--elevation-2, 0 12px 32px rgb(0 0 0 / 0.5));
 }
 
 /*

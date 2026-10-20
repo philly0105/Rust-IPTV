@@ -104,7 +104,7 @@ export interface KbdProps {
 export function Kbd({ combo, children, className }: KbdProps) {
   const { t } = useTranslation('common');
   const keyClass =
-    'inline-flex h-6 min-w-6 items-center justify-center rounded-sm border border-border border-b-2 bg-surface-2 px-1.5 font-mono text-xs text-fg-muted';
+    'inline-flex h-6 min-w-6 items-center justify-center rounded-xs border border-edge border-b-2 bg-surface-2 px-1.5 font-sans text-xs font-medium text-fg-muted';
   if (combo) {
     const tr: KeyTranslate = (key) => t(key);
     const keys = comboKeys(combo, tr);
@@ -134,12 +134,14 @@ export interface BadgeProps extends ComponentPropsWithRef<'span'> {
 
 const badgeVariants: Record<BadgeVariant, string> = {
   neutral: 'bg-surface-3 text-fg-muted',
-  accent: 'bg-accent text-accent-fg',
-  live: 'bg-live text-bg',
+  // Accent text on a neutral chip: a solid amber chip would compete with the primary action.
+  accent: 'bg-surface-3 text-accent',
+  // White on the solid LIVE red, in the tuner-dial face (DS-SEMANTIC-FILLS).
+  live: 'bg-live-solid text-white font-numeric tracking-wide uppercase',
   success: 'bg-success/15 text-success',
   warning: 'bg-warning/15 text-warning',
   danger: 'bg-danger/15 text-danger',
-  outline: 'border border-border text-fg-muted',
+  outline: 'border border-edge text-fg-muted',
 };
 
 /**
@@ -191,7 +193,7 @@ export function LiveBadge({ className }: { className?: string }) {
   const { t } = useTranslation('common');
   return (
     <Badge variant="live" className={className}>
-      <span ref={pauseWhenOffscreen} aria-hidden className="h-1.5 w-1.5 rounded-full bg-bg motion-safe:animate-live-pulse" />
+      <span ref={pauseWhenOffscreen} aria-hidden className="h-1.5 w-1.5 rounded-full bg-white motion-safe:animate-live-pulse" />
       {t('live')}
     </Badge>
   );

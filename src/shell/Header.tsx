@@ -68,7 +68,7 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
               header title stays a styled paragraph to avoid two h1s. A long
               title truncates; hovering it shows the whole name.
             */}
-            <p dir="auto" title={header.title} className="truncate font-display text-xl font-semibold" data-testid="page-title">
+            <p dir="auto" title={header.title} className="truncate text-title" data-testid="page-title">
               {header.title}
             </p>
             {/*
@@ -118,8 +118,9 @@ export const Header = memo(function Header({ panelInline, narrow = false, railHi
           onClick={() => openSearch(navigate)}
           data-tour={narrow ? undefined : 'search'}
           className={cn(
-            'hidden h-8 w-[clamp(10rem,22vw,20rem)] items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm text-fg-subtle lg:flex',
-            'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-2 motion-safe:transition-colors',
+            // Looks like a field but opens the palette: a quiet edge that firms up to the field border on hover.
+            'hidden h-8 w-[clamp(10rem,22vw,20rem)] items-center gap-2 rounded-md border border-edge bg-surface-2 px-3 text-sm text-fg-subtle lg:flex',
+            'hover:border-border hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
           )}
         >
           <Search aria-hidden size={15} />

@@ -23,7 +23,7 @@ export function ShortcutsSection(_props: SectionProps) {
   return (
     <SettingsSection title={t('sectionShortcuts')} description={t('sectionShortcutsLead')} testId="settings-shortcuts">
       {groups.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-fg-muted">{t('shortcutsEmpty')}</p>
+        <p className="rounded-lg border border-dashed border-edge px-4 py-8 text-center text-fg-muted">{t('shortcutsEmpty')}</p>
       ) : (
         // The list holds nothing focusable, so the region itself takes focus:
         // keyboard users can then scroll it with the arrow and Page keys

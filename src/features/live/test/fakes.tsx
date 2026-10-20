@@ -20,9 +20,9 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const VARIANT: Record<NonNullable<ButtonProps['variant']>, string> = {
-  primary: 'bg-accent text-accent-fg hover:bg-accent-hover',
-  secondary: 'bg-surface-2 text-fg border border-border hover:bg-surface-3',
-  ghost: 'text-fg hover:bg-surface-2',
+  primary: 'bg-accent-solid text-accent-solid-fg hover:bg-accent-solid-hover',
+  secondary: 'bg-surface-2 text-fg border border-edge hover:bg-surface-3',
+  ghost: 'text-fg hover:bg-hover',
   danger: 'bg-danger text-white',
 };
 
@@ -34,7 +34,7 @@ export function Button({ variant = 'secondary', size = 'md', icon, loading, clas
       {...rest}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex items-center justify-center gap-2 rounded-md font-medium focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50 ${pad} ${VARIANT[variant]} ${className ?? ''}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-md font-medium focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50 ${pad} ${VARIANT[variant]} ${className ?? ''}`}
     >
       {icon}
       {children}
@@ -57,7 +57,7 @@ export function IconButton({
       title={label}
       aria-pressed={pressed}
       {...rest}
-      className={`inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent ${className ?? ''}`}
+      className={`inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-focus ${className ?? ''}`}
     >
       {icon}
     </button>
@@ -95,7 +95,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}
-        className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-lg border border-border bg-surface text-fg shadow-2"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-lg border border-edge bg-surface text-fg shadow-2"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="px-5 pt-4 pb-2 text-lg font-semibold">{title}</h2>
@@ -146,7 +146,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-border bg-surface-2 px-1.5 font-mono text-xs">{children}</kbd>;
+  return <kbd className="rounded border border-edge bg-surface-2 px-1.5 font-mono text-xs">{children}</kbd>;
 }
 
 export function useToast(): {

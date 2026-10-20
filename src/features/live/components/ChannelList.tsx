@@ -401,7 +401,7 @@ export function ChannelList(props: ChannelListProps) {
           const to = e.relatedTarget;
           if (!(to instanceof Node && e.currentTarget.contains(to)) && (e.target as HTMLElement).isConnected) lastFocused.current = null;
         }}
-        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
+        className={`relative min-h-0 flex-1 overflow-y-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset transition-opacity motion-reduce:transition-none ${
           paged.refreshing ? 'opacity-60' : ''
         }`}
       >
@@ -453,7 +453,7 @@ export function GuideUnavailableNotice({ onRetry }: { onRetry(): void }) {
       <button
         type="button"
         onClick={onRetry}
-        className="shrink-0 rounded-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-accent"
+        className="shrink-0 rounded-sm font-medium text-accent hover:underline focus-visible:outline-2 focus-visible:outline-focus"
       >
         {t('retry')}
       </button>

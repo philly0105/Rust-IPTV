@@ -368,7 +368,7 @@ function StatusPanel({
     <div
       className={cn(
         'flex flex-col gap-4 rounded-lg border bg-surface p-5 @2xl:flex-row @2xl:items-center',
-        state === 'unlocked' ? 'border-warning/50' : state === 'locked' ? 'border-accent/40' : 'border-border',
+        state === 'unlocked' ? 'border-warning/50' : 'border-edge',
       )}
       data-testid="parental-status"
       data-state={state}
@@ -377,7 +377,7 @@ function StatusPanel({
         aria-hidden
         className={cn(
           'flex size-12 shrink-0 items-center justify-center rounded-full',
-          state === 'locked' && 'bg-accent/15 text-accent shadow-[0_0_24px_var(--color-glow)]',
+          state === 'locked' && 'bg-success/15 text-success',
           state === 'unlocked' && 'bg-warning/15 text-warning',
           state === 'off' && 'bg-surface-3 text-fg-muted',
         )}

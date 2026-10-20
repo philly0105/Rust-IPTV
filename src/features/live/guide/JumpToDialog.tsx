@@ -137,7 +137,7 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
       <div className="flex flex-col gap-5">
         {/* The readout: where the guide will land, set large like a tuner's display. */}
         <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1" aria-live="polite" data-testid="guide-jump-readout">
-          <span className="font-display text-[calc(34rem/15)] leading-none font-semibold tabular-nums text-fg">{formatClock(target, lang)}</span>
+          <span className="font-numeric text-[calc(34rem/15)] leading-none font-semibold tabular-nums text-fg">{formatClock(target, lang)}</span>
           <span className="text-sm text-fg-muted first-letter:uppercase">{relativeDay(localDayDiff(target, now), lang) ?? formatDay(target, lang)}</span>
         </p>
 
@@ -168,16 +168,17 @@ export function JumpToDialog({ open, onClose, start, now, onJump, onNow }: JumpT
                   data-day={d}
                   className={cn(
                     'relative flex min-h-12 flex-col items-start justify-center rounded-md border px-2.5 py-1.5 text-start outline-none',
-                    'focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-surface',
+                    'focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus-visible:ring-offset-surface',
                     'motion-safe:transition-colors',
+                    // The chosen day takes the neutral selected fill and an amber edge, like a radio card.
                     selected
-                      ? 'border-accent bg-accent text-accent-fg'
+                      ? 'border-accent bg-selected text-fg'
                       : diff < 0
                         ? 'border-divider bg-surface text-fg-muted hover:bg-surface-2 active:bg-surface-3'
-                        : 'border-border bg-surface-2 text-fg hover:bg-surface-3 active:bg-pressed',
+                        : 'border-edge bg-surface-2 text-fg hover:bg-surface-3 active:bg-pressed',
                   )}
                 >
-                  <span className={cn('text-[calc(11rem/15)] leading-tight first-letter:uppercase', selected ? 'text-accent-fg' : diff === 0 ? 'text-live' : 'text-fg-subtle')}>
+                  <span className={cn('text-[calc(11rem/15)] leading-tight first-letter:uppercase', selected ? 'text-fg-muted' : diff === 0 ? 'text-live' : 'text-fg-subtle')}>
                     {rel ?? ' '}
                   </span>
                   <span className="text-[calc(13rem/15)] leading-tight font-medium tabular-nums">{formatDay(d, lang)}</span>

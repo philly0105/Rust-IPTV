@@ -65,7 +65,7 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
   };
 
   return (
-    <div className="flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-surface px-4 py-2">
+    <div className="flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-edge bg-surface px-4 py-2">
       <HardDrive aria-hidden size={18} className="shrink-0 text-fg-subtle" />
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="text-xs text-fg-subtle">{t('savingTo')}</span>

@@ -64,7 +64,7 @@ export function ExternalStage() {
           type="button"
           onClick={reopen}
           disabled={launching}
-          className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-md bg-accent-solid px-3 py-1.5 text-sm font-medium text-accent-solid-fg hover:bg-accent-solid-hover disabled:opacity-50"
         >
           <RotateCcw className="size-4" aria-hidden />
           {failed ? t('retry') : t('externalReopen', { player: name })}

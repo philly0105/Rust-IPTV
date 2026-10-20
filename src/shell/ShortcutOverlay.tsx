@@ -314,7 +314,7 @@ function OpenShortcutOverlay() {
           {groups.map(([area, list], gi) => (
             // Area names have spaces; an IDREF must not, so the id comes from useId plus the index.
             <section key={area} aria-labelledby={`${idBase}-area-${gi}`}>
-              <h3 id={`${idBase}-area-${gi}`} className="mb-2 text-sm font-semibold text-accent">
+              <h3 id={`${idBase}-area-${gi}`} className="mb-2 text-sm font-semibold text-fg">
                 {area}
               </h3>
               <dl className="flex flex-col">

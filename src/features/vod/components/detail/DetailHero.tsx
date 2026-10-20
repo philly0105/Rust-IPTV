@@ -50,7 +50,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
         <BackButton fallbackHref={`/s/${encodeURIComponent(sourceId)}/${model.mediaType === 'tv' ? 'series' : 'movies'}`} />
       </div>
       <div className="relative mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-4 pt-[clamp(120px,22vh,280px)] pb-8 sm:flex-row sm:items-end md:px-8">
-        <div className="w-36 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-border/60 sm:w-44 lg:w-56" data-testid="vod-detail-poster">
+        <div className="w-36 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:w-44 lg:w-56" data-testid="vod-detail-poster">
           {/* Provider artwork first (through the cache, then directly); when it fails, the TMDB poster (if any) the same way. */}
           <Poster src={model.posterUrl} fallbackSrc={model.posterFallbackUrl} sourceId={sourceId} alt={model.title} aspect="poster" priority />
         </div>
@@ -61,7 +61,7 @@ export function DetailHero({ model, sourceId, actions, chips, note, notice }: De
               id="vod-detail-title"
               dir="auto"
               tabIndex={-1}
-              className="text-match-parent outline-none font-display text-[clamp(28px,3.4vw,56px)] leading-[1.05] font-semibold tracking-[-0.01em] text-fg"
+              className="text-match-parent outline-none text-display text-fg"
             >
               {model.titleBase ?? model.title}
             </h1>

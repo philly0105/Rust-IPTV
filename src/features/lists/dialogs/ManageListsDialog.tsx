@@ -133,7 +133,7 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
                     }
                   }}
                   className={cn(
-                    'h-9 min-w-0 flex-1 rounded-md border bg-surface-2 px-2.5 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    'h-9 min-w-0 flex-1 rounded-md border bg-surface-2 px-2.5 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-focus',
                     renaming.error ? 'border-danger' : 'border-border',
                   )}
                 />
@@ -154,7 +154,7 @@ export function ManageListsDialog({ focusId, onClose }: { focusId?: string; onCl
                 onClick={onClose}
                 data-sort-part="name"
                 className={cn(
-                  'flex min-w-0 flex-1 flex-col rounded-md px-1.5 py-1 outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent',
+                  'flex min-w-0 flex-1 flex-col rounded-md px-1.5 py-1 outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus',
                   FIRST_LINE,
                 )}
               >

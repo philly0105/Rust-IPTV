@@ -425,6 +425,6 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     expect(line.className).not.toMatch(/(^|\s)z-/);
     expect(line.compareDocumentPosition(cell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelector('[role="rowheader"]')!.className).toContain('z-10');
-    expect(cell.className).toMatch(/bg-accent\/\d+/);
+    expect(cell.className).toMatch(/bg-selected\/\d+/);
   });
 });

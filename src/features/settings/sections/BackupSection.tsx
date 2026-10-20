@@ -222,9 +222,9 @@ export function BackupSection(_props: SectionProps) {
             </p>
           ) : null}
           {picked ? (
-            <div className="flex flex-col gap-1 rounded-md border border-border bg-surface-2/60 p-3 text-sm" data-testid="backup-summary">
+            <div className="flex flex-col gap-1 rounded-md border border-edge bg-surface-2/60 p-3 text-sm" data-testid="backup-summary">
               <p className="flex items-center gap-2 font-medium text-fg">
-                <FileJson aria-hidden className="size-4 text-accent" />
+                <FileJson aria-hidden className="size-4 text-fg-muted" />
                 <span className="truncate">{picked.name}</span>
               </p>
               <p className="text-fg-muted">
@@ -294,7 +294,7 @@ export function BackupSection(_props: SectionProps) {
       ) : null}
 
       {result ? (
-        <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4" aria-live="polite" data-testid="backup-result">
+        <div className="flex flex-col gap-3 rounded-lg border border-edge bg-surface p-4" aria-live="polite" data-testid="backup-result">
           <p className="flex items-center gap-2 font-medium text-fg">
             <CircleCheck aria-hidden className="size-5 text-success" />
             {t('backupResult', { imported: formatCount(result.imported, lang), skipped: formatCount(result.skipped, lang) })}

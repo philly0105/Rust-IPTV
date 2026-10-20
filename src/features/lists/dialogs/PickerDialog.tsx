@@ -78,7 +78,7 @@ export function PickerDialog({ channel, onClose }: { channel: Channel; onClose()
             <li key={list.id}>
               <label
                 className={cn(
-                  'flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-surface-2 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
+                  'flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
                   (full || busy) && 'cursor-default',
                   full && 'opacity-60',
                 )}
@@ -95,8 +95,8 @@ export function PickerDialog({ channel, onClose }: { channel: Channel; onClose()
                 <span
                   aria-hidden
                   className={cn(
-                    'inline-flex size-5 shrink-0 items-center justify-center rounded border motion-safe:transition-colors',
-                    checked ? 'border-accent bg-accent text-accent-fg' : 'border-fg-subtle bg-surface',
+                    'inline-flex size-5 shrink-0 items-center justify-center rounded-xs border motion-safe:transition-colors',
+                    checked ? 'border-accent-solid bg-accent-solid text-accent-solid-fg' : 'border-border bg-surface',
                     busy && 'motion-safe:animate-pulse',
                   )}
                 >

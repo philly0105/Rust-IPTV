@@ -1274,7 +1274,7 @@ export function EpgGridPage() {
             // The ring shows only once the grid has held focus for 150 ms: the brief holds of a
             // window shift (16-98 ms) would otherwise flash a frame around the whole grid. It goes
             // at once when a cell takes focus (no delay out of the focused state).
-            className="relative min-h-0 flex-1 overflow-auto overscroll-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset focus-visible:delay-150"
+            className="relative min-h-0 flex-1 overflow-auto overscroll-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset focus-visible:delay-150"
           >
             <div
               style={
@@ -1336,7 +1336,7 @@ export function EpgGridPage() {
             <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center px-3">
               <div
                 data-testid="guide-no-data"
-                className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-fg-muted shadow-2 motion-safe:animate-fade-in"
+                className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-edge bg-surface px-4 py-1.5 text-sm text-fg-muted shadow-2 motion-safe:animate-fade-in"
               >
                 {/* Away from now, an empty window is past the guide's end, not a missing guide (L4-live-1). */}
                 <span className="min-w-0 truncate" title={nowInWindow ? t(guidesLoaded ? 'guideNoMatch' : 'guideNoData') : t('guideNoDataHere')}>
@@ -1549,7 +1549,7 @@ const GuideToolbar = memo(function GuideToolbar({
           onClick={onJump}
           data-testid="guide-window"
           className={cn(
-            'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-accent motion-safe:transition-colors',
+            'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
             stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
           )}
         >
@@ -1758,8 +1758,8 @@ function ProgramPopover({
         }}
         className={
           sheet
-            ? 'fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-xl border-t border-border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-fg shadow-2 motion-safe:animate-toast-in'
-            : 'fixed z-50 w-[min(360px,calc(100vw-16px))] rounded-lg border border-border bg-surface p-4 text-fg shadow-2'
+            ? 'fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-xl border-t border-edge bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-fg shadow-3 motion-safe:animate-sheet-in'
+            : 'fixed z-50 w-[min(360px,calc(100vw-16px))] rounded-lg border border-edge bg-surface p-4 text-fg shadow-2'
         }
         data-testid="program-popover"
         data-sheet={sheet ? '' : undefined}
@@ -1773,7 +1773,7 @@ function ProgramPopover({
             {/* guide: programmes from the provider's own guide, not XMLTV. */}
             {program.fromProvider ? <p className="text-xs text-fg-subtle" data-testid="program-from-provider">{t('fromProvider')}</p> : null}
           </div>
-          <button type="button" aria-label={t('close')} onClick={onClose} className="rounded-md p-1 text-fg-muted hover:bg-surface-2">
+          <button type="button" aria-label={t('close')} onClick={onClose} className="rounded-md p-1 text-fg-muted hover:bg-hover">
             <X className="size-4" />
           </button>
         </div>

@@ -65,10 +65,10 @@ function EmptySlot({ slot, className, disabled, onAdd }: { slot: number; classNa
         className,
       )}
     >
-      <span aria-hidden className="absolute start-2 top-2 flex size-6 items-center justify-center rounded-sm bg-surface-3 font-display text-sm font-semibold tabular-nums text-fg-muted">
+      <span aria-hidden className="absolute start-2 top-2 flex size-6 items-center justify-center rounded-sm bg-surface-3 font-numeric text-sm tabular-nums text-fg-muted">
         {number}
       </span>
-      <span aria-hidden className="flex size-10 items-center justify-center rounded-full border border-border bg-surface-2 group-hover/slot:border-accent group-hover/slot:text-accent">
+      <span aria-hidden className="flex size-10 items-center justify-center rounded-full border border-edge bg-surface-2 group-hover/slot:border-border group-hover/slot:text-fg">
         <Plus className="size-5" />
       </span>
       <span className="text-center text-sm font-medium">{t('addChannel')}</span>

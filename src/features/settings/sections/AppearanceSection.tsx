@@ -19,23 +19,47 @@ import type { SectionProps } from './types';
  * in step with the token file.
  */
 export const PREVIEW_PALETTE = {
-  dark: { bg: '#0c1320', surface: '#131c2d', line: '#2f3d57', fg: '#e9edf5', accent: '#f5b544' },
-  light: { bg: '#edf0f5', surface: '#ffffff', line: '#c6cedc', fg: '#121a2a', accent: '#8f4f00' },
-  oled: { bg: '#000000', surface: '#000000', line: '#232a38', fg: '#e9edf5', accent: '#f5b544' },
+  dark: { bg: '#0c1320', surface: '#121a29', line: '#1d2637', fg: '#eef1f6', accent: '#f5b544' },
+  light: { bg: '#edf0f5', surface: '#ffffff', line: '#e1e5ec', fg: '#0f1626', accent: '#8f4f00' },
+  oled: { bg: '#000000', surface: '#000000', line: '#151a22', fg: '#eef1f6', accent: '#f5b544' },
 } as const;
 
 /**
- * Every accent's fill and text-on-fill, per theme (OLED uses the dark pair).
- * Mirrors the data-accent blocks in tokens.css; a test keeps them in step.
+ * Every accent's text tone with its text-on-fill (`accent`, `fg`) and its solid fill with the
+ * text on that fill (`solid`, `solidFg`), per theme (OLED uses the dark set). The swatches show
+ * the solid fill, which is what a primary button looks like in that theme. Mirrors the
+ * data-accent blocks in tokens.css; a test keeps them in step.
  */
-export const ACCENT_PALETTE: Record<Accent, Record<'dark' | 'light', { accent: string; fg: string }>> = {
-  amber: { dark: { accent: '#f5b544', fg: '#1b1204' }, light: { accent: '#8f4f00', fg: '#ffffff' } },
-  teal: { dark: { accent: '#3ccfbd', fg: '#03201c' }, light: { accent: '#00685d', fg: '#ffffff' } },
-  violet: { dark: { accent: '#b7a0ff', fg: '#170c33' }, light: { accent: '#6a42cf', fg: '#ffffff' } },
-  rose: { dark: { accent: '#ff8fb3', fg: '#2e0614' }, light: { accent: '#b3215a', fg: '#ffffff' } },
-  lime: { dark: { accent: '#b4e05a', fg: '#141f02' }, light: { accent: '#476800', fg: '#ffffff' } },
-  sky: { dark: { accent: '#6cc2ff', fg: '#03182b' }, light: { accent: '#0a5ca6', fg: '#ffffff' } },
-  coral: { dark: { accent: '#ff9474', fg: '#2b0d04' }, light: { accent: '#ad3b16', fg: '#ffffff' } },
+type AccentTones = { accent: string; fg: string; solid: string; solidFg: string };
+export const ACCENT_PALETTE: Record<Accent, Record<'dark' | 'light', AccentTones>> = {
+  amber: {
+    dark: { accent: '#f5b544', fg: '#1b1204', solid: '#f5b544', solidFg: '#1b1204' },
+    light: { accent: '#8f4f00', fg: '#ffffff', solid: '#f5b544', solidFg: '#1b1204' },
+  },
+  teal: {
+    dark: { accent: '#3ccfbd', fg: '#03201c', solid: '#3ccfbd', solidFg: '#03201c' },
+    light: { accent: '#00685d', fg: '#ffffff', solid: '#00685d', solidFg: '#ffffff' },
+  },
+  violet: {
+    dark: { accent: '#b7a0ff', fg: '#170c33', solid: '#b7a0ff', solidFg: '#170c33' },
+    light: { accent: '#6a42cf', fg: '#ffffff', solid: '#6a42cf', solidFg: '#ffffff' },
+  },
+  rose: {
+    dark: { accent: '#ff8fb3', fg: '#2e0614', solid: '#ff8fb3', solidFg: '#2e0614' },
+    light: { accent: '#b3215a', fg: '#ffffff', solid: '#b3215a', solidFg: '#ffffff' },
+  },
+  lime: {
+    dark: { accent: '#b4e05a', fg: '#141f02', solid: '#b4e05a', solidFg: '#141f02' },
+    light: { accent: '#476800', fg: '#ffffff', solid: '#b4e05a', solidFg: '#141f02' },
+  },
+  sky: {
+    dark: { accent: '#6cc2ff', fg: '#03182b', solid: '#6cc2ff', solidFg: '#03182b' },
+    light: { accent: '#0a5ca6', fg: '#ffffff', solid: '#0a5ca6', solidFg: '#ffffff' },
+  },
+  coral: {
+    dark: { accent: '#ff9474', fg: '#2b0d04', solid: '#ff9474', solidFg: '#2b0d04' },
+    light: { accent: '#ad3b16', fg: '#ffffff', solid: '#ff9474', solidFg: '#2b0d04' },
+  },
 };
 
 const ACCENT_LABEL_KEYS: Record<Accent, string> = {
@@ -74,7 +98,7 @@ function ThemePreview({ mode, oled, accent }: { mode: 'light' | 'dark' | 'system
     );
   };
   return (
-    <div aria-hidden className="flex h-24 w-full overflow-hidden rounded-md border border-border">
+    <div aria-hidden className="flex h-24 w-full overflow-hidden rounded-md border border-edge">
       {mode === 'system' ? (
         <>
           {half('light')}
@@ -143,19 +167,19 @@ function AccentPicker({ value, onChange, tone }: { value: Accent; onChange: (a: 
               onKeyDown={onKeyDown}
               className={clsx(
                 'group flex min-w-0 flex-col items-center gap-2 rounded-md px-1 py-2.5 motion-safe:transition-colors',
-                selected ? 'bg-surface-2' : 'hover:bg-surface-2 active:bg-surface-3',
+                selected ? 'bg-selected' : 'hover:bg-hover active:bg-active',
               )}
             >
               <span
                 aria-hidden
                 className="flex size-9 items-center justify-center rounded-full motion-safe:transition-[box-shadow,scale] motion-safe:duration-150 motion-safe:group-active:scale-95"
                 style={{
-                  background: swatch.accent,
+                  background: swatch.solid,
                   // Ring in the swatch's own colour, separated by a gap the colour of the card.
-                  boxShadow: selected ? `0 0 0 2px var(--color-surface-2), 0 0 0 4px ${swatch.accent}` : 'inset 0 0 0 1px rgb(0 0 0 / 0.12)',
+                  boxShadow: selected ? `0 0 0 2px var(--color-selected), 0 0 0 4px ${swatch.solid}` : 'inset 0 0 0 1px rgb(0 0 0 / 0.12)',
                 }}
               >
-                {selected ? <Check size={18} strokeWidth={2.75} style={{ color: swatch.fg }} /> : null}
+                {selected ? <Check size={18} strokeWidth={2.75} style={{ color: swatch.solidFg }} /> : null}
               </span>
               <span className={clsx('max-w-full truncate text-xs', selected ? 'font-semibold text-fg' : 'text-fg-muted group-hover:text-fg')}>
                 {t(ACCENT_LABEL_KEYS[a])}
@@ -179,7 +203,7 @@ function AppearanceSample() {
       <span className="text-xs font-medium text-fg-subtle">{t('previewLabel')}</span>
       <div inert aria-hidden className="flex flex-wrap items-stretch gap-4 rounded-md border border-divider bg-bg p-3">
         <div className="flex w-40 shrink-0 flex-col gap-1 rounded-md bg-surface p-2">
-          <span className="tuning-tick flex h-(--rail-item-height) items-center gap-2 rounded-md bg-surface-3 ps-3 text-sm font-medium text-fg">
+          <span className="tuning-tick flex h-(--rail-item-height) items-center gap-2 rounded-md bg-selected ps-3 text-sm font-medium text-fg">
             <House size={16} className="text-accent" />
             <span className="truncate">{t('shell:navDashboard')}</span>
           </span>
@@ -375,8 +399,8 @@ export function AppearanceSection({ settings, update }: SectionProps) {
               <label
                 key={o.value}
                 className={clsx(
-                  'flex cursor-pointer flex-col gap-3 rounded-md border p-3 hover:bg-surface-2 active:bg-surface-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus',
-                  selected ? 'border-accent bg-surface-2' : 'border-border',
+                  'flex cursor-pointer flex-col gap-3 rounded-md border p-3 hover:bg-hover active:bg-active motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus',
+                  selected ? 'border-accent bg-surface-2' : 'border-edge',
                 )}
               >
                 <ThemePreview mode={o.value} oled={oledBlack} accent={accent} />

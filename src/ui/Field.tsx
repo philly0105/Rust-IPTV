@@ -6,7 +6,7 @@ import { cn } from './cn';
 
 const fieldBase =
   'w-full rounded-md border border-border bg-surface text-fg placeholder:text-fg-subtle ' +
-  'hover:border-fg-subtle focus-visible:border-accent disabled:cursor-not-allowed disabled:opacity-50 ' +
+  'hover:border-fg-subtle focus-visible:border-focus disabled:cursor-not-allowed disabled:opacity-50 ' +
   'aria-[invalid=true]:border-danger motion-safe:transition-colors';
 
 interface FieldChrome {
@@ -244,14 +244,14 @@ export function Toggle({ checked, onChange, label, description, disabled, id: id
         className={cn(
           'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border motion-safe:transition-colors',
           'disabled:cursor-not-allowed disabled:opacity-50',
-          checked ? 'border-accent bg-accent' : 'border-border bg-surface-3',
+          checked ? 'border-accent-solid bg-accent-solid' : 'border-border bg-surface-3',
         )}
       >
         <span
           aria-hidden
           className={cn(
             'inline-block h-4.5 w-4.5 rounded-full shadow-1 motion-safe:transition-transform',
-            checked ? 'translate-x-5.5 bg-accent-fg rtl:-translate-x-5.5' : 'translate-x-0.75 bg-fg-muted rtl:-translate-x-0.75',
+            checked ? 'translate-x-5.5 bg-accent-solid-fg rtl:-translate-x-5.5' : 'translate-x-0.75 bg-fg-muted rtl:-translate-x-0.75',
           )}
         />
       </button>
@@ -312,7 +312,7 @@ export function SearchInput({
           type="button"
           aria-label={t('clearSearch')}
           onClick={() => onChange('')}
-          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors"
+          className="absolute end-1 inline-flex size-[28px] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
         >
           <X aria-hidden size={14} />
         </button>

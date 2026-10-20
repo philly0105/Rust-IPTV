@@ -462,7 +462,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     <div ref={scrollRef} className="h-full overflow-y-auto" data-testid={scoped ? 'vod-search-source' : 'vod-search'}>
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-8 px-4 py-6 md:px-8">
         <div className="-mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="font-display text-[clamp(24px,2.4vw,36px)] leading-tight font-semibold text-fg">{t('search')}</h1>
+          <h1 className="text-headline text-fg">{t('search')}</h1>
           {scoped && scopeName && <p className="min-w-0 truncate text-sm text-fg-muted">{scopeName}</p>}
         </div>
         {body}
@@ -481,7 +481,8 @@ function FacetChip({ active, onClick, label, count }: { active: boolean; onClick
       title={label}
       className={cn(
         'inline-flex h-8 max-w-[min(100%,16rem)] items-center gap-2 rounded-full border px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus',
-        active ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface text-fg-muted hover:text-fg',
+        // A chosen filter is neutral (inverted), so amber stays on the actions (DS amber rules).
+        active ? 'border-fg bg-fg text-bg' : 'border-edge bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg',
       )}
     >
       <span dir="auto" className="min-w-0 truncate">
@@ -514,7 +515,7 @@ function CappedNotice({
   return (
     <div
       data-testid="vod-search-capped"
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg-muted"
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-edge bg-surface px-4 py-3 text-sm text-fg-muted"
     >
       <p role="status" className="min-w-0 flex-1">
         {t('searchShowingFirst', { count: limit })} {t(nextLimit === undefined ? 'searchRefineAll' : 'searchRefineHint')}
@@ -536,7 +537,7 @@ function PartialErrorNotice({ message, onRetry }: { message: string; onRetry: ()
     <div
       role="alert"
       data-testid="vod-search-partial-error"
-      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg-muted"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-edge bg-surface px-4 py-3 text-sm text-fg-muted"
     >
       <TriangleAlert aria-hidden size={16} className="shrink-0 text-warning" />
       <p className="min-w-0 flex-1">
@@ -591,7 +592,7 @@ const ProgrammeList = memo(function ProgrammeList({
               type="button"
               data-grid-index={i}
               onClick={() => void navigate(link.to, { state: link.state })}
-              className="flex w-full min-w-0 items-start gap-x-4 rounded-md px-3 py-2.5 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
+              className="flex w-full min-w-0 items-start gap-x-4 rounded-md px-3 py-2.5 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
             >
               <span className="w-36 shrink-0 pt-0.5 text-sm whitespace-nowrap tabular-nums text-fg-muted">
                 {formatDay(at, lang)} {formatClock(at, lang)}
@@ -883,7 +884,7 @@ const ChannelGrid = memo(function ChannelGrid({
             type="button"
             data-grid-index={i}
             onClick={() => onPlayChannel(c, h)}
-            className="flex w-full items-center gap-3 rounded-md border border-border bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
+            className="flex w-full items-center gap-3 rounded-md border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
           >
             <div className="w-12 shrink-0">
               {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}

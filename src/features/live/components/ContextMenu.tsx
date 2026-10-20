@@ -83,7 +83,7 @@ export function ContextMenu({
       aria-label={label}
       onKeyDown={onKeyDown}
       style={{ left: place.left, top: place.top }}
-      className="fixed z-50 min-w-52 rounded-lg border border-border bg-surface p-1 text-sm text-fg shadow-2"
+      className="fixed z-50 min-w-52 rounded-lg border border-edge bg-surface p-1 text-sm text-fg shadow-2"
     >
       {items.map((it) => (
         <button
@@ -95,7 +95,7 @@ export function ContextMenu({
             finish();
             it.onSelect();
           }}
-          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-start outline-none hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-40"
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-start outline-none hover:bg-hover focus-visible:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset disabled:opacity-40"
         >
           <span className="inline-flex size-4 items-center justify-center text-fg-muted">{it.icon}</span>
           {it.hint ? (

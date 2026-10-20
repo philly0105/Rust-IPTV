@@ -212,7 +212,7 @@ const SortableRow = memo(function SortableRow<T>({ item, index, count, rowKey: k
           handlers.dragStart(key);
         }}
         onDragEnd={handlers.dragEnd}
-        className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-fg-subtle outline-none hover:bg-surface-2 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
+        className="inline-flex size-8 shrink-0 cursor-grab items-center justify-center rounded-md text-fg-subtle outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
       >
         <GripVertical className="size-4" aria-hidden />
       </button>

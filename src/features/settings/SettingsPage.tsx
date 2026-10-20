@@ -109,11 +109,11 @@ export function SettingsNav({ current, variant = 'panel' }: { current: SectionId
               inline ? 'shrink-0 gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-sm' : 'gap-3 rounded-md px-3 py-2 text-sm',
               inline
                 ? active
-                  ? 'border-accent/60 bg-accent/10 text-fg'
-                  : 'border-border text-fg-muted hover:border-fg-subtle hover:bg-surface-2 hover:text-fg'
+                  ? 'border-transparent bg-selected text-fg'
+                  : 'border-edge text-fg-muted hover:border-border hover:bg-hover hover:text-fg'
                 : active
-                  ? 'bg-surface-3 text-fg'
-                  : 'text-fg-muted hover:bg-surface-2 hover:text-fg',
+                  ? 'tuning-tick bg-selected text-fg'
+                  : 'text-fg-muted hover:bg-hover hover:text-fg',
             )}
           >
             <Icon aria-hidden className={clsx('size-4', active && 'text-accent')} />
@@ -177,7 +177,7 @@ function SaveStatus({ state }: { state: SaveState }) {
       data-testid="settings-save-status"
       data-state={state}
       className={clsx(
-        'pointer-events-none fixed bottom-6 end-6 z-20 flex items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-sm font-medium text-fg shadow-1 motion-safe:transition-opacity',
+        'pointer-events-none fixed bottom-6 end-6 z-20 flex items-center gap-2 rounded-full border border-edge bg-surface-2 px-3 py-1.5 text-sm font-medium text-fg shadow-1 motion-safe:transition-opacity',
         state === 'idle' ? 'opacity-0' : 'opacity-100',
       )}
     >

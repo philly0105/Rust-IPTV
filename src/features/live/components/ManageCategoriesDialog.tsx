@@ -120,7 +120,7 @@ export function ManageCategoriesDialog({
           onChange={(e) => setFilter(e.target.value)}
           placeholder={t('filterGroups')}
           aria-label={t('filterGroups')}
-          className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-accent"
+          className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-focus"
         />
         <Button size="sm" variant="ghost" onClick={() => setMany(true)}>
           {t('selectAll')}
@@ -143,7 +143,7 @@ export function ManageCategoriesDialog({
       ) : total === 0 ? (
         <p className="py-6 text-center text-sm text-fg-muted">{t('noGroups')}</p>
       ) : (
-        <div ref={scrollRef} className="h-[min(360px,50vh)] overflow-y-auto rounded-md border border-border">
+        <div ref={scrollRef} className="h-[min(360px,50vh)] overflow-y-auto rounded-md border border-edge">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((v) => {
               const c = shown[v.index]!;
@@ -152,7 +152,7 @@ export function ManageCategoriesDialog({
                 <label
                   key={c.id}
                   style={{ position: 'absolute', top: 0, left: 0, right: 0, height: ROW, transform: `translateY(${v.start}px)` }}
-                  className="flex cursor-pointer items-center gap-3 px-3 text-sm hover:bg-surface-2"
+                  className="flex cursor-pointer items-center gap-3 px-3 text-sm hover:bg-hover"
                 >
                   <input
                     type="checkbox"

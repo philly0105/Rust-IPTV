@@ -145,7 +145,7 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
       style={fade}
       className={cn(
         'flex max-w-full items-center overflow-x-auto scrollbar-none',
-        variant === 'underline' ? 'gap-1 border-b border-divider' : 'gap-1 rounded-md bg-surface-2 p-1',
+        variant === 'underline' ? 'gap-1 border-b border-divider' : 'gap-1 rounded-md border border-edge bg-surface-2 p-1',
         className,
       )}
     >
@@ -176,7 +176,8 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
                   )
                 : cn(
                     'h-8 rounded-sm px-3',
-                    selected ? 'bg-surface text-fg shadow-1' : 'text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors',
+                    // One raised thumb for every segmented choice (DS-STATE-FILLS): neutral, never an amber fill.
+                    selected ? 'bg-raised text-fg shadow-1' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
                   ),
             )}
           >

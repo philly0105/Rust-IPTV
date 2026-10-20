@@ -40,10 +40,10 @@ describe('pressed states', () => {
       </>,
     );
     const primary = screen.getByRole('button', { name: 'Go' }).className;
-    expect(primary).toContain('active:bg-accent-pressed');
+    expect(primary).toContain('active:bg-accent-solid-pressed');
     expect(primary).toContain('motion-safe:active:translate-y-px');
     const icon = screen.getByRole('button', { name: 'Close' }).className;
-    expect(icon).toContain('active:bg-surface-3');
+    expect(icon).toContain('active:bg-active');
     expect(icon).toContain('motion-safe:active:translate-y-px');
     expect(buttonClass('secondary')).toContain('active:bg-pressed');
     // Disabled buttons don't move.
@@ -53,7 +53,7 @@ describe('pressed states', () => {
   it('menu items press darker than their hover and focus fills', () => {
     render(<Menu label="Row actions" items={[{ id: 'a', label: 'Rename', onSelect: () => {} }]} />);
     const trigger = screen.getByRole('button', { name: 'Row actions' });
-    expect(trigger.className).toContain('active:bg-surface-3');
+    expect(trigger.className).toContain('active:bg-active');
     fireEvent.click(trigger);
     expect(screen.getByRole('menuitem', { name: 'Rename' }).className).toContain('active:bg-pressed');
   });
@@ -184,8 +184,8 @@ describe('review round 2', () => {
     });
     expect(screen.getByRole('button', { name: 'Undo' }).className).toContain('active:bg-pressed');
     const list = screen.getByRole('tab', { name: 'List' });
-    expect(list.className).toContain('active:bg-surface-3');
-    // The pill tablist itself is bg-surface-2, so a surface-2 press would not show.
+    expect(list.className).toContain('active:bg-active');
+    // The pill tablist itself is bg-surface-2, so a surface-2 press would not show; the see-through active layer does.
     expect(list.className).not.toContain('active:bg-surface-2');
   });
 });

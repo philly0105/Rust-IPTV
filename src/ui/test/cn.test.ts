@@ -27,7 +27,21 @@ describe('cn', () => {
 
   it('treats the custom shadow scale as sizes', () => {
     expect(cn('shadow-1', 'shadow-2')).toBe('shadow-2');
+    expect(cn('shadow-2', 'shadow-3')).toBe('shadow-3');
     expect(cn('shadow-2', 'shadow-none')).toBe('shadow-none');
+  });
+
+  it('treats the type scale as font sizes, not colours', () => {
+    expect(cn('text-body text-fg-muted', 'text-fg')).toBe('text-body text-fg');
+    expect(cn('text-caption', 'text-title-sm')).toBe('text-title-sm');
+    expect(cn('text-sm', 'text-display')).toBe('text-display');
+  });
+
+  it('understands the state, edge and solid accent tokens', () => {
+    expect(cn('border border-edge', 'border-border')).toBe('border border-border');
+    expect(cn('hover:bg-hover', 'hover:bg-surface-3')).toBe('hover:bg-surface-3');
+    expect(cn('bg-accent-solid text-accent-solid-fg', 'bg-selected text-fg')).toBe('bg-selected text-fg');
+    expect(cn('ease-enter', 'ease-exit')).toBe('ease-exit');
   });
 
   it('merges variants independently', () => {

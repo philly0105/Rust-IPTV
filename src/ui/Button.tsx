@@ -29,10 +29,16 @@ const base =
 
 /** Exported for tests: each variant's rest, hover and pressed classes. */
 export const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-accent-fg hover:bg-accent-hover active:bg-accent-pressed active:shadow-none shadow-1',
-  secondary: 'bg-surface-2 text-fg border border-border hover:bg-surface-3 active:bg-pressed',
-  ghost: 'bg-transparent text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 active:text-fg',
-  danger: 'bg-danger text-bg hover:opacity-90 active:opacity-75',
+  // The solid accent pair: bright amber with ink text in dark and light alike (tokens.css). A disabled
+  // primary turns neutral rather than a half-transparent amber that reads as olive. Its shadow-1 would
+  // replace the base focus glow, so focus draws the glow itself (DS-FOCUS).
+  primary:
+    'bg-accent-solid text-accent-solid-fg shadow-1 hover:bg-accent-solid-hover active:bg-accent-solid-pressed active:shadow-none ' +
+    'focus-visible:shadow-[0_0_0_4px_var(--color-glow)] disabled:bg-surface-3 disabled:text-fg-subtle disabled:shadow-none disabled:opacity-100',
+  // A filled surface with the quiet container edge; the 3:1 border belongs to form controls only.
+  secondary: 'bg-surface-2 text-fg border border-edge hover:bg-surface-3 active:bg-pressed',
+  ghost: 'bg-transparent text-fg-muted hover:bg-hover hover:text-fg active:bg-active active:text-fg',
+  danger: 'bg-danger-solid text-white hover:bg-danger-solid-hover active:bg-danger-solid-pressed',
 };
 const variants = BUTTON_VARIANTS;
 
@@ -121,7 +127,7 @@ export function IconButton({
         variants[variant],
         iconSizes[size],
         'px-0',
-        pressed && 'bg-surface-3 text-fg',
+        pressed && 'bg-selected text-fg',
         className,
       )}
       {...rest}

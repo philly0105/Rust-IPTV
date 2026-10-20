@@ -460,7 +460,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         <Link
           to={guideHref}
           aria-label={t('openGuide')}
-          className="inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+          className="inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
         >
           <CalendarClock className="size-4" aria-hidden />
           {/* Icon only on a phone, so the label does not squeeze the page title. */}
@@ -836,7 +836,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             aria-label={t('groups')}
             data-testid="groups-drawer"
             onKeyDown={onDrawerKeyDown}
-            className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col border-e border-border bg-surface shadow-2"
+            className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col border-e border-edge bg-surface shadow-2"
           >
             {sidebar}
           </aside>
@@ -856,7 +856,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             icon={<ListTree className="size-4" />}
             onClick={toggleSidebar}
           />
-          <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface-2 px-2 text-sm focus-within:ring-2 focus-within:ring-accent">
+          <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface-2 px-2 text-sm focus-within:ring-2 focus-within:ring-focus">
             <Search className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />
             <input
               type="search"
@@ -894,7 +894,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
                   clearSearch();
                   searchRef.current?.focus();
                 }}
-                className="inline-flex size-5 items-center justify-center rounded-sm text-fg-subtle hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+                className="inline-flex size-5 items-center justify-center rounded-sm text-fg-subtle hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
               >
                 <X className="size-3.5" />
               </button>

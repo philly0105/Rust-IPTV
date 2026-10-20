@@ -148,7 +148,7 @@ export function PlaybackSection({ settings, update }: SectionProps) {
               <label
                 key={p.value}
                 className={clsx(
-                  'flex cursor-pointer items-start gap-3 rounded-md px-3 py-3 hover:bg-surface-2',
+                  'flex cursor-pointer items-start gap-3 rounded-md px-3 py-3 hover:bg-hover',
                   selected && 'bg-surface-2',
                   !p.available && 'cursor-not-allowed opacity-60',
                 )}

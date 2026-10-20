@@ -82,7 +82,7 @@ export function NewListForm({ lists, channel, onCreated, autoFocus, className }:
             if (error) setError(null);
           }}
           className={cn(
-            'h-9 min-w-0 flex-1 rounded-md border bg-surface-2 px-3 text-sm text-fg outline-none placeholder:text-fg-subtle focus-visible:ring-2 focus-visible:ring-accent',
+            'h-9 min-w-0 flex-1 rounded-md border bg-surface-2 px-3 text-sm text-fg outline-none placeholder:text-fg-subtle focus-visible:ring-2 focus-visible:ring-focus',
             error ? 'border-danger' : 'border-border',
           )}
         />

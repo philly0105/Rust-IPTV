@@ -39,7 +39,7 @@ const toolButton = (overlay: boolean, extra?: string) =>
     ? cn(GLASS_BUTTON, 'h-9 min-w-9 px-2.5 text-sm', extra)
     : cn(
         'inline-flex h-9 min-w-9 shrink-0 items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium text-fg-muted outline-none',
-        'hover:bg-surface-2 hover:text-fg active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus',
+        'hover:bg-hover hover:text-fg active:bg-active focus-visible:ring-2 focus-visible:ring-focus',
         'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
         'motion-safe:transition-colors motion-safe:duration-150',
         extra,
@@ -109,7 +109,7 @@ export function WallToolbar({
                     : 'text-[color:var(--color-on-glass-muted,#c8cfdc)] hover:text-[color:var(--color-on-glass,#f4f6fa)]'
                   : checked
                     ? 'bg-surface text-fg shadow-1'
-                    : 'text-fg-muted hover:bg-surface-3 hover:text-fg active:bg-pressed',
+                    : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
               )}
             >
               <LayoutGlyph layout={l} tally={checked && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />

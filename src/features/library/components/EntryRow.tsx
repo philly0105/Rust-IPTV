@@ -49,7 +49,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   return (
     <div
       className={cn(
-        'group relative flex h-full items-center gap-3 rounded-md px-2 hover:bg-surface-2',
+        'group relative flex h-full items-center gap-3 rounded-md px-2 hover:bg-hover',
         reorder?.dragging && 'opacity-40',
       )}
       data-testid="entry-row"

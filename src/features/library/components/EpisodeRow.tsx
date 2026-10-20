@@ -50,7 +50,7 @@ function EpisodeRowImpl({
   return (
     <div
       className={cn(
-        'flex h-full items-center gap-4 rounded-md px-3 hover:bg-surface-2',
+        'flex h-full items-center gap-4 rounded-md px-3 hover:bg-hover',
         playing && 'bg-surface-2 shadow-[inset_3px_0_0_var(--color-accent)] rtl:shadow-[inset_-3px_0_0_var(--color-accent)]',
       )}
       data-testid="episode-row"

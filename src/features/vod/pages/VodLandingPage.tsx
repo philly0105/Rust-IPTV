@@ -193,7 +193,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 
             <section aria-labelledby="vod-categories-heading" className="flex flex-col gap-4">
               <div className="flex flex-wrap items-center gap-3">
-                <h2 id="vod-categories-heading" className="text-base text-fg">
+                <h2 id="vod-categories-heading" className="text-title-sm text-fg">
                   {t('categories')}
                 </h2>
                 {shownCats && (

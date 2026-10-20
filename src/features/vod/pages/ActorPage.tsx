@@ -74,11 +74,11 @@ export function ActorPage() {
     body = (
       <>
         <section aria-labelledby="vod-actor-name" className="flex flex-col gap-6 sm:flex-row sm:items-start">
-          <div className="w-40 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-border/60 sm:w-52">
+          <div className="w-40 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:w-52">
             <Poster src={p.profileUrl} alt={p.name} aspect="poster" eager />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <h1 id="vod-actor-name" className="font-display text-[clamp(28px,3vw,48px)] leading-tight font-semibold text-fg">
+            <h1 id="vod-actor-name" className="text-display text-fg">
               {p.name}
             </h1>
             {(born || p.placeOfBirth) && (

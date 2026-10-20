@@ -22,7 +22,7 @@ export function HiddenChannelsButton({ sourceId }: { sourceId: string }) {
           onClick={() => setOpen(true)}
           aria-haspopup="dialog"
           data-testid="hidden-channels-button"
-          className="mx-3 mb-3 flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-fg-muted outline-none hover:bg-surface-2 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
+          className="mx-3 mb-3 flex shrink-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
         >
           <EyeOff className="size-3.5" aria-hidden />
           <span className="flex-1 truncate text-start">{t('hiddenTitle')}</span>

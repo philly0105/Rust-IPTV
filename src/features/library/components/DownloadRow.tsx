@@ -141,7 +141,7 @@ function DownloadRowImpl({ download: d, source, actions, busy, tabbable = false,
     <div
       className={cn(
         'group flex h-full items-center gap-4 rounded-md border border-transparent px-3 py-2',
-        'hover:bg-surface-2 focus-within:bg-surface-2',
+        'hover:bg-hover focus-within:bg-hover',
         isActive && 'bg-surface',
       )}
       data-testid="download-row"

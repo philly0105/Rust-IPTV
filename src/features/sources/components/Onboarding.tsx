@@ -17,7 +17,7 @@ export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
   return (
     <section aria-labelledby="sources-onboarding-title" className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-6 @2xl:py-12" data-testid="sources-onboarding">
       <div className="flex max-w-2xl flex-col gap-2">
-        <h2 id="sources-onboarding-title" className="font-display text-3xl font-semibold text-fg @2xl:text-4xl">
+        <h2 id="sources-onboarding-title" className="text-headline text-fg @2xl:text-display">
           {t('onboardTitle')}
         </h2>
         <p className="text-base text-fg-muted">{t('onboardLead')}</p>
@@ -30,16 +30,16 @@ export function Onboarding({ onPick }: { onPick: (kind: SourceKind) => void }) {
               type="button"
               onClick={() => onPick(tile.kind)}
               data-testid={`onboard-${tile.kind}`}
-              className="group flex h-full w-full flex-col gap-4 rounded-lg border border-border bg-surface p-5 text-start shadow-1 hover:border-accent/70 hover:bg-surface-2 motion-safe:transition-colors"
+              className="group flex h-full w-full flex-col gap-4 rounded-lg border border-edge bg-surface p-5 text-start shadow-1 hover:border-border hover:bg-surface-2 motion-safe:transition-colors"
             >
               <span className="flex items-center gap-3">
                 <span
                   aria-hidden
-                  className="flex size-12 items-center justify-center rounded-md border border-border bg-surface-2 font-display text-base font-semibold tracking-wide text-accent group-hover:border-accent/70"
+                  className="flex size-12 items-center justify-center rounded-md border border-edge bg-surface-2 font-numeric text-lg tracking-wide text-fg-muted group-hover:text-fg"
                 >
                   {KIND_MARK[tile.kind]}
                 </span>
-                <span className="font-display text-xl font-semibold text-fg">{t(tile.title)}</span>
+                <span className="text-title-sm text-fg">{t(tile.title)}</span>
               </span>
               <span className="text-sm text-fg-muted">{t(tile.body)}</span>
               <span className="mt-auto border-t border-divider pt-3 text-sm text-fg">{t(tile.needs)}</span>

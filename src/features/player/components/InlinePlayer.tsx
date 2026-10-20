@@ -555,7 +555,7 @@ function ErrorOverlay({
           ref={retryRef}
           type="button"
           onClick={onRetry}
-          className="inline-flex items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
+          className="inline-flex items-center gap-1.5 rounded-md bg-accent-solid px-2.5 py-1 text-xs font-medium text-accent-solid-fg hover:bg-accent-solid-hover"
         >
           <RotateCcw className="size-3.5" aria-hidden />
           {t('retry')}
@@ -636,7 +636,7 @@ function ErrorOverlay({
             ref={retryRef}
             type="button"
             onClick={onRetry}
-            className={cn('inline-flex items-center rounded-md bg-accent font-medium text-accent-fg hover:bg-accent-hover', action)}
+            className={cn('inline-flex items-center rounded-md bg-accent-solid font-medium text-accent-solid-fg hover:bg-accent-solid-hover', action)}
           >
             <RotateCcw className={actionIcon} aria-hidden />
             {t('retry')}

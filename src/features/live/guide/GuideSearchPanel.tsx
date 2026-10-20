@@ -362,7 +362,7 @@ export function GuideSearchPanel({ id, query, sourceId, offsetMinutes, now, stri
       data-state={state}
       style={style}
       className={cn(
-        'flex max-h-[min(34rem,calc(100dvh-9rem))] w-[min(30rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-border bg-surface text-fg shadow-2',
+        'flex max-h-[min(34rem,calc(100dvh-9rem))] w-[min(30rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-edge bg-surface text-fg shadow-2',
         'motion-safe:animate-fade-in',
         className,
       )}
@@ -406,17 +406,17 @@ const HitRow = memo(function HitRow({
   const time = formatClock(start, lang);
 
   return (
-    <li className="group flex items-center gap-1 pe-2 hover:bg-surface-2" data-hit-row="" data-testid="guide-search-hit">
+    <li className="group flex items-center gap-1 pe-2 hover:bg-hover" data-hit-row="" data-testid="guide-search-hit">
       <button
         type="button"
         data-hit=""
         onClick={() => onSelect(hit)}
         aria-label={t('hitLabel', { title: program.title, channel: name, time })}
-        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-1 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-4 pe-1 text-start outline-none focus-visible:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       >
         {/* Wide enough for a 12-hour "05:00 AM" on one line; a longer local format widens it, never wraps it. */}
         <span className="flex min-w-[4.5rem] shrink-0 flex-col items-start">
-          <span className={cn('font-display text-[calc(14rem/15)] leading-tight font-semibold whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg')}>{time}</span>
+          <span className={cn('font-numeric text-[calc(14rem/15)] leading-tight font-semibold whitespace-nowrap tabular-nums', airing ? 'text-live' : 'text-fg')}>{time}</span>
           {airing ? <span className="text-[calc(10rem/15)] leading-tight text-live">{t('airingNow')}</span> : null}
         </span>
         <ChannelLogo src={hit.logoUrl} name={name} size={28} sourceId={hit.ref.sourceId} />

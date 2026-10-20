@@ -98,7 +98,7 @@ export function PinField({
                 aria-hidden
                 data-filled={digit !== undefined || undefined}
                 className={cn(
-                  'relative flex h-12 w-10 min-w-0 shrink items-center justify-center rounded-md border bg-surface-2 font-display text-xl text-fg tabular',
+                  'relative flex h-12 w-10 min-w-0 shrink items-center justify-center rounded-md border bg-surface-2 font-numeric text-xl text-fg tabular',
                   'motion-safe:transition-[border-color,background-color] motion-safe:duration-150',
                   invalid ? 'border-danger' : digit !== undefined || caret ? 'border-accent' : 'border-border',
                   digit !== undefined && !invalid && 'bg-surface-3',
@@ -202,7 +202,7 @@ function KeypadKey({
       onMouseDown={(e) => e.preventDefault()}
       onClick={onPress}
       className={cn(
-        'flex h-12 w-16 items-center justify-center rounded-md border border-border bg-surface-2 font-display text-xl tabular select-none sm:w-[4.5rem]',
+        'flex h-12 w-16 items-center justify-center rounded-md border border-border bg-surface-2 font-numeric text-xl tabular select-none sm:w-[4.5rem]',
         'hover:bg-surface-3 active:bg-pressed disabled:cursor-not-allowed disabled:opacity-40',
         'motion-safe:transition-colors motion-safe:active:translate-y-px',
         muted ? 'text-fg-muted' : 'text-fg',

@@ -8,7 +8,7 @@ export function SettingsSection({ title, description, children, testId }: { titl
   return (
     <section className="flex flex-col gap-8" aria-labelledby="settings-section-title" data-testid={testId}>
       <header className="flex max-w-2xl flex-col gap-1.5">
-        <h2 id="settings-section-title" className="font-display text-2xl font-semibold text-fg">
+        <h2 id="settings-section-title" className="text-title text-fg">
           {title}
         </h2>
         {description ? <p className="text-fg-muted">{description}</p> : null}
@@ -31,7 +31,7 @@ export function SettingsGroup({ title, description, children, actions }: { title
           {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
         </div>
       ) : null}
-      <div className="flex flex-col divide-y divide-divider rounded-lg border border-border bg-surface">{children}</div>
+      <div className="flex flex-col divide-y divide-divider rounded-lg border border-edge bg-surface">{children}</div>
     </div>
   );
 }
@@ -122,14 +122,14 @@ export function SwitchRow({
         onClick={() => onChange(!checked)}
         className={clsx(
           'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border disabled:opacity-50 motion-safe:transition-colors',
-          checked ? 'border-accent bg-accent' : 'border-border bg-surface-3',
+          checked ? 'border-accent-solid bg-accent-solid' : 'border-border bg-surface-3',
         )}
       >
         <span
           aria-hidden
           className={clsx(
             'inline-block size-4 rounded-full shadow-1 motion-safe:transition-transform',
-            checked ? 'translate-x-6 bg-accent-fg rtl:-translate-x-6' : 'translate-x-1 bg-fg-muted rtl:-translate-x-1',
+            checked ? 'translate-x-6 bg-accent-solid-fg rtl:-translate-x-6' : 'translate-x-1 bg-fg-muted rtl:-translate-x-1',
           )}
         />
       </button>
@@ -242,7 +242,7 @@ export function Segmented<T extends string>({
       id={id}
       role="radiogroup"
       aria-label={label}
-      className="flex w-full gap-1 rounded-md border border-border bg-surface-2 p-1 @2xl:inline-flex @2xl:w-fit"
+      className="flex w-full gap-1 rounded-md border border-edge bg-surface-2 p-1 @2xl:inline-flex @2xl:w-fit"
     >
       {options.map((o) => {
         const selected = o.value === value;
@@ -277,7 +277,8 @@ export function Segmented<T extends string>({
             }}
             className={clsx(
               'min-w-0 flex-1 rounded-sm px-3 py-1.5 text-center text-sm font-medium text-balance break-words motion-safe:transition-colors @2xl:flex-none',
-              selected ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:bg-surface-3 hover:text-fg',
+              // A neutral raised thumb, as in the pill tabs: amber marks actions, not choices.
+              selected ? 'bg-raised text-fg shadow-1' : 'text-fg-muted hover:bg-hover hover:text-fg',
             )}
           >
             {o.label}
@@ -293,7 +294,7 @@ export function SectionSkeleton() {
     <div role="status" aria-busy="true" className="flex flex-col gap-6" data-testid="settings-loading">
       <Skeleton className="h-8 w-56" />
       <Skeleton className="h-4 w-96 max-w-full" />
-      <div className="flex flex-col gap-px overflow-hidden rounded-lg border border-border">
+      <div className="flex flex-col gap-px overflow-hidden rounded-lg border border-edge">
         {Array.from({ length: 5 }, (_, i) => (
           <Skeleton key={i} className="h-16 rounded-none" />
         ))}

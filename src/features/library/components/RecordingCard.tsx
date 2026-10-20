@@ -26,8 +26,8 @@ function RecordingCardImpl({ entry }: { entry: RecordingEntry }) {
     <div className="flex h-full flex-col gap-2" data-testid="library-card" data-kind="recording" data-missing={entry.missing || undefined}>
       <div
         className={cn(
-          'relative overflow-hidden rounded-lg ring-1 ring-border',
-          'group-hover:ring-accent/60 group-focus-visible:ring-2 group-focus-visible:ring-accent',
+          'relative overflow-hidden rounded-lg ring-1 ring-edge',
+          'group-hover:ring-border group-focus-visible:ring-2 group-focus-visible:ring-focus',
           entry.missing && 'opacity-60 grayscale',
         )}
       >

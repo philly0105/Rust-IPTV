@@ -44,7 +44,7 @@ export function LimitBanners({ over, onDismiss }: { over: readonly SourceLoad[];
             aria-label={t('limitDismiss')}
             title={t('limitDismiss')}
             onClick={() => onDismiss(l)}
-            className="-me-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted outline-none hover:bg-surface-2 hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
+            className="-me-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
           >
             <X aria-hidden className="size-4" />
           </button>
@@ -58,7 +58,7 @@ export function LimitBanners({ over, onDismiss }: { over: readonly SourceLoad[];
 export function MainPlayingBanner({ onStop }: { onStop(): void }) {
   const { t } = useTranslation('multiview');
   return (
-    <div data-testid="multiview-main-playing" className={cn(bannerClass, 'border-border bg-surface-2 text-fg')}>
+    <div data-testid="multiview-main-playing" className={cn(bannerClass, 'border-edge bg-surface-2 text-fg')}>
       <MonitorPlay aria-hidden className="mt-0.5 size-4 shrink-0 text-accent sm:mt-0" />
       <p className="min-w-0 flex-1">
         <span className="font-semibold">{t('mainPlayingTitle')} </span>
@@ -67,7 +67,7 @@ export function MainPlayingBanner({ onStop }: { onStop(): void }) {
       <button
         type="button"
         onClick={onStop}
-        className="inline-flex h-8 shrink-0 items-center rounded-md border border-border bg-surface px-3 text-sm font-medium text-fg outline-none hover:bg-surface-3 active:bg-pressed focus-visible:ring-2 focus-visible:ring-focus"
+        className="inline-flex h-8 shrink-0 items-center rounded-md border border-edge bg-surface px-3 text-sm font-medium text-fg outline-none hover:bg-surface-3 active:bg-pressed focus-visible:ring-2 focus-visible:ring-focus"
       >
         {t('stopMain')}
       </button>

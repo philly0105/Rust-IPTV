@@ -19,7 +19,7 @@ export function DigitOsd({ state }: { state: ZapFeedback | null }) {
     >
       {state.kind === 'typing' ? (
         <>
-          <span className="font-mono text-4xl leading-none font-semibold tabular-nums tracking-wider">
+          <span className="font-numeric text-5xl leading-none tabular-nums tracking-wide">
             {state.digits}
             <span className="motion-safe:animate-pulse">_</span>
           </span>
@@ -27,7 +27,7 @@ export function DigitOsd({ state }: { state: ZapFeedback | null }) {
         </>
       ) : (
         <>
-          <span className="font-mono text-4xl leading-none font-semibold text-white/60 tabular-nums line-through">{state.number}</span>
+          <span className="font-numeric text-5xl leading-none text-white/60 tabular-nums line-through">{state.number}</span>
           <span className="mt-1 text-sm">{t('noChannelNumber', { number: state.number })}</span>
         </>
       )}

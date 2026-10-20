@@ -17,7 +17,7 @@ export function GuideProgressView({ guide }: { guide: SourceGuideSummary }) {
     <div className="flex flex-col gap-1" data-testid="guide-progress" data-phase={guide.phase}>
       <div className="flex items-baseline justify-between gap-3 text-sm" aria-live="polite">
         <span className={failed ? 'flex min-w-0 items-center gap-1.5 text-danger' : 'flex min-w-0 items-center gap-1.5 text-fg'}>
-          {failed ? <CalendarX2 aria-hidden className="size-4 shrink-0" /> : <CalendarClock aria-hidden className="size-4 shrink-0 text-accent" />}
+          {failed ? <CalendarX2 aria-hidden className="size-4 shrink-0" /> : <CalendarClock aria-hidden className="size-4 shrink-0 text-fg-muted" />}
           <span className="truncate">{label}</span>
         </span>
         {programs ? <span className="shrink-0 font-display tabular-nums text-fg-muted">{programs}</span> : null}

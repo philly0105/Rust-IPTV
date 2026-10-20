@@ -38,9 +38,9 @@ export function EpgLinksEditor({ value, onChange, disabled }: { value: EpgLinks;
     <div className="flex flex-col gap-5">
       <p className="text-sm text-fg-muted">{t('epgLinksHint')}</p>
       {rows.length === 0 ? (
-        <p className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-fg-muted">{t('epgLinksEmpty')}</p>
+        <p className="rounded-md border border-dashed border-edge px-4 py-6 text-center text-sm text-fg-muted">{t('epgLinksEmpty')}</p>
       ) : (
-        <ul className="flex flex-col divide-y divide-divider rounded-md border border-border" aria-label={t('epgLinks')}>
+        <ul className="flex flex-col divide-y divide-divider rounded-md border border-edge" aria-label={t('epgLinks')}>
           {rows.map((row) => {
             // Xtream's detected xmltv.php link carries the account password.
             const shown = redactUrl(row.url);

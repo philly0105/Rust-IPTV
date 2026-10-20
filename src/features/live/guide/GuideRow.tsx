@@ -162,7 +162,7 @@ export const GuideRow = memo(function GuideRow({
             title={t('playChannel', { name: chName })}
             data-compact={compact ? '' : undefined}
             className={cn(
-              'relative flex h-full w-full outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
+              'relative flex h-full w-full outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset',
               compact ? 'flex-col items-center justify-center gap-0.5 px-1' : 'items-center gap-2 px-2 text-start',
             )}
           >
@@ -170,13 +170,13 @@ export const GuideRow = memo(function GuideRow({
               // Phones: the logo over the number; the name is the button's label and tooltip.
               <>
                 <ChannelLogo src={ch.logoUrl} name={chName} size={30} sourceId={ch.ref.sourceId} />
-                <span className="max-w-full truncate text-[calc(11rem/15)] leading-none tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
+                <span className="max-w-full truncate font-numeric text-xs leading-none tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
                 <span className="sr-only">{chName}</span>
                 {hasUsableArchive(ch, kind) ? <History className="absolute end-1 top-1 size-3 text-fg-subtle" aria-label={t('archive')} /> : null}
               </>
             ) : (
               <>
-                <span className="w-7 shrink-0 text-end text-[calc(11rem/15)] tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
+                <span className="w-7 shrink-0 text-end font-numeric text-xs tabular-nums text-fg-subtle">{ch.number ?? ''}</span>
                 <ChannelLogo src={ch.logoUrl} name={chName} size={30} sourceId={ch.ref.sourceId} />
                 <span className="min-w-0 flex-1 truncate text-sm text-fg">{chName}</span>
                 {hasUsableArchive(ch, kind) ? <History className="size-3.5 shrink-0 text-fg-subtle" aria-label={t('archive')} /> : null}
@@ -203,7 +203,7 @@ export const GuideRow = memo(function GuideRow({
             </span>
           </div>
         ) : programs.length === 0 ? (
-          <div className="absolute inset-1.5 flex items-center rounded border border-dashed border-divider text-xs text-fg-subtle">
+          <div className="absolute inset-1.5 flex items-center rounded-xs border border-dashed border-divider text-xs text-fg-subtle">
             {/* Sticks just past the channel column, so a grid scrolled to now still shows it. */}
             <span data-testid="no-guide-label" className="sticky px-3" style={{ insetInlineStart: channelCol }}>
               {t('noGuideShort')}
@@ -233,12 +233,14 @@ export const GuideRow = memo(function GuideRow({
                   }}
                   onFocus={() => handlers.focusCell(index, p)}
                   // overflow-clip, not hidden: the cell is then no scroll container, so its text can stick.
-                  className={`absolute top-1 bottom-1 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                  className={`absolute top-1 bottom-1 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                    // On now: the neutral selected fill, translucent so the amber now line shows
+                    // through it; amber is the line alone, not a wash over the whole column.
                     b.when === 'now'
-                      ? 'border-accent/60 bg-accent/12 text-fg'
+                      ? 'border-edge bg-selected/85 text-fg'
                       : b.when === 'past'
-                        ? 'border-border/60 bg-surface-2/60 text-fg-muted'
-                        : 'border-border bg-surface-2 text-fg hover:bg-surface-3'
+                        ? 'border-edge/60 bg-surface-2/60 text-fg-muted'
+                        : 'border-edge bg-surface-2 text-fg hover:bg-surface-3'
                   }`}
                   style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
                 >

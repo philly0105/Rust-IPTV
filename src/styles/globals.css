@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import './tokens.css';
+@import './fonts.css';
 
 /* `dark:` follows the theme provider (html[data-theme]), not the OS. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
@@ -9,30 +10,45 @@
  * utilities exist; tokens.css re-declares the same properties per
  * [data-theme] (unlayered, higher specificity), so every utility resolves to
  * the active theme: bg-surface, bg-surface-2, text-fg, text-fg-muted,
- * border-border, bg-accent, text-accent-fg, rounded-lg, shadow-1, font-display.
+ * border-edge, border-border, bg-accent-solid, bg-hover, bg-selected,
+ * rounded-lg, shadow-2, font-numeric, text-title. tokens.css says which token
+ * goes where.
  */
 @theme {
   --color-bg: #0c1320;
-  --color-surface: #131c2d;
-  --color-surface-2: #1a2539;
-  --color-surface-3: #233049;
-  --color-border: #6b7b99;
-  --color-divider: #2f3d57;
-  --color-fg: #e9edf5;
-  --color-fg-muted: #a9b3c6;
-  --color-fg-subtle: #8f9bb2;
+  --color-surface: #121a29;
+  --color-surface-2: #182131;
+  --color-surface-3: #202a3c;
+  --color-pressed: #293447;
+  --color-raised: #263146;
+  --color-selected: #233047;
+  --color-border: #6c7a95;
+  --color-edge: #252f40;
+  --color-divider: #1d2637;
+  --color-fg: #eef1f6;
+  --color-fg-muted: #a9b3c5;
+  --color-fg-subtle: #8f9ab0;
   --color-accent: #f5b544;
   --color-accent-hover: #ffc865;
   --color-accent-pressed: #e09a26;
-  --color-pressed: #2c3b58;
   --color-accent-fg: #1b1204;
+  --color-accent-solid: #f5b544;
+  --color-accent-solid-hover: #ffc865;
+  --color-accent-solid-pressed: #e09a26;
+  --color-accent-solid-fg: #1b1204;
   --color-danger: #ff7a7a;
+  --color-danger-solid: #d6333d;
+  --color-danger-solid-hover: #c02a34;
+  --color-danger-solid-pressed: #ab232c;
   --color-success: #4fd49b;
   --color-warning: #eccb5c;
   --color-live: #ff6a70;
+  --color-live-solid: #d92d3a;
+  --color-hover: rgb(238 241 246 / 0.06);
+  --color-active: rgb(238 241 246 / 0.1);
   --color-scrim: rgb(4 8 16 / 0.72);
   --color-focus: #ffc865;
-  --color-glow: rgb(245 181 68 / 0.28);
+  --color-glow: rgb(245 181 68 / 0.22);
 
   /*
    * Glass (C8): bg-glass, bg-glass-strong, border-glass-border, text-on-glass.
@@ -48,24 +64,79 @@
   --color-glass-accent-fg: #1b1204;
   --blur-glass: 10px;
 
-  /* 10px at 100 % UI scale; rem so it follows the scale like the stock sizes. */
-  --text-2xs: calc(10rem / 15);
+  /*
+   * Type scale (DS-TYPE-SCALE), rem against the 15px root so it follows the UI scale; the
+   * comments give the size and line height at 100 %. Page titles use text-title, rail and
+   * section headings text-title-sm, card titles text-body-sm with font-medium, metadata
+   * text-caption. Headings from title-sm up are 600 and tracked in; Tailwind's stock sizes
+   * (text-xs ... text-2xl) still work.
+   */
+  --text-2xs: calc(10rem / 15); /* 10/14 */
   --text-2xs--line-height: 1.4;
+  --text-caption: calc(12rem / 15); /* 12/16 */
+  --text-caption--line-height: calc(16rem / 15);
+  --text-body-sm: calc(13.5rem / 15); /* 13.5/20 */
+  --text-body-sm--line-height: calc(20rem / 15);
+  --text-body: 1rem; /* 15/22 */
+  --text-body--line-height: calc(22rem / 15);
+  --text-title-sm: calc(18rem / 15); /* 18/24 */
+  --text-title-sm--line-height: calc(24rem / 15);
+  --text-title-sm--letter-spacing: -0.01em;
+  --text-title-sm--font-weight: 600;
+  --text-title: calc(22rem / 15); /* 22/28 */
+  --text-title--line-height: calc(28rem / 15);
+  --text-title--letter-spacing: -0.015em;
+  --text-title--font-weight: 600;
+  --text-headline: calc(28rem / 15); /* 28/34 */
+  --text-headline--line-height: calc(34rem / 15);
+  --text-headline--letter-spacing: -0.02em;
+  --text-headline--font-weight: 600;
+  --text-display: clamp(2.4rem, 1.6rem + 2vw, 3.6rem); /* 36 to 54 */
+  --text-display--line-height: 1.1;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 600;
 
+  /* Radii: xs 4, sm 6, md 8 (buttons, inputs), lg 12 (cards, posters, menus, toasts), xl 16 (dialogs, hero, sheets). */
+  --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
 
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.25);
-  --shadow-2: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.35);
+  /*
+   * Elevation: each utility points at the theme's --elevation-N (tokens.css). A literal value
+   * here would be inlined into the utility and freeze every theme on these dark shadows
+   * (DS-ELEVATION-THEMES; src/ui/test/contrast.test.ts keeps it a var()).
+   */
+  --shadow-1: var(--elevation-1);
+  --shadow-2: var(--elevation-2);
+  --shadow-3: var(--elevation-3);
 
-  --font-sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
-  --font-display: Bahnschrift, 'DIN Alternate', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Inter Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Inter Variable', 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-numeric: 'Barlow Semi Condensed', Bahnschrift, 'DIN Alternate', 'Inter Variable', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, 'SF Mono', monospace;
 
-  --animate-toast-in: toast-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  --animate-fade-in: fade-in 160ms ease-out;
-  --animate-pop-in: pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  /*
+   * Motion (DS-MOTION-EXIT). Curves as ease-enter / ease-exit utilities; the durations
+   * (--duration-fast 120ms, --duration-base 180ms, --duration-slow 280ms) live in tokens.css,
+   * read as duration-(--duration-fast). Every overlay has an exit beside its entrance: the exit
+   * runs at the next shorter duration with the accelerating curve and holds its last frame
+   * (forwards), so the element can unmount on animationend.
+   */
+  --ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  --animate-toast-in: toast-in var(--duration-base) var(--ease-enter);
+  --animate-toast-out: toast-out var(--duration-fast) var(--ease-exit) forwards;
+  --animate-fade-in: fade-in var(--duration-base) var(--ease-enter);
+  --animate-fade-out: fade-out var(--duration-fast) var(--ease-exit) forwards;
+  --animate-pop-in: pop-in var(--duration-base) var(--ease-enter);
+  --animate-pop-out: pop-out var(--duration-fast) var(--ease-exit) forwards;
+  --animate-drawer-in: drawer-in var(--duration-slow) var(--ease-enter);
+  --animate-drawer-out: drawer-out var(--duration-base) var(--ease-exit) forwards;
+  --animate-sheet-in: sheet-in var(--duration-slow) var(--ease-enter);
+  --animate-sheet-out: sheet-out var(--duration-base) var(--ease-exit) forwards;
   /*
    * Three pulses as a live dot appears, then it holds still: an endless pulse kept the compositor
    * drawing frames at the display rate wherever a LIVE badge showed (L3-ui-data-x3). The player's
@@ -74,7 +145,7 @@
   --animate-live-pulse: live-pulse 2s ease-in-out 3;
   --animate-indeterminate: indeterminate 1.2s ease-in-out infinite;
   --animate-hero-in: hero-in 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
-  --animate-hero-copy: hero-copy 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-hero-copy: hero-copy 420ms var(--ease-enter);
 
   /* Hero backdrop: fades up while settling from a slight zoom. */
   @keyframes hero-in {
@@ -122,6 +193,12 @@
       transform: none;
     }
   }
+  @keyframes toast-out {
+    to {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+  }
   @keyframes fade-in {
     from {
       opacity: 0;
@@ -130,14 +207,54 @@
       opacity: 1;
     }
   }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  /* Menus and dialogs: up from below by default; a menu that opens upward sets --pop-from: -6px. */
   @keyframes pop-in {
     from {
       opacity: 0;
-      transform: translateY(6px) scale(0.98);
+      transform: translateY(var(--pop-from, 6px)) scale(0.98);
     }
     to {
       opacity: 1;
       transform: none;
+    }
+  }
+  @keyframes pop-out {
+    to {
+      opacity: 0;
+      transform: translateY(calc(var(--pop-from, 6px) / 2)) scale(0.98);
+    }
+  }
+  /* Side drawers come in from the inline end (--drawer-from flips under RTL, below). */
+  @keyframes drawer-in {
+    from {
+      transform: translateX(var(--drawer-from, 100%));
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes drawer-out {
+    to {
+      transform: translateX(var(--drawer-from, 100%));
+    }
+  }
+  /* Bottom sheets on phones. */
+  @keyframes sheet-in {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes sheet-out {
+    to {
+      transform: translateY(100%);
     }
   }
   @keyframes live-pulse {
@@ -183,7 +300,14 @@
     font-family: var(--font-display);
     font-weight: 600;
     line-height: 1.2;
+    /* Inter is drawn for text sizes; headings pull it in a little (the text-title* sizes set their own). */
+    letter-spacing: -0.01em;
     text-wrap: balance;
+  }
+
+  /* Side drawers enter from the inline end, which is the left in RTL (animate-drawer-in). */
+  :root:dir(rtl) {
+    --drawer-from: -100%;
   }
 
   ::selection {
@@ -191,14 +315,29 @@
     color: var(--color-accent-fg);
   }
 
-  /* One focus language everywhere: an amber halo readable from the couch. */
+  /*
+   * One focus language everywhere: an amber outline readable from the couch, with a soft glow
+   * filling the gap (DS-FOCUS). Text fields take theirs on the field itself: the border turns the
+   * focus colour with a 3px glow, no offset outline, so clicking into a field does not draw a
+   * halo that reads as an alert. Their outline stays, transparent, for forced colours.
+   */
   :focus {
     outline: none;
   }
   :focus-visible {
     outline: 2px solid var(--color-focus);
     outline-offset: 2px;
-    box-shadow: 0 0 0 6px var(--color-glow);
+    box-shadow: 0 0 0 4px var(--color-glow);
+  }
+  :where(
+      input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset']),
+      textarea,
+      select
+    ):focus-visible {
+    outline: 2px solid transparent;
+    outline-offset: 0;
+    border-color: var(--color-focus);
+    box-shadow: 0 0 0 3px var(--color-glow);
   }
 
   button:not(:disabled),
@@ -230,6 +369,18 @@
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
+  }
+}
+
+/*
+ * Windows High Contrast and other forced-colour modes drop box-shadow, which is all a ring-*
+ * focus style draws, and outline-none removes the outline itself. The system highlight outline
+ * comes back for every focused control (DS-FOCUS).
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
   }
 }
 
@@ -399,7 +550,10 @@ html[data-page-hidden] [class*='animate-shimmer']::after {
   }
 }
 
-/* The tuning tick: a short amber bar marking the active rail item or selected row. */
+/*
+ * The tuning tick: a short amber bar marking the active rail item or selected row. Selection is
+ * this tick on the neutral bg-selected fill, never an amber wash (tokens.css).
+ */
 @utility tuning-tick {
   position: relative;
   &::before {
@@ -412,13 +566,13 @@ html[data-page-hidden] [class*='animate-shimmer']::after {
     border-start-end-radius: 3px;
     border-end-end-radius: 3px;
     background: var(--color-accent);
-    box-shadow: 0 0 12px var(--color-glow);
+    box-shadow: 0 0 10px var(--color-glow);
   }
 }
 
 /* cmdk renders its own elements with data attributes. */
 [cmdk-item][data-selected='true'] {
-  background: var(--color-surface-3);
+  background: var(--color-selected);
   color: var(--color-fg);
 }
 /* Pressed: the hovered item is also the selected one, so this must outrank the rule above. */

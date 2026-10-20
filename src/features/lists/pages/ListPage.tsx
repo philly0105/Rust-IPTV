@@ -426,7 +426,7 @@ export function ListPage() {
             aria-label={t('title')}
             data-testid="lists-drawer"
             onKeyDown={onDrawerKeyDown}
-            className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col border-e border-border bg-surface shadow-2"
+            className="fixed inset-y-0 start-0 z-50 flex w-72 max-w-[85vw] flex-col border-e border-edge bg-surface shadow-2"
           >
             {sidebar}
           </aside>
@@ -540,7 +540,7 @@ function UnavailableEntries({
   const fmt = new Intl.NumberFormat(intlLocale(i18n.language));
   return (
     <details className="group shrink-0 border-t border-divider bg-surface" data-testid="list-unavailable">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-fg-muted outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-fg-muted outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
         <span className="flex-1">{t('unavailableHeading')}</span>
         <span className="rounded-full bg-surface-2 px-2 py-0.5 tabular-nums">{fmt.format(entries.length)}</span>
       </summary>

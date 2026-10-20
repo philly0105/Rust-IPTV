@@ -92,7 +92,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
                   title={entry.locked && lockedLabel ? `${entry.name} (${lockedLabel})` : undefined}
                   className={cn(
                     'group flex h-11 items-center gap-3 rounded-md border-b border-divider px-3',
-                    'text-sm text-fg-muted hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg',
+                    'text-sm text-fg-muted hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg',
                     entry.emphasis && 'font-semibold text-fg',
                   )}
                 >
@@ -101,7 +101,7 @@ export function CategoryIndex({ entries, hrefFor, scrollRef, label, lockedLabel 
                     <Lock data-testid="category-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} />
                   )}
                   {entry.count !== undefined && entry.count > 0 && (
-                    <span className="tabular font-display text-[calc(13rem/15)] text-fg-subtle group-hover:text-accent group-focus-visible:text-accent">
+                    <span className="tabular font-display text-[calc(13rem/15)] text-fg-subtle group-hover:text-fg-muted group-focus-visible:text-fg-muted">
                       {fmt.format(entry.count)}
                     </span>
                   )}

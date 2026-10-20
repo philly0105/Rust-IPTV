@@ -1,5 +1,5 @@
 import { Ellipsis } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -121,7 +121,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState<{ rect: MenuAnchor; rtl: boolean } | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<ReturnType<typeof placeMenu> | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const focusOnOpen = useRef<'first' | 'last'>('first');
@@ -275,7 +275,7 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
         }}
         className={cn(
           !trigger &&
-            'inline-flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors',
+            'inline-flex h-9 w-9 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors',
           triggerClassName,
         )}
       >
@@ -292,10 +292,15 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
             data-dialog-layer=""
             aria-label={label}
             onKeyDown={onMenuKey}
-            // Rendered hidden for one layout pass so placeMenu can measure it.
-            style={pos ? { top: pos.top, left: pos.left } : { top: 0, left: 0, visibility: 'hidden' }}
+            // Rendered hidden for one layout pass so placeMenu can measure it. A menu placed above its
+            // trigger rises from above (--pop-from, read by the pop-in keyframes in globals.css).
+            style={
+              pos
+                ? ({ top: pos.top, left: pos.left, '--pop-from': pos.side === 'above' ? '-6px' : '6px' } as CSSProperties)
+                : { top: 0, left: 0, visibility: 'hidden' }
+            }
             className={cn(
-              'fixed z-[60] min-w-48 max-w-80 rounded-md border border-border bg-surface p-1 shadow-2 motion-safe:animate-pop-in',
+              'fixed z-[60] min-w-48 max-w-80 rounded-lg border border-edge bg-surface p-1 shadow-2 motion-safe:animate-pop-in',
               className,
             )}
           >
@@ -321,8 +326,8 @@ export function Menu({ items, label, trigger, triggerClassName, align = 'end', p
                     }
                   }}
                   className={cn(
-                    'flex h-9 cursor-pointer items-center gap-3 rounded-sm px-3 text-sm outline-none select-none',
-                    'hover:bg-surface-2 focus:bg-surface-3 active:bg-pressed focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
+                    'flex h-9 cursor-pointer items-center gap-3 rounded-md px-3 text-sm outline-hidden select-none',
+                    'hover:bg-hover focus:bg-active active:bg-pressed focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
                     item.danger ? 'text-danger' : 'text-fg',
                   )}
                 >

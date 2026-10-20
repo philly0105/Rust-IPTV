@@ -38,12 +38,12 @@ export interface CategorySidebarProps {
 }
 
 function linkClass(active: boolean): string {
-  return `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-    active ? 'bg-accent/15 font-medium text-fg' : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+  return `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+    active ? 'tuning-tick bg-selected font-medium text-fg' : 'text-fg-muted hover:bg-hover hover:text-fg'
   }`;
 }
 
-/** fg-subtle drops to 4:1 on the amber-tinted active row in the dark theme; fg-muted holds 4.5:1 there. */
+/** The active row's count steps up to fg-muted with its label (both hold 4.5:1 on the selected fill). */
 function countClass(active: boolean): string {
   return `text-xs tabular-nums ${active ? 'text-fg-muted' : 'text-fg-subtle'}`;
 }
@@ -186,7 +186,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
         <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} />
       </div>
       <div className="px-3 pb-2">
-        <label className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface-2 px-2 text-sm focus-within:ring-2 focus-within:ring-accent">
+        <label className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface-2 px-2 text-sm focus-within:ring-2 focus-within:ring-focus">
           <Search className="size-3.5 text-fg-subtle" aria-hidden />
           <input
             value={filter}
@@ -298,7 +298,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
         <button
           type="button"
           onClick={props.onManage}
-          className="mx-3 mb-3 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-fg-subtle outline-none hover:bg-surface-2 hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
+          className="mx-3 mb-3 flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-fg-subtle outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
         >
           <EyeOff className="size-3.5" aria-hidden />
           {t('hiddenGroupsCount', { count: props.hiddenCount })}

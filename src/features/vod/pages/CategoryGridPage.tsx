@@ -91,7 +91,7 @@ function GridCellError() {
   return (
     <div className="flex min-w-0 flex-col gap-2" data-testid="vod-grid-cell-error">
       <div
-        className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-md bg-surface-2 p-3 text-center ring-1 ring-border/60 hover:ring-fg-subtle"
+        className="flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-md bg-surface-2 p-3 text-center ring-1 ring-edge hover:ring-fg-subtle"
         style={{ aspectRatio: 2 / 3 }}
       >
         <TriangleAlert aria-hidden size={20} className="text-warning" />
@@ -599,7 +599,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 aria-hidden
                 className={cn(
                   'tabular inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-xs leading-none font-semibold',
-                  filtersOpen ? 'bg-accent-fg text-accent' : 'bg-accent text-accent-fg',
+                  filtersOpen ? 'bg-bg text-fg' : 'bg-fg text-bg',
                 )}
               >
                 {activeFilters}

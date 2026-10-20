@@ -13,7 +13,7 @@ export function PreviewPanel({ state }: { state: PreviewState }) {
   if (state.status === 'idle') return null;
 
   return (
-    <section aria-live="polite" aria-label={t('previewTitle')} className="rounded-md border border-border bg-surface-2/60 p-4">
+    <section aria-live="polite" aria-label={t('previewTitle')} className="rounded-md border border-edge bg-surface-2/60 p-4">
       {state.status === 'loading' ? (
         <div className="flex flex-col gap-2" aria-busy="true">
           <span className="sr-only">{t('previewLoading')}</span>
@@ -54,7 +54,7 @@ export function PreviewPanel({ state }: { state: PreviewState }) {
                 <span className="text-sm text-fg-muted">{t('previewGroups', { count: state.preview.groups.length })}</span>
                 <ul className="flex flex-wrap gap-1.5">
                   {state.preview.groups.slice(0, MAX_GROUPS).map((g, i) => (
-                    <li key={`${i}:${g}`} className="max-w-56 truncate rounded-sm border border-border bg-surface px-2 py-0.5 text-xs text-fg">
+                    <li key={`${i}:${g}`} className="max-w-56 truncate rounded-sm border border-edge bg-surface px-2 py-0.5 text-xs text-fg">
                       {g}
                     </li>
                   ))}

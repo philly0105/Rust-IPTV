@@ -106,7 +106,7 @@ function MyListRowImpl({
         // Below sm a grid: the poster spans two lines, the title above the actions. From sm up one flex line.
         'group relative grid h-full grid-cols-[3rem_minmax(0,1fr)] content-center items-center gap-x-3 gap-y-1 rounded-lg px-1.5',
         'sm:flex sm:gap-4 sm:px-3',
-        'hover:bg-surface-2 in-focus-visible:bg-surface-2 motion-safe:transition-colors',
+        'hover:bg-hover in-focus-visible:bg-hover motion-safe:transition-colors',
         dragging && 'opacity-40',
         busy && 'cursor-progress',
       )}
@@ -136,8 +136,8 @@ function MyListRowImpl({
             'leading-none font-semibold tabular',
             // Below sm: a small plate on the poster's top corner, so the title keeps the width.
             'absolute start-2.5 top-[calc(50%-32px)] z-10 min-w-5 rounded-sm bg-glass-strong px-1 py-0.5 text-center text-xs text-on-glass',
-            'sm:static sm:w-12 sm:min-w-0 sm:shrink-0 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-end sm:font-display sm:text-4xl sm:text-fg-subtle',
-            'sm:group-hover:text-accent sm:in-focus-visible:text-accent motion-safe:transition-colors',
+            'sm:static sm:w-12 sm:min-w-0 sm:shrink-0 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-end sm:font-numeric sm:text-4xl sm:text-fg-subtle',
+            'sm:group-hover:text-fg-muted sm:in-focus-visible:text-fg-muted motion-safe:transition-colors',
           )}
           data-testid="mylist-rank"
         >

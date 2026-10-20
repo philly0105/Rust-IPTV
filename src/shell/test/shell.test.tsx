@@ -1012,7 +1012,7 @@ describe('B7 review round 1', () => {
   it('rail links press darker', async () => {
     renderRoutes(routes(), '/favorites');
     const link = await screen.findByRole('link', { name: /Favorites/ });
-    expect(link.className).toContain('active:bg-surface-3');
+    expect(link.className).toContain('active:bg-active');
   });
 
   it('joins card counts with the locale list format, and names carry dir="auto"', async () => {

@@ -47,8 +47,9 @@ export interface VodFilterBarProps {
 const CHIP =
   'relative inline-flex h-8 shrink-0 items-center rounded-full px-3 text-sm whitespace-nowrap tabular ' +
   'motion-safe:transition-[color,background-color,box-shadow] motion-safe:duration-150';
-const CHIP_IDLE = 'bg-surface-2 text-fg-muted ring-1 ring-inset ring-border hover:bg-surface-3 hover:text-fg';
-const CHIP_ON = 'bg-accent font-medium text-accent-fg ring-1 ring-inset ring-accent';
+const CHIP_IDLE = 'bg-surface-2 text-fg-muted ring-1 ring-inset ring-edge hover:bg-surface-3 hover:text-fg';
+// A chosen filter is neutral (inverted); amber is kept for actions and progress.
+const CHIP_ON = 'bg-fg font-medium text-bg ring-1 ring-inset ring-fg';
 
 /** Sources whose facets had years this session: their row is worth reserving while it loads. */
 const sourcesWithYears = new Set<string>();
@@ -173,11 +174,11 @@ export function VodFilterBar({
                       {c.count !== undefined && max > 0 && (
                         <span
                           aria-hidden
-                          className={cn('absolute inset-x-3 bottom-1 h-0.5 overflow-hidden rounded-full', on ? 'bg-accent-fg/25' : 'bg-border')}
+                          className={cn('absolute inset-x-3 bottom-1 h-0.5 overflow-hidden rounded-full', on ? 'bg-bg/25' : 'bg-border')}
                           data-testid="decade-meter"
                         >
                           <span
-                            className={cn('block h-full rounded-full', on ? 'bg-accent-fg/80' : 'bg-accent')}
+                            className={cn('block h-full rounded-full', on ? 'bg-bg/80' : 'bg-fg-muted')}
                             style={{ width: `${Math.max(6, Math.round((c.count / max) * 100))}%` }}
                           />
                         </span>

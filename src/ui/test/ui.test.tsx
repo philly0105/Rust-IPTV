@@ -92,7 +92,7 @@ describe('Dialog placement="end" (drawer)', () => {
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.className).toContain('h-full');
     expect(dialog.className).toContain('w-[min(var(--panel-width),90vw)]');
-    expect(dialog.className).not.toContain('rounded-lg');
+    expect(dialog.className).not.toMatch(/\brounded-(?:lg|xl)\b/);
     expect(dialog.parentElement!.className).toContain('justify-end');
     // Focus starts on the first item that is not the close button.
     expect(document.activeElement).toBe(screen.getByText('first link'));

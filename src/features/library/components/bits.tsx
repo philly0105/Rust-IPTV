@@ -20,7 +20,7 @@ export function SourceBadge({ source, className }: { source: Source | undefined;
   return (
     <span
       className={cn(
-        'inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-sm border border-border px-1.5 py-0.5 text-[calc(11rem/15)] leading-4 text-fg-muted',
+        'inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-sm border border-edge px-1.5 py-0.5 text-[calc(11rem/15)] leading-4 text-fg-muted',
         className,
       )}
       title={source?.name ?? t('sourceRemoved')}
@@ -104,7 +104,7 @@ export function PageTitle({ children }: { children: string }) {
 export function SectionHeading({ title, count, hint }: { title: string; count: number; hint?: string }) {
   return (
     <div className="flex h-full items-end gap-3 px-1 pb-2">
-      <h2 className="font-display text-[calc(15rem/15)] font-semibold text-fg">{title}</h2>
+      <h2 className="text-title-sm text-fg">{title}</h2>
       <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
       {hint && <span className="ms-auto truncate text-xs text-fg-subtle">{hint}</span>}
     </div>

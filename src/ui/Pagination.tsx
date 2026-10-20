@@ -36,7 +36,7 @@ export function Pagination({ offset, limit, total, onChange, className }: Pagina
   const from = current * limit + 1;
   const to = Math.min(total, from + limit - 1);
   const btn =
-    'inline-flex h-9 min-w-9 items-center justify-center rounded-md px-2 text-sm tabular text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors disabled:pointer-events-none disabled:opacity-40';
+    'inline-flex h-9 min-w-9 items-center justify-center rounded-md px-2 text-sm tabular text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors disabled:pointer-events-none disabled:opacity-40';
 
   return (
     <nav aria-label={t('pagination')} className={cn('flex flex-wrap items-center justify-between gap-3', className)}>
@@ -56,7 +56,7 @@ export function Pagination({ offset, limit, total, onChange, className }: Pagina
             <li key={p}>
               <button
                 type="button"
-                className={cn(btn, p === current && 'bg-surface-3 font-semibold text-fg')}
+                className={cn(btn, p === current && 'bg-selected font-semibold text-fg')}
                 aria-current={p === current ? 'page' : undefined}
                 aria-label={t('pageN', { page: p + 1 })}
                 onClick={() => go(p)}

@@ -91,7 +91,7 @@ function DelayRow({ kind }: { kind: DelayKind }) {
           <RotateCcw aria-hidden />
         </button>
       </div>
-      {blocked && <p className="mt-0.5 text-xs text-white/50">{blocked}</p>}
+      {blocked && <p className="player-on-glass-muted mt-0.5 text-xs">{blocked}</p>}
     </div>
   );
 }

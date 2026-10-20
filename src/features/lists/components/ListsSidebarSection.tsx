@@ -29,8 +29,8 @@ const ROW = 36;
 const ROW_SPACING = 17;
 
 const linkClass = (active: boolean) =>
-  `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-    active ? 'bg-accent/15 font-medium text-fg' : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+  `flex h-full items-center gap-2 rounded-md px-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+    active ? 'tuning-tick bg-selected font-medium text-fg' : 'text-fg-muted hover:bg-hover hover:text-fg'
   }`;
 const countClass = (active: boolean) => `text-xs tabular-nums ${active ? 'text-fg-muted' : 'text-fg-subtle'}`;
 
@@ -125,7 +125,7 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
     );
   } else if (items.length === 0) {
     body = (
-      <div className="mx-3 mb-1 flex flex-col items-start gap-2 rounded-md border border-dashed border-border px-3 py-3 text-sm">
+      <div className="mx-3 mb-1 flex flex-col items-start gap-2 rounded-md border border-dashed border-edge px-3 py-3 text-sm">
         <p className="text-fg-muted">{t('sidebarEmpty')}</p>
         <Button size="sm" variant="secondary" icon={<ListPlus className="size-4" />} onClick={() => openCreateList({ openAfter: true })}>
           {t('newList')}
@@ -182,7 +182,7 @@ export function ListsSidebarSection({ activeListId, onNavigate, variant = 'secti
               aria-expanded={!folded}
               aria-controls={bodyId}
               onClick={toggleFold}
-              className="-ms-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
+              className="-ms-1 flex items-center gap-1 rounded-md px-1 py-0.5 outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
             >
               <ChevronDown className={cn('size-3.5 text-fg-subtle motion-safe:transition-transform', folded && '-rotate-90 rtl:rotate-90')} aria-hidden />
               {t('title')}

@@ -22,9 +22,9 @@ export const CARD_ROOT = 'group/card outline-none focus-visible:outline-none foc
 
 /** The artwork frame: rest, hover, focus-visible and pressed states. */
 export const CARD_ART =
-  'relative overflow-hidden rounded-md shadow-1 ring-1 ring-border/50 ' +
+  'relative overflow-hidden rounded-lg shadow-1 ring-1 ring-edge ' +
   'motion-safe:transition-[translate,scale,box-shadow] motion-safe:duration-150 motion-safe:ease-out ' +
-  'group-hover/card:shadow-2 group-hover/card:ring-fg-subtle motion-safe:group-hover/card:-translate-y-0.5 ' +
+  'group-hover/card:shadow-2 group-hover/card:ring-border motion-safe:group-hover/card:-translate-y-0.5 ' +
   'group-focus-visible/card:ring-2 group-focus-visible/card:ring-focus group-focus-visible/card:shadow-[0_0_0_6px_var(--color-glow)] ' +
   'motion-safe:group-active/card:translate-y-0 motion-safe:group-active/card:scale-[0.98] group-active/card:shadow-1';
 

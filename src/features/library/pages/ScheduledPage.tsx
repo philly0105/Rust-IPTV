@@ -207,7 +207,7 @@ export function ScheduledPage() {
     <div className="mx-auto flex w-full max-w-[1100px] min-w-0 flex-col gap-6 px-6 pb-8 pt-4">
       <PageTitle>{title}</PageTitle>
       {caps.data && !caps.data.supported ? (
-        <p role="note" className="rounded-md border border-border bg-surface px-4 py-3 text-sm text-fg-muted" data-testid="scheduled-no-recording">
+        <p role="note" className="rounded-md border border-edge bg-surface px-4 py-3 text-sm text-fg-muted" data-testid="scheduled-no-recording">
           {t('scheduledServerNoMpv')}
         </p>
       ) : null}
@@ -234,12 +234,12 @@ function Section({
   return (
     <section aria-labelledby={id} data-testid={testId} className="flex flex-col gap-2">
       <div className="flex items-baseline gap-3 px-1">
-        <h2 id={id} className="font-display text-[calc(15rem/15)] font-semibold text-fg">
+        <h2 id={id} className="text-title-sm text-fg">
           {title}
         </h2>
         <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
       </div>
-      <div className={cn('flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-border bg-surface', bodyClassName)}>{children}</div>
+      <div className={cn('flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-edge bg-surface', bodyClassName)}>{children}</div>
     </section>
   );
 }
@@ -279,7 +279,7 @@ function RecordingNowRow({ recording: r }: { recording: Recording }) {
         {/* Measured from when this recording began writing, in step with the elapsed clock. */}
         <ProgressBar value={recordingFraction(r, now) * 100} tone="accent" label={t('scheduledProgressFor', { title: name })} />
         <div className="flex min-w-0 items-center gap-3 text-xs text-fg-muted">
-          <span className="font-display tabular-nums text-fg">{clockDuration(elapsed)}</span>
+          <span className="font-numeric tabular-nums text-fg">{clockDuration(elapsed)}</span>
           <span className="font-display tabular-nums">{formatBytes(bytes, i18n.language)}</span>
           <span className="tabular-nums">{t('scheduledUntil', { time: timeOf(new Date(Date.parse(r.end) + r.paddingAfterMinutes * 60_000).toISOString(), i18n.language) })}</span>
           {reconnecting ? <span className="truncate text-warning">{t('scheduledReconnecting')}</span> : null}
@@ -332,7 +332,7 @@ function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
 
   return (
     <div className="col-span-full grid grid-cols-subgrid items-center gap-x-4 px-4 py-3" data-testid="upcoming-row" data-kind={entry.type}>
-      <span className="whitespace-nowrap font-display text-sm tabular-nums text-fg">{timeOf(item.start, lang)}</span>
+      <span className="whitespace-nowrap font-numeric text-sm tabular-nums text-fg">{timeOf(item.start, lang)}</span>
       <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
         {/* A waiting recording gets a hollow mark; the filled live dot is for recordings writing now. */}
         {isReminder ? (

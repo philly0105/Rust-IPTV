@@ -40,7 +40,7 @@ function MenuAction({ icon, label, hint, onClick }: { icon: ReactNode; label: st
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {hint && <kbd className="font-sans text-xs text-white/50">{hint}</kbd>}
+      {hint && <kbd className="player-on-glass-muted font-sans text-xs">{hint}</kbd>}
     </button>
   );
 }

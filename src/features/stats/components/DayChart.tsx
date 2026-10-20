@@ -105,7 +105,7 @@ export function DayChart({ days, today }: DayChartProps) {
   return (
     <section aria-labelledby={headingId} data-testid="stats-chart">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 id={headingId} className="font-display text-[calc(15rem/15)] font-semibold">
+        <h2 id={headingId} className="text-title-sm">
           {t('perDay')}
         </h2>
         <Button

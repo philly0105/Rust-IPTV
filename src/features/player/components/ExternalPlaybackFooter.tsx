@@ -40,11 +40,11 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
     <div
       role="status"
       className={cn(
-        'flex items-center gap-3 border-t border-border bg-surface-2 px-4 py-2 text-sm text-fg motion-safe:animate-fade-in',
+        'flex items-center gap-3 border-t border-edge bg-surface-2 px-4 py-2 text-sm text-fg motion-safe:animate-fade-in',
         className,
       )}
     >
-      <ExternalLink className="size-4 shrink-0 text-accent" aria-hidden />
+      <ExternalLink className="size-4 shrink-0 text-fg-muted" aria-hidden />
       <span className="shrink-0 text-fg-muted">{t('externalPlaying', { player: name })}</span>
       <span className="min-w-0 truncate font-medium" title={shown.title}>
         {shown.title}
@@ -59,7 +59,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
         }}
         disabled={stopping}
         aria-busy={stopping || undefined}
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs font-medium text-fg hover:bg-surface-3 disabled:opacity-50"
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-edge px-2.5 text-xs font-medium text-fg hover:bg-hover disabled:opacity-50"
       >
         <Square className="size-3 fill-current" aria-hidden />
         {t('externalStop', { player: name })}
@@ -70,7 +70,7 @@ export function ExternalPlaybackFooter({ className }: { className?: string }) {
           aria-label={t('dismiss')}
           title={t('dismiss')}
           onClick={() => setDismissed(latest.startedAt)}
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-surface-3 hover:text-fg"
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-fg-muted hover:bg-hover hover:text-fg"
         >
           <X className="size-4" />
         </button>

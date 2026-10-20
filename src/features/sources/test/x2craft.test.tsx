@@ -46,18 +46,16 @@ function sourceFiles(dir: string): string[] {
 
 describe('border contract (D23)', () => {
   it('decorative separators use the divider token, not the 3:1 component border', () => {
-    // Single-sided edges, divide-* lists and 1px rules are separators. Three kept on purpose:
-    // the modal category drawer's edge (a dialog surface), the EPG midnight marker and the
-    // interface-size scale's ticks in Appearance (both carry meaning). Run 2: the track of the
-    // decade chips' count meter in the movie filters (a bar, not a rule between regions).
-    // Loop 1: the phone guide's programme bottom sheet (a dialog surface) and its grab handle.
+    // Single-sided edges, divide-* lists and 1px rules are separators. Kept on purpose: the EPG
+    // midnight marker and the interface-size scale's ticks in Appearance (both carry meaning).
+    // Run 2: the track of the decade chips' count meter in the movie filters (a bar, not a rule
+    // between regions). Loop 1: the phone guide's programme bottom sheet's grab handle. (Drawer
+    // and sheet edges moved to the quiet container edge with the Night Tuner 2 tokens.)
     const allowed = [
-      /fixed inset-y-0 start-0 z-50 .*border-e border-border/,
-      /fixed inset-x-0 bottom-0 z-50 .*border-t border-border/,
       /block h-1 w-10 rounded-full bg-border/,
       /midnight \? 'bg-border'/,
       /on \? 'bg-accent' : 'bg-border'/,
-      /on \? 'bg-accent-fg\/25' : 'bg-border'/,
+      /on \? 'bg-bg\/25' : 'bg-border'/,
     ];
     const offenders: string[] = [];
     for (const d of DIRS) {
@@ -83,8 +81,8 @@ describe('disclosures', () => {
     for (const f of ['HeadersFields.tsx', 'StalkerForm.tsx']) {
       const src = readFileSync(join(__dirname, '..', 'components', f), 'utf8');
       const summary = /<summary className="([^"]+)"/.exec(src)?.[1] ?? '';
-      expect(summary, f).toMatch(/hover:bg-surface-2/);
-      expect(summary, f).toMatch(/active:bg-surface-3/);
+      expect(summary, f).toMatch(/hover:bg-hover/);
+      expect(summary, f).toMatch(/active:bg-active/);
       const chevron = /<ChevronRight[^>]*className="([^"]+)"/.exec(src)?.[1] ?? '';
       expect(chevron, f).toContain('rtl:-scale-x-100');
       expect(chevron, f).toContain('rtl:group-open:-rotate-90');

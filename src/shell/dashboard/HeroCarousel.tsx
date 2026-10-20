@@ -369,7 +369,7 @@ function SlideBody({
         <h2
           id={titleId}
           dir="auto"
-          className="line-clamp-2 text-match-parent font-display text-[clamp(1.75rem,3.2vw,3rem)] leading-[1.05] font-semibold text-on-glass"
+          className="line-clamp-2 text-match-parent text-display text-on-glass"
         >
           {title}
         </h2>

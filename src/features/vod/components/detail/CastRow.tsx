@@ -37,7 +37,7 @@ export function CastRow({ cast, sourceId }: { cast: Person[]; sourceId: string }
               </span>
             </>
           );
-          const cls = 'flex max-w-56 shrink-0 items-center gap-2 rounded-full border border-border bg-surface/70 py-1 pe-4 ps-1';
+          const cls = 'flex max-w-56 shrink-0 items-center gap-2 rounded-full border border-edge bg-surface/70 py-1 pe-4 ps-1';
           return (
             <li key={`${p.id ?? 'n'}-${p.name}-${i}`}>
               {p.id !== undefined ? (

@@ -57,12 +57,12 @@ export function RecordingRulesPanel() {
   return (
     <section aria-labelledby={headingId} data-testid="recording-rules" className="flex flex-col gap-2">
       <div className="flex items-baseline gap-3 px-1">
-        <h2 id={headingId} className="font-display text-[calc(15rem/15)] font-semibold text-fg">
+        <h2 id={headingId} className="text-title-sm text-fg">
           {t('rulesTitle')}
         </h2>
         {rules.data ? <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{list.length}</span> : null}
       </div>
-      <div className="overflow-hidden rounded-lg border border-border bg-surface">{body}</div>
+      <div className="overflow-hidden rounded-lg border border-edge bg-surface">{body}</div>
       <RemoveRuleDialog rule={removing} onClose={() => setRemoving(null)} />
     </section>
   );

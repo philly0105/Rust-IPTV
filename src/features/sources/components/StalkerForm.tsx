@@ -127,8 +127,8 @@ export function StalkerForm({
         </Field>
       </div>
 
-      <details className="group rounded-md border border-border bg-surface-2/50" open={identityFilled || undefined}>
-        <summary className="flex cursor-pointer select-none items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-fg hover:bg-surface-2 active:bg-surface-3 [&::-webkit-details-marker]:hidden">
+      <details className="group rounded-md border border-edge bg-surface-2/50" open={identityFilled || undefined}>
+        <summary className="flex cursor-pointer select-none items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-fg hover:bg-hover active:bg-active [&::-webkit-details-marker]:hidden">
           <ChevronRight aria-hidden className="size-4 shrink-0 text-fg-subtle motion-safe:transition-transform rtl:-scale-x-100 ltr:group-open:rotate-90 rtl:group-open:-rotate-90" />
           {t('deviceIdentity')}
         </summary>

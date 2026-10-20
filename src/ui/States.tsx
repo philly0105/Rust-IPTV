@@ -47,7 +47,7 @@ export function EmptyState({ icon, title, description, action, className, size =
         widening this shrink-to-fit block past the window edge.
       */}
       <div className="flex max-w-md flex-col gap-1.5 [overflow-wrap:anywhere]">
-        <h2 className={cn(size === 'page' ? 'text-xl' : 'text-base')}>{title}</h2>
+        <h2 className={cn(size === 'page' ? 'text-title-sm' : 'text-base')}>{title}</h2>
         {description && <p className="text-sm text-fg-muted">{description}</p>}
       </div>
       {action && <div className="mt-1 flex flex-wrap items-center justify-center gap-2">{action}</div>}
@@ -165,7 +165,7 @@ export function ErrorState({ error, onRetry, action, className, size = 'page', t
         <CircleAlert size={size === 'page' ? 28 : 20} />
       </div>
       <div className="flex max-w-lg flex-col gap-1.5">
-        <h2 className={cn(size === 'page' ? 'text-xl' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code] ?? 'errorTitleInternal')}</h2>
+        <h2 className={cn(size === 'page' ? 'text-title-sm' : 'text-base')}>{title ?? t(ERROR_TITLE_KEYS[err.code] ?? 'errorTitleInternal')}</h2>
         {unreachable && <p className="text-sm break-words text-fg-muted">{t('errorBodyServerUnreachable')}</p>}
         <p className="text-sm text-fg">
           {unreachable ? t('errorHintServerUnreachable') : (hint ?? t(ERROR_HINT_KEYS[err.code] ?? 'errorHintInternal'))}

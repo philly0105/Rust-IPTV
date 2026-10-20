@@ -19,7 +19,7 @@ function TopSection({ title, empty, testId, children }: { title: string; empty: 
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="@container min-w-0 border-t border-divider pt-4" data-testid={testId}>
-      <h2 id={headingId} className="mb-2 font-display text-[calc(15rem/15)] font-semibold">
+      <h2 id={headingId} className="mb-2 text-title-sm">
         {title}
       </h2>
       {empty ? <p className="py-6 text-sm text-fg-muted">{empty}</p> : <ol className="flex flex-col">{children}</ol>}
@@ -98,7 +98,7 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
           <Link
             to={itemPath(item.ref)}
             aria-label={t('openLabel', { title: item.title })}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-md p-0.5 hover:bg-surface-2 motion-safe:transition-colors"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-md p-0.5 hover:bg-hover motion-safe:transition-colors"
             data-testid="stats-open"
           >
             <Poster src={item.posterUrl ?? null} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" rounded="sm" className="w-9 shrink-0" />

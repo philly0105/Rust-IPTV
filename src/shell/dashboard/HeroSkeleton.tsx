@@ -5,7 +5,7 @@ import { Skeleton, cn } from '@/ui';
  * theme). Shared with the skeleton so nothing jumps, and so a light theme no longer loads the
  * hero as a white card that then turns dark (L3-visual-8).
  */
-export const HERO_FRAME = 'relative mx-4 overflow-hidden rounded-lg border border-glass-border bg-glass-strong sm:mx-8';
+export const HERO_FRAME = 'relative mx-4 overflow-hidden rounded-xl border border-glass-border bg-glass-strong sm:mx-8';
 /** The hero's content box: a fixed minimum height, so slides with and without a plot line up. */
 export const HERO_BODY = 'relative flex min-h-[clamp(17rem,30vw,24rem)] items-end gap-8 p-5 sm:p-8';
 

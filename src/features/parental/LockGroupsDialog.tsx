@@ -350,7 +350,7 @@ function GroupList({
       {shown.length === 0 ? (
         <p className="py-8 text-center text-sm text-fg-muted">{t('noGroupsMatch')}</p>
       ) : (
-        <div ref={scrollRef} className="h-[min(360px,45vh)] overflow-y-auto rounded-md border border-border bg-surface">
+        <div ref={scrollRef} className="h-[min(360px,45vh)] overflow-y-auto rounded-md border border-edge bg-surface">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
             {virtualizer.getVirtualItems().map((v) => {
               const r = shown[v.index]!;
@@ -362,7 +362,7 @@ function GroupList({
                   className={cn(
                     'flex items-center gap-3 px-3 text-sm ring-inset',
                     'has-[:focus-visible]:bg-surface-2 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus',
-                    r.auto ? 'cursor-default' : 'cursor-pointer hover:bg-surface-2',
+                    r.auto ? 'cursor-default' : 'cursor-pointer hover:bg-hover',
                   )}
                   data-testid="lock-group-row"
                 >

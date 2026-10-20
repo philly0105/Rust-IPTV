@@ -2,14 +2,14 @@
 
 Owner: U1. Covers `src/styles`, `src/ui`, `src/shell`, `src/i18n/index.ts`, and the `/dashboard` page. Contracts are SPEC C7, C10, C11, and C16.
 
-## Visual direction: Night Tuner
+## Visual direction: Night Tuner 2
 
 The app is a TV and radio tuner, so the design borrows from a backlit radio dial at night.
 
-- Surfaces are ink navy in dark mode and cool paper in light mode.
-- One accent at a time, amber by default (dark `#f5b544`, light `#8f4f00`); the user can pick one of seven in Settings > Appearance. The accents, OLED black, density and UI scale are in [appearance.md](appearance.md). The accent is used for active navigation, primary actions, progress, and focus. Nothing else wears it, so it always means "here" or "go".
-- The signature detail is the tuning tick, a short accent bar on the leading edge of the active rail item (the `tuning-tick` utility). Focus rings use the same accent with a soft glow.
-- Type: Bahnschrift (`font-display`) for headings, titles, and numbers; Segoe UI Variable Text for body; Cascadia Mono for key caps.
+- Surfaces are ink navy in dark mode and cool paper in light mode. Panels separate by surface steps, elevation and a quiet `--color-edge` hairline; the 3:1 `--color-border` is only on form controls (inputs, selects, switches, checkboxes).
+- One accent at a time, amber by default; the user can pick one of seven in Settings > Appearance. The accents, OLED black, density and UI scale are in [appearance.md](appearance.md). Amber marks the primary action (one per view), focus, the active nav tick, progress, the playing or on-now marker and live progress. Nothing decorative wears it (idle chips, saved and watched marks, segmented choices, icons), so it always means "here" or "go". Selection is the neutral `bg-selected` fill plus the tick, never an amber wash.
+- The signature detail is the tuning tick, a short accent bar on the leading edge of the active rail item or selected row (the `tuning-tick` utility). Focus rings use the focus colour with a soft glow.
+- Type: Inter Variable (self-hosted, `font-sans` and `font-display`) for all text and headings, on the type scale in [appearance.md](appearance.md); Barlow Semi Condensed 600 (`font-numeric`) for channel numbers, clocks, the channel-number OSD and LIVE pills. Arabic and CJK fall back to system faces per glyph.
 - Artwork fallbacks are initials on a per-title hue gradient (`hueOf`, `initialsOf` in `Poster`), so missing posters still look intentional.
 - Motion only answers user actions (dialogs, toasts, card lift). Everything runs under `motion-safe:`. `html[data-reduced-motion='true']` and the OS media query both turn animation off. The player OSD is the exception: it hides through its keyframe, so under reduced motion it keeps a 2.4 s duration with a no-fade `player-osd-still` animation (shown, then gone).
 
@@ -21,9 +21,10 @@ Dark is the default when the OS has no stated preference.
 - `src/styles/globals.css`:
   - imports Tailwind and the tokens
   - declares `@custom-variant dark` keyed on `data-theme`
-  - maps tokens into `@theme`, which provides `bg-surface`, `text-fg-muted`, `border-border`, `bg-accent`, `text-accent-fg`, `bg-live`, and the rest
-  - sets base styles, the focus ring, and scrollbars
-  - defines the keyframes (`shimmer`, `toast-in`, `fade-in`, `pop-in`, `live-pulse`, `indeterminate`), utilities (`scrollbar-none`, `tabular`, `skeleton-surface`, `animate-shimmer`, `tuning-tick`), and cmdk styles
+  - imports `fonts.css` (the self-hosted `@font-face` rules; Vite copies each woff2 into `dist/assets` with a hash)
+  - maps tokens into `@theme`, which provides `bg-surface`, `text-fg-muted`, `border-edge`, `border-border`, `bg-hover`, `bg-selected`, `bg-accent-solid`, `bg-live-solid`, the type scale (`text-caption` to `text-display`), radii, `shadow-1` to `shadow-3`, `font-numeric`, `ease-enter` / `ease-exit`, and the rest
+  - sets base styles, the focus ring (fields get a border and glow instead of the offset outline; forced-colours mode gets a system outline), and scrollbars
+  - defines the keyframes (`shimmer`, `toast-in`/`-out`, `fade-in`/`-out`, `pop-in`/`-out`, `drawer-in`/`-out`, `sheet-in`/`-out`, `live-pulse`, `indeterminate`), utilities (`scrollbar-none`, `tabular`, `skeleton-surface`, `animate-shimmer`, `tuning-tick`), and cmdk styles
   - the skeleton shimmer is `@utility animate-shimmer` (used as `skeleton-surface motion-safe:animate-shimmer`): a band on an `::after` layer that sweeps by `transform` only, with `contain: paint` on the element, so the compositor runs it with no style recalc or repaint per frame. `src/ui/offscreen.ts` stops the loops nobody can see. `pauseWhenOffscreen` is a ref callback, used on the `Poster` placeholder while it loads and on the `LiveBadge` dot: one shared IntersectionObserver (64 px root margin) keeps `data-offscreen` on the element while it is out of view, set before the first observation, and globals.css turns its animation off there. While the window is hidden, `html[data-page-hidden]` pauses every shimmer, `live-pulse` and `indeterminate` loop, so a plain `Skeleton` pauses only then. Without IntersectionObserver nothing is marked. `live-pulse` runs three times as a live dot appears and then holds still, since an endless pulse kept the compositor drawing at the display rate wherever a LIVE badge showed; the player's live dot uses the same count (`LIVE_PULSES` in `Controls.tsx`).
 - Layout variables: `--rail-width` 248px, `--rail-width-collapsed` 72px, `--header-height` 60px, `--panel-width` 340px.
 

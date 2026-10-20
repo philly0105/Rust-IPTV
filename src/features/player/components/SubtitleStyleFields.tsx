@@ -89,7 +89,7 @@ function ChoiceGroup<T extends string>({
       data-testid={testId}
       className={cn(
         'flex flex-wrap gap-1',
-        tone === 'page' ? 'rounded-md border border-border bg-surface-2 p-1' : 'rounded-md bg-white/6 p-0.5',
+        tone === 'page' ? 'rounded-md border border-edge bg-surface-2 p-1' : 'rounded-md bg-white/6 p-0.5',
         className,
       )}
     >
@@ -111,8 +111,8 @@ function ChoiceGroup<T extends string>({
               'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-sm text-sm font-medium motion-safe:transition-colors',
               tone === 'page'
                 ? selected
-                  ? 'bg-accent text-accent-fg'
-                  : 'text-fg-muted hover:bg-surface-3 hover:text-fg'
+                  ? 'bg-raised text-fg shadow-1'
+                  : 'text-fg-muted hover:bg-hover hover:text-fg'
                 : selected
                   ? 'bg-white/16 text-white ring-1 ring-white/35'
                   : 'text-white/80 hover:bg-white/10 hover:text-white',
@@ -313,7 +313,7 @@ export function SubtitlePreview({ style }: { style: SubtitleStyle }) {
     <figure
       data-testid="subtitle-preview"
       aria-label={t('subtitleStyle.preview')}
-      className="@container/preview relative aspect-video w-full overflow-hidden rounded-lg border border-border bg-bg"
+      className="@container/preview relative aspect-video w-full overflow-hidden rounded-lg border border-edge bg-bg"
       style={varsOf(style)}
     >
       {/* A night scene from theme tokens: bright and dark areas, so legibility shows on both. */}

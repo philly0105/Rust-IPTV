@@ -579,7 +579,7 @@ export function AddSourceDialog({
         ) : null}
 
         {cancelled && !submitting ? (
-          <div ref={cancelledRef} tabIndex={-1} role="status" className="rounded-md border border-border bg-surface-2/60 p-3 outline-none" data-testid="add-source-cancelled">
+          <div ref={cancelledRef} tabIndex={-1} role="status" className="rounded-md border border-edge bg-surface-2/60 p-3 outline-none" data-testid="add-source-cancelled">
             <ImportProgressView
               entry={{ sourceId: '', phase: 'cancelled', done: 0, at: 0 }}
               cancelledNote={t(failed ? 'cancelledRetryNote' : 'cancelledAddNote')}

@@ -70,16 +70,16 @@ const PRIMARY: PrimaryLink[] = [
 const KIND_LABEL: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'XC', stalker: 'STB' };
 
 /**
- * One look for every rail row: rest (muted), hover (soft fill, full text),
- * pressed (deeper fill), current (tuning tick, accent icon). The height is
- * --rail-item-height, so compact density tightens the rail with everything else.
+ * One look for every rail row: rest (muted), hover (the see-through hover layer, full text),
+ * pressed (the active layer), current (the neutral selected fill, tuning tick, accent icon). The
+ * height is --rail-item-height, so compact density tightens the rail with everything else.
  */
 const itemClass = (active: boolean, collapsed: boolean) =>
   cn(
     'group flex h-(--rail-item-height) items-center gap-3 rounded-md text-sm font-medium outline-offset-[-2px]',
     'motion-safe:transition-colors motion-safe:duration-150',
     collapsed ? 'justify-center px-0' : 'px-3',
-    active ? 'tuning-tick bg-surface-2 text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
+    active ? 'tuning-tick bg-selected text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
   );
 
 function RailNavLink({ to, labelKey, icon: Icon, collapsed, end, tour }: PrimaryLink & { collapsed: boolean }) {
@@ -310,7 +310,7 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
         }}
         className={cn(
           'flex h-(--rail-item-height) w-full items-center gap-3 rounded-md px-3 text-start text-sm motion-safe:transition-colors motion-safe:duration-150',
-          active ? 'text-fg hover:bg-surface-2/60 active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
+          active ? 'text-fg hover:bg-hover active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
         )}
       >
         <SourceMark source={source} />
@@ -341,7 +341,7 @@ function SourceEntry({ source, collapsed, active, tour }: { source: Source; coll
                 className={({ isActive }) =>
                   cn(
                     'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-150',
-                    isActive ? 'tuning-tick bg-surface-2 font-medium text-fg active:bg-surface-3' : 'text-fg-muted hover:bg-surface-2/60 hover:text-fg active:bg-surface-3',
+                    isActive ? 'tuning-tick bg-selected font-medium text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
                   )
                 }
               >
@@ -462,7 +462,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
             <span className="absolute inset-x-2 bottom-2 h-0.5 rounded-full bg-fg-subtle/60" />
             <span className="absolute bottom-2 left-[55%] h-4 w-0.5 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]" />
           </span>
-          {!collapsed && <span className="truncate font-display text-lg font-semibold tracking-wide">{t('appName')}</span>}
+          {!collapsed && <span className="truncate font-display text-lg font-semibold tracking-tight">{t('appName')}</span>}
         </Link>
       </div>
 
@@ -508,7 +508,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
                 to="/sources?add=1"
                 title={t('addSource')}
                 aria-label={t('addSource')}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
               >
                 <Plus aria-hidden size={16} />
               </Link>
@@ -532,7 +532,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
                   disabled={sources.isFetching}
                   title={t('retry', { ns: 'common' })}
                   aria-label={t('retry', { ns: 'common' })}
-                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 motion-safe:transition-colors disabled:opacity-50"
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors disabled:opacity-50"
                 >
                   <RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />
                 </button>

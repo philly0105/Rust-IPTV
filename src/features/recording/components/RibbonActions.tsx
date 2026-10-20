@@ -102,7 +102,7 @@ export function RibbonActions({ channel, channelName, program, now }: RibbonActi
           label={t('recordMenu')}
           align="end"
           items={items}
-          triggerClassName="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-surface-2 hover:text-fg active:bg-surface-3 focus-visible:outline-2 focus-visible:outline-accent"
+          triggerClassName="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg active:bg-active focus-visible:outline-2 focus-visible:outline-focus"
           trigger={<Circle className={`size-4 ${running ? 'fill-live text-live motion-safe:animate-pulse' : ''}`} aria-hidden />}
         />
       ) : null}

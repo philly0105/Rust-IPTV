@@ -284,7 +284,8 @@ function PosterCardBody({
               </div>
             )}
             {watched && (
-              <div aria-hidden data-testid="poster-watched" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-glass-accent text-glass-accent-fg shadow-1">
+              // Watched is a state, not an action: a glass chip with an on-glass tick, so amber stays on progress and play.
+              <div aria-hidden data-testid="poster-watched" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-glass-strong text-on-glass shadow-1">
                 <Check aria-hidden size={13} strokeWidth={3} />
               </div>
             )}
@@ -493,7 +494,7 @@ function GridMyListToggle({
         // C5: blur only while the corner is up on one card (hover, or the keyboard cursor). Without
         // hover it shows on every card at once, so it is opaque there instead of blurred.
         saved
-          ? 'border-transparent bg-accent text-accent-fg hover:bg-accent-hover'
+          ? 'border-glass-border bg-glass-strong text-on-glass hover:bg-glass'
           : cn(
               'border-glass-border bg-glass text-on-glass opacity-0 group-hover/card:opacity-100 group-hover/card:glass-blur hover:bg-glass-strong',
               '[@media(hover:none)]:bg-glass-strong [@media(hover:none)]:opacity-100',

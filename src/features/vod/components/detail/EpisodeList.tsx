@@ -153,7 +153,7 @@ export function EpisodeList({
                     )}
                     {playing && <span className="min-w-0 truncate text-xs text-accent">{t('nowPlaying')}</span>}
                     {!playing && resumable && pos && (
-                      <span className="tabular min-w-0 truncate text-xs text-accent">{t('percentWatched', { percent: Math.round(fraction * 100) })}</span>
+                      <span className="tabular min-w-0 truncate text-xs text-fg-subtle">{t('percentWatched', { percent: Math.round(fraction * 100) })}</span>
                     )}
                     {runtime && <span className="tabular ms-auto shrink-0 text-xs text-fg-subtle">{runtime}</span>}
                   </div>

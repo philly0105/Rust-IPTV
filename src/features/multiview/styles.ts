@@ -1,6 +1,6 @@
 /**
- * Tile chrome over video uses the glass tokens (C8). Each value carries its fallback so the
- * wall reads the same where a theme does not define them yet.
+ * Tile chrome over video uses the glass tokens (C8) through their utilities (bg-glass-strong,
+ * text-on-glass, border-glass-border, the glass accent); every theme defines them in tokens.css.
  *
  * Run 3 C5: a backdrop filter re-samples the playing video under it on every frame, four times
  * over on a full wall, so chrome that stays on screen (the label strip, status pills) is solid
@@ -13,40 +13,33 @@
  */
 
 /** Glass panel over video that stays on screen: strips and pills. Solid, no blur. */
-export const GLASS =
-  'border border-[color:var(--color-glass-border,rgb(255_255_255/0.14))] ' +
-  'bg-[color:var(--color-glass-strong,rgb(12_19_32/0.88))] text-[color:var(--color-on-glass,#f4f6fa)]';
+export const GLASS = 'border border-glass-border bg-glass-strong text-on-glass';
 
 /**
  * Frosted panel for short-lived chrome over video: the hover tools, the error and lock panels.
  * On-glass text passes contrast on the glass tint without the blur too (no backdrop-filter
  * support), and under reduced transparency `.glass-blur` turns the tint strong.
  */
-export const GLASS_BLUR =
-  'border border-[color:var(--color-glass-border,rgb(255_255_255/0.14))] ' +
-  'bg-[color:var(--color-glass,rgb(12_19_32/0.72))] text-[color:var(--color-on-glass,#f4f6fa)] glass-blur';
+export const GLASS_BLUR = 'border border-glass-border bg-glass text-on-glass glass-blur';
 
 /** Solid glass for small marks that must read over any frame (slot numbers, badges). */
-export const GLASS_STRONG =
-  'bg-[color:var(--color-glass-strong,rgb(12_19_32/0.88))] text-[color:var(--color-on-glass,#f4f6fa)]';
+export const GLASS_STRONG = 'bg-glass-strong text-on-glass';
 
 /** Secondary text on glass. */
-export const ON_GLASS_MUTED = 'text-[color:var(--color-on-glass-muted,#c8cfdc)]';
+export const ON_GLASS_MUTED = 'text-on-glass-muted';
 
 /** The accent on glass as a fill, with its text colour. */
-export const GLASS_ACCENT_FILL =
-  'bg-[color:var(--color-glass-accent,var(--color-accent,#f5b544))] text-[color:var(--color-glass-accent-fg,var(--color-accent-fg,#1b1204))]';
+export const GLASS_ACCENT_FILL = 'bg-glass-accent text-glass-accent-fg';
 
 /** The accent on glass as text or an icon. */
-export const GLASS_ACCENT_TEXT = 'text-[color:var(--color-glass-accent,var(--color-accent,#f5b544))]';
+export const GLASS_ACCENT_TEXT = 'text-glass-accent';
 
 /** The accent on glass as a border. */
-export const GLASS_ACCENT_BORDER = 'border-[color:var(--color-glass-accent,var(--color-accent,#f5b544))]';
+export const GLASS_ACCENT_BORDER = 'border-glass-accent';
 
 /** Buttons laid on glass: quiet until hovered, with a focus ring that reads over any frame. */
 export const GLASS_BUTTON =
   'inline-flex h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none ' +
-  'text-[color:var(--color-on-glass,#f4f6fa)] hover:bg-[color:var(--color-glass-border,rgb(255_255_255/0.14))] ' +
-  'active:bg-[color:var(--color-glass-border,rgb(255_255_255/0.14))] active:ring-1 active:ring-[color:var(--color-glass-border,rgb(255_255_255/0.14))] ' +
-  'focus-visible:ring-2 focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))] ' +
+  'text-on-glass hover:bg-glass-border active:bg-glass-border active:ring-1 active:ring-glass-border ' +
+  'focus-visible:ring-2 focus-visible:ring-glass-accent ' +
   'motion-safe:transition-colors motion-safe:duration-150 disabled:cursor-not-allowed disabled:opacity-50';

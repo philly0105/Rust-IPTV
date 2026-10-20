@@ -242,7 +242,7 @@ export function DashboardRail<T>({
     >
       <div className="flex items-baseline justify-between gap-4 px-4 sm:px-8">
         <div className="flex min-w-0 items-baseline gap-3">
-          <h2 id={headingId} title={title} className="truncate text-lg">
+          <h2 id={headingId} title={title} className="truncate text-title-sm">
             {title}
           </h2>
           {meta}

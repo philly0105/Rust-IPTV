@@ -78,7 +78,7 @@ export function RecordingsPanel({ search }: { search: string }) {
   }
   if (visible.length === 0) return <EmptyState title={t('noMatchTitle')} description={t('noMatchSearch', { query: search })} />;
   return (
-    <ul aria-label={t('filterRecordings')} className="flex min-h-0 flex-col divide-y divide-divider overflow-y-auto rounded-lg border border-border bg-surface" data-testid="recordings-list">
+    <ul aria-label={t('filterRecordings')} className="flex min-h-0 flex-col divide-y divide-divider overflow-y-auto rounded-lg border border-edge bg-surface" data-testid="recordings-list">
       {visible.map((f) => (
         <RecordingFileRow key={f.id} file={f} />
       ))}

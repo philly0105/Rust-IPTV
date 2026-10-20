@@ -124,7 +124,7 @@ function OsdReadout({ primary, secondary, locked = false }: { primary: string; s
     >
       <div
         className={cn(
-          'font-display leading-none tabular-nums',
+          'font-numeric leading-none tabular-nums',
           digits ? 'text-6xl text-accent-hover' : 'text-2xl',
           locked && 'flex items-center justify-end gap-3',
         )}
@@ -185,7 +185,7 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
         tight
           ? 'absolute inset-x-0 bottom-0 z-30 border-t'
           : variant === 'overlay'
-            ? 'player-glass-edge glass-blur absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-xl border motion-safe:animate-pop-in'
+            ? 'player-glass-edge glass-blur absolute end-4 bottom-24 z-30 w-72 max-w-[calc(100%-2rem)] rounded-lg border motion-safe:animate-pop-in'
             : 'shrink-0 border-t',
       )}
       onClick={(e) => e.stopPropagation()}
@@ -235,7 +235,7 @@ function UpNextCard({ variant = 'overlay', compact = false }: { variant?: 'overl
             onClick={playUpNextNow}
             title={tight ? name : undefined}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-md bg-accent font-medium text-accent-fg hover:bg-accent-hover',
+              'inline-flex items-center gap-1.5 rounded-md bg-accent-solid font-medium text-accent-solid-fg hover:bg-accent-solid-hover',
               tight ? 'px-2 py-1 text-xs' : 'px-3 py-1.5 text-sm',
             )}
           >
@@ -271,11 +271,11 @@ function EndedOverlay({ compact }: { compact: boolean }) {
         type="button"
         onClick={replay}
         aria-label={t('replay')}
-        className="group flex flex-col items-center gap-2 rounded-lg p-2 text-white focus-visible:outline-2 focus-visible:outline-white dark:focus-visible:outline-accent"
+        className="group flex flex-col items-center gap-2 rounded-lg p-2 text-white focus-visible:outline-2 focus-visible:outline-white dark:focus-visible:outline-focus"
       >
         <span
           className={cn(
-            'flex items-center justify-center rounded-full bg-white/12 ring-1 ring-white/25 group-hover:bg-accent group-hover:text-accent-fg group-hover:ring-transparent motion-safe:transition-colors',
+            'flex items-center justify-center rounded-full bg-white/12 ring-1 ring-white/25 group-hover:bg-accent-solid group-hover:text-accent-solid-fg group-hover:ring-transparent motion-safe:transition-colors',
             compact ? 'size-11' : 'size-16',
           )}
         >
@@ -356,7 +356,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
           type="button"
           data-ctl="retry"
           onClick={retryPlayback}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent-solid px-2.5 py-1 text-xs font-medium text-accent-solid-fg hover:bg-accent-solid-hover"
         >
           <RotateCcw className="size-3.5" aria-hidden />
           {t('retry')}
@@ -380,7 +380,7 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
         <button
           type="button"
           onClick={replay}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-fg hover:bg-accent-hover"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-accent-solid px-2.5 py-1 text-xs font-medium text-accent-solid-fg hover:bg-accent-solid-hover"
         >
           <RotateCcw className="size-3.5" aria-hidden />
           {t('replay')}
@@ -809,7 +809,7 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         >
           <div className="flex items-center gap-2">
             {source.isLive && (
-              <span className="inline-flex items-center gap-1 rounded-sm bg-live px-1.5 py-px font-display text-[calc(11rem/15)] font-semibold text-white dark:text-bg">
+              <span className="inline-flex items-center gap-1 rounded-xs bg-live-solid px-1.5 py-px font-numeric text-xs tracking-wide text-white uppercase">
                 {t('live')}
               </span>
             )}

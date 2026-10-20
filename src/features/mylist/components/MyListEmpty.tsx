@@ -68,7 +68,7 @@ export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
       <div aria-hidden className="mb-8 flex w-full max-w-sm flex-col gap-3">
         {[1, 2, 3].map((n, i) => (
           <div key={n} className={cn('flex items-center gap-4', i === 1 && 'opacity-70', i === 2 && 'opacity-40')}>
-            <span className="w-8 text-end font-display text-3xl leading-none font-semibold tabular text-fg-subtle/60">{nf.format(n)}</span>
+            <span className="w-8 text-end font-numeric text-3xl leading-none font-semibold tabular text-fg-subtle/60">{nf.format(n)}</span>
             <span
               className={cn(
                 'flex h-[60px] w-10 shrink-0 items-center justify-center rounded-md border border-dashed',
@@ -84,7 +84,7 @@ export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
           </div>
         ))}
       </div>
-      <h2 className="text-center font-display text-xl font-semibold text-fg">{t('emptyTitle')}</h2>
+      <h2 className="text-center text-title text-fg">{t('emptyTitle')}</h2>
       <p className="mt-2 max-w-md text-center text-sm text-fg-muted">
         {sources && sources.length === 0 ? t('emptyNoSources') : noVod ? t('emptyNoVod') : t('emptyBody')}
       </p>

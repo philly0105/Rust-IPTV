@@ -117,7 +117,7 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, ca
         />
       )}
       <div className="mb-3 flex items-end gap-3">
-        <h2 id={headingId} className="text-base text-fg">
+        <h2 id={headingId} className="text-title-sm text-fg">
           {title}
         </h2>
         <div className="ms-auto flex items-center gap-1">

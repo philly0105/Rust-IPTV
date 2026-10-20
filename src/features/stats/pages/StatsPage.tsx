@@ -18,7 +18,7 @@ import type { WatchStatsTop } from '@/api/types';
 import { DayChart, VOD_FILL } from '../components/DayChart';
 import { StatsSkeleton } from '../components/StatsSkeleton';
 import { TopChannels, TopTitles } from '../components/TopList';
-import { Button, Dialog, EmptyState, ErrorState, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources, errorDescription } from '../deps';
+import { Button, Dialog, EmptyState, ErrorState, Page, Tabs, buttonClass, cn, playItem, useShell, useShortcut, useToast, useVisibleSources, errorDescription } from '../deps';
 import { useClearStats, useMonthHasData, useWatchStats } from '../hooks/useWatchStats';
 import { rangeTotals } from '../lib/chart';
 import { formatWatchTime } from '../lib/format';
@@ -160,7 +160,7 @@ export function StatsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1100px] min-w-0 flex-col gap-6 px-3 pb-10 pt-4 sm:px-6" data-testid="stats-page">
+    <Page width="default" className="flex min-w-0 flex-col gap-6 pb-10 pt-4" data-testid="stats-page">
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
       {/* The range control comes first for keyboard and phones; from sm up it sits at the row's end. */}
@@ -197,7 +197,7 @@ export function StatsPage() {
           </>
         }
       />
-    </div>
+    </Page>
   );
 }
 

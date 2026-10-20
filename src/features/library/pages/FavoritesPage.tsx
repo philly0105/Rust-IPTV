@@ -14,7 +14,7 @@ import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, SkeletonList, useShortcut, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonList, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -262,13 +262,10 @@ export function FavoritesPage() {
     );
 
   return (
-    <div
-      className="mx-auto flex h-[calc(100dvh-var(--header-height))] w-full max-w-[1400px] min-w-0 flex-col px-6 pb-4 pt-2"
-      data-testid="favorites-page"
-    >
+    <Page width="default" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col pb-4 pt-2" data-testid="favorites-page">
       <PageTitle>{title}</PageTitle>
       {body}
-    </div>
+    </Page>
   );
 }
 

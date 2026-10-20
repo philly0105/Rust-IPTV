@@ -133,6 +133,28 @@ describe('Controls options menu', () => {
     expect(screen.getByRole('menuitem', { name: /playback speed/i })).toBeTruthy();
   });
 
+  // The step buttons carry kit tooltips that show at once on keyboard focus. Escape hides the
+  // tooltip and still reaches the menu, which steps back: one press, not two.
+  it('Escape on a keyboard-focused step button steps back to the root view on the first press', () => {
+    act(() => {
+      useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: true }] } });
+    });
+    render(<Controls variant="dock" visible />);
+    openMenu();
+    fireEvent.click(screen.getByRole('menuitem', { name: /^sync/i }));
+    const earlier = screen.getByTestId('sync-sub').querySelector('button')!;
+    // jsdom guesses :focus-visible from earlier events; pin it as a keyboard user's focus.
+    const real = earlier.matches.bind(earlier);
+    vi.spyOn(earlier, 'matches').mockImplementation((sel: string) => (sel === ':focus-visible' ? document.activeElement === earlier : real(sel)));
+    if (document.activeElement === earlier) act(() => earlier.blur());
+    act(() => earlier.focus());
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+    fireEvent.keyDown(earlier, { key: 'Escape' });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(menu()).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /playback speed/i })).toBeTruthy();
+  });
+
   it('Reset moves focus to the row’s Later button instead of dropping it', () => {
     act(() => {
       useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: true }] } });

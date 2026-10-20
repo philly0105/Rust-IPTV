@@ -12,6 +12,7 @@ export {
   ErrorState,
   IconButton,
   Kbd,
+  Page,
   Poster,
   ProgressBar,
   SearchInput,

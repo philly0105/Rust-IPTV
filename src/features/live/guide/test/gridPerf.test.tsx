@@ -416,7 +416,8 @@ describe('guide requests', () => {
 describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
   // It used to sit over the cells (z-[5]) and strike through the airing title and time. It is
   // drawn first now, with no z-index: under the sticky channel column (z-10), and under the cells'
-  // text, showing through the airing cell's tint.
+  // text, showing through the airing cell's tint. The tint has to stay see-through: an 85 %
+  // selected fill turned the red line grey in every airing cell.
   it('passes under the sticky channel column and the cells, over the translucent airing cell', async () => {
     rpc.handlers['epg.grid'] = hourly(defaultStart(Date.now()));
     renderGuide({ path: '/epg?source=src1', routes: GRID });
@@ -425,6 +426,8 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     expect(line.className).not.toMatch(/(^|\s)z-/);
     expect(line.compareDocumentPosition(cell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelector('[role="rowheader"]')!.className).toContain('z-10');
-    expect(cell.className).toMatch(/bg-selected\/\d+/);
+    // The see-through active layer (about 10 % alpha), not an opaque or mostly opaque fill.
+    expect(cell.className.split(/\s+/)).toContain('bg-active');
+    expect(cell.className).not.toMatch(/(^|\s)bg-(selected|surface[\w-]*)(\/\d+)?(\s|$)/);
   });
 });

@@ -515,7 +515,9 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
             onKeyDown={onSearchKeyDown}
             placeholder={t('searchChannels')}
             aria-label={t('searchChannels')}
-            className="min-w-0 flex-1 rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-white/50"
+            // Its own border colour outranks the base focus rule (a utility beats @layer base), so
+            // it names the focus border itself; --color-focus is the glass accent over the player.
+            className="min-w-0 flex-1 rounded-md border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-white/50 focus-visible:border-focus"
           />
           <button
             type="button"

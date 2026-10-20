@@ -9,7 +9,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { joinList } from '@/shell/dashboard/cards';
 import { buttonClass } from '@/ui/Button';
 
-import { Button, EmptyState, ErrorState, SkeletonGrid, Tabs } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs } from '../deps';
 import { CARD_CAPTION_HEIGHT, LibraryCard } from '../components/LibraryCard';
 import { RecordingCard } from '../components/RecordingCard';
 import { PageTitle } from '../components/bits';
@@ -211,7 +211,7 @@ export function MyVideosPage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-var(--header-height))] w-full max-w-[2200px] min-w-0 flex-col gap-4 px-6 pb-4 pt-4">
+    <Page width="wide" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col gap-4 pb-4 pt-4">
       <PageTitle>{title}</PageTitle>
       <Tabs
         variant="pill"
@@ -233,7 +233,7 @@ export function MyVideosPage() {
         ]}
       />
       {body}
-    </div>
+    </Page>
   );
 }
 

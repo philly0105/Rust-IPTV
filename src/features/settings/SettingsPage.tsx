@@ -23,6 +23,7 @@ import { Navigate, NavLink, useParams } from 'react-router';
 import { isDesktop } from '@/api/transport';
 import { ParentalSection } from '@/features/parental/ParentalSection';
 import { useShell } from '@/shell';
+import { Page } from '@/ui';
 import { SectionError, SectionSkeleton } from './components';
 import type { SettingsPatch } from './lib/patch';
 import { useSettingsQuery, useUpdateSettings } from './lib/useUpdateSettings';
@@ -91,7 +92,8 @@ export function SettingsNav({ current, variant = 'panel' }: { current: SectionId
       aria-label={t('navLabel')}
       className={
         inline
-          ? '-mx-4 flex scroll-px-4 gap-1.5 overflow-x-auto px-4 pb-1 scrollbar-none @2xl:mx-0 @2xl:flex-wrap @2xl:overflow-visible @2xl:px-0 @2xl:pb-0'
+          ? // Bleeds to the page's edges while it scrolls sideways (Page pads by the gutter).
+            '-mx-(--page-gutter) flex scroll-px-(--page-gutter) gap-1.5 overflow-x-auto px-(--page-gutter) pb-1 scrollbar-none @2xl:mx-0 @2xl:flex-wrap @2xl:overflow-visible @2xl:px-0 @2xl:pb-0'
           : 'flex flex-col gap-0.5 p-3'
       }
       data-testid={inline ? 'settings-nav-inline' : 'settings-nav'}
@@ -214,7 +216,7 @@ export function SettingsPage() {
   const Section = SECTIONS[current].component;
 
   return (
-    <div className="@container mx-auto w-full max-w-4xl px-4 py-6 @2xl:px-8" data-testid="settings-page">
+    <Page width="narrow" className="@container" data-testid="settings-page">
       {/* The page's single h1 (C16) matches the header title; each section's own title is its h2. */}
       <h1 className="sr-only">{t('title')}</h1>
       {/*
@@ -232,6 +234,6 @@ export function SettingsPage() {
         <Section settings={query.data} update={save.update} />
       )}
       <SaveStatus state={save.state} />
-    </div>
+    </Page>
   );
 }

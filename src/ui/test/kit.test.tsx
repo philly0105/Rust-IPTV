@@ -30,7 +30,9 @@ import {
   Toggle,
   Tooltip,
   buttonClass,
+  useTooltip,
 } from '..';
+import { SWITCH_TONES } from '../Field';
 import { mergeShownToasts, type ToastRecord } from '../Toast';
 
 afterEach(() => {
@@ -39,7 +41,7 @@ afterEach(() => {
 });
 
 describe('Switch', () => {
-  it('is one switch: role, state, a white knob that slides (mirrored in RTL), the solid accent when on', () => {
+  it('is one switch: role, state, a knob in the state’s own tone that slides (mirrored in RTL), the solid accent when on', () => {
     function Host() {
       const [on, setOn] = useState(false);
       return <Switch aria-label="Auto refresh" checked={on} onCheckedChange={setOn} />;
@@ -47,13 +49,21 @@ describe('Switch', () => {
     render(<Host />);
     const sw = screen.getByRole('switch', { name: 'Auto refresh' });
     const knob = () => sw.querySelector<HTMLElement>('[data-switch-knob]')!;
+    const classes = (el: HTMLElement) => el.className.split(/\s+/);
     expect(sw.getAttribute('aria-checked')).toBe('false');
-    expect(sw.className).toContain('border-border');
-    expect(knob().className).toContain('bg-white');
+    // The classes contrast.test checks (SWITCH_TONES) are the ones drawn.
+    expect(classes(sw)).toEqual(expect.arrayContaining(SWITCH_TONES.off.track.split(' ')));
+    expect(classes(sw)).toContain('border-border');
+    expect(classes(knob())).toEqual(expect.arrayContaining(SWITCH_TONES.off.knob.split(' ')));
+    // A white knob all but vanished on the light off track (1.2:1).
+    expect(classes(knob())).not.toContain('bg-white');
     expect(knob().className).toContain('rtl:-translate-x-0.5');
     fireEvent.click(sw);
     expect(sw.getAttribute('aria-checked')).toBe('true');
-    expect(sw.className).toContain('bg-accent-solid');
+    expect(classes(sw)).toEqual(expect.arrayContaining(SWITCH_TONES.on.track.split(' ')));
+    expect(classes(sw)).toContain('bg-accent-solid');
+    expect(classes(knob())).toEqual(expect.arrayContaining(SWITCH_TONES.on.knob.split(' ')));
+    expect(classes(knob())).not.toContain('bg-white');
     expect(knob().className).toContain('translate-x-5.5');
     expect(knob().className).toContain('rtl:-translate-x-5.5');
   });
@@ -241,6 +251,29 @@ describe('Tooltip', () => {
     expect(own).toHaveBeenCalled();
     expect(screen.getByRole('tooltip').textContent).toBe('Guide');
   });
+
+  // Inline JSX is a new element every render, which re-ran the placement effect; a new position
+  // object each time re-rendered without end ("Maximum update depth exceeded").
+  it('useTooltip takes content built as JSX in the caller’s render', () => {
+    vi.useFakeTimers();
+    function Item({ n }: { n: number }) {
+      const { triggerProps, tooltip } = useTooltip({ content: <span>Item {n}</span> });
+      return (
+        <>
+          <button type="button" {...triggerProps}>
+            Open
+          </button>
+          {tooltip}
+        </>
+      );
+    }
+    const { rerender } = render(<Item n={1} />);
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Open' }));
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByRole('tooltip').textContent).toBe('Item 1');
+    rerender(<Item n={2} />);
+    expect(screen.getByRole('tooltip').textContent).toBe('Item 2');
+  });
 });
 
 describe('overlay exits (usePresence)', () => {
@@ -359,6 +392,29 @@ describe('features use the kit controls (DS-DUPLICATE-CONTROLS)', () => {
       return [/role="switch"/, /type="checkbox"/, /type="radio"/].filter((re) => re.test(text)).map((re) => `${rel(f)}: ${re.source}`);
     });
     expect(own).toEqual([]);
+  });
+
+  // The base focus rule for text fields (globals.css) lives in @layer base, so a field's own
+  // border colour utility outranks its focus border: the fullscreen channel search showed only a
+  // faint glow when focused. A hand-built field takes fieldClass, or names its focus look.
+  it('a hand-built text field with its own border colour also sets a focus border or ring', () => {
+    const NOT_TEXT = new Set(['checkbox', 'radio', 'range', 'color', 'file', 'button', 'submit', 'reset', 'hidden']);
+    // A resting border colour: border-<x> that is not a width, side or style (variants such as
+    // hover: or aria-[…]: sit after a colon, so they do not count).
+    const restingColour = /(?:^|[\s'"`])border-(?!(?:[xytbselr](?:-\d+)?|\d+|solid|dashed|dotted|double|none|hidden)(?![\w/-]))[\w/[\]().-]+/;
+    const focusLook = /fieldClass\(|focus(?:-visible)?:(?:border-|ring-|outline-(?!none))/;
+    const bare = files.flatMap((f) => {
+      const text = readFileSync(f, 'utf8');
+      // The opening tag, attributes included (an arrow's => does not end it).
+      return [...text.matchAll(/<(input|textarea|select)\b((?:=>|[^>])*?)\/?>/gs)]
+        .filter((m) => {
+          const attrs = m[2]!;
+          const type = /\btype=["']([\w-]+)["']/.exec(attrs)?.[1];
+          return !(type && NOT_TEXT.has(type)) && restingColour.test(attrs) && !focusLook.test(attrs);
+        })
+        .map((m) => `${rel(f)}:${text.slice(0, m.index).split('\n').length}`);
+    });
+    expect(bare).toEqual([]);
   });
 
   it('puts no native title on an IconButton', () => {

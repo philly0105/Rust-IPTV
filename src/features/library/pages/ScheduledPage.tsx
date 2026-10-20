@@ -24,6 +24,7 @@ import {
   EmptyState,
   ErrorState,
   IconButton,
+  Page,
   ProgressBar,
   RecordingRulesPanel,
   SkeletonList,
@@ -204,7 +205,7 @@ export function ScheduledPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1100px] min-w-0 flex-col gap-6 px-6 pb-8 pt-4">
+    <Page width="default" className="flex min-w-0 flex-col gap-6 pb-8 pt-4">
       <PageTitle>{title}</PageTitle>
       {caps.data && !caps.data.supported ? (
         <p role="note" className="rounded-md border border-edge bg-surface px-4 py-3 text-sm text-fg-muted" data-testid="scheduled-no-recording">
@@ -213,7 +214,7 @@ export function ScheduledPage() {
       ) : null}
       {body}
       {rulesAboveUpcoming || !showRules ? null : rulesPanel}
-    </div>
+    </Page>
   );
 }
 

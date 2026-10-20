@@ -82,5 +82,10 @@ describe('ribbon timeline text', () => {
     const line = screen.getByTestId('ribbon-now-line');
     expect(line.className).not.toMatch(/(^|\s)z-/);
     expect(line.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The airing block is see-through, so the line runs through it in its own red: an opaque
+    // selected fill hid it under the block (L3-visual-3).
+    expect(block.getAttribute('data-when')).toBe('now');
+    expect(block.className.split(/\s+/)).toContain('bg-active');
+    expect(block.className).not.toMatch(/(^|\s)bg-(selected|surface[\w-]*)(\/\d+)?(\s|$)/);
   });
 });

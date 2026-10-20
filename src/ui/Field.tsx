@@ -224,12 +224,27 @@ export interface SwitchProps extends Omit<ComponentPropsWithRef<'button'>, 'onCh
 }
 
 /**
+ * The switch's colours per state, exported so src/ui/test/contrast.test.ts checks the pairs the
+ * switch really draws (it reads the token names out of these classes). The knob takes the
+ * state's own high-contrast tone: a white knob was 1.2:1 on the light off track and 1.8:1 on the
+ * bright amber fill. The on track's edge is the accent's indicator tone, which is the fill itself
+ * in dark and a deep shade around the bright light-theme fill, so the on track keeps a 3:1
+ * outline on a white panel too (WCAG 1.4.11).
+ */
+export const SWITCH_TONES = {
+  off: { track: 'border-border bg-surface-3 hover:border-fg-subtle', knob: 'bg-fg-muted' },
+  on: { track: 'border-accent bg-accent-solid hover:bg-accent-solid-hover', knob: 'bg-accent-solid-fg' },
+} as const;
+
+/**
  * The one switch (role="switch"; Space and Enter toggle, as on any button). Off: a recessed
- * track with the 3:1 control border. On: the solid accent fill. The knob is white in both
- * states and slides with motion allowed. Name it with a <label htmlFor> (a label click toggles
- * it) or aria-label. Toggle and the settings SwitchRow render it.
+ * track with the 3:1 control border and a muted knob. On: the solid accent fill with a knob in
+ * its text colour (SWITCH_TONES). The knob slides with motion allowed. Name it with a
+ * <label htmlFor> (a label click toggles it) or aria-label. Toggle and the settings SwitchRow
+ * render it.
  */
 export function Switch({ checked, onCheckedChange, className, onClick, ...rest }: SwitchProps) {
+  const tones = checked ? SWITCH_TONES.on : SWITCH_TONES.off;
   return (
     <button
       type="button"
@@ -242,7 +257,7 @@ export function Switch({ checked, onCheckedChange, className, onClick, ...rest }
       className={cn(
         'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border motion-safe:transition-colors',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        checked ? 'border-accent-solid bg-accent-solid hover:bg-accent-solid-hover' : 'border-border bg-surface-3 hover:border-fg-subtle',
+        tones.track,
         className,
       )}
       {...rest}
@@ -251,7 +266,8 @@ export function Switch({ checked, onCheckedChange, className, onClick, ...rest }
         aria-hidden
         data-switch-knob=""
         className={cn(
-          'inline-block size-4.5 rounded-full bg-white shadow-1 motion-safe:transition-transform motion-safe:duration-(--duration-fast)',
+          'inline-block size-4.5 rounded-full shadow-1 motion-safe:transition-transform motion-safe:duration-(--duration-fast)',
+          tones.knob,
           checked ? 'translate-x-5.5 rtl:-translate-x-5.5' : 'translate-x-0.5 rtl:-translate-x-0.5',
         )}
       />

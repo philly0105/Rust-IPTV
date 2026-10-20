@@ -215,7 +215,10 @@ export function useTooltip({
     };
   }, [rect]);
 
-  // Measure after render (hidden), then place inside the viewport before paint.
+  // Measure after render (hidden), then place inside the viewport before paint. Content built as
+  // JSX in the caller's render is a new element every render, so this runs on each of them while
+  // shown; keeping the old placement when nothing moved ends that there (a new object every time
+  // re-rendered without end: "Maximum update depth exceeded").
   useLayoutEffect(() => {
     const tip = tipRef.current;
     if (!rect || !tip) {
@@ -223,12 +226,11 @@ export function useTooltip({
       return;
     }
     const size = tip.getBoundingClientRect();
-    setPos(
-      placeTooltip(rect, { width: size.width, height: size.height }, physicalSide(side, anchor.current), {
-        width: window.innerWidth,
-        height: window.innerHeight,
-      }),
-    );
+    const next = placeTooltip(rect, { width: size.width, height: size.height }, physicalSide(side, anchor.current), {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+    setPos((p) => (p && p.left === next.left && p.top === next.top && p.side === next.side ? p : next));
   }, [rect, side, content]);
 
   // Stable, so a trigger's merged ref (useMergedRef) stays the same between renders.
@@ -253,11 +255,17 @@ export function useTooltip({
     },
     onBlur: hide,
     onKeyDown: (e) => {
-      // WCAG 1.4.13: Escape dismisses the tooltip alone. Claiming the key keeps
-      // the same press from also closing the dialog or leaving the page.
+      // WCAG 1.4.13: Escape dismisses the tooltip. On a keyboard-focused trigger the tooltip only
+      // follows focus, so the press goes on as well, to close the menu or dialog, step back a
+      // player menu view, leave PiP: one Escape, as if there were no tooltip. Claiming it there
+      // cost an extra press per tooltipped control (and the X of a dialog, whose tooltip says
+      // Esc, did not close on Esc). A tooltip the pointer brought up claims the press, so
+      // dismissing it does not also close the dialog under it.
       if (e.key === 'Escape' && rect && !e.nativeEvent.isComposing) {
-        e.preventDefault();
-        e.stopPropagation();
+        if (!e.currentTarget.matches?.(':focus-visible')) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         hide();
       }
     },

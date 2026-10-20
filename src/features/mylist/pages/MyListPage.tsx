@@ -23,7 +23,7 @@ import { intlLocale } from '@/lib/intl';
 import { MyListEmpty } from '../components/MyListEmpty';
 import { MyListRow, MyListSkeleton, ROW_HEIGHT, type RowReorder } from '../components/MyListRow';
 import { MyListToolbar } from '../components/MyListToolbar';
-import { Button, EmptyState, ErrorState, VirtualRows, usePendingRemovals, useShell, useShortcut, useVisibleSources } from '../deps';
+import { Button, EmptyState, ErrorState, Page, VirtualRows, usePendingRemovals, useShell, useShortcut, useVisibleSources } from '../deps';
 import { useListParams } from '../hooks/useListParams';
 import { useMyList } from '../hooks/useMyList';
 import { useMyListActions } from '../hooks/useMyListActions';
@@ -341,10 +341,7 @@ export function MyListPage() {
   const showToolbar = !query.isPending && view.base.length > 0;
 
   return (
-    <div
-      className="mx-auto flex h-[calc(100dvh-var(--header-height))] w-full max-w-[1100px] min-w-0 flex-col px-3 pb-4 pt-3 sm:px-6"
-      data-testid="mylist-page"
-    >
+    <Page width="default" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col pb-4 pt-3" data-testid="mylist-page">
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
       {showToolbar && (
@@ -364,7 +361,7 @@ export function MyListPage() {
         />
       )}
       {body}
-    </div>
+    </Page>
   );
 }
 

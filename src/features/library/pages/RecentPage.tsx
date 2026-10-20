@@ -11,7 +11,7 @@ import { rpc } from '@/api/transport';
 import type { PlaybackPosition, RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, SkeletonList, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonList, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
@@ -276,10 +276,7 @@ export function RecentPage() {
     );
 
   return (
-    <div
-      className="mx-auto flex h-[calc(100dvh-var(--header-height))] w-full max-w-[1400px] min-w-0 flex-col px-6 pb-4 pt-4"
-      data-testid="recent-page"
-    >
+    <Page width="default" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col pb-4 pt-4" data-testid="recent-page">
       <PageTitle>{title}</PageTitle>
       {phone && count > 0 && !query.isLoading && !query.isError ? (
         <div className="mb-2 flex min-h-8 items-center justify-between gap-3" data-testid="recent-phone-bar">
@@ -300,7 +297,7 @@ export function RecentPage() {
         confirmLabel={t('clearHistory')}
         onConfirm={() => void clearAll()}
       />
-    </div>
+    </Page>
   );
 }
 

@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 
 import { ACCENTS } from '@/api/types';
 
+import { SWITCH_TONES } from '../Field';
+
 const STYLES = join(__dirname, '..', '..', 'styles');
 const tokensCss = readFileSync(join(STYLES, 'tokens.css'), 'utf8');
 
@@ -88,6 +90,19 @@ for (const accent of ACCENTS) {
 const SURFACES = ['bg', 'surface', 'surface-2', 'surface-3'] as const;
 const WHITE_TEXT: Rgb = [255, 255, 255];
 
+/** The resting colour token of a class list (`bg-x`, `border-x`), ignoring variants such as `hover:`. */
+function restingToken(classes: string, prefix: 'bg' | 'border'): string {
+  const hit = classes.split(/\s+/).find((c) => c.startsWith(`${prefix}-`));
+  if (!hit) throw new Error(`no resting ${prefix}- class in "${classes}"`);
+  return hit.slice(prefix.length + 1);
+}
+
+/** The token names one Switch state draws: track fill and outline, knob fill. */
+function switchTokens(state: 'off' | 'on') {
+  const { track, knob } = SWITCH_TONES[state];
+  return { track: { bg: restingToken(track, 'bg'), border: restingToken(track, 'border') }, knob: { bg: restingToken(knob, 'bg') } };
+}
+
 describe('accent and OLED blocks', () => {
   it('every non-amber accent defines its whole family for dark and for light', () => {
     for (const accent of ACCENTS.filter((a) => a !== 'amber')) {
@@ -154,12 +169,17 @@ for (const [name, c] of Object.entries(THEMES)) {
       for (const s of SURFACES) expect(contrast(tok('focus'), tok(s)), `focus on ${s}`).toBeGreaterThanOrEqual(3);
     });
 
-    it('state indicators reach 3:1: selected tab bar, tuning tick, switch on, switch thumb, progress fill', () => {
+    it('state indicators reach 3:1: selected tab bar, tuning tick, progress fill', () => {
       for (const s of SURFACES) expect(contrast(tok('accent'), tok(s)), `accent on ${s}`).toBeGreaterThanOrEqual(3);
       expect(contrast(tok('accent'), tok('selected')), 'tick on selected').toBeGreaterThanOrEqual(3);
-      // Switch off: thumb (fg-muted) on its track (surface-3); on: thumb (accent-solid-fg) on the solid fill.
-      expect(contrast(tok('fg-muted'), tok('surface-3'))).toBeGreaterThanOrEqual(3);
-      expect(contrast(tok('accent-solid-fg'), tok('accent-solid'))).toBeGreaterThanOrEqual(3);
+    });
+
+    // Read from the classes Switch renders (SWITCH_TONES), so the guard cannot drift from the
+    // component again: it once checked a fg-muted thumb while the switch drew a white one.
+    it.each(['off', 'on'] as const)('the %s switch: knob 3:1 on its track, track outline 3:1 on every surface', (state) => {
+      const { track, knob } = switchTokens(state);
+      expect(contrast(tok(knob.bg), tok(track.bg)), `knob ${knob.bg} on track ${track.bg}`).toBeGreaterThanOrEqual(3);
+      for (const s of SURFACES) expect(contrast(tok(track.border), tok(s)), `track edge ${track.border} on ${s}`).toBeGreaterThanOrEqual(3);
     });
 
     it('every text colour reaches 4.5:1 on bg and every surface', () => {
@@ -285,6 +305,18 @@ describe('state layers (DS-STATE-FILLS)', () => {
       }
       for (const s of ['bg', 'surface', 'surface-2'] as const) {
         expect(contrast(c['fg-subtle']!, over(hover.rgb, hover.alpha, c[s]!)), `fg-subtle on hovered ${s}`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    // The guide's and the ribbon's airing cell is the active layer over the page (guide) or a
+    // panel (ribbon), and the red now line is drawn under it: seen through the layer it still
+    // reaches 3:1 against the cell, and the cell still stands apart from a future cell.
+    it(`${name}: the now line reads through the airing cell, which stands apart from the next one`, () => {
+      for (const s of ['bg', 'surface'] as const) {
+        const cell = over(active.rgb, active.alpha, c[s]!);
+        const line = over(active.rgb, active.alpha, c.live!);
+        expect(contrast(line, cell), `now line through the airing cell on ${s}`).toBeGreaterThanOrEqual(3);
+        expect(contrast(cell, c['surface-2']!), `airing cell against a future cell on ${s}`).toBeGreaterThanOrEqual(1.08);
       }
     });
   }

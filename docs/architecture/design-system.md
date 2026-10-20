@@ -32,6 +32,8 @@ Never put `border-border` on a container: it turns the dark theme into a wirefra
 
 Selection is neutral plus the small amber tick, never an amber wash (`bg-accent/10` and the like are banned).
 
+The airing cell in the guide grid and the EPG ribbon takes `bg-active`, not `bg-selected`: the red now line is drawn before the cells so it never strikes through a title, and it has to read through the airing cell's fill. An opaque or mostly opaque fill there hides the line or turns it grey (the contrast test checks the line through the layer).
+
 ### Accent
 
 Amber marks, and only marks: the primary action (one per view), focus, the active nav tick and icon, progress, the playing / on-now marker and live progress. Never idle chips, saved or watched marks, segmented choices, switch-off tracks, decorative icons or section headings.
@@ -104,7 +106,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 
 ## Focus and touch
 
-- Focus: the global `:focus-visible` rule draws a 2 px focus outline with a soft glow. Text fields draw a focus border and a 3 px glow instead. Forced-colours mode gets a system outline on every focused control, so `outline-none` plus a ring is safe. A scroll container holding fields keeps a little padding so the glow is not clipped (Dialog's body does).
+- Focus: the global `:focus-visible` rule draws a 2 px focus outline with a soft glow. Text fields draw a focus border and a 3 px glow instead. That field rule sits in `@layer base`, so any `border-*` colour utility on the field outranks its focus border: a field built by hand that sets its own border colour must also set `focus-visible:border-focus` (or its own focus ring), or take `fieldClass`. `kit.test.tsx` flags text fields that do neither. Forced-colours mode gets a system outline on every focused control, so `outline-none` plus a ring is safe. A scroll container holding fields keeps a little padding so the glow is not clipped (Dialog's body does).
 - Touch: under `(pointer: coarse)` Button `sm`/`md`, IconButton, menu items and the toast's dismiss button grow to 44 px (`TOUCH_TARGET`, exported for hand-built controls). Keyboard-only hints use `pointer-coarse:hidden`.
 
 ## Components
@@ -121,7 +123,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 </Page>
 ```
 
-- `Page`: side padding from `--page-gutter`, `py-6`, and a width cap: `narrow` 56rem (settings, forms), `default` 80rem (lists, stats), `wide` 120rem (grids, rails), `full` (the guide, the player). It starts at the gutter, on the header title's line, and is not centred.
+- `Page`: side padding from `--page-gutter`, `py-6`, and a width cap: `narrow` 56rem (settings, forms), `default` 80rem (lists, stats), `wide` 120rem (grids, rails), `full` (the guide, the player). It starts at the gutter, on the header title's line, and is not centred. A page root that pads itself (`px-6`) or centres itself (`mx-auto max-w-…`) leaves that line, so the title and the content no longer share a left edge; a full-height page passes its own height and padding (`className="flex h-[calc(100dvh-var(--header-height))] flex-col pt-4 pb-4"`).
 - `PageHeader`: h1 in `text-title`, optional `count` (muted, formatted by the caller), `subtitle` and `actions`. Most pages set their title in the shell header with `usePageHeader` and keep a visually hidden h1; use PageHeader when the title belongs in the content.
 - `SectionHeader`: h2 in `text-title-sm` with optional `count`, `action` (rail arrows, a sort menu) and `seeAll={{ to, label? }}` ("See all" and a chevron).
 - `BackButton`: `<BackButton to="/movies" label={t('movies')} />`, or `onClick={goBack}` (with `to` as well, the link still shows where back is and opens in a new tab). `tone="glass"` over artwork.
@@ -147,7 +149,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 </Tooltip>
 ```
 
-Shows on hover after 400 ms (the next one within 500 ms shows at once), and at once on keyboard focus; never after a touch. Escape, a press, blur or scrolling hides it. It adds handlers and a ref to its single child, with no wrapper element, so the child keeps its layout. `describe` (default true) points `aria-describedby` at it while shown; pass `false` when it only repeats the accessible name. `content={null}` turns it off without remounting the child. For a custom hook-level trigger, `useTooltip(options)` returns `{ triggerProps, tooltip }`.
+Shows on hover after 400 ms (the next one within 500 ms shows at once), and at once on keyboard focus; never after a touch. Escape, a press, blur or scrolling hides it. On a keyboard-focused trigger Escape also goes on to whatever handles it (a menu or dialog closes, a player menu steps back, PiP ends), so a tooltip never costs an extra press; a tooltip the pointer brought up claims the Escape, so dismissing it does not close the dialog under it. It adds handlers and a ref to its single child, with no wrapper element, so the child keeps its layout. `describe` (default true) points `aria-describedby` at it while shown; pass `false` when it only repeats the accessible name. `content={null}` turns it off without remounting the child. For a custom hook-level trigger, `useTooltip(options)` returns `{ triggerProps, tooltip }`; its `content` may be JSX built in the caller's render.
 
 Keep native `title` only for text cut by truncation (a long channel name) and for the reason on a disabled button, which gets no pointer events.
 
@@ -165,7 +167,7 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 ```
 
 - Fields: `Input`, `Textarea`, `Select` (native, restyled), `SearchInput` (search icon, clear button that keeps focus, first Escape clears). A field a feature must build itself takes `fieldClass('sm' | 'md', extra)`. The settings `CommitInput` (commit on blur or Enter, Escape restores) is built on it and merges classes, so `className="w-28"` works.
-- `Switch`: the only switch. Off is a recessed track with the control border, on is the solid accent; the knob is white. `Toggle` is a labelled Switch; the settings `SwitchRow` renders one too.
+- `Switch`: the only switch. Off is a recessed track with the control border and a `fg-muted` knob; on is the solid accent with a knob in the fill's text colour (`accent-solid-fg`) and an outline in the accent's indicator tone, so the on track keeps 3:1 against a white panel in light. A white knob is not an option: 1.2:1 on the light off track, 1.8:1 on amber. The classes live in `SWITCH_TONES` (`Field.tsx`), which `contrast.test.ts` reads. `Toggle` is a labelled Switch; the settings `SwitchRow` renders one too.
 - `Checkbox`: a native input drawn as an 18 px box; `indeterminate` for mixed. Wrap it in a `<label>` with its text. When the row draws its own focus ring, pass `className="focus-visible:outline-none focus-visible:shadow-none"`.
 - `Radio` and `RadioGroup`: native inputs (arrow keys work); RadioGroup is a list of labelled rows with a description and an optional `note`, the chosen row on `bg-selected`.
 - `SegmentedControl`: two to six short options side by side (role radiogroup, arrows choose). One neutral raised thumb. `content` shows an icon or sample instead of the label, which then becomes the tooltip. `tone="glass"` inside player menus. `itemClassName="flex-1"` for equal segments. The settings `Segmented` wraps it.
@@ -199,6 +201,6 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 
 ## Checks that guard this
 
-- `src/ui/test/contrast.test.ts`: every text pair AA and control boundaries 3:1 in all 21 themes, the edge between divider and border, the state layers, the elevation mapping.
-- `src/ui/test/kit.test.tsx`: the kit pieces above, and that no feature draws its own switch, checkbox or radio, or puts a native `title` on an IconButton.
+- `src/ui/test/contrast.test.ts`: every text pair AA and control boundaries 3:1 in all 21 themes, the edge between divider and border, the state layers (and the now line through the airing cell), the Switch as drawn (`SWITCH_TONES`), the elevation mapping.
+- `src/ui/test/kit.test.tsx`: the kit pieces above, and that no feature draws its own switch, checkbox or radio, puts a native `title` on an IconButton, or builds a text field whose border colour hides its focus border.
 - `src/ui/test/cn.test.ts`: tailwind-merge knows the theme's sizes, shadows and animations.

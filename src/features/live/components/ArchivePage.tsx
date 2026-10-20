@@ -7,7 +7,7 @@ import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
 import { useShell } from '@/shell';
-import { Badge, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LivePill, Skeleton, useToast, errorDescription } from '@/ui';
+import { Badge, Button, buttonClass, cn, EmptyState, ErrorState, IconButton, LivePill, Page, Skeleton, useToast, errorDescription } from '@/ui';
 
 import { useArchiveDay } from '../hooks/useArchiveDay';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -73,10 +73,10 @@ export function ArchivePage() {
 
   return (
     // Fills the shell's main area: the channel header and day tabs stay put while the programme list scrolls inside.
-    <div className="mx-auto flex min-h-0 w-full max-w-[1100px] min-w-0 flex-1 flex-col gap-4 px-4 pt-4 sm:px-6" data-testid="archive-page">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 pt-4 pb-0" data-testid="archive-page">
       <h1 className="sr-only">{name ? t('archiveOf', { name }) : t('archiveTitle')}</h1>
       {body}
-    </div>
+    </Page>
   );
 }
 

@@ -11,7 +11,7 @@ import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
 import { useStable } from '@/features/live/guide/useStable';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
-import { Button, EmptyState, ErrorState, Menu, Select, Skeleton, TEXT_LINK, useToast, errorDescription } from '@/ui';
+import { Button, EmptyState, ErrorState, Menu, Page, Select, Skeleton, TEXT_LINK, useToast, errorDescription } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
 import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
@@ -638,7 +638,7 @@ export function SourcesPage() {
     );
 
   return (
-    <div className="@container mx-auto w-full max-w-6xl px-4 py-6 @2xl:px-8" data-testid="sources-page">
+    <Page width="default" className="@container" data-testid="sources-page">
       {/* The page's single h1 (C16): the shell header shows the same title as a styled paragraph. */}
       <h1 className="sr-only">{t('title')}</h1>
       <p id="sources-reorder-help" className="sr-only">
@@ -667,6 +667,6 @@ export function SourcesPage() {
         onClose={() => setRemoveAllOpen(false)}
         onConfirm={() => void confirmRemoveAll()}
       />
-    </div>
+    </Page>
   );
 }

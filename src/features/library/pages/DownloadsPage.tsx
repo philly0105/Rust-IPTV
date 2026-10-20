@@ -11,7 +11,7 @@ import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { formatList } from '@/lib/intl';
 
-import { Button, EmptyState, ErrorState, SkeletonList, Toggle, useShortcut } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useShortcut } from '../deps';
 import { ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { DOWNLOAD_ROW_HEIGHT, DownloadRow } from '../components/DownloadRow';
 import { FolderBar } from '../components/FolderBar';
@@ -209,7 +209,7 @@ export function DownloadsPage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-var(--header-height))] w-full max-w-[1400px] min-w-0 flex-col gap-4 px-6 pb-4 pt-4">
+    <Page width="default" className="flex h-[calc(100dvh-var(--header-height))] min-w-0 flex-col gap-4 pb-4 pt-4">
       <PageTitle>{title}</PageTitle>
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
@@ -248,7 +248,7 @@ export function DownloadsPage() {
           <Toggle checked={deletePartial} onChange={setDeletePartial} label={t('deletePartial')} description={t('deletePartialHint')} />
         )}
       </ConfirmDialog>
-    </div>
+    </Page>
   );
 }
 

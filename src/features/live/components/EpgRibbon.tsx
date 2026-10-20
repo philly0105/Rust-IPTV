@@ -531,8 +531,9 @@ const TimelineBlock = memo(function TimelineBlock({
   const progress = block.when === 'now' ? programProgress(p, now) : 0;
   const tone =
     block.when === 'now'
-      ? // On now: the neutral selected fill; amber only in the elapsed share below.
-        'border-edge bg-selected text-fg'
+      ? // On now: the see-through active layer, not the opaque selected fill, so the live now line
+        // (painted first) shows through at nearly full strength; amber only in the elapsed share below.
+        'border-edge bg-active text-fg'
       : block.when === 'past'
         ? catchup
           ? 'border-edge bg-surface-2 text-fg-muted hover:border-border hover:text-fg'

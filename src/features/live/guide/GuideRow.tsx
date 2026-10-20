@@ -234,10 +234,11 @@ export const GuideRow = memo(function GuideRow({
                   onFocus={() => handlers.focusCell(index, p)}
                   // overflow-clip, not hidden: the cell is then no scroll container, so its text can stick.
                   className={`absolute top-1 bottom-1 overflow-clip rounded-md border px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-                    // On now: the neutral selected fill, translucent so the amber now line shows
-                    // through it; amber is the line alone, not a wash over the whole column.
+                    // On now: the see-through active layer, so the live now line (drawn before the
+                    // rows) shows through at nearly full strength; an opaque or 85 % fill greyed
+                    // it out across the whole now column. No amber wash either.
                     b.when === 'now'
-                      ? 'border-edge bg-selected/85 text-fg'
+                      ? 'border-edge bg-active text-fg'
                       : b.when === 'past'
                         ? 'border-edge/60 bg-surface-2/60 text-fg-muted'
                         : 'border-edge bg-surface-2 text-fg hover:bg-surface-3'

@@ -130,9 +130,41 @@ function startOfDay(at: number): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-/** Clock time as the Scheduled list shows it ("02:45 AM"). */
+/**
+ * The hour style for clock times: no leading zero where the locale counts 12 hours ("2:45 AM",
+ * as people write it), two digits where it counts 24 ("02:45").
+ */
+function hourStyle(locale: string | undefined): '2-digit' | 'numeric' {
+  const cycle = dateTimeFormat(locale, { hour: 'numeric' }).resolvedOptions().hourCycle;
+  return cycle === 'h12' || cycle === 'h11' ? 'numeric' : '2-digit';
+}
+
+/** Clock time as the Scheduled list shows it ("2:45 AM", "02:45"). */
 export function clockTime(at: number, lang: string): string {
-  return dateTimeFormat(intlLocale(lang), { hour: '2-digit', minute: '2-digit' }).format(at);
+  const locale = intlLocale(lang);
+  return dateTimeFormat(locale, { hour: hourStyle(locale), minute: '2-digit' }).format(at);
+}
+
+/**
+ * A start and end time as one range in the locale's own words, with the day period said once
+ * ("12:45 – 1:45 PM", "13:45–14:15 Uhr"). Falls back to two clock times and a dash.
+ */
+export function clockRange(start: number, end: number, lang: string): string {
+  const locale = intlLocale(lang);
+  const fmt = dateTimeFormat(locale, { hour: hourStyle(locale), minute: '2-digit' });
+  if (typeof fmt.formatRange === 'function' && end >= start) return fmt.formatRange(start, end);
+  return `${fmt.format(start)} – ${fmt.format(end)}`;
+}
+
+/**
+ * A day heading with its date: "Today · Tue, Oct 20" (the locale's words for today and
+ * tomorrow), else the weekday and date alone ("Friday, October 23").
+ */
+export function dayHeading(day: number, now: number, lang: string): { label: string; date?: string } {
+  const diff = Math.round((startOfDay(day) - startOfDay(now)) / 86_400_000);
+  const label = dayLabel(day, now, lang);
+  if (diff !== 0 && diff !== 1) return { label };
+  return { label, date: dateTimeFormat(intlLocale(lang), { weekday: 'short', day: 'numeric', month: 'short' }).format(day) };
 }
 
 /** Day heading of the Scheduled list: "today", "tomorrow" (the locale's words), else "Friday, October 16". */
@@ -144,13 +176,14 @@ export function dayLabel(day: number, now: number, lang: string): string {
 
 /**
  * When an airing starts, in the Scheduled list's words, for places that show it
- * on one line (a series rule's next airing): "today 02:45 AM", "tomorrow
- * 09:00 PM", else "Saturday, October 17 at 02:45 AM".
+ * on one line (a series rule's next airing): "today 2:45 AM", "tomorrow
+ * 9:00 PM", else "Saturday, October 17 at 2:45 AM".
  */
 export function airingLabel(at: number, now: number, lang: string): string {
   const diff = Math.round((startOfDay(at) - startOfDay(now)) / 86_400_000);
   if (diff === 0 || diff === 1) return `${dayLabel(at, now, lang)} ${clockTime(at, lang)}`;
-  return dateTimeFormat(intlLocale(lang), { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).format(at);
+  const locale = intlLocale(lang);
+  return dateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', hour: hourStyle(locale), minute: '2-digit' }).format(at);
 }
 
 /** Seconds a running recording has been writing. */

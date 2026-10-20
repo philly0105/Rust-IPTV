@@ -75,5 +75,14 @@
   "menuChecking": "Comprobando Mi lista…",
   "menuRetry": "Volver a cargar Mi lista",
   "notReady": "Mi lista todavía se está cargando. Inténtalo de nuevo en un momento.",
-  "loadFailed": "No se pudo cargar Mi lista"
+  "loadFailed": "No se pudo cargar Mi lista",
+  "playTitle": "Reproducir {{title}}",
+  "resumeTitle": "Reanudar {{title}}",
+  "playFailed": "No se pudo iniciar la reproducción",
+  "minutesLeft_one": "Queda {{count}} minuto",
+  "minutesLeft_many": "Quedan {{count}} minutos",
+  "minutesLeft_other": "Quedan {{count}} minutos",
+  "viewLabel": "Vista",
+  "viewGrid": "Cuadrícula",
+  "viewList": "Lista"
 }

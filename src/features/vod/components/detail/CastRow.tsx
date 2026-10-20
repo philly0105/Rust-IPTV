@@ -4,27 +4,52 @@ import { Link } from 'react-router';
 
 import type { Person } from '@/api/types';
 
+import { useEdgeFades } from '../../hooks/useEdgeFades';
 import { handleGridKeyDown } from '../../lib/gridNav';
 import { cn, useImageChain } from '@/ui';
+import { formatList } from '@/lib/intl';
 
 const MAX_CAST = 16;
 
-/** Cast chips; people with a TMDB id link to their actor page. */
-export function CastRow({ cast, sourceId }: { cast: Person[]; sourceId: string }) {
-  const { t } = useTranslation('vod');
+/**
+ * Cast chips; people with a TMDB id link to their actor page. With `links` off (TMDB off: the
+ * actor page would only say so) every chip is plain text, so a name is never a dead end. With no
+ * picture and no link anywhere (a provider's cast list, TMDB off) the names are one line of text,
+ * like the director's: a row of initials circles read as missing photos (critique: movie detail).
+ */
+export function CastRow({ cast, sourceId, links = true }: { cast: Person[]; sourceId: string; links?: boolean }) {
+  const { t, i18n } = useTranslation('vod');
   const people = cast.slice(0, MAX_CAST);
   const headingId = useId();
+  const linked = (p: Person) => links && p.id !== undefined;
+  if (!people.some((p) => p.profileUrl || linked(p))) {
+    return (
+      <p className="text-sm text-fg-muted" data-testid="vod-cast-line">
+        <span className="text-fg-subtle">{t('cast')} </span>
+        <span dir="auto">{formatList(people.map((p) => p.name), i18n.language)}</span>
+      </p>
+    );
+  }
+  return <CastChips people={people} sourceId={sourceId} linked={linked} headingId={headingId} />;
+}
+
+function CastChips({ people, sourceId, linked, headingId }: { people: Person[]; sourceId: string; linked: (p: Person) => boolean; headingId: string }) {
+  const { t } = useTranslation('vod');
   // With no linked chip the scrolling row has nothing to focus, so the row
   // itself takes focus (named by the heading) and scrolls with the arrow keys.
-  const focusableRow = !people.some((p) => p.id !== undefined);
+  const focusableRow = !people.some(linked);
+  // The row is cut by the column's edge: the hidden end fades out instead of clipping a name mid-word.
+  const fades = useEdgeFades(String(people.length));
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <h2 id={headingId} className="text-sm font-medium text-fg-subtle">{t('cast')}</h2>
       <ul
+        ref={fades.ref}
+        style={fades.style}
         aria-labelledby={headingId}
         tabIndex={focusableRow ? 0 : undefined}
         data-testid="vod-cast-row"
-        className="-mx-1 flex gap-2 overflow-x-auto rounded-md px-1 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="-mx-1 flex gap-2 overflow-x-auto rounded-md px-1 pb-2 scrollbar-none outline-none focus-visible:ring-2 focus-visible:ring-focus"
         onKeyDown={(e) => handleGridKeyDown(e, { orientation: 'horizontal', count: people.length })}
       >
         {people.map((p, i) => {
@@ -40,7 +65,7 @@ export function CastRow({ cast, sourceId }: { cast: Person[]; sourceId: string }
           const cls = 'flex max-w-56 shrink-0 items-center gap-2 rounded-full border border-edge bg-surface/70 py-1 pe-4 ps-1';
           return (
             <li key={`${p.id ?? 'n'}-${p.name}-${i}`}>
-              {p.id !== undefined ? (
+              {linked(p) ? (
                 <Link
                   to={`/s/${encodeURIComponent(sourceId)}/actor/${p.id}`}
                   data-grid-index={i}

@@ -15,13 +15,14 @@ import { joinList } from '@/shell/dashboard/cards';
 import { CastRow } from '../components/detail/CastRow';
 import { PosterCard } from '../components/PosterCard';
 import { PosterRail } from '../components/PosterRail';
-import { i18n, installDomStubs } from './harness';
+import { i18n, installDomStubs, QueryWrapper } from './harness';
 
 beforeAll(installDomStubs);
 afterEach(cleanup);
 
+// With pictures, so the cast is a row of chips (with neither a picture nor a link it is one line of text).
 const people = (withIds: boolean): Person[] =>
-  ['Amy Adams', 'Jeremy Renner', 'Forest Whitaker'].map((name, i) => (withIds ? { id: i + 1, name } : { name }));
+  ['Amy Adams', 'Jeremy Renner', 'Forest Whitaker'].map((name, i) => (withIds ? { id: i + 1, name, profileUrl: `p${i}` } : { name, profileUrl: `p${i}` }));
 
 describe('B4-vod-D16: horizontally scrolling VOD rows are keyboard reachable', () => {
   it('a cast row with no linked chip is a focusable, named list with a focus ring', () => {
@@ -32,6 +33,12 @@ describe('B4-vod-D16: horizontally scrolling VOD rows are keyboard reachable', (
     expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
+  it('names a cast with no pictures and no links in one line of text, not a row of initials', () => {
+    render(<MemoryRouter><CastRow cast={['Amy Adams', 'Jeremy Renner'].map((name) => ({ name }))} sourceId="src1" links={false} /></MemoryRouter>);
+    expect(screen.queryByRole('list', { name: 'Cast' })).toBeNull();
+    expect(screen.getByTestId('vod-cast-line').textContent).toMatch(/^Cast .*Amy Adams.*Jeremy Renner/);
+  });
+
   it('with linked chips the links take focus, so the row adds no extra tab stop', () => {
     render(<MemoryRouter><CastRow cast={people(true)} sourceId="src1" /></MemoryRouter>);
     const row = screen.getByRole('list', { name: 'Cast' });
@@ -40,7 +47,7 @@ describe('B4-vod-D16: horizontally scrolling VOD rows are keyboard reachable', (
   });
 
   it('a loading poster rail (skeletons only, nothing to focus) clips instead of scrolling', () => {
-    const { rerender } = render(<MemoryRouter><PosterRail title="Movies" items={[]} render={() => null} loading /></MemoryRouter>);
+    const { rerender } = render(<MemoryRouter><PosterRail title="Movies" items={[]} render={() => null} loading /></MemoryRouter>, { wrapper: QueryWrapper });
     const loadingRow = screen.getByRole('list');
     expect(loadingRow.className).toContain('overflow-x-hidden');
     expect(loadingRow.className).not.toContain('overflow-x-auto');

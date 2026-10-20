@@ -105,11 +105,15 @@ describe('My Videos All includes recordings (L2-guide-library-8)', () => {
     renderAt('/my-videos', libraryRoutes);
     const grid = await screen.findByTestId('my-videos-grid');
     await waitFor(() => expect(within(grid).getAllByTestId('library-card')).toHaveLength(3));
-    expect(within(grid).getAllByRole('listitem').map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Evening News, Recording', 'Heat']);
+    // Recordings are TV: a section of wide cards of their own above the poster grid, newest first in each.
+    const recordings = within(grid).getByRole('list', { name: 'Recordings' });
+    expect(within(recordings).getAllByRole('button').map((c) => c.getAttribute('aria-label'))).toEqual(['Evening News, Recording']);
+    const titles = within(grid).getByRole('list', { name: 'My Videos' });
+    expect(within(titles).getAllByRole('listitem').map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Heat']);
     expect(screen.getByRole('tab', { name: /All/ }).textContent).toContain('3');
     expect(screen.getByRole('tab', { name: /Movies/ }).textContent).toContain('2');
 
-    fireEvent.click(within(grid).getByRole('listitem', { name: 'Evening News, Recording' }));
+    fireEvent.click(within(recordings).getByRole('button', { name: 'Evening News, Recording' }));
     await waitFor(() => expect(fakePlayer.played.map((s) => s.url)).toEqual(['http://x/r.r1.0']));
   });
 
@@ -130,10 +134,11 @@ describe('My Videos All includes recordings (L2-guide-library-8)', () => {
     expect(within(grid).getAllByTestId('library-card').map((c) => c.dataset['kind'])).toEqual(['recording']);
   });
 
-  it('keeps the queue link label for screen readers when it is hidden on a phone (L2-visual-4)', async () => {
+  it('names the queue link with its label, which shows on a phone too (L2-visual-4)', async () => {
     renderAt('/my-videos', libraryRoutes);
     const link = await screen.findByRole('link', { name: 'Open download queue' });
-    expect(within(link).getByText('Open download queue').className).toContain('max-sm:sr-only');
+    // On a phone the link sits on its own line under the tabs, with room for its label.
+    expect(within(link).getByText('Open download queue').className).not.toContain('sr-only');
   });
 });
 

@@ -20,7 +20,7 @@ import {
   searchLimitSteps,
   searchRequestLimit,
 } from '../lib/search';
-import { i18n, installDomStubs } from './harness';
+import { i18n, installDomStubs, QueryWrapper } from './harness';
 
 beforeAll(installDomStubs);
 afterEach(() => {
@@ -79,6 +79,7 @@ function renderRail(opts: { rtl: boolean; reduced: boolean }) {
         <PosterRail title="Rail" items={items} render={(i) => <span>Card {i}</span>} cardWidth={150} />
       </div>
     </I18nextProvider>,
+    { wrapper: QueryWrapper },
   );
   const list = screen.getByRole('list');
   Object.defineProperty(list, 'clientWidth', { configurable: true, value: 900 });

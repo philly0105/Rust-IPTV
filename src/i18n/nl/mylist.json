@@ -73,5 +73,13 @@
   "menuChecking": "Mijn lijst controleren…",
   "menuRetry": "Mijn lijst opnieuw laden",
   "notReady": "Mijn lijst wordt nog geladen. Probeer het zo opnieuw.",
-  "loadFailed": "Mijn lijst kon niet worden geladen"
+  "loadFailed": "Mijn lijst kon niet worden geladen",
+  "playTitle": "{{title}} afspelen",
+  "resumeTitle": "{{title}} hervatten",
+  "playFailed": "Afspelen kon niet starten",
+  "minutesLeft_one": "Nog {{count}} minuut",
+  "minutesLeft_other": "Nog {{count}} minuten",
+  "viewLabel": "Weergave",
+  "viewGrid": "Raster",
+  "viewList": "Lijst"
 }

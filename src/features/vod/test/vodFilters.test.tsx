@@ -178,7 +178,9 @@ describe('decade chips', () => {
     const group = await screen.findByRole('group', { name: 'Year' });
     // 1985..2024 minus the yearless fifth: 1980s (1985-1988 kept: 4), 1990s 8, 2000s 8, 2010s 8, 2020s 4.
     await waitFor(() => expect(within(group).getByRole('button', { name: '1990s, 8 titles' })).toBeTruthy());
-    expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['All years', '2020s', '2010s', '2000s', '1990s', '1980s']);
+    // Each chip shows its count beside the decade (VL-grid-toolbars: a number, not a share bar).
+    expect(within(group).getAllByRole('button').map((b) => b.firstChild?.textContent)).toEqual(['All years', '2020s', '2010s', '2000s', '1990s', '1980s']);
+    expect(within(group).getAllByTestId('decade-count').map((c) => c.textContent)).toEqual(['4', '8', '8', '8', '4']);
     expect(callsOf('catalog.yearFacets')[0]!.args).toEqual({ sourceId: 'src1', contentType: 'movie' });
     expect(within(group).getByRole('button', { name: 'All years' }).getAttribute('aria-pressed')).toBe('true');
 
@@ -393,7 +395,7 @@ describe('review fixes (Run 2 R1)', () => {
     await waitFor(() => expect(currentLocation).toBe('/s/src1/movies/c/all'));
   });
 
-  it('with Hide watched on, the facets are asked with hideWatched and the counts and meters match the grid', async () => {
+  it('with Hide watched on, the facets are asked with hideWatched and the counts match the grid', async () => {
     // f5 and f6 are 1990 and 1991: the 1990s hold 8 titles, 6 of them unwatched.
     watchedIds = new Set(['f5', 'f6']);
     handlers('xtream', { vodHideWatched: true });
@@ -402,7 +404,7 @@ describe('review fixes (Run 2 R1)', () => {
     await waitFor(() => expect(within(group).getByRole('button', { name: '1990s, 6 titles' })).toBeTruthy());
     expect(callsOf('catalog.yearFacets').at(-1)!.args).toEqual({ sourceId: 'src1', contentType: 'movie', hideWatched: true });
     expect(within(group).getByRole('button', { name: '2000s, 8 titles' })).toBeTruthy();
-    expect(within(group).getAllByTestId('decade-meter')).toHaveLength(5);
+    expect(within(group).getAllByTestId('decade-count').map((c) => c.textContent)).toEqual(['4', '8', '8', '6', '4']);
   });
 
   it('flipping Hide watched asks the facets again and the counts follow', async () => {
@@ -415,7 +417,7 @@ describe('review fixes (Run 2 R1)', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Hide watched' }));
     await waitFor(() => expect(within(group).getByRole('button', { name: '1990s, 6 titles' })).toBeTruthy());
     expect(callsOf('catalog.yearFacets').at(-1)!.args).toEqual({ sourceId: 'src1', contentType: 'movie', hideWatched: true });
-    expect(within(group).getAllByTestId('decade-meter')).toHaveLength(5);
+    expect(within(group).getAllByTestId('decade-count')).toHaveLength(5);
   });
 
   it('only the chips scroll: From/To and Hide watched sit outside the chip row', async () => {

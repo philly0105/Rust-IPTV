@@ -4,6 +4,11 @@
  * counts, and acts on due reminders (see `lib/fire.ts`). On mount it also
  * picks up reminders that fired before it listened (at launch, or with no
  * browser tab open) and acknowledges each one it handles.
+ *
+ * It also carries the download watcher (VL-download-feedback), the other
+ * piece of the offline library that has to listen app-wide; both mount with
+ * the player, which their actions (play a reminder's channel, a download's
+ * file) need anyway.
  */
 
 import { useEffect } from 'react';
@@ -16,6 +21,8 @@ import type { ReminderFiredEvent } from '@/api/types';
 import { playItem, playSource, usePlayerStore } from '@/features/player';
 import { toast } from '@/ui';
 import { intlLocale } from '@/lib/intl';
+
+import { DownloadWatcher } from '@/features/library/components/DownloadWatcher';
 
 import { setRecordingProgress } from '../hooks';
 import { claimFiring, handleReminderFired, type FireDeps } from '../lib/fire';
@@ -81,5 +88,5 @@ export function RecordingWatcher() {
     return () => offs.forEach((off) => off());
   }, [t, i18n.language]);
 
-  return null;
+  return <DownloadWatcher />;
 }

@@ -72,7 +72,6 @@
   "folderChanged": "Nowe pobrania będą zapisywane w wybranym folderze",
   "folderChangeFailed": "Nie udało się zmienić folderu pobierania",
   "folderOpenFailed": "Nie udało się otworzyć folderu pobierania",
-  "clearFinished": "Wyczyść zakończone",
   "clearConfirmTitle_one": "Wyczyścić {{count, number}} pobieranie?",
   "clearConfirmTitle_few": "Wyczyścić {{count, number}} pobierania?",
   "clearConfirmTitle_many": "Wyczyścić {{count, number}} pobierań?",
@@ -101,7 +100,6 @@
   "shortcutCancel": "Anuluj zaznaczone pobieranie",
   "shortcutRemove": "Usuń zaznaczone pobieranie",
   "shortcutReveal": "Pokaż zaznaczone pobieranie w folderze",
-
   "myVideosTitle": "Moje wideo",
   "libraryTitleCount_one": "{{count, number}} tytuł",
   "libraryTitleCount_few": "{{count, number}} tytuły",
@@ -173,7 +171,6 @@
   "episodeRedownloadAria": "Pobierz ponownie {{title}}",
   "episodeRevealAria": "Pokaż {{title}} w folderze",
   "episodeRemoveAria": "Usuń {{title}}",
-
   "favoritesTitle": "Ulubione",
   "sourceFavoritesTitle": "Ulubione w {{source}}",
   "favoritesCount_one": "{{count, number}} ulubiony",
@@ -197,7 +194,6 @@
   "shortcutMoveDown": "Przenieś zaznaczony ulubiony niżej",
   "addedAgo": "Dodano {{time}}",
   "undo": "Cofnij",
-
   "recentTitle": "Ostatnio oglądane",
   "sourceRecentTitle": "Ostatnio oglądane w {{source}}",
   "recentCount_one": "{{count, number}} element",
@@ -224,7 +220,6 @@
   "continueTitle": "Kontynuuj {{title}} od {{time}}",
   "removeContinue": "Usuń {{title}} z sekcji Kontynuuj oglądanie",
   "watchedPercent": "Obejrzano {{percent}}%",
-
   "typeLive": "Kanał na żywo",
   "typeMovie": "Film",
   "typeSeries": "Serial",
@@ -316,5 +311,19 @@
   "stopConfirmTitle": "Zatrzymać nagrywanie?",
   "stopConfirmBody": "Nagrywanie {{title}} zatrzyma się teraz i nie da się go wznowić. To, co już nagrano, zostanie w sekcji Moje wideo.",
   "stopConfirmKeep": "Nagrywaj dalej",
-  "stopConfirmAction": "Zatrzymaj nagrywanie"
+  "stopConfirmAction": "Zatrzymaj nagrywanie",
+  "clearFailedDownloads": "Wyczyść nieudane",
+  "downloadDone": "Pobrano {{title}}",
+  "downloadFailedNamed": "Nie udało się pobrać {{title}}",
+  "nowProgress": "Postęp: {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Zatrzymaj",
+  "scheduledPaddingAll": "Nagrania zaczynają się {{before}} min wcześniej i kończą {{after}} min później",
+  "myVideosTitlesHeading": "Filmy i seriale",
+  "aboutSource": "Źródło",
+  "aboutEpisodes": "Odcinki",
+  "aboutSize": "Rozmiar",
+  "aboutDownloaded": "Pobrano",
+  "aboutFile": "Plik",
+  "openInCatalogue": "Otwórz w {{source}}"
 }

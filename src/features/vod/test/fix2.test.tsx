@@ -250,19 +250,20 @@ describe('U4-fix2: exactly one h1 in every other state of every routed page', ()
     rpcMock.handlers['settings.get'] = () => settings();
     renderAt('/s/src1/actor/9', route);
     await screen.findByText('TMDB metadata is off');
-    expect(h1Texts()).toEqual(['Actor']);
-    expect(headerTitle()).toBe('Actor');
+    // Until a person is known the page is named after the row it came from (critique: actor).
+    expect(h1Texts()).toEqual(['Cast']);
+    expect(headerTitle()).toBe('Cast');
     cleanup();
     rpcMock.handlers['settings.get'] = () => settings({ tmdb: { enabled: true } });
     rpcMock.handlers['tmdb.person'] = () => null;
     renderAt('/s/src1/actor/9', route);
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
-    expect(h1Texts()).toEqual(['Actor']);
+    expect(h1Texts()).toEqual(['Cast']);
     cleanup();
     rpcMock.handlers['tmdb.person'] = fail;
     renderAt('/s/src1/actor/9', route);
     await screen.findByText('Portal unreachable');
-    expect(h1Texts()).toEqual(['Actor']);
+    expect(h1Texts()).toEqual(['Cast']);
   });
 
   it('scoped search', async () => {

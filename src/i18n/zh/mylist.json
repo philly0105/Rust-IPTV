@@ -71,5 +71,13 @@
   "menuChecking": "正在检查我的片单…",
   "menuRetry": "重新加载我的片单",
   "notReady": "我的片单仍在加载，请稍后再试。",
-  "loadFailed": "无法加载我的片单"
+  "loadFailed": "无法加载我的片单",
+  "playTitle": "播放{{title}}",
+  "resumeTitle": "继续播放{{title}}",
+  "playFailed": "无法开始播放",
+  "minutesLeft_one": "剩余 {{count}} 分钟",
+  "minutesLeft_other": "剩余 {{count}} 分钟",
+  "viewLabel": "视图",
+  "viewGrid": "网格",
+  "viewList": "列表"
 }

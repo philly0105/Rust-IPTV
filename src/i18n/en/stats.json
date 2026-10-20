@@ -35,5 +35,8 @@
   "clearBody": "This deletes all counted watch time. Watch progress and Recently watched stay.",
   "cleared": "Watch stats cleared",
   "clearFailed": "Couldn't clear stats",
-  "watchLive": "Watch live TV"
+  "watchLive": "Watch live TV",
+  "kpiWeek": "Watched in the last 7 days",
+  "kpiMonth": "Watched in the last 30 days",
+  "dailyAverage": "Daily average"
 }

@@ -35,5 +35,8 @@
   "clearBody": "Cały zliczony czas oglądania zostanie usunięty. Postęp oglądania i Ostatnio oglądane zostaną zachowane.",
   "cleared": "Wyczyszczono statystyki oglądania",
   "clearFailed": "Nie udało się wyczyścić statystyk",
-  "watchLive": "Oglądaj telewizję na żywo"
+  "watchLive": "Oglądaj telewizję na żywo",
+  "kpiWeek": "Obejrzane w ciągu ostatnich 7 dni",
+  "kpiMonth": "Obejrzane w ciągu ostatnich 30 dni",
+  "dailyAverage": "Średnio dziennie"
 }

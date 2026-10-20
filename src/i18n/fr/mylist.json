@@ -75,5 +75,14 @@
   "menuChecking": "Vérification de Ma liste…",
   "menuRetry": "Recharger Ma liste",
   "notReady": "Ma liste est encore en cours de chargement. Réessayez dans un instant.",
-  "loadFailed": "Impossible de charger Ma liste"
+  "loadFailed": "Impossible de charger Ma liste",
+  "playTitle": "Lire {{title}}",
+  "resumeTitle": "Reprendre {{title}}",
+  "playFailed": "Impossible de lancer la lecture",
+  "minutesLeft_one": "{{count}} minute restante",
+  "minutesLeft_many": "{{count}} minutes restantes",
+  "minutesLeft_other": "{{count}} minutes restantes",
+  "viewLabel": "Affichage",
+  "viewGrid": "Grille",
+  "viewList": "Liste"
 }

@@ -72,7 +72,6 @@
   "folderChanged": "Новыя спампаванні будуць захоўвацца ў выбраную папку",
   "folderChangeFailed": "Не ўдалося змяніць папку спампаванняў",
   "folderOpenFailed": "Не ўдалося адкрыць папку спампаванняў",
-  "clearFinished": "Ачысціць завершаныя",
   "clearConfirmTitle_one": "Ачысціць {{count, number}} спампоўванне?",
   "clearConfirmTitle_few": "Ачысціць {{count, number}} спампоўванні?",
   "clearConfirmTitle_many": "Ачысціць {{count, number}} спампоўванняў?",
@@ -101,7 +100,6 @@
   "shortcutCancel": "Скасаваць выбранае спампоўванне",
   "shortcutRemove": "Выдаліць выбранае спампоўванне",
   "shortcutReveal": "Паказаць выбранае спампоўванне ў папцы",
-
   "myVideosTitle": "Мае відэа",
   "libraryTitleCount_one": "{{count, number}} назва",
   "libraryTitleCount_few": "{{count, number}} назвы",
@@ -173,7 +171,6 @@
   "episodeRedownloadAria": "Спампаваць {{title}} зноў",
   "episodeRevealAria": "Паказаць {{title}} у папцы",
   "episodeRemoveAria": "Выдаліць {{title}}",
-
   "favoritesTitle": "Выбранае",
   "sourceFavoritesTitle": "Выбранае ў {{source}}",
   "favoritesCount_one": "{{count, number}} элемент у выбраным",
@@ -197,7 +194,6 @@
   "shortcutMoveDown": "Перамясціць выбраны элемент ніжэй",
   "addedAgo": "Дададзена {{time}}",
   "undo": "Вярнуць",
-
   "recentTitle": "Нядаўна прагледжанае",
   "sourceRecentTitle": "Нядаўна прагледжанае ў {{source}}",
   "recentCount_one": "{{count, number}} элемент",
@@ -224,7 +220,6 @@
   "continueTitle": "Працягнуць {{title}} з {{time}}",
   "removeContinue": "Выдаліць {{title}} з «Працягнуць прагляд»",
   "watchedPercent": "Прагледжана {{percent}}%",
-
   "typeLive": "Канал",
   "typeMovie": "Фільм",
   "typeSeries": "Серыял",
@@ -316,5 +311,19 @@
   "stopConfirmTitle": "Спыніць запіс?",
   "stopConfirmBody": "Запіс «{{title}}» спыніцца зараз, і працягнуць яго не атрымаецца. Ужо запісанае застанецца ў раздзеле «Мае відэа».",
   "stopConfirmKeep": "Працягваць запіс",
-  "stopConfirmAction": "Спыніць запіс"
+  "stopConfirmAction": "Спыніць запіс",
+  "clearFailedDownloads": "Ачысціць няўдалыя",
+  "downloadDone": "{{title}} спампавана",
+  "downloadFailedNamed": "Не ўдалося спампаваць {{title}}",
+  "nowProgress": "Ход перадачы {{title}}",
+  "scheduledRec": "Запіс",
+  "scheduledStopShort": "Спыніць",
+  "scheduledPaddingAll": "Запісы пачынаюцца на {{before}} хв раней і заканчваюцца на {{after}} хв пазней",
+  "myVideosTitlesHeading": "Фільмы і серыялы",
+  "aboutSource": "Крыніца",
+  "aboutEpisodes": "Эпізоды",
+  "aboutSize": "Памер",
+  "aboutDownloaded": "Спампавана",
+  "aboutFile": "Файл",
+  "openInCatalogue": "Адкрыць у {{source}}"
 }

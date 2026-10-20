@@ -35,5 +35,8 @@
   "clearBody": "Sayılan tüm izleme süresi silinir. İzleme ilerlemesi ve Son izlenenler korunur.",
   "cleared": "İzleme istatistikleri temizlendi",
   "clearFailed": "İstatistikler temizlenemedi",
-  "watchLive": "Canlı TV izle"
+  "watchLive": "Canlı TV izle",
+  "kpiWeek": "Son 7 günde izlenen",
+  "kpiMonth": "Son 30 günde izlenen",
+  "dailyAverage": "Günlük ortalama"
 }

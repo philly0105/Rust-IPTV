@@ -72,7 +72,6 @@
   "folderChanged": "Новые загрузки будут сохраняться в выбранную папку",
   "folderChangeFailed": "Не удалось изменить папку загрузок",
   "folderOpenFailed": "Не удалось открыть папку загрузок",
-  "clearFinished": "Очистить завершённые",
   "clearConfirmTitle_one": "Очистить {{count, number}} загрузку?",
   "clearConfirmTitle_few": "Очистить {{count, number}} загрузки?",
   "clearConfirmTitle_many": "Очистить {{count, number}} загрузок?",
@@ -101,7 +100,6 @@
   "shortcutCancel": "Отменить выбранную загрузку",
   "shortcutRemove": "Удалить выбранную загрузку",
   "shortcutReveal": "Показать выбранную загрузку в папке",
-
   "myVideosTitle": "Мои видео",
   "libraryTitleCount_one": "{{count, number}} видео",
   "libraryTitleCount_few": "{{count, number}} видео",
@@ -173,7 +171,6 @@
   "episodeRedownloadAria": "Скачать {{title}} заново",
   "episodeRevealAria": "Показать «{{title}}» в папке",
   "episodeRemoveAria": "Удалить «{{title}}»",
-
   "favoritesTitle": "Избранное",
   "sourceFavoritesTitle": "Избранное в {{source}}",
   "favoritesCount_one": "{{count, number}} элемент в избранном",
@@ -197,7 +194,6 @@
   "shortcutMoveDown": "Переместить выбранный элемент избранного вниз",
   "addedAgo": "Добавлено {{time}}",
   "undo": "Отменить",
-
   "recentTitle": "Недавно просмотренные",
   "sourceRecentTitle": "Недавно просмотренные в {{source}}",
   "recentCount_one": "{{count, number}} элемент",
@@ -224,7 +220,6 @@
   "continueTitle": "Продолжить «{{title}}» с {{time}}",
   "removeContinue": "Убрать «{{title}}» из списка «Продолжить просмотр»",
   "watchedPercent": "Просмотрено {{percent}}%",
-
   "typeLive": "ТВ-канал",
   "typeMovie": "Фильм",
   "typeSeries": "Сериал",
@@ -316,5 +311,19 @@
   "stopConfirmTitle": "Остановить запись?",
   "stopConfirmBody": "Запись «{{title}}» остановится сейчас, и продолжить её будет нельзя. Уже записанное останется в разделе «Мои видео».",
   "stopConfirmKeep": "Продолжить запись",
-  "stopConfirmAction": "Остановить запись"
+  "stopConfirmAction": "Остановить запись",
+  "clearFailedDownloads": "Очистить неудачные",
+  "downloadDone": "«{{title}}» скачано",
+  "downloadFailedNamed": "Не удалось скачать «{{title}}»",
+  "nowProgress": "Ход передачи {{title}}",
+  "scheduledRec": "Запись",
+  "scheduledStopShort": "Остановить",
+  "scheduledPaddingAll": "Записи начинаются на {{before}} мин раньше и заканчиваются на {{after}} мин позже",
+  "myVideosTitlesHeading": "Фильмы и сериалы",
+  "aboutSource": "Источник",
+  "aboutEpisodes": "Серии",
+  "aboutSize": "Размер",
+  "aboutDownloaded": "Скачано",
+  "aboutFile": "Файл",
+  "openInCatalogue": "Открыть в {{source}}"
 }

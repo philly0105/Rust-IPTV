@@ -60,7 +60,6 @@
   "folderChanged": "Οι νέες λήψεις θα αποθηκεύονται στον επιλεγμένο φάκελο",
   "folderChangeFailed": "Δεν ήταν δυνατή η αλλαγή του φακέλου λήψεων",
   "folderOpenFailed": "Δεν ήταν δυνατό το άνοιγμα του φακέλου λήψεων",
-  "clearFinished": "Εκκαθάριση ολοκληρωμένων",
   "clearConfirmTitle_one": "Εκκαθάριση {{count, number}} λήψης;",
   "clearConfirmTitle_other": "Εκκαθάριση {{count, number}} λήψεων;",
   "clearConfirmBody": "Οι αποτυχημένες και ακυρωμένες λήψεις αφαιρούνται από την ουρά, μαζί με τυχόν μερικά αρχεία.",
@@ -83,7 +82,6 @@
   "shortcutCancel": "Ακύρωση της επιλεγμένης λήψης",
   "shortcutRemove": "Αφαίρεση της επιλεγμένης λήψης",
   "shortcutReveal": "Εμφάνιση της επιλεγμένης λήψης στον φάκελό της",
-
   "myVideosTitle": "Τα βίντεό μου",
   "libraryTitleCount_one": "{{count, number}} τίτλος",
   "libraryTitleCount_other": "{{count, number}} τίτλοι",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "Νέα λήψη: {{title}}",
   "episodeRevealAria": "Εμφάνιση του {{title}} στον φάκελο",
   "episodeRemoveAria": "Αφαίρεση: {{title}}",
-
   "favoritesTitle": "Αγαπημένα",
   "sourceFavoritesTitle": "Αγαπημένα στο {{source}}",
   "favoritesCount_one": "{{count, number}} αγαπημένο",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "Μετακίνηση του επιλεγμένου αγαπημένου κάτω",
   "addedAgo": "Προστέθηκε {{time}}",
   "undo": "Αναίρεση",
-
   "recentTitle": "Πρόσφατα προβληθέντα",
   "sourceRecentTitle": "Πρόσφατα προβληθέντα στο {{source}}",
   "recentCount_one": "{{count, number}} στοιχείο",
@@ -192,7 +188,6 @@
   "continueTitle": "Συνέχιση του {{title}} στο {{time}}",
   "removeContinue": "Αφαίρεση του {{title}} από τη συνέχιση παρακολούθησης",
   "watchedPercent": "Προβλήθηκε {{percent}}%",
-
   "typeLive": "Ζωντανό κανάλι",
   "typeMovie": "Ταινία",
   "typeSeries": "Σειρά",
@@ -280,5 +275,19 @@
   "stopConfirmTitle": "Διακοπή εγγραφής;",
   "stopConfirmBody": "Η εγγραφή του {{title}} σταματά τώρα και δεν μπορεί να συνεχιστεί. Ό,τι έχει εγγραφεί μένει στα Τα βίντεό μου.",
   "stopConfirmKeep": "Συνέχεια εγγραφής",
-  "stopConfirmAction": "Διακοπή εγγραφής"
+  "stopConfirmAction": "Διακοπή εγγραφής",
+  "clearFailedDownloads": "Εκκαθάριση αποτυχημένων",
+  "downloadDone": "Λήφθηκε: {{title}}",
+  "downloadFailedNamed": "Δεν ήταν δυνατή η λήψη: {{title}}",
+  "nowProgress": "Πρόοδος του {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Διακοπή",
+  "scheduledPaddingAll": "Οι εγγραφές ξεκινούν {{before}} λεπ. νωρίτερα και τελειώνουν {{after}} λεπ. αργότερα",
+  "myVideosTitlesHeading": "Ταινίες και σειρές",
+  "aboutSource": "Πηγή",
+  "aboutEpisodes": "Επεισόδια",
+  "aboutSize": "Μέγεθος",
+  "aboutDownloaded": "Λήφθηκε",
+  "aboutFile": "Αρχείο",
+  "openInCatalogue": "Άνοιγμα στο {{source}}"
 }

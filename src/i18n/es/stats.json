@@ -35,5 +35,8 @@
   "clearBody": "Se borra todo el tiempo de visualización contado. El progreso y Vistos recientemente se conservan.",
   "cleared": "Estadísticas de visualización borradas",
   "clearFailed": "No se pudieron borrar las estadísticas",
-  "watchLive": "Ver TV en directo"
+  "watchLive": "Ver TV en directo",
+  "kpiWeek": "Visto en los últimos 7 días",
+  "kpiMonth": "Visto en los últimos 30 días",
+  "dailyAverage": "Media diaria"
 }

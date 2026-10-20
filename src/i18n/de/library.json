@@ -60,7 +60,6 @@
   "folderChanged": "Neue Downloads werden im gewählten Ordner gespeichert",
   "folderChangeFailed": "Der Downloadordner konnte nicht geändert werden",
   "folderOpenFailed": "Der Downloadordner konnte nicht geöffnet werden",
-  "clearFinished": "Abgeschlossene entfernen",
   "clearConfirmTitle_one": "{{count, number}} Download entfernen?",
   "clearConfirmTitle_other": "{{count, number}} Downloads entfernen?",
   "clearConfirmBody": "Fehlgeschlagene und abgebrochene Downloads werden samt unvollständiger Dateien aus der Warteschlange entfernt.",
@@ -83,7 +82,6 @@
   "shortcutCancel": "Ausgewählten Download abbrechen",
   "shortcutRemove": "Ausgewählten Download entfernen",
   "shortcutReveal": "Fokussierten Download im Ordner anzeigen",
-
   "myVideosTitle": "Meine Videos",
   "libraryTitleCount_one": "{{count, number}} Titel",
   "libraryTitleCount_other": "{{count, number}} Titel",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "{{title}} erneut herunterladen",
   "episodeRevealAria": "{{title}} im Ordner anzeigen",
   "episodeRemoveAria": "{{title}} entfernen",
-
   "favoritesTitle": "Favoriten",
   "sourceFavoritesTitle": "Favoriten in {{source}}",
   "favoritesCount_one": "{{count, number}} Favorit",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "Ausgewählten Favoriten nach unten verschieben",
   "addedAgo": "Hinzugefügt {{time}}",
   "undo": "Rückgängig",
-
   "recentTitle": "Zuletzt angesehen",
   "sourceRecentTitle": "Zuletzt angesehen in {{source}}",
   "recentCount_one": "{{count, number}} Eintrag",
@@ -192,7 +188,6 @@
   "continueTitle": "{{title}} bei {{time}} fortsetzen",
   "removeContinue": "{{title}} aus „Weiterschauen“ entfernen",
   "watchedPercent": "{{percent}}% angesehen",
-
   "typeLive": "Live-Sender",
   "typeMovie": "Film",
   "typeSeries": "Serie",
@@ -280,5 +275,19 @@
   "stopConfirmTitle": "Aufnahme stoppen?",
   "stopConfirmBody": "Die Aufnahme von {{title}} endet jetzt und lässt sich nicht fortsetzen. Das bisher Aufgenommene bleibt in Meine Videos.",
   "stopConfirmKeep": "Weiter aufnehmen",
-  "stopConfirmAction": "Aufnahme stoppen"
+  "stopConfirmAction": "Aufnahme stoppen",
+  "clearFailedDownloads": "Fehlgeschlagene entfernen",
+  "downloadDone": "{{title}} heruntergeladen",
+  "downloadFailedNamed": "{{title}} konnte nicht heruntergeladen werden",
+  "nowProgress": "Fortschritt von {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Stoppen",
+  "scheduledPaddingAll": "Aufnahmen beginnen {{before}} Min. früher und enden {{after}} Min. später",
+  "myVideosTitlesHeading": "Filme und Serien",
+  "aboutSource": "Quelle",
+  "aboutEpisodes": "Folgen",
+  "aboutSize": "Größe",
+  "aboutDownloaded": "Heruntergeladen",
+  "aboutFile": "Datei",
+  "openInCatalogue": "In {{source}} öffnen"
 }

@@ -16,21 +16,28 @@ export {
   Poster,
   ProgressBar,
   SearchInput,
+  SectionHeader,
   Skeleton,
   SkeletonGrid,
   SkeletonList,
   Tabs,
   Toggle,
   errorDescription,
+  useScaledPx,
   useToast,
 } from '@/ui';
+export type { TabsProps } from '@/ui';
 export { useShell, useShortcut } from '@/shell';
+// From its own module, not the barrel: the shared settings query alone (tests stub the barrel).
+export { useSettings } from '@/shell/useSettings';
 export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 export { PlayerStage, playItem, playSource, usePlayerStore } from '@/features/player';
 // recording:
 export {
   clockDuration,
+  clockRange,
   clockTime,
+  dayHeading,
   dayLabel,
   elapsedSeconds,
   finishedRecordings,
@@ -53,3 +60,10 @@ export {
   StopRecordingDialog,
   type UpcomingEntry,
 } from '@/features/recording';
+// vod: the catalogue's detail hero and facts sheet, so an offline title looks like the same title
+// in Movies or Series (My Videos detail).
+export { DetailHero, DetailHeroSkeleton, HERO_BACK, HeroActionGroup } from '@/features/vod/components/detail/DetailHero';
+export { AboutSection } from '@/features/vod/components/detail/AboutSection';
+export type { DetailModel } from '@/features/vod/lib/merge';
+// vod: the edge fades of a sideways scroller (the VOD chips, the cast row), for the My Videos tabs.
+export { useEdgeFades } from '@/features/vod/hooks/useEdgeFades';

@@ -1,23 +1,31 @@
 import { Download, ListVideo, Lock, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigationType, useParams } from 'react-router';
 
+import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
-import { sameRef, type Episode, type ItemRef } from '@/api/types';
+import { sameRef, type Episode, type ItemRef, type SeriesItem, type VodItem } from '@/api/types';
+import { intlLocale } from '@/lib/intl';
 import { MyListButton } from '@/features/mylist/components/MyListButton';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { usePlayerStore } from '@/features/player';
 
-import { FavoriteButton, WatchedButton } from '../components/detail/actions';
-import { DetailHero, DetailHeroSkeleton } from '../components/detail/DetailHero';
-import { EpisodeList, SeasonTabs } from '../components/detail/EpisodeList';
+import { CatalogRail } from '../components/CatalogRail';
+import { AboutSection } from '../components/detail/AboutSection';
+import { FavoriteButton, WatchedButton, useFavoriteMenuItem } from '../components/detail/actions';
+import { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
+import { TmdbPromo } from '../components/detail/TmdbPromo';
+import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup } from '../components/detail/DetailHero';
+import { EpisodeList, SeasonTabs, offlineDownload } from '../components/detail/EpisodeList';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
 import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { NextEpisodeCard, UpNextRail, upcoming } from '../components/detail/UpNext';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import { WatchStage } from '../components/detail/WatchStage';
+import { myListTarget, PosterCard } from '../components/PosterCard';
+import type { RailCardProps } from '../components/PosterRail';
 import { SimilarSection } from '../components/SimilarSection';
 import {
   useIsFavorite,
@@ -35,12 +43,16 @@ import { recallSeason, rememberSeason, useScrollMemory } from '../hooks/useScrol
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useDetailEscapeBack } from '../hooks/useBackKey';
 import { useEscapeToClose, useWatchState } from '../hooks/useWatchState';
-import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched } from '../lib/format';
+import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched, offlineResumeSeconds } from '../lib/format';
+import { itemLanguage, languageName } from '../lib/language';
+import { effectiveMinRating } from '../lib/paging';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
-import { Button, EmptyState, ErrorState, IconButton, Skeleton, Tooltip, useToast, errorDescription } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, Menu, Page, Skeleton, Tooltip, useToast, errorDescription, type MenuItem } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
+import { resumePoint } from '@/features/library/lib/myvideos';
+import { playDownload } from '@/features/library/lib/playDownload';
 import { seriesWatchedTargets, seriesWatchedWrite, watchedToastId, watchedUndoAll } from '../lib/seriesWatched';
 
 export function SeriesDetailPage() {
@@ -50,6 +62,9 @@ export function SeriesDetailPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const settings = useSettings();
   const tmdbOn = settings.tmdb.enabled;
+  // On a phone the season's actions are icon buttons beside the Episodes heading, so the heading row
+  // stays one line instead of stacking two text buttons under it.
+  const phone = useMediaQuery('(width < 40rem)', false);
   const source = useSource(sourceId);
   const detail = useSeriesDetail(source.data, ref);
   // A failed lookup may be a movie id on the series route (cold link): look it up as a movie.
@@ -182,17 +197,43 @@ export function SeriesDetailPage() {
   const lockItems = useLockMenuItems(model ? { sourceId, contentType: 'series', kind: 'item', targetId: itemId, name: model.titleBase ?? model.title } : null, {
     categoryId: item?.categoryId,
   });
+  // The header title is also the window and tab title, so it stays the series' name (see MovieDetailPage).
   usePageHeader({ title: pageTitle, subtitle: source.data?.name }, [pageTitle, source.data?.name]);
+  const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
+  // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
+  // (My List saves what a poster card saves, myListTarget).
+  const snapshot = {
+    title: model?.titleBase ?? model?.title ?? '',
+    posterUrl: model?.posterUrl,
+    contentType: 'series' as const,
+    ...(model?.year ? { subtitle: String(model.year) } : {}),
+  };
+  const favoriteItem = useFavoriteMenuItem(ref, snapshot, isFavorite);
 
   // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
   const playEpisode = (ep: Episode, fromStart = false) => {
     const opts = { episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), fromStart };
-    void playback.play(opts).then(() => {
-      if (!target) return;
-      const ctx: Parameters<typeof startEpisodeQueue>[0] = { ref, sourceKind: target.sourceKind, title: target.title, order, positions };
-      if (target.posterUrl) ctx.posterUrl = target.posterUrl;
-      return startEpisodeQueue(ctx, ep.id);
-    });
+    // VL-offline-play, per episode: a finished download whose file is on disk plays from the file
+    // (offline, and past a provider's connection limit); the episodes after it still queue as streams.
+    // It resumes at the episode's saved position, the one the Resume label and the row show.
+    const file = offlineDownload(downloads.get(ep.id));
+    const started = file
+      ? playDownload(
+          file,
+          fromStart ? { fromStart: true } : { resumeSeconds: offlineResumeSeconds(positions.get(ep.id), resumePoint(file, ep.durationSeconds)) ?? 0 },
+        ).catch((err: unknown) => {
+          toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' });
+          throw err;
+        })
+      : playback.play(opts);
+    void started
+      .then(() => {
+        if (!target) return;
+        const ctx: Parameters<typeof startEpisodeQueue>[0] = { ref, sourceKind: target.sourceKind, title: target.title, order, positions };
+        if (target.posterUrl) ctx.posterUrl = target.posterUrl;
+        return startEpisodeQueue(ctx, ep.id);
+      })
+      .catch(() => undefined);
   };
   const downloadEpisode = (ep: Episode) =>
     void playback.download({ episodeId: ep.id, subtitle: episodeSubtitle(ep.season, ep.episode, ep.title), extension: ep.containerExtension });
@@ -278,19 +319,12 @@ export function SeriesDetailPage() {
       seasonName,
     );
   };
-  // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
-  // (My List saves what a poster card saves, myListTarget).
-  const snapshot = {
-    title: model.titleBase ?? model.title,
-    posterUrl: model.posterUrl,
-    contentType: 'series' as const,
-    ...(model.year ? { subtitle: String(model.year) } : {}),
-  };
   const listSnapshot = snapshot;
+  // In watch mode the page keeps a slim row of the series' own controls under the player.
   const favorite = (
     <>
-      <MyListButton itemRef={ref} snapshot={listSnapshot} size={watch.active ? 'sm' : 'lg'} />
-      <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact={watch.active} />
+      <MyListButton itemRef={ref} snapshot={listSnapshot} size="sm" />
+      <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact />
       {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too. */}
       <WatchedButton
         itemRef={ref}
@@ -298,20 +332,106 @@ export function SeriesDetailPage() {
         series={seriesWrite.series}
         name={model.titleBase ?? model.title}
         watched={seriesWatched}
-        compact={watch.active}
+        compact
         labels={{ mark: t('markSeriesWatched'), unmark: t('markSeriesUnwatched') }}
       />
       {/* C2: lock or remove the lock (only while parental controls are on). */}
       {lockItems.map((a) => (
-        <Button key={a.id} size={watch.active ? 'sm' : 'lg'} variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>
+        <Button key={a.id} size="sm" variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>
           {a.label}
         </Button>
       ))}
     </>
   );
 
+  const startCode = start ? episodeCode(start.episode.season, start.episode.episode) : '';
+  const startPos = start ? positions.get(start.episode.id) : undefined;
+  const startDuration = startPos?.durationSeconds ?? start?.episode.durationSeconds;
+  const progress =
+    start?.resume && startPos && startDuration
+      ? {
+          fraction: Math.min(1, startPos.positionSeconds / startDuration),
+          label: `${startCode} · ${t('minutesLeft', { count: Math.max(1, Math.round((startDuration - startPos.positionSeconds) / 60)) })}`,
+        }
+      : undefined;
+  const firstEpisode = order[0];
+  // VL-hero-actions: Start over, Play from the first episode, Favorites and the lock wait in More.
+  const moreItems: MenuItem[] = [
+    ...(start?.resume
+      ? [{ id: 'start-over', label: t('startOverEpisode', { code: startCode }), icon: <RotateCcw aria-hidden size={16} />, onSelect: () => playEpisode(start.episode, true) }]
+      : []),
+    ...(firstEpisode && start && firstEpisode.id !== start.episode.id
+      ? [{ id: 'play-first', label: t('playEpisode', { code: episodeCode(firstEpisode.season, firstEpisode.episode) }), icon: <Play aria-hidden size={16} />, onSelect: () => playEpisode(firstEpisode) }]
+      : []),
+    favoriteItem,
+    ...(lockItems.length > 0 ? [{ id: 'sep-lock', type: 'separator' as const }, ...lockItems] : []),
+  ];
+  const heroActions = (
+    <>
+      <HeroActionGroup className="max-sm:w-full">
+        {start && (
+          <Button
+            ref={playRef}
+            size="lg"
+            variant="primary"
+            icon={<Play aria-hidden size={18} className="fill-current" />}
+            aria-describedby="vod-detail-title"
+            onClick={() => playEpisode(start.episode)}
+            className="max-sm:flex-1"
+          >
+            {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: startCode })}
+          </Button>
+        )}
+        {trailer ? (
+          <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
+            {t('trailer')}
+          </Button>
+        ) : tmdbOn && tmdb.isLoading ? (
+          // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
+          <span data-testid="vod-trailer-slot" className="inline-flex">
+            <Skeleton className="h-12 w-32 rounded-md" />
+          </span>
+        ) : null}
+      </HeroActionGroup>
+      <HeroActionGroup>
+        <MyListButton itemRef={ref} snapshot={listSnapshot} variant="round" size="lg" />
+        {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too. */}
+        <WatchedButton
+          itemRef={ref}
+          episodeIds={seriesWrite.episodeIds}
+          series={seriesWrite.series}
+          name={model.titleBase ?? model.title}
+          watched={seriesWatched}
+          round
+          labels={{ mark: t('markSeriesWatched'), unmark: t('markSeriesUnwatched') }}
+        />
+        <Menu items={moreItems} triggerClassName={HERO_MENU_TRIGGER} />
+      </HeroActionGroup>
+    </>
+  );
+
+  const categoryName = item.categoryName || categories.data?.find((c) => c.id === item.categoryId)?.name;
+  const language = itemLanguage(item.title, item.categoryName);
+  const added = item.added ? new Date(item.added) : undefined;
+  const sourceName = source.data?.name ?? sourceId;
+  const moreCard = (rel: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean): ReactNode => (
+    <PosterCard
+      index={i}
+      tabIndex={rail.tabIndex}
+      title={rel.titleBase || rel.title}
+      fullTitle={rel.title}
+      href={detailHref(rel.ref) ?? '#'}
+      posterUrl={rel.posterUrl}
+      year={rel.year}
+      rating={rel.rating}
+      watched={isWatched}
+      myList={myListTarget(rel)}
+      prefetch={source.data ? { ref: rel.ref, sourceKind: source.data.kind, posterUrl: rel.posterUrl, backdropUrl: rel.backdropUrl } : undefined}
+    />
+  );
+
   return (
-    <div ref={scrollRef} className="isolate h-full overflow-y-auto pb-12" data-testid="vod-series-detail">
+    <div ref={scrollRef} className="isolate h-full overflow-x-hidden overflow-y-auto pb-12" data-testid="vod-series-detail">
       {watch.active ? (
         <WatchStage
           title={model.titleBase ?? model.title}
@@ -327,44 +447,15 @@ export function SeriesDetailPage() {
         <DetailHero
           model={model}
           sourceId={sourceId}
-          chips={model.status ? <span>{model.status}</span> : undefined}
+          castLinks={tmdbOn}
+          chips={model.status ? [<span key="status">{model.status}</span>] : undefined}
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
-          actions={
-            <>
-              {start && (
-                <Button
-                  ref={playRef}
-                  size="lg"
-                  variant="primary"
-                  icon={<Play aria-hidden size={18} className="fill-current" />}
-                  aria-describedby="vod-detail-title"
-                  onClick={() => playEpisode(start.episode)}
-                >
-                  {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: episodeCode(start.episode.season, start.episode.episode) })}
-                </Button>
-              )}
-              {start?.resume && (
-                <Button size="lg" variant="ghost" icon={<RotateCcw aria-hidden size={18} />} onClick={() => playEpisode(start.episode, true)}>
-                  {t('startOverEpisode', { code: episodeCode(start.episode.season, start.episode.episode) })}
-                </Button>
-              )}
-              {trailer ? (
-                <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
-                  {t('trailer')}
-                </Button>
-              ) : tmdbOn && tmdb.isLoading ? (
-                // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
-                <span data-testid="vod-trailer-slot" className="inline-flex">
-                  <Skeleton className="h-12 w-32 rounded-md" />
-                </span>
-              ) : null}
-              {favorite}
-            </>
-          }
+          progress={progress}
+          actions={heroActions}
         />
       )}
 
-      <div className="mx-auto mt-6 flex w-full max-w-[1800px] flex-col gap-8 px-4 md:px-8">
+      <Page width="wide" className="flex flex-col gap-10 pt-2">
         {watch.active && showNextCard && next && (
           <NextEpisodeCard
             key={watch.episodeId}
@@ -380,7 +471,8 @@ export function SeriesDetailPage() {
               <Tooltip content={episodeCode(previous.season, previous.episode)} shortcut="shift+p">
                 <Button
                   variant="secondary"
-                  icon={<SkipBack aria-hidden size={18} />}
+                  size="sm"
+                  icon={<SkipBack aria-hidden size={16} />}
                   aria-keyshortcuts="Shift+P"
                   onClick={() => playEpisode(previous)}
                 >
@@ -393,14 +485,16 @@ export function SeriesDetailPage() {
         )}
 
         <section aria-labelledby="vod-episodes-heading" className="relative flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id="vod-episodes-heading" className="text-lg text-fg">
+          {/* The heading row of SectionHeader, except that on a phone the season's actions wrap under the title. */}
+          <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <h2 id="vod-episodes-heading" className="text-title-sm text-fg">
               {t('episodes')}
             </h2>
             {episodes.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2">
+              // The season's own actions sit with its list, small, so they never outweigh the heading.
+              <div className="flex flex-wrap items-center gap-1">
                 {playback.canDownload &&
-                  (watch.active ? (
+                  (watch.active || phone ? (
                     <IconButton
                       label={t('downloadSeason')}
                       icon={<Download aria-hidden size={18} />}
@@ -410,9 +504,9 @@ export function SeriesDetailPage() {
                     />
                   ) : (
                     <Button
-                      size="lg"
+                      size="sm"
                       variant="ghost"
-                      icon={<Download aria-hidden size={18} />}
+                      icon={<Download aria-hidden size={16} />}
                       loading={playback.pendingSeason}
                       onClick={downloadSeason}
                       data-testid="vod-download-season"
@@ -427,7 +521,8 @@ export function SeriesDetailPage() {
                   series={seasonWrite.series}
                   name={seasonName}
                   watched={seasonWatched}
-                  compact={watch.active}
+                  compact={watch.active || phone}
+                  size="sm"
                   labels={{ mark: t('markSeasonWatched'), unmark: t('markSeasonUnwatched') }}
                 />
               </div>
@@ -460,11 +555,34 @@ export function SeriesDetailPage() {
           )}
         </section>
 
+        {item.categoryId && source.data && (
+          <CatalogRail
+            title={categoryName ? t('moreInCategory', { category: categoryName }) : t('moreFromSource', { source: sourceName })}
+            seeAll={{ to: `/s/${encodeURIComponent(sourceId)}/series/c/${encodeURIComponent(item.categoryId)}` }}
+            input={{
+              sourceKind: source.data.kind,
+              kind: 'series',
+              sourceId,
+              categoryId: item.categoryId,
+              sort: 'added',
+              dir: 'desc',
+              search: '',
+              minRating: effectiveMinRating(settings.vodMinRating, new URLSearchParams()),
+              ...(settings.vodHideWatched ? { hideWatched: true } : {}),
+            }}
+            rootRef={scrollRef}
+            exclude={ref}
+            card={moreCard}
+          />
+        )}
+
         {tmdbOn && (
           <SimilarSection
             items={similar}
             loading={tmdb.isPending || similarFallback.isFetching}
             sourceId={sourceId}
+            kind="series"
+            sourceKind={source.data?.kind}
             error={tmdb.isError || similarFallback.isError ? (tmdb.error ?? similarFallback.error) : undefined}
             onRetry={() => {
               void tmdb.refetch();
@@ -474,7 +592,30 @@ export function SeriesDetailPage() {
             enriched={model.enriched}
           />
         )}
-      </div>
+        {!watch.active && (
+          <AboutSection
+            facts={[
+              { label: t('detailSource'), value: sourceName },
+              { label: t('detailCategory'), value: categoryName },
+              {
+                label: t('detailAdded'),
+                value:
+                  added && !Number.isNaN(added.getTime())
+                    ? new Intl.DateTimeFormat(intlLocale(i18n.language), { dateStyle: 'medium' }).format(added)
+                    : undefined,
+              },
+              { label: t('seasons'), value: seasons.length > 0 ? String(seasons.length) : undefined },
+              {
+                label: t('detailLanguage'),
+                value: language ? languageName(language, i18n.language, (g) => t(`languageGroup_${g}`)) : undefined,
+              },
+              { label: t('detailGenres'), value: model.genres.length > 0 ? model.genres.join(', ') : undefined },
+            ]}
+          />
+        )}
+        {/* Last, after the episodes and what the provider has: an offer, not something in the way. */}
+        {!tmdbOn && !watch.active && <TmdbPromo />}
+      </Page>
 
       {trailer && <TrailerDialog open={trailerOpen} onClose={() => setTrailerOpen(false)} youtubeKey={trailer} title={model.titleBase ?? model.title} />}
     </div>

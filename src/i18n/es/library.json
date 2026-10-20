@@ -66,7 +66,6 @@
   "folderChanged": "Las nuevas descargas se guardarán en la carpeta elegida",
   "folderChangeFailed": "No se pudo cambiar la carpeta de descargas",
   "folderOpenFailed": "No se pudo abrir la carpeta de descargas",
-  "clearFinished": "Borrar finalizadas",
   "clearConfirmTitle_one": "¿Borrar {{count, number}} descarga?",
   "clearConfirmTitle_many": "¿Borrar {{count, number}} descargas?",
   "clearConfirmTitle_other": "¿Borrar {{count, number}} descargas?",
@@ -92,7 +91,6 @@
   "shortcutCancel": "Cancelar la descarga seleccionada",
   "shortcutRemove": "Quitar la descarga seleccionada",
   "shortcutReveal": "Mostrar la descarga seleccionada en su carpeta",
-
   "myVideosTitle": "Mis videos",
   "libraryTitleCount_one": "{{count, number}} título",
   "libraryTitleCount_many": "{{count, number}} títulos",
@@ -159,7 +157,6 @@
   "episodeRedownloadAria": "Volver a descargar {{title}}",
   "episodeRevealAria": "Mostrar {{title}} en la carpeta",
   "episodeRemoveAria": "Quitar {{title}}",
-
   "favoritesTitle": "Favoritos",
   "sourceFavoritesTitle": "Favoritos en {{source}}",
   "favoritesCount_one": "{{count, number}} favorito",
@@ -182,7 +179,6 @@
   "shortcutMoveDown": "Bajar el favorito seleccionado",
   "addedAgo": "Añadido {{time}}",
   "undo": "Deshacer",
-
   "recentTitle": "Vistos recientemente",
   "sourceRecentTitle": "Vistos recientemente en {{source}}",
   "recentCount_one": "{{count, number}} elemento",
@@ -208,7 +204,6 @@
   "continueTitle": "Seguir viendo {{title}} en {{time}}",
   "removeContinue": "Quitar {{title}} de Seguir viendo",
   "watchedPercent": "{{percent}}% visto",
-
   "typeLive": "Canal en vivo",
   "typeMovie": "Película",
   "typeSeries": "Serie",
@@ -298,5 +293,19 @@
   "stopConfirmTitle": "¿Detener la grabación?",
   "stopConfirmBody": "La grabación de {{title}} se detiene ahora y no se puede reanudar. Lo grabado hasta ahora queda en Mis videos.",
   "stopConfirmKeep": "Seguir grabando",
-  "stopConfirmAction": "Detener grabación"
+  "stopConfirmAction": "Detener grabación",
+  "clearFailedDownloads": "Borrar fallidas",
+  "downloadDone": "{{title}} descargado",
+  "downloadFailedNamed": "No se pudo descargar {{title}}",
+  "nowProgress": "Progreso de {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Detener",
+  "scheduledPaddingAll": "Las grabaciones empiezan {{before}} min antes y terminan {{after}} min después",
+  "myVideosTitlesHeading": "Películas y series",
+  "aboutSource": "Fuente",
+  "aboutEpisodes": "Episodios",
+  "aboutSize": "Tamaño",
+  "aboutDownloaded": "Descargado",
+  "aboutFile": "Archivo",
+  "openInCatalogue": "Abrir en {{source}}"
 }

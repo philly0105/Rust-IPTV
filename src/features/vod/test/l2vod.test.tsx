@@ -16,8 +16,8 @@ import { VirtualGrid } from '@/ui';
 import { sameGridSlot, useSource } from '../hooks/queries';
 import { forgetSpots, recallSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
-import { VodLandingPage } from '../pages/VodLandingPage';
-import { i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
+import { findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -102,10 +102,11 @@ describe('L2-settings-5: lock marks in Ask mode', () => {
   });
 
   it('marks a locked category on the landing with the Live groups glyph', async () => {
+    localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     renderAt('/s/src1/movies', landingRoute);
-    const locked = await screen.findByRole('link', { name: /Late night/ });
+    const locked = await findIndexLink(/Late night/);
     await waitFor(() => expect(within(locked).getByTestId('category-locked').getAttribute('aria-label')).toBe(i18n.t('vod:locked')));
-    expect(within(screen.getByRole('link', { name: /Action/ })).queryByTestId('category-locked')).toBeNull();
+    expect(within(await findIndexLink(/Action/)).queryByTestId('category-locked')).toBeNull();
   });
 
   it('marks nothing in Hide mode (locked things are left out there)', async () => {

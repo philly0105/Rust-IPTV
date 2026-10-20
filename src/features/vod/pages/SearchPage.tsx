@@ -1,31 +1,40 @@
 import { useQueries } from '@tanstack/react-query';
-import { Radio, RotateCw, Search, SearchX, TriangleAlert, Tv } from 'lucide-react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, Tv, X } from 'lucide-react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { rpcRaw } from '@/api/transport';
-import { itemKey, type Channel, type GuideSearchHit, type Page, type SeriesItem, type Source, type VodItem } from '@/api/types';
+import { itemKey, type Channel, type GuideSearchHit, type Page as PageOf, type RecentEntry, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { displayChannelName } from '@/features/live/lib/channelName';
-import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
+import { ms } from '@/features/live/lib/epgTime';
+// The Scheduled list's clock and day words, from the module itself (pure helpers, no hooks).
+import { clockTime, dayHeading } from '@/features/recording/lib/schedule';
 import { playItem } from '@/features/player';
+import { joinList } from '@/shell/dashboard/cards';
+import { snapshotTitle } from '@/lib/title';
 
 import { GridMyListProvider, myListTarget, PosterCard } from '../components/PosterCard';
+import { PosterRail } from '../components/PosterRail';
 import { isSourceMissing, SourceMissing } from '../components/SourceMissing';
 import { resumeKey, useResumeLookup, useSettings, useSource, useSourcesList } from '../hooks/queries';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
+import { useSearchLocks } from '../hooks/useSearchLocks';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { itemLanguage } from '../lib/language';
+import { clearSearches, forgetSearch, rememberSearch, useRecentSearches } from '../lib/recentSearches';
 import {
   SEARCH_LIMIT,
   capSearchResult,
+  detailHref,
+  groupDuplicateHits,
   groupSearchResults,
   narrowsQuery,
   nextSearchLimit,
@@ -35,13 +44,16 @@ import {
   searchTerms,
   sourceFacets,
   splitStalkerResults,
+  type GroupedHit,
+  type SearchGroup,
   type SearchGroupKind,
   type SearchHit,
   type SearchMore,
   type SourceSearch,
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
-import { Badge, Button, EmptyState, ErrorState, Poster, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { useRailCardWidth } from '../hooks/useRailCardWidth';
+import { Badge, Button, EmptyState, ErrorState, IconButton, Page, Poster, SectionHeader, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -89,19 +101,22 @@ function focusFieldWhenReady(timeoutMs = 1500): () => void {
 /**
  * Focuses result `index` once its row is mounted (rows are virtualized, so a row scrolled to a
  * moment ago mounts a frame or two later). `reveal` scrolls it into view; without it, focus
- * already taken elsewhere is never stolen.
+ * already taken elsewhere is never stolen. `section` picks the Top results section that numbers
+ * the index (each counts from 0); without one, the first result with that index.
  */
-function focusResult(scroller: HTMLElement, index: number, reveal: boolean, frames = 10): void {
+function focusResult(scroller: HTMLElement, index: number, reveal: boolean, section?: string, frames = 10): void {
   if (!reveal) {
     const active = document.activeElement;
     if (active && active !== document.body) return;
   }
-  const cell = scroller.querySelector<HTMLElement>(`[data-grid-index="${index}"]`);
+  // Matched by value, not in a selector: a remembered section is read back from storage.
+  const scope = section ? [...scroller.querySelectorAll<HTMLElement>('[data-search-section]')].find((el) => el.dataset['searchSection'] === section) : scroller;
+  const cell = scope?.querySelector<HTMLElement>(`[data-grid-index="${index}"]`);
   if (cell) {
     cell.focus({ preventScroll: true });
     if (reveal) cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   } else if (frames > 0) {
-    requestAnimationFrame(() => focusResult(scroller, index, reveal, frames - 1));
+    requestAnimationFrame(() => focusResult(scroller, index, reveal, section, frames - 1));
   }
 }
 
@@ -128,7 +143,7 @@ function useStalkerSearch(sources: Source[], typed: string) {
         return {
           queryKey: ['stalker.search', args],
           // The signal aborts a portal search that a newer query replaced.
-          queryFn: async ({ signal }) => (await rpcRaw('stalker.search', args, { signal })) as Page<VodItem | SeriesItem>,
+          queryFn: async ({ signal }) => (await rpcRaw('stalker.search', args, { signal })) as PageOf<VodItem | SeriesItem>,
           enabled: !!query,
           staleTime: 60_000,
         };
@@ -273,7 +288,18 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     {
       title: t('search'),
       subtitle: scoped ? scopeName : undefined,
-      search: { value: draft, onChange: setDraft, placeholder, onSubmit: (v) => setDraft(v), onKeyDown: onFieldKeyDown },
+      search: {
+        value: draft,
+        onChange: setDraft,
+        placeholder,
+        onSubmit: (v) => {
+          setDraft(v);
+          // Enter on an empty field moves to the first recent search, as on a TV remote.
+          if (!v.trim()) scrollRef.current?.querySelector<HTMLElement>('[data-recent-search]')?.focus();
+          else rememberSearch(v);
+        },
+        onKeyDown: onFieldKeyDown,
+      },
     },
     [draft, placeholder, scopeName],
   );
@@ -312,19 +338,32 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const coverWidth = useCoverWidth(useSettings().coverSize);
+  const location = useLocation();
+  // VL-page-rhythm: the grids' column width at the UI scale (VirtualGrid scales its own the same way),
+  // so a search poster is the size of a category poster at every scale.
+  const coverWidth = useScaledPx(useCoverWidth(useSettings().coverSize), true);
   const resume = useResumeLookup(!!query);
   // One result type at a time, chosen by tab; a type missing from these results falls back to the first one present.
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
   // Programmes are a tab of their own, after the catalog's; the only one when nothing else matched.
   const programmeHits = programmes.hits;
-  const showProgrammes = programmeHits.length > 0 && (typeParam === 'programmes' || groups.length === 0);
+  // Top results (critique: search): when the answer spans more than one type, the page opens on a
+  // slice of each (a rail of movies, of series, the first channels and programmes), each with
+  // "See all" to its tab, instead of the first type alone and a mostly empty screen.
+  const topAvailable = groups.length + (programmeHits.length > 0 ? 1 : 0) > 1;
+  const showTop = topAvailable && (typeParam === 'top' || typeParam === null || (!groups.some((g) => g.kind === typeParam) && typeParam !== 'programmes'));
+  const showProgrammes = !showTop && programmeHits.length > 0 && (typeParam === 'programmes' || groups.length === 0);
+  /** The URL of one type's tab, for a Top results section's "See all". */
+  const typeHref = (kind: string) => {
+    const next = new URLSearchParams(params);
+    next.set('type', kind);
+    return `${location.pathname}?${next.toString()}`;
+  };
   const anyResults = groups.length > 0 || programmeHits.length > 0;
   const showBadges = !scoped && allSources.length > 1;
   const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
   // Back from a title: the results open where you left them (same query, type and source in the
   // URL), with focus on the title you opened. A link here (PUSH) is a fresh visit from the top.
-  const location = useLocation();
   const navigationType = useNavigationType();
   const memoryKey = `${location.pathname}${location.search}`;
   useScrollMemory({
@@ -333,21 +372,42 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     ready: !!query && !loading && groups.length > 0,
     restore: navigationType !== 'PUSH',
     onRestored: (spot, scroller) => {
-      if (spot.index !== undefined) focusResult(scroller, spot.index, false);
+      if (spot.index !== undefined) focusResult(scroller, spot.index, false, spot.section);
     },
   });
-  // Enter on a focused result also fires click, so this covers the keyboard too.
+  // Enter on a focused result also fires click, so this covers the keyboard too. In Top results
+  // the section goes with the index: series #3 is not movie #3.
   const rememberResult = (e: MouseEvent<HTMLElement>) => {
     const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
     const index = Number(cell?.dataset['gridIndex']);
-    if (cell && Number.isInteger(index)) rememberSpot(memoryKey, { scrollTop: scrollRef.current?.scrollTop ?? 0, index });
+    const section = cell?.closest<HTMLElement>('[data-search-section]')?.dataset['searchSection'];
+    if (cell && Number.isInteger(index)) rememberSpot(memoryKey, { scrollTop: scrollRef.current?.scrollTop ?? 0, index, ...(section ? { section } : {}) });
+    // Opening a result makes the query one worth offering again.
+    if (cell) rememberSearch(query);
   };
+  // VL-search-locks: the parental lock on every source with hits, as the grids and rails show it.
+  const lockedHit = useSearchLocks(useMemo(() => [...new Set(groups.flatMap((g) => g.hits.map((h) => h.sourceId)))], [groups]));
 
   // L1-vod-3: opened from a link, the rail or the palette, the cursor lands in the field, so
   // typing searches at once. Back (POP) leaves focus to the restore above; typing replaces.
+  // A Top results "See all" is a PUSH too (Back returns to Top results), but it stays on this
+  // search: the page starts again at the top with focus on the opened tab's first result.
+  const lastSearch = useRef<{ key: string; pathname: string; q: string | null } | null>(null);
   useEffect(() => {
+    const prev = lastSearch.current;
+    const q = params.get('q');
+    lastSearch.current = { key: location.key, pathname: location.pathname, q };
     if (navigationType !== 'PUSH') return;
+    const scroller = scrollRef.current;
+    const sameSearch = !!prev && prev.key !== location.key && prev.pathname === location.pathname && prev.q === q && !!q;
+    if (sameSearch && scroller) {
+      scroller.scrollTop = 0;
+      focusResult(scroller, 0, false);
+      return;
+    }
     return focusFieldWhenReady();
+    // params is read for the query only; the location key marks a new visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key, navigationType]);
 
   // Some results arrived but one lookup failed (the library or a portal): say so instead of showing a silently short list.
@@ -359,10 +419,22 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     body = <SourceMissing />;
   } else if (!query) {
     body = (
-      <EmptyState
-        icon={<Search size={28} />}
+      <SearchStart
+        sourceId={sourceId}
+        sources={allSources}
+        onPick={(q) => {
+          setDraft(q);
+          rememberSearch(q);
+        }}
         title={scoped && scopeName ? t('searchSourceTitle', { source: scopeName }) : t('searchTitle')}
-        description={draft.trim().length === 1 ? t('searchMinLength', { count: 2 }) : t('searchHint')}
+        hint={draft.trim().length === 1 ? t('searchMinLength', { count: 2 }) : t('searchHint')}
+        empty={
+          <EmptyState
+            icon={<Search size={28} />}
+            title={scoped && scopeName ? t('searchSourceTitle', { source: scopeName }) : t('searchTitle')}
+            description={draft.trim().length === 1 ? t('searchMinLength', { count: 2 }) : t('searchHint')}
+          />
+        }
       />
     );
   } else if (catalog.isError && !anyResults) {
@@ -392,7 +464,12 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
     body = (
       <>
         {facets.length > 1 && (
-          <div role="group" aria-label={t('filterBySource')} className="flex flex-wrap gap-2">
+          // One row that scrolls sideways on a phone instead of three rows of chips (critique: search, phone).
+          <div
+            role="group"
+            aria-label={t('filterBySource')}
+            className="flex gap-2 max-sm:-mx-(--page-gutter) max-sm:overflow-x-auto max-sm:px-(--page-gutter) max-sm:scrollbar-none sm:flex-wrap"
+          >
             <FacetChip active={!facet} onClick={() => setFacet(undefined)} label={t('allSources')} />
             {facets.map((f) => (
               <FacetChip
@@ -408,9 +485,10 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
         <Tabs
           label={t('search')}
           panelIdPrefix="search-results"
-          value={showProgrammes ? 'programmes' : (activeGroup?.kind ?? '')}
+          value={showTop ? 'top' : showProgrammes ? 'programmes' : (activeGroup?.kind ?? '')}
           onChange={setType}
           items={[
+            ...(topAvailable ? [{ id: 'top', label: t('topResults') }] : []),
             ...groups.map((g) => ({
               id: g.kind,
               label: t(`group_${g.kind}`),
@@ -421,7 +499,23 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
               : []),
           ]}
         />
-        {showProgrammes ? (
+        {showTop ? (
+          <div {...tabPanelProps('search-results', 'top')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
+            <TopResults
+              groups={groups}
+              more={capped.more}
+              programmes={programmeHits}
+              programmesMore={programmeHits.length >= PROGRAMME_LIMIT}
+              sources={allSources}
+              showBadges={showBadges}
+              stripCountryPrefix={prefs.stripCountryPrefix}
+              resume={resume}
+              locked={lockedHit}
+              typeHref={typeHref}
+              onPlayChannel={playChannel}
+            />
+          </div>
+        ) : showProgrammes ? (
           <div {...tabPanelProps('search-results', 'programmes')} onClickCapture={rememberResult} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus">
             <ProgrammeList hits={programmeHits} sources={allSources} showSource={showBadges} stripCountryPrefix={prefs.stripCountryPrefix} />
           </div>
@@ -434,7 +528,16 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
             {activeGroup.kind === 'live' ? (
               <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} onPlayChannel={playChannel} scrollRef={scrollRef} />
             ) : (
-              <PosterGrid key={activeGroup.kind} kind={activeGroup.kind} hits={activeGroup.hits} showBadges={showBadges} minWidth={coverWidth} scrollRef={scrollRef} resume={resume} />
+              <PosterGrid
+                key={activeGroup.kind}
+                kind={activeGroup.kind}
+                hits={activeGroup.hits}
+                showBadges={showBadges}
+                minWidth={coverWidth}
+                scrollRef={scrollRef}
+                resume={resume}
+                locked={lockedHit}
+              />
             )}
           </div>
         )}
@@ -459,14 +562,12 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   }
 
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto" data-testid={scoped ? 'vod-search-source' : 'vod-search'}>
-      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-8 px-4 py-6 md:px-8">
-        <div className="-mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="text-headline text-fg">{t('search')}</h1>
-          {scoped && scopeName && <p className="min-w-0 truncate text-sm text-fg-muted">{scopeName}</p>}
-        </div>
+    <div ref={scrollRef} className="h-full overflow-x-hidden overflow-y-auto" data-testid={scoped ? 'vod-search-source' : 'vod-search'}>
+      <Page width="wide" className="flex flex-col gap-6">
+        {/* VL-search-title-dup: the header says "Search" (and the source); the page's h1 is for screen readers. */}
+        <h1 className="sr-only">{t('search')}</h1>
         {body}
-      </div>
+      </Page>
     </div>
   );
 }
@@ -482,7 +583,7 @@ function FacetChip({ active, onClick, label, count }: { active: boolean; onClick
       className={cn(
         'inline-flex h-8 max-w-[min(100%,16rem)] items-center gap-2 rounded-full border px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus',
         // A chosen filter is neutral (inverted), so amber stays on the actions (DS amber rules).
-        active ? 'border-fg bg-fg text-bg' : 'border-edge bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg',
+        active ? 'border-fg bg-fg text-bg' : 'border-transparent bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg',
       )}
     >
       <span dir="auto" className="min-w-0 truncate">
@@ -550,9 +651,31 @@ function PartialErrorNotice({ message, onRetry }: { message: string; onRetry: ()
   );
 }
 
+/** Local midnight of the day `at` falls on. */
+function dayStart(at: number): number {
+  const d = new Date(at);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** Programme hits (in start order) grouped by the day they start on, each with its place in the whole list. */
+function programmeDays(hits: readonly GuideSearchHit[]): { day: number; items: { hit: GuideSearchHit; index: number; at: number }[] }[] {
+  const days: { day: number; items: { hit: GuideSearchHit; index: number; at: number }[] }[] = [];
+  hits.forEach((hit, index) => {
+    const at = ms(hit.program.start);
+    const day = dayStart(at);
+    const last = days[days.length - 1];
+    if (last && last.day === day) last.items.push({ hit, index, at });
+    else days.push({ day, items: [{ hit, index, at }] });
+  });
+  return days;
+}
+
 /**
- * Guide programmes that match: start, title, channel (and source). One opens the guide at the
- * programme, where its row takes the cursor (as a hit of the guide's own search does).
+ * Guide programmes that match: start, title, channel (and source), under a heading per day, so
+ * the time column holds the clock alone ("4:50 AM", "16:50"). One grid serves every row
+ * (rows are subgrids): the column takes the widest clock in the locale and the titles share one
+ * edge. One opens the guide at the programme, where its row takes the cursor (as a hit of the
+ * guide's own search does).
  */
 const ProgrammeList = memo(function ProgrammeList({
   hits,
@@ -568,7 +691,10 @@ const ProgrammeList = memo(function ProgrammeList({
   const { i18n } = useTranslation('vod');
   const navigate = useNavigate();
   const lang = i18n.language;
+  const listId = useId();
   const names = useMemo(() => new Map(sources.map((s) => [s.id, s.name])), [sources]);
+  const days = useMemo(() => programmeDays(hits), [hits]);
+  const now = Date.now();
   // Up and Down move between the rows; ArrowDown in the search field lands on the first.
   const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -580,32 +706,45 @@ const ProgrammeList = memo(function ProgrammeList({
     next.focus();
   };
   return (
-    <ul className="flex flex-col gap-1" onKeyDown={onKeyDown} data-testid="search-programmes">
-      {hits.map((hit, i) => {
-        const at = ms(hit.program.start);
-        const link = guideHitLink(hit);
-        const channel = displayChannelName(hit.channelName, stripCountryPrefix);
-        const source = showSource ? names.get(hit.ref.sourceId) : undefined;
+    <ul className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4" onKeyDown={onKeyDown} data-testid="search-programmes">
+      {days.map(({ day, items }, d) => {
+        const heading = dayHeading(day, now, lang);
+        const headingId = `${listId}-${day}`;
         return (
-          <li key={`${itemKey(hit.ref)}@${at}`}>
-            <button
-              type="button"
-              data-grid-index={i}
-              onClick={() => void navigate(link.to, { state: link.state })}
-              className="flex w-full min-w-0 items-start gap-x-4 rounded-md px-3 py-2.5 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <span className="w-36 shrink-0 pt-0.5 text-sm whitespace-nowrap tabular-nums text-fg-muted">
-                {formatDay(at, lang)} {formatClock(at, lang)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span dir="auto" className="block truncate text-sm font-medium text-fg">
-                  {hit.program.title}
-                </span>
-                <span dir="auto" className="block truncate text-xs text-fg-muted">
-                  {source ? `${channel} · ${source}` : channel}
-                </span>
-              </span>
-            </button>
+          <li key={day} className="col-span-full grid grid-cols-subgrid">
+            <p id={headingId} className={cn('col-span-full flex items-baseline gap-2 px-3 pb-1 text-caption', d > 0 && 'pt-3')} data-testid="search-programme-day">
+              <span className="font-medium text-fg-muted first-letter:uppercase">{heading.label}</span>
+              {heading.date ? <span className="text-fg-subtle">{heading.date}</span> : null}
+            </p>
+            <ul aria-labelledby={headingId} className="col-span-full grid grid-cols-subgrid gap-y-1">
+              {items.map(({ hit, index, at }) => {
+                const link = guideHitLink(hit);
+                const channel = displayChannelName(hit.channelName, stripCountryPrefix);
+                const source = showSource ? names.get(hit.ref.sourceId) : undefined;
+                return (
+                  <li key={`${itemKey(hit.ref)}@${at}`} className="col-span-full grid grid-cols-subgrid">
+                    <button
+                      type="button"
+                      data-grid-index={index}
+                      onClick={() => void navigate(link.to, { state: link.state })}
+                      className="col-span-full grid grid-cols-subgrid items-start rounded-md px-3 py-2.5 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
+                    >
+                      <span className="pt-0.5 text-sm whitespace-nowrap tabular-nums text-fg-muted" data-testid="search-programme-time">
+                        {clockTime(at, lang)}
+                      </span>
+                      <span className="min-w-0">
+                        <span dir="auto" className="block truncate text-sm font-medium text-fg">
+                          {hit.program.title}
+                        </span>
+                        <span dir="auto" className="block truncate text-xs text-fg-muted">
+                          {source ? `${channel} · ${source}` : channel}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           </li>
         );
       })}
@@ -748,6 +887,8 @@ const POSTER_BADGE_MAX = 120;
 const POSTER_BADGE_INSETS = 12;
 /** Room the rating chip takes on the poster's top-end corner, so the source badge stops short of it. */
 const POSTER_RATING_ROOM = 52;
+/** Below this poster width the source name moves from the art into the caption. */
+const POSTER_BADGE_MIN_CELL = 132;
 
 /**
  * Movie or series hits as poster cards, with the language the provider gives each title.
@@ -760,6 +901,7 @@ const PosterGrid = memo(function PosterGrid({
   minWidth,
   scrollRef,
   resume,
+  locked,
 }: {
   kind: Exclude<SearchGroupKind, 'live'>;
   hits: SearchHit[];
@@ -768,6 +910,8 @@ const PosterGrid = memo(function PosterGrid({
   scrollRef: RefObject<HTMLDivElement | null>;
   /** Watched fraction by `resumeKey`, for the poster progress bar. */
   resume: Map<string, number>;
+  /** Parental Ask mode: the title asks for the PIN before it opens (VL-search-locks). */
+  locked: (item: VodItem | SeriesItem) => boolean;
 }) {
   // L1-vod-6: the watched tick, as on the category grid (the first 500 hits; the rest show none).
   const items = useMemo(() => hits.map((h) => h.item as VodItem | SeriesItem), [hits]);
@@ -793,6 +937,7 @@ const PosterGrid = memo(function PosterGrid({
               showBadges={showBadges}
               progress={resume.get(resumeKey(item.ref))}
               watched={watched.has(itemKey(item.ref))}
+              locked={locked(item)}
             />
           );
         }}
@@ -809,6 +954,9 @@ const PosterHitCell = memo(function PosterHitCell({
   showBadges,
   progress,
   watched,
+  locked,
+  tabIndex,
+  otherSources = 0,
 }: {
   hit: SearchHit;
   index: number;
@@ -816,7 +964,13 @@ const PosterHitCell = memo(function PosterHitCell({
   showBadges: boolean;
   progress: number | undefined;
   watched: boolean;
+  locked: boolean;
+  /** A rail's roving tab index (Top results); a grid leaves it to the grid. */
+  tabIndex?: number | undefined;
+  /** More sources carry this title (groupDuplicateHits): the badge counts them instead of naming one. */
+  otherSources?: number;
 }) {
+  const { t, i18n } = useTranslation('vod');
   const item = h.item as VodItem | SeriesItem;
   const language = useMemo(() => itemLanguage(item.title, item.categoryName), [item.title, item.categoryName]);
   const myList = useMemo(() => myListTarget(item), [item]);
@@ -826,16 +980,21 @@ const PosterHitCell = memo(function PosterHitCell({
     [h.sourceKind, h.imageUrl, item],
   );
   const badgeWidth = Math.max(0, Math.min(POSTER_BADGE_MAX, cellWidth - POSTER_BADGE_INSETS - (item.rating ? POSTER_RATING_ROOM : 0)));
+  // A phone's posters are too narrow for the source name on the art: it collapsed to "N…" beside
+  // the rating. There the source goes into the caption, after the year, in full.
+  const narrow = cellWidth < POSTER_BADGE_MIN_CELL;
+  const sourceText = otherSources > 0 ? t('sourcesCount', { count: otherSources + 1 }) : h.sourceName;
   const badge = useMemo(
     () =>
-      showBadges ? (
+      showBadges && !narrow ? (
         // Badge is inline-flex, so the ellipsis needs a block inside it (L2-visual-8).
-        <Badge variant="neutral" dir="auto" title={h.sourceName} className="bg-scrim text-white" style={{ maxWidth: badgeWidth }}>
-          {h.sourceName}
+        <Badge variant="neutral" dir="auto" title={sourceText} className="bg-glass-strong text-on-glass" style={{ maxWidth: badgeWidth }}>
+          {sourceText}
         </Badge>
       ) : undefined,
-    [showBadges, h.sourceName, badgeWidth],
+    [showBadges, narrow, sourceText, badgeWidth],
   );
+  const meta = showBadges && narrow ? joinList([h.meta, sourceText], i18n.language) : h.meta;
   return (
     <PosterCard
       index={index}
@@ -843,16 +1002,18 @@ const PosterHitCell = memo(function PosterHitCell({
       fullTitle={h.title}
       href={h.href ?? '#'}
       posterUrl={h.imageUrl}
-      meta={h.meta}
+      meta={meta}
       // L4-vod-3: the rating chip, as on the category grid and the rails.
       rating={item.rating}
       progress={progress}
       watched={watched}
       language={language}
       badge={badge}
-      badgeLabel={showBadges ? h.sourceName : undefined}
+      badgeLabel={showBadges && !narrow ? sourceText : undefined}
       myList={myList}
       prefetch={prefetch}
+      locked={locked}
+      tabIndex={tabIndex}
     />
   );
 });
@@ -877,35 +1038,216 @@ const ChannelGrid = memo(function ChannelGrid({
       rowHeight={() => CHANNEL_ROW_HEIGHT}
       scrollRef={scrollRef}
       testId="vod-search-channels"
-      renderCell={(h, i) => {
-        const c = h.item as Channel;
-        return (
-          <button
-            type="button"
-            data-grid-index={i}
-            onClick={() => onPlayChannel(c, h)}
-            className="flex w-full items-center gap-3 rounded-md border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <div className="w-12 shrink-0">
-              {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
-              <Poster src={h.imageUrl} sourceId={c.ref.sourceId} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div dir="auto" className="truncate text-sm font-medium text-fg text-match-parent">{h.title}</div>
-              <div className="tabular truncate text-xs text-fg-subtle">{h.meta}</div>
-            </div>
-            {showBadges && (
-              <Badge variant="outline" dir="auto" title={h.sourceName} className="max-w-[110px] shrink-0">
-                {h.sourceName}
-              </Badge>
-            )}
-            {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
-          </button>
-        );
-      }}
+      renderCell={(h, i) => <ChannelHitButton hit={h} index={i} showBadges={showBadges} onPlayChannel={onPlayChannel} />}
     />
   );
 });
+
+/** One channel hit; choosing it plays the channel. The source is quiet text, not an outlined chip. */
+function ChannelHitButton({
+  hit: h,
+  index,
+  showBadges,
+  onPlayChannel,
+}: {
+  hit: SearchHit;
+  index: number;
+  showBadges: boolean;
+  onPlayChannel: (c: Channel, hit: SearchHit) => void;
+}) {
+  const c = h.item as Channel;
+  return (
+    <button
+      type="button"
+      data-grid-index={index}
+      onClick={() => onPlayChannel(c, h)}
+      className="flex w-full items-center gap-3 rounded-lg border border-edge bg-surface p-2 text-start outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors"
+    >
+      <div className="w-12 shrink-0">
+        {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
+        <Poster src={h.imageUrl} sourceId={c.ref.sourceId} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div dir="auto" className="truncate text-body-sm font-medium text-fg text-match-parent">
+          {h.title}
+        </div>
+        {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
+        <div className="flex min-w-0 gap-1.5 text-caption text-fg-subtle">
+          {h.meta && <span className="tabular shrink-0">{h.meta}</span>}
+          {showBadges && h.meta && <span aria-hidden>·</span>}
+          {showBadges && (
+            <span dir="auto" title={h.sourceName} className="min-w-0 truncate" data-testid="search-channel-source">
+              {h.sourceName}
+            </span>
+          )}
+        </div>
+      </div>
+      {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
+    </button>
+  );
+}
+
+/** How many of each type Top results shows before "See all". */
+const TOP_POSTERS = 12;
+const TOP_CHANNELS = 6;
+const TOP_PROGRAMMES = 5;
+/**
+ * Movies and series each this short (in folded titles) sit side by side in Top results, so the
+ * channels and programmes after them reach the first screen instead of two one-card rails.
+ */
+const TOP_SHORT_RAIL = 3;
+
+/**
+ * The Top results view: a section per result type, in the order movies, series, channels,
+ * programmes. Posters fold the same title from several sources into one card ("2 sources"), so a
+ * film is not listed twice side by side, and the section counts the titles it shows; each
+ * section's "See all" opens its tab. Each section numbers its results from 0, so it carries its
+ * kind (`data-search-section`), and Back from a result finds it again in its own section.
+ */
+function TopResults({
+  groups,
+  more,
+  programmes,
+  programmesMore,
+  sources,
+  showBadges,
+  stripCountryPrefix,
+  resume,
+  locked,
+  typeHref,
+  onPlayChannel,
+}: {
+  groups: SearchGroup[];
+  more: SearchMore;
+  programmes: readonly GuideSearchHit[];
+  programmesMore: boolean;
+  sources: readonly Source[];
+  showBadges: boolean;
+  stripCountryPrefix: boolean;
+  resume: Map<string, number>;
+  locked: (item: VodItem | SeriesItem) => boolean;
+  typeHref: (kind: string) => string;
+  onPlayChannel: (c: Channel, hit: SearchHit) => void;
+}) {
+  const { t } = useTranslation('vod');
+  const count = (n: number, capped: boolean | undefined) => (capped ? t('searchCountMore', { count: n }) : n);
+  const posterGroups = useMemo(
+    () =>
+      groups
+        .filter((g) => g.kind !== 'live')
+        .map((g) => ({ group: g, folded: showBadges ? groupDuplicateHits(g.hits) : g.hits.map((hit): GroupedHit => ({ hit, others: [] })) })),
+    [groups, showBadges],
+  );
+  const live = groups.find((g) => g.kind === 'live');
+  const sideBySide = posterGroups.length === 2 && posterGroups.every((p) => p.folded.length <= TOP_SHORT_RAIL);
+  const rails = posterGroups.map(({ group, folded }) => (
+    <TopPosterRail
+      key={group.kind}
+      group={group}
+      folded={folded}
+      capped={more[group.kind]}
+      showBadges={showBadges}
+      resume={resume}
+      locked={locked}
+      seeAll={typeHref(group.kind)}
+      // Side by side, a rail stays in its column instead of running out through the gutter.
+      bleed={!sideBySide}
+    />
+  ));
+  return (
+    <div className="flex flex-col gap-10" data-testid="search-top">
+      {sideBySide ? (
+        <div className="grid min-w-0 gap-x-8 gap-y-10 sm:grid-cols-2" data-testid="search-top-titles">
+          {rails}
+        </div>
+      ) : (
+        rails
+      )}
+      {live && (
+        <section aria-labelledby="search-top-live" className="flex flex-col gap-3" data-search-section="live">
+          <SectionHeader id="search-top-live" title={t('group_live')} count={count(live.hits.length, more.live)} seeAll={{ to: typeHref('live') }} />
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_MIN_WIDTH}px, 1fr))` }} role="list">
+            {live.hits.slice(0, TOP_CHANNELS).map((h, i) => (
+              <div key={h.key} role="listitem" className="min-w-0">
+                <ChannelHitButton hit={h} index={i} showBadges={showBadges} onPlayChannel={onPlayChannel} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {programmes.length > 0 && (
+        <section aria-labelledby="search-top-programmes" className="flex flex-col gap-3" data-search-section="programmes">
+          <SectionHeader
+            id="search-top-programmes"
+            title={t('group_programmes')}
+            count={count(programmes.length, programmesMore)}
+            seeAll={{ to: typeHref('programmes') }}
+          />
+          <ProgrammeList hits={programmes.slice(0, TOP_PROGRAMMES)} sources={sources} showSource={showBadges} stripCountryPrefix={stripCountryPrefix} />
+        </section>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One Top results rail of posters, duplicates folded. The count is the titles the rail holds
+ * (one film from two sources is one title, its card says "2 sources"); the type's tab, which
+ * lists every copy, counts copies.
+ */
+function TopPosterRail({
+  group,
+  folded,
+  capped,
+  showBadges,
+  resume,
+  locked,
+  seeAll,
+  bleed,
+}: {
+  group: SearchGroup;
+  folded: readonly GroupedHit[];
+  capped: boolean | undefined;
+  showBadges: boolean;
+  resume: Map<string, number>;
+  locked: (item: VodItem | SeriesItem) => boolean;
+  seeAll: string;
+  bleed: boolean;
+}) {
+  const { t } = useTranslation('vod');
+  const cardWidth = useRailCardWidth();
+  const items = useMemo(() => folded.slice(0, TOP_POSTERS), [folded]);
+  const watched = useWatchedKeys(useMemo(() => items.map((g) => g.hit.item as VodItem | SeriesItem), [items]));
+  return (
+    <div className="min-w-0" data-search-section={group.kind}>
+      <PosterRail<GroupedHit>
+        title={t(`group_${group.kind}`)}
+        count={capped ? t('searchCountMore', { count: folded.length }) : folded.length}
+        seeAll={{ to: seeAll }}
+        items={items}
+        cardWidth={cardWidth}
+        bleed={bleed}
+        myList={(g) => myListTarget(g.hit.item as VodItem | SeriesItem)}
+        render={(g, i, rail) => {
+          const item = g.hit.item as VodItem | SeriesItem;
+          return (
+            <PosterHitCell
+              hit={g.hit}
+              index={i}
+              cellWidth={cardWidth}
+              showBadges={showBadges}
+              progress={resume.get(resumeKey(item.ref))}
+              watched={watched.has(itemKey(item.ref))}
+              locked={locked(item)}
+              tabIndex={rail.tabIndex}
+              otherSources={g.others.length}
+            />
+          );
+        }}
+      />
+    </div>
+  );
+}
 
 function SearchSkeleton() {
   const { t } = useTranslation('vod');
@@ -922,6 +1264,153 @@ function SearchSkeleton() {
           <div key={i} className="skeleton-surface w-full rounded-md motion-safe:animate-shimmer" style={{ aspectRatio: 2 / 3 }} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Titles in "Jump back in" on the search page's zero state. */
+const JUMP_BACK_LIMIT = 16;
+/** Category chips per section in a scoped search's zero state. */
+const BROWSE_CHIPS = 12;
+
+/**
+ * What the search page shows before a query (critique: search; CB "Search zero state"): the recent
+ * searches as chips (Enter in an empty field lands on the first), the titles you watched lately
+ * ("Jump back in"), and in a source's own search its categories, one press from the grid. With
+ * none of that yet, the plain prompt (`empty`) stays.
+ */
+function SearchStart({
+  sourceId,
+  sources,
+  onPick,
+  title,
+  hint,
+  empty,
+}: {
+  sourceId: string | undefined;
+  sources: Source[];
+  onPick: (query: string) => void;
+  /** The prompt, as a short lead above the sections (the full empty state when there are none). */
+  title: string;
+  hint: string;
+  empty: ReactNode;
+}) {
+  const { t } = useTranslation('vod');
+  const queries = useRecentSearches();
+  const recent = useRpcQuery('recent.list', sourceId ? { sourceId, limit: 60 } : { limit: 60 }, { staleTime: 30_000 });
+  const jump = useMemo(
+    () => (recent.data ?? []).filter((e) => e.ref.contentType === 'movie' || e.ref.contentType === 'series').slice(0, JUMP_BACK_LIMIT),
+    [recent.data],
+  );
+  // The same arguments as the landings ask, so the categories usually come from the cache.
+  const movieCats = useRpcQuery('catalog.categories', { sourceId: sourceId ?? '', contentType: 'movie', includeHidden: true }, { enabled: !!sourceId });
+  const seriesCats = useRpcQuery('catalog.categories', { sourceId: sourceId ?? '', contentType: 'series', includeHidden: true }, { enabled: !!sourceId });
+  const browse = useMemo(
+    () =>
+      sourceId
+        ? (
+            [
+              ['movies', movieCats.data],
+              ['series', seriesCats.data],
+            ] as const
+          )
+            .map(([section, cats]) => ({ section, cats: (cats ?? []).filter((c) => !c.hidden && c.itemCount > 0).slice(0, BROWSE_CHIPS) }))
+            .filter((g) => g.cats.length > 0)
+        : [],
+    [sourceId, movieCats.data, seriesCats.data],
+  );
+  const sourceKind = (id: string) => sources.find((s) => s.id === id)?.kind;
+
+  if (queries.length === 0 && jump.length === 0 && browse.length === 0) return <>{empty}</>;
+  return (
+    <div className="flex flex-col gap-10" data-testid="vod-search-start">
+      <div className="flex flex-col gap-1">
+        <p className="text-title-sm text-fg">{title}</p>
+        <p className="text-body-sm text-fg-muted">{hint}</p>
+      </div>
+      {queries.length > 0 && (
+        <section aria-labelledby="vod-recent-searches" className="flex flex-col gap-3">
+          <SectionHeader
+            id="vod-recent-searches"
+            title={t('recentSearches')}
+            action={
+              <Button size="sm" variant="ghost" onClick={clearSearches}>
+                {t('clearRecentSearches')}
+              </Button>
+            }
+          />
+          <ul className="flex flex-wrap gap-2">
+            {queries.map((q) => (
+              <li key={q} className="inline-flex h-8 max-w-full items-center rounded-full bg-surface-2 pe-0.5">
+                <button
+                  type="button"
+                  data-recent-search=""
+                  onClick={() => onPick(q)}
+                  className="inline-flex h-full min-w-0 items-center gap-1.5 rounded-full ps-3 pe-1.5 text-sm text-fg hover:text-fg"
+                >
+                  <History aria-hidden size={14} className="shrink-0 text-fg-subtle" />
+                  <span dir="auto" className="min-w-0 truncate">
+                    {q}
+                  </span>
+                </button>
+                <IconButton
+                  size="sm"
+                  label={t('removeRecentSearch', { query: q })}
+                  icon={<X aria-hidden size={14} />}
+                  onClick={() => forgetSearch(q)}
+                  className="h-7 w-7 rounded-full"
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {jump.length > 0 && (
+        <PosterRail<RecentEntry>
+          title={t('jumpBackIn')}
+          items={jump}
+          bleed
+          render={(e, i, rail) => {
+            const kind = sourceKind(e.ref.sourceId);
+            return (
+              <PosterCard
+                index={i}
+                tabIndex={rail.tabIndex}
+                title={snapshotTitle(e.ref, e.snapshot.title).title}
+                href={detailHref(e.ref) ?? '#'}
+                posterUrl={e.snapshot.posterUrl}
+                meta={e.snapshot.subtitle}
+                sourceId={e.ref.sourceId}
+                prefetch={kind ? { ref: e.ref, sourceKind: kind, posterUrl: e.snapshot.posterUrl } : undefined}
+              />
+            );
+          }}
+        />
+      )}
+      {browse.length > 0 && sourceId && (
+        <section aria-labelledby="vod-browse-categories" className="flex flex-col gap-4">
+          <SectionHeader id="vod-browse-categories" title={t('browseCategories')} />
+          {browse.map((g) => (
+            <div key={g.section} className="flex flex-col gap-2">
+              <h3 className="text-caption font-medium text-fg-subtle">{t(g.section === 'movies' ? 'group_movies' : 'group_series')}</h3>
+              <ul className="flex flex-wrap gap-2">
+                {g.cats.map((c) => (
+                  <li key={c.id}>
+                    <Link
+                      to={`/s/${encodeURIComponent(sourceId)}/${g.section}/c/${encodeURIComponent(c.id)}`}
+                      className="inline-flex h-8 max-w-[16rem] items-center rounded-full bg-surface-2 px-3 text-sm text-fg-muted hover:bg-surface-3 hover:text-fg"
+                    >
+                      <span dir="auto" className="truncate">
+                        {c.name}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

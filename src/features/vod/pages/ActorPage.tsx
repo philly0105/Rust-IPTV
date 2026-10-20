@@ -1,16 +1,21 @@
 import { UserRound } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
+import { itemKey, type SeriesItem, type TmdbBrief, type VodItem } from '@/api/types';
 
+import { myListTarget, PosterCard } from '../components/PosterCard';
+import { PosterRail } from '../components/PosterRail';
 import { TmdbErrorState } from '../components/TmdbErrorState';
 import { TmdbAttribution } from '../components/TmdbAttribution';
-import { TmdbRail } from '../components/TmdbRail';
-import { useSettings } from '../hooks/queries';
+import { useSettings, useSource } from '../hooks/queries';
+import { useCatalogMatches } from '../hooks/useCatalogMatches';
 import { usePageHeader } from '../hooks/usePageHeader';
-import { EmptyState, Poster, Skeleton, TEXT_LINK, buttonClass, cn } from '@/ui';
+import { useWatchedKeys } from '../hooks/useWatched';
+import { detailHref } from '../lib/search';
+import { EmptyState, Page, Poster, Skeleton, TEXT_LINK, buttonClass, cn } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 const BIO_CLAMP = 600;
@@ -21,7 +26,12 @@ function formatDate(iso: string | undefined, locale?: string): string | undefine
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(intlLocale(locale), { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
-/** TMDB person: portrait, facts, biography, and a known-for rail whose titles search the current source. */
+const NO_BRIEFS: TmdbBrief[] = [];
+
+/**
+ * TMDB person: portrait, facts, biography, and a "Known for" rail of the person's titles that this
+ * source has, each opening its own detail page (VL-tmdb-deadend).
+ */
 export function ActorPage() {
   const { t, i18n } = useTranslation('vod');
   const { sourceId = '', personId = '' } = useParams();
@@ -33,8 +43,17 @@ export function ActorPage() {
 
   // Mirrors the branch below that renders the visible h1 (the person's name).
   const loaded = settings.tmdb.enabled && valid && !person.isError && !!person.data;
-  const pageTitle = loaded && person.data ? person.data.name : t('actor');
+  // The person's name once known; before that "Cast", the row the page was opened from.
+  const pageTitle = loaded && person.data ? person.data.name : t('cast');
   usePageHeader({ title: pageTitle }, [pageTitle]);
+  const knownFor = person.data?.knownFor ?? NO_BRIEFS;
+  const movieBriefs = useMemo(() => knownFor.filter((b) => b.mediaType === 'movie'), [knownFor]);
+  const tvBriefs = useMemo(() => knownFor.filter((b) => b.mediaType === 'tv'), [knownFor]);
+  const movies = useCatalogMatches(movieBriefs, sourceId || undefined, 'movie', loaded);
+  const shows = useCatalogMatches(tvBriefs, sourceId || undefined, 'series', loaded);
+  const known = useMemo(() => [...movies.items, ...shows.items], [movies.items, shows.items]);
+  const knownWatched = useWatchedKeys(known);
+  const sourceKind = useSource(sourceId || undefined).data?.kind;
 
   let body;
   if (!settings.tmdb.enabled) {
@@ -102,11 +121,28 @@ export function ActorPage() {
             )}
           </div>
         </section>
-        <TmdbRail
+        <PosterRail<VodItem | SeriesItem>
           title={t('knownFor')}
-          items={p.knownFor}
-          sourceId={sourceId || undefined}
-          empty={<p className="text-sm text-fg-subtle">{t('noKnownFor')}</p>}
+          items={known}
+          loading={known.length === 0 && (movies.pending || shows.pending)}
+          bleed
+          myList={myListTarget}
+          empty={<p className="text-sm text-fg-subtle">{p.knownFor.length > 0 ? t('knownForNoneHere') : t('noKnownFor')}</p>}
+          render={(item, i, rail) => (
+            <PosterCard
+              index={i}
+              tabIndex={rail.tabIndex}
+              title={item.titleBase || item.title}
+              fullTitle={item.title}
+              href={detailHref(item.ref) ?? '#'}
+              posterUrl={item.posterUrl}
+              year={item.year}
+              rating={item.rating}
+              watched={knownWatched.has(itemKey(item.ref))}
+              myList={myListTarget(item)}
+              prefetch={sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined}
+            />
+          )}
         />
         <TmdbAttribution />
       </>
@@ -114,12 +150,12 @@ export function ActorPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto" data-testid="vod-actor">
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-10 px-4 py-8 md:px-8">
+    <div className="h-full overflow-x-hidden overflow-y-auto" data-testid="vod-actor">
+      <Page width="wide" className="flex flex-col gap-10 py-8">
         {/* The loaded person renders a visible h1 with their name; every other state keeps one sr-only h1. */}
         {!loaded && <h1 className="sr-only">{pageTitle}</h1>}
         {body}
-      </div>
+      </Page>
     </div>
   );
 }

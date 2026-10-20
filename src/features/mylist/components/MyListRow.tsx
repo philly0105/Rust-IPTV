@@ -1,7 +1,8 @@
 /**
  * One /my-list row: the rank in the user's order, the artwork, the title with
- * its facts, and the row's actions (watched tick for movies, move up/down,
- * remove).
+ * its facts and how far you got, and the row's actions (Play, watched tick for
+ * movies, move up/down, remove). VL-mylist-rows: the list is a place to start
+ * watching from, so a row plays (resuming where you left off) as well as opens.
  *
  * The row itself is the keyboard stop (VirtualRows roves focus between rows),
  * so its buttons stay out of the Tab order: Enter, Delete, W and Alt+arrows
@@ -14,7 +15,7 @@
  * of their own under the title, always visible.
  */
 
-import { Check, ChevronDown, ChevronUp, Circle, CircleCheck, Clapperboard, Film, GripVertical, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, CircleCheck, Clapperboard, Film, GripVertical, Play, X } from 'lucide-react';
 import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -22,7 +23,7 @@ import type { Source, WatchlistEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 import { joinList } from '@/shell/dashboard/cards';
 
-import { IconButton, Poster, cn } from '../deps';
+import { IconButton, Poster, ProgressBar, cn } from '../deps';
 
 /**
  * Fixed row height for the virtual list: a 48 x 72 poster plus breathing room,
@@ -67,6 +68,12 @@ export interface MyListRowProps {
   onOpen: (entry: WatchlistEntry) => void;
   onRemove: (entry: WatchlistEntry) => void;
   onToggleWatched: (entry: WatchlistEntry) => void;
+  /** Plays the title, resuming a saved position; absent when it cannot play from here (a series not started). */
+  onPlay?: ((entry: WatchlistEntry) => void) | undefined;
+  /** 0..1 of the saved position, drawn as a bar under the facts. */
+  progress?: number | undefined;
+  /** What the bar stands for: "12 minutes left", or the episode a series resumes. */
+  progressLabel?: string | undefined;
 }
 
 /**
@@ -91,6 +98,9 @@ function MyListRowImpl({
   onOpen: openEntry,
   onRemove: removeEntry,
   onToggleWatched: toggleEntry,
+  onPlay: playEntry,
+  progress,
+  progressLabel,
 }: MyListRowProps) {
   const { t, i18n } = useTranslation('mylist');
   const { ref, snapshot, watched } = entry;
@@ -129,14 +139,14 @@ function MyListRowImpl({
       )}
 
       {rank !== undefined && (
-        // The place in the queue, set like a tuner preset: the one loud element on the page.
+        // The place in the queue: a quiet number, so the artwork and the title lead the row.
         <span
           aria-hidden
           className={cn(
-            'leading-none font-semibold tabular',
+            'leading-none font-medium tabular',
             // Below sm: a small plate on the poster's top corner, so the title keeps the width.
             'absolute start-2.5 top-[calc(50%-32px)] z-10 min-w-5 rounded-sm bg-glass-strong px-1 py-0.5 text-center text-xs text-on-glass',
-            'sm:static sm:w-12 sm:min-w-0 sm:shrink-0 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-end sm:font-numeric sm:text-4xl sm:text-fg-subtle',
+            'sm:static sm:w-6 sm:min-w-0 sm:shrink-0 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-end sm:text-sm sm:text-fg-subtle',
             'sm:group-hover:text-fg-muted sm:in-focus-visible:text-fg-muted motion-safe:transition-colors',
           )}
           data-testid="mylist-rank"
@@ -163,7 +173,7 @@ function MyListRowImpl({
       )}
 
       {/* Artwork is a mouse shortcut: the title button carries the name for keyboard and AT. */}
-      <div aria-hidden onClick={onOpen} className="row-span-2 w-12 shrink-0 cursor-pointer self-center overflow-hidden rounded-md shadow-1">
+      <div aria-hidden onClick={onOpen} className="row-span-2 w-12 shrink-0 cursor-pointer self-center overflow-hidden rounded-md shadow-1 ring-1 ring-edge sm:w-14">
         <Poster src={snapshot.posterUrl} sourceId={ref.sourceId} alt="" label={title} aspect="poster" />
       </div>
 
@@ -194,6 +204,12 @@ function MyListRowImpl({
             </span>
           )}
         </span>
+        {progress !== undefined && progress > 0 && (
+          <span className="flex w-full min-w-0 items-center gap-2 text-xs text-fg-muted" data-testid="mylist-progress">
+            <ProgressBar value={progress} max={1} size="xs" className="w-24 shrink-0 sm:w-32" label={progressLabel} />
+            {progressLabel && <span className="tabular min-w-0 truncate">{progressLabel}</span>}
+          </span>
+        )}
         <span className="hidden w-full min-w-0 items-center gap-2 text-xs text-fg-subtle sm:flex">
           {source && (
             <span
@@ -214,6 +230,21 @@ function MyListRowImpl({
 
       {/* Below sm the actions line sits under the title (grid column 2); move first, remove at the far end. */}
       <div className="col-start-2 row-start-2 flex min-w-0 items-center gap-1 sm:shrink-0" data-testid="mylist-actions">
+        {playEntry ? (
+          <IconButton
+            size="sm"
+            variant="secondary"
+            tabIndex={-1}
+            label={progress ? t('resumeTitle', { title }) : t('playTitle', { title })}
+            icon={<Play aria-hidden size={14} className="fill-current" />}
+            disabled={busy}
+            onClick={() => playEntry(entry)}
+            className={cn('rounded-full', revealOnFine)}
+            data-action="play"
+          />
+        ) : (
+          <span aria-hidden className="h-8 w-8 shrink-0" />
+        )}
         {movie ? (
           <IconButton
             size="sm"
@@ -222,9 +253,10 @@ function MyListRowImpl({
             tooltip={watched ? t('watchedHintOn') : t('watchedHintOff')}
             pressed={watched}
             disabled={busy}
-            icon={watched ? <CircleCheck aria-hidden size={18} /> : <Circle aria-hidden size={18} />}
+            // One glyph in both states (an empty circle read as a radio button); the colour and the pressed state carry it.
+            icon={<CircleCheck aria-hidden size={18} />}
             onClick={() => toggleEntry(entry)}
-            className={cn(watched ? 'bg-transparent text-success hover:text-success' : 'text-fg-subtle')}
+            className={cn(watched ? 'bg-transparent text-success hover:text-success' : cn('text-fg-subtle', revealOnFine))}
             data-action="watched"
           />
         ) : (
@@ -262,7 +294,7 @@ function MyListRowImpl({
           icon={<X aria-hidden size={16} />}
           disabled={busy}
           onClick={() => removeEntry(entry)}
-          className="ms-auto hover:text-danger sm:ms-0"
+          className={cn('ms-auto hover:text-danger sm:ms-0', revealOnFine)}
           data-action="remove"
         />
       </div>
@@ -279,8 +311,8 @@ export function MyListSkeleton({ rows = 7, label }: { rows?: number; label: stri
       <span className="sr-only">{label}</span>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} aria-hidden className="flex items-center gap-3 px-1.5 sm:gap-4 sm:px-3" style={{ height: ROW_HEIGHT }}>
-          <div className="hidden w-12 shrink-0 sm:block" />
-          <div className="skeleton-surface h-[72px] w-12 shrink-0 rounded-md motion-safe:animate-shimmer" />
+          <div className="hidden w-6 shrink-0 sm:block" />
+          <div className="skeleton-surface h-[72px] w-12 shrink-0 rounded-md motion-safe:animate-shimmer sm:h-[84px] sm:w-14" />
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="skeleton-surface h-3.5 rounded-sm motion-safe:animate-shimmer" style={{ width: `${70 - (i % 3) * 12}%` }} />
             <div className="skeleton-surface h-3 w-1/3 rounded-sm opacity-70 motion-safe:animate-shimmer" />

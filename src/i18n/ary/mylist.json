@@ -81,5 +81,17 @@
   "menuChecking": "كنتحققو من الليستة ديالي…",
   "menuRetry": "عاود حمّل الليستة ديالي",
   "notReady": "الليستة ديالي باقا كتتحمّل. عاود جرّب من بعد شوية.",
-  "loadFailed": "ما قدرناش نحمّلو الليستة ديالي"
+  "loadFailed": "ما قدرناش نحمّلو الليستة ديالي",
+  "playTitle": "شغّل {{title}}",
+  "resumeTitle": "كمّل {{title}}",
+  "playFailed": "ماقدرناش نبداو التشغيل",
+  "minutesLeft_zero": "ما بقا حتى دقيقة",
+  "minutesLeft_one": "باقية {{count}} دقيقة",
+  "minutesLeft_two": "باقي جوج دقايق",
+  "minutesLeft_few": "باقي {{count}} دقايق",
+  "minutesLeft_many": "باقي {{count}} دقيقة",
+  "minutesLeft_other": "باقي {{count}} د",
+  "viewLabel": "العرض",
+  "viewGrid": "شبكة",
+  "viewList": "لائحة"
 }

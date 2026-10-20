@@ -60,7 +60,6 @@
   "folderChanged": "新しいダウンロードは選択したフォルダーに保存されます",
   "folderChangeFailed": "ダウンロードフォルダーを変更できませんでした",
   "folderOpenFailed": "ダウンロードフォルダーを開けませんでした",
-  "clearFinished": "終了したものをクリア",
   "clearConfirmTitle_one": "{{count, number}}件のダウンロードをクリアしますか？",
   "clearConfirmTitle_other": "{{count, number}}件のダウンロードをクリアしますか？",
   "clearConfirmBody": "失敗またはキャンセルされたダウンロードを、途中までのファイルとあわせてキューから削除します。",
@@ -83,7 +82,6 @@
   "shortcutCancel": "選択中のダウンロードをキャンセル",
   "shortcutRemove": "選択中のダウンロードを削除",
   "shortcutReveal": "選択中のダウンロードをフォルダーで表示",
-
   "myVideosTitle": "マイビデオ",
   "libraryTitleCount_one": "{{count, number}}作品",
   "libraryTitleCount_other": "{{count, number}}作品",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "{{title}}を再ダウンロード",
   "episodeRevealAria": "{{title}}をフォルダーに表示",
   "episodeRemoveAria": "{{title}}を削除",
-
   "favoritesTitle": "お気に入り",
   "sourceFavoritesTitle": "{{source}}のお気に入り",
   "favoritesCount_one": "お気に入り{{count, number}}件",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "選択中のお気に入りを下へ移動",
   "addedAgo": "{{time}}に追加",
   "undo": "元に戻す",
-
   "recentTitle": "最近視聴した項目",
   "sourceRecentTitle": "{{source}}で最近視聴した項目",
   "recentCount_one": "{{count, number}}件",
@@ -192,7 +188,6 @@
   "continueTitle": "{{title}}を{{time}}から再開",
   "removeContinue": "{{title}}を「視聴を再開」から削除",
   "watchedPercent": "{{percent}}% 視聴済み",
-
   "typeLive": "ライブチャンネル",
   "typeMovie": "映画",
   "typeSeries": "シリーズ",
@@ -280,5 +275,19 @@
   "stopConfirmTitle": "録画を停止しますか？",
   "stopConfirmBody": "{{title}} の録画を今すぐ停止します。再開はできません。ここまでの録画はマイビデオに残ります。",
   "stopConfirmKeep": "録画を続ける",
-  "stopConfirmAction": "録画を停止"
+  "stopConfirmAction": "録画を停止",
+  "clearFailedDownloads": "失敗したものをクリア",
+  "downloadDone": "{{title}}をダウンロードしました",
+  "downloadFailedNamed": "{{title}}をダウンロードできませんでした",
+  "nowProgress": "{{title}} の進行状況",
+  "scheduledRec": "録画",
+  "scheduledStopShort": "停止",
+  "scheduledPaddingAll": "録画は {{before}} 分早く開始し、{{after}} 分遅く終了します",
+  "myVideosTitlesHeading": "映画とシリーズ",
+  "aboutSource": "ソース",
+  "aboutEpisodes": "エピソード",
+  "aboutSize": "サイズ",
+  "aboutDownloaded": "ダウンロード日",
+  "aboutFile": "ファイル",
+  "openInCatalogue": "{{source}} で開く"
 }

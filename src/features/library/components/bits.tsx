@@ -1,32 +1,46 @@
 /** Small presentational pieces shared by the library pages. */
 
 import { k } from '../lib/keys';
-import { Clapperboard, Film, Radio, Tv } from 'lucide-react';
+import { Clapperboard, Film, Pause, Radio, Tv } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import type { ContentType, DownloadStatus, Source, SourceKind } from '@/api/types';
+import type { ContentType, DownloadStatus, Source } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
+import { hueOf, initialsOf } from '@/ui/Poster';
 
 import { Badge, Button, Dialog } from '../deps';
 
-const KIND_LABEL: Record<SourceKind, string> = { m3u: 'M3U', xtream: 'Xtream', stalker: 'Stalker' };
-
-/** Source provenance chip: name plus a tiny kind tag. Deleted sources read as such. */
+/**
+ * Source provenance: the rail's monogram (same hue, so a source is recognised at a glance) and
+ * the name in quiet text, no outline. Rows show it only where the page mixes sources, and a page
+ * whose rows all share one source can leave it out. Deleted sources read as such.
+ */
 export function SourceBadge({ source, className }: { source: Source | undefined; className?: string }) {
   const { t } = useTranslation('library');
+  const name = source?.name ?? t('sourceRemoved');
+  return (
+    <span className={cn('inline-flex min-w-0 max-w-[14rem] items-center gap-1.5 text-caption text-fg-subtle', className)} title={name} data-testid="source-badge">
+      {source && <SourceMonogram name={source.name} />}
+      <span dir="auto" className="truncate">
+        {name}
+      </span>
+    </span>
+  );
+}
+
+/** The rail's source monogram at 16 px: two initials on the source's own hue. Decorative; the name sits beside it. */
+export function SourceMonogram({ name, className }: { name: string; className?: string }) {
+  const hue = hueOf(name);
   return (
     <span
-      className={cn(
-        'inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-sm border border-edge px-1.5 py-0.5 text-[calc(11rem/15)] leading-4 text-fg-muted',
-        className,
-      )}
-      title={source?.name ?? t('sourceRemoved')}
+      aria-hidden
+      className={cn('inline-flex size-4 shrink-0 items-center justify-center rounded-xs font-display text-[calc(8rem/15)] font-semibold leading-none text-white', className)}
+      style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
     >
-      {source && <span className="font-display text-2xs font-semibold tracking-wide text-fg-subtle">{KIND_LABEL[source.kind]}</span>}
-      <span className="truncate">{source?.name ?? t('sourceRemoved')}</span>
+      {initialsOf(name)}
     </span>
   );
 }
@@ -36,10 +50,15 @@ export function ContentIcon({ type, size = 16, className }: { type: ContentType;
   return <Icon aria-hidden size={size} className={className} />;
 }
 
+/**
+ * Only the running transfer takes the accent (as text on a neutral chip); paused and queued are
+ * neutral, paused with its glyph, so a paused row no longer reads as the warning-yellow twin of a
+ * downloading one.
+ */
 const STATUS_VARIANT: Record<DownloadStatus, 'accent' | 'neutral' | 'warning' | 'danger' | 'outline' | 'success'> = {
   downloading: 'accent',
   queued: 'neutral',
-  paused: 'warning',
+  paused: 'neutral',
   failed: 'danger',
   canceled: 'outline',
   completed: 'success',
@@ -49,6 +68,7 @@ export function StatusBadge({ status, className }: { status: DownloadStatus; cla
   const { t } = useTranslation('library');
   return (
     <Badge variant={STATUS_VARIANT[status]} className={className} data-status={status}>
+      {status === 'paused' && <Pause aria-hidden size={12} className="shrink-0" />}
       {t(k('status', status))}
     </Badge>
   );
@@ -100,13 +120,19 @@ export function PageTitle({ children }: { children: string }) {
   return <h1 className="sr-only">{children}</h1>;
 }
 
-/** Section header row used inside the virtual lists. */
-export function SectionHeading({ title, count, hint }: { title: string; count: number; hint?: string }) {
+/**
+ * A section's heading row in a virtual list: title, count, an optional hint and an action at the
+ * end. The lists bleed their rows' hover fill into the gutter (`-mx-2` on the scroller, `px-2` on
+ * each row), and the heading takes the rows' padding too, so heading, artwork and the header
+ * title share one line.
+ */
+export function SectionHeading({ title, count, hint, action }: { title: string; count: number; hint?: string; action?: ReactNode }) {
   return (
-    <div className="flex h-full items-end gap-3 px-1 pb-2">
+    <div className="flex h-full items-end gap-3 px-2 pb-2">
       <h2 className="text-title-sm text-fg">{title}</h2>
-      <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
-      {hint && <span className="ms-auto truncate text-xs text-fg-subtle">{hint}</span>}
+      <span className="text-body-sm tabular-nums text-fg-subtle">{count}</span>
+      {hint && <span className="ms-auto hidden min-w-0 truncate text-xs text-fg-subtle sm:inline">{hint}</span>}
+      {action && <span className={cn('ms-auto shrink-0', hint && 'sm:ms-0')}>{action}</span>}
     </div>
   );
 }

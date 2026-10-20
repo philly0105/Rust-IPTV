@@ -1,18 +1,20 @@
 /**
  * The /my-list toolbar: the type filter as pill tabs with counts, then the
- * search, the Hide watched switch and the sort. The search lives here rather
+ * search, the Hide watched switch, the sort and the grid/list switch. The search lives here rather
  * than in the shell header, so a phone-width header keeps room for the page
  * title (as on the category grid); Ctrl+F finds it through `data-page-search`.
  * On a phone the tabs, the search and the other two controls take a line
  * each; from about 1000 px up everything fits on one line.
  */
 
+import { LayoutGrid, List } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { intlLocale, numberFormat } from '@/lib/intl';
 
-import { SearchInput, Select, Tabs, Toggle, cn } from '../deps';
+import { SearchInput, SegmentedControl, Select, Tabs, Toggle, cn } from '../deps';
 import { FILTERS, SORTS, type MyListFilter, type MyListSort } from '../lib/list';
+import type { MyListView } from '../lib/view';
 
 export interface MyListToolbarProps {
   filter: MyListFilter;
@@ -29,6 +31,9 @@ export interface MyListToolbarProps {
   onFilter: (f: MyListFilter) => void;
   onSort: (s: MyListSort) => void;
   onHideWatched: (on: boolean) => void;
+  /** Grid or list; the switch shows when `onView` is given. */
+  view?: MyListView;
+  onView?: (view: MyListView) => void;
   className?: string;
 }
 
@@ -47,6 +52,8 @@ export function MyListToolbar({
   onFilter,
   onSort,
   onHideWatched,
+  view = 'grid',
+  onView,
   className,
 }: MyListToolbarProps) {
   const { t, i18n } = useTranslation('mylist');
@@ -79,10 +86,26 @@ export function MyListToolbar({
           }}
           size="sm"
           placeholder={t('searchPlaceholder')}
-          className="w-full sm:w-auto sm:min-w-48 sm:flex-1 lg:w-56 lg:flex-none"
+          // Below sm the search shares its line with the grid/list switch only.
+          className="min-w-0 flex-1 basis-[calc(100%-6rem)] sm:basis-auto sm:min-w-48 lg:w-56 lg:flex-none"
           data-page-search=""
           data-testid="mylist-search"
         />
+        {onView && (
+          <SegmentedControl<MyListView>
+            label={t('viewLabel')}
+            value={view}
+            onChange={onView}
+            // Beside the search on a phone, at the end of the toolbar from lg up.
+            className="shrink-0 lg:order-last"
+            itemClassName="px-2"
+            testId="mylist-view"
+            options={[
+              { value: 'grid', label: t('viewGrid'), content: <LayoutGrid aria-hidden size={16} /> },
+              { value: 'list', label: t('viewList'), content: <List aria-hidden size={16} /> },
+            ]}
+          />
+        )}
         {(watchedCount > 0 || hideWatched) && (
           <Toggle
             checked={hideWatched}

@@ -44,8 +44,14 @@ export interface VirtualRowsProps<R extends RowBase> {
   onRowKeyDown?: (row: R, e: ReactKeyboardEvent<HTMLDivElement>, index: number) => void;
   /** Extra content rendered above the rows inside the scroll area (scrolls away). */
   header?: ReactNode;
+  /**
+   * The header's height before it is measured (and in jsdom, which has no layout). Once on
+   * screen the header is measured, so it may grow with the UI scale or wrap.
+   */
   headerHeight?: number;
   className?: string;
+  /** Classes for the list itself, inside the scroll area: a reading width for the rows (`max-w-4xl`). */
+  listClassName?: string;
   testId?: string;
 }
 
@@ -59,10 +65,28 @@ export function VirtualRows<R extends RowBase>({
   header,
   headerHeight = 0,
   className,
+  listClassName,
   testId,
 }: VirtualRowsProps<R>) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [activeKey, setActiveKey] = useState<string | undefined>(undefined);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [measuredHeader, setMeasuredHeader] = useState<number | undefined>(undefined);
+  const hasHeader = header !== undefined && header !== null && header !== false;
+  // The rows sit below the header: their offsets start where it ends, as measured.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const read = () => {
+      const h = el.getBoundingClientRect().height;
+      setMeasuredHeader(h > 0 ? h : undefined);
+    };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasHeader]);
+  const headerSize = hasHeader ? (measuredHeader ?? headerHeight) : 0;
 
   const virtualizer = useListVirtualizer({
     count: rows.length,
@@ -73,7 +97,7 @@ export function VirtualRows<R extends RowBase>({
     },
     getItemKey: (i) => rows[i]?.key ?? i,
     overscan: 8,
-    scrollMargin: headerHeight,
+    scrollMargin: headerSize,
     // jsdom has no layout; render a first screenful so tests see rows.
     initialRect: { width: 1024, height: 800 },
   });
@@ -211,8 +235,8 @@ export function VirtualRows<R extends RowBase>({
         if (next instanceof Node && !e.currentTarget.contains(next)) lastFocus.current = null;
       }}
     >
-      {header}
-      <div role="list" aria-label={label} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+      {hasHeader ? <div ref={headerRef}>{header}</div> : null}
+      <div role="list" aria-label={label} className={cn('relative w-full', listClassName)} style={{ height: virtualizer.getTotalSize() }}>
         {items.map((vi) => {
           const row = rows[vi.index];
           if (!row) return null;
@@ -233,7 +257,7 @@ export function VirtualRows<R extends RowBase>({
               }
               onKeyDown={focusable ? (e) => onKeyDown(e, vi.index) : undefined}
               className="absolute start-0 top-0 w-full rounded-md focus-visible:outline-offset-[-2px]"
-              style={{ height: vi.size, transform: `translateY(${vi.start - headerHeight}px)` }}
+              style={{ height: vi.size, transform: `translateY(${vi.start - headerSize}px)` }}
             >
               {renderRow(row, { index: vi.index, active: vi.index === activeIndex, tabStop: focusable && vi.index === tabStop })}
             </div>

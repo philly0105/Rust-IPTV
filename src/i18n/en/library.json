@@ -60,7 +60,6 @@
   "folderChanged": "New downloads will be saved to the chosen folder",
   "folderChangeFailed": "Could not change the downloads folder",
   "folderOpenFailed": "Could not open the downloads folder",
-  "clearFinished": "Clear finished",
   "clearConfirmTitle_one": "Clear {{count, number}} download?",
   "clearConfirmTitle_other": "Clear {{count, number}} downloads?",
   "clearConfirmBody": "Failed and canceled downloads are removed from the queue, along with any partial files.",
@@ -83,7 +82,6 @@
   "shortcutCancel": "Cancel the focused download",
   "shortcutRemove": "Remove the focused download",
   "shortcutReveal": "Show the focused download in its folder",
-
   "myVideosTitle": "My Videos",
   "libraryTitleCount_one": "{{count, number}} title",
   "libraryTitleCount_other": "{{count, number}} titles",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "Download {{title}} again",
   "episodeRevealAria": "Show {{title}} in folder",
   "episodeRemoveAria": "Remove {{title}}",
-
   "favoritesTitle": "Favorites",
   "sourceFavoritesTitle": "Favorites in {{source}}",
   "favoritesCount_one": "{{count, number}} favorite",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "Move the focused favorite down",
   "addedAgo": "Added {{time}}",
   "undo": "Undo",
-
   "recentTitle": "Recently watched",
   "sourceRecentTitle": "Recently watched in {{source}}",
   "recentCount_one": "{{count, number}} item",
@@ -192,7 +188,6 @@
   "continueTitle": "Continue {{title}} at {{time}}",
   "removeContinue": "Remove {{title}} from continue watching",
   "watchedPercent": "{{percent}}% watched",
-
   "typeLive": "Live channel",
   "typeMovie": "Movie",
   "typeSeries": "Series",
@@ -280,5 +275,19 @@
   "stopConfirmTitle": "Stop recording?",
   "stopConfirmBody": "Recording of {{title}} stops now and cannot be resumed. What was recorded so far stays in My Videos.",
   "stopConfirmKeep": "Keep recording",
-  "stopConfirmAction": "Stop recording"
+  "stopConfirmAction": "Stop recording",
+  "clearFailedDownloads": "Clear failed",
+  "downloadDone": "Downloaded {{title}}",
+  "downloadFailedNamed": "Couldn't download {{title}}",
+  "nowProgress": "How far {{title}} has got",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Stop",
+  "scheduledPaddingAll": "Recordings start {{before}} min early and end {{after}} min late",
+  "myVideosTitlesHeading": "Movies and series",
+  "aboutSource": "Source",
+  "aboutEpisodes": "Episodes",
+  "aboutSize": "Size",
+  "aboutDownloaded": "Downloaded",
+  "aboutFile": "File",
+  "openInCatalogue": "Open in {{source}}"
 }

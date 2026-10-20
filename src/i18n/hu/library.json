@@ -60,7 +60,6 @@
   "folderChanged": "Az új letöltések a kiválasztott mappába kerülnek",
   "folderChangeFailed": "Nem sikerült módosítani a letöltési mappát",
   "folderOpenFailed": "Nem sikerült megnyitni a letöltési mappát",
-  "clearFinished": "Befejezettek törlése",
   "clearConfirmTitle_one": "{{count, number}} letöltés törlése?",
   "clearConfirmTitle_other": "{{count, number}} letöltés törlése?",
   "clearConfirmBody": "A sikertelen és megszakított letöltések a részleges fájlokkal együtt lekerülnek a várólistáról.",
@@ -83,7 +82,6 @@
   "shortcutCancel": "A kijelölt letöltés megszakítása",
   "shortcutRemove": "A kijelölt letöltés eltávolítása",
   "shortcutReveal": "A kijelölt letöltés megjelenítése a mappájában",
-
   "myVideosTitle": "Saját videók",
   "libraryTitleCount_one": "{{count, number}} cím",
   "libraryTitleCount_other": "{{count, number}} cím",
@@ -145,7 +143,6 @@
   "episodeRedownloadAria": "{{title}} letöltése újra",
   "episodeRevealAria": "{{title}} megjelenítése a mappában",
   "episodeRemoveAria": "{{title}} eltávolítása",
-
   "favoritesTitle": "Kedvencek",
   "sourceFavoritesTitle": "Kedvencek – {{source}}",
   "favoritesCount_one": "{{count, number}} kedvenc",
@@ -167,7 +164,6 @@
   "shortcutMoveDown": "A kijelölt kedvenc mozgatása lejjebb",
   "addedAgo": "Hozzáadva: {{time}}",
   "undo": "Visszavonás",
-
   "recentTitle": "Legutóbb megtekintett",
   "sourceRecentTitle": "Legutóbb megtekintett – {{source}}",
   "recentCount_one": "{{count, number}} elem",
@@ -192,7 +188,6 @@
   "continueTitle": "{{title}} folytatása innen: {{time}}",
   "removeContinue": "{{title}} eltávolítása a Lejátszás folytatása sorból",
   "watchedPercent": "{{percent}}% megtekintve",
-
   "typeLive": "Élő csatorna",
   "typeMovie": "Film",
   "typeSeries": "Sorozat",
@@ -280,5 +275,19 @@
   "stopConfirmTitle": "Leállítja a felvételt?",
   "stopConfirmBody": "A(z) {{title}} felvétele most leáll, és nem folytatható. Az eddig rögzített rész megmarad itt: Saját videók.",
   "stopConfirmKeep": "Felvétel folytatása",
-  "stopConfirmAction": "Felvétel leállítása"
+  "stopConfirmAction": "Felvétel leállítása",
+  "clearFailedDownloads": "Sikertelenek törlése",
+  "downloadDone": "{{title}} letöltve",
+  "downloadFailedNamed": "{{title}} letöltése nem sikerült",
+  "nowProgress": "{{title}} előrehaladása",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Leállítás",
+  "scheduledPaddingAll": "A felvételek {{before}} perccel korábban indulnak és {{after}} perccel később állnak le",
+  "myVideosTitlesHeading": "Filmek és sorozatok",
+  "aboutSource": "Forrás",
+  "aboutEpisodes": "Epizódok",
+  "aboutSize": "Méret",
+  "aboutDownloaded": "Letöltve",
+  "aboutFile": "Fájl",
+  "openInCatalogue": "Megnyitás itt: {{source}}"
 }

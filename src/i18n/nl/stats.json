@@ -35,5 +35,8 @@
   "clearBody": "Alle getelde kijktijd wordt verwijderd. Je voortgang en Recent bekeken blijven bewaard.",
   "cleared": "Kijkstatistieken gewist",
   "clearFailed": "Kan de statistieken niet wissen",
-  "watchLive": "Live tv kijken"
+  "watchLive": "Live tv kijken",
+  "kpiWeek": "Gekeken in de afgelopen 7 dagen",
+  "kpiMonth": "Gekeken in de afgelopen 30 dagen",
+  "dailyAverage": "Gemiddeld per dag"
 }

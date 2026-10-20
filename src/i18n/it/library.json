@@ -66,7 +66,6 @@
   "folderChanged": "I nuovi download verranno salvati nella cartella scelta",
   "folderChangeFailed": "Impossibile cambiare la cartella di download",
   "folderOpenFailed": "Impossibile aprire la cartella di download",
-  "clearFinished": "Cancella terminati",
   "clearConfirmTitle_one": "Cancellare {{count, number}} download?",
   "clearConfirmTitle_many": "Cancellare {{count, number}} download?",
   "clearConfirmTitle_other": "Cancellare {{count, number}} download?",
@@ -92,7 +91,6 @@
   "shortcutCancel": "Annulla il download selezionato",
   "shortcutRemove": "Rimuovi il download selezionato",
   "shortcutReveal": "Mostra il download selezionato nella sua cartella",
-
   "myVideosTitle": "I miei video",
   "libraryTitleCount_one": "{{count, number}} titolo",
   "libraryTitleCount_many": "{{count, number}} titoli",
@@ -159,7 +157,6 @@
   "episodeRedownloadAria": "Scarica di nuovo {{title}}",
   "episodeRevealAria": "Mostra {{title}} nella cartella",
   "episodeRemoveAria": "Rimuovi {{title}}",
-
   "favoritesTitle": "Preferiti",
   "sourceFavoritesTitle": "Preferiti in {{source}}",
   "favoritesCount_one": "{{count, number}} preferito",
@@ -182,7 +179,6 @@
   "shortcutMoveDown": "Sposta giù il preferito selezionato",
   "addedAgo": "Aggiunto {{time}}",
   "undo": "Annulla",
-
   "recentTitle": "Visti di recente",
   "sourceRecentTitle": "Visti di recente in {{source}}",
   "recentCount_one": "{{count, number}} elemento",
@@ -208,7 +204,6 @@
   "continueTitle": "Continua {{title}} da {{time}}",
   "removeContinue": "Rimuovi {{title}} da Continua a guardare",
   "watchedPercent": "{{percent}}% visto",
-
   "typeLive": "Canale in diretta",
   "typeMovie": "Film",
   "typeSeries": "Serie",
@@ -298,5 +293,19 @@
   "stopConfirmTitle": "Interrompere la registrazione?",
   "stopConfirmBody": "La registrazione di {{title}} si interrompe ora e non può riprendere. Quanto registrato finora resta in I miei video.",
   "stopConfirmKeep": "Continua a registrare",
-  "stopConfirmAction": "Interrompi registrazione"
+  "stopConfirmAction": "Interrompi registrazione",
+  "clearFailedDownloads": "Cancella non riusciti",
+  "downloadDone": "{{title}} scaricato",
+  "downloadFailedNamed": "Impossibile scaricare {{title}}",
+  "nowProgress": "Avanzamento di {{title}}",
+  "scheduledRec": "Rec",
+  "scheduledStopShort": "Ferma",
+  "scheduledPaddingAll": "Le registrazioni iniziano {{before}} min prima e finiscono {{after}} min dopo",
+  "myVideosTitlesHeading": "Film e serie",
+  "aboutSource": "Sorgente",
+  "aboutEpisodes": "Episodi",
+  "aboutSize": "Dimensione",
+  "aboutDownloaded": "Scaricato il",
+  "aboutFile": "File",
+  "openInCatalogue": "Apri in {{source}}"
 }

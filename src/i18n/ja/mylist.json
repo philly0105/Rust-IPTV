@@ -71,5 +71,13 @@
   "menuChecking": "マイリストを確認中…",
   "menuRetry": "マイリストを再読み込み",
   "notReady": "マイリストはまだ読み込み中です。少ししてからもう一度お試しください。",
-  "loadFailed": "マイリストを読み込めませんでした"
+  "loadFailed": "マイリストを読み込めませんでした",
+  "playTitle": "{{title}}を再生",
+  "resumeTitle": "{{title}}を続きから再生",
+  "playFailed": "再生を開始できませんでした",
+  "minutesLeft_one": "残り{{count}}分",
+  "minutesLeft_other": "残り{{count}}分",
+  "viewLabel": "表示",
+  "viewGrid": "グリッド",
+  "viewList": "リスト"
 }

@@ -267,15 +267,15 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     expect(label.className).toContain('min-w-0');
   });
 
-  it('poster badges truncate inside the badge and never outgrow a narrow poster', async () => {
+  it('poster badges truncate inside the badge and never outgrow the poster', async () => {
     const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 110 });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 140 });
     try {
       rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [movie(1, 'src2')], series: [] });
       renderApp('/search?q=movie');
       const grid = await screen.findByTestId('vod-search-movies');
-      // One 110px column on a phone: the badge stops 12px short of the poster's width.
-      await waitFor(() => expect((grid.querySelector('[title="Zed M3U with a very long provider name"]') as HTMLElement | null)?.style.maxWidth).toBe('98px'));
+      // One 140px column: the badge keeps 12px clear of the poster's edges and to its own 120px cap.
+      await waitFor(() => expect((grid.querySelector('[title="Zed M3U with a very long provider name"]') as HTMLElement | null)?.style.maxWidth).toBe('120px'));
       const badge = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
       expect(badge.querySelector('span')?.className).toContain('truncate');
     } finally {
@@ -283,13 +283,29 @@ describe('L2-visual-8: long source names truncate with an ellipsis and a tooltip
     }
   });
 
-  it('channel badges truncate inside the badge with the full name in the title', async () => {
+  it('on a phone-narrow poster the source moves into the caption instead of a clipped badge', async () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 110 });
+    try {
+      rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [movie(1, 'src2')], series: [] });
+      renderApp('/search?q=movie');
+      const grid = await screen.findByTestId('vod-search-movies');
+      // 110px collapsed the name to "Z…" beside the rating (the harness's phone shot): no badge on the art there.
+      await waitFor(() => expect(within(grid).getByText(/Zed M3U with a very long provider name/)).toBeTruthy());
+      expect(grid.querySelector('[title="Zed M3U with a very long provider name"]')).toBeNull();
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, 'clientWidth', original);
+    }
+  });
+
+  it('channel source names truncate with the full name in the title', async () => {
     rpcMock.handlers['catalog.search'] = () => ({ live: [channel(1, 'src2'), channel(2, 'src1')], movies: [], series: [] });
     renderApp('/search?q=news');
     const grid = await screen.findByTestId('vod-search-channels');
-    const badge = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
-    expect(badge.className).toContain('max-w-[110px]');
-    expect(badge.querySelector('span')?.className).toContain('truncate');
+    // The source is quiet text in the channel's second line now (no outlined chip); it still gives way first.
+    const name = grid.querySelector<HTMLElement>('[title="Zed M3U with a very long provider name"]')!;
+    expect(name.className).toContain('truncate');
+    expect(name.className).toContain('min-w-0');
   });
 });
 

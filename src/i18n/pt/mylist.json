@@ -75,5 +75,14 @@
   "menuChecking": "Verificando Minha lista…",
   "menuRetry": "Carregar Minha lista de novo",
   "notReady": "A Minha lista ainda está carregando. Tente de novo em instantes.",
-  "loadFailed": "Não foi possível carregar a Minha lista"
+  "loadFailed": "Não foi possível carregar a Minha lista",
+  "playTitle": "Reproduzir {{title}}",
+  "resumeTitle": "Retomar {{title}}",
+  "playFailed": "Não foi possível iniciar a reprodução",
+  "minutesLeft_one": "Falta {{count}} minuto",
+  "minutesLeft_many": "Faltam {{count}} minutos",
+  "minutesLeft_other": "Faltam {{count}} minutos",
+  "viewLabel": "Visualização",
+  "viewGrid": "Grade",
+  "viewList": "Lista"
 }

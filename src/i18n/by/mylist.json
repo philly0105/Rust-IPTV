@@ -77,5 +77,15 @@
   "menuChecking": "Правяраем Мой спіс…",
   "menuRetry": "Загрузіць Мой спіс нанова",
   "notReady": "Мой спіс яшчэ загружаецца. Паўтарыце крыху пазней.",
-  "loadFailed": "Не ўдалося загрузіць Мой спіс"
+  "loadFailed": "Не ўдалося загрузіць Мой спіс",
+  "playTitle": "Прайграць {{title}}",
+  "resumeTitle": "Працягнуць {{title}}",
+  "playFailed": "Не ўдалося пачаць прайграванне",
+  "minutesLeft_one": "Засталася {{count}} хвіліна",
+  "minutesLeft_few": "Засталіся {{count}} хвіліны",
+  "minutesLeft_many": "Засталося {{count}} хвілін",
+  "minutesLeft_other": "Засталося хвілін: {{count}}",
+  "viewLabel": "Выгляд",
+  "viewGrid": "Сетка",
+  "viewList": "Спіс"
 }

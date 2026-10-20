@@ -83,7 +83,12 @@ describe('stats page', () => {
 
   it('shows the total as a sentence and the live and VOD split', async () => {
     await loaded();
-    expect(screen.getByTestId('stats-total').textContent).toBe('3 hr 20 min watched in the last 7 days');
+    // A KPI tile: the number over its label, read as one sentence.
+    const total = screen.getByTestId('stats-total');
+    expect(within(total).getByText('3 hr 20 min watched in the last 7 days')).toBeTruthy();
+    expect(within(total).getByText('3 hr 20 min').getAttribute('aria-hidden')).toBe('true');
+    expect(within(total).getByText('Watched in the last 7 days')).toBeTruthy();
+    expect(screen.getByTestId('stats-average').textContent).toBe('Daily average 29 min');
     const split = screen.getByTestId('stats-split');
     expect(within(split).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Live 2 hr 30 min', 'Movies and series 50 min']);
   });
@@ -247,6 +252,25 @@ describe('stats page', () => {
     expect(played.list).toEqual([{ ref: JAZZ, title: 'Jazz FM', isLive: true, isRadio: true, sourceKind: 'xtream' }]);
     fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Play BBC One' }));
     expect(played.list[1]).toMatchObject({ ref: NEWS, posterUrl: 'http://img/bbc.png', isRadio: false });
+  });
+
+  it('puts both lists on one row template, so ranks and meters line up across the columns', async () => {
+    await loaded();
+    const channels = within(screen.getByTestId('stats-top-channels')).getAllByTestId('stats-channel');
+    const titles = within(screen.getByTestId('stats-top-titles')).getAllByTestId('stats-title');
+    await waitFor(() => expect(within(screen.getByTestId('stats-top-channels')).getAllByTestId('stats-play')).toHaveLength(2));
+    // One row height for both (the channel row also carries `group` for its Play reveal).
+    const rowOf = (el: HTMLElement) => el.className.split(/\s+/).filter((c) => c !== 'group').join(' ');
+    expect(new Set([...channels, ...titles].map(rowOf)).size).toBe(1);
+    // The same artwork frame holds a logo and a poster.
+    const frame = (row: HTMLElement) => row.querySelector('[data-testid="stats-meter"]')!.closest('li')!.querySelector('span.shrink-0.items-center')!.className;
+    expect(frame(channels[0]!)).toBe(frame(titles[0]!));
+    // Every row ends in the same trailing column: Play, its stand-in where the source is gone, or the title's chevron.
+    const trailing = (row: HTMLElement) => (row.querySelector('[data-testid="stats-open"]') ?? row).lastElementChild!;
+    expect(trailing(channels[2]!).tagName).toBe('SPAN');
+    expect(trailing(channels[2]!).className).toContain('w-8');
+    expect(trailing(titles[0]!).className).toContain('w-8');
+    expect(trailing(channels[0]!).getAttribute('data-testid')).toBe('stats-play');
   });
 
   it('lists top titles that open their page', async () => {

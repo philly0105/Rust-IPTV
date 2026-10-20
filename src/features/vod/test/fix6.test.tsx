@@ -10,7 +10,7 @@ import type { Category, Page, PageQuery, VodItem } from '@/api/types';
 
 import { CategoryGridPage } from '../pages/CategoryGridPage';
 import { SearchPage } from '../pages/SearchPage';
-import { VodLandingPage } from '../pages/VodLandingPage';
+import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { currentLocation, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
@@ -122,6 +122,7 @@ describe('F5: cards show the title without the year suffix', () => {
 describe('F4: counts follow the UI language', () => {
   it('groups category counts with the active locale', async () => {
     await i18n.changeLanguage('de');
+    localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     try {
       renderAt('/s/src1/movies', [{ path: '/s/:sourceId/movies', element: <VodLandingPage kind="movie" /> }]);
       const index = await screen.findByRole('list', { name: 'Categories' });

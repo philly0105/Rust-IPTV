@@ -21,6 +21,7 @@ import { cn } from '@/ui/cn';
 
 import {
   Badge,
+  Button,
   EmptyState,
   ErrorState,
   IconButton,
@@ -30,7 +31,9 @@ import {
   SkeletonList,
   StopRecordingDialog,
   clockDuration,
+  clockRange,
   clockTime,
+  dayHeading,
   dayLabel,
   elapsedSeconds,
   finishedRecordings,
@@ -115,7 +118,12 @@ export function ScheduledPage() {
   const nowList = useMemo(() => recordingNow(recordings.data), [recordings.data]);
   const next = useMemo(() => upcoming(reminders.data, recordings.data), [reminders.data, recordings.data]);
   const done = useMemo(() => finishedRecordings(recordings.data).slice(0, 50), [recordings.data]);
-  const subtitle = reminders.data && recordings.data ? scheduledSubtitle({ now: nowList.length, upcoming: next.length, lang, t }) : undefined;
+  // The padding most upcoming recordings share, said once in the section's heading; a row whose
+  // padding differs (scheduled before the setting changed) still says its own.
+  const padding = useMemo(() => commonPadding(next), [next]);
+  // Nothing at all: the page's empty state says so, and "0 items coming up" above it adds nothing.
+  const anything = nowList.length + next.length + done.length > 0;
+  const subtitle = reminders.data && recordings.data && anything ? scheduledSubtitle({ now: nowList.length, upcoming: next.length, lang, t }) : undefined;
   usePageHeader(title, subtitle);
 
   // Rules count toward loading, so the lists appear with the panel already in its place.
@@ -176,21 +184,29 @@ export function ScheduledPage() {
           title={t('scheduledUpcoming')}
           count={next.length}
           testId="scheduled-upcoming"
+          hint={padding ? t('scheduledPaddingAll', { before: padding.before, after: padding.after }) : undefined}
           // One grid for every day group (rows are subgrids): the time column takes the
           // widest time in the locale, so times never wrap and stay aligned.
           bodyClassName={next.length > 0 ? UPCOMING_GRID : undefined}
         >
           {next.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-fg-muted">{t('scheduledUpcomingEmpty')}</p>
+            <p className="px-4 py-6 text-body-sm text-fg-muted">{t('scheduledUpcomingEmpty')}</p>
           ) : (
-            groupByDay(next).map((g) => (
-              <div key={g.day} role="group" aria-label={dayLabel(g.day, now, lang)} className="col-span-full grid grid-cols-subgrid">
-                <p className="col-span-full bg-surface-2/50 px-4 py-1.5 text-xs font-medium text-fg-muted first-letter:uppercase">{dayLabel(g.day, now, lang)}</p>
-                {g.entries.map((e) => (
-                  <UpcomingRow key={`${e.type}:${e.id}`} entry={e} />
-                ))}
-              </div>
-            ))
+            groupByDay(next).map((g) => {
+              const heading = dayHeading(g.day, now, lang);
+              return (
+                <div key={g.day} role="group" aria-label={dayLabel(g.day, now, lang)} className="col-span-full grid grid-cols-subgrid">
+                  {/* The day carries the list's structure, so it reads as a heading: the word, then the date. */}
+                  <p className="col-span-full flex items-baseline gap-2 border-b border-divider bg-surface-2/60 px-4 py-2 text-body-sm">
+                    <span className="font-semibold text-fg first-letter:uppercase">{heading.label}</span>
+                    {heading.date ? <span className="text-caption text-fg-muted">{heading.date}</span> : null}
+                  </p>
+                  {g.entries.map((e) => (
+                    <UpcomingRow key={`${e.type}:${e.id}`} entry={e} padding={padding} />
+                  ))}
+                </div>
+              );
+            })
           )}
         </Section>
         {done.length > 0 ? (
@@ -208,7 +224,7 @@ export function ScheduledPage() {
     <Page width="default" className="flex min-w-0 flex-col gap-6 pb-8 pt-4">
       <PageTitle>{title}</PageTitle>
       {caps.data && !caps.data.supported ? (
-        <p role="note" className="rounded-md border border-edge bg-surface px-4 py-3 text-sm text-fg-muted" data-testid="scheduled-no-recording">
+        <p role="note" className="rounded-lg border border-edge bg-surface px-4 py-3 text-body-sm text-fg-muted" data-testid="scheduled-no-recording">
           {t('scheduledServerNoMpv')}
         </p>
       ) : null}
@@ -222,31 +238,58 @@ function Section({
   title,
   count,
   testId,
+  hint,
   bodyClassName,
   children,
 }: {
   title: string;
   count: number;
   testId: string;
-  bodyClassName?: string;
+  /** A note for every row of the section, said once beside the heading. */
+  hint?: string | undefined;
+  bodyClassName?: string | undefined;
   children: React.ReactNode;
 }) {
   const id = `${testId}-title`;
   return (
-    <section aria-labelledby={id} data-testid={testId} className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-3 px-1">
+    <section aria-labelledby={id} data-testid={testId} className="flex flex-col gap-3">
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h2 id={id} className="text-title-sm text-fg">
           {title}
         </h2>
-        <span className="font-display text-[calc(13rem/15)] tabular-nums text-fg-subtle">{count}</span>
+        <span className="text-body-sm tabular-nums text-fg-subtle">{count}</span>
+        {hint ? (
+          <span className="min-w-0 text-caption text-fg-subtle sm:ms-auto" data-testid={`${testId}-hint`}>
+            {hint}
+          </span>
+        ) : null}
       </div>
       <div className={cn('flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-edge bg-surface', bodyClassName)}>{children}</div>
     </section>
   );
 }
 
-/** Upcoming rows: time, kind mark, title block, kind badge (from sm), cancel. */
-const UPCOMING_GRID = 'grid grid-cols-[max-content_auto_minmax(0,1fr)_auto] sm:grid-cols-[max-content_auto_minmax(0,1fr)_auto_auto]';
+/** Upcoming rows: time, kind mark, title block, cancel. */
+const UPCOMING_GRID = 'grid grid-cols-[max-content_auto_minmax(0,1fr)_auto]';
+
+type Padding = { before: number; after: number };
+
+/** The padding most upcoming programme recordings share, or undefined when none is padded. */
+export function commonPadding(entries: readonly UpcomingEntry[]): Padding | undefined {
+  const counts = new Map<string, { p: Padding; n: number }>();
+  for (const e of entries) {
+    if (e.type !== 'recording' || e.recording.kind !== 'programme') continue;
+    const p = { before: e.recording.paddingBeforeMinutes, after: e.recording.paddingAfterMinutes };
+    if (p.before <= 0 && p.after <= 0) continue;
+    const key = `${p.before}|${p.after}`;
+    const c = counts.get(key);
+    if (c) c.n += 1;
+    else counts.set(key, { p, n: 1 });
+  }
+  let best: { p: Padding; n: number } | undefined;
+  for (const c of counts.values()) if (!best || c.n > best.n) best = c;
+  return best?.p;
+}
 
 /** Icon-button content while its action runs: a spinner in place of the icon. */
 function Busy() {
@@ -264,42 +307,52 @@ function RecordingNowRow({ recording: r }: { recording: Recording }) {
   const elapsed = elapsedSeconds(r, now);
   const reconnecting = r.errorCode === 'reconnecting';
   return (
-    <div className="flex items-center gap-4 px-4 py-3" data-testid="recording-now-row" data-recording-id={r.id}>
-      <span aria-hidden className="block size-2.5 shrink-0 rounded-full bg-live motion-safe:animate-pulse" />
+    <div className="flex items-center gap-3 px-4 py-3 sm:gap-4" data-testid="recording-now-row" data-recording-id={r.id}>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span dir="auto" className="truncate text-sm font-medium text-fg">
+        <div className="flex min-w-0 items-center gap-2">
+          {/* The recording mark: the live red, as a word, so it never reads as a status dot or a radio. */}
+          <Badge variant="live" className="shrink-0 font-numeric uppercase tracking-wide" data-testid="recording-rec">
+            {t('scheduledRec')}
+          </Badge>
+          <span dir="auto" className="min-w-0 truncate text-body-sm font-medium text-fg">
             {name}
           </span>
           {r.title ? (
-            <span dir="auto" className="hidden truncate text-[calc(13rem/15)] text-fg-muted sm:inline">
+            <span dir="auto" className="hidden min-w-0 truncate text-caption text-fg-muted sm:inline">
               {r.channelName}
             </span>
           ) : null}
         </div>
         {/* Measured from when this recording began writing, in step with the elapsed clock. */}
         <ProgressBar value={recordingFraction(r, now) * 100} tone="accent" label={t('scheduledProgressFor', { title: name })} />
-        <div className="flex min-w-0 items-center gap-3 text-xs text-fg-muted">
+        <div className="flex min-w-0 items-center gap-3 whitespace-nowrap text-caption text-fg-muted">
           <span className="font-numeric tabular-nums text-fg">{clockDuration(elapsed)}</span>
-          <span className="font-display tabular-nums">{formatBytes(bytes, i18n.language)}</span>
-          <span className="tabular-nums">{t('scheduledUntil', { time: timeOf(new Date(Date.parse(r.end) + r.paddingAfterMinutes * 60_000).toISOString(), i18n.language) })}</span>
+          <span className="tabular-nums">{formatBytes(bytes, i18n.language)}</span>
+          <span className="min-w-0 truncate tabular-nums">
+            {t('scheduledUntil', { time: timeOf(new Date(Date.parse(r.end) + r.paddingAfterMinutes * 60_000).toISOString(), i18n.language) })}
+          </span>
           {reconnecting ? <span className="truncate text-warning">{t('scheduledReconnecting')}</span> : null}
         </div>
       </div>
-      <IconButton
-        label={t('scheduledStop', { title: name })}
-        icon={stopping ? <Busy /> : <Square size={16} aria-hidden />}
+      {/* A labelled button, not a bare square glyph that reads as an empty checkbox. */}
+      <Button
+        size="sm"
+        variant="secondary"
+        aria-label={t('scheduledStop', { title: name })}
+        icon={stopping ? <Busy /> : <Square size={12} aria-hidden className="fill-current text-live" />}
         disabled={stopping}
         aria-busy={stopping || undefined}
         onClick={() => setConfirm(true)}
         data-testid="recording-stop"
-      />
+      >
+        {t('scheduledStopShort')}
+      </Button>
       <StopRecordingDialog recording={confirm ? r : null} onClose={() => setConfirm(false)} />
     </div>
   );
 }
 
-function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
+function UpcomingRow({ entry, padding }: { entry: UpcomingEntry; padding: Padding | undefined }) {
   const { t, i18n } = useTranslation('library');
   const { toast } = useToast();
   const actions = useScheduleActions();
@@ -307,21 +360,59 @@ function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
   const isReminder = entry.type === 'reminder';
   const item: Reminder | Recording = isReminder ? entry.reminder : entry.recording;
   const name = (isReminder ? entry.reminder.title : entry.recording.title) ?? item.channelName;
-  const range = `${timeOf(item.start, lang)}–${timeOf(item.end, lang)}`;
+  const range = clockRange(Date.parse(item.start), Date.parse(item.end), lang);
+  // Said once in the section heading when it matches; only a row that differs says its own.
+  const ownPadding =
+    entry.type === 'recording' &&
+    entry.recording.kind === 'programme' &&
+    (entry.recording.paddingBeforeMinutes > 0 || entry.recording.paddingAfterMinutes > 0) &&
+    (entry.recording.paddingBeforeMinutes !== padding?.before || entry.recording.paddingAfterMinutes !== padding?.after)
+      ? { before: entry.recording.paddingBeforeMinutes, after: entry.recording.paddingAfterMinutes }
+      : undefined;
   const cancelling = useCancelPending(isReminder ? undefined : entry.recording.id);
   const [removing, setRemoving] = useState(false);
   const busy = cancelling || removing;
 
+  // VL-cancel-recording: one press cancels, so the toast carries an Undo that puts the recording (or
+  // the reminder) back for the same programme. The core applies the padding from Settings again.
+  const undoFailed = (e: unknown) => toast({ variant: 'error', title: t('undoFailed'), description: errorDescription(e) });
   const cancel = async () => {
     if (busy) return;
     if (entry.type === 'recording') {
-      await actions.cancelRecording(entry.recording);
+      const r = entry.recording;
+      const again = r.kind === 'programme' && r.status === 'scheduled' && r.title;
+      await actions.cancelRecording(
+        r,
+        again
+          ? {
+              undo: {
+                label: t('undo'),
+                onClick: () => {
+                  void actions
+                    .record({ ref: r.ref, channelName: r.channelName, program: { title: r.title ?? name, start: r.start, end: r.end } })
+                    .catch(undoFailed);
+                },
+              },
+            }
+          : undefined,
+      );
       return;
     }
+    const reminder = entry.reminder;
     setRemoving(true);
     try {
-      await rpc('reminders.remove', { id: entry.reminder.id });
-      toast({ title: t('scheduledReminderRemoved', { title: name }) });
+      await rpc('reminders.remove', { id: reminder.id });
+      toast({
+        title: t('scheduledReminderRemoved', { title: name }),
+        action: {
+          label: t('undo'),
+          onClick: () => {
+            rpc('reminders.add', { ref: reminder.ref, channelName: reminder.channelName, title: reminder.title, start: reminder.start, end: reminder.end })
+              .then(() => invalidate('reminders.'))
+              .catch(undoFailed);
+          },
+        },
+      });
       // Stays pending until the refreshed list drops the row.
       await invalidate('reminders.');
     } catch (e) {
@@ -333,43 +424,38 @@ function UpcomingRow({ entry }: { entry: UpcomingEntry }) {
 
   return (
     <div className="col-span-full grid grid-cols-subgrid items-center gap-x-4 px-4 py-3" data-testid="upcoming-row" data-kind={entry.type}>
-      <span className="whitespace-nowrap font-numeric text-sm tabular-nums text-fg">{timeOf(item.start, lang)}</span>
+      <span className="whitespace-nowrap font-numeric text-body-sm tabular-nums text-fg">{timeOf(item.start, lang)}</span>
+      {/* One signal for the kind: a red record dot or a bell (the words are for screen readers). */}
       <span className="flex size-6 shrink-0 items-center justify-center" aria-hidden>
-        {/* A waiting recording gets a hollow mark; the filled live dot is for recordings writing now. */}
         {isReminder ? (
-          <Bell size={16} className="text-accent" />
+          <Bell size={16} className="text-fg-muted" data-testid="upcoming-reminder-mark" />
         ) : (
-          <span className="block size-2.5 rounded-full border-2 border-fg-subtle" data-testid="upcoming-record-mark" />
+          <span className="block size-2 rounded-full bg-live" data-testid="upcoming-record-mark" />
         )}
       </span>
       <div className="flex min-w-0 flex-col">
-        <span dir="auto" className="truncate text-sm font-medium text-fg">
+        <span dir="auto" className="truncate text-body-sm font-medium text-fg">
           {name}
         </span>
+        <span className="sr-only">{isReminder ? t('scheduledKindReminder') : t('scheduledKindWillRecord')}</span>
         {/* The channel comes first and keeps its room; on a narrow row the range wraps under it. */}
-        <span className="flex min-w-0 flex-wrap gap-x-3 text-xs text-fg-muted">
+        <span className="flex min-w-0 flex-wrap gap-x-3 text-caption text-fg-muted">
           <span dir="auto" className="min-w-0 max-w-full truncate">
             {item.channelName}
           </span>
           <span className="shrink-0 tabular-nums">{range}</span>
-          {entry.type === 'recording' &&
-          entry.recording.kind === 'programme' &&
-          (entry.recording.paddingBeforeMinutes > 0 || entry.recording.paddingAfterMinutes > 0) ? (
-            <span className="hidden truncate text-fg-subtle md:inline">
-              {t('scheduledPadding', { before: entry.recording.paddingBeforeMinutes, after: entry.recording.paddingAfterMinutes })}
-            </span>
+          {ownPadding ? (
+            <span className="hidden truncate text-fg-subtle md:inline">{t('scheduledPadding', { before: ownPadding.before, after: ownPadding.after })}</span>
           ) : null}
         </span>
       </div>
-      <Badge variant={isReminder ? 'outline' : 'neutral'} className="hidden shrink-0 sm:inline-flex">
-        {isReminder ? t('scheduledKindReminder') : t('scheduledKindWillRecord')}
-      </Badge>
       <IconButton
         label={isReminder ? t('scheduledCancelReminder', { title: name }) : t('scheduledCancelRecording', { title: name })}
         icon={busy ? <Busy /> : <X size={16} aria-hidden />}
         disabled={busy}
         aria-busy={busy || undefined}
         onClick={() => void cancel()}
+        className="hover:text-danger"
         data-testid="upcoming-cancel"
       />
     </div>
@@ -402,27 +488,27 @@ function FinishedRow({ recording: r }: { recording: Recording }) {
   };
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3" data-testid="finished-row" data-status={r.status}>
+    <div className="flex items-center gap-3 px-4 py-3 sm:gap-4" data-testid="finished-row" data-status={r.status}>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-baseline gap-2">
-          <span dir="auto" className="truncate text-sm font-medium text-fg">
+          <span dir="auto" className="min-w-0 truncate text-body-sm font-medium text-fg">
             {name}
           </span>
           <Badge variant={early ? 'warning' : STATUS_VARIANT[r.status]} className="shrink-0" data-status={early ? 'stoppedEarly' : r.status}>
             {early ? t('recStatusStoppedEarly') : t(k('recStatus', r.status))}
           </Badge>
         </div>
-        <span className="flex min-w-0 gap-3 text-xs text-fg-muted">
+        <span className="flex min-w-0 gap-3 whitespace-nowrap text-caption text-fg-muted">
           {r.title ? (
             <span dir="auto" className="truncate">
               {r.channelName}
             </span>
           ) : null}
           <span className="shrink-0 tabular-nums">{when}</span>
-          {r.bytes > 0 ? <span className="shrink-0 font-display tabular-nums">{formatBytes(r.bytes, lang)}</span> : null}
+          {r.bytes > 0 ? <span className="shrink-0 tabular-nums">{formatBytes(r.bytes, lang)}</span> : null}
         </span>
         {note ? (
-          <span className={cn('truncate text-xs', r.status === 'failed' ? 'text-danger' : 'text-fg-subtle')} title={r.error}>
+          <span className={cn('truncate text-caption', r.status === 'failed' ? 'text-danger' : 'text-fg-subtle')} title={r.error}>
             {note}
           </span>
         ) : null}

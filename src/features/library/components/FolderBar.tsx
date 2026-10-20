@@ -1,4 +1,4 @@
-/** "Saving to <folder>" strip with change (desktop dialog) and open-folder actions. */
+/** "Saving to <folder>" line with change (desktop dialog) and open-folder actions. */
 
 import { FolderCog, FolderOpen, HardDrive, RotateCw } from 'lucide-react';
 import { useState } from 'react';
@@ -64,20 +64,22 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
     }
   };
 
+  // One quiet line under the header (not a bordered panel): where files go, and the two folder
+  // actions beside it. The queue below is what the page is for.
   return (
-    <div className="flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-edge bg-surface px-4 py-2">
-      <HardDrive aria-hidden size={18} className="shrink-0 text-fg-subtle" />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-xs text-fg-subtle">{t('savingTo')}</span>
+    <div className="flex min-h-8 min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-muted" data-testid="downloads-folder">
+      <span className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+        <HardDrive aria-hidden size={14} className="shrink-0 text-fg-subtle" />
+        <span className="shrink-0">{t('savingTo')}</span>
         {dir.isLoading ? (
-          <Skeleton className="mt-1 h-3.5 w-64" />
+          <Skeleton className="h-3.5 w-48" />
         ) : dir.isError && pageError ? (
           // The page already shows the error and its retry; one alert is enough.
-          <span className="text-[calc(13rem/15)] text-fg-muted" data-testid="downloads-dir-unavailable">
+          <span className="text-fg-muted" data-testid="downloads-dir-unavailable">
             {t('folderUnavailable')}
           </span>
         ) : dir.isError ? (
-          <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[calc(13rem/15)] text-danger" role="alert" data-testid="downloads-dir-error">
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-danger" role="alert" data-testid="downloads-dir-error">
             <span>{t('folderLoadFailed')}</span>
             <Button
               size="sm"
@@ -92,16 +94,16 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
         ) : (
           <FolderPath path={path} unknown={t('folderUnknown')} />
         )}
-      </div>
+      </span>
       {isDesktop && (
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" icon={<FolderOpen size={16} aria-hidden />} onClick={() => void openFolder()} disabled={!path}>
+        <span className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" icon={<FolderOpen size={14} aria-hidden />} onClick={() => void openFolder()} disabled={!path}>
             {t('openFolder')}
           </Button>
-          <Button size="sm" icon={<FolderCog size={16} aria-hidden />} loading={busy} onClick={() => void change()}>
+          <Button size="sm" variant="ghost" icon={<FolderCog size={14} aria-hidden />} loading={busy} onClick={() => void change()}>
             {t('changeFolder')}
           </Button>
-        </div>
+        </span>
       )}
     </div>
   );
@@ -114,7 +116,7 @@ export function FolderBar({ pageError = false }: { pageError?: boolean }) {
  * to right in every locale.
  */
 function FolderPath({ path, unknown }: { path: string | undefined; unknown: string }) {
-  const cls = 'font-mono text-[calc(13rem/15)] text-fg';
+  const cls = 'font-mono text-caption text-fg';
   if (!path) return <span className={cls}>{unknown}</span>;
   const { head, tail } = splitPath(path);
   return (

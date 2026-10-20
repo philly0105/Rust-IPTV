@@ -73,5 +73,13 @@
   "menuChecking": "Checking My List…",
   "menuRetry": "Load My List again",
   "notReady": "My List is still loading. Try again in a moment.",
-  "loadFailed": "Couldn't load My List"
+  "loadFailed": "Couldn't load My List",
+  "playTitle": "Play {{title}}",
+  "resumeTitle": "Resume {{title}}",
+  "playFailed": "Couldn't start playback",
+  "minutesLeft_one": "{{count}} minute left",
+  "minutesLeft_other": "{{count}} minutes left",
+  "viewLabel": "View",
+  "viewGrid": "Grid",
+  "viewList": "List"
 }

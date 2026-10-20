@@ -8,8 +8,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Category, Source } from '@/api/types';
 
 import { forgetSpots } from '../hooks/useScrollMemory';
-import { VodLandingPage } from '../pages/VodLandingPage';
-import { i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
+import { findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -52,6 +52,8 @@ beforeAll(installDomStubs);
 beforeEach(() => {
   forgetSpots();
   localStorage.clear();
+  // The counts under test sit in the category index, behind "Browse all categories" (VL-landing-index).
+  localStorage.setItem(CATEGORY_INDEX_KEY, '1');
   rpcMock.calls.length = 0;
   source = makeSource('src1', 'xtream', 'Alpha IPTV'); // movieCount 5000: the raw import
   cats = [cat('c1', 'Action', 12), cat('c2', 'Drama', 30, false, 1), cat('c3', 'Late night', 400, true, 2)];
@@ -78,15 +80,15 @@ describe('L3-app-4: the landing counts the titles the user can open', () => {
     expect(screen.queryByText(/5,000/)).toBeNull();
     const all = screen.getByRole('link', { name: new RegExp(i18n.t('vod:allMovies')) });
     expect(within(all).getByText('42')).toBeTruthy();
-    // The hidden category is not listed, only counted on Manage.
+    // The hidden category is not listed, only counted on Manage (in the chip row and by the index).
     expect(screen.queryByRole('link', { name: /Late night/ })).toBeNull();
-    expect(screen.getByRole('button', { name: i18n.t('vod:manageCategoriesHidden', { count: 1 }) })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: i18n.t('vod:manageCategoriesHidden', { count: 1 }) })).toHaveLength(2);
   });
 
   it('shows no count when every category is hidden (no "5,000 titles" over an empty index)', async () => {
     cats = cats.map((c) => ({ ...c, hidden: true }));
     landing();
-    expect(await screen.findByRole('button', { name: i18n.t('vod:manageCategoriesHidden', { count: 3 }) })).toBeTruthy();
+    expect(await screen.findAllByRole('button', { name: i18n.t('vod:manageCategoriesHidden', { count: 3 }) })).toHaveLength(2);
     expect(screen.getByText('Alpha IPTV')).toBeTruthy();
     expect(screen.queryByText(/titles/)).toBeNull();
   });
@@ -102,7 +104,7 @@ describe('L3-app-4: the landing counts the titles the user can open', () => {
 describe('L3-perf-desktop-7: one categories request', () => {
   it('reads the shown and the hidden categories from a single catalog.categories call', async () => {
     landing();
-    await screen.findByRole('link', { name: /Action/ });
+    await findIndexLink(/Action/);
     await new Promise((r) => setTimeout(r, 30));
     const calls = rpcMock.calls.filter((c) => c.cmd === 'catalog.categories');
     expect(calls).toEqual([{ cmd: 'catalog.categories', args: { sourceId: 'src1', contentType: 'movie', includeHidden: true } }]);

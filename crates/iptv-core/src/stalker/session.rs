@@ -316,10 +316,16 @@ impl StalkerClient {
             let label = label.clone();
             async move {
                 tracing::trace!(%label, "stalker request");
-                // Server mode: guarded client, portal host:port trusted.
-                let request = crate::http::trusted_client(&self.state, &self.config.portal_url)
-                    .get(&url)
-                    .headers(headers);
+                // Server mode: guarded client, portal host:port trusted. A
+                // big list may wait LONG_TIMEOUT for its head, longer than
+                // the normal clients' read timeout.
+                let portal = &self.config.portal_url;
+                let http = if long {
+                    crate::http::trusted_long_client(&self.state, portal)
+                } else {
+                    crate::http::trusted_client(&self.state, portal)
+                };
+                let request = http.get(&url).headers(headers);
                 // A big list keeps a minimum body rate instead of a whole
                 // deadline: tens of MB on a slow link take minutes.
                 let request = if long {

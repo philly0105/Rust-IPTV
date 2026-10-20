@@ -1301,6 +1301,23 @@ mod tests {
         );
     }
 
+    /// GPT review (long-head-timeout-undercut): reqwest's read timeout also
+    /// runs while a response head is awaited, so the normal clients' one cut
+    /// big lists off at 60 s. The long-wait clients' read timeout outlasts
+    /// every list head deadline they serve: 120 s for a playlist or an
+    /// Xtream list in the app (`PLAYLIST_HEADER_TIMEOUT`), and Stalker's.
+    #[test]
+    fn long_wait_clients_outlast_the_list_head_deadlines() {
+        let (normal, long) = (READ_TIMEOUT, LONG_READ_TIMEOUT);
+        let heads = [
+            Duration::from_secs(120),
+            crate::stalker::session::LONG_TIMEOUT,
+        ];
+        for head in heads {
+            assert!(normal < head && head < long, "{head:?}");
+        }
+    }
+
     #[test]
     fn backoff_grows_and_caps() {
         assert!(backoff_delay(0) >= Duration::from_millis(300));

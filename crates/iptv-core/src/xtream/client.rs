@@ -31,6 +31,8 @@ pub const ATTEMPTS: u32 = 3;
 #[derive(Clone)]
 pub struct XtreamClient {
     http: reqwest::Client,
+    /// Client for list actions ([`Self::with_list_client`]); `http` when unset.
+    list_http: Option<reqwest::Client>,
     /// Normalized server base (`scheme://host[:port][/base]`).
     pub server: String,
     pub username: String,
@@ -76,6 +78,7 @@ impl XtreamClient {
             .unwrap_or_else(|| XTREAM_USER_AGENT.to_string());
         Ok(Self {
             http,
+            list_http: None,
             server,
             username,
             password,
@@ -84,6 +87,17 @@ impl XtreamClient {
             attempts: ATTEMPTS,
             progress: None,
         })
+    }
+
+    /// Sends list actions ([`Self::get_bytes`]) through `http`. Their head
+    /// may take [`crate::m3u::importer::PLAYLIST_HEADER_TIMEOUT`], and
+    /// reqwest's read timeout also runs while a head is awaited, so this is
+    /// a client whose read timeout outlasts that deadline
+    /// ([`crate::http::trusted_long_client`]); the body keeps its own idle
+    /// limit ([`crate::http::READ_TIMEOUT`]).
+    pub fn with_list_client(mut self, http: reqwest::Client) -> Self {
+        self.list_http = Some(http);
+        self
     }
 
     /// Overrides the attempt count (connection tests use 1 to answer fast).
@@ -196,8 +210,11 @@ impl XtreamClient {
         for (k, v) in params {
             query.push((k, v.as_str()));
         }
-        let req = self
-            .http
+        let http = match (kind, &self.list_http) {
+            (BodyKind::List, Some(list)) => list,
+            _ => &self.http,
+        };
+        let req = http
             .get(api_endpoint(&self.server))
             .header(reqwest::header::USER_AGENT, self.user_agent.as_str())
             .header(reqwest::header::ACCEPT, "application/json, */*")
@@ -337,8 +354,9 @@ enum BodyKind {
 
 /// Reads a list body up to `max` bytes, failing with `Timeout` when it
 /// averages under the minimum rate over a window (a drip-feeding server
-/// resets the idle read timeout with every byte). Cancellable like
-/// [`read_capped`].
+/// resets the idle read timeout with every byte) or sends nothing for
+/// [`crate::http::READ_TIMEOUT`] (the list client's own read timeout is
+/// longer). Cancellable like [`read_capped`].
 async fn read_list_body(
     mut resp: reqwest::Response,
     context: &str,
@@ -356,23 +374,22 @@ async fn read_list_body(
     }
     let mut rate = crate::m3u::body::MinRate::standard();
     let mut buf = bytes::BytesMut::new();
-    while let Some(chunk) = crate::http::cancellable(resp.chunk())
-        .await?
-        .map_err(|err| {
-            if err.is_timeout() {
-                // The body stalled after the head (the idle read timeout):
-                // like the M3U download, a stalled body is not retried.
-                Failed {
-                    err: CoreError::Timeout(format!(
-                        "{context}: the server took too long to send its answer. Try again later."
-                    )),
-                    budget_spent: true,
-                }
-            } else {
-                CoreError::from(err).into()
-            }
-        })?
-    {
+    // The body stalled after the head (the idle read limit): like the M3U
+    // download, a stalled body is not retried.
+    let stalled = || Failed {
+        err: CoreError::Timeout(format!(
+            "{context}: the server took too long to send its answer. Try again later."
+        )),
+        budget_spent: true,
+    };
+    loop {
+        let read = tokio::time::timeout(crate::http::READ_TIMEOUT, resp.chunk());
+        let chunk = match crate::http::cancellable(read).await? {
+            Ok(Ok(Some(chunk))) => chunk,
+            Ok(Ok(None)) => break,
+            Ok(Err(err)) if !err.is_timeout() => return Err(CoreError::from(err).into()),
+            Ok(Err(_)) | Err(_) => return Err(stalled()),
+        };
         // Under the minimum rate for a whole window: the budget is spent.
         rate.on_bytes(chunk.len(), &host).map_err(|err| Failed {
             err: match err {
@@ -804,6 +821,58 @@ mod tests {
             "{took:?}"
         );
         assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+    }
+
+    /// GPT review (long-head-timeout-undercut): reqwest's read timeout also
+    /// runs while a response head is awaited, so a list whose head came
+    /// after the client's read timeout (60 s in the app, 300 ms here) failed
+    /// long before the list head deadline (120 s in the app, 1.5 s here).
+    /// Lists go through the list client, whose read timeout outlasts it.
+    #[tokio::test]
+    async fn list_head_may_outlast_the_main_read_timeout() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        const REPLY: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]";
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let _ = sock.read(&mut buf).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    let _ = sock.write_all(REPLY).await;
+                });
+            }
+        });
+        let short = || {
+            reqwest::Client::builder()
+                .read_timeout(std::time::Duration::from_millis(300))
+                .build()
+                .unwrap()
+        };
+        let cfg = XtreamSourceConfig {
+            server_url: format!("http://127.0.0.1:{port}"),
+            username: "u".into(),
+            password: "p".into(),
+            headers: Default::default(),
+        };
+        let main_only = XtreamClient::new(short(), &cfg).unwrap().with_attempts(1);
+        let err = main_only.get_bytes("get_live_streams").await.unwrap_err();
+        assert!(matches!(err, CoreError::Timeout(_)), "{err:?}");
+
+        let lists = XtreamClient::new(short(), &cfg)
+            .unwrap()
+            .with_attempts(1)
+            .with_list_client(reqwest::Client::new());
+        let body = lists.get_bytes("get_live_streams").await.unwrap();
+        assert_eq!(&body[..], b"[]");
+        // Small requests keep the main client.
+        let err = lists
+            .get::<serde_json::Value>(Some("get_vod_info"), &[])
+            .await;
+        assert!(matches!(err, Err(CoreError::Timeout(_))), "{err:?}");
     }
 
     /// Review R2-7: Xtream retries were silent and the final message did not

@@ -1306,7 +1306,9 @@ async fn fetch_conditional(
         .ok()
         .and_then(|u| crate::http::Authority::of(&u));
     crate::http::check_fetch(state, url, own.as_ref()).await?;
-    let client = crate::http::guarded_client(state, own.as_ref());
+    // The head may take PLAYLIST_HEADER_TIMEOUT, longer than the normal
+    // clients' read timeout; the body has its own idle limit (BODY_IDLE).
+    let client = crate::http::guarded_long_client(state, own.as_ref());
     let host = url::Url::parse(url.trim())
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))

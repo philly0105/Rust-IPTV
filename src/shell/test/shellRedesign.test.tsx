@@ -182,6 +182,24 @@ describe('rail at laptop heights (stage 2)', () => {
     expect(toggle2.getAttribute('aria-expanded')).toBe('true');
   });
 
+  // library-navigation-stays-folded: the group tracked "a Library page is open", which stayed
+  // true from one Library page to the next, so a fold on Favorites hid My List's link on My List.
+  it('folded on one Library page, it opens again when another Library page opens', async () => {
+    const { router } = renderRoutes(routes(), '/favorites');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const toggle = within(nav).getByRole('button', { name: 'Library' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    await act(() => router.navigate('/my-list'));
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(within(nav).getByRole('link', { name: 'My List' }).getAttribute('aria-current')).toBe('page');
+    // Folding there stays a choice: a page inside the same entry does not undo it.
+    fireEvent.click(toggle);
+    await act(() => router.navigate('/my-list?sort=title'));
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('remembers which sources the user opened or closed', async () => {
     renderRoutes(routes(), '/dashboard');
     const backup = await screen.findByRole('button', { name: /^Backup/ });

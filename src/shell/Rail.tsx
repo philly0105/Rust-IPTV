@@ -190,15 +190,17 @@ function RailGroup({
 }) {
   const { pathname } = useLocation();
   const listId = useId();
-  const current = links.some((l) => pathname === l.to || pathname.startsWith(`${l.to}/`));
-  const [unfolded, setUnfolded] = useState(() => !foldable || readLibraryOpen() || current);
+  // The group's link for the page that is open, if any.
+  const current = links.find((l) => pathname === l.to || pathname.startsWith(`${l.to}/`))?.to ?? null;
+  const [unfolded, setUnfolded] = useState(() => !foldable || readLibraryOpen() || current !== null);
   // Folded, the group opens again when one of its pages opens (from a card, the palette, a
   // shortcut), so the current page is never a hidden link; in the same render, as a source's
-  // entry does. Only a press is remembered.
+  // entry does. Only a press is remembered. Tracked by page, not by "one of them is open": going
+  // from one Library page to another with the group folded opens it too.
   const [wasCurrent, setWasCurrent] = useState(current);
   if (current !== wasCurrent) {
     setWasCurrent(current);
-    if (current && !unfolded) setUnfolded(true);
+    if (current !== null && !unfolded) setUnfolded(true);
   }
   const open = collapsed || unfolded;
   const disclosure = foldable

@@ -104,7 +104,7 @@ fn live_item(n: usize) -> (String, Option<String>) {
 }
 
 fn radio_item(n: usize) -> (String, Option<String>) {
-    if n % 3 == 0 {
+    if n.is_multiple_of(3) {
         (
             format!("Radio {n}"),
             Some(format!("g{}.tv", (n * 3) % SIZE.guide)),

@@ -511,7 +511,7 @@ async fn live_hls_is_continuous() {
 
     // Served segments, including across the 16-segment loop wrap, step by 2 s of PTS.
     let first_pts = |ts: &[u8]| -> u64 {
-        for pkt in ts.chunks_exact(188) {
+        for pkt in ts.as_chunks::<188>().0 {
             let afc = (pkt[3] >> 4) & 3;
             let idx = if afc & 2 != 0 { 5 + pkt[4] as usize } else { 4 };
             if pkt[1] & 0x40 != 0

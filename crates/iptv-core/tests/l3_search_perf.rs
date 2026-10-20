@@ -86,7 +86,7 @@ const CHANNEL_NAMES: [&str; 10] = [
 
 fn vod_title(i: usize) -> String {
     let n = WORDS.len();
-    let the = if i % 3 == 0 { "The " } else { "" };
+    let the = if i.is_multiple_of(3) { "The " } else { "" };
     format!(
         "{} {the}{} {} ({}) {i}",
         TAGS[(i / 7) % TAGS.len()],
@@ -123,8 +123,8 @@ fn vod_row(sid: &str, ct: ContentType, prefix: &str, i: usize) -> ItemRow {
         category_id: format!("{prefix}c{}", i % VOD_CATS),
         title: vod_title(i + if prefix == "s" { 500_000 } else { 0 }),
         poster_url: Some(format!("http://img.example/{prefix}/{i}.jpg")),
-        rating: (i % 11 != 0).then(|| ((i * 37) % 100) as f64 / 10.0),
-        added: (i % 17 != 0).then(|| {
+        rating: (!i.is_multiple_of(11)).then(|| ((i * 37) % 100) as f64 / 10.0),
+        added: (!i.is_multiple_of(17)).then(|| {
             format!(
                 "20{:02}-{:02}-{:02}T{:02}:{:02}:00Z",
                 10 + (i * 13) % 16,
@@ -134,7 +134,7 @@ fn vod_row(sid: &str, ct: ContentType, prefix: &str, i: usize) -> ItemRow {
                 i % 60
             )
         }),
-        year: (i % 13 != 0).then(|| 1950 + ((i * 7) % 76) as i64),
+        year: (!i.is_multiple_of(13)).then(|| 1950 + ((i * 7) % 76) as i64),
         url: Some(format!("http://vod.example/{prefix}/{i}.mkv")),
         container_extension: Some("mkv".into()),
         extra: json!({"plot": "A long plot line that makes the row as wide as a provider's.", "genres": ["Drama"]}),

@@ -275,7 +275,8 @@ pub async fn sync_source(
                 let mut on_row = |_: ContentType| {
                     done += 1;
                     if done == total
-                        || (done % PROGRESS_EVERY == 0 && gate.due(std::time::Instant::now()))
+                        || (done.is_multiple_of(PROGRESS_EVERY)
+                            && gate.due(std::time::Instant::now()))
                     {
                         progress(&state2, &sid, "saving", done, Some(total), None);
                     }
@@ -535,7 +536,7 @@ fn kind_hash(kind: Kind, categories: &[CategoryRow], list: &[u8]) -> String {
         h.update(c.name.as_bytes());
         h.update([0]);
         h.update(c.position.to_le_bytes());
-        h.update([b'\n']);
+        h.update(*b"\n");
     }
     h.update([0xff]);
     h.update(list);

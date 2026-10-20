@@ -1100,7 +1100,7 @@ fn write_catalog(
                 }
             }
             n += 1;
-            if n % PROGRESS_EVERY == 0 {
+            if n.is_multiple_of(PROGRESS_EVERY) {
                 check_cancel()?;
                 if gate.due(std::time::Instant::now()) {
                     sources::progress(state, source_id, "parsing", n, None, None);

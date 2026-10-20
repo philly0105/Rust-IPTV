@@ -502,7 +502,7 @@ mod tests {
 
     fn pts_list(ts: &[u8]) -> Vec<u64> {
         let mut v = Vec::new();
-        for pkt in ts.chunks_exact(188) {
+        for pkt in ts.as_chunks::<188>().0 {
             let afc = (pkt[3] >> 4) & 3;
             let idx = if afc & 2 != 0 { 5 + pkt[4] as usize } else { 4 };
             if pkt[1] & 0x40 != 0

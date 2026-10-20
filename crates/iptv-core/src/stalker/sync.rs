@@ -166,7 +166,7 @@ fn answers_hash(
             h.update(c.name.as_bytes());
             h.update([0]);
             h.update(c.position.to_le_bytes());
-            h.update([b'\n']);
+            h.update(*b"\n");
         }
         h.update([0xff]);
     }

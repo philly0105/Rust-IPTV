@@ -725,7 +725,7 @@ impl<'c> CatalogWriter<'c> {
             item.position,
             non_english,
         ])?;
-        if (self.total + self.duplicates + 1) % WRITE_BATCH == 0 {
+        if (self.total + self.duplicates + 1).is_multiple_of(WRITE_BATCH) {
             check_cancel(self.cancel.as_ref())?;
             self.maybe_go_bulk()?;
         }

@@ -906,7 +906,9 @@ impl Watch {
             // addresses that failed to bind. `start_on` is a no-op when the
             // bound addresses already match.
             return match running {
-                Some(port) if current.lan && is_desktop && self.ticks % LAN_RESCAN_TICKS == 0 => {
+                Some(port)
+                    if current.lan && is_desktop && self.ticks.is_multiple_of(LAN_RESCAN_TICKS) =>
+                {
                     Step::Start {
                         port,
                         why: StartWhy::Rescan,

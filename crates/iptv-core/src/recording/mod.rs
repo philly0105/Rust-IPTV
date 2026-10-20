@@ -1583,7 +1583,7 @@ fn spawn_progress(
                 },
             );
             ticks = ticks.wrapping_add(1);
-            if ticks % SAVE_BYTES_EVERY == 0 {
+            if ticks.is_multiple_of(SAVE_BYTES_EVERY) {
                 let key = id.clone();
                 // Bytes only: the parts list is the engine's to write.
                 if let Err(e) = state

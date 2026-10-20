@@ -165,7 +165,7 @@ impl Kind {
             .collect()
     }
     fn year(i: usize) -> Option<i64> {
-        (i % 13 != 0).then(|| 1950 + ((i * 7) % 76) as i64)
+        (!i.is_multiple_of(13)).then(|| 1950 + ((i * 7) % 76) as i64)
     }
     fn row(&self, sid: &str, i: usize) -> ItemRow {
         ItemRow {
@@ -175,8 +175,8 @@ impl Kind {
             category_id: self.cat_id(i % self.cats),
             title: vod_title(i + self.title_offset),
             poster_url: Some(format!("http://img.example/{}/{i}.jpg", self.prefix)),
-            rating: (i % 11 != 0).then(|| ((i * 37) % 100) as f64 / 10.0),
-            added: (i % 17 != 0).then(|| {
+            rating: (!i.is_multiple_of(11)).then(|| ((i * 37) % 100) as f64 / 10.0),
+            added: (!i.is_multiple_of(17)).then(|| {
                 format!(
                     "20{:02}-{:02}-{:02}T{:02}:{:02}:00Z",
                     10 + (i * 13) % 16,
@@ -647,7 +647,7 @@ async fn catalog_rpcs_on_170k_items_meet_run_budgets() {
                     // The shell's navigation write, untimed; alternating so
                     // every write changes the settings.
                     route += 1;
-                    let path = if route % 2 == 0 {
+                    let path = if route.is_multiple_of(2) {
                         format!("/s/{vsid}/movies")
                     } else {
                         format!("/s/{vsid}/movies/c/{cat}")

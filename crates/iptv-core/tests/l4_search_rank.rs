@@ -93,7 +93,7 @@ fn vod_cats() -> Vec<CategoryRow> {
 fn channel(source: &str, i: usize) -> ItemRow {
     let tag = TAGS[(i / 7) % TAGS.len()];
     let name = CHANNEL_NAMES[i % CHANNEL_NAMES.len()];
-    let title = if i % 3 == 0 {
+    let title = if i.is_multiple_of(3) {
         // Titles that repeat inside a list (different positions).
         format!("{tag} {name}").trim().to_string()
     } else {
@@ -126,8 +126,8 @@ fn radio(source: &str, i: usize) -> ItemRow {
 
 fn vod(ct: ContentType, i: usize) -> ItemRow {
     let n = WORDS.len();
-    let the = if i % 3 == 0 { "The " } else { "" };
-    let title = if i % 11 == 0 {
+    let the = if i.is_multiple_of(3) { "The " } else { "" };
+    let title = if i.is_multiple_of(11) {
         format!("Фильм {} {i}", WORDS[i % n])
     } else {
         format!(

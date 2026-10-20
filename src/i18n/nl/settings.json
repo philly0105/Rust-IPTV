@@ -222,9 +222,10 @@
 
   "backupExport": "Exporteren",
   "backupExportHint": "Slaat je bronnen, favorieten en instellingen op in een JSON-bestand.",
-  "backupIncludeSecrets": "Wachtwoorden en sleutels meenemen",
-  "backupIncludeSecretsHint": "Standaard uit, zodat je het bestand veilig kunt delen.",
+  "backupIncludeSecrets": "Wachtwoorden en sleutels van Xtream en Stalker meenemen",
+  "backupIncludeSecretsHint": "Staat dit uit, dan blijven ze buiten het bestand en moet je ze na een import opnieuw invoeren.",
   "backupIncludeSecretsWarning": "Iedereen met dit bestand kan inloggen bij je providers. Houd het privé.",
+  "backupPrivacyNote": "Elke backup bevat playlist- en gidsadressen en Stalker-MAC-adressen, die als inloggegevens kunnen werken. Houd backupbestanden privé.",
   "backupExportButton": "Backup exporteren",
   "backupExported": "Backup geëxporteerd",
   "backupExportFailed": "Kan de backup niet exporteren",

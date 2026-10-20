@@ -14,7 +14,7 @@ import { applyStatus, currentStatus } from '@/features/parental/status';
 import { Button, Dialog, useToast, errorDescription } from '@/ui';
 import { downloadText, readFileText } from '../../sources/lib/files';
 import { absoluteTime, formatCount } from '../../sources/lib/format';
-import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
+import { Segmented, SettingsGroup, SettingsNote, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { MAX_BACKUP_BYTES, backupFileName, chooseBackupSavePath, inspectBackup, parentalOptionsDiffer, type BackupSummary } from '../lib/backup';
 import { ImageCacheRow } from './ImageCacheRow';
 import { ResetGroup } from './ResetGroup';
@@ -230,6 +230,8 @@ export function BackupSection({ update }: SectionProps) {
           onChange={setIncludeSecrets}
           testId="toggle-include-secrets"
         />
+        {/* Whatever the switch says, URLs and MACs stay in the file and can be logins: said on every export. */}
+        <SettingsNote testId="backup-privacy-note">{t('backupPrivacyNote')}</SettingsNote>
       </SettingsGroup>
 
       {/* How to import, then the file: the mode decides what Import does (and its label), so it

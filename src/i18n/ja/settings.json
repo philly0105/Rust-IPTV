@@ -222,9 +222,10 @@
 
   "backupExport": "エクスポート",
   "backupExportHint": "ソース、お気に入り、設定をJSONファイルに保存します。",
-  "backupIncludeSecrets": "パスワードとキーを含める",
-  "backupIncludeSecretsHint": "既定ではオフのため、ファイルを安全に共有できます。",
+  "backupIncludeSecrets": "Xtream と Stalker のパスワードとキーを含める",
+  "backupIncludeSecretsHint": "オフの場合は含まれないため、読み込み後に再入力が必要です。",
   "backupIncludeSecretsWarning": "このファイルがあれば誰でもプロバイダーにログインできます。他人に渡さないでください。",
+  "backupPrivacyNote": "どのバックアップにも、プレイリストと番組表のアドレス、Stalker の MAC アドレスが含まれ、ログイン情報として使われることがあります。バックアップファイルは他人に渡さないでください。",
   "backupExportButton": "バックアップをエクスポート",
   "backupExported": "バックアップをエクスポートしました",
   "backupExportFailed": "バックアップをエクスポートできませんでした",

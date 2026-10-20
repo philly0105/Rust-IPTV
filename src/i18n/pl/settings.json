@@ -224,9 +224,10 @@
 
   "backupExport": "Eksportuj",
   "backupExportHint": "Zapisuje źródła, ulubione i ustawienia do pliku JSON.",
-  "backupIncludeSecrets": "Dołącz hasła i klucze",
-  "backupIncludeSecretsHint": "Domyślnie wyłączone, więc plik można bezpiecznie udostępnić.",
+  "backupIncludeSecrets": "Dołącz hasła i klucze Xtream i Stalker",
+  "backupIncludeSecretsHint": "Gdy wyłączone, nie trafiają do pliku i po imporcie trzeba je wpisać ponownie.",
   "backupIncludeSecretsWarning": "Każdy, kto ma ten plik, może zalogować się u Twoich dostawców. Nie udostępniaj go.",
+  "backupPrivacyNote": "Każda kopia zapasowa zawiera adresy list i przewodnika oraz adresy MAC Stalkera, które mogą działać jak dane logowania. Nie udostępniaj plików kopii.",
   "backupExportButton": "Eksportuj kopię zapasową",
   "backupExported": "Wyeksportowano kopię zapasową",
   "backupExportFailed": "Nie udało się wyeksportować kopii zapasowej",

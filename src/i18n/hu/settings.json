@@ -222,9 +222,10 @@
 
   "backupExport": "Exportálás",
   "backupExportHint": "Forrásait, kedvenceit és beállításait egy JSON-fájlba menti.",
-  "backupIncludeSecrets": "Jelszavak és kulcsok belefoglalása",
-  "backupIncludeSecretsHint": "Alapértelmezés szerint ki van kapcsolva, így a fájl biztonságosan megosztható.",
+  "backupIncludeSecrets": "Xtream- és Stalker-jelszavak és -kulcsok belefoglalása",
+  "backupIncludeSecretsHint": "Kikapcsolva kimaradnak a fájlból, és importálás után újra meg kell adni őket.",
   "backupIncludeSecretsWarning": "Ezzel a fájllal bárki bejelentkezhet a szolgáltatóihoz. Ne ossza meg senkivel.",
+  "backupPrivacyNote": "Minden biztonsági mentés tartalmazza a lejátszási listák és a műsorújság címeit, valamint a Stalker MAC-címeket, amelyek bejelentkezési adatként is működhetnek. Ne ossza meg a mentési fájlokat senkivel.",
   "backupExportButton": "Biztonsági mentés exportálása",
   "backupExported": "Biztonsági mentés exportálva",
   "backupExportFailed": "Nem sikerült exportálni a biztonsági mentést",

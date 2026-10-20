@@ -1,4 +1,4 @@
-import { Download, ListVideo, Lock, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
+import { Download, ListVideo, Play, MonitorPlay, RotateCcw, SkipBack } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useLocation, useNavigationType, useParams } from 'react-router';
@@ -13,10 +13,10 @@ import { usePlayerStore } from '@/features/player';
 
 import { CatalogRail } from '../components/CatalogRail';
 import { AboutSection } from '../components/detail/AboutSection';
-import { FavoriteButton, WatchedButton, useFavoriteMenuItem } from '../components/detail/actions';
+import { FavoriteButton, WatchedButton } from '../components/detail/actions';
 import { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 import { TmdbPromo } from '../components/detail/TmdbPromo';
-import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup } from '../components/detail/DetailHero';
+import { DetailHero, DetailHeroSkeleton, HERO_MENU_TRIGGER, HeroActionGroup, HeroIcon, HeroIconGroup } from '../components/detail/DetailHero';
 import { EpisodeList, SeasonTabs, offlineDownload } from '../components/detail/EpisodeList';
 import { ParentalLocked, useOpenGate } from '../components/detail/ParentalLocked';
 import { TrailerDialog } from '../components/detail/TrailerDialog';
@@ -47,7 +47,7 @@ import { cleanEpisodeTitle, episodeCode, episodeSubtitle, isWatched, offlineResu
 import { itemLanguage, languageName } from '../lib/language';
 import { effectiveMinRating } from '../lib/paging';
 import { episodeOrder, mergeSeasonEpisodes, mergeSeriesDetail, nextEpisode, previousEpisode, resumeTarget, sortSeasons, youtubeKey } from '../lib/merge';
-import { Button, EmptyState, ErrorState, IconButton, Menu, Page, Skeleton, Tooltip, useToast, errorDescription, type MenuItem } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, Menu, Page, Skeleton, useToast, errorDescription, type MenuItem } from '@/ui';
 import { detailHref } from '../lib/search';
 import { startEpisodeQueue } from '../lib/episodeQueue';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
@@ -216,7 +216,6 @@ export function SeriesDetailPage() {
     contentType: 'series' as const,
     ...(model?.year ? { subtitle: String(model.year) } : {}),
   };
-  const favoriteItem = useFavoriteMenuItem(ref, snapshot, isFavorite);
 
   // Playing an episode hands the player the rest of the season (and the next one), so it auto-advances anywhere.
   const playEpisode = (ep: Episode, fromStart = false) => {
@@ -328,29 +327,6 @@ export function SeriesDetailPage() {
     );
   };
   const listSnapshot = snapshot;
-  // In watch mode the page keeps a slim row of the series' own controls under the player.
-  const favorite = (
-    <>
-      <MyListButton itemRef={ref} snapshot={listSnapshot} size="sm" />
-      <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} compact />
-      {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too. */}
-      <WatchedButton
-        itemRef={ref}
-        episodeIds={seriesWrite.episodeIds}
-        series={seriesWrite.series}
-        name={model.titleBase ?? model.title}
-        watched={seriesWatched}
-        compact
-        labels={{ mark: t('markSeriesWatched'), unmark: t('markSeriesUnwatched') }}
-      />
-      {/* C2: lock or remove the lock (only while parental controls are on). */}
-      {lockItems.map((a) => (
-        <Button key={a.id} size="sm" variant="ghost" icon={a.icon ?? <Lock aria-hidden size={18} />} disabled={a.disabled} onClick={a.onSelect}>
-          {a.label}
-        </Button>
-      ))}
-    </>
-  );
 
   const startCode = start ? episodeCode(start.episode.season, start.episode.episode) : '';
   const startPos = start ? positions.get(start.episode.id) : undefined;
@@ -363,7 +339,7 @@ export function SeriesDetailPage() {
         }
       : undefined;
   const firstEpisode = order[0];
-  // VL-hero-actions: Start over, Play from the first episode, Favorites and the lock wait in More.
+  // VL-hero-actions: Start over, Play from the first episode and the lock wait in More.
   const moreItems: MenuItem[] = [
     ...(start?.resume
       ? [{ id: 'start-over', label: t('startOverEpisode', { code: startCode }), icon: <RotateCcw aria-hidden size={16} />, onSelect: () => playEpisode(start.episode, true) }]
@@ -371,38 +347,18 @@ export function SeriesDetailPage() {
     ...(firstEpisode && start && firstEpisode.id !== start.episode.id
       ? [{ id: 'play-first', label: t('playEpisode', { code: episodeCode(firstEpisode.season, firstEpisode.episode) }), icon: <Play aria-hidden size={16} />, onSelect: () => playEpisode(firstEpisode) }]
       : []),
-    favoriteItem,
     ...(lockItems.length > 0 ? [{ id: 'sep-lock', type: 'separator' as const }, ...lockItems] : []),
   ];
-  const heroActions = (
+  // The series' round icon buttons: in the hero beside Resume, and under the player in watch state.
+  const iconActions = (more: MenuItem[]) => (
     <>
-      <HeroActionGroup className="max-sm:w-full">
-        {start && (
-          <Button
-            ref={playRef}
-            size="lg"
-            variant="primary"
-            icon={<Play aria-hidden size={18} className="fill-current" />}
-            aria-describedby="vod-detail-title"
-            onClick={() => playEpisode(start.episode)}
-            className="max-sm:flex-1"
-          >
-            {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: startCode })}
-          </Button>
-        )}
-        {trailer ? (
-          <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
-            {t('trailer')}
-          </Button>
-        ) : tmdbOn && tmdb.isLoading ? (
-          // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
-          <span data-testid="vod-trailer-slot" className="inline-flex">
-            <Skeleton className="h-12 w-32 rounded-md" />
-          </span>
-        ) : null}
-      </HeroActionGroup>
-      <HeroActionGroup>
+      <HeroIcon caption={t('captionMyList')}>
         <MyListButton itemRef={ref} snapshot={listSnapshot} variant="round" size="lg" />
+      </HeroIcon>
+      <HeroIcon caption={t('captionFavorite')}>
+        <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
+      </HeroIcon>
+      <HeroIcon caption={t('watched')}>
         {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too. */}
         <WatchedButton
           itemRef={ref}
@@ -413,9 +369,40 @@ export function SeriesDetailPage() {
           round
           labels={{ mark: t('markSeriesWatched'), unmark: t('markSeriesUnwatched') }}
         />
-        <Menu items={moreItems} triggerClassName={HERO_MENU_TRIGGER} />
-      </HeroActionGroup>
+      </HeroIcon>
+      {more.length > 0 && (
+        <HeroIcon caption={t('captionMore')}>
+          <Menu items={more} triggerClassName={HERO_MENU_TRIGGER} />
+        </HeroIcon>
+      )}
     </>
+  );
+  const heroActions = (
+    <HeroActionGroup className="max-sm:w-full">
+      {start && (
+        <Button
+          ref={playRef}
+          size="lg"
+          variant="primary"
+          icon={<Play aria-hidden size={18} className="fill-current" />}
+          aria-describedby="vod-detail-title"
+          onClick={() => playEpisode(start.episode)}
+          className="max-sm:flex-1"
+        >
+          {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: startCode })}
+        </Button>
+      )}
+      {trailer ? (
+        <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
+          {t('trailer')}
+        </Button>
+      ) : tmdbOn && tmdb.isLoading ? (
+        // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
+        <span data-testid="vod-trailer-slot" className="inline-flex">
+          <Skeleton className="h-12 w-32 rounded-md" />
+        </span>
+      ) : null}
+    </HeroActionGroup>
   );
 
   const categoryName = item.categoryName || categories.data?.find((c) => c.id === item.categoryId)?.name;
@@ -460,6 +447,7 @@ export function SeriesDetailPage() {
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
           progress={progress}
           actions={heroActions}
+          icons={iconActions(moreItems)}
         />
       )}
 
@@ -474,22 +462,26 @@ export function SeriesDetailPage() {
           />
         )}
         {watch.active && (
-          <div className="flex flex-wrap items-center gap-2">
+          // Under the player, the hero's icon set: the previous episode first, then the series' own
+          // toggles; only the lock waits in More (episode choices are in the list below).
+          <HeroIconGroup>
             {previous && (
-              <Tooltip content={episodeCode(previous.season, previous.episode)} shortcut="shift+p">
-                <Button
+              <HeroIcon caption={t('captionPrevious')}>
+                <IconButton
+                  size="lg"
                   variant="secondary"
-                  size="sm"
-                  icon={<SkipBack aria-hidden size={16} />}
+                  className="rounded-full"
+                  label={t('previousEpisode')}
+                  tooltip={t('previousEpisodeCode', { code: episodeCode(previous.season, previous.episode) })}
+                  shortcut="shift+p"
+                  icon={<SkipBack aria-hidden size={18} />}
                   aria-keyshortcuts="Shift+P"
                   onClick={() => playEpisode(previous)}
-                >
-                  {t('previousEpisode')}
-                </Button>
-              </Tooltip>
+                />
+              </HeroIcon>
             )}
-            {favorite}
-          </div>
+            {iconActions(lockItems)}
+          </HeroIconGroup>
         )}
 
         <section aria-labelledby="vod-episodes-heading" className="relative flex flex-col gap-4">
@@ -598,6 +590,7 @@ export function SeriesDetailPage() {
             }}
             keyMissing={keyMissing}
             enriched={model.enriched}
+            rootRef={scrollRef}
           />
         )}
         {!watch.active && (

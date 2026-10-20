@@ -34,13 +34,21 @@ export interface DetailHeroProps {
   model: DetailModel;
   sourceId: string;
   /**
-   * The action row: the one primary button (Play or Resume), one or two text buttons, then round
-   * icon buttons (IconButton lg secondary, `rounded-full`) and a More menu (VL-hero-actions,
-   * HERO_MENU_TRIGGER). Pass them as two groups (`HeroActionGroup`),
-   * so a narrow column breaks the row between the groups, never inside one.
+   * The text buttons of the action row: the one primary button (Play or Resume) and at most one
+   * more (Trailer), in a `HeroActionGroup`.
    */
   actions: ReactNode;
-  /** How far the resume point is, drawn as a bar under the actions with its caption ("42 min left"). */
+  /**
+   * The round icon buttons after them (VL-hero-actions): IconButton lg secondary `rounded-full`,
+   * each in a `HeroIcon` with its caption, ending in a More menu (HERO_MENU_TRIGGER). They form
+   * their own group, so a narrow column breaks the row between the text and the icons, never
+   * inside either; on a phone they are a row of captioned tiles under the progress.
+   */
+  icons?: ReactNode;
+  /**
+   * How far the resume point is, drawn as a bar with its caption ("42 min left"). It sits under
+   * the whole row, and on a phone right under the full-width Resume button it describes.
+   */
   progress?: { fraction: number; label: string } | undefined;
   /** More facts at the end of the meta line (series status, Downloaded). */
   chips?: ReactNode[];
@@ -63,7 +71,7 @@ export interface DetailHeroProps {
  * artwork reads and the title and buttons stay legible on any image. Poster and title sit on its
  * lower edge; the title is the one large type moment on the page.
  */
-export function DetailHero({ model, sourceId, actions, progress, chips, note, notice, castLinks = true, back }: DetailHeroProps) {
+export function DetailHero({ model, sourceId, actions, icons, progress, chips, note, notice, castLinks = true, back }: DetailHeroProps) {
   const { t, i18n } = useTranslation('vod');
   const [expanded, setExpanded] = useState(false);
   const formatRuntime = useFormatRuntime();
@@ -129,17 +137,18 @@ export function DetailHero({ model, sourceId, actions, progress, chips, note, no
               {notice}
             </p>
           )}
-          <div className="flex flex-col gap-2">
-            {/* Two groups (the text buttons, the icon buttons): a narrow column breaks between them, never inside one. */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="vod-hero-actions">
-              {actions}
-            </div>
+          {/* Two groups (the text buttons, the icon buttons): a narrow column breaks between them, never
+              inside one. The progress line follows the buttons in the DOM, Resume first; from sm it is
+              drawn under the whole row, on a phone between Resume and the icon tiles. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="vod-hero-actions">
+            {actions}
             {progress && (
-              <div className="flex items-center gap-2 text-caption text-fg-muted" data-testid="vod-hero-progress">
-                <ProgressBar value={progress.fraction} max={1} size="xs" className="w-32" label={progress.label} />
+              <div className="flex basis-full items-center gap-2 text-caption text-fg-muted sm:order-last" data-testid="vod-hero-progress">
+                <ProgressBar value={progress.fraction} max={1} size="xs" className="w-32 max-sm:w-auto max-sm:flex-1" label={progress.label} />
                 <span className="tabular">{progress.label}</span>
               </div>
             )}
+            {icons && <HeroIconGroup>{icons}</HeroIconGroup>}
           </div>
           {note && <div className="text-xs text-fg-subtle">{note}</div>}
           {model.plot && (
@@ -166,11 +175,40 @@ export function DetailHero({ model, sourceId, actions, progress, chips, note, no
 }
 
 /**
- * One group of the hero's action row: its buttons stay on one line together. The first group holds
- * the text buttons (on a phone the primary takes the whole width), the second the icon buttons.
+ * The text buttons of the hero's action row: they stay on one line together, and on a phone the
+ * primary takes the whole width. The icon buttons are a `HeroIconGroup` (DetailHero's `icons`).
  */
 export function HeroActionGroup({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn('flex min-w-0 items-center gap-2', className)}>{children}</div>;
+}
+
+/**
+ * The round icon buttons of the hero, and of the row under the player in watch state. From sm
+ * they sit in a line beside the text buttons. Touch shows no tooltips, so on a phone they are a
+ * grid of equal tiles across the width, each circle over its caption (the Netflix mobile row).
+ */
+export function HeroIconGroup({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cn('flex min-w-0 items-start gap-2 max-sm:grid max-sm:w-full max-sm:auto-cols-fr max-sm:grid-flow-col max-sm:gap-1', className)} data-testid="vod-hero-icons">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One round icon button of a `HeroIconGroup` with its caption, which shows on a phone only. The
+ * button keeps its accessible name; the caption is a shorter form of it ("Watched" for "Mark as
+ * watched"), hidden from assistive tech so the name is not read twice.
+ */
+export function HeroIcon({ caption, children }: { caption: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col items-center gap-1">
+      {children}
+      <span aria-hidden className="max-w-full truncate text-caption text-fg-muted sm:hidden">
+        {caption}
+      </span>
+    </div>
+  );
 }
 
 /** The hero's More menu trigger: the Menu's own icon button, drawn as the other round secondaries. */

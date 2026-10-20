@@ -190,8 +190,13 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     expect(within(actions).getByTestId('mylist-button').dataset['variant']).toBe('round');
     expect(within(actions).getByRole('button', { name: 'Mark as watched' })).toBeTruthy();
     expect(within(actions).getByRole('button', { name: 'Download' })).toBeTruthy();
-    const menu = await openHeroMenu();
-    expect(within(menu).getByRole('menuitem', { name: 'Add to favorites' })).toBeTruthy();
+    // Favorite sits between My List and Watched, so the page says whether the title is one.
+    const favorite = within(actions).getByRole('button', { name: 'Favorite', pressed: false });
+    expect(favorite.className).toContain('rounded-full');
+    const order = within(actions).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+    expect(order.indexOf('Favorite')).toBe(order.indexOf('Mark as watched') - 1);
+    // Nothing else to offer: no Start over (no saved spot), no other copies, no lock, so no More.
+    expect(within(actions).queryByRole('button', { name: 'More actions' })).toBeNull();
     // The provider's facts sit under the hero with TMDB off.
     const about = screen.getByTestId('vod-about');
     expect(within(about).getByText('Alpha IPTV')).toBeTruthy();

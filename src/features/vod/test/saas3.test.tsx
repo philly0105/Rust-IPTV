@@ -1,10 +1,10 @@
 /**
  * Product redesign, review fixes (movies, series, search): a download plays from the title's saved
  * position, the one its Resume label shows; the round download button draws its progress; search
- * programmes sit under a heading per day with the clock alone; Top results counts folded titles,
- * pairs two short poster rails, drops step buttons where nothing scrolls, finds a result again in
- * its own section on Back, and "See all" leaves focus in the results; the landing's chip row
- * reaches every category from the top.
+ * programmes sit under a heading per day with the clock alone; Top results counts what the tabs
+ * count, puts two short poster lists in one rail, leads with the type it found most of, drops step
+ * buttons where nothing scrolls, finds a result again in its own section on Back, and "See all"
+ * leaves focus in the results; the landing's chip row reaches every category from the top.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -275,34 +275,46 @@ describe('Top results', () => {
     });
   });
 
-  it('counts the titles a rail holds, pairs two short rails, and has no step buttons where nothing scrolls', async () => {
+  it('puts two short poster lists in one rail, counts what the tabs count, and has no step buttons where nothing scrolls', async () => {
     renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
     const top = await screen.findByTestId('search-top');
-    // One film from two sources is one title (its card says "2 sources"); the tab counts copies.
-    const movies = within(top).getByRole('heading', { name: /^Movies/ });
-    expect(movies.textContent).toBe('Movies1');
+    // Movies and series, three titles or fewer each, share one rail instead of two half-width
+    // columns of one poster each; no "See all", since no single tab holds both.
+    const headings = within(top).getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(['Movies and series4', 'Channels1']);
+    const rail = within(top).getByRole('heading', { name: /^Movies and series/ }).closest('section')!;
+    expect(within(rail).getAllByRole('link').filter((a) => a.getAttribute('data-grid-index') !== null)).toHaveLength(3);
+    expect(within(rail).queryByRole('link', { name: /See all/ })).toBeNull();
+    // The heading counts copies, as the tabs do: the film from two sources is one card that says so.
     expect(screen.getByRole('tab', { name: /Movies/ }).textContent).toContain('2');
-    // Movies and series, three titles or fewer each, share a row, so channels reach the first screen.
-    const pair = within(top).getByTestId('search-top-titles');
-    expect(within(pair).getAllByRole('heading').map((h) => h.textContent)).toEqual(['Movies1', 'Series2']);
-    expect(pair.className).toContain('sm:grid-cols-2');
+    expect(screen.getByRole('tab', { name: /Series/ }).textContent).toContain('2');
+    expect(within(rail).getByRole('link', { name: /^Glass Harbor Blues/ }).getAttribute('aria-label')).toContain('2 sources');
     // jsdom lays nothing out, so no rail scrolls: no disabled arrows beside See all.
     expect(within(top).queryByRole('button', { name: 'Scroll forward' })).toBeNull();
     expect(within(top).queryByRole('button', { name: 'Scroll back' })).toBeNull();
   });
 
-  it('keeps long rails one under the other', async () => {
+  it('keeps a long list in a rail of its own, and leads with the type it found most of', async () => {
     rpcMock.handlers['catalog.search'] = () => ({
-      live: [],
+      live: [1, 2, 3, 4, 5].map((i) => channel('src1', i, `Harbor ${i} TV`)),
       movies: [1, 2, 3, 4].map((i) => vod('src1', i, `Harbor ${i}`)),
       series: [show('src1', 1, 'Harbor Nine')],
     });
     renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
     const top = await screen.findByTestId('search-top');
-    expect(within(top).queryByTestId('search-top-titles')).toBeNull();
+    // Five channels, four movies, one series: the channels come first, on a phone too.
+    expect(within(top).getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Channels5', 'Movies4', 'Series1']);
+    // A rail of one type keeps its "See all" to that type's tab.
+    expect(within(within(top).getByRole('heading', { name: /^Movies/ }).closest('section')!).getByRole('link', { name: /See all/ })).toBeTruthy();
   });
 
   it('Back from a series puts focus on that series, not on the movie with the same place', async () => {
+    // Four movies keep the two rails apart, so the first series and the first movie share index 0.
+    rpcMock.handlers['catalog.search'] = () => ({
+      live: [],
+      movies: [1, 2, 3, 4].map((i) => vod('src1', i, `Harbor ${i}`)),
+      series: [show('src1', 1, 'Harbor Nine'), show('src1', 2, 'Harbor Ten')],
+    });
     renderSearch('/search?q=harbor');
     fireEvent.click(screen.getByRole('link', { name: 'Open search' }));
     const top = await screen.findByTestId('search-top');
@@ -315,6 +327,11 @@ describe('Top results', () => {
   });
 
   it('See all opens the tab with focus on its first result, not in the search field', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({
+      live: [],
+      movies: [1, 2, 3, 4].map((i) => vod('src1', i, `Harbor ${i}`)),
+      series: [show('src1', 1, 'Harbor Nine'), show('src1', 2, 'Harbor Ten')],
+    });
     renderSearch('/search?q=harbor');
     fireEvent.click(screen.getByRole('link', { name: 'Open search' }));
     const field = screen.getByLabelText('Header search');

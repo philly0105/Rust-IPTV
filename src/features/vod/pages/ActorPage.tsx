@@ -55,11 +55,13 @@ export function ActorPage() {
   const knownFor = person.data?.knownFor ?? NO_BRIEFS;
   const movieBriefs = useMemo(() => knownFor.filter((b) => b.mediaType === 'movie'), [knownFor]);
   const tvBriefs = useMemo(() => knownFor.filter((b) => b.mediaType === 'tv'), [knownFor]);
-  const movies = useCatalogMatches(movieBriefs, sourceId || undefined, 'movie', loaded);
-  const shows = useCatalogMatches(tvBriefs, sourceId || undefined, 'series', loaded);
+  const sourceKind = useSource(sourceId || undefined).data?.kind;
+  // A Stalker portal's VOD is not in the local catalog: nothing could match, so nothing is asked.
+  const lookups = loaded && sourceKind !== 'stalker';
+  const movies = useCatalogMatches(movieBriefs, sourceId || undefined, 'movie', lookups);
+  const shows = useCatalogMatches(tvBriefs, sourceId || undefined, 'series', lookups);
   const known = useMemo(() => [...movies.items, ...shows.items], [movies.items, shows.items]);
   const knownWatched = useWatchedKeys(known);
-  const sourceKind = useSource(sourceId || undefined).data?.kind;
 
   let body;
   if (!settings.tmdb.enabled) {
@@ -157,7 +159,7 @@ export function ActorPage() {
 
   return (
     <div className="h-full overflow-x-hidden overflow-y-auto" data-testid="vod-actor">
-      <Page width="wide" className="flex flex-col gap-10 py-8">
+      <Page width="wide" className="flex flex-col gap-10">
         {/* The loaded person renders a visible h1 with their name; every other state keeps one sr-only h1. */}
         {!loaded && <h1 className="sr-only">{pageTitle}</h1>}
         {body}

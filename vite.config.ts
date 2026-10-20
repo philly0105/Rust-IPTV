@@ -30,6 +30,15 @@ const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly s
  */
 const LOCALE = /[\\/]src[\\/]i18n[\\/]([^\\/]+)[\\/](?:[^\\/]+\.json|index\.ts)$/;
 
+/**
+ * `src/lib/duration.ts` gets a chunk of its own, out of the experimentalMinChunkSize merge. It is
+ * 1.4 kB shared by the VOD and library formatters and the player's subtitle loader, and the merge
+ * put it in the subtitle chunk, whose imports reach the player's controls and zap banner. Settings
+ * then waited for the player's controls before its first render: its trash icon sat in the chunk
+ * of `features/library/lib/format.ts`, which imports `formatDurationParts` (pnpm size:check).
+ */
+const OWN_CHUNK = /[\\/]src[\\/]lib[\\/]duration\.ts$/;
+
 function vendorChunk(id: string): string | undefined {
   // English strings change on every copy edit; their own chunk keeps the app
   // code cache warm and loads in parallel with the entry. Every other language
@@ -38,6 +47,7 @@ function vendorChunk(id: string): string | undefined {
   // experimentalMinChunkSize merge, so no foreign strings end up in app chunks.
   const locale = LOCALE.exec(id);
   if (locale) return `locale-${locale[1]}`;
+  if (OWN_CHUNK.test(id)) return 'duration';
   const at = id.lastIndexOf('node_modules');
   if (at < 0) return undefined;
   const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);

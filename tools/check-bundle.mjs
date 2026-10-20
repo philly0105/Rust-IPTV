@@ -2,7 +2,8 @@
 //
 // Prints every JavaScript chunk in dist/assets, largest first, and exits 1 when the entry chunk
 // (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when
-// Home's route chunk statically loads player code (performance audit SH-2), or when there is no
+// Home's route chunk statically loads player code (performance audit SH-2), when the Search,
+// Settings or category-grid route chunks statically load the player's UI, or when there is no
 // build to check. Plain Node, no dependencies.
 //
 //   node tools/check-bundle.mjs [distDir]    (default: dist)
@@ -16,8 +17,6 @@ import { gzipSync } from 'node:zlib';
 /** About 10 % over the 243,927-byte entry measured before Run 1 (run.md SC10). */
 const BUDGET = 268_000;
 const ENTRY = /^index-[\w-]+\.js$/;
-/** Home's lazy route chunk, named after `src/shell/dashboard/DashboardPage.tsx`. */
-const HOME = /^DashboardPage-[\w-]+\.js$/;
 /**
  * Player chunks (named after their first module: the player store, `playback`, `mpvExtras`, the
  * `@/features/player` barrel, the stage and the engines). A lazy route renders only after its
@@ -25,6 +24,28 @@ const HOME = /^DashboardPage-[\w-]+\.js$/;
  * about 97 kB of player code it needs only after a click. Home loads the player behind import().
  */
 const PLAYER = /^(?:store|playback|mpvExtras|player-index|PlayerStage|PlayerDock|Controls|hls|mpegts|shaka-player\.compiled)-[\w-]+\.js$/;
+/**
+ * The player's UI: the barrel, the dock, the stage, the controls (whose chunk also holds the
+ * player's stores and subscriptions: reconnect, failover, sleep timer, zap banner) and the engines.
+ * A page that only formats or resumes titles may load the player store (`vod/lib/format.ts` reads
+ * its resume rules), not these. A static import of `@/features/player` for `playItem` put the
+ * controls chunk, 69 kB, in front of Search's and the category grids' first render; the duration
+ * helper merged into the player's subtitle chunk did the same to Settings.
+ */
+const PLAYER_UI = /^(?:player-index|PlayerStage|PlayerDock|Controls|hls|mpegts|shaka-player\.compiled)-[\w-]+\.js$/;
+/** The chunk Controls.tsx starts; the route checks fail when it is gone, so a rename cannot switch them off. */
+const CONTROLS = /^Controls-[\w-]+\.js$/;
+/**
+ * Lazy route chunks, named after their page module, and the player chunks each must not reach
+ * through static imports. Home plays only through import() (SH-2); Search plays a channel and a
+ * category grid's poster menu plays a movie the same way.
+ */
+const ROUTES = [
+  { name: 'Home', chunk: /^DashboardPage-[\w-]+\.js$/, page: 'src/shell/dashboard/DashboardPage.tsx', forbid: PLAYER, what: 'player code' },
+  { name: 'Search', chunk: /^SearchPage-[\w-]+\.js$/, page: 'src/features/vod/pages/SearchPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
+  { name: 'Settings', chunk: /^SettingsPage-[\w-]+\.js$/, page: 'src/features/settings/SettingsPage.tsx', forbid: PLAYER, what: 'player code' },
+  { name: 'Category grid', chunk: /^CategoryGridPage-[\w-]+\.js$/, page: 'src/features/vod/pages/CategoryGridPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
+];
 /** A static `import`/`export ... from "./chunk.js"` in Rollup's output; `import("./x.js")` is not one. */
 const STATIC_IMPORT = /\b(?:import|export)\s*(?:\{[^}]*\}\s*from\s*|\*\s*as\s*[\w$]+\s*from\s*|[\w$]+\s*from\s*)?["']\.\/([\w.-]+\.js)["']/g;
 
@@ -105,15 +126,23 @@ function staticClosure(file) {
   return seen;
 }
 
-const home = chunks.find((c) => HOME.test(c.file));
-if (!home) fail(`no Home route chunk (DashboardPage-*.js) in ${shown}; update HOME in tools/check-bundle.mjs if the page moved.`);
-const homeClosure = staticClosure(home.file);
 const boot = (f) => ENTRY.test(f) || /^(?:vendor|locale)-/.test(f);
-const beyondBoot = chunks.filter((c) => homeClosure.has(c.file) && !boot(c.file));
-const homeBytes = beyondBoot.reduce((sum, c) => sum + c.size, 0);
-console.log(`Home ${home.file}: ${beyondBoot.length} chunks, ${bytes(homeBytes)} bytes beyond the boot chunks before its first render.`);
-const player = [...homeClosure].filter((f) => PLAYER.test(f)).sort();
-if (player.length > 0) {
-  fail(`Home's route chunk statically loads player code (${player.join(', ')}). Load the player inside the click handler with import('@/features/player'); see docs/architecture/performance.md.`);
+if (!chunks.some((c) => CONTROLS.test(c.file))) {
+  fail(`no player controls chunk (Controls-*.js) in ${shown}; update CONTROLS and PLAYER_UI in tools/check-bundle.mjs if the module moved.`);
 }
-console.log('size:check: no player chunks in Home\'s static imports.');
+const leaks = [];
+for (const route of ROUTES) {
+  const page = chunks.find((c) => route.chunk.test(c.file));
+  if (!page) fail(`no ${route.name} route chunk (${route.page}) in ${shown}; update ROUTES in tools/check-bundle.mjs if the page moved.`);
+  const closure = staticClosure(page.file);
+  const beyondBoot = chunks.filter((c) => closure.has(c.file) && !boot(c.file));
+  const routeBytes = beyondBoot.reduce((sum, c) => sum + c.size, 0);
+  const routeGzip = beyondBoot.reduce((sum, c) => sum + c.gzip, 0);
+  console.log(`${route.name} ${page.file}: ${beyondBoot.length} chunks, ${bytes(routeBytes)} bytes (${kb(routeGzip)} gz) beyond the boot chunks before its first render.`);
+  const player = [...closure].filter((f) => route.forbid.test(f)).sort();
+  if (player.length > 0) leaks.push(`The ${route.name} route chunk statically loads ${route.what} (${player.join(', ')}).`);
+}
+if (leaks.length > 0) {
+  fail(`${leaks.join(' ')} Load the player inside the click handler with import('@/features/player'), and import the store from '@/features/player/store' where a page reads it; see docs/architecture/performance.md.`);
+}
+console.log("size:check: no player code in the Home or Settings route chunks' static imports, and none of the player's UI in Search's or the category grid's.");

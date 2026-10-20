@@ -276,7 +276,11 @@ describe('Favorites and Recent time column (L2-visual-10)', () => {
     );
     const time = screen.getByTestId('entry-time');
     expect(time.className).toContain('whitespace-nowrap');
-    expect(time.className).toContain('min-w-28');
-    expect(time.className).not.toMatch(/(^|\s)w-28(\s|$)/);
+    // Round 2: one fixed width that holds "Added 2 weeks ago" (w-28 wrapped it, a min-width let a
+    // longer date push the source column left on its row); a longer one truncates, never wraps.
+    expect(time.className).toMatch(/(^|\s)w-36(\s|$)/);
+    expect(time.className).toContain('truncate');
+    expect(time.className).not.toMatch(/(^|\s)min-w-/);
+    expect(time.getAttribute('title')).toBe('Added 2 minutes ago');
   });
 });

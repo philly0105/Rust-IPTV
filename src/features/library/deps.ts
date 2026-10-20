@@ -62,8 +62,10 @@ export {
 } from '@/features/recording';
 // vod: the catalogue's detail hero and facts sheet, so an offline title looks like the same title
 // in Movies or Series (My Videos detail).
-export { DetailHero, DetailHeroSkeleton, HERO_BACK, HeroActionGroup } from '@/features/vod/components/detail/DetailHero';
+export { DetailHero, DetailHeroSkeleton, HERO_BACK, HeroActionGroup, HeroIcon } from '@/features/vod/components/detail/DetailHero';
 export { AboutSection } from '@/features/vod/components/detail/AboutSection';
 export type { DetailModel } from '@/features/vod/lib/merge';
 // vod: the edge fades of a sideways scroller (the VOD chips, the cast row), for the My Videos tabs.
 export { useEdgeFades } from '@/features/vod/hooks/useEdgeFades';
+// vod: the search page's recent searches, which Clear history clears with the watch history.
+export { clearSearches, recentSearchList, rememberSearch } from '@/features/vod/lib/recentSearches';

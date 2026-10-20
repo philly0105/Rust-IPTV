@@ -5,30 +5,15 @@ import { useNavigate } from 'react-router';
 import { invalidate, queryClient } from '@/api/query';
 import type { DownloadStartArgs } from '@/api/rpc';
 import { RpcError, rpc } from '@/api/transport';
-import { sameRef, type Download, type ItemRef, type PlaybackPosition, type RequestHeaders, type SourceKind } from '@/api/types';
+import { sameRef, type Download, type ItemRef, type PlaybackPosition, type RequestHeaders } from '@/api/types';
 import { playItem, usePlayerStore } from '@/features/player';
 
 import { downloadFileName } from '../lib/format';
 import { useToast, errorDescription } from '@/ui';
 import { useDownloads } from './queries';
+import { playItemArgs, type PlayOptions, type PlayTarget } from './usePlayTitle';
 
-export interface PlayTarget {
-  ref: ItemRef;
-  sourceKind: SourceKind;
-  title: string;
-  posterUrl?: string;
-  /** The title's group, so the parental gate can check group locks (C2). */
-  categoryId?: string;
-}
-
-export interface PlayOptions {
-  episodeId?: string;
-  subtitle?: string;
-  /** Play from 0. The saved position (and the watched mark) stays until playback saves a new one. */
-  fromStart?: boolean;
-  /** Play a different copy (another source) instead of the page's target. */
-  target?: PlayTarget;
-}
+export type { PlayOptions, PlayTarget } from './usePlayTitle';
 
 export interface DownloadOptions {
   episodeId?: string;
@@ -82,7 +67,7 @@ async function downloadArgs(target: PlayTarget, opts: DownloadOptions, notFileMe
   return args;
 }
 
-/** Play, start over, stop, and download for one movie or series. */
+/** Play, start over, stop, and download for one movie or series (the detail pages, which show the player). */
 export function usePlayback(target: PlayTarget | undefined) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
@@ -93,22 +78,8 @@ export function usePlayback(target: PlayTarget | undefined) {
     async (opts: PlayOptions = {}) => {
       const tgt = opts.target ?? target;
       if (!tgt) return;
-      const { ref } = tgt;
       try {
-        const args: Parameters<typeof playItem>[0] = {
-          ref,
-          title: tgt.title,
-          isLive: false,
-          sourceKind: tgt.sourceKind,
-        };
-        if (opts.episodeId) args.episodeId = opts.episodeId;
-        if (opts.subtitle) args.subtitle = opts.subtitle;
-        if (tgt.posterUrl) args.posterUrl = tgt.posterUrl;
-        if (tgt.categoryId) args.categoryId = tgt.categoryId;
-        // Start over (VL-start-over-unwatches): no positions.remove first, which also dropped the
-        // watched mark and, when the play then failed, the old resume point.
-        if (opts.fromStart) args.fromStart = true;
-        await playItem(args);
+        await playItem(playItemArgs(tgt, opts));
       } catch (err) {
         toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' });
       }

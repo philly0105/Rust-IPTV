@@ -221,7 +221,7 @@ export function ScheduledPage() {
   }
 
   return (
-    <Page width="default" className="flex min-w-0 flex-col gap-6 pb-8 pt-4">
+    <Page width="default" className="flex min-w-0 flex-col gap-6 pb-8">
       <PageTitle>{title}</PageTitle>
       {caps.data && !caps.data.supported ? (
         <p role="note" className="rounded-lg border border-edge bg-surface px-4 py-3 text-body-sm text-fg-muted" data-testid="scheduled-no-recording">

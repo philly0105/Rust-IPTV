@@ -11,7 +11,7 @@ import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 import { SourceMonogram as Monogram } from '@/ui/SourceMonogram';
 
-import { Badge, Button, Dialog } from '../deps';
+import { Badge, Button, Dialog, SectionHeader } from '../deps';
 
 /**
  * Source provenance: the rail's monogram (same hue, so a source is recognised at a glance) and
@@ -112,18 +112,27 @@ export function PageTitle({ children }: { children: string }) {
 }
 
 /**
- * A section's heading row in a virtual list: title, count, an optional hint and an action at the
- * end. The lists bleed their rows' hover fill into the gutter (`-mx-2` on the scroller, `px-2` on
- * each row), and the heading takes the rows' padding too, so heading, artwork and the header
- * title share one line.
+ * A section's heading row in a virtual list: the kit's SectionHeader (title, count, and the hint
+ * and the action at the end, centred on one line), at the foot of the row's fixed height so it
+ * sits on the rows it heads. The lists bleed their rows' hover fill into the gutter (`-mx-2` on
+ * the scroller, `px-2` on each row), and the heading takes the rows' padding too, so heading,
+ * artwork and the header title share one line.
  */
 export function SectionHeading({ title, count, hint, action }: { title: string; count: number; hint?: string; action?: ReactNode }) {
   return (
-    <div className="flex h-full items-end gap-3 px-2 pb-2">
-      <h2 className="text-title-sm text-fg">{title}</h2>
-      <span className="text-body-sm tabular-nums text-fg-subtle">{count}</span>
-      {hint && <span className="ms-auto hidden min-w-0 truncate text-xs text-fg-subtle sm:inline">{hint}</span>}
-      {action && <span className={cn('ms-auto shrink-0', hint && 'sm:ms-0')}>{action}</span>}
+    <div className="flex h-full flex-col justify-end px-2 pb-2">
+      <SectionHeader
+        title={title}
+        count={count}
+        action={
+          hint || action ? (
+            <>
+              {hint && <span className="hidden min-w-0 truncate text-caption text-fg-subtle sm:inline">{hint}</span>}
+              {action}
+            </>
+          ) : undefined
+        }
+      />
     </div>
   );
 }

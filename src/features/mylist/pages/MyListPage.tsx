@@ -450,7 +450,7 @@ export function MyListPage() {
   const showToolbar = !query.isPending && view.base.length > 0;
 
   return (
-    <Page width={layout === 'grid' ? 'wide' : 'default'} className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-3" data-testid="mylist-page" data-view={layout}>
+    <Page width={layout === 'grid' ? 'wide' : 'default'} className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="mylist-page" data-view={layout}>
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
       {showToolbar && (

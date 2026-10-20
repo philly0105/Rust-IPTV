@@ -14,7 +14,8 @@ import { displayChannelName } from '@/features/live/lib/channelName';
 import { ms } from '@/features/live/lib/epgTime';
 // The Scheduled list's clock and day words, from the module itself (pure helpers, no hooks).
 import { clockTime, dayHeading } from '@/features/recording/lib/schedule';
-import { playItem } from '@/features/player';
+import { useParentalStatus } from '@/features/parental/status';
+import type { PlayItemArgs } from '@/features/player';
 import { joinList } from '@/shell/dashboard/cards';
 import { snapshotTitle } from '@/lib/title';
 
@@ -29,7 +30,7 @@ import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { handleGridKeyDown } from '../lib/gridNav';
 import { itemLanguage } from '../lib/language';
-import { clearSearches, forgetSearch, rememberSearch, useRecentSearches } from '../lib/recentSearches';
+import { clearSearches, forgetSearch, rememberSearch, setRecentSearchesPaused, useRecentSearches } from '../lib/recentSearches';
 import {
   SEARCH_LIMIT,
   capSearchResult,
@@ -53,7 +54,7 @@ import {
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, Page, Poster, SectionHeader, Skeleton, Tabs, cn, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, Page, Poster, SectionHeader, Skeleton, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -184,6 +185,13 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // The field's text, debounced into `q`; a write of its own never comes back over newer typing (L3-vod-1).
   const [draft, setDraft] = useUrlSearchDraft({ delayMs: DEBOUNCE_MS, toParam: keepTyped });
   const query = normalizeQuery(q);
+
+  // While parental controls are set, recent searches are neither kept nor offered, and setting
+  // them clears the list (lib/recentSearches). Before paint, so a stored chip never flashes up.
+  const parentalOn = useParentalStatus().data?.enabled;
+  useLayoutEffect(() => {
+    if (parentalOn !== undefined) setRecentSearchesPaused(parentalOn);
+  }, [parentalOn]);
 
   const sourcesQ = useSourcesList();
   const scopedSource = useSource(sourceId);
@@ -329,10 +337,14 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   const playChannel = useCallback(
     (c: Channel, hit: SearchHit) => {
       if (!hit.sourceKind) return;
-      const args: Parameters<typeof playItem>[0] = { ref: c.ref, title: c.name, isLive: true, isRadio: c.isRadio, sourceKind: hit.sourceKind };
+      const args: PlayItemArgs = { ref: c.ref, title: c.name, isLive: true, isRadio: c.isRadio, sourceKind: hit.sourceKind };
       if (c.logoUrl) args.posterUrl = c.logoUrl;
       if (c.categoryId) args.categoryId = c.categoryId;
-      playItem(args).catch((err: unknown) => toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' }));
+      // The player loads on the press, as on Home (performance audit SH-2): a static import of the
+      // player barrel made a cold Search wait for the player's controls before its first render.
+      import('@/features/player')
+        .then(({ playItem }) => playItem(args))
+        .catch((err: unknown) => toast({ title: t('playFailed'), description: errorDescription(err), variant: 'error' }));
     },
     [toast, t],
   );
@@ -1079,17 +1091,27 @@ const TOP_POSTERS = 12;
 const TOP_CHANNELS = 6;
 const TOP_PROGRAMMES = 5;
 /**
- * Movies and series each this short (in folded titles) sit side by side in Top results, so the
- * channels and programmes after them reach the first screen instead of two one-card rails.
+ * Movies and series each this short (in folded titles) share one "Movies and series" rail in Top
+ * results: two half-width rails of one poster each left two empty areas and pushed the channels
+ * below the first screen on a phone.
  */
 const TOP_SHORT_RAIL = 3;
 
+/** One Top results section and the number of results it stands for (the count its tab shows). */
+interface TopSection {
+  key: string;
+  count: number;
+  node: ReactNode;
+}
+
 /**
- * The Top results view: a section per result type, in the order movies, series, channels,
- * programmes. Posters fold the same title from several sources into one card ("2 sources"), so a
- * film is not listed twice side by side, and the section counts the titles it shows; each
- * section's "See all" opens its tab. Each section numbers its results from 0, so it carries its
- * kind (`data-search-section`), and Back from a result finds it again in its own section.
+ * The Top results view: a section per result type. Posters fold the same title from several
+ * sources into one card ("2 sources"), so a film is not listed twice side by side; short movie and
+ * series lists share one rail. The sections come in order of how many results they have (the
+ * guide's programmes last), so the type the query mostly found leads, and each heading counts what
+ * its tab counts, every copy, with the "2 sources" chip explaining a card that stands for two.
+ * Each section's "See all" opens its tab. Each section numbers its results from 0, so it carries
+ * its kind (`data-search-section`), and Back from a result finds it again in its own section.
  */
 function TopResults({
   groups,
@@ -1126,32 +1148,52 @@ function TopResults({
     [groups, showBadges],
   );
   const live = groups.find((g) => g.kind === 'live');
-  const sideBySide = posterGroups.length === 2 && posterGroups.every((p) => p.folded.length <= TOP_SHORT_RAIL);
-  const rails = posterGroups.map(({ group, folded }) => (
-    <TopPosterRail
-      key={group.kind}
-      group={group}
-      folded={folded}
-      capped={more[group.kind]}
-      showBadges={showBadges}
-      resume={resume}
-      locked={locked}
-      seeAll={typeHref(group.kind)}
-      // Side by side, a rail stays in its column instead of running out through the gutter.
-      bleed={!sideBySide}
-    />
-  ));
-  return (
-    <div className="flex flex-col gap-10" data-testid="search-top">
-      {sideBySide ? (
-        <div className="grid min-w-0 gap-x-8 gap-y-10 sm:grid-cols-2" data-testid="search-top-titles">
-          {rails}
-        </div>
-      ) : (
-        rails
-      )}
-      {live && (
-        <section aria-labelledby="search-top-live" className="flex flex-col gap-3" data-search-section="live">
+  const sections: TopSection[] = [];
+  if (posterGroups.length === 2 && posterGroups.every((p) => p.folded.length <= TOP_SHORT_RAIL)) {
+    const hits = posterGroups.reduce((n, p) => n + p.group.hits.length, 0);
+    sections.push({
+      key: 'titles',
+      count: hits,
+      node: (
+        <TopPosterRail
+          key="titles"
+          section="titles"
+          title={t('group_titles')}
+          count={count(hits, posterGroups.some((p) => more[p.group.kind]))}
+          folded={posterGroups.flatMap((p) => p.folded)}
+          showBadges={showBadges}
+          resume={resume}
+          locked={locked}
+        />
+      ),
+    });
+  } else {
+    for (const { group, folded } of posterGroups) {
+      sections.push({
+        key: group.kind,
+        count: group.hits.length,
+        node: (
+          <TopPosterRail
+            key={group.kind}
+            section={group.kind}
+            title={t(`group_${group.kind}`)}
+            count={count(group.hits.length, more[group.kind])}
+            folded={folded}
+            showBadges={showBadges}
+            resume={resume}
+            locked={locked}
+            seeAll={typeHref(group.kind)}
+          />
+        ),
+      });
+    }
+  }
+  if (live) {
+    sections.push({
+      key: 'live',
+      count: live.hits.length,
+      node: (
+        <section key="live" aria-labelledby="search-top-live" className="flex flex-col gap-3" data-search-section="live">
           <SectionHeader id="search-top-live" title={t('group_live')} count={count(live.hits.length, more.live)} seeAll={{ to: typeHref('live') }} />
           <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_MIN_WIDTH}px, 1fr))` }} role="list">
             {live.hits.slice(0, TOP_CHANNELS).map((h, i) => (
@@ -1161,7 +1203,14 @@ function TopResults({
             ))}
           </div>
         </section>
-      )}
+      ),
+    });
+  }
+  // Most results first; a tie keeps the order above (movies, series, channels). Sort is stable.
+  sections.sort((a, b) => b.count - a.count);
+  return (
+    <div className="flex flex-col gap-10" data-testid="search-top">
+      {sections.map((x) => x.node)}
       {programmes.length > 0 && (
         <section aria-labelledby="search-top-programmes" className="flex flex-col gap-3" data-search-section="programmes">
           <SectionHeader
@@ -1178,42 +1227,41 @@ function TopResults({
 }
 
 /**
- * One Top results rail of posters, duplicates folded. The count is the titles the rail holds
- * (one film from two sources is one title, its card says "2 sources"); the type's tab, which
- * lists every copy, counts copies.
+ * One Top results rail of posters, duplicates folded (one film from two sources is one card that
+ * says "2 sources"). `section` keys Back's return to the card; the combined movies-and-series
+ * rail has no single tab to open, so no "See all".
  */
 function TopPosterRail({
-  group,
+  section,
+  title,
+  count,
   folded,
-  capped,
   showBadges,
   resume,
   locked,
   seeAll,
-  bleed,
 }: {
-  group: SearchGroup;
+  section: string;
+  title: string;
+  count: ReactNode;
   folded: readonly GroupedHit[];
-  capped: boolean | undefined;
   showBadges: boolean;
   resume: Map<string, number>;
   locked: (item: VodItem | SeriesItem) => boolean;
-  seeAll: string;
-  bleed: boolean;
+  seeAll?: string;
 }) {
-  const { t } = useTranslation('vod');
   const cardWidth = useRailCardWidth();
   const items = useMemo(() => folded.slice(0, TOP_POSTERS), [folded]);
   const watched = useWatchedKeys(useMemo(() => items.map((g) => g.hit.item as VodItem | SeriesItem), [items]));
   return (
-    <div className="min-w-0" data-search-section={group.kind}>
+    <div className="min-w-0" data-search-section={section}>
       <PosterRail<GroupedHit>
-        title={t(`group_${group.kind}`)}
-        count={capped ? t('searchCountMore', { count: folded.length }) : folded.length}
-        seeAll={{ to: seeAll }}
+        title={title}
+        count={count}
+        seeAll={seeAll ? { to: seeAll } : undefined}
         items={items}
         cardWidth={cardWidth}
-        bleed={bleed}
+        bleed
         myList={(g) => myListTarget(g.hit.item as VodItem | SeriesItem)}
         render={(g, i, rail) => {
           const item = g.hit.item as VodItem | SeriesItem;
@@ -1385,7 +1433,8 @@ function SearchStart({
                   <li key={c.id}>
                     <Link
                       to={`/s/${encodeURIComponent(sourceId)}/${g.section}/c/${encodeURIComponent(c.id)}`}
-                      className="inline-flex h-8 max-w-[16rem] items-center rounded-full bg-surface-2 px-3 text-sm text-fg-muted hover:bg-surface-3 hover:text-fg"
+                      className={filterChipClass(false, 'max-w-[16rem]')}
+                      title={c.name}
                     >
                       <span dir="auto" className="truncate">
                         {c.name}

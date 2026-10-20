@@ -147,12 +147,15 @@ export function clockTime(at: number, lang: string): string {
 
 /**
  * A start and end time as one range in the locale's own words, with the day period said once
- * ("12:45 – 1:45 PM", "13:45–14:15 Uhr"). Falls back to two clock times and a dash.
+ * ("12:45 – 1:45 PM", "13:45–14:15 Uhr"). Falls back to two clock times and a dash. A range that
+ * runs past midnight is two clock times too ("11:00 PM – 12:00 AM"): `formatRange` spells out
+ * both dates when the days differ, whatever the options, and the row's day heading already says
+ * which day it starts on.
  */
 export function clockRange(start: number, end: number, lang: string): string {
   const locale = intlLocale(lang);
   const fmt = dateTimeFormat(locale, { hour: hourStyle(locale), minute: '2-digit' });
-  if (typeof fmt.formatRange === 'function' && end >= start) return fmt.formatRange(start, end);
+  if (typeof fmt.formatRange === 'function' && end >= start && startOfDay(start) === startOfDay(end)) return fmt.formatRange(start, end);
   return `${fmt.format(start)} – ${fmt.format(end)}`;
 }
 

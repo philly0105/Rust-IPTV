@@ -32,10 +32,17 @@ import { Button, cn } from '../deps';
 import { barPercent, chartScale, labelsFit, showDayLabel } from '../lib/chart';
 import { dayOfMonthLabel, formatAxisHours, formatAxisMinutes, formatWatchTime, longDayLabel, narrowWeekdayLabel, weekdayLabel } from '../lib/format';
 
-/** Movies and series: a lighter step of the accent; hatching under forced colours, where fills are dropped. */
-export const VOD_FILL = 'bg-accent/60 forced-colors:bg-[repeating-linear-gradient(135deg,CanvasText_0_1.5px,transparent_1.5px_5px)]';
-/** Live: the solid accent. */
-export const LIVE_FILL = 'bg-accent forced-colors:bg-[CanvasText]';
+/**
+ * Movies and series: a lighter step of the mark tone; hatching under forced colours, where fills
+ * are dropped. The legend tiles, the tooltip and the table view name both series, so the pair is
+ * never told apart by colour alone.
+ */
+export const VOD_FILL = 'bg-accent-mark/50 forced-colors:bg-[repeating-linear-gradient(135deg,CanvasText_0_1.5px,transparent_1.5px_5px)]';
+/**
+ * Live: the accent's mark tone (design-system.md), the amber of the progress bars in both themes.
+ * `bg-accent` is the text tone, deep brown in light, which made the light chart read as another brand.
+ */
+export const LIVE_FILL = 'bg-accent-mark forced-colors:bg-[CanvasText]';
 
 export interface DayChartProps {
   days: readonly WatchStatsDay[];

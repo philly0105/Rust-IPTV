@@ -41,7 +41,9 @@ export function matchBrief<T extends VodItem | SeriesItem>(brief: Pick<TmdbBrief
  * TMDB titles ("More like this", "Known for") that this source has (VL-tmdb-deadend), as catalog
  * items, so each card opens the title's own detail page instead of a search that finds nothing.
  * One `catalog.search` per brief (local SQLite, a few ms each), cached like the search page's.
- * Stalker portals keep VOD out of SQLite, so nothing matches there and the rail stays hidden.
+ * Stalker portals keep VOD out of SQLite, so nothing could match there: callers turn the lookups
+ * off for them (`enabled`), and "More like this", below the fold, also until it nears the screen
+ * and the page is idle, so its twenty searches do not queue with the page's own reads.
  */
 export function useCatalogMatches(
   briefs: readonly TmdbBrief[],

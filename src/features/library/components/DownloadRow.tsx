@@ -65,7 +65,7 @@ export function DialProgress({
   label: string;
   indeterminate?: boolean;
 }) {
-  const fill = tone === 'accent' ? 'bg-accent' : tone === 'danger' ? 'bg-danger/70' : 'bg-fg-subtle/50';
+  const fill = tone === 'accent' ? 'bg-accent-mark' : tone === 'danger' ? 'bg-danger/70' : 'bg-fg-subtle/50';
   return (
     <div
       role="progressbar"
@@ -174,8 +174,17 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
           {showSource && <SourceBadge source={source} className="ms-auto hidden shrink-0 lg:inline-flex" />}
         </div>
       </div>
-      {/* Ghost icon buttons; a row that is not transferring shows them on hover or focus (fine pointers). */}
-      <div className={cn('flex shrink-0 items-center gap-0.5', !isActive && REVEAL_ON_FINE)}>
+      {/* Ghost icon buttons. A row that is waiting or paused shows them on hover or focus (fine
+          pointers); a failed row always shows Retry and Remove, since it is there to be dealt with.
+          The column is as wide as the most a row has (three), shown or not, so every bar, badge
+          and button ends on the same line. */}
+      <div
+        className={cn(
+          'flex shrink-0 items-center justify-end gap-0.5 pointer-fine:w-[calc(3*2rem+2*0.125rem)]',
+          !isActive && d.status !== 'failed' && REVEAL_ON_FINE,
+        )}
+        data-testid="download-actions"
+      >
         {actions.map((a) => {
           const Icon = ICONS[a];
           return (

@@ -1,4 +1,4 @@
-import { ChevronRight, Clapperboard, LayoutList, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
+import { ChevronRight, Clapperboard, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -26,7 +26,7 @@ import { useVodLocks } from '../hooks/useVodLocks';
 import { loadSearchPage } from '../routes';
 import { ALL_CATEGORIES, effectiveMinRating, type GridQueryInput, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
-import { Button, EmptyState, ErrorState, IconButton, Page, SearchInput, Skeleton, buttonClass, cn } from '@/ui';
+import { Button, EmptyState, ErrorState, IconButton, Page, SearchInput, Skeleton, buttonClass, cn, filterChipClass } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 /** Category rails under the top rails; the rest of the categories are one click away in the index. */
@@ -383,15 +383,14 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   );
 }
 
-const CHIP =
-  'inline-flex h-8 max-w-[16rem] shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 text-sm whitespace-nowrap text-fg-muted hover:bg-surface-3 hover:text-fg active:bg-pressed motion-safe:transition-colors';
-
 /**
- * The row of category chips under the header: "All categories" (with the count) opens the full
- * index under the rails and moves there, then the first categories in the provider's order, each
- * opening its grid, and Manage categories at the end. A provider with hundreds of groups reaches
- * any of them from the top of the page, not past a dozen rails. The row scrolls sideways; the
- * edge that hides chips fades out and a vertical wheel moves it.
+ * The row of category chips under the header: the first categories in the provider's order, each
+ * opening its grid, then "All categories" with the count, which opens the full index under the
+ * rails and moves there, and Manage categories beside it. A provider with hundreds of groups
+ * reaches any of them from the top of the page, not past a dozen rails. The chips are links in the
+ * kit's filter-chip look; "All categories" follows them as a quiet link with a chevron, so it does
+ * not read as a chosen filter, and the manage button sits next to it rather than at the far end.
+ * The chips scroll sideways; the edge that hides chips fades out and a vertical wheel moves them.
  */
 function CategoryChips({
   cats,
@@ -414,29 +413,16 @@ function CategoryChips({
   return (
     <nav aria-label={t('categories')} className="-mb-4 flex min-w-0 items-center gap-2 max-sm:-mb-2" data-testid="vod-category-chips">
       {/* Room for the focus halo, which the scroller would clip. */}
-      <ul ref={fades.ref} style={fades.style} className="-m-1.5 flex min-w-0 flex-1 items-center gap-2 overflow-x-auto p-1.5 scrollbar-none">
-        <li className="shrink-0">
-          <button
-            type="button"
-            onClick={onShowAll}
-            aria-label={total !== undefined ? `${t('allCategories')}, ${t('categoryCount', { count: total })}` : undefined}
-            className={cn(CHIP, 'font-medium text-fg')}
-            data-testid="vod-chip-all"
-          >
-            <LayoutList aria-hidden size={14} className="shrink-0" />
-            {t('allCategories')}
-            {total !== undefined && <span className="tabular text-xs font-normal text-fg-subtle">{fmt.format(total)}</span>}
-          </button>
-        </li>
+      <ul ref={fades.ref} style={fades.style} className="-m-1.5 flex min-w-0 items-center gap-2 overflow-x-auto p-1.5 scrollbar-none">
         {loading
           ? [0, 1, 2, 3, 4].map((i) => (
               <li key={i} aria-hidden className="shrink-0">
-                <Skeleton className="h-8 w-24 rounded-full" />
+                <Skeleton className="h-7 w-24 rounded-full" />
               </li>
             ))
           : cats.map((c) => (
               <li key={c.id} className="shrink-0">
-                <Link to={hrefFor(c.id)} state={FROM_LANDING} className={CHIP} data-testid="vod-category-chip">
+                <Link to={hrefFor(c.id)} state={FROM_LANDING} className={filterChipClass(false, 'max-w-[16rem]')} title={c.name} data-testid="vod-category-chip">
                   {c.locked && <Lock aria-hidden size={12} className="shrink-0" />}
                   <span dir="auto" className="truncate">
                     {c.name}
@@ -446,6 +432,17 @@ function CategoryChips({
               </li>
             ))}
       </ul>
+      <button
+        type="button"
+        onClick={onShowAll}
+        aria-label={total !== undefined ? `${t('allCategories')}, ${t('categoryCount', { count: total })}` : undefined}
+        className={buttonClass('ghost', 'sm', 'shrink-0 gap-1 px-2')}
+        data-testid="vod-chip-all"
+      >
+        {t('allCategories')}
+        {total !== undefined && <span className="tabular text-caption font-normal text-fg-subtle">{fmt.format(total)}</span>}
+        <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
+      </button>
       {manage}
     </nav>
   );

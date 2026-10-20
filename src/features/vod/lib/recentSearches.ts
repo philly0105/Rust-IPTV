@@ -2,6 +2,11 @@
  * Recent searches (the search page's zero state): the last few queries the user acted on, newest
  * first, kept in localStorage per app (a UI preference, like the scroll memory). A query counts
  * once it was submitted or a result was opened from it, so half-typed words never land here.
+ *
+ * While parental controls are set (a PIN), nothing is remembered and nothing remembered before is
+ * offered: the core filters what Hide mode hides from every list, but these chips are the UI's
+ * own, and a parent's query for a locked title would wait there for the next person on the device
+ * once the unlock ran out (docs/architecture/parental.md). Turning the pause on clears the list.
  */
 
 import { useSyncExternalStore } from 'react';
@@ -12,8 +17,11 @@ export const RECENT_SEARCHES_MAX = 8;
 
 const listeners = new Set<() => void>();
 let cache: readonly string[] | null = null;
+let paused = false;
+const NONE: readonly string[] = [];
 
 function read(): readonly string[] {
+  if (paused) return NONE;
   if (cache) return cache;
   let out: string[] = [];
   try {
@@ -43,10 +51,15 @@ const same = (a: string, b: string) => a.trim().replace(/\s+/g, ' ').toLocaleLow
 
 export function rememberSearch(query: string): void {
   const q = query.trim().replace(/\s+/g, ' ');
-  if (!q) return;
+  if (!q || paused) return;
   const list = read();
   if (list[0] !== undefined && same(list[0], q)) return;
   write([q, ...list.filter((x) => !same(x, q))].slice(0, RECENT_SEARCHES_MAX));
+}
+
+/** The recent searches now, newest first (none while paused). */
+export function recentSearchList(): readonly string[] {
+  return read();
 }
 
 export function forgetSearch(query: string): void {
@@ -57,9 +70,21 @@ export function clearSearches(): void {
   write([]);
 }
 
-/** Drops the in-memory copy (tests, or another tab's write read again). */
+/**
+ * Parental controls set (`on`) or not, from the parental status. On, the stored list is cleared
+ * and the zero state offers nothing until controls are off again; nothing is remembered meanwhile.
+ */
+export function setRecentSearchesPaused(on: boolean): void {
+  if (on === paused) return;
+  if (on) write([]);
+  paused = on;
+  listeners.forEach((l) => l());
+}
+
+/** Drops the in-memory copy and the pause (tests, or another tab's write read again). */
 export function resetRecentSearchCache(): void {
   cache = null;
+  paused = false;
 }
 
 function subscribe(listener: () => void): () => void {

@@ -176,8 +176,20 @@ export function buildLibrary(downloads: readonly Download[]): LibraryEntry[] {
 }
 
 /** A recording file as a grid entry: the programme title leads, as in the Recordings list. */
+/**
+ * A readable name from a recording's file name, for a file the core knows no programme or channel
+ * for: no extension and no trailing date or time stamp (the card's caption shows the date), so
+ * "Matchday Live 2026-09-28.ts" reads "Matchday Live". A name that is only a stamp keeps it.
+ */
+export function fileTitle(fileName: string): string {
+  const base = fileName.replace(/\.[a-z0-9]{1,5}$/i, '');
+  const stamp = /[\s._-]*\(?\d{4}[-._]?\d{2}[-._]?\d{2}(?:[\sT._-]*\d{2}[-.:h]?\d{2}(?:[-.:]?\d{2})?)?\)?$/i;
+  const name = base.replace(stamp, '').replace(/[\s._-]+$/, '').trim();
+  return name || base || fileName;
+}
+
 export function recordingEntry(f: RecordingFile): RecordingEntry {
-  return { kind: 'recording', key: `r-${f.id}`, title: f.title ?? f.channelName ?? f.fileName, file: f, missing: !f.fileAvailable, completedAt: f.date };
+  return { kind: 'recording', key: `r-${f.id}`, title: f.title ?? f.channelName ?? fileTitle(f.fileName), file: f, missing: !f.fileAvailable, completedAt: f.date };
 }
 
 function timeOf(iso: string): number {

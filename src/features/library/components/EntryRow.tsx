@@ -80,7 +80,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       {reorder?.dropTarget && (
         <div
           aria-hidden
-          className={cn('pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-accent', reorder.dropTarget === 'before' ? 'top-0' : 'bottom-0')}
+          className={cn('pointer-events-none absolute inset-x-2 h-0.5 rounded-full bg-accent-mark', reorder.dropTarget === 'before' ? 'top-0' : 'bottom-0')}
         />
       )}
       {/* Artwork is a mouse shortcut only: the title button beside it and the Play button carry the name for keyboard and AT. */}
@@ -121,9 +121,9 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       </button>
       {/* A fixed column, so the monograms line up down the list. */}
       {showSource && <SourceBadge source={source} className="hidden w-40 shrink-0 md:inline-flex" />}
-      {/* One line at any length ("Added 2 minutes ago"): rows keep one height, and the end-aligned
-          column still lines up with the actions beside it. */}
-      <span className="hidden min-w-28 shrink-0 whitespace-nowrap text-end text-caption tabular-nums text-fg-subtle sm:block" data-testid="entry-time">
+      {/* One line at any length ("Added 2 minutes ago"): rows keep one height. A fixed width, so a
+          longer date ("Added 2 weeks ago") never pushes the source column left on its row. */}
+      <span className="hidden w-36 shrink-0 truncate whitespace-nowrap text-end text-caption tabular-nums text-fg-subtle sm:block" title={time} data-testid="entry-time">
         {time}
       </span>
       <div className="flex shrink-0 items-center gap-0.5">

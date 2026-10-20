@@ -271,7 +271,7 @@ export function FavoritesPage() {
     );
 
   return (
-    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4 pt-2" data-testid="favorites-page">
+    <Page width="default" className="flex min-h-0 min-w-0 flex-1 flex-col pb-4" data-testid="favorites-page">
       <PageTitle>{title}</PageTitle>
       {body}
     </Page>

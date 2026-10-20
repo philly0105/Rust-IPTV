@@ -682,6 +682,8 @@ fn scrub(v: Value) -> Value {
                 .map(|(k, v)| (k, scrub(v)))
                 .collect::<Map<String, Value>>(),
         ),
+        // A list of devices or sessions carries the same fields.
+        Value::Array(items) => Value::Array(items.into_iter().map(scrub).collect()),
         other => other,
     }
 }
@@ -829,6 +831,23 @@ pub fn user_message(err: &CoreError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GPT review (stalker-raw-array-credentials): arrays were returned as
+    /// they were, so a token or MAC inside a list reached
+    /// `stalker.accountInfo.raw`.
+    #[test]
+    fn scrub_reaches_into_arrays() {
+        let raw = json!({
+            "devices": [{"mac": "00:1A:79:00:00:01", "name": "Box", "token": "t"}],
+            "sessions": [[{"auth_token": "a", "ok": 1}], "kept"],
+            "password": "p"
+        });
+        let want = json!({
+            "devices": [{"name": "Box"}],
+            "sessions": [[{"ok": 1}], "kept"]
+        });
+        assert_eq!(scrub(raw), want);
+    }
 
     /// IN-1: the bulk guide's `data` is moved out, with the same results as
     /// the clone it replaced.

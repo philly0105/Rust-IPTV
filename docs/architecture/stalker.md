@@ -104,7 +104,7 @@ MAC rules: a newly typed MAC (`sources.add`, `stalker.test`, a changed MAC in `s
 
 ## Secrets
 
-The MAC and token only show up at `trace` level, and only as the request label (`type/action`); URLs are never logged. Error messages never include the URL or token; the unreachable-portal message names only the host. Portal sentences that echo the MAC are dropped from error messages. `accountInfo.raw` drops keys containing token, password, signature, device_id, or mac.
+The MAC and token only show up at `trace` level, and only as the request label (`type/action`); URLs are never logged. Error messages never include the URL or token; the unreachable-portal message names only the host. Portal sentences that echo the MAC are dropped from error messages. `accountInfo.raw` drops keys containing token, password, signature, device_id, or mac, at any depth, including objects inside arrays.
 
 ## Tests
 

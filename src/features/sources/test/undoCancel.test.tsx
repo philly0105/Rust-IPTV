@@ -5,7 +5,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
+import { chooseCardAction, confirmDiscard, eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -62,7 +62,7 @@ describe('remove with undo (C9)', () => {
     rpcMock.handlers['sources.remove'] = () => null;
     renderAt(routes(), '/sources');
     await waitFor(() => expect(cards()).toEqual(['a', 'b']));
-    fireEvent.click(screen.getAllByTestId('source-remove')[0]!);
+    chooseCardAction('Remove');
     await waitFor(() => expect(cards()).toEqual(['b']));
   }
 
@@ -370,6 +370,9 @@ describe('cancel while adding a source (C8)', () => {
     // The cancel button is gone; focus moved to the notice inside the dialog, not <body>.
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('add-source-cancelled')));
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    // Escape reached the dialog: with the typed details still there, it asks before dropping them (SS-1).
+    await screen.findByTestId('discard-prompt');
+    confirmDiscard();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
@@ -392,6 +395,8 @@ describe('cancel while adding a source (C8)', () => {
     await screen.findByTestId('add-source-error');
     await waitFor(() => expect(dlg.contains(document.activeElement)).toBe(true));
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await screen.findByTestId('discard-prompt');
+    confirmDiscard();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
@@ -599,11 +604,12 @@ describe('review round 1', () => {
     renderAt(routes(), '/sources');
     await waitFor(() => expect(cards()).toEqual(['m', 'a']));
     const [m, a] = screen.getAllByTestId('source-card');
-    // Four stat slots and four action places on every card, whatever it holds.
-    expect(within(m!).getAllByTestId('source-stat-slot')).toHaveLength(4);
-    expect(within(a!).getAllByTestId('source-stat-slot')).toHaveLength(4);
-    expect(within(m!).getByTestId('source-actions').children).toHaveLength(4);
-    expect(within(a!).getByTestId('source-actions').children).toHaveLength(4);
+    // Only the stats a source has, right-aligned against the actions: no empty columns (SS-10).
+    expect(within(m!).getAllByTestId('source-stat').map((e) => e.querySelector('dt')?.textContent)).toEqual(['channels']);
+    expect(within(a!).getAllByTestId('source-stat').map((e) => e.querySelector('dt')?.textContent)).toEqual(['channels', 'movies', 'series']);
+    // The same three action places on every card (Refresh, Edit, More), so they line up down the list.
+    expect(within(m!).getByTestId('source-actions').children).toHaveLength(3);
+    expect(within(a!).getByTestId('source-actions').children).toHaveLength(3);
     expect(within(m!).queryByTestId('source-refreshed')).toBeNull();
     expect(within(m!).queryByText('Not refreshed yet')).toBeNull();
     expect(within(a!).getByTestId('source-refreshed')).toBeTruthy();

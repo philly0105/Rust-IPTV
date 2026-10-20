@@ -11,7 +11,7 @@
 import '@/i18n';
 
 import { QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router';
 
 import { queryClient } from '@/api/query';
@@ -94,6 +94,23 @@ export async function eagerRoutes(routes: RouteObject[]): Promise<RouteObject[]>
       typeof lazy === 'function' ? ({ ...route, ...(await lazy()) } as RouteObject) : ({ ...route, lazy } as RouteObject),
     ),
   );
+}
+
+/**
+ * Picks an action from a source card's More menu ("Remove", "Subscription details",
+ * "Hidden and renamed channels"). The card's first card when none is given.
+ */
+export function chooseCardAction(name: string | RegExp, card: HTMLElement = screen.getAllByTestId('source-card')[0]!): void {
+  fireEvent.click(within(card).getByRole('button', { name: /^More actions for/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name }));
+}
+
+/**
+ * Closes the Add or Edit source dialog the way a user who typed details does: the close
+ * request (Cancel, Escape, the X) asks "Discard changes?" first (SS-1), and Discard closes it.
+ */
+export function confirmDiscard(): void {
+  fireEvent.click(screen.getByTestId('discard-confirm'));
 }
 
 export function renderAt(routes: RouteObject[], path: string) {

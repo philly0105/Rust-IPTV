@@ -10,7 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { RpcError } from '@/api/transport';
 
 import { duplicateSourceId } from '../lib/errors';
-import { eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
+import { confirmDiscard, eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -88,6 +88,8 @@ describe('adding a source that already exists (L1-sources-home-4)', () => {
     // Not a failed add: the footer still adds, and nothing is scheduled for removal.
     expect(screen.getByTestId('add-source-submit').textContent).toBe('Add source');
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
+    // Typed details: Cancel asks before dropping them (SS-1).
+    confirmDiscard();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(isRemovalPending('old')).toBe(false);
     expect(rpcMock.callsOf('sources.remove')).toEqual([]);

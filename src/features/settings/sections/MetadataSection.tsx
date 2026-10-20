@@ -1,11 +1,12 @@
-import { CircleAlert, CircleCheck, Eye, EyeOff, PlugZap, Trash2 } from 'lucide-react';
+import { CircleAlert, CircleCheck, PlugZap, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 
-import { Button, IconButton, Select, fieldClass, useToast, errorDescription } from '@/ui';
+import { Button, Select, useToast, errorDescription } from '@/ui';
+import { SecretInput } from '../../sources/components/SecretInput';
 import { SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { TMDB_LANGUAGES } from '../lib/languages';
 import { tmdbPatch } from '../lib/patch';
@@ -18,7 +19,6 @@ export function MetadataSection({ settings, update }: SectionProps) {
   const { toast } = useToast();
   const saved = settings.tmdb.apiKey ?? '';
   const [key, setKey] = useState(saved);
-  const [shown, setShown] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [test, setTest] = useState<TestState>({ status: 'idle' });
   const [clearing, setClearing] = useState(false);
@@ -75,42 +75,32 @@ export function MetadataSection({ settings, update }: SectionProps) {
           {({ id, describedBy }) => (
             <div className="flex w-full flex-col gap-3">
               <div className="flex items-center gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <input
-                    id={id}
-                    type={shown ? 'text' : 'password'}
-                    value={key}
-                    disabled={!enabled}
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-describedby={describedBy}
-                    aria-invalid={keyError ? true : undefined}
-                    placeholder={t('tmdbApiKeyPlaceholder')}
-                    onChange={(e) => {
-                      setKey(e.target.value);
-                      setTest({ status: 'idle' });
-                      if (keyError) setKeyError(null);
-                    }}
-                    onBlur={() => void commitKey()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        void commitKey();
-                      }
-                    }}
-                    className={fieldClass('md', 'pe-11 font-mono placeholder:font-sans')}
-                    data-testid="input-tmdb-key"
-                  />
-                  <div className="absolute inset-y-0 end-0.5 flex items-center">
-                    <IconButton
-                      label={shown ? t('hideKey') : t('showKey')}
-                      aria-pressed={shown}
-                      disabled={!enabled}
-                      icon={shown ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}
-                      onClick={() => setShown((s) => !s)}
-                    />
-                  </div>
-                </div>
+                {/* The kit's secret field, as the source dialogs use for passwords (SS-9). */}
+                <SecretInput
+                  id={id}
+                  value={key}
+                  disabled={!enabled}
+                  aria-describedby={describedBy}
+                  aria-invalid={keyError ? true : undefined}
+                  placeholder={t('tmdbApiKeyPlaceholder')}
+                  showLabel={t('showKey')}
+                  hideLabel={t('hideKey')}
+                  onChange={(e) => {
+                    setKey(e.target.value);
+                    setTest({ status: 'idle' });
+                    if (keyError) setKeyError(null);
+                  }}
+                  onBlur={() => void commitKey()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void commitKey();
+                    }
+                  }}
+                  className="font-mono placeholder:font-sans"
+                  wrapperClassName="min-w-0 flex-1"
+                  data-testid="input-tmdb-key"
+                />
                 <Button
                   size="md"
                   variant="secondary"

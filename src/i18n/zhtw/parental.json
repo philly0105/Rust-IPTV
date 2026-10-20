@@ -37,7 +37,7 @@
   "setPin": "設定 PIN 碼",
   "changePin": "變更 PIN 碼",
   "pinSetToast": "家長監護已開啟",
-  "pinSetToastText": "您可以在這裡鎖定群組，或從頻道、電影、影集的選單個別鎖定。",
+  "pinSetToastText": "您可以在這裡鎖定群組，或從頻道、電影、影集的選單個別鎖定。忘記的 PIN 無法重設，請妥善保存。",
   "pinChangedToast": "PIN 碼已變更",
   "unlockTitle": "輸入家長監護 PIN 碼",
   "unlockText": "此內容已被家長監護鎖定。",
@@ -159,5 +159,6 @@
   "discardTitle": "要捨棄變更嗎？",
   "discardText": "你在此勾選或取消勾選的群組不會被儲存。",
   "keepEditing": "繼續編輯",
-  "discard": "捨棄"
+  "discard": "捨棄",
+  "pinNoRecovery": "忘記的 PIN 無法重設。請妥善保存。"
 }

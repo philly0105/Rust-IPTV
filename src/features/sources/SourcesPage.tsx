@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { clsx } from 'clsx';
 import { CircleStop, ListFilter, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -8,11 +9,14 @@ import { onAppEvent } from '@/api/events';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { RpcError, rpc, rpcRaw, type CallOptions } from '@/api/transport';
 import { DEFAULT_SETTINGS, type Source, type SourceKind } from '@/api/types';
+import { HiddenChannelsDialog } from '@/features/channeledit';
 import { useStable } from '@/features/live/guide/useStable';
 import { removalMayNeedPin, unlockToRemoveSources } from '@/features/parental/gate';
 
 import { Button, EmptyState, ErrorState, Menu, Page, Select, Skeleton, TEXT_LINK, useToast, errorDescription } from '@/ui';
 import { useShell, useShortcut } from '@/shell';
+import { sourceHomePath } from '@/shell/railLinks';
+import { useMediaQuery } from '@/shell/useMediaQuery';
 import { hasAccountInfo } from './components/AccountPanel';
 import { AddSourceDialog, type AddSourceInitial } from './components/AddSourceDialog';
 import { EditSourceDialog, type EditTab } from './components/EditSourceDialog';
@@ -44,6 +48,9 @@ import { applyOrder, moveItem } from './lib/reorder';
 import { useNextFrame } from './lib/useNextFrame';
 
 const KINDS: readonly SourceKind[] = ['m3u', 'xtream', 'stalker'];
+
+/** Up to this many sources the page shows no sort or filter controls (SS-10). */
+const COMPACT_MAX = 2;
 
 /** How one refresh ended: `failed` includes an import that finished with `lastError`. */
 type RefreshOutcome = 'ok' | 'failed' | 'cancelled';
@@ -101,6 +108,8 @@ export function SourcesPage() {
   const [stoppingAll, setStoppingAll] = useState(false);
   const [editing, setEditing] = useState<Source | null>(null);
   const [editTab, setEditTab] = useState<EditTab>('details');
+  // The source whose hidden and renamed channels are open (SS-3).
+  const [editsFor, setEditsFor] = useState<string | null>(null);
   const [view, setViewState] = useState<ListView>(() => loadView());
   const [removeAllOpen, setRemoveAllOpen] = useState(false);
   const [removeAllBusy, setRemoveAllBusy] = useState(false);
@@ -113,8 +122,15 @@ export function SourcesPage() {
       saveView(next);
       return next;
     });
-  const manual = isManualView(view);
-  const shown = useMemo(() => applyView(sources, view, i18n.language), [sources, view, i18n.language]);
+  // With one or two sources there is nothing to sort or filter: the controls and the hint stay
+  // away, and a sort or filter saved from a longer list does not hide a card the user cannot get back.
+  const compact = sources.length <= COMPACT_MAX;
+  // On a phone Refresh all waits in the More menu, so Add a source and More share one row; it comes
+  // out as a button while it runs, to show its progress and Stop.
+  const phone = useMediaQuery('(max-width: 639.98px)');
+  const activeView = compact ? DEFAULT_VIEW : view;
+  const manual = isManualView(activeView);
+  const shown = useMemo(() => applyView(sources, activeView, i18n.language), [sources, activeView, i18n.language]);
   const openEdit = (s: Source, tab: EditTab = 'details') => {
     setEditTab(tab);
     setEditing(s);
@@ -154,19 +170,27 @@ export function SourcesPage() {
     }
   }, [accountParam, query.data, params, setParams]);
   // `&from=<path>`: the page that sent the user here to add a source (Home's first-run welcome).
-  // After a successful add they go back there, to the content they came for.
+  // After a successful add they go back there, to the content they came for. The very first
+  // source opens on its own content instead (SS-6): Home has nothing to show a live-only playlist
+  // yet, while its channels are one click from playing.
   const returnTo = safeReturnPath(params.get('from'));
-  const addedRef = useRef(false);
+  const addedRef = useRef<{ source: Source; first: boolean } | null>(null);
   const closeAdd = () => {
-    if (addedRef.current && returnTo) {
-      addedRef.current = false;
+    const added = addedRef.current;
+    if (added && returnTo && added.first) {
+      addedRef.current = null;
+      navigate(sourceHomePath(added.source), { replace: true });
+      return;
+    }
+    if (added && returnTo) {
+      addedRef.current = null;
       // The sender pushed this page: going back keeps history free of a second copy of it.
       const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
       if (idx > 0) navigate(-1);
       else navigate(returnTo, { replace: true });
       return;
     }
-    addedRef.current = false;
+    addedRef.current = null;
     const next = new URLSearchParams(params);
     next.delete('add');
     next.delete('kind');
@@ -229,10 +253,10 @@ export function SourcesPage() {
     }
   };
 
-  // Pasted playlists have nothing to fetch again.
-  const refreshable = sources.filter((s) => s.m3u?.origin !== 'text');
+  // Pasted and uploaded playlists are included: the core re-imports their stored text (no network),
+  // which is how they pick up new import rules such as series grouping (FW-M3U-SERIES-MIGRATION).
   const refreshAll = async () => {
-    const targets = refreshable;
+    const targets = sources;
     if (targets.length === 0 || stopAllRef.current) return;
     const run = { stopped: false, currentId: null as string | null };
     stopAllRef.current = run;
@@ -409,7 +433,8 @@ export function SourcesPage() {
     nextFrame(() => {
       const cards = listRef.current?.querySelectorAll<HTMLElement>('[data-source-id]') ?? [];
       const card = [...cards].find((el) => el.dataset.sourceId === neighbour);
-      const next = card?.querySelector<HTMLElement>('[data-testid="source-remove"]:not(:disabled)') ?? card?.querySelector<HTMLElement>('a');
+      // Remove sits in the card's More menu: the neighbour's menu button takes the same place.
+      const next = card?.querySelector<HTMLElement>('[aria-haspopup="menu"]') ?? card?.querySelector<HTMLElement>('a');
       (next ?? document.querySelector<HTMLElement>('[data-testid="sources-add"], [data-testid="sources-onboarding"] button'))?.focus();
     });
   };
@@ -477,6 +502,7 @@ export function SourcesPage() {
   const cardRefresh = useStable((s: Source) => void refreshOne(s));
   const cardEdit = useStable((s: Source) => openEdit(s));
   const cardAccount = useStable((s: Source) => openEdit(s, 'account'));
+  const cardChannelEdits = useStable((s: Source) => setEditsFor(s.id));
   const cardRemove = useStable((s: Source) => removeChecked(s));
   const cardCancel = useStable((id: string) => void cancelOne(id));
   const cardMove = useStable(moveTo);
@@ -496,53 +522,57 @@ export function SourcesPage() {
   else
     body = (
       <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className={clsx('flex flex-wrap items-center gap-3', compact ? 'justify-end' : 'justify-between')}>
           {/* Phones: sort spans the row and the two filters share the next one at equal widths. */}
-          <div
-            className="grid w-full grid-cols-2 gap-2 @md:flex @md:w-auto @md:flex-wrap @md:items-center"
-            role="group"
-            aria-label={t('viewControls')}
-            data-testid="sources-view"
-          >
-            <ListFilter aria-hidden className="size-4 text-fg-subtle @max-md:hidden" />
-            <Select
-              wrapperClassName="min-w-0 @max-md:col-span-2"
-              aria-label={t('sortLabel')}
-              value={view.sort}
-              options={sortOptions}
-              onValueChange={(v) => setView({ sort: v as SourceSort })}
-              data-testid="sources-sort"
-            />
-            <Select
-              wrapperClassName="min-w-0"
-              aria-label={t('filterKindLabel')}
-              value={view.kind}
-              options={kindOptions}
-              onValueChange={(v) => setView({ kind: v as KindFilter })}
-              data-testid="sources-filter-kind"
-            />
-            <Select
-              wrapperClassName="min-w-0"
-              aria-label={t('filterStatusLabel')}
-              value={view.status}
-              options={statusOptions}
-              onValueChange={(v) => setView({ status: v as StatusFilter })}
-              data-testid="sources-filter-status"
-            />
-          </div>
+          {compact ? null : (
+            <div
+              className="grid w-full grid-cols-2 gap-2 @md:flex @md:w-auto @md:flex-wrap @md:items-center"
+              role="group"
+              aria-label={t('viewControls')}
+              data-testid="sources-view"
+            >
+              <ListFilter aria-hidden className="size-4 text-fg-subtle @max-md:hidden" />
+              <Select
+                wrapperClassName="min-w-0 @max-md:col-span-2"
+                aria-label={t('sortLabel')}
+                value={view.sort}
+                options={sortOptions}
+                onValueChange={(v) => setView({ sort: v as SourceSort })}
+                data-testid="sources-sort"
+              />
+              <Select
+                wrapperClassName="min-w-0"
+                aria-label={t('filterKindLabel')}
+                value={view.kind}
+                options={kindOptions}
+                onValueChange={(v) => setView({ kind: v as KindFilter })}
+                data-testid="sources-filter-kind"
+              />
+              <Select
+                wrapperClassName="min-w-0"
+                aria-label={t('filterStatusLabel')}
+                value={view.status}
+                options={statusOptions}
+                onValueChange={(v) => setView({ status: v as StatusFilter })}
+                data-testid="sources-filter-status"
+              />
+            </div>
+          )}
           {/* Add and its More menu stay together; on phones the buttons fill their row. */}
           <div className="flex w-full flex-wrap gap-2 @md:w-auto">
-            <Button
-              variant="secondary"
-              className="@max-md:flex-1"
-              icon={<RefreshCw aria-hidden className="size-4" />}
-              loading={refreshingAll}
-              disabled={refreshable.length === 0}
-              onClick={() => void refreshAll()}
-              data-testid="sources-refresh-all"
-            >
-              {refreshAllStep && refreshAllStep.total > 1 ? t('refreshAllProgress', refreshAllStep) : t('refreshAll')}
-            </Button>
+            {phone && !refreshingAll ? null : (
+              <Button
+                variant="secondary"
+                className="@max-md:flex-1"
+                icon={<RefreshCw aria-hidden className="size-4" />}
+                loading={refreshingAll}
+                disabled={sources.length === 0}
+                onClick={() => void refreshAll()}
+                data-testid="sources-refresh-all"
+              >
+                {refreshAllStep && refreshAllStep.total > 1 ? t('refreshAllProgress', refreshAllStep) : t('refreshAll')}
+              </Button>
+            )}
             {refreshingAll ? (
               <Button
                 variant="ghost"
@@ -562,6 +592,18 @@ export function SourcesPage() {
               <Menu
                 label={t('moreActions')}
                 items={[
+                  ...(phone
+                    ? [
+                        {
+                          id: 'refresh-all',
+                          label: t('refreshAll'),
+                          icon: <RefreshCw aria-hidden className="size-4" />,
+                          disabled: refreshingAll,
+                          onSelect: () => void refreshAll(),
+                        },
+                        { id: 'sep', type: 'separator' as const },
+                      ]
+                    : []),
                   {
                     id: 'remove-all',
                     label: t('removeAllMenu'),
@@ -574,26 +616,15 @@ export function SourcesPage() {
             </div>
           </div>
         </div>
-        <p className="text-sm text-fg-muted" data-testid="sources-view-hint">
-          {manual
-            ? t('reorderHint')
-            : isFiltered(view)
-              ? t('filteredHint', { shown: shown.length, total: sources.length })
-              : t('sortedHint')}
-          {!manual ? (
-            <>
-              {' '}
-              <button
-                type="button"
-                className={TEXT_LINK}
-                onClick={() => setView(DEFAULT_VIEW)}
-                data-testid="sources-view-reset"
-              >
-                {t('showYourOrder')}
-              </button>
-            </>
-          ) : null}
-        </p>
+        {/* Your order needs no explanation: the grip's tooltip says how to move a card. */}
+        {manual ? null : (
+          <p className="text-sm text-fg-muted" data-testid="sources-view-hint">
+            {isFiltered(activeView) ? t('filteredHint', { shown: shown.length, total: sources.length }) : t('sortedHint')}{' '}
+            <button type="button" className={TEXT_LINK} onClick={() => setView(DEFAULT_VIEW)} data-testid="sources-view-reset">
+              {t('showYourOrder')}
+            </button>
+          </p>
+        )}
         {shown.length === 0 ? (
           <EmptyState
             size="inline"
@@ -621,6 +652,7 @@ export function SourcesPage() {
               onRefresh={cardRefresh}
               onEdit={cardEdit}
               onAccount={cardAccount}
+              onChannelEdits={cardChannelEdits}
               onRemove={cardRemove}
               onCancelImport={cardCancel}
               onMove={cardMove}
@@ -653,12 +685,14 @@ export function SourcesPage() {
         open={addInitial !== undefined}
         initial={addInitial}
         onClose={closeAdd}
-        onAdded={() => {
-          addedRef.current = true;
+        onAdded={(source, first) => {
+          addedRef.current = { source, first };
         }}
       />
 
       <EditSourceDialog source={editing} initialTab={editTab} onClose={() => setEditing(null)} onRefresh={(s) => void refreshOne(s)} />
+
+      <HiddenChannelsDialog sourceId={editsFor ?? ''} open={editsFor !== null} onOpenChange={(open) => !open && setEditsFor(null)} />
 
       <RemoveAllDialog
         open={removeAllOpen}

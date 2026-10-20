@@ -37,7 +37,7 @@
   "setPin": "PINを設定",
   "changePin": "PINを変更",
   "pinSetToast": "ペアレンタルコントロールをオンにしました",
-  "pinSetToastText": "グループはここでロックできます。チャンネル、映画、シリーズは各メニューからロックできます。",
+  "pinSetToastText": "グループはここでロックできます。チャンネル、映画、シリーズは各メニューからロックできます。PINを忘れるとリセットできないので、安全な場所に控えておいてください。",
   "pinChangedToast": "PINを変更しました",
   "unlockTitle": "ペアレンタルPINを入力",
   "unlockText": "これはペアレンタルコントロールでロックされています。",
@@ -159,5 +159,6 @@
   "discardTitle": "変更を破棄しますか?",
   "discardText": "ここでチェックを付けたり外したりしたグループは保存されません。",
   "keepEditing": "編集を続ける",
-  "discard": "破棄"
+  "discard": "破棄",
+  "pinNoRecovery": "PINを忘れるとリセットできません。安全な場所に控えておいてください。"
 }

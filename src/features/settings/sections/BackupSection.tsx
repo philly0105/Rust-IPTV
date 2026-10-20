@@ -14,11 +14,13 @@ import { downloadText, readFileText } from '../../sources/lib/files';
 import { absoluteTime, formatCount } from '../../sources/lib/format';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { MAX_BACKUP_BYTES, backupFileName, chooseBackupSavePath, inspectBackup, parentalOptionsDiffer, type BackupSummary } from '../lib/backup';
+import { ImageCacheRow } from './ImageCacheRow';
+import { ResetGroup } from './ResetGroup';
 import type { SectionProps } from './types';
 
 type Picked = { name: string; size: number; text: string; summary: BackupSummary };
 
-export function BackupSection(_props: SectionProps) {
+export function BackupSection({ update }: SectionProps) {
   const { t, i18n } = useTranslation('settings');
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -350,6 +352,13 @@ export function BackupSection(_props: SectionProps) {
       >
         <p className="text-fg-muted">{t('backupReplaceConfirmBody')}</p>
       </Dialog>
+
+      {/* Run 3 C3: the disk image cache (size against the cap, the cap, Clear). Server mode has one too. */}
+      <SettingsGroup title={t('storageGroup')}>
+        <ImageCacheRow update={update} />
+      </SettingsGroup>
+
+      <ResetGroup update={update} />
     </SettingsSection>
   );
 }

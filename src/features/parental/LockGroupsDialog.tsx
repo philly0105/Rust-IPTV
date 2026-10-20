@@ -168,7 +168,7 @@ export function LockGroupsDialog({ source, status, locks, onClose }: LockGroupsD
         testId="lock-groups-dialog"
         footer={
           <>
-            <span className="me-auto text-[calc(13rem/15)] text-fg-subtle" aria-live="polite" data-testid="lock-groups-changes">
+            <span className="me-auto text-body-sm text-fg-subtle" aria-live="polite" data-testid="lock-groups-changes">
               {changeCount > 0 ? t('unsavedChanges', { count: changeCount }) : null}
             </span>
             <Button variant="ghost" onClick={requestClose}>

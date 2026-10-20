@@ -41,6 +41,12 @@ export interface ReleaseNoteItem {
   /** String key prefix in `onboarding.json` (`<key>Title`, `<key>Text`). */
   key: string;
   icon: LucideIcon;
+  /**
+   * Only where this runs: `desktop` for a feature of the desktop app (the window, phone
+   * pairing), `server` for one of the browser. Unset: everywhere. What's new leaves the item out
+   * elsewhere, so nobody reads about a setting they cannot find (SR-9).
+   */
+  platform?: 'desktop' | 'server';
 }
 
 export interface ReleaseNotes {
@@ -60,10 +66,12 @@ export const RELEASE_NOTES: readonly ReleaseNotes[] = [
       { key: 'notePicture', icon: Scaling },
       { key: 'noteSourceUpdates', icon: RefreshCw },
       { key: 'noteDownloadsMore', icon: Download },
-      { key: 'noteRemotePlay', icon: Gamepad2 },
+      // Phones pair with the desktop app only; in server mode the remote page is local to the server.
+      { key: 'noteRemotePlay', icon: Gamepad2, platform: 'desktop' },
       { key: 'notePhoneLayout', icon: Smartphone },
       { key: 'noteMessages', icon: Languages },
-      { key: 'noteWindowStart', icon: Maximize },
+      // Settings > General shows Window at startup only in the desktop app.
+      { key: 'noteWindowStart', icon: Maximize, platform: 'desktop' },
       { key: 'noteFixes', icon: Wrench },
     ],
   },
@@ -85,3 +93,14 @@ export const RELEASE_NOTES: readonly ReleaseNotes[] = [
     ],
   },
 ];
+
+/** A release's items for this host (`desktop`: the desktop app; otherwise a browser on a server). */
+export function itemsFor(release: ReleaseNotes, desktop: boolean): readonly ReleaseNoteItem[] {
+  const here = desktop ? 'desktop' : 'server';
+  return release.items.filter((i) => i.platform === undefined || i.platform === here);
+}
+
+/** The releases with their items for this host; a release left with nothing drops out. */
+export function notesFor(releases: readonly ReleaseNotes[], desktop: boolean): ReleaseNotes[] {
+  return releases.map((r) => ({ ...r, items: itemsFor(r, desktop) })).filter((r) => r.items.length > 0);
+}

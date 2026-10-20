@@ -40,7 +40,7 @@
   "setPin": "Ustaw PIN",
   "changePin": "Zmień PIN",
   "pinSetToast": "Kontrola rodzicielska jest włączona",
-  "pinSetToastText": "Blokuj grupy tutaj, a pojedynczy kanał, film lub serial z jego menu.",
+  "pinSetToastText": "Blokuj grupy tutaj, a pojedynczy kanał, film lub serial z jego menu. Zapomnianego PIN-u nie da się zresetować, więc przechowuj go w bezpiecznym miejscu.",
   "pinChangedToast": "PIN zmieniony",
   "unlockTitle": "Wpisz PIN kontroli rodzicielskiej",
   "unlockText": "Ta pozycja jest zablokowana przez kontrolę rodzicielską.",
@@ -192,5 +192,6 @@
   "discardTitle": "Odrzucić zmiany?",
   "discardText": "Grupy zaznaczone lub odznaczone tutaj nie zostaną zapisane.",
   "keepEditing": "Edytuj dalej",
-  "discard": "Odrzuć"
+  "discard": "Odrzuć",
+  "pinNoRecovery": "Zapomnianego PIN-u nie da się zresetować. Przechowuj go w bezpiecznym miejscu."
 }

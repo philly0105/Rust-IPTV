@@ -38,7 +38,7 @@
   "setPin": "Set PIN",
   "changePin": "Change PIN",
   "pinSetToast": "Parental controls are on",
-  "pinSetToastText": "Lock groups here, or lock a channel, movie or series from its menu.",
+  "pinSetToastText": "Lock groups here, or lock a channel, movie or series from its menu. A forgotten PIN can't be reset, so keep it somewhere safe.",
   "pinChangedToast": "PIN changed",
   "unlockTitle": "Enter the parental PIN",
   "unlockText": "This is locked by parental controls.",
@@ -170,5 +170,6 @@
   "discardTitle": "Discard your changes?",
   "discardText": "The groups you ticked or unticked here won't be saved.",
   "keepEditing": "Keep editing",
-  "discard": "Discard"
+  "discard": "Discard",
+  "pinNoRecovery": "A forgotten PIN can't be reset. Keep it somewhere safe."
 }

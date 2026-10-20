@@ -230,6 +230,16 @@ describe('SetPinDialog', () => {
     expect(queryClient.getQueryData(['parental.status', null])).toMatchObject({ enabled: true });
   });
 
+  it('warns at the confirm step that a forgotten PIN cannot be reset (SS-15)', async () => {
+    core.reset();
+    renderUi(<SetPinDialog open mode="first" onDone={vi.fn()} onCancel={vi.fn()} />, queryClient);
+    const dialog = screen.getByRole('dialog', { name: 'Set a parental PIN' });
+    expect(within(dialog).queryByText(/can't be reset/)).toBeNull();
+    step(dialog, 'New PIN', PIN, 'Next');
+    await within(dialog).findByText('Step 2 of 2');
+    expect(within(dialog).getByText("A forgotten PIN can't be reset. Keep it somewhere safe.")).toBeTruthy();
+  });
+
   it('starts over when the two PINs differ', async () => {
     core.reset();
     renderUi(<SetPinDialog open mode="first" onDone={vi.fn()} onCancel={vi.fn()} />, queryClient);

@@ -49,8 +49,8 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function addSample(path: string) {
-  rpcMock.handlers['sources.list'] = () => [];
+async function addSample(path: string, existing: ReturnType<typeof makeSource>[] = []) {
+  rpcMock.handlers['sources.list'] = () => existing;
   const view = renderAt(routes(), path);
   await screen.findByRole('dialog');
   type(/^Name/, 'Sample');
@@ -85,8 +85,14 @@ describe('return after a first add (L2-sources-home-12)', () => {
     rpcMock.handlers['sources.add'] = () => makeSource('new', { name: 'Sample' });
   });
 
-  it('goes back to the page that opened Add', async () => {
+  it('opens the first source on its channels instead of going back (SS-6)', async () => {
     const { router } = await addSample('/sources?add=1&from=%2F');
+    expect(await screen.findByText('live page')).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/s/new/live');
+  });
+
+  it('goes back to the page that opened Add when sources already existed', async () => {
+    const { router } = await addSample('/sources?add=1&from=%2F', [makeSource('old', { name: 'Old' })]);
     expect(await screen.findByText('home page')).toBeTruthy();
     expect(router.state.location.pathname).toBe('/');
   });
@@ -102,7 +108,7 @@ describe('return after a first add (L2-sources-home-12)', () => {
   });
 
   it('ignores a return target that leaves the app', async () => {
-    const { router } = await addSample('/sources?add=1&from=%2F%2Fevil.example.com');
+    const { router } = await addSample('/sources?add=1&from=%2F%2Fevil.example.com', [makeSource('old', { name: 'Old' })]);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(router.state.location.pathname).toBe('/sources');
     expect(screen.queryByText('home page')).toBeNull();

@@ -6,7 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
+import { confirmDiscard, eagerRoutes, installDomStubs, makeSource, renderAt, rpcMock } from './harness';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -214,6 +214,8 @@ describe('closing after a failed add (L1-sources-home-8)', () => {
     const alert = await screen.findByTestId('add-source-error');
     expect(within(alert).getByTestId('add-source-retry-note').textContent).toContain('Closing this window removes "hang"');
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Cancel' }));
+    // Typed details: Cancel asks before dropping them (SS-1).
+    confirmDiscard();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   }
 

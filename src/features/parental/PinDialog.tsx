@@ -108,7 +108,7 @@ export function PinDialog({ open, title, description, footnote, confirmLabel, da
           message={<PinMessage id={messageId} feedback={feedback} />}
           testId={`${testId}-field`}
         />
-        {footnote ? <p className="max-w-xs text-center text-[calc(13rem/15)] text-fg-subtle">{footnote}</p> : null}
+        {footnote ? <p className="max-w-xs text-center text-body-sm text-fg-subtle">{footnote}</p> : null}
       </form>
     </Dialog>
   );

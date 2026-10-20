@@ -23,7 +23,9 @@ const h = await import('./harness');
 let core = h.createCore();
 rpcMock.current = { call: (cmd, args) => core.call(cmd, args) };
 const { WhatsNewDialog } = await import('../WhatsNewDialog');
-const { RELEASE_NOTES } = await import('../notes');
+const { RELEASE_NOTES, itemsFor, notesFor } = await import('../notes');
+// The browser build (jsdom has no Tauri): desktop-only notes are left out (SR-9).
+const DESKTOP = false;
 const { closeOverlay, useOnboardingStore } = await import('../store');
 const { queryClient, rpcKey } = await import('@/api/query');
 
@@ -65,7 +67,7 @@ describe("What's new", () => {
     core.state.version = '0.2.0';
     open({ since: '0.1.0', auto: true });
     const items = await screen.findAllByTestId('whats-new-item');
-    expect(items).toHaveLength(RELEASE_NOTES.find((r) => r.version === '0.2.0')!.items.length);
+    expect(items).toHaveLength(itemsFor(RELEASE_NOTES.find((r) => r.version === '0.2.0')!, DESKTOP).length);
     expect(dialog().textContent).toContain('Version 0.2.0');
     expect(items[0]!.textContent).toContain('Series in playlists');
     expect(dialog().textContent).not.toContain('Multi-view');
@@ -145,7 +147,7 @@ describe("What's new", () => {
   it('still lists every release when opened by hand and the version cannot be read', async () => {
     core.state.failInfo = true;
     open({ since: null });
-    const all = RELEASE_NOTES.reduce((n, r) => n + r.items.length, 0);
+    const all = notesFor(RELEASE_NOTES, DESKTOP).reduce((n, r) => n + r.items.length, 0);
     expect(await screen.findAllByTestId('whats-new-item')).toHaveLength(all);
   });
 
@@ -208,3 +210,25 @@ describe("What's new", () => {
     expect(screen.queryByRole('button', { name: 'Take the tour' })).toBeNull();
   });
 });
+
+describe("What's new per platform (SR-9)", () => {
+  it('leaves desktop-only notes out of the browser, and keeps them for the desktop app', () => {
+    const release = RELEASE_NOTES.find((r) => r.version === '0.2.0')!;
+    const browser = itemsFor(release, false).map((i) => i.key);
+    const desktop = itemsFor(release, true).map((i) => i.key);
+    expect(browser).not.toContain('noteWindowStart');
+    expect(browser).not.toContain('noteRemotePlay');
+    expect(desktop).toContain('noteWindowStart');
+    expect(desktop).toHaveLength(release.items.length);
+  });
+
+  it('shows the browser the 0.2.0 notes without the window setting', async () => {
+    core.state.version = '0.2.0';
+    open({ since: '0.1.0', auto: true });
+    await screen.findAllByTestId('whats-new-item');
+    expect(dialog().textContent).not.toContain('Start maximized or fullscreen');
+    // The newest release leads with three larger cards.
+    expect(dialog().querySelectorAll('[data-highlight]')).toHaveLength(3);
+  });
+});
+

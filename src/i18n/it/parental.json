@@ -39,7 +39,7 @@
   "setPin": "Imposta PIN",
   "changePin": "Cambia PIN",
   "pinSetToast": "Il controllo parentale è attivo",
-  "pinSetToastText": "Blocca i gruppi qui, oppure blocca un canale, un film o una serie dal suo menu.",
+  "pinSetToastText": "Blocca i gruppi qui, oppure blocca un canale, un film o una serie dal suo menu. Un PIN dimenticato non si può reimpostare, quindi conservalo in un posto sicuro.",
   "pinChangedToast": "PIN cambiato",
   "unlockTitle": "Inserisci il PIN parentale",
   "unlockText": "Questo contenuto è bloccato dal controllo parentale.",
@@ -181,5 +181,6 @@
   "discardTitle": "Annullare le modifiche?",
   "discardText": "I gruppi selezionati o deselezionati qui non verranno salvati.",
   "keepEditing": "Continua a modificare",
-  "discard": "Annulla modifiche"
+  "discard": "Annulla modifiche",
+  "pinNoRecovery": "Un PIN dimenticato non si può reimpostare. Conservalo in un posto sicuro."
 }

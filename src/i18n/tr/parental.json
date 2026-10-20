@@ -38,7 +38,7 @@
   "setPin": "PIN belirle",
   "changePin": "PIN'i değiştir",
   "pinSetToast": "Ebeveyn denetimi açık",
-  "pinSetToastText": "Grupları burada kilitleyin; bir kanalı, filmi veya diziyi ise kendi menüsünden kilitleyin.",
+  "pinSetToastText": "Grupları burada kilitleyin; bir kanalı, filmi veya diziyi ise kendi menüsünden kilitleyin. Unutulan PIN sıfırlanamaz, bu yüzden güvenli bir yerde saklayın.",
   "pinChangedToast": "PIN değiştirildi",
   "unlockTitle": "Ebeveyn PIN'ini girin",
   "unlockText": "Bu içerik ebeveyn denetimiyle kilitli.",
@@ -170,5 +170,6 @@
   "discardTitle": "Değişiklikler atılsın mı?",
   "discardText": "Burada işaretlediğiniz veya işaretini kaldırdığınız gruplar kaydedilmeyecek.",
   "keepEditing": "Düzenlemeye devam et",
-  "discard": "At"
+  "discard": "At",
+  "pinNoRecovery": "Unutulan PIN sıfırlanamaz. Güvenli bir yerde saklayın."
 }

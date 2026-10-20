@@ -27,9 +27,11 @@ export interface M3uFormProps {
   onSuggestName?: (input: string) => void;
   /** Validates one field (error path, e.g. `m3u.url`) when the user leaves it. */
   onFieldBlur?: (path: string) => void;
+  /** The Add dialog opens on the playlist address, or the text box for a paste (SS-2). */
+  autoFocusAddress?: boolean;
 }
 
-export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur }: M3uFormProps) {
+export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur, autoFocusAddress }: M3uFormProps) {
   const { t, i18n } = useTranslation('sources');
   const fileInput = useRef<HTMLInputElement>(null);
   const fileHintId = useId();
@@ -124,11 +126,19 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
   return (
     <div className="flex flex-col gap-5">
       {mode === 'add' ? (
+        // A pill row, not a second underline bar: it picks where this playlist comes from, under the kind tabs above (SS-14).
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-fg" id={`${fileHintId}-origin`}>
+          <span aria-hidden className="text-sm font-medium text-fg">
             {t('m3uOriginLabel')}
           </span>
-          <Tabs items={origins} value={value.origin} onChange={(id) => set({ origin: id as M3uOrigin })} />
+          <Tabs
+            items={origins}
+            value={value.origin}
+            variant="pill"
+            label={t('m3uOriginLabel')}
+            className="w-fit"
+            onChange={(id) => set({ origin: id as M3uOrigin })}
+          />
         </div>
       ) : null}
 
@@ -144,6 +154,7 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
                 spellCheck={false}
                 disabled={disabled}
                 placeholder="https://provider.example/playlist.m3u"
+                data-autofocus={autoFocusAddress ? '' : undefined}
                 value={value.url}
                 onChange={(e) => set({ url: e.target.value })}
                 onBlur={() => {
@@ -234,6 +245,7 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
               disabled={disabled}
               className="font-mono text-sm"
               placeholder={'#EXTM3U\n#EXTINF:-1 tvg-id="news.1" group-title="News",News One\nhttps://example.com/news1.m3u8'}
+              data-autofocus={autoFocusAddress ? '' : undefined}
               value={value.text}
               onChange={(e) => set({ text: e.target.value })}
             />

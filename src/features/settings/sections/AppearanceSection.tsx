@@ -4,13 +4,40 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ACCENTS, DENSITIES, UI_SCALE_MAX, UI_SCALE_MIN } from '@/api/types';
-import type { Accent, Density, Theme } from '@/api/types';
+import type { Accent, CoverSize, DashboardRails, Density, Theme } from '@/api/types';
 import { clampUiScale, previewAppearance, useTheme } from '@/shell';
 import { Button, Poster, ProgressBar, Radio as RadioInput } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
+import { railsPatch } from '../lib/patch';
 import type { SectionProps } from './types';
+
+/** The home screen's rows, in the order Home shows them. */
+const RAILS: (keyof DashboardRails)[] = [
+  'hero',
+  'continueWatching',
+  'myList',
+  'liveFavorites',
+  'recentlyWatchedLive',
+  'favoriteMoviesAndSeries',
+  'recentSources',
+  'recentlyAdded',
+  'tmdbTrending',
+];
+
+const RAIL_KEY: Record<keyof DashboardRails, string> = {
+  hero: 'railHero',
+  continueWatching: 'railContinueWatching',
+  liveFavorites: 'railLiveFavorites',
+  recentlyWatchedLive: 'railRecentlyWatchedLive',
+  favoriteMoviesAndSeries: 'railFavoriteMoviesAndSeries',
+  recentSources: 'railRecentSources',
+  recentlyAdded: 'railRecentlyAdded',
+  tmdbTrending: 'railTmdbTrending',
+  myList: 'railMyList',
+};
+
 
 /**
  * Each card previews its own theme whatever theme is active, so it cannot read
@@ -455,6 +482,42 @@ export function AppearanceSection({ settings, update }: SectionProps) {
             <ScaleControl id={id} describedBy={describedBy} value={uiScale} onCommit={(v) => update({ uiScale: v })} />
           )}
         </SettingsRow>
+        <SettingsRow label={t('coverSize')} description={t('coverSizeHint')}>
+          {({ id }) => (
+            <Segmented<CoverSize>
+              id={id}
+              label={t('coverSize')}
+              value={settings.coverSize}
+              options={[
+                { value: 'small', label: t('coverSmall') },
+                { value: 'medium', label: t('coverMedium') },
+                { value: 'large', label: t('coverLarge') },
+              ]}
+              onChange={(coverSize) => void update({ coverSize })}
+            />
+          )}
+        </SettingsRow>
+      </SettingsGroup>
+
+      {/* SS-8: the home screen is something the user sees, so it sits with the other looks. */}
+      <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? t('dashboardHint') : t('railsOffHint')}>
+        <SwitchRow
+          label={t('showDashboard')}
+          description={t('showDashboardHint')}
+          checked={settings.showDashboard}
+          onChange={(showDashboard) => void update({ showDashboard })}
+          testId="toggle-showDashboard"
+        />
+        {RAILS.map((rail) => (
+          <SwitchRow
+            key={rail}
+            label={t(RAIL_KEY[rail])}
+            checked={settings.dashboardRails[rail]}
+            disabled={!settings.showDashboard}
+            onChange={(v) => void update(railsPatch(settings, rail, v))}
+            testId={`toggle-rail-${rail}`}
+          />
+        ))}
       </SettingsGroup>
     </SettingsSection>
   );

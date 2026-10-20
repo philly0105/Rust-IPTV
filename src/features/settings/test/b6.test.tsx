@@ -80,7 +80,7 @@ describe('Reset settings (D9)', () => {
       current = settings();
       return current;
     };
-    renderAt(settingsRoutes, '/settings/general');
+    renderAt(settingsRoutes, '/settings/backup');
     fireEvent.click(await screen.findByTestId('settings-reset'));
     const dialog = await screen.findByRole('dialog', { name: 'Reset all settings?' });
     expect(rpcMock.callsOf('settings.reset')).toEqual([]);
@@ -98,7 +98,7 @@ describe('Reset settings (D9)', () => {
     rpcMock.handlers['settings.reset'] = () => {
       throw new Error('disk full');
     };
-    renderAt(settingsRoutes, '/settings/general');
+    renderAt(settingsRoutes, '/settings/backup');
     fireEvent.click(await screen.findByTestId('settings-reset'));
     fireEvent.click(within(await screen.findByRole('dialog')).getByTestId('settings-reset-confirm'));
     await waitFor(() => expect(lastToast()?.title).toBe("Couldn't reset settings"));

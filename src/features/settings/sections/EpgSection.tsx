@@ -321,7 +321,7 @@ export function EpgSection({ settings, update }: SectionProps) {
         />
       </SettingsGroup>
 
-      <SettingsGroup title={t('epgClearTitle')}>
+      <SettingsGroup title={t('epgClearTitle')} tone="danger">
         <div className="flex flex-col gap-3 px-4 py-4 @2xl:flex-row @2xl:items-center @2xl:justify-between">
           <p className="max-w-xl text-sm text-fg-muted">{t('epgClearHint')}</p>
           <Button variant="danger" icon={<Eraser aria-hidden className="size-4" />} onClick={() => setClearOpen(true)} data-testid="epg-clear-all">

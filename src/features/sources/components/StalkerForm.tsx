@@ -22,6 +22,7 @@ export function StalkerForm({
   storedMac,
   onSuggestName,
   onFieldBlur,
+  autoFocusAddress,
 }: {
   value: StalkerDraft;
   onChange: (next: StalkerDraft) => void;
@@ -33,6 +34,8 @@ export function StalkerForm({
   onSuggestName?: (input: string) => void;
   /** Validates one field (error path, e.g. `stalker.macAddress`) when the user leaves it. */
   onFieldBlur?: (path: string) => void;
+  /** The Add dialog opens on the portal address (SS-2). */
+  autoFocusAddress?: boolean;
 }) {
   const { t } = useTranslation('sources');
   const set = (patch: Partial<StalkerDraft>) => onChange({ ...value, ...patch });
@@ -72,6 +75,7 @@ export function StalkerForm({
             spellCheck={false}
             disabled={disabled}
             placeholder="http://portal.example/c/"
+            data-autofocus={autoFocusAddress ? '' : undefined}
             value={value.portalUrl}
             onChange={(e) => onPortalChange(e.target.value)}
             onBlur={() => {

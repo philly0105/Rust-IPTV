@@ -1,4 +1,4 @@
-/** Settings > Recording: recording padding and guide reminders. */
+/** Settings > Recording: where recordings go, recording padding and guide reminders. */
 
 import { useTranslation } from 'react-i18next';
 
@@ -7,7 +7,8 @@ import { Select, type SelectOption } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
-import type { SectionProps } from './types';
+import { RecordingsFolderRow } from './RecordingsFolderRow';
+import { parity, type SectionProps } from './types';
 
 export const PADDING_BEFORE_CHOICES = [0, 1, 2, 3, 5, 10, 15] as const;
 export const PADDING_AFTER_CHOICES = [0, 1, 2, 5, 10, 15, 20, 30] as const;
@@ -31,6 +32,10 @@ export function RecordingSection({ settings, update }: SectionProps) {
 
   return (
     <SettingsSection title={t('sectionRecording')} description={t('recordingSectionHint')} testId="settings-recording">
+      {/* SS-8: the folder sits with the rest of recording, where people look for it. */}
+      <SettingsGroup title={t('recordingFilesGroup')}>
+        <RecordingsFolderRow value={parity(settings).recordingsDir} update={update} />
+      </SettingsGroup>
       <SettingsGroup title={t('recordingPaddingGroup')} description={t('recordingPaddingHint')}>
         <SettingsRow label={t('recordingPaddingBefore')}>
           {({ id, describedBy }) => (

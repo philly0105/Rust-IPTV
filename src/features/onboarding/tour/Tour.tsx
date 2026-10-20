@@ -84,18 +84,20 @@ function useAnchorBox(anchor: TourAnchor): Box | null {
   return box;
 }
 
-/** Three rising bars, filled up to the current step: the tuner's signal meter. Decorative; the text says the step. */
-function SignalMeter({ step, total }: { step: number; total: number }) {
+/**
+ * Where the tour is: one dot per step, the current one stretched and in the accent (progress is
+ * an accent use). Decorative; the sr-only text beside it says the step.
+ */
+function StepDots({ step, total }: { step: number; total: number }) {
   return (
-    <span aria-hidden className="flex h-4 items-end gap-[3px]" data-testid="tour-meter">
+    <span aria-hidden className="flex items-center gap-1.5" data-testid="tour-dots">
       {Array.from({ length: total }, (_, i) => (
         <span
           key={i}
           className={cn(
-            'w-1 rounded-[1px] motion-safe:transition-colors motion-safe:duration-200',
-            i <= step ? 'bg-accent' : 'bg-surface-3',
+            'h-1.5 rounded-full motion-safe:transition-[width,background-color] motion-safe:duration-(--duration-base)',
+            i === step ? 'w-4 bg-accent' : i < step ? 'w-1.5 bg-fg-subtle' : 'w-1.5 bg-surface-3',
           )}
-          style={{ height: `${6 + (i * 10) / Math.max(1, total - 1)}px` }}
         />
       ))}
     </span>
@@ -273,25 +275,24 @@ export function Tour({ onClose }: TourProps) {
         data-testid="tour-card"
         data-side={place.side}
         className={cn(
-          'fixed top-0 left-0 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-lg border border-edge bg-surface text-fg shadow-2 focus-visible:outline-none',
+          'fixed top-0 left-0 flex w-[min(22rem,calc(100vw-1.5rem))] flex-col rounded-xl border border-edge bg-surface text-fg shadow-3 focus-visible:outline-none',
           'motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out',
         )}
         style={{ transform: translateTo(place.left, place.top) }}
       >
         <div className="flex items-center gap-3 px-5 pt-5">
-          <span aria-hidden className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-2 text-fg-muted">
-            <Icon size={20} />
+          <span aria-hidden className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg border border-edge bg-surface-2 text-fg">
+            <Icon size={18} />
           </span>
-          <p className="min-w-0 flex-1 text-xs text-fg-muted" data-testid="tour-progress">
+          <p className="min-w-0 flex-1 text-caption text-fg-subtle" data-testid="tour-progress">
             {t('tourStep', { current: step + 1, total })}
           </p>
-          <SignalMeter step={step} total={total} />
         </div>
         <div key={step} className="px-5 pt-3 motion-safe:animate-fade-in" data-testid="tour-body">
-          <h2 id={titleId} className="font-display text-lg leading-snug">
+          <h2 id={titleId} className="text-title-sm">
             {t(current.titleKey)}
           </h2>
-          <p id={textId} className="mt-1.5 text-sm text-fg-muted">
+          <p id={textId} className="mt-1.5 text-body-sm text-fg-muted">
             {t(current.textKey)}
           </p>
           {current.anchor === 'search' && (
@@ -319,7 +320,9 @@ export function Tour({ onClose }: TourProps) {
               {t('tourSkip')}
             </Button>
           )}
-          <span className="flex-1" />
+          <span className="flex flex-1 justify-center">
+            <StepDots step={step} total={total} />
+          </span>
           {step > 0 && (
             <Button variant="secondary" size="sm" onClick={() => go(-1)}>
               {t('tourBack')}

@@ -106,8 +106,12 @@ pub fn register(r: &mut RpcRouter) {
             service::catchup_url(&s, &a.item_ref, &a.start, a.duration_minutes).await?,
         )
     });
+    // Moved by the channel's guide shift, like `epg.shortEpg`.
     r.add("xtream.shortEpg", |s, a: ShortEpgArgs| async move {
-        Ok::<Vec<EpgProgram>, RpcError>(service::short_epg(&s, &a.item_ref, a.limit).await?)
+        let programs = service::short_epg(&s, &a.item_ref, a.limit).await?;
+        let shift = crate::epg::channel_shift(&s, &a.item_ref).await?;
+        let programs = programs.into_iter().map(|p| crate::epg::shifted(p, shift));
+        Ok::<Vec<EpgProgram>, RpcError>(programs.collect())
     });
     r.add("xtream.accountInfo", |s, a: SourceArgs| async move {
         let info = service::account_info(&s, &a.source_id).await?;

@@ -3,7 +3,9 @@
 //! - `epg.shortEpg`: an Xtream channel's now/next from the panel
 //!   (`get_short_epg`), for channels without XMLTV programmes. Cached per
 //!   `(source, stream)`, deduplicated and rate-limited; empty when the
-//!   `epgShortFallback` setting is off or the source is not Xtream.
+//!   `epgShortFallback` setting is off or the source is not Xtream. Like
+//!   `catchup.programs`, moved by the channel's guide shift
+//!   ([`crate::epg::channel_shift`]) after the cache.
 //! - `catchup.programs`: an Xtream channel's archive table
 //!   (`get_simple_data_table`) for a time range, for the archive browser
 //!   when XMLTV has nothing for that day.
@@ -98,6 +100,14 @@ pub async fn short_epg(
             crate::xtream::service::short_epg(state, r, Some(SHORT_EPG_FETCH))
         })
         .await?;
+    // The channel's guide shift moves the panel's programmes (the cache keeps
+    // them as the panel sent them) before the guide clock picks.
+    let shift = crate::epg::channel_shift(state, r).await?;
+    let list: Vec<EpgProgram> = list
+        .iter()
+        .cloned()
+        .map(|p| crate::epg::shifted(p, shift))
+        .collect();
     let offset = i64::from(state.settings_snapshot().epg_offset_minutes);
     Ok(not_ended(
         &list,
@@ -141,12 +151,15 @@ pub async fn programs(
         .archive
         .get_or_fetch(key, || crate::xtream::service::simple_data_table(state, r))
         .await?;
+    // Moved by the channel's guide shift before the range picks.
+    let shift = crate::epg::channel_shift(state, r).await?;
     Ok(list
         .iter()
+        .cloned()
+        .map(|p| crate::epg::shifted(p, shift))
         .filter(
             |p| matches!((secs(&p.start), secs(&p.end)), (Some(s), Some(e)) if e > from && s < to),
         )
-        .cloned()
         .collect())
 }
 

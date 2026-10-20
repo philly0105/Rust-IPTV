@@ -128,7 +128,10 @@ pub async fn sync_source(
     plan: SyncPlan,
 ) -> CoreResult<ImportSummary> {
     let http = crate::http::trusted_client(&state, &cfg.server_url);
-    let client = XtreamClient::new(http, cfg)?.with_progress(&state, source_id);
+    let lists = crate::http::trusted_long_client(&state, &cfg.server_url);
+    let client = XtreamClient::new(http, cfg)?
+        .with_list_client(lists)
+        .with_progress(&state, source_id);
     tracing::info!(source_id, server = %client.server, user = %client.masked_username(), ?plan, "xtream sync start");
     progress(&state, source_id, "fetching", 0, None, Some("account"));
     let account = client.account().await?;

@@ -208,6 +208,58 @@ async fn archive_programs_come_from_the_panel_table() {
     assert_eq!(err.code, iptv_core::RpcErrorCode::Invalid);
 }
 
+/// GPT review (provider-guides-ignore-shifts): the source's guide shift
+/// ("moves every programme of this source") left the panel's own guide
+/// alone. The short EPG and the archive table now move by the channel's
+/// shift, after their caches.
+#[tokio::test]
+async fn provider_guides_follow_the_guide_shift() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let env = support::env().await;
+    let state = env.state.clone();
+    let sid = xtream_source(&state, &format!("{}/xtream", mock.base)).await;
+    let r = build_router();
+    let now = chrono::Utc::now();
+    let range = json!({
+        "ref": live(&sid, "101"),
+        "from": (now - chrono::Duration::days(7)).to_rfc3339(),
+        "to": (now + chrono::Duration::days(7)).to_rfc3339()
+    });
+    let short = json!({"ref": live(&sid, "101"), "limit": 10});
+    let plain_archive = call(&r, &state, "catchup.programs", range.clone()).await;
+    let plain_short = call(&r, &state, "epg.shortEpg", short.clone()).await;
+
+    let id = sid.clone();
+    state
+        .db_call(move |c| {
+            c.execute(
+                r#"UPDATE sources SET epg_json = '{"shiftMinutes":60}' WHERE id = ?1"#,
+                [&id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let starts = |v: &Value| -> Vec<i64> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|p| secs(&p["start"]))
+            .collect()
+    };
+    // Both answers come from the caches: only the shift moved them.
+    let archive = starts(&call(&r, &state, "catchup.programs", range).await);
+    let expected: Vec<i64> = starts(&plain_archive).iter().map(|s| s + 3600).collect();
+    assert!(!expected.is_empty());
+    assert_eq!(archive, expected);
+    let moved = starts(&call(&r, &state, "epg.shortEpg", short).await);
+    let plain = starts(&plain_short);
+    assert!(!plain.is_empty());
+    for s in plain {
+        assert!(moved.contains(&(s + 3600)), "{s} not moved: {moved:?}");
+    }
+}
+
 #[tokio::test]
 async fn m3u_sources_get_no_provider_guide() {
     let env = support::env().await;

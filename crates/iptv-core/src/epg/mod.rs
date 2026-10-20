@@ -109,6 +109,32 @@ fn resolve_many(
         .collect()
 }
 
+/// A channel's guide shift in seconds ([`query::item_shift`]), read for the
+/// provider guides: the Xtream short EPG and archive table and the Stalker
+/// portal guide move by it ([`shifted`]) like the XMLTV reads do.
+pub async fn channel_shift(state: &AppState, r: &ItemRef) -> CoreResult<i64> {
+    let r = r.clone();
+    state.db_call(move |c| query::item_shift(c, &r)).await
+}
+
+/// `p` moved by `shift` seconds ([`channel_shift`]). A provider guide is
+/// moved after its cache and before any filter on its times. A time that
+/// is not RFC 3339 is left as it is.
+pub fn shifted(mut p: EpgProgram, shift: i64) -> EpgProgram {
+    if shift != 0 {
+        p.start = shift_time(&p.start, shift);
+        p.end = shift_time(&p.end, shift);
+    }
+    p
+}
+
+fn shift_time(time: &str, shift: i64) -> String {
+    match chrono::DateTime::parse_from_rfc3339(time.trim()) {
+        Ok(t) => query::to_rfc3339(t.timestamp().saturating_add(shift)),
+        Err(_) => time.to_string(),
+    }
+}
+
 /// Largest `epg.nowNext` `offsetMinutes` accepted (the `epgOffsetMinutes` setting range).
 pub const MAX_OFFSET_MINUTES: i32 = 720;
 

@@ -148,18 +148,34 @@ async fn load_source(app: &AppState, id: String) -> CoreResult<Option<SourceAcce
     .await
 }
 
-/// A request's way to the stream server: the client, the guard, the source it
-/// trusts and the headers to send. A media body's reader keeps a clone so it
-/// can resume a dropped connection.
+/// A request's way to the stream server: the clients, the guard, the source
+/// it trusts and the headers to send. A media body's reader keeps a clone so
+/// it can resume a dropped connection.
 #[derive(Clone)]
 pub(crate) struct Upstream {
-    client: reqwest::Client,
+    /// Client whose resolver trusts `trusted`, for URLs on exactly it.
+    own: reqwest::Client,
+    /// Client that trusts nothing, for every other URL.
+    open: reqwest::Client,
     guard: Arc<NetGuard>,
     trusted: Option<Authority>,
     headers: RequestHeaders,
 }
 
 impl Upstream {
+    /// The client for `url`. The resolver sees host names without ports, so
+    /// the source-trusting client is used only on the source's exact
+    /// `host:port`; any other URL, the same name on another port included,
+    /// gets the client that refuses private addresses when it connects,
+    /// whatever the name resolved to when [`NetGuard::check`] looked.
+    fn client_for(&self, url: &Url) -> &reqwest::Client {
+        if self.trusted.is_some() && Authority::of(url) == self.trusted {
+            &self.own
+        } else {
+            &self.open
+        }
+    }
+
     /// Sends the request and follows up to [`MAX_REDIRECTS`] redirects by
     /// hand, validating every hop. Returns the answer and the URL that gave it.
     async fn fetch(
@@ -174,7 +190,7 @@ impl Upstream {
         loop {
             self.guard.check(&current, self.trusted.as_ref()).await?;
             let resp = send(
-                &self.client,
+                self.client_for(&current),
                 method,
                 &current,
                 &self.headers,
@@ -284,7 +300,8 @@ async fn proxy(
         None => SourceAccess::default(),
     };
     let upstream = Upstream {
-        client: s.proxy.clients.get(access.authority.as_ref()),
+        own: s.proxy.clients.get(access.authority.as_ref()),
+        open: s.proxy.clients.get(None),
         guard: Arc::clone(&s.proxy.guard),
         headers: merge_headers(&access.headers, &q),
         trusted: access.authority,
@@ -317,7 +334,7 @@ async fn proxy(
     // A slice of a playlist cannot be rewritten, so fetch the whole of it
     // (ignoring Range is allowed) and answer 200.
     let resp = send(
-        &upstream.client,
+        upstream.client_for(&current),
         &method,
         &current,
         &upstream.headers,
@@ -617,4 +634,64 @@ fn rewrite_stream(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    const OK: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok";
+
+    /// An upstream on 127.0.0.1 that answers every request with `ok`.
+    async fn ok_upstream() -> u16 {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(OK).await;
+            }
+        });
+        port
+    }
+
+    async fn get(up: &Upstream, url: &Url) -> Result<reqwest::Response, Fail> {
+        let (client, none) = (up.client_for(url), HeaderMap::new());
+        send(client, &Method::GET, url, &up.headers, &none, false).await
+    }
+
+    /// GPT review (trusted-host-dns-rebinding): a request for the source on
+    /// `localhost:<own>` uses the source-trusting client only on that exact
+    /// `host:port`. The same name on another port gets the client that
+    /// trusts nothing, which refuses the private address when it connects,
+    /// as it must after a rebinding name passed [`NetGuard::check`].
+    #[tokio::test]
+    async fn source_trust_is_for_the_exact_authority() {
+        let own_port = ok_upstream().await;
+        let other_port = ok_upstream().await;
+        let proxy = Proxy::new(Arc::new(NetGuard::new(false)));
+        let trusted = Authority::parse_lenient(&format!("http://localhost:{own_port}"));
+        let up = Upstream {
+            own: proxy.clients.get(trusted.as_ref()),
+            open: proxy.clients.get(None),
+            guard: Arc::clone(&proxy.guard),
+            trusted,
+            headers: RequestHeaders::default(),
+        };
+        let own = Url::parse(&format!("http://localhost:{own_port}/a")).unwrap();
+        let ok = get(&up, &own).await;
+        assert!(ok.is_ok_and(|r| r.status() == reqwest::StatusCode::OK));
+
+        let other = Url::parse(&format!("http://localhost:{other_port}/a")).unwrap();
+        let Err(Fail(status, err)) = get(&up, &other).await else {
+            panic!("the trusted name was reached on another port");
+        };
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let msg = err.message;
+        assert!(msg.contains("--allow-private-targets"), "{msg}");
+    }
 }

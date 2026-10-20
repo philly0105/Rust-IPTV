@@ -100,15 +100,17 @@ pub async fn list_page(
     } else {
         first
     };
-    let mut wave: Vec<(i64, Value)> = stream::iter(first..=wave_last)
+    // Each page keeps its own result: a page past the real total (only
+    // known from page `first`) may fail without failing the listing.
+    let mut wave: Vec<(i64, CoreResult<Value>)> = stream::iter(first..=wave_last)
         .map(|page| {
             let req = list_req(kind, &category, sort, search, page);
-            async move { Ok::<_, CoreError>((page, client.call(req).await?)) }
+            async move { (page, client.call(req).await) }
         })
         .buffered(PAGE_CONCURRENCY)
-        .try_collect()
-        .await?;
-    let first_js = wave.remove(0).1;
+        .collect()
+        .await;
+    let first_js = wave.remove(0).1?;
     let total = n(&first_js, "total_items");
     let reported = n(&first_js, "max_page_items").filter(|x| *x > 0);
     let mut first_rows = into_list(first_js);
@@ -138,16 +140,17 @@ pub async fn list_page(
         }
         pages.push((offset / ps + 1, first_rows));
     }
-    // The rest of the wave holds only when the assumed size was right.
-    if ps == assumed {
-        pages.extend(wave.into_iter().map(|(page, js)| (page, into_list(js))));
-    }
     let first_page = pages[0].0;
     let total = total.unwrap_or_else(|| (first_page - 1) * ps + pages[0].1.len() as i64);
     let last_needed = last_needed_page(offset, limit, ps, total);
-    // Wave pages past the end are dropped: some portals repeat their last
-    // page for any page number past it.
-    pages.truncate((last_needed - first_page).max(0) as usize + 1);
+    // The rest of the wave holds only when the assumed size was right. Wave
+    // pages past the end are dropped, failed or not: some portals repeat
+    // their last page for any page number past it, others fail it.
+    if ps == assumed {
+        for (page, js) in wave.into_iter().filter(|(page, _)| *page <= last_needed) {
+            pages.push((page, into_list(js?)));
+        }
+    }
     let fetched = pages.last().map_or(first_page, |(page, _)| *page);
 
     if last_needed > fetched {
@@ -451,7 +454,9 @@ async fn vod_pages(client: &StalkerClient, base: Req) -> CoreResult<Vec<Value>> 
 /// Every page of a `get_ordered_list` style call, at most `max_pages` and
 /// [`MAX_WALK_ITEMS`] rows. Page 1 gives the total and the page size; the
 /// other pages then go out [`PAGE_CONCURRENCY`] at a time instead of one
-/// after another (IN-4). An empty page ends the list.
+/// after another (IN-4). An empty page ends the list: the pages are read in
+/// order as they arrive, so a total the portal overstates costs at most the
+/// requests already out, and a failure past the end is never seen.
 pub(super) async fn walk_pages(
     client: &StalkerClient,
     base: Req,
@@ -472,13 +477,13 @@ pub(super) async fn walk_pages(
         );
     }
     let pages = (total.min(MAX_WALK_ITEMS) as u64).div_ceil(per_page as u64) as i64;
-    let rest: Vec<Vec<Value>> = stream::iter(2..=pages.min(max_pages))
+    let rest = stream::iter(2..=pages.min(max_pages))
         .map(|page| client.call(base.clone().p("p", page)))
-        .buffered(PAGE_CONCURRENCY)
-        .map_ok(into_list)
-        .try_collect()
-        .await?;
-    for rows in rest {
+        .buffered(PAGE_CONCURRENCY);
+    tokio::pin!(rest);
+    // Dropping `rest` at an empty page drops the requests still out.
+    while let Some(rows) = rest.next().await {
+        let rows = into_list(rows?);
         if rows.is_empty() {
             break;
         }

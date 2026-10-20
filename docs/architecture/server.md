@@ -153,12 +153,15 @@ needs source headers or would be mixed content.
    up to 32 MiB ahead of the player, so the provider's connection keeps
    flowing while `<video>` pauses its own reads (it buffers about ten seconds
    of a progressive file). When that connection drops before the body is
-   complete and the server takes byte ranges (206, or `Accept-Ranges: bytes`),
-   the reader asks for the rest (`Range: bytes=<offset>-<end>`, with `If-Range`
-   from a strong ETag or Last-Modified, redirects followed again from the
-   requested URL), checks the 206 `Content-Range`, and carries on in the same
-   response; three failed tries in a row end it. The player never sees the
-   drop, and the log notes each resume with the host. The reader stops as soon
+   complete, the server takes byte ranges (206, or `Accept-Ranges: bytes`)
+   and its answer carried a strong ETag or a Last-Modified date, the reader
+   asks for the rest (`Range: bytes=<offset>-<end>`, with that validator as
+   `If-Range`, redirects followed again from the requested URL), checks the
+   206 `Content-Range`, and carries on in the same response; three failed
+   tries in a row end it. The player never sees the drop, and the log notes
+   each resume with the host. Without a validator the reader cannot tell the
+   same file from a replacement of the same length, so it does not resume
+   and the drop reaches the player. The reader stops as soon
    as the client lets go of the response, which frees the provider's
    connection. Bodies without a length (live MPEG-TS) pass through as they
    come.
@@ -184,18 +187,27 @@ message names that flag. Loopback, RFC 1918, link-local (including
 NAT64/6to4-embedded private addresses are refused. IP literals are checked
 per hop; host names are checked by the proxy client's own DNS resolver at
 connect time, so a name cannot pass the check and then rebind to a private
-address. Trust is per request: each request gets a client whose resolver
-trusts only the requesting source's own host (nothing is remembered), so
-using one source never opens its host to requests without a source, to
-another source, or to a redirect from another source.
+address. A resolver sees host names without ports, so the client whose
+resolver trusts the requesting source's own host is used only for a URL or
+redirect hop on exactly the source's `host:port`; every other hop, the same
+host name on another port included, goes through the client that trusts
+nothing, which drops private addresses when it connects. Trust is per
+request (nothing is remembered), so using one source never opens its host
+to requests without a source, to another source, or to a redirect from
+another source.
 
 The same guard lives in `iptv_core::http` (`NetGuard`, `ServerMode`), and
 `iptv-server` installs it on the core at startup: in server mode downloads,
 M3U URL imports, XMLTV downloads and Xtream/Stalker API calls use a guarded
 client too, each trusting only its own source's `host:port` (a guide URL is
-trusted when any source listing it sits on its `host:port`). Its redirect policy applies
-the port rule above: a redirect to another port of a trusted host name that
-resolves privately is refused. No client sends `Referer`, so redirects never
+trusted when any source listing it sits on its `host:port`). A fetch of a URL
+that may be elsewhere (a download, a recording, a logo) gets the
+source-trusting client only when the URL is on the source's exact
+`host:port`. Its redirect policy applies the port rule above: a redirect to
+another port of a trusted host name that resolves privately is refused, and
+one that is followed first ends that name's trust in the client's resolver,
+so the hop (and every later connection of that client) reaches only public
+addresses whatever the name resolves to by then. No client sends `Referer`, so redirects never
 carry Xtream credentials. Local EPG paths and `file://` guide URLs are
 refused (501). The desktop app does not install it and
 may fetch from the LAN freely. Its loopback media proxy reuses this route with
@@ -287,8 +299,14 @@ Server mode has no login. Defaults keep it local:
   nocookie frames for trailers, `object-src 'none'`, `frame-ancestors 'self'`)
   and `Referrer-Policy: same-origin`.
 - State-changing `/api` requests and WebSocket upgrades are refused (403) when
-  `Origin` names another host or `Sec-Fetch-Site` is `cross-site`. This blocks
-  CSRF through `text/plain` form posts and cross-site WebSocket hijacking.
+  `Origin` is not the request's own origin or `Sec-Fetch-Site` is
+  `cross-site`. This blocks CSRF through `text/plain` form posts and
+  cross-site WebSocket hijacking. The Origin must match the request's scheme,
+  host and port. The scheme is `X-Forwarded-Proto` from a reverse proxy, else
+  `http` (what the server speaks), and a `Host` without a port means that
+  scheme's default port, never the port the Origin names. A proxy that serves
+  HTTPS must therefore send `X-Forwarded-Proto` (Caddy, Traefik and Tailscale
+  Serve do; nginx needs `proxy_set_header X-Forwarded-Proto $scheme`).
   `X-Forwarded-Host` is accepted as an alternative match for reverse proxies.
 - No CORS headers are sent: same-origin only.
 - Request tracing logs method and path only; proxy query strings (which carry
@@ -343,8 +361,8 @@ Caddy terminates TLS (`tls internal` for a LAN name or IP address, or a Let's
 Encrypt certificate for a public domain), asks for a password with
 `basic_auth`, and proxies to the app, which publishes no port of its own.
 Compose sets `IPTV_ALLOWED_HOSTS` to the same host name Caddy serves, and
-Caddy passes the `Host` header through unchanged, so the guard above accepts
-it. `/manifest.webmanifest` and `/icons/*` stay outside the password because
+Caddy passes the `Host` header through unchanged and adds
+`X-Forwarded-Proto: https`, so the guard above accepts both. `/manifest.webmanifest` and `/icons/*` stay outside the password because
 browsers fetch the manifest without credentials.
 
 ### HTTPS and secure context

@@ -135,7 +135,7 @@ async fn fix3_net_trust_does_not_leak_across_sources() {
         "SECRET-BODY /secret-after"
     );
     assert_eq!(
-        get_ok(http::source_client(st, &id).await, &secret)
+        get_ok(http::source_client(st, &id, &secret).await, &secret)
             .await
             .unwrap(),
         "SECRET-BODY /secret-after"
@@ -146,7 +146,7 @@ async fn fix3_net_trust_does_not_leak_across_sources() {
     assert!(err.to_string().contains("--allow-private-targets"), "{err}");
     let err = get_ok(http::client_for(st), &secret).await.unwrap_err();
     assert!(err.contains("--allow-private-targets"), "{err}");
-    let err = get_ok(http::source_client(st, "nope").await, &secret)
+    let err = get_ok(http::source_client(st, "nope", &secret).await, &secret)
         .await
         .unwrap_err();
     assert!(err.contains("--allow-private-targets"), "{err}");
@@ -158,9 +158,42 @@ async fn fix3_net_trust_does_not_leak_across_sources() {
     // Removing the source leaves nothing behind either.
     sources::remove(st, &id).await.unwrap();
     assert!(get_ok(http::client_for(st), &secret).await.is_err());
-    assert!(get_ok(http::source_client(st, &id).await, &secret)
+    assert!(get_ok(http::source_client(st, &id, &secret).await, &secret)
         .await
         .is_err());
+}
+
+/// GPT review (trusted-host-dns-rebinding): a source trusts its own
+/// `host:port`, not its host name. A URL on the same name and another port
+/// gets the client that trusts nothing, which refuses the private address
+/// when it connects, even without the up-front check (a separate DNS lookup
+/// that a rebinding name can pass).
+#[tokio::test]
+async fn fix3_net_trust_is_for_the_exact_port() {
+    let e = env().await;
+    let st = &e.state;
+    let up = upstream_on("127.0.0.1", Some("localhost")).await.unwrap();
+    let other = upstream_on("127.0.0.1", Some("localhost")).await.unwrap();
+    let id = add_m3u(st, "nas", json!({ "url": format!("{}/list.m3u", up.base) }))
+        .await
+        .expect("own private host is trusted for its source");
+    let mine = format!("{}/secret-own-port", up.base);
+    assert_eq!(
+        get_ok(http::source_client(st, &id, &mine).await, &mine)
+            .await
+            .unwrap(),
+        "SECRET-BODY /secret-own-port"
+    );
+    let elsewhere = format!("{}/secret-other-port", other.base);
+    let err = get_ok(http::source_client(st, &id, &elsewhere).await, &elsewhere)
+        .await
+        .unwrap_err();
+    assert!(err.contains("--allow-private-targets"), "{err}");
+    let trusted = http::source_authority(st, &id).await.unwrap();
+    let client = http::guarded_client(st, http::trust_for(&elsewhere, trusted.as_ref()));
+    let err = get_ok(client, &elsewhere).await.unwrap_err();
+    assert!(err.contains("--allow-private-targets"), "{err}");
+    assert!(!other.hit("/secret-other-port"));
 }
 
 /// R5-r3 F1: `xtream.test` trusts the tested server for its own calls only.

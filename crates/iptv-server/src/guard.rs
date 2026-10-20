@@ -4,8 +4,11 @@
 //! origins in the user's browser:
 //!
 //! - State-changing requests and WebSocket upgrades carrying an `Origin` must
-//!   come from the same host (blocks CSRF via `text/plain` form posts and
-//!   cross-site WebSocket hijacking). `Sec-Fetch-Site: cross-site` is refused
+//!   come from the request's own origin: scheme, host and port (blocks CSRF
+//!   via `text/plain` form posts and cross-site WebSocket hijacking). The
+//!   scheme is `X-Forwarded-Proto` from a reverse proxy, else `http`, and a
+//!   `Host` without a port means that scheme's default port.
+//!   `Sec-Fetch-Site: cross-site` is refused
 //!   (except on the desktop loopback proxy, see
 //!   [`crate::ServerOptions::allow_cross_site`]).
 //! - The `Host` header must be an allowed name ([`AllowedHosts`]) whatever
@@ -134,8 +137,9 @@ pub async fn api_guard(State(s): State<Server>, req: Request, next: Next) -> Res
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.split(',').next())
                 .map(str::trim);
-            let ok = host.is_some_and(|h| origin_matches_host(origin, h))
-                || forwarded.is_some_and(|h| origin_matches_host(origin, h));
+            let scheme = request_scheme(headers);
+            let ok = host.is_some_and(|h| origin_matches_host(origin, h, scheme))
+                || forwarded.is_some_and(|h| origin_matches_host(origin, h, scheme));
             if !ok {
                 return forbidden("cross-origin requests are not allowed");
             }
@@ -154,6 +158,22 @@ fn request_host<'a>(headers: &'a HeaderMap, uri: &'a axum::http::Uri) -> Option<
         .get(HOST)
         .and_then(|v| v.to_str().ok())
         .or_else(|| uri.authority().map(|a| a.as_str()))
+}
+
+/// The scheme the browser used: `https` when a reverse proxy that serves
+/// HTTPS says so in `X-Forwarded-Proto` (first value), else `http`, which is
+/// what iptv-server itself speaks. A cross-origin page cannot set the header:
+/// it is not CORS-safelisted, and the server answers no preflight.
+fn request_scheme(headers: &HeaderMap) -> &'static str {
+    let forwarded = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(str::trim);
+    match forwarded {
+        Some(p) if p.eq_ignore_ascii_case("https") => "https",
+        _ => "http",
+    }
 }
 
 /// Splits `host[:port]` / `[v6]:port` into a lowercase host and optional port.
@@ -180,9 +200,11 @@ pub fn is_loopback_host(authority: &str) -> bool {
         || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
-/// True when the `Origin` (scheme://host[:port]) names the same host and port
-/// as the request's `Host` header.
-pub fn origin_matches_host(origin: &str, host_header: &str) -> bool {
+/// True when the `Origin` (scheme://host[:port]) is the request's own origin:
+/// the request's `scheme` ([`request_scheme`]), the `Host` header's host, and
+/// its port. A `Host` without a port means the scheme's default port, never
+/// the port the Origin names.
+pub fn origin_matches_host(origin: &str, host_header: &str, scheme: &str) -> bool {
     let Ok(origin) = url::Url::parse(origin) else {
         return false; // includes the opaque "null" origin
     };
@@ -196,8 +218,9 @@ pub fn origin_matches_host(origin: &str, host_header: &str) -> bool {
     let Some(origin_port) = origin.port_or_known_default() else {
         return false;
     };
+    let default_port = if scheme == "https" { 443 } else { 80 };
     let (host, port) = split_host_port(host_header);
-    host == origin_host && port.unwrap_or(origin_port) == origin_port
+    origin.scheme() == scheme && host == origin_host && port.unwrap_or(default_port) == origin_port
 }
 
 /// Adds hardening headers to every response that lacks them, including the
@@ -261,21 +284,34 @@ mod tests {
 
     #[test]
     fn origin_matching() {
-        assert!(origin_matches_host(
-            "http://localhost:7180",
-            "localhost:7180"
-        ));
-        assert!(origin_matches_host("http://example.com", "example.com:80"));
-        assert!(origin_matches_host("https://example.com", "example.com"));
-        assert!(origin_matches_host("http://[::1]:7180", "[::1]:7180"));
-        assert!(!origin_matches_host(
-            "http://evil.example",
-            "localhost:7180"
-        ));
-        assert!(!origin_matches_host(
-            "http://localhost:5173",
-            "localhost:7180"
-        ));
-        assert!(!origin_matches_host("null", "localhost:7180"));
+        let http = |origin: &str, host: &str| origin_matches_host(origin, host, "http");
+        let https = |origin: &str, host: &str| origin_matches_host(origin, host, "https");
+        assert!(http("http://localhost:7180", "localhost:7180"));
+        assert!(http("http://example.com", "example.com:80"));
+        assert!(http("http://example.com", "example.com"));
+        assert!(https("https://example.com", "example.com"));
+        assert!(https("https://example.com:8443", "example.com:8443"));
+        assert!(http("http://[::1]:7180", "[::1]:7180"));
+        assert!(!http("http://evil.example", "localhost:7180"));
+        assert!(!http("http://localhost:5173", "localhost:7180"));
+        assert!(!http("null", "localhost:7180"));
+        // GPT review (origin-port-wildcard): a Host without a port is the
+        // scheme's default port, not whatever port the Origin names.
+        assert!(!https("https://tv.example.com:8443", "tv.example.com"));
+        assert!(!http("http://tv.example.com:8080", "tv.example.com"));
+        // The scheme counts too: an http page is another origin.
+        assert!(!https("http://tv.example.com", "tv.example.com"));
+        assert!(!https("http://tv.example.com:443", "tv.example.com"));
+        assert!(!http("https://tv.example.com:80", "tv.example.com"));
+    }
+
+    #[test]
+    fn request_schemes() {
+        let (mut h, xfp) = (HeaderMap::new(), "x-forwarded-proto");
+        assert_eq!(request_scheme(&h), "http");
+        h.insert(xfp, HeaderValue::from_static("HTTPS, http"));
+        assert_eq!(request_scheme(&h), "https");
+        h.insert(xfp, HeaderValue::from_static("http"));
+        assert_eq!(request_scheme(&h), "http");
     }
 }

@@ -96,10 +96,11 @@ Do not fix it by taking `/api/events` out of the password: anyone who can reach 
 
 ## Other setups
 
-Any reverse proxy that serves HTTPS and asks for a login works the same way: Traefik, nginx, Tailscale Serve, or Caddy with `forward_auth` to a single sign-on service. Two rules hold for all of them:
+Any reverse proxy that serves HTTPS and asks for a login works the same way: Traefik, nginx, Tailscale Serve, or Caddy with `forward_auth` to a single sign-on service. Three rules hold for all of them:
 
 - Set `IPTV_ALLOWED_HOSTS` to the host name the browser uses. Do not set it to `*`, which turns off the DNS-rebinding check.
 - Keep the app's port 7180 off the network. Publish it on loopback only (`-p 127.0.0.1:7180:7180`) or not at all, so the proxy is the only way in.
+- Send `X-Forwarded-Proto`, and pass the `Host` header on as the browser sent it, with the port when the proxy listens on a port other than 443. The app compares the page's scheme, host and port with them, and refuses changes and the live updates at `/api/events` (403) when they differ. Caddy and Traefik do both by default. In nginx, add `proxy_set_header Host $http_host;` and `proxy_set_header X-Forwarded-Proto $scheme;`.
 
 The browser fetches `/manifest.webmanifest` and the icons under `/icons/` without sending the login, so leave those two paths open if you want the install button. They contain nothing private.
 

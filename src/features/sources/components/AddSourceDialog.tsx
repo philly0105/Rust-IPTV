@@ -86,6 +86,18 @@ export function draftHost(d: SourceDraft): string | undefined {
   return check.ok ? displayHost(check.url) : undefined;
 }
 
+/**
+ * The name an add uses when the optional Name field is left empty: the one the current address or
+ * file suggests, or `pasted` for a pasted playlist, which has neither.
+ */
+export function defaultName(d: SourceDraft, pasted: string): string {
+  if (d.kind === 'xtream') return suggestName(d.xtream.serverUrl);
+  if (d.kind === 'stalker') return suggestName(d.stalker.portalUrl);
+  if (d.m3u.origin === 'url') return suggestName(d.m3u.url);
+  if (d.m3u.origin === 'file') return suggestName(d.m3u.filePath || d.m3u.fileName);
+  return pasted;
+}
+
 /** The kind's name, for the import heading while the source has no name yet. */
 const KIND_NAME: Record<SourceKind, string> = { m3u: 'kindM3u', xtream: 'kindXtream', stalker: 'kindStalker' };
 
@@ -115,8 +127,8 @@ export function AddSourceDialog({
   const [draft, setDraft] = useState<SourceDraft>(() => initialDraft(initial));
   const [errors, setErrors] = useState<DraftErrors>({});
   const [nameTouched, setNameTouched] = useState(Boolean(initial?.name));
-  // A name derived from the URL or file. It shows as the placeholder and is used only when the name is left empty,
-  // so it never lands in the middle of what the user is typing.
+  // A name derived from the URL or file, shown as the placeholder so it never lands in the middle of what the
+  // user is typing. A submit with the name left empty derives it again from the current form (defaultName).
   const [suggested, setSuggested] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -262,7 +274,7 @@ export function AddSourceDialog({
     setSubmitError(null);
     setCancelled(false);
     cancelIdRef.current = null;
-    const named = draft.name.trim() ? draft : { ...draft, name: suggested };
+    const named = draft.name.trim() ? draft : { ...draft, name: defaultName(draft, t('originPasted')) };
     const built = buildAddArgs(named, { isDesktop });
     setErrors(built.errors);
     if (!built.ok) {
@@ -512,7 +524,8 @@ export function AddSourceDialog({
           autoComplete="off"
           disabled={submitting}
           maxLength={120}
-          placeholder={suggested || t('sourceNamePlaceholder')}
+          // A pasted playlist has no address to suggest a name: show the one it gets instead.
+          placeholder={draft.kind === 'm3u' && draft.m3u.origin === 'text' ? t('originPasted') : suggested || t('sourceNamePlaceholder')}
           value={draft.name}
           // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
           onFocus={(e) => {
@@ -641,7 +654,7 @@ export function AddSourceDialog({
               <p className="flex items-center gap-2 text-body-sm font-medium text-fg">
                 <LoaderCircle aria-hidden size={16} className="shrink-0 text-accent motion-safe:animate-spin" />
                 <span className="min-w-0 truncate" dir="auto">
-                  {t('importingTitle', { name: draft.name.trim() || suggested || t(KIND_NAME[draft.kind]) })}
+                  {t('importingTitle', { name: draft.name.trim() || defaultName(draft, t('originPasted')) || t(KIND_NAME[draft.kind]) })}
                 </span>
               </p>
               <ImportProgressView

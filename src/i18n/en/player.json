@@ -238,7 +238,7 @@
   "errorConnLimit": "This subscription is already streaming on as many devices as it allows. Stop playback in another app or on another device that uses this account, then try again.",
   "errorConnLimitMaybeTitle": "Connection limit may be reached ({{active}} of {{max}} in use)",
   "errorConnLimitMaybe": "The provider counts {{active}} of {{max}} connections in use, and one of them may be this app's own stream that just stopped or one of its recordings. Wait a minute and try again, or stop playback on another device that uses this account.",
-  "browseArchive": "Browse archive",
+  "browseArchive": "Browse catch-up",
   "sleepTimer": "Sleep timer",
   "sleepOffValue": "Off",
   "sleepOff": "Sleep timer off",

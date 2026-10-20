@@ -238,7 +238,7 @@
   "errorConnLimit": "Dieses Abo streamt bereits auf so vielen Geräten, wie es erlaubt. Beenden Sie die Wiedergabe in einer anderen App oder auf einem anderen Gerät mit diesem Konto und versuchen Sie es erneut.",
   "errorConnLimitMaybeTitle": "Verbindungslimit möglicherweise erreicht ({{active}} von {{max}} belegt)",
   "errorConnLimitMaybe": "Der Anbieter zählt {{active}} von {{max}} Verbindungen als belegt, und eine davon kann der gerade abgebrochene Stream dieser App oder eine ihrer Aufnahmen sein. Warten Sie eine Minute und versuchen Sie es erneut, oder beenden Sie die Wiedergabe auf einem anderen Gerät mit diesem Konto.",
-  "browseArchive": "Archiv durchsuchen",
+  "browseArchive": "Catch-up durchsuchen",
   "sleepTimer": "Sleep-Timer",
   "sleepOffValue": "Aus",
   "sleepOff": "Sleep-Timer aus",

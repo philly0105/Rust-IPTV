@@ -18,7 +18,8 @@ export function shiftTextOf(links: EpgLinks): string {
 /**
  * Per-source EPG URLs (detected from the playlist/portal, added by hand, and disabled), and the
  * source's guide time shift. The dialog owns the shift's typed text (`shiftText`), so it can
- * refuse to save while the text is not a shift (SS-16) and keep it across tab switches.
+ * refuse to save while the text is not a shift (SS-16) and keep it across tab switches, and the
+ * guide URL typed but not added yet (`pendingUrl`), so its discard guard counts it.
  */
 export function EpgLinksEditor({
   value,
@@ -26,28 +27,31 @@ export function EpgLinksEditor({
   disabled,
   shiftText,
   onShiftTextChange,
+  pendingUrl,
+  onPendingUrlChange,
 }: {
   value: EpgLinks;
   onChange: (next: EpgLinks) => void;
   disabled?: boolean;
   shiftText: string;
   onShiftTextChange: (text: string) => void;
+  pendingUrl: string;
+  onPendingUrlChange: (text: string) => void;
 }) {
   const { t } = useTranslation('sources');
-  const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   // The links take the typed text only while it is a valid shift.
   const shiftValid = parseGuideShift(shiftText) !== null;
   const rows = epgRows(value);
 
   const add = () => {
-    const r = addManualEpgUrl(value, draft);
+    const r = addManualEpgUrl(value, pendingUrl);
     if (!r.ok) {
       setError(r.error);
       return;
     }
     setError(null);
-    setDraft('');
+    onPendingUrlChange('');
     onChange(r.links);
   };
 
@@ -105,9 +109,9 @@ export function EpgLinksEditor({
               spellCheck={false}
               disabled={disabled}
               placeholder="https://epg.example/guide.xml.gz"
-              value={draft}
+              value={pendingUrl}
               onChange={(e) => {
-                setDraft(e.target.value);
+                onPendingUrlChange(e.target.value);
                 if (error) setError(null);
               }}
               onKeyDown={(e) => {
@@ -119,7 +123,7 @@ export function EpgLinksEditor({
             />
           )}
         </Field>
-        <Button icon={<Plus aria-hidden className="size-4" />} disabled={disabled || !draft.trim()} onClick={add} className="mt-[1.625rem] shrink-0">
+        <Button icon={<Plus aria-hidden className="size-4" />} disabled={disabled || !pendingUrl.trim()} onClick={add} className="mt-[1.625rem] shrink-0">
           {t('epgAddButton')}
         </Button>
       </div>

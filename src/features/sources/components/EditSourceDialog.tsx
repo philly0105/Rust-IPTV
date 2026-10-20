@@ -82,6 +82,8 @@ export function EditSourceDialog({
   const [checking, setChecking] = useState(false);
   // The Guide tab's time shift as typed: it reaches `epg` only while it is a valid shift.
   const [shiftText, setShiftText] = useState('');
+  // The Guide tab's "Add guide URL" text, typed but not added yet.
+  const [pendingGuideUrl, setPendingGuideUrl] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
   // Focus the field a failed save points at once the error has rendered and the fields are enabled again.
   const focusInvalid = useFocusInvalid(formRef, saving);
@@ -92,6 +94,7 @@ export function EditSourceDialog({
     setDraft(draftFromSource(source));
     setEpg(source.epg);
     setShiftText(shiftTextOf(source.epg));
+    setPendingGuideUrl('');
     setErrors({});
     setSaveError(null);
     setCheckError(null);
@@ -111,15 +114,15 @@ export function EditSourceDialog({
     }
   }, [draft]);
 
-  // Typed changes (SS-1): anything a save would send, an invalid entry included, or a shift
-  // that is not a number yet. Escape, the close button and Cancel ask before dropping them, and
-  // a click on the backdrop does nothing.
+  // Typed changes (SS-1): anything a save would send, an invalid entry included, a shift that
+  // is not a number yet, or a guide URL typed but not added. Escape, the close button and Cancel
+  // ask before dropping them, and a click on the backdrop does nothing.
   const built = source && draft ? buildUpdatePatch(source, draft, { isDesktop }) : null;
   const dirty =
     !!source &&
     !!epg &&
     !!built &&
-    (!built.ok || Object.keys(built.value).length > 0 || epgPatch(source.epg, epg) !== undefined || parseGuideShift(shiftText) === null);
+    (!built.ok || Object.keys(built.value).length > 0 || epgPatch(source.epg, epg) !== undefined || parseGuideShift(shiftText) === null || pendingGuideUrl.trim() !== '');
   const guard = useDiscardGuard({ open: !!source, dirty: dirty && !saving, onClose });
 
   if (!source || !draft || !epg) return null;
@@ -301,7 +304,15 @@ export function EditSourceDialog({
               />
             </>
           ) : tab === 'epg' ? (
-            <EpgLinksEditor value={epg} onChange={setEpg} disabled={saving} shiftText={shiftText} onShiftTextChange={setShiftText} />
+            <EpgLinksEditor
+              value={epg}
+              onChange={setEpg}
+              disabled={saving}
+              shiftText={shiftText}
+              onShiftTextChange={setShiftText}
+              pendingUrl={pendingGuideUrl}
+              onPendingUrlChange={setPendingGuideUrl}
+            />
           ) : (
             <AccountPanel source={source} />
           )}

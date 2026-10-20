@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import '@/i18n';
 import { DEFAULT_SETTINGS, itemKey, type Channel, type ItemRef } from '@/api/types';
 
-// Guide slice: the fullscreen channel panel's now line and "Browse archive".
+// Guide slice: the fullscreen channel panel's now line and "Browse catch-up".
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -107,7 +107,10 @@ describe('fullscreen channel panel guide', () => {
   it('opens the archive of the playing channel and closes the panel', async () => {
     mount();
     act(() => useMediaStore.setState({ channelPanelOpen: true }));
-    fireEvent.click(await screen.findByTestId('panel-browse-archive'));
+    const button = await screen.findByTestId('panel-browse-archive');
+    // The live pages' name for it, not "Browse archive".
+    expect(button.textContent).toBe('Browse catch-up');
+    fireEvent.click(button);
     expect(await screen.findByText('archive route')).toBeTruthy();
     expect(useMediaStore.getState().channelPanelOpen).toBe(false);
   });

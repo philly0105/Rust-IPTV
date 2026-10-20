@@ -238,7 +238,7 @@
   "errorConnLimit": "Cet abonnement diffuse déjà sur le nombre maximal d'appareils autorisé. Arrêtez la lecture dans une autre application ou sur un autre appareil qui utilise ce compte, puis réessayez.",
   "errorConnLimitMaybeTitle": "Limite de connexions peut-être atteinte ({{active}} sur {{max}} utilisées)",
   "errorConnLimitMaybe": "Le fournisseur compte {{active}} connexions utilisées sur {{max}}, et l'une d'elles peut être le flux de cette application qui vient de s'arrêter ou l'un de ses enregistrements. Patientez une minute puis réessayez, ou arrêtez la lecture sur un autre appareil qui utilise ce compte.",
-  "browseArchive": "Parcourir les archives",
+  "browseArchive": "Parcourir le rattrapage",
   "sleepTimer": "Minuterie de veille",
   "sleepOffValue": "Désactivée",
   "sleepOff": "Minuterie de veille désactivée",

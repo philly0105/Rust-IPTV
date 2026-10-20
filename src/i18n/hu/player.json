@@ -238,7 +238,7 @@
   "errorConnLimit": "Ez az előfizetés már a megengedett számú eszközön fut. Állítsa le a lejátszást egy másik alkalmazásban vagy eszközön, amely ezt a fiókot használja, majd próbálja újra.",
   "errorConnLimitMaybeTitle": "Lehet, hogy elérte a kapcsolatkorlátot ({{max}} közül {{active}} használatban)",
   "errorConnLimitMaybe": "A szolgáltató {{max}} kapcsolatból {{active}} használatát számolja, és ezek egyike lehet ennek az alkalmazásnak az imént leállt adása vagy egyik felvétele. Várjon egy percet, és próbálja újra, vagy állítsa le a lejátszást egy másik eszközön, amely ezt a fiókot használja.",
-  "browseArchive": "Archívum böngészése",
+  "browseArchive": "Visszanézhető műsorok",
   "sleepTimer": "Elalvási időzítő",
   "sleepOffValue": "Ki",
   "sleepOff": "Elalvási időzítő kikapcsolva",

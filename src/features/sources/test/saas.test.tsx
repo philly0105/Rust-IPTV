@@ -92,6 +92,51 @@ describe('typed details survive a stray close (SS-1)', () => {
     expect(rpcMock.callsOf('sources.update')).toEqual([]);
   });
 
+  it('the Edit dialog asks before dropping a guide URL typed but not added', async () => {
+    rpcMock.handlers['sources.list'] = () => [xtream('a')];
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    const edit = await screen.findByTestId('edit-source-dialog');
+    const guideUrl = () => within(screen.getByTestId('edit-source-dialog')).getByLabelText(/^Add guide URL/, { selector: 'input' }) as HTMLInputElement;
+    fireEvent.click(within(edit).getByRole('tab', { name: 'Guide' }));
+    fireEvent.change(guideUrl(), { target: { value: 'http://epg.example.com/extra.xml' } });
+    // The typed text outlives a switch to another tab.
+    fireEvent.click(within(edit).getByRole('tab', { name: 'Details' }));
+    fireEvent.click(within(edit).getByRole('tab', { name: 'Guide' }));
+    expect(guideUrl().value).toBe('http://epg.example.com/extra.xml');
+    fireEvent.mouseDown(scrim());
+    expect(screen.getByTestId('edit-source-dialog')).toBeTruthy();
+    fireEvent.keyDown(edit, { key: 'Escape' });
+    expect(await screen.findByTestId('discard-prompt')).toBeTruthy();
+    confirmDiscard();
+    await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
+
+    // Opened again, the field starts empty and there is nothing to lose.
+    fireEvent.click(screen.getByTestId('source-edit'));
+    fireEvent.click(within(await screen.findByTestId('edit-source-dialog')).getByRole('tab', { name: 'Guide' }));
+    expect(guideUrl().value).toBe('');
+    fireEvent.keyDown(screen.getByTestId('edit-source-dialog'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
+    expect(screen.queryByTestId('discard-prompt')).toBeNull();
+    expect(rpcMock.callsOf('sources.update')).toEqual([]);
+  });
+
+  it('a guide URL once added is no longer typed text: removing the link again leaves nothing to discard', async () => {
+    rpcMock.handlers['sources.list'] = () => [xtream('a')];
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    const edit = await screen.findByTestId('edit-source-dialog');
+    fireEvent.click(within(edit).getByRole('tab', { name: 'Guide' }));
+    const guideUrl = within(edit).getByLabelText(/^Add guide URL/, { selector: 'input' }) as HTMLInputElement;
+    fireEvent.change(guideUrl, { target: { value: 'http://epg.example.com/extra.xml' } });
+    fireEvent.click(within(edit).getByRole('button', { name: 'Add' }));
+    expect(guideUrl.value).toBe('');
+    fireEvent.click(within(edit).getByRole('button', { name: 'Remove http://epg.example.com/extra.xml' }));
+    fireEvent.keyDown(edit, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
+    expect(screen.queryByTestId('discard-prompt')).toBeNull();
+  });
+
   // An untouched Edit dialog has nothing to lose, so every way out closes it at once. A bad
   // "unchanged" check once left it dirty from the first render: Escape, Cancel and the close
   // button asked "Discard changes?" and the backdrop did nothing.
@@ -179,6 +224,40 @@ describe('the Add dialog starts at the address (SS-2, SS-14)', () => {
     renderAt(routes(), '/sources?add=1&kind=m3u');
     await screen.findByTestId('add-source-dialog');
     expect(await within(dialog()).findByText(/every 6 hours/)).toBeTruthy();
+  });
+});
+
+describe('an Add left unnamed still adds (the name is optional)', () => {
+  const playlist = '#EXTM3U\n#EXTINF:-1,One\nhttp://a.example.com/1';
+  const field = (label: RegExp) => within(dialog()).getByLabelText(label, { selector: 'input,textarea' }) as HTMLInputElement;
+
+  async function openM3u() {
+    rpcMock.handlers['sources.list'] = () => [];
+    rpcMock.handlers['sources.add'] = (a) => makeSource('new', { name: (a as { name: string }).name });
+    rpcMock.handlers['m3u.parsePreview'] = () => ({ channelCount: 1, groups: [], epgUrls: [] });
+    renderAt(routes(), '/sources?add=1&kind=m3u');
+    await screen.findByTestId('add-source-dialog');
+  }
+  async function addedArgs() {
+    fireEvent.click(screen.getByTestId('add-source-submit'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.add')).toHaveLength(1));
+    return rpcMock.callsOf('sources.add')[0];
+  }
+
+  it('a pasted playlist is added as "Pasted playlist", not under an address typed before', async () => {
+    await openM3u();
+    fireEvent.change(field(/^Playlist URL/), { target: { value: 'http://lists.example.com/sports.m3u' } });
+    fireEvent.blur(field(/^Playlist URL/));
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Paste' }));
+    fireEvent.change(field(/^Playlist text/), { target: { value: playlist } });
+    expect(field(/^Name/).placeholder).toBe('Pasted playlist');
+    expect(await addedArgs()).toEqual({ kind: 'm3u', name: 'Pasted playlist', autoRefresh: false, m3u: { origin: 'text', text: playlist } });
+  });
+
+  it('an address submitted before it lost focus names the source', async () => {
+    await openM3u();
+    fireEvent.change(field(/^Playlist URL/), { target: { value: 'http://lists.example.com/sports.m3u' } });
+    expect(await addedArgs()).toMatchObject({ name: 'sports', m3u: { origin: 'url', url: 'http://lists.example.com/sports.m3u' } });
   });
 });
 

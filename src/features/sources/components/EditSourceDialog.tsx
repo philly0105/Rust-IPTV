@@ -119,7 +119,7 @@ export function EditSourceDialog({
     !!source &&
     !!epg &&
     !!built &&
-    (!built.ok || Object.keys(built.value).length > 0 || epgPatch(source.epg, epg) !== null || parseGuideShift(shiftText) === null);
+    (!built.ok || Object.keys(built.value).length > 0 || epgPatch(source.epg, epg) !== undefined || parseGuideShift(shiftText) === null);
   const guard = useDiscardGuard({ open: !!source, dirty: dirty && !saving, onClose });
 
   if (!source || !draft || !epg) return null;

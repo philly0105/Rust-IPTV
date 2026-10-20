@@ -91,6 +91,62 @@ describe('typed details survive a stray close (SS-1)', () => {
     await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
     expect(rpcMock.callsOf('sources.update')).toEqual([]);
   });
+
+  // An untouched Edit dialog has nothing to lose, so every way out closes it at once. A bad
+  // "unchanged" check once left it dirty from the first render: Escape, Cancel and the close
+  // button asked "Discard changes?" and the backdrop did nothing.
+  describe('an untouched Edit dialog closes without asking', () => {
+    const stalker = (id: string) =>
+      makeSource(id, {
+        kind: 'stalker',
+        name: `ST ${id}`,
+        m3u: undefined,
+        stalker: { portalUrl: 'http://portal.example.com/c/', macAddress: '00:1A:79:12:34:56', isFullPortal: false, headers: {} },
+      });
+    const shapes = [
+      ['an M3U address', () => makeSource('a')],
+      ['an M3U address with a guide and a shift', () => makeSource('a', { epg: { detectedUrls: [], manualUrls: ['http://guide.example.com/a.xml'], disabledUrls: [], shiftMinutes: 60 } })],
+      ['an Xtream account', () => xtream('a')],
+      ['a Stalker portal', () => stalker('a')],
+    ] as const;
+    const ways = [
+      ['Escape', (edit: HTMLElement) => fireEvent.keyDown(edit, { key: 'Escape' })],
+      ['Cancel', (edit: HTMLElement) => fireEvent.click(within(edit).getByRole('button', { name: 'Cancel' }))],
+      ['the backdrop', () => fireEvent.mouseDown(scrim())],
+    ] as const;
+    for (const [shape, make] of shapes) {
+      for (const [way, close] of ways) {
+        it(`${shape}, closed with ${way}`, async () => {
+          rpcMock.handlers['sources.list'] = () => [make()];
+          renderAt(routes(), '/sources');
+          fireEvent.click(await screen.findByTestId('source-edit'));
+          close(await screen.findByTestId('edit-source-dialog'));
+          await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
+          expect(screen.queryByTestId('discard-prompt')).toBeNull();
+          expect(rpcMock.callsOf('sources.update')).toEqual([]);
+        });
+      }
+    }
+
+    it('opened on the Account tab from Subscription details, closed with Escape and the backdrop', async () => {
+      rpcMock.handlers['sources.list'] = () => [xtream('a')];
+      rpcMock.handlers['xtream.accountInfo'] = () => ({ status: 'Active', activeCons: 0, maxConnections: 1, isTrial: false });
+      renderAt(routes(), '/sources');
+      await screen.findByTestId('source-card');
+      chooseCardAction('Subscription details');
+      const edit = await screen.findByTestId('edit-source-dialog');
+      await within(edit).findByTestId('account-panel');
+      fireEvent.keyDown(edit, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
+      expect(screen.queryByTestId('discard-prompt')).toBeNull();
+
+      chooseCardAction('Subscription details');
+      await screen.findByTestId('edit-source-dialog');
+      fireEvent.mouseDown(scrim());
+      await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
+      expect(screen.queryByTestId('discard-prompt')).toBeNull();
+    });
+  });
 });
 
 describe('the Add dialog starts at the address (SS-2, SS-14)', () => {

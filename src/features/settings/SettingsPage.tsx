@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ComponentType, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, Navigate, NavLink, useParams } from 'react-router';
+import { Link, Navigate, NavLink, useLocation, useNavigate, useParams } from 'react-router';
 
 import { isDesktop } from '@/api/transport';
 import { ParentalSection } from '@/features/parental/ParentalSection';
@@ -101,18 +101,31 @@ export function SettingsNav({ current, variant = 'sidebar' }: { current?: Sectio
             <p id={`settings-nav-${g.id}`} className="px-1 text-caption font-medium text-fg-subtle">
               {t(g.label)}
             </p>
-            <ul aria-labelledby={`settings-nav-${g.id}`} className="flex flex-col divide-y divide-divider overflow-hidden rounded-lg border border-edge bg-surface">
-              {g.sections.map((id) => {
+            {/* No overflow-hidden to round the rows: it would clip their focus ring. The first and
+                last rows round themselves, so the hover fill keeps to the corners, and the ring is
+                drawn inside the row, clear of the dividers and the group's edge. */}
+            <ul aria-labelledby={`settings-nav-${g.id}`} className="flex flex-col divide-y divide-divider rounded-lg border border-edge bg-surface">
+              {g.sections.map((id, i) => {
                 const { icon: Icon, label, lead } = SECTIONS[id];
                 return (
                   <li key={id}>
-                    <Link to={`/settings/${id}`} className="flex min-h-14 items-center gap-3 px-3 py-2.5 hover:bg-hover active:bg-active motion-safe:transition-colors">
+                    <Link
+                      to={`/settings/${id}`}
+                      // The section's Back goes back in history from here (see SettingsPage).
+                      state={{ fromSettingsList: true }}
+                      className={clsx(
+                        'flex min-h-14 items-center gap-3 px-3 py-2.5 hover:bg-hover focus-visible:outline-offset-[-2px] active:bg-active motion-safe:transition-colors',
+                        i === 0 && 'rounded-t-[calc(var(--radius-lg)-1px)]',
+                        i === g.sections.length - 1 && 'rounded-b-[calc(var(--radius-lg)-1px)]',
+                      )}
+                    >
                       <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-md border border-edge bg-surface-2 text-fg-muted">
                         <Icon size={16} />
                       </span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="text-body font-medium text-fg">{t(label)}</span>
-                        {lead ? <span className="truncate text-caption text-fg-muted">{t(lead)}</span> : null}
+                        {/* Two lines, not one cut mid-word: at phone width most leads run past one. */}
+                        {lead ? <span className="line-clamp-2 text-caption text-fg-muted">{t(lead)}</span> : null}
                       </span>
                       <ChevronRight aria-hidden size={16} className="shrink-0 text-fg-subtle rtl:rotate-180" />
                     </Link>
@@ -233,6 +246,8 @@ export function SettingsPage() {
   const phone = useMediaQuery(PHONE_QUERY);
   const query = useSettingsQuery();
   const save = useSaveStatus(useUpdateSettings());
+  const location = useLocation();
+  const navigate = useNavigate();
   // `/settings` itself: the phone's list of sections; a wider window goes straight to General.
   const index = section === undefined;
   const valid = isSectionId(section) && sectionAvailable(section);
@@ -256,12 +271,20 @@ export function SettingsPage() {
   }
 
   const Section = SECTIONS[current].component;
+  // The phone's "All settings". From the list, back in history: a pushed /settings would leave
+  // list and sections taking turns in history, so the system back from the list went to the
+  // section just left instead of out of Settings. Opened any other way (a deep link, the command
+  // palette, a link in another section), the list replaces this section.
+  const backToList = () => {
+    if ((location.state as { fromSettingsList?: boolean } | null)?.fromSettingsList) navigate(-1);
+    else navigate('/settings', { replace: true });
+  };
 
   return (
     <Page width="default" data-testid="settings-page" onPointerDownCapture={save.onPointerDownCapture}>
       {/* The page's single h1 (C16) matches the header title; each section's own title is its h2. */}
       <h1 className="sr-only">{t('title')}</h1>
-      {phone ? <BackButton to="/settings" label={t('allSettings')} className="-ms-2 mb-4" data-testid="settings-back" /> : null}
+      {phone ? <BackButton to="/settings" onClick={backToList} label={t('allSettings')} className="-ms-2 mb-4" data-testid="settings-back" /> : null}
       <div className="flex items-start gap-8 lg:gap-12">
         {phone ? null : (
           // Sticky inside the shell's scrolling main, so the nav stays put down a long section.

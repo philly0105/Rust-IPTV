@@ -442,15 +442,18 @@ export function AppearanceSection({ settings, update }: SectionProps) {
                     <Check size={12} strokeWidth={3} />
                   </span>
                 ) : null}
-                <RadioInput
-                  name="settings-theme"
-                  value={o.value}
-                  checked={selected}
-                  onChange={() => choose(o.value)}
-                  className="focus-visible:shadow-none focus-visible:outline-none"
-                  wrapperClassName="sr-only"
-                  data-testid={`theme-${o.value}`}
-                />
+                {/* Hidden by a wrapper, not through wrapperClassName: the kit's own `relative size-4.5`
+                    there outlasts sr-only and left a blank band in every card. */}
+                <span className="sr-only">
+                  <RadioInput
+                    name="settings-theme"
+                    value={o.value}
+                    checked={selected}
+                    onChange={() => choose(o.value)}
+                    className="focus-visible:shadow-none focus-visible:outline-none"
+                    data-testid={`theme-${o.value}`}
+                  />
+                </span>
                 <span className="flex flex-col gap-0.5">
                   <span className="text-body font-medium text-fg">{o.label}</span>
                   <span className="text-body-sm text-fg-muted">{o.hint}</span>

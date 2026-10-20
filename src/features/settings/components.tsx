@@ -10,9 +10,9 @@ export type SaveState = 'idle' | 'saving' | 'saved';
 
 /**
  * The page's save state and the row it came from (`data-settings-row` of the row the user last
- * pressed or focused). The row shows "Saved" beside its label; a save from anywhere else (a theme
- * card, a dialog) shows it beside the section title. One confirmation, next to what changed, and
- * clear of the mini player and toasts in the corner.
+ * pressed or focused). The row shows "Saved" in its bottom end corner, under its control; a save
+ * from anywhere else (a theme card, a dialog) shows it beside the section title. One
+ * confirmation, next to what changed, and clear of the mini player and toasts in the corner.
  */
 export const SaveFeedback = createContext<{ state: SaveState; rowId: string | null }>({ state: 'idle', rowId: null });
 
@@ -20,17 +20,18 @@ export const SaveFeedback = createContext<{ state: SaveState; rowId: string | nu
  * "Saving…" then a check and "Saved", fading in and out. Hidden from screen readers: the page's
  * polite status (SettingsPage) announces the same thing once.
  */
-function SavedMark({ state }: { state: SaveState }) {
+function SavedMark({ state, className }: { state: SaveState; className?: string }) {
   const { t } = useTranslation('settings');
   return (
     <span
       aria-hidden
       data-testid="settings-saved-mark"
       data-state={state}
-      className={clsx(
+      className={cn(
         'inline-flex shrink-0 items-center gap-1 text-caption font-medium motion-safe:transition-opacity motion-safe:duration-(--duration-base)',
         state === 'idle' ? 'opacity-0' : 'opacity-100',
         state === 'saved' ? 'text-success' : 'text-fg-muted',
+        className,
       )}
     >
       {state === 'saved' ? <Check size={12} /> : null}
@@ -39,10 +40,22 @@ function SavedMark({ state }: { state: SaveState }) {
   );
 }
 
-/** The mark for one row: shown while the last save came from it. */
+/**
+ * The mark for one row: shown while the last save came from it. Always mounted and out of flow,
+ * in the row's bottom end corner, so a save never changes the row's layout. Beside the label it
+ * took a line of its own wherever the label filled its line (most rows at phone width): the row
+ * grew for two seconds and the switch moved from under the finger. The corner is free in every
+ * row: the bottom padding (py-3.5) holds the 12 px mark (leading-none) with 2 px to spare, and
+ * the control sits above it, the description at the start.
+ */
 function RowMark({ rowId }: { rowId: string }) {
   const fb = useContext(SaveFeedback);
-  return fb.rowId === rowId && fb.state !== 'idle' ? <SavedMark state={fb.state} /> : null;
+  return (
+    <SavedMark
+      state={fb.rowId === rowId ? fb.state : 'idle'}
+      className="pointer-events-none absolute bottom-0.5 end-4 whitespace-nowrap leading-none"
+    />
+  );
 }
 
 /** One settings page: heading, optional lead, and grouped rows. */
@@ -104,16 +117,13 @@ export function SettingsGroup({
   );
 }
 
-/** A row's label column: the label, the saved mark beside it, and the help text (capped for reading, not by a percentage). */
-function RowLabel({ htmlFor, label, description, descId, rowId }: { htmlFor: string; label: ReactNode; description?: ReactNode; descId: string; rowId: string }) {
+/** A row's label column: the label and the help text (capped for reading, not by a percentage). */
+function RowLabel({ htmlFor, label, description, descId }: { htmlFor: string; label: ReactNode; description?: ReactNode; descId: string }) {
   return (
     <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5">
-      <span className="flex flex-wrap items-center gap-x-2">
-        <label htmlFor={htmlFor} className="text-body font-medium text-fg">
-          {label}
-        </label>
-        <RowMark rowId={rowId} />
-      </span>
+      <label htmlFor={htmlFor} className="text-body font-medium text-fg">
+        {label}
+      </label>
       {description ? (
         <p id={descId} className="max-w-[38rem] text-body-sm text-pretty text-fg-muted">
           {description}
@@ -153,9 +163,9 @@ export function SettingsRow({
     <div
       data-settings-row={id}
       data-dimmed={dimmed || undefined}
-      className={clsx('flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3.5 motion-safe:transition-opacity', dimmed && 'opacity-60')}
+      className={clsx('relative flex flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-3.5 motion-safe:transition-opacity', dimmed && 'opacity-60')}
     >
-      <RowLabel htmlFor={id} label={label} description={description} descId={descId} rowId={id} />
+      <RowLabel htmlFor={id} label={label} description={description} descId={descId} />
       <div className={clsx('flex min-w-0 max-w-full flex-col gap-1.5', stack ? 'basis-full' : '@max-md:basis-full @md:items-end')}>
         {children({ id, describedBy, invalid: error ? true : undefined })}
         {error ? (
@@ -164,6 +174,7 @@ export function SettingsRow({
           </p>
         ) : null}
       </div>
+      <RowMark rowId={id} />
     </div>
   );
 }
@@ -186,8 +197,8 @@ export function SwitchRow({
 }) {
   const id = useId();
   return (
-    <div data-settings-row={id} className={clsx('flex items-center justify-between gap-6 px-4 py-3.5', disabled && 'opacity-60')}>
-      <RowLabel htmlFor={id} label={label} description={description} descId={`${id}-desc`} rowId={id} />
+    <div data-settings-row={id} className={clsx('relative flex items-center justify-between gap-6 px-4 py-3.5', disabled && 'opacity-60')}>
+      <RowLabel htmlFor={id} label={label} description={description} descId={`${id}-desc`} />
       <Switch
         id={id}
         checked={checked}
@@ -196,6 +207,7 @@ export function SwitchRow({
         disabled={disabled}
         data-testid={testId}
       />
+      <RowMark rowId={id} />
     </div>
   );
 }

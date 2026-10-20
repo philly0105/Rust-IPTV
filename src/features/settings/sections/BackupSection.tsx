@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { clsx } from 'clsx';
 import { ChevronRight, CircleAlert, CircleCheck, Download, FileJson, ShieldCheck, Upload } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import type { BackupImportResult } from '@/api/rpc';
@@ -26,7 +27,10 @@ export function BackupSection({ update }: SectionProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const chooseFileRef = useRef<HTMLButtonElement>(null);
+  const chooseAnotherRef = useRef<HTMLButtonElement>(null);
   const fileHintId = useId();
+  const summaryId = useId();
   const [includeSecrets, setIncludeSecrets] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -76,26 +80,43 @@ export function BackupSection({ update }: SectionProps) {
     }
   };
 
+  /**
+   * Shows what came of a pick. The summary and the drop zone take turns, so the button that
+   * opened the file picker may have just unmounted, which drops focus to <body> and sends the next
+   * Tab back to the top of the page. Focus then goes to the choose button now showing: "Choose
+   * another file" beside Import, or the drop zone's button after a file it could not read. A
+   * file dropped with the pointer leaves focus where it was.
+   */
+  const settlePick = (next: Picked | null, error: string | null, fromButton: boolean) => {
+    flushSync(() => {
+      setPickError(error);
+      setPicked(next);
+    });
+    const active = document.activeElement;
+    if (fromButton && (!active || active === document.body)) (next ? chooseAnotherRef : chooseFileRef).current?.focus();
+  };
+
   const onFile = async (file: File | undefined) => {
     if (!file) return;
+    const active = document.activeElement;
+    const fromButton = active !== null && (active === chooseFileRef.current || active === chooseAnotherRef.current);
     setResult(null);
     setImportError(null);
     setPicked(null);
     if (file.size > MAX_BACKUP_BYTES) {
-      setPickError('backupTooLarge');
+      settlePick(null, 'backupTooLarge', fromButton);
       return;
     }
     try {
       const text = await readFileText(file);
       const check = inspectBackup(text);
       if (!check.ok) {
-        setPickError(check.error);
+        settlePick(null, check.error, fromButton);
         return;
       }
-      setPickError(null);
-      setPicked({ name: file.name, size: file.size, text, summary: check.summary });
+      settlePick({ name: file.name, size: file.size, text, summary: check.summary }, null, fromButton);
     } catch {
-      setPickError('backupReadFailed');
+      settlePick(null, 'backupReadFailed', fromButton);
     }
   };
 
@@ -180,26 +201,16 @@ export function BackupSection({ update }: SectionProps) {
   const start = () => (mode === 'replace' ? setConfirmReplace(true) : void startMerge());
 
   const choose = () => fileRef.current?.click();
-  const importButton = (
-    <Button
-      variant={mode === 'replace' ? 'danger' : 'primary'}
-      icon={<Upload aria-hidden size={16} />}
-      loading={importing}
-      onClick={start}
-      data-testid="backup-import"
-    >
-      {mode === 'replace' ? t('backupImportReplaceButton') : t('backupImportButton')}
-    </Button>
-  );
-
   return (
     <SettingsSection title={t('sectionBackup')} description={t('sectionBackupLead')} testId="settings-backup">
-      {/* The export is one choice and one action: the action sits in the group's header. */}
+      {/* The export is one choice and one action: the action sits in the group's header. A
+          secondary button: it is always there, and Import is the page's one primary once a file
+          is chosen. */}
       <SettingsGroup
         title={t('backupExport')}
         description={t('backupExportHint')}
         actions={
-          <Button variant="primary" icon={<Download aria-hidden size={16} />} loading={exporting} onClick={() => void exportBackup()} data-testid="backup-export">
+          <Button variant="secondary" icon={<Download aria-hidden size={16} />} loading={exporting} onClick={() => void exportBackup()} data-testid="backup-export">
             {t('backupExportButton')}
           </Button>
         }
@@ -213,7 +224,23 @@ export function BackupSection({ update }: SectionProps) {
         />
       </SettingsGroup>
 
+      {/* How to import, then the file: the mode decides what Import does (and its label), so it
+          comes before the button, which sits with the file it imports. */}
       <SettingsGroup title={t('backupImport')} description={t('backupImportHint')}>
+        <SettingsRow label={t('backupMode')} description={mode === 'merge' ? t('backupMergeHint') : t('backupReplaceHint')}>
+          {({ id }) => (
+            <Segmented<'merge' | 'replace'>
+              id={id}
+              label={t('backupMode')}
+              value={mode}
+              options={[
+                { value: 'merge', label: t('backupMerge') },
+                { value: 'replace', label: t('backupReplace') },
+              ]}
+              onChange={setMode}
+            />
+          )}
+        </SettingsRow>
         <div className="flex flex-col gap-3 px-4 py-4">
           <input
             ref={fileRef}
@@ -235,31 +262,48 @@ export function BackupSection({ update }: SectionProps) {
                 <span className="min-w-0 flex-1 truncate font-medium text-fg" title={picked.name}>
                   {picked.name}
                 </span>
-                <Button size="sm" variant="ghost" className="-me-2" onClick={choose} disabled={importing} data-testid="backup-choose-another">
+              </div>
+              {/* What is in the file, read out with the Import button too. */}
+              <div id={summaryId} className="flex flex-col gap-1">
+                <p className="text-fg-muted">
+                  {t('backupSummary', {
+                    count: picked.summary.playlists,
+                    m3u: picked.summary.byKind.m3u,
+                    xtream: picked.summary.byKind.xtream,
+                    stalker: picked.summary.byKind.stalker,
+                  })}
+                </p>
+                {picked.summary.exportedAt ? (
+                  <p className="text-fg-muted">{t('backupExportedAt', { when: absoluteTime(picked.summary.exportedAt, lang) })}</p>
+                ) : null}
+                {picked.summary.skipped > 0 ? (
+                  <p className="text-warning" data-testid="backup-skipped">
+                    {picked.summary.skipped === picked.summary.playlists
+                      ? t('backupNoPlaylists')
+                      : t('backupSkippedEntries', { count: picked.summary.skipped })}
+                  </p>
+                ) : null}
+                {!picked.summary.includeSecrets && picked.summary.byKind.xtream + picked.summary.byKind.stalker > 0 ? (
+                  <p className="text-warning">{t('backupNoSecrets')}</p>
+                ) : null}
+              </div>
+              {/* The file's actions end the card: no row of its own holding only a button. */}
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                <Button ref={chooseAnotherRef} size="sm" variant="ghost" onClick={choose} disabled={importing} data-testid="backup-choose-another">
                   {t('backupChooseAnother')}
                 </Button>
+                <Button
+                  size="sm"
+                  variant={mode === 'replace' ? 'danger' : 'primary'}
+                  icon={<Upload aria-hidden size={16} />}
+                  loading={importing}
+                  onClick={start}
+                  aria-describedby={summaryId}
+                  data-testid="backup-import"
+                >
+                  {mode === 'replace' ? t('backupImportReplaceButton') : t('backupImportButton')}
+                </Button>
               </div>
-              <p className="text-fg-muted">
-                {t('backupSummary', {
-                  count: picked.summary.playlists,
-                  m3u: picked.summary.byKind.m3u,
-                  xtream: picked.summary.byKind.xtream,
-                  stalker: picked.summary.byKind.stalker,
-                })}
-              </p>
-              {picked.summary.exportedAt ? (
-                <p className="text-fg-muted">{t('backupExportedAt', { when: absoluteTime(picked.summary.exportedAt, lang) })}</p>
-              ) : null}
-              {picked.summary.skipped > 0 ? (
-                <p className="text-warning" data-testid="backup-skipped">
-                  {picked.summary.skipped === picked.summary.playlists
-                    ? t('backupNoPlaylists')
-                    : t('backupSkippedEntries', { count: picked.summary.skipped })}
-                </p>
-              ) : null}
-              {!picked.summary.includeSecrets && picked.summary.byKind.xtream + picked.summary.byKind.stalker > 0 ? (
-                <p className="text-warning">{t('backupNoSecrets')}</p>
-              ) : null}
             </div>
           ) : (
             // A drop zone as well as a button: a backup is usually a file the user already has open in a folder.
@@ -284,7 +328,7 @@ export function BackupSection({ update }: SectionProps) {
               <Upload aria-hidden size={18} className="text-fg-subtle" />
               {/* Nothing to drag on a touch screen: the button alone. */}
               <p className="text-body-sm text-fg-muted pointer-coarse:hidden">{t('backupDropHint')}</p>
-              <Button size="sm" variant="secondary" aria-describedby={fileHintId} onClick={choose} disabled={importing}>
+              <Button ref={chooseFileRef} size="sm" variant="secondary" aria-describedby={fileHintId} onClick={choose} disabled={importing}>
                 {t('backupChooseFile')}
               </Button>
               <span id={fileHintId} className="text-caption text-fg-subtle">
@@ -299,22 +343,6 @@ export function BackupSection({ update }: SectionProps) {
             </p>
           ) : null}
         </div>
-        <SettingsRow label={t('backupMode')} description={mode === 'merge' ? t('backupMergeHint') : t('backupReplaceHint')}>
-          {({ id }) => (
-            <Segmented<'merge' | 'replace'>
-              id={id}
-              label={t('backupMode')}
-              value={mode}
-              options={[
-                { value: 'merge', label: t('backupMerge') },
-                { value: 'replace', label: t('backupReplace') },
-              ]}
-              onChange={setMode}
-            />
-          )}
-        </SettingsRow>
-        {/* No import button until there is a file to import: a disabled primary only adds noise. */}
-        {picked ? <div className="flex justify-end px-4 py-3">{importButton}</div> : null}
       </SettingsGroup>
 
       {importError ? (

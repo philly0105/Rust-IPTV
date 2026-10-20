@@ -103,21 +103,24 @@ pub fn finish_staged(conn: &Connection, data_dir: &Path, source_id: &str) -> Cor
 }
 
 /// [`finish_staged`] for every source with a mark. The start-up sweep runs
-/// it before it deletes staged files without one; a failure is logged and
-/// tried again at the next import of the source.
-pub fn finish_all_staged(conn: &Connection, data_dir: &Path) -> CoreResult<()> {
+/// it before it deletes staged files without one. A failed move is logged
+/// and tried again at the next import of the source; the staged files of
+/// those moves are returned, so the sweep keeps them.
+pub fn finish_all_staged(conn: &Connection, data_dir: &Path) -> CoreResult<Vec<PathBuf>> {
     let mut stmt = conn.prepare(
         "SELECT substr(key, length('m3u_staged:') + 1) FROM app_state WHERE key LIKE 'm3u_staged:%'",
     )?;
     let ids = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
+    let mut waiting = Vec::new();
     for id in ids {
         if let Err(err) = finish_staged(conn, data_dir, &id) {
             tracing::warn!(%err, source_id = %id, "could not move a playlist update into place");
+            waiting.push(staged_playlist_path(data_dir, &id));
         }
     }
-    Ok(())
+    Ok(waiting)
 }
 
 /// Stores playlist text that arrived in memory (a backup restore) the way an
@@ -747,6 +750,15 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
     let mut fetched = false;
     let mut validators: Option<Validators> = None;
 
+    // New text of a `sources.update` whose move into place failed goes in
+    // place first, whatever the origin is now (the import holds the source's
+    // lock, as the update does).
+    let sid = source_id.clone();
+    let data_dir = state.data_dir.clone();
+    state
+        .db_call(move |c| finish_staged(c, &data_dir, &sid))
+        .await?;
+
     // 1. Acquire bytes + sha256.
     let (payload, sha) = match cfg.origin {
         M3uOrigin::Text => {
@@ -759,13 +771,8 @@ pub async fn import_source(state: Arc<AppState>, source: &Source) -> CoreResult<
             // The text is hashed like a download (with IMPORT_VERSION), so the
             // unchanged check below re-imports it once after a parser change.
             let sid = source_id.clone();
-            let data_dir = state.data_dir.clone();
             let raw = state
                 .db_call(move |c| {
-                    // New text of a `sources.update` whose move into place
-                    // failed is moved first (the import holds the source's
-                    // lock, as the update does).
-                    finish_staged(c, &data_dir, &sid)?;
                     Ok(c.query_row(
                         "SELECT raw FROM m3u_raw WHERE source_id = ?1",
                         [&sid],

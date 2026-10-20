@@ -557,8 +557,8 @@ async fn migrated_watched_episodes_mark_a_complete_series() {
     let items = page["items"].as_array().unwrap();
     assert_eq!(items.len(), 2, "{page}");
     for item in items {
-        let complete = item["title"] == "Bluey";
-        assert_eq!(series_watched(&env, &item["ref"]).await, complete, "{item}");
+        let watched = series_watched(&env, &item["ref"]).await;
+        assert_eq!(watched, item["title"] == "Bluey", "{item}");
     }
 }
 

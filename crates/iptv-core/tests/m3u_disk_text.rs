@@ -210,9 +210,10 @@ async fn staged_marks(state: &iptv_core::AppState, id: &str) -> i64 {
 }
 
 /// A committed large update whose text cannot be moved into place keeps the
-/// staged text and its mark instead of losing them: the next refresh moves
-/// and imports it, and after a crash between the commit and the move the
-/// start-up sweep moves it rather than deleting it as an orphan.
+/// staged text and its mark instead of losing them: a start-up that cannot
+/// move it either keeps it, the next refresh moves and imports it, and after
+/// a crash between the commit and the move the start-up sweep moves it
+/// rather than deleting it as an orphan.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn committed_large_update_survives_a_failed_move() {
     let env = env().await;
@@ -229,6 +230,11 @@ async fn committed_large_update_survives_a_failed_move() {
     std::fs::create_dir_all(&path).unwrap();
     sources::update(&env.state, &src.id, patch).await.unwrap();
     assert_eq!(raw_row(&env.state, &src.id).await.0, 0);
+    assert_eq!(std::fs::read_to_string(&staged).unwrap(), text);
+    assert_eq!(staged_marks(&env.state, &src.id).await, 1);
+
+    // Start-up fails to move it too: the sweep keeps it.
+    iptv_core::m3u::init(env.state.clone()).await.unwrap();
     assert_eq!(std::fs::read_to_string(&staged).unwrap(), text);
     assert_eq!(staged_marks(&env.state, &src.id).await, 1);
 

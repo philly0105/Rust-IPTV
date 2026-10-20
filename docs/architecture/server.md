@@ -322,6 +322,34 @@ docker run --rm -p 127.0.0.1:7180:7180 -v tsrust-iptv-data:/data tsrust-iptv
 A `.dockerignore` excluding `**/target/`, `node_modules/`, `dist/` and data
 dirs (`.*-data/`) keeps the build context small.
 
+The runtime stage carries OCI labels (title, description, source, and
+`org.opencontainers.image.version` from the `VERSION` build arg; no licence
+label until the project licence is chosen). When the build context holds a
+`THIRD_PARTY_NOTICES.md` (written by `tools/third-party-notices.mjs`), it is
+copied to `/usr/share/doc/tsrust-iptv/`.
+
+Released images are on `ghcr.io/philly0105/tsrust-iptv` for linux/amd64 and
+linux/arm64, tagged with the version and `latest`
+(`.github/workflows/release.yml`). CI builds the image and checks
+`/api/health` on pull requests without pushing (`ci.yml`, job `docker`).
+
+### Deployment for other devices
+
+[`deploy/`](../../deploy/README.md) runs the image behind Caddy with Compose:
+Caddy terminates TLS (`tls internal` for a LAN name or IP address, or a Let's
+Encrypt certificate for a public domain), asks for a password with
+`basic_auth`, and proxies to the app, which publishes no port of its own.
+Compose sets `IPTV_ALLOWED_HOSTS` to the same host name Caddy serves, and
+Caddy passes the `Host` header through unchanged, so the guard above accepts
+it. `/manifest.webmanifest` and `/icons/*` stay outside the password because
+browsers fetch the manifest without credentials.
+
+HTTPS matters for more than the password. A page on plain
+`http://<lan-ip>:7180` is not a secure context, so the browser turns off the
+service worker and PWA install, `navigator.clipboard` (the copy buttons),
+`Notification` (guide reminders) and EME (ClearKey channels). `localhost` is a
+secure context, so none of this applies on the server machine itself.
+
 ## Tests
 
 `cargo test -p iptv-server` runs unit tests (rewriter, address rules, guards,

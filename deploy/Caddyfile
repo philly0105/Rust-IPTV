@@ -1,0 +1,21 @@
+# Caddy in front of Tsrust IPTV: HTTPS, a password, and a proxy to the app.
+# compose.yaml passes the TSRUST_* values from .env. See README.md here.
+
+{$TSRUST_HOST} {
+	# "internal": certificates from Caddy's own authority, for a LAN name or an
+	# IP address. Devices have to trust that authority (README.md explains how).
+	# An e-mail address instead: a Let's Encrypt certificate for a public domain
+	# that points at this machine, with ports 80 and 443 reachable from outside.
+	tls {$TSRUST_TLS:internal}
+
+	# Browsers fetch the web app manifest and its icons without credentials, so
+	# these stay outside the password. They contain nothing private.
+	@locked not path /manifest.webmanifest /icons/*
+	basic_auth @locked {
+		{$TSRUST_USER:tv} {$TSRUST_PASSWORD_HASH}
+	}
+
+	# Caddy keeps the Host header, which IPTV_ALLOWED_HOSTS has to name, and
+	# handles the WebSocket at /api/events and streamed video as they are.
+	reverse_proxy tsrust-iptv:7180
+}

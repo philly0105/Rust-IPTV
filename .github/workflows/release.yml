@@ -1,0 +1,256 @@
+# Builds a release from a version tag (v0.2.0 and so on):
+#
+# - prepare: checks that the tag matches the app version, takes the release notes from
+#   CHANGELOG.md, writes THIRD_PARTY_NOTICES.md (tools/third-party-notices.mjs with cargo-about)
+#   and creates a draft GitHub Release with both.
+# - desktop: the Windows NSIS installer, built by tauri-action and attached to that draft. The
+#   installer carries THIRD_PARTY_NOTICES.md beside the app.
+# - image and image-manifest: the server image for linux/amd64 and linux/arm64, each built on a
+#   native runner, then pushed to ghcr.io/philly0105/tsrust-iptv as <version> and latest.
+#
+# The draft stays a draft until the owner publishes it. Two things are off on purpose, as owner
+# decisions: code signing (the installer is unsigned, so SmartScreen warns) and the auto-updater
+# (no --features updater, no updater signing key, no latest.json). See CONTRIBUTING.md, "Releases".
+# The only credential is the workflow's own GITHUB_TOKEN.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+  IMAGE: ghcr.io/philly0105/tsrust-iptv
+
+jobs:
+  prepare:
+    name: Release notes, notices and draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag against the app version
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          tauri=$(node -p "require('./crates/iptv-tauri/tauri.conf.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          for found in "package.json=$pkg" "tauri.conf.json=$tauri" "Cargo.toml=$cargo"; do
+            if [ "${found#*=}" != "$version" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match ${found%%=*} (${found#*=})."
+              exit 1
+            fi
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v head="## [$VERSION]" '
+            index($0, head) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section. Move the Unreleased notes under it."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable corepack
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.9
+      - name: Write THIRD_PARTY_NOTICES.md
+        run: |
+          cargo about generate --locked --fail --output-file "$RUNNER_TEMP/notices-rust.md" about.hbs
+          node tools/third-party-notices.mjs --rust "$RUNNER_TEMP/notices-rust.md"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            THIRD_PARTY_NOTICES.md
+            release-notes.md
+          if-no-files-found: error
+
+      # A re-run finds the draft from the first run and leaves its notes and assets alone.
+      - name: Create the draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          find_release() {
+            gh api "repos/$GH_REPO/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id" | head -n 1
+          }
+          id=$(find_release)
+          if [ -z "$id" ]; then
+            gh release create "$GITHUB_REF_NAME" THIRD_PARTY_NOTICES.md \
+              --draft --verify-tag --title "Tsrust IPTV $VERSION" --notes-file release-notes.md
+            id=$(find_release)
+          else
+            echo "::notice::Release for $GITHUB_REF_NAME exists (id $id); not changing it."
+          fi
+          test -n "$id" || { echo "::error::Could not find the release for $GITHUB_REF_NAME"; exit 1; }
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    name: Windows installer
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable corepack
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # An extra config merged over tauri.conf.json for this build only: it adds the notices to
+      # the bundle (installed beside the app). Resource paths are relative to crates/iptv-tauri.
+      - name: Bundle THIRD_PARTY_NOTICES.md
+        shell: bash
+        run: |
+          printf '%s\n' '{"bundle":{"resources":{"../../THIRD_PARTY_NOTICES.md":"THIRD_PARTY_NOTICES.md"}}}' \
+            > release-notices.tauri.json
+
+      # tauri build runs beforeBuildCommand (pnpm build) first, so the embedded dist/ is current.
+      # No signing: no certificate, no TAURI_SIGNING_PRIVATE_KEY, updater JSON off.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tauriScript: pnpm tauri
+          args: --config release-notices.tauri.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          includeUpdaterJson: false
+
+  image:
+    name: Server image (${{ matrix.platform }})
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          # Native arm64 runner, free for public repositories. Building the Rust server under
+          # QEMU emulation instead would take hours.
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+      - name: Platform name for caches and artifacts
+        run: |
+          platform="${{ matrix.platform }}"
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@v3
+      # Pushed by digest only; image-manifest tags the multi-arch list.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: VERSION=${{ needs.prepare.outputs.version }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=server-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=server-${{ env.PLATFORM_PAIR }}
+      - name: Export the digest
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  image-manifest:
+    name: Server image tags
+    needs: [prepare, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@v3
+      # <version> from the tag (v0.2.0 -> 0.2.0), and latest unless it is a pre-release
+      # (v0.3.0-rc.1 gets no latest).
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+      - name: Create and push the multi-arch tags
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          mapfile -t tags < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+      - name: Inspect
+        run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"

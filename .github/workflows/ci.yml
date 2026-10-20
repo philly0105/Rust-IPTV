@@ -1,6 +1,12 @@
 # The same checks as `pnpm check`, plus the production build and its entry-chunk budget.
 # The desktop crate (iptv-tauri) only builds on Windows, so the full Rust pass runs there; Linux
 # tests the crates that do not depend on Tauri. No secrets are used.
+#
+# Every push and pull request: frontend, rust-windows, rust-linux and cargo-deny.
+# Pull requests and pushes to master also run the slower jobs: msrv (cargo check with the
+# rust-version from Cargo.toml), docker (builds and starts the server image, no push) and
+# tauri-build (the desktop release build without the installer).
+# Playwright runs in e2e.yml; releases are built by release.yml.
 name: CI
 
 on:
@@ -22,6 +28,7 @@ jobs:
   frontend:
     name: Frontend (typecheck, test, build, size)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,6 +54,7 @@ jobs:
   rust-windows:
     name: Rust on Windows (fmt, clippy, test)
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -65,9 +73,122 @@ jobs:
   rust-linux:
     name: Rust on Linux (core, server, mock)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # None of these crates depends on Tauri, so no WebKitGTK or other system packages.
       - run: cargo test -p iptv-core -p iptv-server -p iptv-mock
+
+  # Advisories, licences, banned crates and sources, configured in deny.toml. A new advisory can
+  # appear any day without a change here, so that leg reports without failing the workflow; the
+  # licence, ban and source checks must pass.
+  cargo-deny:
+    name: cargo-deny (${{ matrix.checks }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          command-arguments: ${{ matrix.checks }}
+          # Replaces the action's default --all-features: deny.toml checks the default
+          # features, which is what ships (the updater feature is off).
+          arguments: --workspace
+
+  # Cargo.toml's rust-version is the oldest Rust this workspace claims to build with. This job
+  # holds it to that: it checks every crate, the Tauri one included, with exactly that toolchain.
+  msrv:
+    name: Rust MSRV (cargo check on Windows)
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        shell: bash
+        run: |
+          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          test -n "$version" || { echo "::error::No rust-version in Cargo.toml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      # rust-toolchain.toml selects stable; this makes cargo and the cache key use the MSRV.
+      - name: Use the MSRV toolchain
+        shell: bash
+        run: echo "RUSTUP_TOOLCHAIN=${{ steps.msrv.outputs.version }}" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+      - name: Placeholder frontend for iptv-tauri
+        shell: bash
+        run: mkdir -p dist && echo '<!doctype html><title>Tsrust IPTV</title>' > dist/index.html
+      - run: cargo check --workspace --all-targets --locked
+
+  docker:
+    name: Docker image (build and start, no push)
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # The cache scope matches the amd64 leg of release.yml, so a release reuses these layers.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: tsrust-iptv:ci
+          cache-from: type=gha,scope=server-linux-amd64
+          cache-to: type=gha,mode=max,scope=server-linux-amd64
+      - name: Start the image and wait for /api/health
+        run: |
+          docker run -d --name tsrust -p 127.0.0.1:7180:7180 tsrust-iptv:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7180/api/health; then
+              echo
+              docker inspect --format '{{ json .Config.Labels }}' tsrust-iptv:ci
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs tsrust
+          exit 1
+
+  # The release build of the desktop app as `pnpm tauri build` makes it (beforeBuildCommand runs
+  # pnpm build, the real dist/ is embedded), without the NSIS step. release.yml bundles it.
+  tauri-build:
+    name: Desktop release build (no installer)
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable corepack
+        run: corepack enable
+      - name: Locate the pnpm store
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm tauri build --no-bundle

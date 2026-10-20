@@ -1,0 +1,47 @@
+# Tsrust IPTV server mode for other devices: the app behind Caddy, which adds
+# HTTPS and a password. Settings come from .env in this folder (copy
+# .env.example). Read README.md here first.
+#
+#   cp .env.example .env    # then fill it in
+#   docker compose up -d
+name: tsrust-iptv
+
+services:
+  tsrust-iptv:
+    image: ghcr.io/philly0105/tsrust-iptv:${TSRUST_VERSION:-latest}
+    restart: unless-stopped
+    environment:
+      # The name people type in the browser. The API refuses other names
+      # (DNS-rebinding protection); IP addresses and localhost always work.
+      IPTV_ALLOWED_HOSTS: ${TSRUST_HOST:?Set TSRUST_HOST in .env}
+    volumes:
+      - tsrust-data:/data
+    # No published port: only Caddy reaches the app, on the compose network.
+    expose:
+      - "7180"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      tsrust-iptv:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      TSRUST_HOST: ${TSRUST_HOST:?Set TSRUST_HOST in .env}
+      TSRUST_TLS: ${TSRUST_TLS:-internal}
+      TSRUST_USER: ${TSRUST_USER:-tv}
+      TSRUST_PASSWORD_HASH: ${TSRUST_PASSWORD_HASH:?Set TSRUST_PASSWORD_HASH in .env (see README.md)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates, and with "tls internal" Caddy's own root certificate.
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  tsrust-data:
+  caddy-data:
+  caddy-config:

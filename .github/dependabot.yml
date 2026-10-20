@@ -1,0 +1,49 @@
+# Weekly dependency updates. Minor and patch versions arrive grouped, one pull request per
+# ecosystem; major versions come one by one. GitHub's "Dependabot security updates" (repository
+# settings) add pull requests for advisories on top of this.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Patched through patches/ (package.json pnpm.patchedDependencies). Update the patch with it.
+      - dependency-name: mpegts.js
+      # `tauri build` stops when the npm and Rust Tauri packages are on different minor versions,
+      # and Dependabot updates npm and cargo in separate pull requests. Move Tauri by hand, both
+      # sides at once; patch releases still come through.
+      - dependency-name: '@tauri-apps/*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # See the npm entry above.
+      - dependency-name: 'tauri*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - '*'

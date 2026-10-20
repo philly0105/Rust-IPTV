@@ -1,0 +1,74 @@
+# cargo-deny configuration: security advisories, licences, banned crates and
+# crate sources for the Rust workspace. CI runs it in .github/workflows/ci.yml
+# (job "cargo-deny"). Locally: `cargo install --locked cargo-deny`, then
+# `cargo deny check` from the repository root.
+
+[graph]
+# The desktop app ships for Windows, the server image for Linux on amd64 and
+# arm64. Crates that only build for other platforms (macOS, iOS, Android) are
+# left out of every check.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+# Default features only, which is what the installer and the image ship. The
+# `updater` feature of iptv-tauri (tauri-plugin-updater) stays off until the
+# owner turns the updater on; check it then with `cargo deny --all-features check`.
+all-features = false
+
+[advisories]
+# Vulnerabilities always fail the check. Unmaintained and unsound notices fail
+# only for crates the workspace depends on directly: Tauri pulls in the GTK 3
+# bindings on Linux and a few other crates that have such notices and that
+# this project cannot replace. Yanked versions fail.
+unmaintained = "workspace"
+unsound = "workspace"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Every licence found in Cargo.lock for the targets above, as of 0.2.0. All of
+# them allow binary redistribution with a notice. MPL-2.0 (cssparser,
+# selectors, dtoa-short and option-ext) is file-level copyleft: the source of
+# those crates stays on crates.io unchanged. THIRD_PARTY_NOTICES.md
+# (tools/third-party-notices.mjs with cargo-about) carries the texts.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+# The workspace crates marked `publish = false` are skipped. iptv-core still
+# carries the workspace's placeholder `license = "MIT"`; when the owner picks
+# the project's licence, add it to `allow` if it is not listed.
+[licenses.private]
+ignore = true
+
+[bans]
+# Tauri's tree has many crates in two or three major versions (windows-sys,
+# rand, toml, ...). Listing them helps nobody, so duplicates are allowed.
+multiple-versions = "allow"
+wildcards = "allow"
+deny = [
+    # TLS is rustls everywhere. The server image has no OpenSSL runtime, so a
+    # dependency that links OpenSSL would break it.
+    { crate = "openssl-sys", reason = "TLS uses rustls; the runtime image ships no libssl" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

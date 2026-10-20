@@ -1,0 +1,21 @@
+{{!--
+  cargo-about template for the Rust section of THIRD_PARTY_NOTICES.md (Markdown).
+  tools/third-party-notices.mjs puts this output under its "Rust crates" heading.
+  Triple braces keep the licence texts unescaped; they sit in ````text fences.
+--}}
+| Licence | Crates |
+| --- | ---: |
+{{#each overview}}
+| {{{name}}} | {{count}} |
+{{/each}}
+
+{{#each licenses}}
+### {{{name}}}
+
+Used by: {{#each used_by}}{{crate.name}} {{crate.version}}{{#unless @last}}, {{/unless}}{{/each}}
+
+````text
+{{{text}}}
+````
+
+{{/each}}

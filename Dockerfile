@@ -6,7 +6,12 @@
 #   docker run --rm -p 127.0.0.1:7180:7180 -v tsrust-iptv-data:/data tsrust-iptv
 #
 # The API has no login. Publish the port on loopback (as above) or put an
-# authenticating reverse proxy in front. See docs/architecture/server.md.
+# authenticating reverse proxy in front: deploy/ has a Compose setup with Caddy
+# (HTTPS and a password). See also docs/architecture/server.md.
+#
+# Build arg VERSION sets the image's version label (the release workflow passes
+# the tag). A THIRD_PARTY_NOTICES.md in the build context, written by
+# tools/third-party-notices.mjs, is copied to /usr/share/doc/tsrust-iptv/.
 
 # ---- 1. Web UI (vite build -> /src/dist) -----------------------------------
 FROM node:24-bookworm-slim AS web
@@ -47,6 +52,16 @@ RUN apt-get update \
 
 COPY --from=server /usr/local/bin/iptv-server /usr/local/bin/iptv-server
 COPY --from=web /src/dist /app/dist
+# Optional: the glob matches nothing when the file was not generated.
+COPY THIRD_PARTY_NOTICES.m[d] /usr/share/doc/tsrust-iptv/
+
+# Declared after the RUN above so that a new version does not rebuild the apt layer.
+ARG VERSION=dev
+# No org.opencontainers.image.licenses yet: the project licence is not chosen.
+LABEL org.opencontainers.image.title="Tsrust IPTV" \
+      org.opencontainers.image.description="Tsrust IPTV server mode: the web player for your own M3U playlists, Xtream Codes accounts and Stalker portals, with its API" \
+      org.opencontainers.image.source="https://github.com/philly0105/Rust-IPTV" \
+      org.opencontainers.image.version="${VERSION}"
 
 # Bind all interfaces inside the container; the data dir is the volume.
 # IPTV_ALLOWED_HOSTS: extra host names (comma list) the browser may use to

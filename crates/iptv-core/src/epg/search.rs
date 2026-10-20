@@ -554,6 +554,8 @@ struct Candidate {
     channel_id: Arc<str>,
     start: i64,
     stop: i64,
+    /// The channel's guide shift in seconds (`query::item_shift`).
+    shift: i64,
     channel: Arc<SourceChannel>,
 }
 
@@ -599,8 +601,10 @@ fn hit_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
 ///
 /// The window is read on the guide's clock: moved back by `source_secs`,
 /// the source's guide shift, which moves every channel of the source alike
-/// (so the start order holds too). A channel's own shift or `tvg-shift` is
-/// applied by [`finish`].
+/// (so the start order holds too). A channel's own shift or `tvg-shift`
+/// differs per channel: it is read with the channel, for the pairs in
+/// (start, number) order, and a pair it moves out of the window is skipped.
+/// When that leaves fewer than `limit`, the walk goes on to later starts.
 fn candidates(
     conn: &Connection,
     rt: &EpgRuntime,
@@ -670,84 +674,100 @@ fn candidates(
         channels
     };
     hits.sort_unstable_by_key(|h| (h.start, h.feed));
-    // Stop after the start time at which the limit is reached; a slot
-    // listed by two feeds counts once.
-    let mut end = hits.len();
-    let mut kept = 0usize;
-    let mut cut: Option<i64> = None;
-    let mut slots: HashSet<(usize, i64)> = HashSet::new();
-    for (i, h) in hits.iter().enumerate() {
-        if cut.is_some_and(|c| h.start > c) {
-            end = i;
-            break;
-        }
-        if slots.insert((h.guide, h.start)) {
-            kept += channels.guides[h.guide].1.len();
-        }
-        if kept >= want && cut.is_none() {
-            cut = Some(h.start);
-        }
-    }
-    hits.truncate(end);
-    // Each channel of each kept programme's guide channel, once per start
-    // (the first feed's programme wins).
-    let mut seen: HashSet<(i64, i64)> = HashSet::new();
-    let mut pairs: Vec<(Hit, ChannelKey)> = Vec::new();
-    for h in &hits {
-        for ch in &channels.guides[h.guide].1 {
-            if seen.insert((ch.rowid, h.start)) {
-                pairs.push((*h, *ch));
-            }
-        }
-    }
-    // By (start, number), the first `want` and every pair tied with the
-    // last of them: only those can be among the first `want` once names and
-    // refs break the ties.
     let prefix = |p: &(Hit, ChannelKey)| (p.0.start, p.1.number.unwrap_or(i64::MAX));
-    pairs.sort_unstable_by_key(prefix);
-    if pairs.len() > want {
-        let last = prefix(&pairs[want - 1]);
-        let n = pairs.partition_point(|p| prefix(p) <= last);
-        pairs.truncate(n);
-    }
     let mut stmt = conn.prepare_cached(
         "SELECT item_id, title, logo_url, category_id FROM items WHERE rowid = ?1",
     )?;
-    let mut read: HashMap<i64, Arc<SourceChannel>> = HashMap::new();
-    let mut out: Vec<Candidate> = Vec::with_capacity(pairs.len());
-    for (h, ch) in pairs {
-        let channel = match read.get(&ch.rowid) {
-            Some(c) => c.clone(),
-            None => {
-                let found = stmt
-                    .query_row([ch.rowid], |r| {
-                        let item_id: String = r.get(0)?;
-                        let name: String = r.get(1)?;
-                        let logo_url: Option<String> = r.get(2)?;
-                        Ok(SourceChannel {
-                            item_ref: ItemRef::new(&q.source_id, ch.content_type, item_id),
-                            sort_name: name.to_lowercase(),
-                            name,
-                            number: ch.number,
-                            logo_url: logo_url.filter(|s| !s.trim().is_empty()),
-                            category_id: r.get(3)?,
-                        })
-                    })
-                    .optional()?;
-                let Some(c) = found else { continue };
-                let c = Arc::new(c);
-                read.insert(ch.rowid, c.clone());
-                c
+    // Each channel read once, with its guide shift.
+    let mut read: HashMap<i64, (Arc<SourceChannel>, i64)> = HashMap::new();
+    let mut target = want;
+    let mut out = loop {
+        // Stop after the start time at which `target` is reached; a slot
+        // listed by two feeds counts once.
+        let mut end = hits.len();
+        let mut kept = 0usize;
+        let mut cut: Option<i64> = None;
+        let mut slots: HashSet<(usize, i64)> = HashSet::new();
+        for (i, h) in hits.iter().enumerate() {
+            if cut.is_some_and(|c| h.start > c) {
+                end = i;
+                break;
             }
-        };
-        out.push(Candidate {
-            rowid: h.rowid,
-            channel_id: channels.guides[h.guide].0.clone(),
-            start: h.start,
-            stop: h.stop,
-            channel,
-        });
-    }
+            if slots.insert((h.guide, h.start)) {
+                kept += channels.guides[h.guide].1.len();
+            }
+            if kept >= target && cut.is_none() {
+                cut = Some(h.start);
+            }
+        }
+        // Each channel of each kept programme's guide channel, once per start
+        // (the first feed's programme wins).
+        let mut seen: HashSet<(i64, i64)> = HashSet::new();
+        let mut pairs: Vec<(Hit, ChannelKey)> = Vec::new();
+        for h in &hits[..end] {
+            for ch in &channels.guides[h.guide].1 {
+                if seen.insert((ch.rowid, h.start)) {
+                    pairs.push((*h, *ch));
+                }
+            }
+        }
+        // By (start, number), the first `want` inside the window and every
+        // pair tied with the last of them: only those can be among the first
+        // `want` once names and refs break the ties.
+        pairs.sort_unstable_by_key(prefix);
+        let mut chosen: Vec<Candidate> = Vec::with_capacity(want);
+        let mut last: Option<(i64, i64)> = None;
+        for p in &pairs {
+            let key = prefix(p);
+            if chosen.len() >= want && last.is_some_and(|l| key > l) {
+                break;
+            }
+            let (h, ch) = *p;
+            let (channel, shift) = match read.get(&ch.rowid) {
+                Some(c) => c.clone(),
+                None => {
+                    let found = stmt
+                        .query_row([ch.rowid], |r| {
+                            let item_id: String = r.get(0)?;
+                            let name: String = r.get(1)?;
+                            let logo_url: Option<String> = r.get(2)?;
+                            Ok(SourceChannel {
+                                item_ref: ItemRef::new(&q.source_id, ch.content_type, item_id),
+                                sort_name: name.to_lowercase(),
+                                name,
+                                number: ch.number,
+                                logo_url: logo_url.filter(|s| !s.trim().is_empty()),
+                                category_id: r.get(3)?,
+                            })
+                        })
+                        .optional()?;
+                    let Some(c) = found else { continue };
+                    let shift = query::item_shift_with(conn, &c.item_ref, source_secs)?;
+                    let c = (Arc::new(c), shift);
+                    read.insert(ch.rowid, c.clone());
+                    c
+                }
+            };
+            // The channel's own shift or `tvg-shift` can move it out.
+            if h.stop + shift <= q.from || h.start + shift >= q.to {
+                continue;
+            }
+            last = Some(key);
+            chosen.push(Candidate {
+                rowid: h.rowid,
+                channel_id: channels.guides[h.guide].0.clone(),
+                start: h.start,
+                stop: h.stop,
+                shift,
+                channel,
+            });
+        }
+        if chosen.len() >= want || end == hits.len() {
+            break chosen;
+        }
+        // Every pair was looked at: walk on for as many more as are missing.
+        target = kept + want - chosen.len();
+    };
     out.sort_by(hit_order);
     out.truncate(want);
     Ok((out, used_index))
@@ -755,20 +775,13 @@ fn candidates(
 
 /// Reads titles, descriptions, categories and icons, applies custom channel
 /// names (C2), and moves each hit by its channel's guide shift as the grid
-/// does (L1-core-11): the source's `source_secs`, which [`candidates`] read
-/// the window with, plus the channel's own shift or `tvg-shift`. A hit that
-/// the channel's part moves out of the window is dropped.
-fn finish(
-    conn: &Connection,
-    found: Vec<Candidate>,
-    q: &Query,
-    source_secs: i64,
-) -> CoreResult<Vec<GuideSearchHit>> {
+/// does (L1-core-11): the source's shift plus the channel's own shift or
+/// `tvg-shift`, read by [`candidates`].
+fn finish(conn: &Connection, found: Vec<Candidate>) -> CoreResult<Vec<GuideSearchHit>> {
     let mut details = conn.prepare_cached(
         "SELECT title, description, category, icon FROM epg_programs WHERE rowid = ?1",
     )?;
     let mut names: HashMap<String, Option<String>> = HashMap::new();
-    let mut shifts: HashMap<String, i64> = HashMap::new();
     let mut out = Vec::with_capacity(found.len());
     for c in found {
         type Details = (String, Option<String>, Option<String>, Option<String>);
@@ -781,18 +794,7 @@ fn finish(
             continue;
         };
         let key = c.channel.item_ref.key();
-        let shift = match shifts.get(&key) {
-            Some(s) => *s,
-            None => {
-                let s = query::item_shift_with(conn, &c.channel.item_ref, source_secs)?;
-                shifts.insert(key.clone(), s);
-                s
-            }
-        };
-        let (start, stop) = (c.start + shift, c.stop + shift);
-        if stop <= q.from || start >= q.to {
-            continue;
-        }
+        let (start, stop) = (c.start + c.shift, c.stop + c.shift);
         let custom = match names.get(&key) {
             Some(n) => n.clone(),
             None => {
@@ -859,7 +861,7 @@ pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<Guid
             let tx = c.transaction()?;
             let source_secs = query::source_shift(&tx, &q.source_id)?;
             let (found, used_index) = candidates(&tx, &rt, &dir, &q, hide, source_secs)?;
-            let hits = finish(&tx, found, &q, source_secs)?;
+            let hits = finish(&tx, found)?;
             tx.commit()?;
             Ok((hits, used_index))
         })

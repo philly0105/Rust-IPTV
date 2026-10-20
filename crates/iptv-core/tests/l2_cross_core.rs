@@ -6,7 +6,8 @@
 //!   SQL when its caller goes away; work outside it runs to the end.
 //! - XA-11: a `settings.update` that only moves `lastRoute` is not broadcast.
 //! - XA-5 (L1-core-11): guide search hits carry the channel's `tvg-shift`,
-//!   and the search window applies to the shifted times.
+//!   the search window applies to the shifted times, and the limit counts
+//!   only hits inside it.
 //! - XA-6 (L2-perf-core-12): an XMLTV ingest leaves an empty WAL.
 //! - XA-4 (L1-core-17): a gzip playlist that unpacks past the inline limit
 //!   keeps an on-disk copy instead of an inline one.
@@ -414,6 +415,86 @@ async fn guide_search_window_follows_the_guide_shift() {
             })
             .collect();
         assert_eq!(got, expected, "index: {index}");
+    }
+}
+
+/// Compile-risk review (guide-search-limit): the candidates were cut to the
+/// limit before a channel's `tvg-shift` dropped the ones it moved out of the
+/// window, so a search could come back short or empty. Channel 1's
+/// programme an hour ahead is moved to five hours ago by its -6 h
+/// `tvg-shift`; channel 2's programme two hours ahead still fills a limit
+/// of 1. Index and scan agree.
+#[tokio::test]
+async fn guide_search_limit_counts_only_hits_inside_the_window() {
+    let env = support::env().await;
+    let state = env.state.clone();
+    let now = chrono::Utc::now().timestamp();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources(id, kind, name, config_json) VALUES ('s', 'm3u', 'S', '{}')",
+                [],
+            )?;
+            c.execute(
+                "INSERT INTO epg_sources(url, origin, status) VALUES ('http://g/x.xml', 'settings', 'ok')",
+                [],
+            )?;
+            let rows = [
+                ("1", r#"{"tvgShift":"-6"}"#, now + 3600),
+                ("2", "{}", now + 2 * 3600),
+            ];
+            for (id, extra, start) in rows {
+                let guide = format!("ch{id}.tv");
+                c.execute(
+                    "INSERT INTO items(source_id, content_type, item_id, category_id, title, number, epg_channel_id, extra_json)
+                     VALUES ('s', 'live', ?1, 'c', ?2, ?1, ?3, ?4)",
+                    params![id, format!("Channel {id}"), guide, extra],
+                )?;
+                c.execute(
+                    "INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES ('http://g/x.xml', ?1, ?1)",
+                    [&guide],
+                )?;
+                c.execute(
+                    "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('http://g/x.xml', ?1, ?2, ?3, 'Late Show')",
+                    params![guide, start, start + 3600],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let router = build_router();
+    let ts = iptv_core::epg::query::to_rfc3339;
+    let expected = vec![("2".to_string(), ts(now + 2 * 3600))];
+    for index in [false, true] {
+        if index {
+            state
+                .db_call(|c| iptv_core::epg::search::ensure_index(c, true))
+                .await
+                .unwrap();
+        }
+        for limit in [1, 50] {
+            let hits = router
+                .dispatch(
+                    state.clone(),
+                    "epg.search",
+                    json!({"sourceId": "s", "query": "late", "limit": limit}),
+                )
+                .await
+                .unwrap();
+            let got: Vec<(String, String)> = hits
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|h| {
+                    (
+                        h["ref"]["itemId"].as_str().unwrap().to_string(),
+                        h["program"]["start"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect();
+            assert_eq!(got, expected, "index: {index}, limit: {limit}");
+        }
     }
 }
 

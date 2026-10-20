@@ -3,22 +3,29 @@
 /*
  * The level sliders over the picture (volume, the subtitle position): a white fill and thumb, as
  * on Apple TV. A level is not progress, so it leaves the accent to the seek bar and the live marks.
+ * The fill starts at the slider's minimum: the left edge, or the right one in a right-to-left
+ * layout (Arabic, Moroccan Arabic), where a native range puts its minimum. The seek bar is
+ * a timeline and keeps dir="ltr" on its own.
  */
 .player-range {
+  --player-range-to: right;
   appearance: none;
   height: 20px;
   background: transparent;
   cursor: pointer;
 }
+.player-range:dir(rtl) {
+  --player-range-to: left;
+}
 .player-range::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+  background: linear-gradient(to var(--player-range-to), var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
 }
 .player-range::-moz-range-track {
   height: 4px;
   border-radius: 999px;
-  background: linear-gradient(to right, var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
+  background: linear-gradient(to var(--player-range-to), var(--color-on-glass, #f4f6fa) var(--fill, 0%), rgb(255 255 255 / 0.25) var(--fill, 0%));
 }
 .player-range::-webkit-slider-thumb {
   appearance: none;

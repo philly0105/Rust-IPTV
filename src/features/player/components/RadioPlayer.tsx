@@ -16,8 +16,11 @@ import { useNarrow } from './useNarrow';
 const SHORT_STAGE_PX = 420;
 
 export interface RadioPlayerProps {
-  /** 'stage' fills a player slot; 'bar' is a compact strip (mini dock, sidebars). */
-  variant?: 'stage' | 'bar';
+  /**
+   * 'stage' fills a player slot; 'bar' is a compact strip (mini dock, sidebars); 'thumb' is the
+   * station's art alone, the thumbnail of a phone's mini player bar, which holds the controls.
+   */
+  variant?: 'stage' | 'bar' | 'thumb';
   className?: string;
 }
 
@@ -58,6 +61,14 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
   // the name side by side, the controls under them.
   const shortStage = useNarrow(root, Number.POSITIVE_INFINITY, SHORT_STAGE_PX) && variant === 'stage';
   if (!source) return null;
+
+  if (variant === 'thumb') {
+    return (
+      <div className={cn('flex h-full w-full items-center justify-center bg-white/5 text-on-glass-muted', className)}>
+        {art.url ? <img src={art.url} alt="" className="h-full w-full object-contain p-1" onError={art.onError} /> : <Radio className="size-5" aria-hidden />}
+      </div>
+    );
+  }
 
   const store = usePlayerStore.getState();
   const playing = status === 'playing';

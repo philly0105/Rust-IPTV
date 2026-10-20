@@ -225,14 +225,30 @@ export function airingPair(guide: EpgNowNext | null | undefined, now: number): {
 /** How often the playing channel's airing programme is looked at (a cache read; a request only when it ended). */
 export const LIVE_PROGRAMME_CHECK_MS = 30_000;
 
+/** A guide answer with nothing on the channel is asked again this often by the follower. */
+export const LIVE_PROGRAMME_IDLE_MS = 5 * MINUTE;
+
+/**
+ * Whether the follower can go on with `entry` at `now`, past the 60 s reuse of `fresh`: a
+ * programme in it still airs (its now, or its next once the now ended), or its next has yet to
+ * start, so its titles cannot have moved on. A guide with nothing for the channel is asked again
+ * after `LIVE_PROGRAMME_IDLE_MS`. Anything else (the last programme it knew ended) is asked again.
+ */
+function followable(entry: Entry, now: number): boolean {
+  const guide = entry.value;
+  if (!guide) return now - entry.at < LIVE_PROGRAMME_IDLE_MS;
+  return !!airingPair(guide, now).current || (!!guide.next && ms(guide.next.start) > now);
+}
+
 /**
  * Keeps a live source's subtitle on the programme airing now (PL-STALE-PROGRAMME). A live
  * source is subtitled with the airing title once, at tune time; an hour on one channel left the
  * previous show under its name in the player's title bar and in the system's media controls
- * (`mediaSession.ts`). Every `LIVE_PROGRAMME_CHECK_MS` the cached guide answer is read (and asked
- * again once its programme ended), and a new airing title patches `source.subtitle`: the same
- * media (`watchKey`), so nothing restarts. A guide with nothing airing leaves the subtitle as it
- * is. Bound once by the dock; returns the unbind.
+ * (`mediaSession.ts`). Every `LIVE_PROGRAMME_CHECK_MS` the cached guide answer is read, and asked
+ * again only once nothing in it airs any more (`followable`): a channel left playing overnight
+ * asks once per programme, not every time the 60 s cache runs out. A new airing title patches
+ * `source.subtitle`: the same media (`watchKey`), so nothing restarts. A guide with nothing airing
+ * leaves the subtitle as it is. Bound once by the dock; returns the unbind.
  */
 export function bindLiveProgramme(): () => void {
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -243,7 +259,8 @@ export function bindLiveProgramme(): () => void {
     if (!ref) return;
     const key = itemKey(ref);
     const now = Date.now();
-    const guide = peekNowNext(ref, now) ?? (await fetchNowNext(ref));
+    const kept = cache.get(key);
+    const guide = kept && followable(kept, now) ? kept.value : (peekNowNext(ref, now) ?? (await fetchNowNext(ref)));
     const title = airingPair(guide, Date.now()).current?.title;
     const cur = usePlayerStore.getState().source;
     if (!title || !cur?.ref || itemKey(cur.ref) !== key || !cur.isLive || cur.subtitle === title) return;

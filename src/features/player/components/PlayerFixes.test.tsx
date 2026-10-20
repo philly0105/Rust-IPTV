@@ -34,7 +34,7 @@ const { PlayerSurface, DOUBLE_TAP_MS } = await import('./PlayerSurface');
 const { noteAutoMuted } = await import('./InlinePlayer');
 const { Controls } = await import('./Controls');
 const { PlayerStage } = await import('./PlayerStage');
-const { __resetNowNextForTests, bindLiveProgramme, LIVE_PROGRAMME_CHECK_MS } = await import('../nowNext');
+const { __resetNowNextForTests, bindLiveProgramme, LIVE_PROGRAMME_CHECK_MS, LIVE_PROGRAMME_IDLE_MS } = await import('../nowNext');
 
 const vod = { url: 'http://h/m.mp4', kind: 'direct' as const, title: 'Movie', isLive: false, isRadio: false };
 const liveRef: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '7' };
@@ -293,6 +293,68 @@ describe('PL-STALE-PROGRAMME: the live subtitle follows what airs', () => {
     } finally {
       unbind();
     }
+  });
+});
+
+describe('the live programme follower asks the guide once per programme', () => {
+  const at = (hhmm: string): string => `2026-10-20T${hhmm}:00Z`;
+  const show = (title: string, start: string, end: string) => ({ title, start: at(start), end: at(end), channelId: 'c7' });
+  const source = { url: 'http://h/live/7.ts', kind: 'direct' as const, title: 'News 7', isLive: true, isRadio: false, ref: liveRef, subtitle: 'Morning News' };
+  let asked = 0;
+  let unbind: () => void = () => undefined;
+
+  /** Plays the channel and follows it, the guide answering `guide()`. */
+  function follow(guide: () => unknown): void {
+    handlers['settings.get'] = () => ({});
+    handlers['epg.nowNext'] = () => {
+      asked += 1;
+      return { [itemKey(liveRef)]: guide() };
+    };
+    handlers['epg.shortEpg'] = () => [];
+    act(() => usePlayerStore.setState({ source, status: 'playing' }));
+    unbind = bindLiveProgramme();
+  }
+  const advance = async (minutes: number): Promise<void> => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(minutes * 60_000);
+    });
+  };
+  const subtitle = (): string | undefined => usePlayerStore.getState().source?.subtitle;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: Date.parse(at('10:00')), toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    __resetNowNextForTests();
+    asked = 0;
+  });
+  afterEach(() => unbind());
+
+  it('keeps the answer while a programme in it airs, past the 60 s cache, and asks again once they ended', async () => {
+    follow(() => {
+      const now = Date.now();
+      if (now < Date.parse(at('11:00'))) return { now: show('Morning News', '09:30', '11:00'), next: show('Weather', '11:00', '11:30') };
+      if (now < Date.parse(at('11:30'))) return { now: show('Weather', '11:00', '11:30'), next: show('Late Show', '11:30', '12:30') };
+      return { now: show('Late Show', '11:30', '12:30') };
+    });
+    // 90 checks in 45 minutes; only the first asks (every third used to, when the 60 s cache ran out).
+    await advance(45);
+    expect(asked).toBe(1);
+    expect(subtitle()).toBe('Morning News');
+    // The answer's next took over at 11:00 without a request.
+    await advance(20);
+    expect(asked).toBe(1);
+    expect(subtitle()).toBe('Weather');
+    // At 11:30 both programmes it knew had ended: one request.
+    await advance(35);
+    expect(asked).toBe(2);
+    expect(subtitle()).toBe('Late Show');
+  });
+
+  it('asks a guide with nothing on the channel again every few minutes, not on every check', async () => {
+    follow(() => undefined);
+    await advance(30);
+    // Once, then once per LIVE_PROGRAMME_IDLE_MS.
+    expect(asked).toBeGreaterThan(1);
+    expect(asked).toBeLessThanOrEqual(1 + (30 * 60_000) / LIVE_PROGRAMME_IDLE_MS);
   });
 });
 

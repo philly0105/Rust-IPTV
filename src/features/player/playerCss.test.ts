@@ -51,3 +51,23 @@ describe('the control bar scrim', () => {
     expect(contrast(hex(muted), under)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+describe('the level sliders (.player-range)', () => {
+  /** The declarations of the first rule whose selector is exactly `selector`. */
+  const rule = (selector: string): string => {
+    const at = css.indexOf(`\n${selector} {`);
+    if (at < 0) throw new Error(`no rule for ${selector}`);
+    return css.slice(css.indexOf('{', at) + 1, css.indexOf('}', at));
+  };
+
+  it('fill from the minimum the browser puts the thumb against: the left, or the right in RTL', () => {
+    // A native range in an RTL page has its minimum on the right; a fill drawn from the left there
+    // never met the thumb (the Arabic radio volume at 30 %: thumb 30 % from the right, fill on the left).
+    expect(rule('.player-range')).toMatch(/--player-range-to:\s*right/);
+    expect(rule('.player-range:dir(rtl)')).toMatch(/--player-range-to:\s*left/);
+    for (const track of ['.player-range::-webkit-slider-runnable-track', '.player-range::-moz-range-track']) {
+      expect(rule(track)).toMatch(/linear-gradient\(to var\(--player-range-to\), [^;]* var\(--fill, 0%\), [^;]* var\(--fill, 0%\)\)/);
+    }
+    expect(css).not.toMatch(/linear-gradient\(to right, var\(--color-on-glass/);
+  });
+});

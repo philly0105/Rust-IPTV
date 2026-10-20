@@ -32,6 +32,7 @@ use iptv_core::logging::LogGuard;
 use iptv_core::rpc::app::{deliver_deep_links, set_desktop_info, DesktopInfo};
 use iptv_core::rpc::{build_router, init_all, RpcRouter};
 use iptv_core::{AppState, RpcError, RpcErrorCode};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -486,8 +487,47 @@ fn move_hidden_natively(w: &tauri::WebviewWindow, r: geometry::Rect) -> bool {
 /// is shown anyway (a page that never loads must not leave the app invisible).
 const SHOW_FALLBACK: std::time::Duration = std::time::Duration::from_secs(4);
 
-/// Set once the main window has been shown for the first time.
-static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// First showing of the main window and its one-time `windowStart` mode.
+static WINDOW: WindowGate = WindowGate::new();
+
+/// Tracks the first showing of the main window apart from applying the saved
+/// `windowStart` mode: the fallback timer can show the window before the
+/// state is open, and the mode then applies once the boot has the state
+/// (`apply_late_start`).
+struct WindowGate {
+    shown: AtomicBool,
+    start_applied: AtomicBool,
+}
+
+impl WindowGate {
+    const fn new() -> Self {
+        Self {
+            shown: AtomicBool::new(false),
+            start_applied: AtomicBool::new(false),
+        }
+    }
+
+    /// Marks the window shown; true the first time.
+    fn first_show(&self) -> bool {
+        !self.shown.swap(true, Ordering::SeqCst)
+    }
+
+    /// Marks the window shown (tray, second launch).
+    fn mark_shown(&self) {
+        self.shown.store(true, Ordering::SeqCst);
+    }
+
+    /// Claims applying the start mode; true for the first caller only.
+    fn claim_start(&self) -> bool {
+        !self.start_applied.swap(true, Ordering::SeqCst)
+    }
+
+    /// The state has just opened: true (and claimed) when the window is
+    /// already showing and the start mode has not been applied.
+    fn late_start(&self) -> bool {
+        self.shown.load(Ordering::SeqCst) && self.claim_start()
+    }
+}
 
 /// How long after the page has loaded the window is shown anyway when the UI
 /// never asks (`reveal_window`): a page that failed before its first render.
@@ -508,14 +548,16 @@ fn reveal_window(app: AppHandle) {
 /// The `windowStart` setting applies here: maximized goes through the same
 /// hidden maximize as `unstick_fullscreen_size`, fullscreen follows the show.
 /// Before the state is open (only the fallback timer can be that early) the
-/// window opens as it closed.
+/// window opens as it closed, and the boot applies the mode once the state
+/// is open (`apply_late_start`).
 fn reveal_main(app: &AppHandle) {
-    if SHOWN.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    if !WINDOW.first_show() {
         return;
     }
     if let Some(w) = app.get_webview_window("main") {
         let start = app
             .try_state::<Arc<AppState>>()
+            .filter(|_| WINDOW.claim_start())
             .map(|state| state.settings_snapshot().window_start);
         if start == Some(iptv_core::model::WindowStart::Maximized) {
             let _ = w.maximize();
@@ -526,6 +568,28 @@ fn reveal_main(app: &AppHandle) {
             let _ = w.set_fullscreen(true);
         }
         let _ = w.set_focus();
+    }
+}
+
+/// Applies the saved `windowStart` mode to a main window the fallback timer
+/// showed before the state was open, when `reveal_main` could not read it.
+/// Does nothing while the window is hidden (its reveal applies the mode) or
+/// once the mode was applied.
+fn apply_late_start(app: &AppHandle, state: &AppState) {
+    if !WINDOW.late_start() {
+        return;
+    }
+    let Some(w) = app.get_webview_window("main") else {
+        return;
+    };
+    match state.settings_snapshot().window_start {
+        iptv_core::model::WindowStart::Maximized => {
+            let _ = w.maximize();
+        }
+        iptv_core::model::WindowStart::Fullscreen => {
+            let _ = w.set_fullscreen(true);
+        }
+        iptv_core::model::WindowStart::Normal => {}
     }
 }
 
@@ -565,7 +629,7 @@ fn clear_hidden_maximize(w: &tauri::WebviewWindow) {
 
 /// Brings the main window to the front (tray, second launch).
 fn show_main(app: &AppHandle) {
-    SHOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+    WINDOW.mark_shown();
     if let Some(w) = app.get_webview_window("main") {
         clear_hidden_maximize(&w);
         let _ = w.unminimize();
@@ -803,6 +867,8 @@ async fn boot_state(
 
     // `shutdown` finds the state here.
     handle.manage(Arc::clone(&state));
+    // The fallback timer may have shown the window before the state opened.
+    apply_late_start(&handle, &state);
     if let Some(urls) = launch_links {
         log_and_deliver_deep_links(&state, "launch", urls);
     }
@@ -1046,7 +1112,31 @@ fn checkpoint_wal(state: &AppState, wait: std::time::Duration) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TrayLabels, TRAY_LABEL_MAX};
+    use super::{TrayLabels, WindowGate, TRAY_LABEL_MAX};
+
+    /// GPT review (window-start-skipped): the fallback timer can show the
+    /// window before the state is open; the saved mode then applies once the
+    /// boot has the state, and only once.
+    #[test]
+    fn window_start_applies_after_an_early_reveal() {
+        // Shown early: the reveal had no state, so the boot applies the mode.
+        let early = WindowGate::new();
+        assert!(early.first_show());
+        assert!(early.late_start());
+        assert!(!early.late_start());
+        assert!(!early.claim_start());
+        // Shown with the state open: the reveal applies it, the boot does not.
+        let on_time = WindowGate::new();
+        assert!(on_time.first_show());
+        assert!(on_time.claim_start());
+        assert!(!on_time.late_start());
+        // The state first, the window still hidden: left to the reveal.
+        let hidden = WindowGate::new();
+        assert!(!hidden.late_start());
+        assert!(hidden.first_show());
+        assert!(hidden.claim_start());
+        assert!(!hidden.first_show());
+    }
 
     #[test]
     fn tray_labels_are_trimmed_and_blank_ones_stay_english() {

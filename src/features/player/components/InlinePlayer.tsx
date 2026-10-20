@@ -119,13 +119,18 @@ export interface InlinePlayerProps {
   compact?: boolean;
   /** A short player (a phone's 16:9, a docked stage): the error state packs into the room the bar leaves. */
   short?: boolean;
+  /**
+   * The picture only (the thumbnail of a phone's mini player bar, which says what is going on in
+   * its own line): no connecting notice and no error panel over it.
+   */
+  thumb?: boolean;
 }
 
 /**
  * The media element plus its engine. Reports progress/status into the store and
  * registers itself as the store's PlaybackController. Chrome is rendered by the caller.
  */
-export function InlinePlayer({ as = 'video', className, compact = false, short = false }: InlinePlayerProps) {
+export function InlinePlayer({ as = 'video', className, compact = false, short = false, thumb = false }: InlinePlayerProps) {
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
@@ -515,8 +520,9 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
         />
       )}
       {as === 'video' && <div ref={subsRef} data-subtitle-overlay aria-hidden className="player-subs" />}
-      {status === 'loading' && <ConnectingNotice source={source} compact={compact} />}
-      {status === 'error' && (
+      {status === 'loading' && !thumb && <ConnectingNotice source={source} compact={compact} />}
+      {status === 'error' && thumb && <RetryWhenOnline kind={errorKind} onRetry={retry} />}
+      {status === 'error' && !thumb && (
         <ErrorOverlay
           message={error}
           kind={errorKind}
@@ -529,6 +535,12 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
       )}
     </div>
   );
+}
+
+/** A thumbnail's failed stream still plays again by itself when the network comes back, as the error panel does. */
+function RetryWhenOnline({ kind, onRetry }: { kind: EngineError['kind'] | null; onRetry(): void }) {
+  useRetryWhenOnline(useStreamError(kind).cls, onRetry);
+  return null;
 }
 
 function ErrorOverlay({

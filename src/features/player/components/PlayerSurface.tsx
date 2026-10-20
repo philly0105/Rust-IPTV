@@ -457,7 +457,7 @@ function Tuning({ label }: { label: string }) {
  * pointer is on the bar, a menu is open, or playback is not running. The surface stays the
  * first child in every layout, so switching never remounts it (that would restart mpv).
  */
-function MpvPlayer({ compact }: { compact: boolean }) {
+function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   const { t } = useTranslation('player');
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
   const status = usePlayerStore((s) => s.status);
@@ -566,79 +566,84 @@ function MpvPlayer({ compact }: { compact: boolean }) {
       }}
     >
       <MpvSurface className={overlay ? 'absolute! inset-0' : 'min-h-0 flex-1'} />
-      {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
-      <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
-      {/*
-        Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
-        mini player says it in its header instead; a small player gets the one-line chip.
-      */}
-      {!compact && (
-        <ZapBanner
-          compact={pip}
-          chip={smallPlayer && !pip}
-          className={pip ? 'inset-x-2 top-11' : smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
-        />
-      )}
-      {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
-      {overlay && <SleepPrompt small={small} className={pip ? 'bottom-14' : 'bottom-28'} />}
-      {overlay ? (
-        chromeShown && (
-          <>
-            {pip && (
-              // Borderless window: this strip moves it, and holds the way back to the full app.
-              <div
-                data-mpv-reserved=""
-                data-tauri-drag-region=""
-                data-testid="pip-bar"
-                className="player-glass-strong absolute inset-x-0 top-0 z-10 flex h-10 items-center gap-0.5 border-b ps-3 pe-1"
-                {...barEvents}
-              >
-                {/* The PiP bar has no room for a readout of its own: volume and seek feedback replace the title briefly. */}
-                <BarReadout
-                  dragRegion
-                  className="me-0 flex-1 font-sans text-caption font-medium"
-                  fallback={
-                    buffering ? (
-                      <BufferingLabel />
-                    ) : (
-                      <span data-tauri-drag-region="" title={title} {...titleHover}>
-                        {title}
-                      </span>
-                    )
-                  }
-                />
-                <CtlButton id="pip-exit" shortcut="exitPip" label={t('exitPip')} onClick={() => void exitPip()} className="size-8 [&_svg]:size-4">
-                  <PictureInPicture2 />
-                </CtlButton>
-                <CtlButton
-                  id="pip-close"
-                  label={t('close')}
-                  onClick={() => {
-                    usePlayerStore.getState().stop();
-                    void exitPip();
-                  }}
-                  className="size-8 [&_svg]:size-4"
-                >
-                  <X />
-                </CtlButton>
-              </div>
-            )}
-            <div data-testid="mpv-overlay-chrome" className="absolute inset-x-0 bottom-0 z-10" {...barEvents}>
-              <MpvNotices compact={small} overlay />
-              <Controls
-                variant="dock"
-                visible
-                compact={small}
-                onMenuOpenChange={setMenuOpen}
-                readoutIdle={buffering ? <BufferingLabel /> : undefined}
-              />
-            </div>
-          </>
-        )
-      ) : (
+      {/* A phone bar's thumbnail is the picture alone: the bar beside it has the controls. */}
+      {!thumb && (
         <>
-          <MpvNotices compact={compact} />
-          <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} />
+          {/* Over the video; cut out of the native window while open. Below the PiP bar in PiP. */}
+          <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
+          {/*
+            Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
+            mini player says it in its header instead; a small player gets the one-line chip.
+          */}
+          {!compact && (
+            <ZapBanner
+              compact={pip}
+              chip={smallPlayer && !pip}
+              className={pip ? 'inset-x-2 top-11' : smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
+            />
+          )}
+          {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
+          {overlay && <SleepPrompt small={small} className={pip ? 'bottom-14' : 'bottom-28'} />}
+          {overlay ? (
+            chromeShown && (
+              <>
+                {pip && (
+                  // Borderless window: this strip moves it, and holds the way back to the full app.
+                  <div
+                    data-mpv-reserved=""
+                    data-tauri-drag-region=""
+                    data-testid="pip-bar"
+                    className="player-glass-strong absolute inset-x-0 top-0 z-10 flex h-10 items-center gap-0.5 border-b ps-3 pe-1"
+                    {...barEvents}
+                  >
+                    {/* The PiP bar has no room for a readout of its own: volume and seek feedback replace the title briefly. */}
+                    <BarReadout
+                      dragRegion
+                      className="me-0 flex-1 font-sans text-caption font-medium"
+                      fallback={
+                        buffering ? (
+                          <BufferingLabel />
+                        ) : (
+                          <span data-tauri-drag-region="" title={title} {...titleHover}>
+                            {title}
+                          </span>
+                        )
+                      }
+                    />
+                    <CtlButton id="pip-exit" shortcut="exitPip" label={t('exitPip')} onClick={() => void exitPip()} className="size-8 [&_svg]:size-4">
+                      <PictureInPicture2 />
+                    </CtlButton>
+                    <CtlButton
+                      id="pip-close"
+                      label={t('close')}
+                      onClick={() => {
+                        usePlayerStore.getState().stop();
+                        void exitPip();
+                      }}
+                      className="size-8 [&_svg]:size-4"
+                    >
+                      <X />
+                    </CtlButton>
+                  </div>
+                )}
+                <div data-testid="mpv-overlay-chrome" className="absolute inset-x-0 bottom-0 z-10" {...barEvents}>
+                  <MpvNotices compact={small} overlay />
+                  <Controls
+                    variant="dock"
+                    visible
+                    compact={small}
+                    onMenuOpenChange={setMenuOpen}
+                    readoutIdle={buffering ? <BufferingLabel /> : undefined}
+                  />
+                </div>
+              </>
+            )
+          ) : (
+            <>
+              <MpvNotices compact={compact} />
+              <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} />
+            </>
+          )}
         </>
       )}
     </div>
@@ -740,10 +745,16 @@ function TapSeekRipple({ side, seconds, onDone }: { side: -1 | 1; seconds: numbe
 export interface PlayerSurfaceProps {
   compact: boolean;
   channelPanelAvailable: boolean;
+  /**
+   * The thumbnail of a phone's mini player bar (PlayerDock): the picture (or a station's art)
+   * and nothing over it. The bar beside it names what plays and holds play, pause and close, and
+   * a tap anywhere on it expands the player, so the thumbnail takes no pointer of its own.
+   */
+  thumb?: boolean;
 }
 
 /** Everything inside the dock's host node: the media surface for the current mode plus its chrome. */
-export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceProps) {
+export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }: PlayerSurfaceProps) {
   const { t } = useTranslation('player');
   const mode = usePlayerStore((s) => s.mode);
   const source = usePlayerStore((s) => s.source);
@@ -848,14 +859,14 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
   if (mode === 'radio') {
     return (
       <div className="player-stage-dark relative h-full w-full">
-        <RadioPlayer variant={compact ? 'bar' : 'stage'} />
-        <InlinePlayer as="audio" className="pointer-events-none absolute! inset-0 bg-transparent!" />
+        <RadioPlayer variant={thumb ? 'thumb' : compact ? 'bar' : 'stage'} />
+        <InlinePlayer as="audio" thumb={thumb} className="pointer-events-none absolute! inset-0 bg-transparent!" />
       </div>
     );
   }
 
   if (mode === 'embedded-mpv') {
-    return <MpvPlayer compact={compact} />;
+    return <MpvPlayer compact={compact} thumb={thumb} />;
   }
 
   if (mode === 'external') return null;
@@ -972,105 +983,110 @@ export function PlayerSurface({ compact, channelPanelAvailable }: PlayerSurfaceP
         setMenuAt({ x: e.clientX, y: e.clientY });
       }}
     >
-      <InlinePlayer as="video" compact={compact} short={shortPlayer} />
-      {/* Click surface sits above the video so clicks never reach native controls. */}
-      <div className="absolute inset-0 z-[5]" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} aria-hidden />
-      {ripple && <TapSeekRipple key={ripple.key} side={ripple.side} seconds={ripple.seconds} onDone={endRipple} />}
-      {(status === 'loading' || (waiting && playing)) && <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />}
-      {/* failover: smart reconnect / failover progress under the dial. */}
-      <ReconnectNotice compact={compact} />
+      <InlinePlayer as="video" compact={compact} short={shortPlayer} thumb={thumb} />
+      {/* A phone bar's thumbnail is the picture alone (see `thumb`). */}
+      {!thumb && (
+        <>
+          {/* Click surface sits above the video so clicks never reach native controls. */}
+          <div className="absolute inset-0 z-[5]" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} aria-hidden />
+          {ripple && <TapSeekRipple key={ripple.key} side={ripple.side} seconds={ripple.seconds} onDone={endRipple} />}
+          {(status === 'loading' || (waiting && playing)) && <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />}
+          {/* failover: smart reconnect / failover progress under the dial. */}
+          <ReconnectNotice compact={compact} />
 
-      {!compact && (
-        <div
-          data-testid="player-titlebar"
-          className={cn(
-            'player-chrome player-scrim-top pointer-events-none absolute inset-x-0 top-0 z-10 motion-safe:transition-opacity motion-safe:duration-(--duration-base)',
-            // Fullscreen: further in from the edges and larger, like the bar. A short player's
-            // shade fades out sooner, so the two scrims do not meet over the middle of the picture.
-            isFullscreen ? 'px-4 pt-4 pb-20 sm:px-10 sm:pt-8' : cn('px-4 pt-3 sm:px-5 sm:pt-4', shortPlayer ? 'pb-8' : 'pb-14'),
-            titleHidden && 'opacity-0',
-          )}
-        >
-          <div className={cn('flex min-w-0 items-center', isFullscreen ? 'gap-4' : 'gap-3')}>
-            {/* The channel's logo where the LIVE pill was: the bar's badge is the one live mark (PL-DUPLICATE-CHROME). */}
-            {liveRef && <TitleLogo channel={liveRef} posterUrl={source.posterUrl} big={isFullscreen} />}
-            <div className="min-w-0 flex-1">
-              {/*
-                Hovering the channel title brings up the zap banner (live TV) and, like the bar,
-                keeps the chrome up. It sits above the click layer, so it passes clicks on to it;
-                hidden chrome lets the pointer through to the video.
-              */}
-              <h2
-                data-testid="player-title"
-                dir="auto"
-                className={cn(
-                  'w-fit max-w-full truncate [text-shadow:0_1px_3px_rgb(0_0_0/0.5)]',
-                  isFullscreen ? 'text-title' : 'text-title-sm',
-                  chromeVisible && 'pointer-events-auto',
-                )}
-                onClick={onSurfaceClick}
-                onDoubleClick={onSurfaceDouble}
-                onPointerEnter={() => {
-                  setOnBar(true);
-                  titleHover.onPointerEnter();
-                }}
-                onPointerLeave={() => {
-                  setOnBar(false);
-                  titleHover.onPointerLeave();
-                }}
-              >
-                {source.title}
-              </h2>
-              {/* What airs now, kept current while the channel plays (PL-STALE-PROGRAMME); an episode's line for VOD. */}
-              {liveRef ? (
-                <LiveProgrammeLine channel={liveRef} fallback={source.subtitle} />
-              ) : (
-                source.subtitle && (
-                  <p dir="auto" data-testid="player-subtitle" className="mt-0.5 truncate text-body-sm text-on-glass-muted">
-                    {source.subtitle}
-                  </p>
-                )
+          {!compact && (
+            <div
+              data-testid="player-titlebar"
+              className={cn(
+                'player-chrome player-scrim-top pointer-events-none absolute inset-x-0 top-0 z-10 motion-safe:transition-opacity motion-safe:duration-(--duration-base)',
+                // Fullscreen: further in from the edges and larger, like the bar. A short player's
+                // shade fades out sooner, so the two scrims do not meet over the middle of the picture.
+                isFullscreen ? 'px-4 pt-4 pb-20 sm:px-10 sm:pt-8' : cn('px-4 pt-3 sm:px-5 sm:pt-4', shortPlayer ? 'pb-8' : 'pb-14'),
+                titleHidden && 'opacity-0',
               )}
+            >
+              <div className={cn('flex min-w-0 items-center', isFullscreen ? 'gap-4' : 'gap-3')}>
+                {/* The channel's logo where the LIVE pill was: the bar's badge is the one live mark (PL-DUPLICATE-CHROME). */}
+                {liveRef && <TitleLogo channel={liveRef} posterUrl={source.posterUrl} big={isFullscreen} />}
+                <div className="min-w-0 flex-1">
+                  {/*
+                    Hovering the channel title brings up the zap banner (live TV) and, like the bar,
+                    keeps the chrome up. It sits above the click layer, so it passes clicks on to it;
+                    hidden chrome lets the pointer through to the video.
+                  */}
+                  <h2
+                    data-testid="player-title"
+                    dir="auto"
+                    className={cn(
+                      'w-fit max-w-full truncate [text-shadow:0_1px_3px_rgb(0_0_0/0.5)]',
+                      isFullscreen ? 'text-title' : 'text-title-sm',
+                      chromeVisible && 'pointer-events-auto',
+                    )}
+                    onClick={onSurfaceClick}
+                    onDoubleClick={onSurfaceDouble}
+                    onPointerEnter={() => {
+                      setOnBar(true);
+                      titleHover.onPointerEnter();
+                    }}
+                    onPointerLeave={() => {
+                      setOnBar(false);
+                      titleHover.onPointerLeave();
+                    }}
+                  >
+                    {source.title}
+                  </h2>
+                  {/* What airs now, kept current while the channel plays (PL-STALE-PROGRAMME); an episode's line for VOD. */}
+                  {liveRef ? (
+                    <LiveProgrammeLine channel={liveRef} fallback={source.subtitle} />
+                  ) : (
+                    source.subtitle && (
+                      <p dir="auto" data-testid="player-subtitle" className="mt-0.5 truncate text-body-sm text-on-glass-muted">
+                        {source.subtitle}
+                      </p>
+                    )
+                  )}
+                </div>
+              </div>
             </div>
+          )}
+
+          <Osd />
+          <UnmutePrompt compact={compact} />
+          <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
+          {/*
+            Zap banner (C5): the title's corner, or the far one while the channel list or stream info
+            holds it. The mini player says it in its header instead; a small player gets the
+            one-line chip.
+          */}
+          {!compact && (
+            <ZapBanner
+              compact={pip}
+              chip={smallPlayer && !pip}
+              className={
+                pip || smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+              }
+            />
+          )}
+          {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
+          {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : isFullscreen ? 'bottom-44' : 'bottom-32'} />}
+          <EndedOverlay compact={compact} short={shortPlayer} />
+          <UpNextCard compact={compact} short={shortPlayer} />
+
+          <div
+            data-testid="overlay-chrome"
+            // Only the bar's pane takes the pointer (Controls): the scrim above it lets it through.
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
+            // Resting the pointer on the bar (volume slider, time, a held scrub) keeps it up.
+            onPointerEnter={() => setOnBar(true)}
+            onPointerLeave={() => setOnBar(false)}
+          >
+            <Controls variant="overlay" visible={chromeVisible} compact={compact} short={shortPlayer} onMenuOpenChange={setMenuOpen} />
           </div>
-        </div>
+
+          <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} chromeVisible={chromeVisible} />
+          {menuAt && <VideoContextMenu at={menuAt} onClose={closeMenu} />}
+        </>
       )}
-
-      <Osd />
-      <UnmutePrompt compact={compact} />
-      <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
-      {/*
-        Zap banner (C5): the title's corner, or the far one while the channel list or stream info
-        holds it. The mini player says it in its header instead; a small player gets the
-        one-line chip.
-      */}
-      {!compact && (
-        <ZapBanner
-          compact={pip}
-          chip={smallPlayer && !pip}
-          className={
-            pip || smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
-          }
-        />
-      )}
-      {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
-      {!compact && <SleepPrompt small={pip} className={pip ? 'bottom-16' : isFullscreen ? 'bottom-44' : 'bottom-32'} />}
-      <EndedOverlay compact={compact} short={shortPlayer} />
-      <UpNextCard compact={compact} short={shortPlayer} />
-
-      <div
-        data-testid="overlay-chrome"
-        // Only the bar's pane takes the pointer (Controls): the scrim above it lets it through.
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-20"
-        // Resting the pointer on the bar (volume slider, time, a held scrub) keeps it up.
-        onPointerEnter={() => setOnBar(true)}
-        onPointerLeave={() => setOnBar(false)}
-      >
-        <Controls variant="overlay" visible={chromeVisible} compact={compact} short={shortPlayer} onMenuOpenChange={setMenuOpen} />
-      </div>
-
-      <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} chromeVisible={chromeVisible} />
-      {menuAt && <VideoContextMenu at={menuAt} onClose={closeMenu} />}
     </div>
   );
 }

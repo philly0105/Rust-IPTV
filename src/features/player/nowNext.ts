@@ -71,7 +71,7 @@ export function peekNowNext(ref: ItemRef, now = Date.now()): EpgNowNext | null |
  * stops on it. Each resolves true when the channel is to be asked, false when the burst moved on.
  */
 const holds = new Map<string, Promise<boolean>>();
-/** Lets a locked step's hold go once its PIN let it through (its tune waits on the guide answer). */
+/** Lets a step's hold go once the gate let its tune through (the tune waits on the guide answer). */
 const passes = new Map<string, () => void>();
 
 /** The channel on screen is `key`, and a step whose guide may be asked (a locked one shows none). */
@@ -88,23 +88,29 @@ function stoppedOn(key: string): boolean {
 export function holdNowNext(ref: ItemRef, dwellMs: number): void {
   const key = itemKey(ref);
   const hold = new Promise<boolean>((resolve) => {
-    setTimeout(() => {
+    let unsub: (() => void) | undefined;
+    const timer = setTimeout(() => {
       const s = usePlayerStore.getState().source;
       if (!s?.ref || itemKey(s.ref) !== key || !isPendingZap(s) || !isLockedZap(s)) {
         resolve(stoppedOn(key));
         return;
       }
       // Behind its PIN prompt: wait for what the prompt decides (the tune passes it on accept).
-      const unsub = usePlayerStore.subscribe((st) => {
+      unsub = usePlayerStore.subscribe((st) => {
         if (st.source === s) return;
-        unsub();
+        unsub?.();
         resolve(stoppedOn(key));
       });
-      passes.set(key, () => {
-        unsub();
-        resolve(true);
-      });
     }, dwellMs);
+    // The pass counts from the start, not only once the dwell looked: the quiet's tune starts on a
+    // timer as long as this one and fires first, so its gate can let the step through (an unlock
+    // already running, a prompt answered at once) before this timer runs. The tune then waits on
+    // the answer with the placeholder still up, which nothing else would change.
+    passes.set(key, () => {
+      clearTimeout(timer);
+      unsub?.();
+      resolve(true);
+    });
   });
   holds.set(key, hold);
   // Decided: a later request for the channel is not held by it.

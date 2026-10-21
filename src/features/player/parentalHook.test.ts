@@ -260,8 +260,23 @@ describe('zapping past a locked channel (Ask mode)', () => {
     expect((await pending)?.ref.itemId).toBe('666');
     expect(usePlayerStore.getState().source?.url).toBe('http://x/live/666.m3u8');
     expect(calls('xtream.streamUrl').map((a) => (a as { ref: ItemRef }).ref.itemId)).toEqual(['101', '666']);
-    // The zap quiet runs on real timers, which a loaded two-core CI runner stretches past 5 s.
-  }, 20_000);
+  });
+
+  it('on a one-connection account, plays a locked neighbour the gate lets through before its guide hold looked', async () => {
+    // The press holds 666's guide answer behind its lock, on a timer as long as the quiet. Here an
+    // unlock lands before the quiet, so the tune's gate passes unasked in the quiet's own timer
+    // turn, ahead of the hold's timer: that pass must still release the answer the tune waits on.
+    handlers['account.status'] = () => ({ sourceId: 's1', kind: 'xtream', isTrial: false, maxConnections: 1, checkedAt: new Date().toISOString() });
+    await store.playChannel(channel('101'));
+    await vi.waitFor(() => expect(queryClient.getQueryState(['account.status', { sourceId: 's1' }])?.status).toBe('success'));
+    const pending = zap('down');
+    await vi.waitFor(() => expect(store.isLockedZap(usePlayerStore.getState().source)).toBe(true));
+    handlers['parental.check'] = () => [];
+    applyStatus(status({ unlocked: true }));
+    expect((await pending)?.ref.itemId).toBe('666');
+    expect(useGateStore.getState().queue).toEqual([]);
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/live/666.m3u8');
+  });
 
   it('stays put at the end of the list when everything past the refusal is locked', async () => {
     order = ['101', '666', '667'];

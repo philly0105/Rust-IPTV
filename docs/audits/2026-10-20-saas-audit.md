@@ -12,14 +12,14 @@ Round 1 graded nine areas and filed 142 findings: 1 critical, 23 high, 78 medium
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | DS: design system and kit | C+ | 17 | 4 | 15 | 2 | 0 | 0 |
 | SH: shell and Home | B- | 19 | 4 | 16 | 3 | 0 | 0 |
-| LG: Live TV, guide, multi-view and lists | B- | 19 | 3 | 17 | 2 | 0 | 0 |
+| LG: Live TV, guide, multi-view and lists | B- | 19 | 3 | 18 | 1 | 0 | 0 |
 | VL: movies, series, search and library | B- | 22 | 3 | 19 | 3 | 0 | 0 |
 | SS: sources, settings and onboarding | B- | 20 | 1 | 19 | 1 | 0 | 0 |
 | PL: player | B- | 15 | 4 | 15 | 0 | 0 | 0 |
 | SR: ship readiness | C | 13 | 2 | 6 | 6 | 0 | 1 |
 | FW: wiring, front to back | C+ | 8 | 2 | 7 | 0 | 1 | 0 |
 | CB: competitive benchmark | B | 9 | 1 | 6 | 2 | 1 | 0 |
-| Total | | 142 | 24 | 120 | 19 | 2 | 1 |
+| Total | | 142 | 24 | 121 | 18 | 2 | 1 |
 
 The bugs that mattered most:
 
@@ -226,7 +226,7 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 | LG-05 | Mini player Expand can open another source | Medium | Fixed | `expandPath()` opens the playing channel's own page, Favorites and Recently watched views included. Round 2 fixed it for recordings and the guide band. |
 | LG-06 | The ribbon header sticks on the last hovered programme | Medium | Fixed | Hover previews, a click pins, and Back to now returns. |
 | LG-07 | The list page keeps the old letterboxed stage | Medium | Fixed | Lists use the shared LiveStageColumn. |
-| LG-08 | Catch-up goes by three names | Medium | Partial | The live namespace says "Catch-up" in every locale ("Browse catch-up" in menus). The player's channel panel still says "Browse archive" (`player.json` browseArchive, rendered in `ChannelPanelGuide.tsx`), and source settings say "Archive days". |
+| LG-08 | Catch-up goes by three names | Medium | Fixed | The live namespace says "Catch-up" in every locale ("Browse catch-up" in menus), and since `c07451b` the player's channel panel matches it in all 19 locales. Source settings still label the field "Archive days". |
 | LG-09 | Catch-up plays in the corner mini player | Medium | Fixed | The catch-up page has its own 16:9 stage. |
 | LG-10 | A guide with no EPG looks broken | Medium | Fixed | An empty-state card with Add guide. |
 | LG-11 | Native selects in the guide | Medium | Fixed | A ScopePicker combobox, whose list loads lazily since round 2. Sources without live channels are not offered. |
@@ -358,7 +358,7 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 
 ## GPT-6.1 review of f4549d1
 
-84 findings: 6 high, 52 medium, 5 low, and 21 translation fixes without a severity. 78 are fixed, 3 partly, 1 was wrong, and 2 were never assigned. Commits marked (a) or (b) are on saas/rustfix-a or saas/rustfix-b.
+84 findings: 6 high, 52 medium, 5 low, and 21 translation fixes without a severity. 80 are fixed, 3 partly, and 1 was wrong. Two that were missed in the first assignment were fixed afterwards in `c07451b` and `562a4f1`. Commits marked (a) or (b) are on saas/rustfix-a or saas/rustfix-b.
 
 | Group | Findings | Fixed | Partial | Other | Commits | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -374,10 +374,10 @@ Status is Fixed, Partial, Not done or Owner decision. Commits are on audit/saas-
 | Live | 5 | 4 | 1 | | `d5845b9`, `0757955`, `80c4ab0` | Pickers search inside their scope and page past 1,000 rows; focus links retry; the idle stage hides a locked channel's programme. picker-epg-request-cascade is partial. Favorites and Recent still look up on-screen rows one `catalog.item` at a time, because the core has no batch command. |
 | Player | 4 | 4 | | | `9f8a949` | `playGeneration` reloads a new play of the same URL; recoveries stop after Stop or a newer play; Start over survives recovery; Play as HLS is only for live and radio. |
 | VOD | 4 | 4 | | | `c35dd12`, `42b3a91`, `9fb6f69`, `729b466` | Recent searches hidden under Hide mode and while parental status is unknown; My List keeps focus after Delete; Stalker rails honour Hide watched; Top rated dropped for Stalker. |
-| Settings and sources | 2 | 0 | | 2 not assigned | none | optional-name-blocks-paste and guide-url-escapes-discard-guard were left out of the fix assignments (see follow-ups). |
+| Settings and sources | 2 | 2 | | | `c07451b`, `562a4f1` | A pasted playlist with no name gets a default name at submit; a typed guide URL counts as an unsaved change, survives tab switches and is saved by Save. |
 | Translations, European | 11 | 11 | | | `7b03743` | German and Hungarian formal address, Dutch informal, Brazilian Portuguese terms, Polish, Belarusian and Turkish wording. |
 | Translations, other | 10 | 10 | | | `7b03743` | Arabic duals, the server and web-edition messages in Arabic, Darija, Korean and Chinese, and one name each for Continue watching, Favorites and the palette. |
-| Total | 84 | 78 | 3 | 3 | | |
+| Total | 84 | 80 | 3 | 1 | | |
 
 ## Round 2 issues
 
@@ -391,7 +391,7 @@ The round-2 critics and reviewers filed 99 issues on the integrated branch: 10 h
 | Settings and sources | 18 | 15 | 3 | 0 | `4cb521a`, `7aaf2e5`, `e095f09` | "Settings" no longer appears twice on phones; a View button replaces three bordered selects; light accents got bright fills. Partial: the Toggle description wraps one word alone, the image cache hint is still long, and What's new has no release date. |
 | Movies, series and library | 19 | 17 | 1 | 1 | `81468a1`, `aa8b417` | The watch view shows the title once; recordings show their own cards; search Top results, Downloads retry and the Stats chart are fixed; Search, Settings and category pages no longer load the player controls. Partial: Live and Guide still load the 69 kB Controls chunk. Not done: Poster size still skips Home's and My List's rails. |
 | Live TV and guide | 19 | 18 | 0 | 1 | `54c69b2`, `1b577ab` | Opaque airing cells with a red now stub, so the now line no longer strikes through titles; the idle card and ribbon describe one channel; the archive layout; the phone guide fits two control rows; portaled menus; the scope picker loads lazily. Not done: `/lists` still opens the first list, a product decision. |
-| Translations | 1 | 0 | 1 | 0 | `7b03743` | German formal address in the new strings is fixed. The other two parts are not: de and pl still give recentStations nearly the same text as lastStation, and whether to localise "Rec" is undecided (see follow-ups). |
+| Translations | 1 | 0 | 1 | 0 | `7b03743`, `c07451b` | German formal address is fixed, and recentStations no longer repeats lastStation in de, pl, ko or tr. Whether to localise "Rec" is undecided (see follow-ups). |
 | Not assigned | 1 | 0 | 0 | 1 | | Hero slide controls come before the slide's own actions in tab order. |
 | Total | 99 | 85 | 8 | 6 | | |
 
@@ -451,14 +451,12 @@ Frontend:
 - Category grids and My List keep their own search fields instead of the header search slot (`src/features/vod/pages/CategoryGridPage.tsx` around line 644, `src/features/mylist/components/MyListToolbar.tsx` around line 76).
 - The Poster size setting doesn't reach Home's rails or My List's rail, which don't use `useRailCardWidth`.
 - The hero's slide controls come before Resume and Details in tab order (`src/shell/dashboard/HeroCarousel.tsx`).
-- Two GPT-6.1 findings were never assigned. A pasted playlist with an empty, optional name fails validation (`src/features/sources/lib/draft.ts`, `buildAddArgs`), and a pending guide URL in the Edit dialog escapes the discard guard (`src/features/sources/components/EpgLinksEditor.tsx`). Neither was checked by a fixer.
 - Favorites and Recent in the channel pickers look up on-screen rows one `catalog.item` call at a time. A batch command in the core would remove that.
 - The light theme's chrome is flat, with a grey header over a white rail and white panes (`src/shell/Rail.tsx`, `Header.tsx`).
 - Smaller kit gaps remain. The multi-view empty-state layout picker (`src/features/multiview/components/EmptyIntro.tsx`) is hand-rolled, the Toggle description in `src/ui/Field.tsx` needs `text-pretty`, SectionHeader has no meta slot, VOD posters don't use Home's caption spec, and recording fallback tiles all share one colour (`src/ui/Poster.tsx`).
 - Copy actions fail on plain HTTP with no fallback, and Settings > About has no Open-source licences link (SR-2, SR-4).
 - `package.json` still describes the app as "IPTVnator rebuilt on Tauri 2 with a Rust core". The manifest has no screenshots, and `index.html` has no Open Graph tags (SH-pwa-manifest, SR-8).
-- The player's channel panel still says "Browse archive" (`src/i18n/en/player.json` browseArchive, rendered in `src/features/player/components/ChannelPanelGuide.tsx`), where the live pages say "Browse catch-up" (LG-08).
-- On the radio idle stage, de and pl give recentStations almost the same text as lastStation: both are "Zuletzt gehört" in `src/i18n/de/live.json`, and the two pl strings differ by one letter (`src/i18n/pl/live.json`). Both render in `src/features/live/components/StageIdle.tsx`. Whether to localise "Rec" (library.json scheduledRec, still "Rec" in nine locales) is undecided.
+- Whether to localise "Rec" (library.json scheduledRec, still "Rec" in nine locales) is undecided.
 - `789fce2` gives a recording the server refuses at start the error code `serverHttpOnly`, but `src/` has no `library:recErrorServerHttpOnly` string and `RecordingErrorCode` in `src/api/types.ts` lacks the code, so the UI still shows the core's English note.
 - A guide focus link scrolls its row to the top of the grid instead of the middle.
 - Some timing tests fail under load: lists sortable, the guide's gridLoad and gridPerf, and two tests in `src/features/live/test/stalkerGridArchive.test.tsx`. The two Stalker tests also fail on `7b03743` and `f4549d1` when run alone on a loaded machine. They passed in CI run 2 (4,790 of 4,790, the six stalkerGridArchive tests included), so the local failures look load-related. In CI run 1, one frontend test of 4,790 failed, on a timeout.

@@ -127,9 +127,6 @@ export function AddSourceDialog({
   const [draft, setDraft] = useState<SourceDraft>(() => initialDraft(initial));
   const [errors, setErrors] = useState<DraftErrors>({});
   const [nameTouched, setNameTouched] = useState(Boolean(initial?.name));
-  // A name derived from the URL or file, shown as the placeholder so it never lands in the middle of what the
-  // user is typing. A submit with the name left empty derives it again from the current form (defaultName).
-  const [suggested, setSuggested] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   // Source ids that existed when the submit started. The live list would absorb the new source as soon as
@@ -174,7 +171,6 @@ export function AddSourceDialog({
     setDraft(initialDraft(initial));
     setErrors({});
     setNameTouched(Boolean(initial?.name));
-    setSuggested('');
     setSubmitting(false);
     setSubmitError(null);
     setStartedAt(null);
@@ -209,8 +205,6 @@ export function AddSourceDialog({
       toast({ variant: 'error', title: t('cancelFailed'), description: t(summaryKey(RpcError.from(e))) });
     });
   };
-
-  const suggest = (input: string) => setSuggested(suggestName(input));
 
   // An inline error goes away as soon as the user edits its field.
   const prevDraft = useRef(draft);
@@ -524,8 +518,9 @@ export function AddSourceDialog({
           autoComplete="off"
           disabled={submitting}
           maxLength={120}
-          // A pasted playlist has no address to suggest a name: show the one it gets instead.
-          placeholder={draft.kind === 'm3u' && draft.m3u.origin === 'text' ? t('originPasted') : suggested || t('sourceNamePlaceholder')}
+          // The name a submit uses when this is left empty, as a placeholder so it never lands in the middle of
+          // what the user is typing.
+          placeholder={defaultName(draft, t('originPasted')) || t('sourceNamePlaceholder')}
           value={draft.name}
           // A prefilled name (deep link) is replaced by the first keystroke until the user edits it.
           onFocus={(e) => {
@@ -600,12 +595,10 @@ export function AddSourceDialog({
               errors={errors}
               isDesktop={isDesktop}
               disabled={submitting}
-              onSuggestName={suggest}
               onFieldBlur={onFieldBlur}
               showHeaders={false}
               onUseXtream={(xtream) => {
                 setDraft((d) => ({ ...d, kind: 'xtream', xtream: { ...d.xtream, ...xtream } }));
-                setSuggested(suggestName(xtream.serverUrl));
                 setErrors({});
               }}
             />
@@ -618,7 +611,6 @@ export function AddSourceDialog({
               onErrors={setErrors}
               disabled={submitting}
               autoFocusAddress
-              onSuggestName={suggest}
               onFieldBlur={onFieldBlur}
               showHeaders={false}
             />
@@ -631,7 +623,6 @@ export function AddSourceDialog({
               onErrors={setErrors}
               disabled={submitting}
               autoFocusAddress
-              onSuggestName={suggest}
               onFieldBlur={onFieldBlur}
               showHeaders={false}
             />

@@ -12,7 +12,7 @@ export function archivePath(ref: Pick<ItemRef, 'sourceId' | 'itemId'>): string {
   return `/live/archive/${encodeURIComponent(ref.sourceId)}/${encodeURIComponent(ref.itemId)}`;
 }
 
-/** True when the channel has an archive the app can play (shows the "Browse archive" entry points); needs the source kind. */
+/** True when the channel has an archive the app can play (shows the "Browse catch-up" entry points); needs the source kind. */
 export function canBrowseArchive(channel: Pick<Channel, 'archive' | 'url' | 'isRadio'> & { catchup?: Channel['catchup'] }, kind: SourceKind | undefined): boolean {
   return !!kind && !channel.isRadio && hasUsableArchive(channel, kind);
 }

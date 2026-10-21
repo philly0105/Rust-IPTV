@@ -20,7 +20,7 @@ import {
   type DraftErrors,
   type SourceDraft,
 } from '../lib/draft';
-import { epgPatch } from '../lib/epgLinks';
+import { addManualEpgUrl, epgPatch } from '../lib/epgLinks';
 import { newlyEnabledEpgUrls, refreshGuides } from '../lib/epgRefresh';
 import { fieldForError, importErrorCode, nextStepKey, summaryKey } from '../lib/errors';
 import { redactText } from '../lib/redact';
@@ -82,8 +82,9 @@ export function EditSourceDialog({
   const [checking, setChecking] = useState(false);
   // The Guide tab's time shift as typed: it reaches `epg` only while it is a valid shift.
   const [shiftText, setShiftText] = useState('');
-  // The Guide tab's "Add guide URL" text, typed but not added yet.
+  // The Guide tab's "Add guide URL" text, typed but not added yet, and why it could not be added.
   const [pendingGuideUrl, setPendingGuideUrl] = useState('');
+  const [guideUrlError, setGuideUrlError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   // Focus the field a failed save points at once the error has rendered and the fields are enabled again.
   const focusInvalid = useFocusInvalid(formRef, saving);
@@ -95,6 +96,7 @@ export function EditSourceDialog({
     setEpg(source.epg);
     setShiftText(shiftTextOf(source.epg));
     setPendingGuideUrl('');
+    setGuideUrlError(null);
     setErrors({});
     setSaveError(null);
     setCheckError(null);
@@ -139,6 +141,23 @@ export function EditSourceDialog({
       formRef.current?.querySelector<HTMLElement>('[data-testid="epg-shift-minutes"]')?.focus();
       return;
     }
+    // A guide URL typed but not added goes in with the save, as if Add had been pressed. One that
+    // cannot be added keeps the dialog open on its field with the reason, as the shift does.
+    let links = epg;
+    if (pendingGuideUrl.trim()) {
+      const added = addManualEpgUrl(epg, pendingGuideUrl);
+      if (!added.ok) {
+        flushSync(() => {
+          setGuideUrlError(added.error);
+          setTab('epg');
+        });
+        formRef.current?.querySelector<HTMLElement>('[data-testid="epg-add-url"]')?.focus();
+        return;
+      }
+      links = added.links;
+      setEpg(links);
+      setPendingGuideUrl('');
+    }
     const built = buildUpdatePatch(source, draft, { isDesktop });
     setErrors(built.errors);
     if (!built.ok) {
@@ -147,7 +166,7 @@ export function EditSourceDialog({
       return;
     }
     const patch = { ...built.value };
-    const ep = epgPatch(source.epg, epg);
+    const ep = epgPatch(source.epg, links);
     if (ep) patch.epg = ep;
     if (Object.keys(patch).length === 0) {
       onClose();
@@ -312,6 +331,8 @@ export function EditSourceDialog({
               onShiftTextChange={setShiftText}
               pendingUrl={pendingGuideUrl}
               onPendingUrlChange={setPendingGuideUrl}
+              pendingUrlError={guideUrlError}
+              onPendingUrlErrorChange={setGuideUrlError}
             />
           ) : (
             <AccountPanel source={source} />

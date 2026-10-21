@@ -20,7 +20,6 @@ export function StalkerForm({
   onErrors,
   disabled,
   storedMac,
-  onSuggestName,
   onFieldBlur,
   autoFocusAddress,
   showHeaders = true,
@@ -32,7 +31,6 @@ export function StalkerForm({
   disabled?: boolean;
   /** Edit mode: the MAC already on the wire stays valid even if malformed. */
   storedMac?: string;
-  onSuggestName?: (input: string) => void;
   /** Validates one field (error path, e.g. `stalker.macAddress`) when the user leaves it. */
   onFieldBlur?: (path: string) => void;
   /** The Add dialog opens on the portal address (SS-2). */
@@ -81,10 +79,7 @@ export function StalkerForm({
             data-autofocus={autoFocusAddress ? '' : undefined}
             value={value.portalUrl}
             onChange={(e) => onPortalChange(e.target.value)}
-            onBlur={() => {
-              onSuggestName?.(value.portalUrl);
-              onFieldBlur?.('stalker.portalUrl');
-            }}
+            onBlur={() => onFieldBlur?.('stalker.portalUrl')}
           />
         )}
       </Field>

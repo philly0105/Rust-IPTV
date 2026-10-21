@@ -84,7 +84,7 @@ Right-click a live channel and choose "Rename…" (F2 on the focused channel) or
 
 ## Catch-up
 
-Right-click a channel with catch-up and choose "Browse archive" (also in the fullscreen channel list and the guide's programme dialog). Pick a day, then play any past programme, or "Watch from start" on the one airing now. A day with no guide at all lists the archive's hours instead, so you can still watch from a time. The download button next to a finished programme saves it (My Videos lists it under the channel).
+Right-click a channel with catch-up and choose "Browse catch-up" (also in the fullscreen channel list and the guide's programme dialog). Pick a day, then play any past programme, or "Watch from start" on the one airing now. A day with no guide at all lists the archive's hours instead, so you can still watch from a time. The download button next to a finished programme saves it (My Videos lists it under the channel).
 
 ## Movies and series
 

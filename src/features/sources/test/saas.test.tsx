@@ -259,6 +259,20 @@ describe('an Add left unnamed still adds (the name is optional)', () => {
     fireEvent.change(field(/^Playlist URL/), { target: { value: 'http://lists.example.com/sports.m3u' } });
     expect(await addedArgs()).toMatchObject({ name: 'sports', m3u: { origin: 'url', url: 'http://lists.example.com/sports.m3u' } });
   });
+
+  it('the placeholder shows the name the add uses, after a switch to another kind too', async () => {
+    await openM3u();
+    fireEvent.change(field(/^Playlist URL/), { target: { value: 'http://lists.example.com/sports.m3u' } });
+    fireEvent.blur(field(/^Playlist URL/));
+    expect(field(/^Name/).placeholder).toBe('sports');
+    fireEvent.click(within(dialog()).getByRole('tab', { name: 'Xtream Codes' }));
+    expect(field(/^Name/).placeholder).toBe('Living room provider');
+    fireEvent.change(field(/^Server URL/), { target: { value: 'http://xtream.example.com:8080' } });
+    expect(field(/^Name/).placeholder).toBe('xtream.example.com');
+    fireEvent.change(field(/^Username/), { target: { value: 'u' } });
+    fireEvent.change(field(/^Password/), { target: { value: 'p' } });
+    expect(await addedArgs()).toMatchObject({ kind: 'xtream', name: 'xtream.example.com' });
+  });
 });
 
 describe('saving connection fixes (SS-5, SS-16)', () => {
@@ -293,6 +307,40 @@ describe('saving connection fixes (SS-5, SS-16)', () => {
     expect(document.activeElement).toBe(field);
     expect(rpcMock.callsOf('sources.update')).toEqual([]);
     expect(screen.getByTestId('edit-source-dialog')).toBeTruthy();
+  });
+
+  it('a guide URL typed but not added is saved as if Add had been pressed', async () => {
+    const source = xtream('a');
+    rpcMock.handlers['sources.list'] = () => [source];
+    rpcMock.handlers['sources.update'] = () => source;
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    const edit = await screen.findByTestId('edit-source-dialog');
+    fireEvent.click(within(edit).getByRole('tab', { name: 'Guide' }));
+    fireEvent.change(within(edit).getByTestId('epg-add-url'), { target: { value: 'http://epg.example.com/extra.xml' } });
+    fireEvent.click(screen.getByTestId('edit-source-save'));
+    await waitFor(() => expect(rpcMock.callsOf('sources.update')).toHaveLength(1));
+    expect(rpcMock.callsOf('sources.update')[0]).toEqual({ id: 'a', patch: { epg: { manualUrls: ['http://epg.example.com/extra.xml'] } } });
+    await waitFor(() => expect(screen.queryByTestId('edit-source-dialog')).toBeNull());
+  });
+
+  it('a guide URL that cannot be added blocks Save and goes back to the field with the reason', async () => {
+    rpcMock.handlers['sources.list'] = () => [xtream('a')];
+    renderAt(routes(), '/sources');
+    fireEvent.click(await screen.findByTestId('source-edit'));
+    const edit = await screen.findByTestId('edit-source-dialog');
+    fireEvent.click(within(edit).getByRole('tab', { name: 'Guide' }));
+    fireEvent.change(within(edit).getByTestId('epg-add-url'), { target: { value: 'ftp://epg.example.com/extra.xml' } });
+    fireEvent.click(within(edit).getByRole('tab', { name: 'Details' }));
+    fireEvent.click(screen.getByTestId('edit-source-save'));
+    const field = (await within(edit).findByTestId('epg-add-url')) as HTMLInputElement;
+    expect(field.value).toBe('ftp://epg.example.com/extra.xml');
+    expect(document.activeElement).toBe(field);
+    expect(within(edit).getByText('Only http and https addresses work here.')).toBeTruthy();
+    expect(rpcMock.callsOf('sources.update')).toEqual([]);
+    // Fixing the text clears the reason.
+    fireEvent.change(field, { target: { value: 'https://epg.example.com/extra.xml' } });
+    expect(within(edit).queryByText('Only http and https addresses work here.')).toBeNull();
   });
 });
 

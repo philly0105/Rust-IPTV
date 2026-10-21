@@ -18,7 +18,7 @@ import { useMediaStore } from '../media';
 import { usePlayerStore } from '../store';
 
 /**
- * Guide slice: the fullscreen channel panel's now line and its "Browse archive" action.
+ * Guide slice: the fullscreen channel panel's now line and its "Browse catch-up" action.
  * The player also renders outside the app shell (tests, a bare mount): without a query client
  * or router these parts render nothing instead of throwing.
  */
@@ -85,7 +85,7 @@ function NowLines({ sourceId, first, last, rowAt, children }: NowLinesProps) {
   return <>{children(nowFor)}</>;
 }
 
-/** "Browse archive" for the playing channel: leaves fullscreen, closes the panel and opens the archive. */
+/** "Browse catch-up" for the playing channel: leaves fullscreen, closes the panel and opens the archive. */
 export function PanelArchiveButton() {
   return useAppContext() ? <ArchiveButton /> : null;
 }

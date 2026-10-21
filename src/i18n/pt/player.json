@@ -238,7 +238,7 @@
   "errorConnLimit": "Esta assinatura já está transmitindo no máximo de dispositivos permitido. Pare a reprodução em outro app ou dispositivo que usa esta conta e tente novamente.",
   "errorConnLimitMaybeTitle": "O limite de conexões pode ter sido atingido ({{active}} de {{max}} em uso)",
   "errorConnLimitMaybe": "O provedor conta {{active}} de {{max}} conexões em uso, e uma delas pode ser a transmissão deste app que acabou de parar ou uma de suas gravações. Aguarde um minuto e tente novamente, ou pare a reprodução em outro dispositivo que usa esta conta.",
-  "browseArchive": "Explorar o arquivo",
+  "browseArchive": "Explorar catch-up",
   "sleepTimer": "Timer de desligamento",
   "sleepOffValue": "Desativado",
   "sleepOff": "Timer de desligamento desativado",

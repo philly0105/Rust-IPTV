@@ -2174,7 +2174,7 @@ function ProgramPopover({
   onCatchup(): void;
 }) {
   const { t, i18n } = useTranslation('live');
-  const navigate = useNavigate(); // guide: "Browse archive"
+  const navigate = useNavigate(); // guide: "Browse catch-up"
   const ref = useRef<HTMLDivElement>(null);
   const { program, channel, anchor } = selection;
   const when = programWhen(program, now);

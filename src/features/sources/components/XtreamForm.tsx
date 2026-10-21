@@ -16,7 +16,6 @@ export function XtreamForm({
   errors,
   onErrors,
   disabled,
-  onSuggestName,
   onFieldBlur,
   autoFocusAddress,
   showHeaders = true,
@@ -27,7 +26,6 @@ export function XtreamForm({
   /** Lets the test button surface field errors without submitting. */
   onErrors: (errors: DraftErrors) => void;
   disabled?: boolean;
-  onSuggestName?: (input: string) => void;
   /** Validates one field (error path, e.g. `xtream.serverUrl`) when the user leaves it. */
   onFieldBlur?: (path: string) => void;
   /** The Add dialog opens on the server address (SS-2). */
@@ -64,10 +62,7 @@ export function XtreamForm({
             data-autofocus={autoFocusAddress ? '' : undefined}
             value={value.serverUrl}
             onChange={(e) => onServerChange(e.target.value)}
-            onBlur={() => {
-              onSuggestName?.(value.serverUrl);
-              onFieldBlur?.('xtream.serverUrl');
-            }}
+            onBlur={() => onFieldBlur?.('xtream.serverUrl')}
           />
         )}
       </Field>

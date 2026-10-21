@@ -238,7 +238,7 @@
   "errorConnLimit": "Dit abonnement streamt al op het maximale aantal apparaten. Stop het afspelen in een andere app of op een ander apparaat met dit account en probeer het opnieuw.",
   "errorConnLimitMaybeTitle": "Verbindingslimiet mogelijk bereikt ({{active}} van {{max}} in gebruik)",
   "errorConnLimitMaybe": "De provider telt {{active}} van {{max}} verbindingen als in gebruik, en een daarvan kan de zojuist gestopte stream van deze app of een van haar opnamen zijn. Wacht een minuut en probeer het opnieuw, of stop het afspelen op een ander apparaat met dit account.",
-  "browseArchive": "Archief bekijken",
+  "browseArchive": "Catch-up bekijken",
   "sleepTimer": "Slaaptimer",
   "sleepOffValue": "Uit",
   "sleepOff": "Slaaptimer uit",

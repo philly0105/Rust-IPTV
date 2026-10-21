@@ -238,7 +238,7 @@
   "errorConnLimit": "Questo abbonamento è già in riproduzione sul numero massimo di dispositivi consentito. Interrompi la riproduzione in un'altra app o su un altro dispositivo che usa questo account, poi riprova.",
   "errorConnLimitMaybeTitle": "Limite di connessioni forse raggiunto ({{active}} di {{max}} in uso)",
   "errorConnLimitMaybe": "Il provider conta {{active}} connessioni in uso su {{max}}, e una di queste potrebbe essere lo stream di questa app appena interrotto o una sua registrazione. Attendi un minuto e riprova, oppure interrompi la riproduzione su un altro dispositivo che usa questo account.",
-  "browseArchive": "Sfoglia l'archivio",
+  "browseArchive": "Sfoglia il catch-up",
   "sleepTimer": "Timer di spegnimento",
   "sleepOffValue": "Disattivato",
   "sleepOff": "Timer di spegnimento disattivato",

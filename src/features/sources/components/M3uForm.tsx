@@ -23,8 +23,6 @@ export interface M3uFormProps {
   mode: 'add' | 'edit';
   /** Called when the user accepts the "this is an Xtream link" suggestion. */
   onUseXtream?: (cfg: { serverUrl: string; username: string; password: string }) => void;
-  /** Lets the dialog suggest a name from a URL or file. */
-  onSuggestName?: (input: string) => void;
   /** Validates one field (error path, e.g. `m3u.url`) when the user leaves it. */
   onFieldBlur?: (path: string) => void;
   /** The Add dialog opens on the playlist address, or the text box for a paste (SS-2). */
@@ -33,7 +31,7 @@ export interface M3uFormProps {
   showHeaders?: boolean;
 }
 
-export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onSuggestName, onFieldBlur, autoFocusAddress, showHeaders = true }: M3uFormProps) {
+export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, onUseXtream, onFieldBlur, autoFocusAddress, showHeaders = true }: M3uFormProps) {
   const { t, i18n } = useTranslation('sources');
   const fileInput = useRef<HTMLInputElement>(null);
   const fileHintId = useId();
@@ -58,7 +56,6 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
       const path = await pickPathDesktop({ title: t('chooseFile'), filterName: t('playlistFiles'), extensions: PLAYLIST_EXTENSIONS });
       if (path) {
         set({ filePath: path, fileName: baseName(path), fileText: '' });
-        onSuggestName?.(path);
       }
     } catch (e) {
       setFileError(e instanceof Error ? e.message : String(e));
@@ -77,7 +74,6 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
     try {
       const text = await readFileText(file);
       set({ fileText: text, fileName: file.name, filePath: '', ...(editText ? { text: '' } : {}) });
-      onSuggestName?.(file.name);
     } catch (e) {
       setFileError(t('errorFileRead', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
@@ -159,10 +155,7 @@ export function M3uForm({ value, onChange, errors, isDesktop, disabled, mode, on
                 data-autofocus={autoFocusAddress ? '' : undefined}
                 value={value.url}
                 onChange={(e) => set({ url: e.target.value })}
-                onBlur={() => {
-                  onSuggestName?.(value.url);
-                  onFieldBlur?.('m3u.url');
-                }}
+                onBlur={() => onFieldBlur?.('m3u.url')}
               />
             )}
           </Field>

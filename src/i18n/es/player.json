@@ -238,7 +238,7 @@
   "errorConnLimit": "Esta suscripción ya se está reproduciendo en todos los dispositivos que permite. Detén la reproducción en otra app o dispositivo que use esta cuenta y vuelve a intentarlo.",
   "errorConnLimitMaybeTitle": "Es posible que se haya alcanzado el límite de conexiones ({{active}} de {{max}} en uso)",
   "errorConnLimitMaybe": "El proveedor cuenta {{active}} de {{max}} conexiones en uso, y una de ellas puede ser la transmisión de esta app que acaba de detenerse o una de sus grabaciones. Espera un minuto y vuelve a intentarlo, o detén la reproducción en otro dispositivo que use esta cuenta.",
-  "browseArchive": "Explorar el archivo",
+  "browseArchive": "Explorar catch-up",
   "sleepTimer": "Temporizador de apagado",
   "sleepOffValue": "Desactivado",
   "sleepOff": "Temporizador de apagado desactivado",

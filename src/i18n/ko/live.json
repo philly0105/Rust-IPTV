@@ -232,7 +232,7 @@
   "pickerViews": "보기",
   "pickerShow": "표시",
   "filterSources": "소스 필터",
-  "recentStations": "최근 재생",
+  "recentStations": "최근 들은 방송국",
   "playNamed": "{{name}} 재생",
   "highlightedChannel": "선택됨"
 }

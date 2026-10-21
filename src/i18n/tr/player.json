@@ -238,7 +238,7 @@
   "errorConnLimit": "Bu abonelik, izin verilen sayıda cihazda zaten yayın yapıyor. Bu hesabı kullanan başka bir uygulamada veya cihazda oynatmayı durdurup tekrar deneyin.",
   "errorConnLimitMaybeTitle": "Bağlantı sınırına ulaşılmış olabilir ({{max}} bağlantının {{active}} tanesi kullanımda)",
   "errorConnLimitMaybe": "Sağlayıcı {{max}} bağlantının {{active}} tanesini kullanımda sayıyor; bunlardan biri bu uygulamanın az önce duran yayını veya kayıtlarından biri olabilir. Bir dakika bekleyip tekrar deneyin ya da bu hesabı kullanan başka bir cihazda oynatmayı durdurun.",
-  "browseArchive": "Arşive göz at",
+  "browseArchive": "Geri izlemeye göz at",
   "sleepTimer": "Uyku zamanlayıcısı",
   "sleepOffValue": "Kapalı",
   "sleepOff": "Uyku zamanlayıcısı kapalı",

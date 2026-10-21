@@ -111,8 +111,8 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
       tsc-rs:
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.7.0
+        version: 0.7.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -988,38 +988,38 @@ packages:
       '@types/react-dom':
         optional: true
 
-  '@tsc-rs/darwin-arm64@0.3.0':
-    resolution: {integrity: sha512-+gDzmXr/E3AQpbcsmt2Vh5WwWXzdveS0bCfbP3jea+gFKxrhlrFxEB74mhCHlHR0zByTVAE1rA8vDFveUrs4QA==}
+  '@tsc-rs/darwin-arm64@0.7.0':
+    resolution: {integrity: sha512-3execGkNh7DXNZr03dhQP2wqmsjB1Q4OJnTMgKIibjeQMsjNK8HTalJZPIG6PkiXeusXUweHP3+4yJjbi5auNw==}
     engines: {node: '>=16.20.0'}
     cpu: [arm64]
     os: [darwin]
 
-  '@tsc-rs/darwin-x64@0.3.0':
-    resolution: {integrity: sha512-AeMWOO9AwNqgJGlYuDJarx0wyRhnnlj5cKjS3O6BoFwN8J2S3Z7wi4ognKOKO9U4X1AUyOWwTsHy0a8kp4QBGA==}
+  '@tsc-rs/darwin-x64@0.7.0':
+    resolution: {integrity: sha512-Wi3CNYWgyIOcWTQjihXCFPTul+aTEXVq1og8rO22Cq6/Mz6lKk+9YSXycWOkJql6D0uE0l/S1nMStq4mx7ydpA==}
     engines: {node: '>=16.20.0'}
     cpu: [x64]
     os: [darwin]
 
-  '@tsc-rs/linux-arm64@0.3.0':
-    resolution: {integrity: sha512-ZmCJXKJkCq+fYITNuh3SnoggZGn7pGqkDcFgzqEZnVHAMOM3Xbe9zjY/C9QCLllA0rjePMIphsLf4VcmOvjmpw==}
+  '@tsc-rs/linux-arm64@0.7.0':
+    resolution: {integrity: sha512-sm+xPELgQGKOoFeklJAmIi99Fi3fIUFgGPYQclC/IiVdUTzHtKw6yg6JRNEI74JIaSxGRAGbtmHcVvTkC93ZLw==}
     engines: {node: '>=16.20.0'}
     cpu: [arm64]
     os: [linux]
 
-  '@tsc-rs/linux-x64@0.3.0':
-    resolution: {integrity: sha512-kYkicJCZHJG/LjPUMzMqPnbXYks88WTOd6IKSP7yw9rH7uTqHYlhKJpokH/h6+LOHGS+8TmGW746TlTjrqsdBQ==}
+  '@tsc-rs/linux-x64@0.7.0':
+    resolution: {integrity: sha512-gyDPxVNmasL/RMPXzutxhaUqyLlPLTcPhWl5pWCkuZdV0dUfGpR4PG5h1Nht9Db3MMHs9ixzl+uS6Nc5+qA/jg==}
     engines: {node: '>=16.20.0'}
     cpu: [x64]
     os: [linux]
 
-  '@tsc-rs/win32-arm64@0.3.0':
-    resolution: {integrity: sha512-7Z2OGeY3EJspieIkGO+PVxVVEMEysmAMHCwpKiJ3O3HLynC3sdnJWlxxVtRMjT+DkEamgzbBdf4hGqJtk/W2sg==}
+  '@tsc-rs/win32-arm64@0.7.0':
+    resolution: {integrity: sha512-dPLJLH5iXgBzMRiuSGz4awMu8dxOI2iXRN0ZDqs/LolZ1ShbjmgIcH1bwQeObdyFwyen44c6vK8mFIiJELsv4Q==}
     engines: {node: '>=16.20.0'}
     cpu: [arm64]
     os: [win32]
 
-  '@tsc-rs/win32-x64@0.3.0':
-    resolution: {integrity: sha512-1mNRmNK8BVodVRNkMtbajOc5VDe74GuYoIrgvD7NGlTHVVfCRPfN68fV1ko/w2/epWelX8KrdfKuPAoV9PCJPA==}
+  '@tsc-rs/win32-x64@0.7.0':
+    resolution: {integrity: sha512-n/bJeMWvr0KbBPYVXroe23ia82Q6ZizUBYhgoZvsUasK4RfZ/rsJdIoP1Jpcw0ONXEbC8AKwHVi8BSOiUlSOuw==}
     engines: {node: '>=16.20.0'}
     cpu: [x64]
     os: [win32]
@@ -1568,6 +1568,7 @@ packages:
 
   shaka-player@4.16.52:
     resolution: {integrity: sha512-B56UZ0hAK16mLBjlzZ2FWZBREyh8hVDrDJnHYTP8pWKjmn2vgZMa6cb7ljkvZI1qHTz3v+zt2G3EXlzIqWn6zA==}
+    engines: {node: '>=18'}
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
@@ -1625,8 +1626,8 @@ packages:
     resolution: {integrity: sha512-bLVMLPtstlZ4iMQHpFHTR7GAGj2jxi8Dg0s2h2MafAE4uSWF98FC/3MomU51iQAMf8/qDUbKWf5GxuvvVcXEhw==}
     engines: {node: '>=20'}
 
-  tsc-rs@0.3.0:
-    resolution: {integrity: sha512-WgB4nPT6jrOn6SNUU28lTlvWgJ1b5RbIo5pwk4dV8/tpIITuJ0Ma/mO87ptmg018MJcCZmJ6PmR4v8SVMpJTRQ==}
+  tsc-rs@0.7.0:
+    resolution: {integrity: sha512-diVCBljoXLQjvXRkIuamR3QRrmNyqgYDePKA5SFXTSDPSjku2a2JXj/bOxG4DoPUbYkzWl/XFu1689z/46TCaA==}
     engines: {node: '>=16.20.0'}
     hasBin: true
 
@@ -2474,22 +2475,22 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@tsc-rs/darwin-arm64@0.3.0':
+  '@tsc-rs/darwin-arm64@0.7.0':
     optional: true
 
-  '@tsc-rs/darwin-x64@0.3.0':
+  '@tsc-rs/darwin-x64@0.7.0':
     optional: true
 
-  '@tsc-rs/linux-arm64@0.3.0':
+  '@tsc-rs/linux-arm64@0.7.0':
     optional: true
 
-  '@tsc-rs/linux-x64@0.3.0':
+  '@tsc-rs/linux-x64@0.7.0':
     optional: true
 
-  '@tsc-rs/win32-arm64@0.3.0':
+  '@tsc-rs/win32-arm64@0.7.0':
     optional: true
 
-  '@tsc-rs/win32-x64@0.3.0':
+  '@tsc-rs/win32-x64@0.7.0':
     optional: true
 
   '@types/aria-query@5.0.4': {}
@@ -3063,14 +3064,14 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  tsc-rs@0.3.0:
+  tsc-rs@0.7.0:
     optionalDependencies:
-      '@tsc-rs/darwin-arm64': 0.3.0
-      '@tsc-rs/darwin-x64': 0.3.0
-      '@tsc-rs/linux-arm64': 0.3.0
-      '@tsc-rs/linux-x64': 0.3.0
-      '@tsc-rs/win32-arm64': 0.3.0
-      '@tsc-rs/win32-x64': 0.3.0
+      '@tsc-rs/darwin-arm64': 0.7.0
+      '@tsc-rs/darwin-x64': 0.7.0
+      '@tsc-rs/linux-arm64': 0.7.0
+      '@tsc-rs/linux-x64': 0.7.0
+      '@tsc-rs/win32-arm64': 0.7.0
+      '@tsc-rs/win32-x64': 0.7.0
 
   tslib@2.8.1: {}
 

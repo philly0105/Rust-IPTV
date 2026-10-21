@@ -686,7 +686,8 @@ async fn startup_re_imports_catalogs_an_older_import_version_wrote() {
     ] {
         exec_one(&env, sql, &src.id).await;
     }
-    assert_eq!(startup_refreshed(&env).await, [src.id.clone()]);
+    let just_src = std::slice::from_ref(&src.id);
+    assert_eq!(startup_refreshed(&env).await, just_src);
     // Re-imported from the stored text: this version's sha and record.
     assert_eq!(import_record(&env, &src.id).await, recorded);
     let (_, detail) = dark(&env, &src.id).await;
@@ -698,7 +699,7 @@ async fn startup_re_imports_catalogs_an_older_import_version_wrote() {
     let forget = "DELETE FROM app_state WHERE key = 'm3u_import_version:' || ?1";
     exec_one(&env, forget, &src.id).await;
     assert_eq!(import_record(&env, &src.id).await, (sha, None));
-    assert_eq!(startup_refreshed(&env).await, [src.id.clone()]);
+    assert_eq!(startup_refreshed(&env).await, just_src);
     assert_eq!(import_record(&env, &src.id).await, recorded);
 
     // Removing the source drops the record.

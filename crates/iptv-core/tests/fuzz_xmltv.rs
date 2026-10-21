@@ -177,9 +177,9 @@ fn date_text(rng: &mut Rng) -> String {
         _ => {
             let mut s = String::new();
             for _ in 0..rng.size(3) {
-                s.push_str(rng.pick(INTERESTING_NUMBERS));
+                s.push_str(rng.pick::<&str>(INTERESTING_NUMBERS));
             }
-            s.push_str(rng.pick(&[
+            s.push_str(rng.pick::<&str>(&[
                 "",
                 " ",
                 " +0000",
@@ -275,7 +275,8 @@ fn fuzz_open_reader_files() {
             bytes = enc.finish().unwrap();
         }
         if rng.chance(1, 4) {
-            let head: &[u8] = rng.pick(&[&b"\xef\xbb\xbf"[..], b"PK\x03\x04", b"BZh9"]);
+            let heads: [&[u8]; 3] = [&b"\xef\xbb\xbf"[..], b"PK\x03\x04", b"BZh9"];
+            let head = *rng.pick(&heads);
             bytes.splice(0..0, head.iter().copied());
         }
         std::fs::write(&path, &bytes).unwrap();

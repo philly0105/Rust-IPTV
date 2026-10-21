@@ -197,8 +197,8 @@ fn text_input(rng: &mut Rng) -> String {
         _ => {
             let mut s = String::new();
             for _ in 0..rng.size(4) {
-                s.push_str(rng.pick(INTERESTING_NUMBERS));
-                s.push_str(rng.pick(&["", "-", ":", " ", "0"]));
+                s.push_str(rng.pick::<&str>(INTERESTING_NUMBERS));
+                s.push_str(rng.pick::<&str>(&["", "-", ":", " ", "0"]));
             }
             s
         }

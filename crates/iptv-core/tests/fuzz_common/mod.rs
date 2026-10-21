@@ -155,7 +155,7 @@ pub fn random_utf8(rng: &mut Rng, max_chars: usize) -> String {
         match rng.below(4) {
             0 => s.push((b' ' + rng.below(95) as u8) as char),
             1 => s.push(char::from_u32(rng.below(0x11_0000) as u32).unwrap_or('?')),
-            _ => s.push_str(rng.pick(HOSTILE_CHARS)),
+            _ => s.push_str(rng.pick::<&str>(HOSTILE_CHARS)),
         }
     }
     s
@@ -167,7 +167,7 @@ pub fn random_tokens(rng: &mut Rng, dict: &[&str], max_tokens: usize) -> String 
     let mut s = String::new();
     for _ in 0..n {
         if rng.chance(2, 3) && !dict.is_empty() {
-            s.push_str(rng.pick(dict));
+            s.push_str(rng.pick::<&str>(dict));
         } else {
             s.push_str(&random_utf8(rng, 6));
         }

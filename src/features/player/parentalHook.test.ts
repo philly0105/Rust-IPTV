@@ -262,6 +262,20 @@ describe('zapping past a locked channel (Ask mode)', () => {
     expect(calls('xtream.streamUrl').map((a) => (a as { ref: ItemRef }).ref.itemId)).toEqual(['101', '666']);
   });
 
+  it('on a one-connection account, plays a locked channel zapped away from and back onto in one burst', async () => {
+    // Down, down, up lands on 666 twice: its first hold must not wait for a pass the second one takes.
+    handlers['account.status'] = () => ({ sourceId: 's1', kind: 'xtream', isTrial: false, maxConnections: 1, checkedAt: new Date().toISOString() });
+    await store.playChannel(channel('101'));
+    await vi.waitFor(() => expect(queryClient.getQueryState(['account.status', { sourceId: 's1' }])?.status).toBe('success'));
+    void zap('down');
+    void zap('down');
+    const pending = zap('up');
+    await vi.waitFor(() => expect(useGateStore.getState().queue).toHaveLength(1));
+    settleGate(useGateStore.getState().queue[0]!.id, true);
+    expect((await pending)?.ref.itemId).toBe('666');
+    expect(usePlayerStore.getState().source?.url).toBe('http://x/live/666.m3u8');
+  });
+
   it('on a one-connection account, plays a locked neighbour the gate lets through before its guide hold looked', async () => {
     // The press holds 666's guide answer behind its lock, on a timer as long as the quiet. Here an
     // unlock lands before the quiet, so the tune's gate passes unasked in the quiet's own timer

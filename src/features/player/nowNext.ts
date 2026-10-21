@@ -87,6 +87,10 @@ function stoppedOn(key: string): boolean {
  */
 export function holdNowNext(ref: ItemRef, dwellMs: number): void {
   const key = itemKey(ref);
+  // A burst that zaps away and back lands on the same channel twice. The older hold would see the
+  // newer placeholder and wait for a pass that now goes to the newer hold, and released() waits
+  // on both in turn, so the older one is decided here: the newer hold carries the question on.
+  passes.get(key)?.();
   const hold = new Promise<boolean>((resolve) => {
     let unsub: (() => void) | undefined;
     const timer = setTimeout(() => {
@@ -122,8 +126,9 @@ export function holdNowNext(ref: ItemRef, dwellMs: number): void {
 }
 
 /**
- * The PIN prompt let `ref` through: a hold waiting on it is asked now. The tune waits for the
- * guide answer before it plays, so waiting for the play itself would never end.
+ * The gate let `ref`'s tune through, after a PIN prompt or without one (an unlock already
+ * running, an unlocked channel): a hold on it is asked now. The tune waits for the guide answer
+ * before it plays, so waiting for the play itself would never end.
  */
 export function passNowNext(ref: ItemRef): void {
   passes.get(itemKey(ref))?.();

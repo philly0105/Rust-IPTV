@@ -468,7 +468,7 @@ Tests and fixtures:
 
 ## CI state at publication
 
-Everything in this report is on GitHub in audit/saas-polish, including saas/rustfix-a (merged as `3ac59bb`) and saas/rustfix-b (merged as `eca8edf`). master is unchanged at `b9b00d7`, and nothing is tagged or released.
+Everything in this report is on GitHub. audit/saas-polish holds it, including saas/rustfix-a (merged as `3ac59bb`) and saas/rustfix-b (merged as `eca8edf`), and master was fast-forwarded to it on 2026-10-21. Nothing is tagged or released.
 
 - CI run 1 (`7b03743`) compiled all of the Rust for the first time. Before today none of it had ever been compiled, because nothing on gmk1 can build Rust. On Linux it built and passed every test except `mpv_commands_without_session`. rustfmt flagged seven layouts. The frontend job passed 4,789 of 4,790 tests; the one failure was a timeout. `41f86e2` fixed all three.
 - In CI run 2 (`41f86e2`) the Linux Rust job and the frontend job passed, all 4,790 frontend tests included. Windows clippy failed on five lints that are new in the latest stable clippy, all in iptv-mock (`manual_is_multiple_of`, `chunks_exact_to_as_chunks`).
@@ -481,4 +481,4 @@ Everything in this report is on GitHub in audit/saas-polish, including saas/rust
 - Run 6 (`f2bae22`) passed every job that runs on a branch push: the frontend (typecheck, tests, build, size), Rust on Linux, and Rust on Windows (`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`), plus the licence, ban and source checks. This was the first run in which the Windows tests ran, and they passed.
 - Run 7 (`0c6ffa3`) added the zap-back fix and passed the same jobs as run 6.
 
-The MSRV check, the Docker image build and the desktop release build run only on pull requests and on master, so none of them has run yet. Opening a pull request from audit/saas-polish to master runs them.
+The MSRV check, the Docker image build and the desktop release build run only on pull requests and on master, so they first ran when master was fast-forwarded to `8affe1f`. The Docker image built and started, and the desktop release build passed. The MSRV check failed: on Rust 1.90, nine `rng.pick(...)` calls in the fuzz tests inferred an unsized type that newer compilers avoid. These tests predate this work, but no earlier run had checked them on 1.90. `72aeacc` names the type at those calls, and its run passed every job, the advisories leg aside.

@@ -555,3 +555,54 @@ async fn a_recording_that_ends_keeps_its_connection_a_moment() {
         .await;
     assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_row_that_yielded_after_new_bytes_starts_its_wait_over() {
+    let c = ctx().await;
+    c.files(4 * 1024 * 1024, 256).await;
+    // A row fails after 3 s of waiting without new bytes.
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_millis(200),
+        Duration::from_secs(3),
+    );
+    let sid = c.source("limit1").await;
+    // Another device holds the account's connection: the download is
+    // refused and waits.
+    let other = reqwest::get(c.movie_url("limit1", 300)).await.unwrap();
+    let d = c.start(&sid, "limit1", 101).await;
+    c.wait_until(d.id, "was refused", |d| {
+        d.waiting
+            .as_ref()
+            .is_some_and(|w| w.reason == WaitReason::Connection && w.until.is_some())
+    })
+    .await;
+    drop(other);
+    c.wait_until(d.id, "made progress", |d| {
+        d.status == DownloadStatus::Downloading && d.bytes_downloaded > 256 * 1024
+    })
+    .await;
+    // The user watches for longer than the wait limit; the download yields
+    // with new bytes, and the other device is back meanwhile.
+    c.playback("player-1", &[&sid]).await;
+    let other = reqwest::get(c.movie_url("limit1", 300)).await.unwrap();
+    assert!(other.status().is_success());
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    c.playback("player-1", &[]).await;
+    // Refused once more: that is the start of a new wait, not 2 h of one.
+    c.wait_until(d.id, "was refused again", |d| {
+        assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+        d.waiting
+            .as_ref()
+            .is_some_and(|w| w.reason == WaitReason::Connection && w.until.is_some())
+    })
+    .await;
+    drop(other);
+    let done = c
+        .wait_until(d.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+}

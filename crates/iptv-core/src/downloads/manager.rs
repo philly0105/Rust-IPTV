@@ -590,8 +590,9 @@ impl DownloadManager {
     /// Books a run's outcome against its source. A `Requeue` blocks the
     /// source for the next backoff step and keeps the row's waiting clock,
     /// or becomes `Failed` once the row waited [`WAIT_LIMIT`] without new
-    /// bytes. Bytes from the source (a completed or progressing run) end
-    /// its streak.
+    /// bytes. Bytes from the source (a completed or progressing run, one
+    /// that yielded to playback included) end its streak and the row's
+    /// waiting clock.
     fn settle(&self, id: i64, source: &str, outcome: Outcome) -> Outcome {
         let now = Instant::now();
         let (base, limit) = self.wait_timing();
@@ -604,13 +605,22 @@ impl DownloadManager {
             part,
         } = outcome
         else {
-            if matches!(outcome, Outcome::Completed { .. }) {
+            if matches!(
+                outcome,
+                Outcome::Completed { .. }
+                    | Outcome::Stopped {
+                        reason: StopReason::Yield,
+                        progressed: true,
+                        ..
+                    }
+            ) {
                 inner.streaks.remove(source);
             }
             if !matches!(
                 outcome,
                 Outcome::Stopped {
                     reason: StopReason::Yield,
+                    progressed: false,
                     ..
                 }
             ) {
@@ -1168,6 +1178,7 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
                     reason: StopReason::Yield,
                     bytes,
                     part,
+                    ..
                 } => Some((*bytes, part.clone(), false)),
                 Outcome::Requeue { bytes, part, .. } => Some((*bytes, part.clone(), true)),
                 _ => None,
@@ -1222,6 +1233,7 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
                 reason,
                 bytes,
                 part,
+                progressed: false,
             },
         )
         .await;
@@ -1285,6 +1297,7 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
                     reason,
                     bytes,
                     part,
+                    ..
                 } => match reason {
                     StopReason::Pause | StopReason::Detach => {
                         store::finish(c, id, DownloadStatus::Paused, bytes, None)

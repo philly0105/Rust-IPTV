@@ -46,6 +46,8 @@ pub enum Outcome {
         reason: StopReason,
         bytes: i64,
         part: Option<PathBuf>,
+        /// The run wrote bytes the row did not have.
+        progressed: bool,
     },
     Failed {
         message: String,
@@ -113,6 +115,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                 reason: ctl.reason(),
                 bytes: row.download.bytes_downloaded,
                 part: Some(dest.part_path.clone()),
+                progressed: false,
             }
         }
         kind = refresh_url(state, &mut row) => kind,
@@ -139,6 +142,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                     reason: ctl.reason(),
                     bytes,
                     part: Some(dest.part_path.clone()),
+                    progressed: reached.unwrap_or(0).max(bytes) > had,
                 }
             }
             AttemptEnd::Error {
@@ -158,7 +162,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                     tracing::info!(id, attempt = failures, ?delay, error = %err, "download interrupted; retrying");
                     tokio::select! {
                         _ = ctl.token.cancelled() => {
-                            return Outcome::Stopped { reason: ctl.reason(), bytes, part: Some(dest.part_path.clone()) };
+                            return Outcome::Stopped { reason: ctl.reason(), bytes, part: Some(dest.part_path.clone()), progressed: reached.is_some_and(|r| r > had) };
                         }
                         _ = tokio::time::sleep(delay) => continue,
                     }

@@ -467,7 +467,11 @@ async fn search_ranks_like_the_window_statement_with_every_filter() {
             }
             let (all, tagged) = (counts[0], counts[1]);
             assert!(tagged.0 < all.0, "live rows dropped: {counts:?}");
-            assert_eq!((tagged.1, tagged.2), (all.1, all.2), "radio and movies kept");
+            assert_eq!(
+                (tagged.1, tagged.2),
+                (all.1, all.2),
+                "radio and movies kept"
+            );
 
             // A catalog whose stored verdicts are pending: the per-row
             // English-only rule (it needs the category name) keeps the old

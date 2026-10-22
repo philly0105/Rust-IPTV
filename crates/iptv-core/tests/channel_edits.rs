@@ -1496,8 +1496,11 @@ async fn parental_locks_and_the_quality_filter_count_a_channel_once() {
     assert!(groups(Quality::Hd, true).await.is_empty());
 
     // The rpc without hide mode: News keeps 101 and 103.
-    a.call("settings.update", json!({"patch": {"liveMinQuality": "hd"}}))
-        .await;
+    a.call(
+        "settings.update",
+        json!({"patch": {"liveMinQuality": "hd"}}),
+    )
+    .await;
     assert_eq!(
         a.category_counts(false).await,
         counts(&[("news", 2), ("sport", 1), ("solo", 1)])

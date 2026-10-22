@@ -285,5 +285,8 @@ fn migration_0020_fills_items_rank_on_a_220k_library() {
         )
         .unwrap();
     assert_eq!((items, rank, wrong), (220_000, 220_000, 0));
-    assert!(took < BUDGET, "upgrade from 19 took {took:?} (budget {BUDGET:?})");
+    assert!(
+        took < BUDGET,
+        "upgrade from 19 took {took:?} (budget {BUDGET:?})"
+    );
 }

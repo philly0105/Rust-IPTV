@@ -106,6 +106,12 @@ pub fn set_no_holes(state: &AppState, on: bool) {
     manager::manager(state).set_no_holes(on);
 }
 
+/// Makes every sidecar save of a split download take `extra` longer, the
+/// way a slow disk's sync does. Test hook; not a C4 command.
+pub fn set_slow_sync(state: &AppState, extra: std::time::Duration) {
+    manager::manager(state).set_slow_sync(extra);
+}
+
 /// `downloads.playback`: what one player plays now (see
 /// [`manager::set_playback`]).
 pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<String>) {

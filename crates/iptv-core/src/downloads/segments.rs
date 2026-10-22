@@ -452,6 +452,21 @@ pub async fn run(
             (seg, end)
         }
     };
+    // Connections the transfer may hold now. "Connections per download: 1",
+    // a speed cap and a refused segment keep one (resuming a split file one
+    // segment after another).
+    let allowance = || {
+        let one = job.one_connection.load(Ordering::Relaxed);
+        let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.mgr, one) {
+            MAX_CONNECTIONS
+        } else {
+            1
+        };
+        job.mgr
+            .connection_allowance(job.ctl)
+            .min(cap)
+            .clamp(1, MAX_CONNECTIONS)
+    };
 
     let mut first = first.and_then(|(stream, at)| {
         let mut p = plan.lock();
@@ -474,11 +489,14 @@ pub async fn run(
     let mut saved_plan = 0;
 
     let mut last_save = Instant::now();
-    // The periodic save in flight. Its sync can take a while on a slow disk,
-    // and the workers only run while this loop polls them, so it is not
-    // waited for; the next one is skipped meanwhile, and every other save
-    // waits for it (two would share the temporary file).
+    // The save in flight. Its sync can take a while on a slow disk, and the
+    // workers only run while this loop polls them, so the loop never waits
+    // for it: a periodic save is skipped meanwhile, and the next save starts
+    // once it lands (two would share the temporary file).
     let mut saving: Option<tokio::task::JoinHandle<io::Result<()>>> = None;
+    // Segments that start once the plan save in flight lands. Meanwhile the
+    // loop goes on retiring workers and watching the stop token.
+    let mut pending: Vec<(usize, Option<BoxStream<'static, reqwest::Result<Bytes>>>)> = Vec::new();
     let began = plan.lock().ranges.done();
     let mut reported = false;
     let mut failure: Option<WorkerError> = None;
@@ -487,27 +505,15 @@ pub async fn run(
         if !stopping {
             // As many connections as the transfer may hold: start free
             // segments (splitting the largest when none is free), or retire
-            // the newest workers. "Connections per download: 1", a speed cap
-            // and a refused segment keep one (resuming a split file one
-            // segment after another).
-            let one = job.one_connection.load(Ordering::Relaxed);
-            let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.mgr, one) {
-                MAX_CONNECTIONS
-            } else {
-                1
-            };
-            let allowed = job
-                .mgr
-                .connection_allowance(job.ctl)
-                .min(cap)
-                .clamp(1, MAX_CONNECTIONS);
+            // the newest workers.
+            let allowed = allowance();
+            // Nothing new starts while a plan save is in flight.
             let mut starting: Vec<(usize, Option<BoxStream<'static, reqwest::Result<Bytes>>>)> =
-                first
-                    .take()
-                    .map(|(i, s)| (i, Some(s)))
-                    .into_iter()
-                    .collect();
-            while running.len() + starting.len() < allowed {
+                Vec::new();
+            if pending.is_empty() {
+                starting.extend(first.take().map(|(i, s)| (i, Some(s))));
+            }
+            while pending.is_empty() && running.len() + starting.len() < allowed {
                 let next = {
                     let mut p = plan.lock();
                     let free = p
@@ -533,19 +539,9 @@ pub async fn run(
             let segments = plan.lock().ranges.segments.len();
             if !starting.is_empty() && segments != saved_plan {
                 saved_plan = segments;
-                settle_save(job.id, saving.take()).await;
-                let (part, snapshot) = (job.part.clone(), plan.lock().ranges.clone());
-                let saved =
-                    tokio::task::spawn_blocking(move || save_synced(&part, &snapshot)).await;
-                if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
-                    // Without the sidecar a split `.part` could not resume:
-                    // end the attempt before anything writes.
-                    plan.lock().taken.iter_mut().for_each(|t| *t = false);
-                    failure = Some(WorkerError::Failed(CoreError::Io(e)));
-                    stopping = true;
-                    all.cancel();
-                    starting.clear();
-                }
+                let snapshot = plan.lock().ranges.clone();
+                saving = Some(spawn_save(job, snapshot, saving.take()));
+                pending = std::mem::take(&mut starting);
             }
             let wait =
                 closed_at.map_or(Duration::ZERO, |t| CLOSE_GRACE.saturating_sub(t.elapsed()));
@@ -568,8 +564,42 @@ pub async fn run(
             _ = job.ctl.token.cancelled(), if !stopping => {
                 stopping = true;
                 all.cancel();
+                pending.clear();
             }
-            ended = workers.next() => match ended {
+            saved = async { saving.as_mut().expect("a plan save in flight").await },
+                if !pending.is_empty() =>
+            {
+                saving = None;
+                match saved.map_err(io::Error::other).and_then(|r| r) {
+                    Ok(()) => {
+                        // What the transfer may hold now: playback may have
+                        // asked for connections meanwhile.
+                        let room = allowance().saturating_sub(running.len());
+                        let wait = closed_at.map_or(Duration::ZERO, |t| {
+                            CLOSE_GRACE.saturating_sub(t.elapsed())
+                        });
+                        let starting = std::mem::take(&mut pending);
+                        for (n, (seg, stream)) in starting.into_iter().enumerate() {
+                            if n < room {
+                                workers.push(spawn(seg, stream, wait, &mut running));
+                            } else {
+                                plan.lock().taken[seg] = false;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Without the sidecar a split `.part` could not
+                        // resume: end the attempt before anything writes.
+                        pending.clear();
+                        plan.lock().taken.iter_mut().for_each(|t| *t = false);
+                        failure = Some(WorkerError::Failed(CoreError::Io(e)));
+                        stopping = true;
+                        all.cancel();
+                    }
+                }
+            }
+            // With no worker left, an empty set would answer at once.
+            ended = workers.next(), if !workers.is_empty() || pending.is_empty() => match ended {
                 Some((seg, end)) => {
                     running.retain(|(s, _)| *s != seg);
                     closed_at = Some(Instant::now());
@@ -603,6 +633,7 @@ pub async fn run(
                             }
                             stopping = true;
                             all.cancel();
+                            pending.clear();
                         }
                     }
                 }
@@ -622,13 +653,12 @@ pub async fn run(
         job.ctl.bytes.store(done, Ordering::Relaxed);
         progress(done, total);
         reported |= done > began;
-        if last_save.elapsed() >= SAVE_EVERY && saving.as_ref().is_none_or(|s| s.is_finished()) {
+        if pending.is_empty()
+            && last_save.elapsed() >= SAVE_EVERY
+            && saving.as_ref().is_none_or(|s| s.is_finished())
+        {
             last_save = Instant::now();
-            settle_save(job.id, saving.take()).await;
-            let part = job.part.clone();
-            saving = Some(tokio::task::spawn_blocking(move || {
-                save_synced(&part, &snapshot)
-            }));
+            saving = Some(spawn_save(job, snapshot, saving.take()));
         }
         if stopping && workers.is_empty() {
             break;
@@ -664,10 +694,7 @@ pub async fn run(
         let _ = tokio::task::spawn_blocking(move || remove(&part)).await;
         return SegEnd::Done(total);
     }
-    let saved = tokio::task::spawn_blocking(move || save_synced(&part, &ranges)).await;
-    if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
-        tracing::warn!(id = job.id, error = %e, "could not save download ranges");
-    }
+    settle_save(job.id, Some(spawn_save(job, ranges, None))).await;
     match failure {
         Some(WorkerError::Failed(err) | WorkerError::Refused(err)) => {
             SegEnd::Error { err, bytes: done }
@@ -676,7 +703,28 @@ pub async fn run(
     }
 }
 
-/// Waits for a periodic save in flight, if any, and logs its failure.
+/// Saves `ranges` with [`save_synced`] once `before` (the save in flight,
+/// if any) has landed.
+fn spawn_save(
+    job: &Job<'_>,
+    ranges: Ranges,
+    before: Option<tokio::task::JoinHandle<io::Result<()>>>,
+) -> tokio::task::JoinHandle<io::Result<()>> {
+    let (id, part, slow) = (job.id, job.part.clone(), job.mgr.slow_sync());
+    tokio::spawn(async move {
+        settle_save(id, before).await;
+        tokio::task::spawn_blocking(move || {
+            if !slow.is_zero() {
+                std::thread::sleep(slow);
+            }
+            save_synced(&part, &ranges)
+        })
+        .await
+        .map_err(io::Error::other)?
+    })
+}
+
+/// Waits for a save in flight, if any, and logs its failure.
 async fn settle_save(id: i64, saving: Option<tokio::task::JoinHandle<io::Result<()>>>) {
     let Some(saving) = saving else { return };
     if let Ok(Err(e)) | Err(e) = saving.await.map_err(io::Error::other) {

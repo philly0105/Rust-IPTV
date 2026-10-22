@@ -395,6 +395,9 @@ pub struct DownloadManager {
     /// The downloads folder behaves as one that cannot leave holes (FAT,
     /// exFAT). Tests only.
     no_holes: AtomicBool,
+    /// Extra time every sidecar save of a split file takes, in
+    /// milliseconds: a slow disk's sync. Tests only.
+    slow_sync_ms: AtomicU64,
 }
 
 /// What a stop request found.
@@ -595,6 +598,17 @@ impl DownloadManager {
 
     pub(crate) fn no_holes(&self) -> bool {
         self.no_holes.load(Ordering::Relaxed)
+    }
+
+    /// Makes every sidecar save of a split file take `extra` longer, the
+    /// way a slow disk's sync does. Used by tests.
+    pub fn set_slow_sync(&self, extra: Duration) {
+        let ms = u64::try_from(extra.as_millis()).unwrap_or(u64::MAX);
+        self.slow_sync_ms.store(ms, Ordering::Relaxed);
+    }
+
+    pub(crate) fn slow_sync(&self) -> Duration {
+        Duration::from_millis(self.slow_sync_ms.load(Ordering::Relaxed))
     }
 
     /// Shortens how long a playback report counts. Used by tests.

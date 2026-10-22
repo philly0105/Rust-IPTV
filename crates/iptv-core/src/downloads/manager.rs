@@ -40,9 +40,9 @@ const MAKE_ROOM_WAIT: Duration = Duration::from_secs(2);
 /// connection a moment after the client closed it, and a stream asking
 /// sooner can still be refused.
 const YIELD_GRACE: Duration = Duration::from_millis(300);
-/// How long a source still counts as playing after a player that connects
-/// itself reports it no longer plays from it, or a recording from it ends.
-/// A player answers its report before it lets the old stream go (mpv loads
+/// How long a stream a player stops reporting, or a recording that ends,
+/// still takes a connection of its source, on top of what else uses it. A
+/// player answers its report before it lets the old stream go (mpv loads
 /// the next channel only once the report for it is answered), and the panel
 /// counts the closed connection a moment longer.
 pub const RELEASE_GRACE: Duration = Duration::from_secs(3);
@@ -142,8 +142,12 @@ struct Inner {
     streams: HashMap<String, usize>,
     /// Until when a source counts as playing after its last proxied stream.
     lingering: HashMap<String, Instant>,
+    /// Streams players stopped reporting a moment ago.
+    released: Closed,
     /// Recordings running, per source.
     recordings: HashMap<String, usize>,
+    /// Recordings that ended a moment ago.
+    ended: Closed,
     /// Sources whose downloads wait before the next attempt, and why.
     blocked: HashMap<String, Block>,
     /// When each queued id started waiting on a blocked source.
@@ -166,6 +170,35 @@ enum Limit {
 struct Lease {
     sources: Vec<String>,
     until: Instant,
+}
+
+/// Connections that closed a moment ago, per source, each with when it
+/// stops counting ([`RELEASE_GRACE`]): the panel still counts them, on top
+/// of whatever else uses the source.
+#[derive(Default)]
+struct Closed(HashMap<String, Vec<Instant>>);
+
+impl Closed {
+    fn add(&mut self, source: &str, until: Instant) {
+        self.0.entry(source.to_string()).or_default().push(until);
+    }
+
+    fn count(&self, source: &str, now: Instant) -> usize {
+        self.0
+            .get(source)
+            .map_or(0, |t| t.iter().filter(|t| **t > now).count())
+    }
+
+    fn expire(&mut self, now: Instant) {
+        self.0.retain(|_, t| {
+            t.retain(|t| *t > now);
+            !t.is_empty()
+        });
+    }
+
+    fn ends(&self) -> impl Iterator<Item = Instant> + '_ {
+        self.0.values().flatten().copied()
+    }
 }
 
 /// Why and until when downloads from a source wait (the provider refused a
@@ -197,14 +230,17 @@ pub fn download_budget(limit: Option<i64>, playing: usize, recording: usize) -> 
 
 impl Inner {
     /// Streams playing from `source`: the most any one signal reports (a
-    /// player's lease and the proxy see the same playback).
+    /// player's lease and the proxy see the same playback). A stream a
+    /// player let go a moment ago counts beside the ones players report; a
+    /// proxied one is still among the proxy's streams or lingering.
     fn playing(&self, source: &str, now: Instant) -> usize {
-        let reported: usize = self
+        let reported = self
             .leases
             .values()
             .filter(|l| l.until > now)
             .map(|l| l.sources.iter().filter(|s| *s == source).count())
-            .sum();
+            .sum::<usize>()
+            + self.released.count(source, now);
         let proxied = self
             .streams
             .get(source)
@@ -216,8 +252,8 @@ impl Inner {
         reported.max(proxied)
     }
 
-    fn recording(&self, source: &str) -> usize {
-        self.recordings.get(source).copied().unwrap_or(0)
+    fn recording(&self, source: &str, now: Instant) -> usize {
+        self.recordings.get(source).copied().unwrap_or(0) + self.ended.count(source, now)
     }
 
     /// `None` while the source's limit is still being read.
@@ -227,7 +263,7 @@ impl Inner {
             Limit::Known(limit) => Some(download_budget(
                 *limit,
                 self.playing(source, now),
-                self.recording(source),
+                self.recording(source, now),
             )),
         }
     }
@@ -273,16 +309,12 @@ impl Inner {
         done
     }
 
-    /// Counts `source` as playing until `until`, or longer if it already is.
-    fn linger(&mut self, source: String, until: Instant) {
-        let at = self.lingering.entry(source).or_insert(until);
-        *at = (*at).max(until);
-    }
-
     /// Drops reports, lingers and blocks that ran out.
     fn expire(&mut self, now: Instant) {
         self.leases.retain(|_, l| l.until > now);
         self.lingering.retain(|_, t| *t > now);
+        self.released.expire(now);
+        self.ended.expire(now);
         self.blocked.retain(|_, b| b.until > now);
     }
 
@@ -297,6 +329,8 @@ impl Inner {
             .values()
             .map(|l| l.until)
             .chain(self.lingering.values().copied())
+            .chain(self.released.ends())
+            .chain(self.ended.ends())
             .chain(self.blocked.values().map(|b| b.until))
             .filter(|t| *t > now)
             .min()?;
@@ -467,7 +501,7 @@ impl DownloadManager {
         if used < inner.budget(source, now)? {
             return None;
         }
-        let without_playback = download_budget(Some(limit), 0, inner.recording(source));
+        let without_playback = download_budget(Some(limit), 0, inner.recording(source, now));
         let reason = if without_playback > used {
             WaitReason::Playback
         } else {
@@ -958,14 +992,22 @@ pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<Stri
                 },
             )
         };
-        // The player still holds the stream it reported last when this
-        // returns: what it no longer plays stays its own a moment longer.
-        let released = before
+        // The player still holds the streams it reported last when this
+        // returns: each entry of that report the new one no longer has (a
+        // source it left, one of a wall's two tiles on a source) stays its
+        // own a moment longer.
+        let before = before
             .filter(|l| l.until > now)
             .map(|l| l.sources)
             .unwrap_or_default();
-        for source in released.into_iter().filter(|s| !sources.contains(s)) {
-            inner.linger(source, now + RELEASE_GRACE);
+        let mut kept: Vec<&String> = sources.iter().collect();
+        for source in &before {
+            match kept.iter().position(|s| *s == source) {
+                Some(i) => {
+                    kept.swap_remove(i);
+                }
+                None => inner.released.add(source, now + RELEASE_GRACE),
+            }
         }
     }
     let done = pump(state, &mgr);
@@ -1054,10 +1096,12 @@ impl Drop for RecordingHold {
                 *n = n.saturating_sub(1);
                 if *n == 0 {
                     inner.recordings.remove(&self.source);
-                    // The recording's connection closed a moment ago, and
-                    // the panel still counts it.
-                    inner.linger(self.source.clone(), Instant::now() + RELEASE_GRACE);
                 }
+                // The recording's connection closed a moment ago, and the
+                // panel still counts it.
+                inner
+                    .ended
+                    .add(&self.source, Instant::now() + RELEASE_GRACE);
             }
         }
         pump_if_running(&state, &mgr);

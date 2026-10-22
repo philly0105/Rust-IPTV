@@ -557,6 +557,87 @@ async fn a_recording_that_ends_keeps_its_connection_a_moment() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recording_that_ends_while_a_player_stays_keeps_its_connection_a_moment() {
+    let c = ctx().await;
+    c.files(2 * 1024 * 1024, 1024).await;
+    let sid = c.source("limit2").await;
+    // Embedded mpv plays one channel of the account while a recording
+    // takes the other connection.
+    c.playback("player-1", &[&sid]).await;
+    let play = reqwest::get(c.movie_url("limit2", 200)).await.unwrap();
+    assert!(play.status().is_success());
+    let recording = iptv_core::downloads::hold_recording(&c.state, &sid).await;
+    let stream = reqwest::get(c.movie_url("limit2", 300)).await.unwrap();
+    assert!(stream.status().is_success());
+    let d = c.start(&sid, "limit2", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // The recording ends; the panel still counts its connection a moment,
+    // beside the player's.
+    drop(recording);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(stream);
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
+    drop(play);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_wall_tile_that_goes_keeps_its_connection_a_moment() {
+    let c = ctx().await;
+    c.files(2 * 1024 * 1024, 1024).await;
+    let sid = c.source("limit2").await;
+    // Two wall tiles on the account's two connections, loaded directly.
+    c.playback("wall", &[&sid, &sid]).await;
+    let tile_1 = reqwest::get(c.movie_url("limit2", 200)).await.unwrap();
+    let tile_2 = reqwest::get(c.movie_url("limit2", 201)).await.unwrap();
+    assert!(tile_1.status().is_success() && tile_2.status().is_success());
+    let d = c.start(&sid, "limit2", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // One tile goes: the wall reports the other alone, and the closed
+    // tile's stream lets go a moment later.
+    c.playback("wall", &[&sid]).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(tile_2);
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
+    drop(tile_1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_proxied_player_that_stops_is_not_counted_twice() {
+    let c = ctx().await;
+    c.files(2 * 1024 * 1024, 256).await;
+    let sid = c.source("limit3").await;
+    // A player plays through the media proxy: its report and the proxy's
+    // stream are one connection, and downloads get the other two.
+    c.playback("player-1", &[&sid]).await;
+    let proxied = iptv_core::downloads::open_stream(&c.state, &sid).await;
+    let a = c.start(&sid, "limit3", 101).await;
+    let b = c.start(&sid, "limit3", 102).await;
+    for d in [&a, &b] {
+        c.wait_until(d.id, "started", |d| d.status == DownloadStatus::Downloading)
+            .await;
+    }
+    // The player stops: the proxy still holds its stream for a moment,
+    // and that is the connection the report let go, not another one.
+    c.playback("player-1", &[]).await;
+    for d in [&a, &b] {
+        assert_eq!(
+            c.get(d.id).await.status,
+            DownloadStatus::Downloading,
+            "a download yielded to a stream counted twice"
+        );
+    }
+    drop(proxied);
+    c.ok("downloads.cancel", json!({"id": a.id})).await;
+    c.ok("downloads.cancel", json!({"id": b.id})).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_row_that_yielded_after_new_bytes_starts_its_wait_over() {
     let c = ctx().await;
     c.files(4 * 1024 * 1024, 256).await;

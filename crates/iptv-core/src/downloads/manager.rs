@@ -71,6 +71,10 @@ pub struct DownloadManager {
     rate_limit: AtomicU64,
     /// Stop wait override in milliseconds; 0 = [`STOP_TIMEOUT`]. Tests only.
     stop_timeout_ms: AtomicU64,
+    /// Response-head and body-idle limit override in milliseconds; 0 = the
+    /// defaults ([`crate::http::HEADER_TIMEOUT`], [`crate::http::BODY_IDLE_TIMEOUT`]).
+    /// Tests only.
+    idle_timeout_ms: AtomicU64,
 }
 
 /// What a stop request found.
@@ -110,6 +114,23 @@ impl DownloadManager {
             u64::try_from(t.as_millis()).unwrap_or(u64::MAX).max(1)
         });
         self.stop_timeout_ms.store(ms, Ordering::Relaxed);
+    }
+
+    /// How long a transfer waits for the response head, and for the next
+    /// body chunk, before it reconnects.
+    pub fn idle_timeouts(&self) -> (Duration, Duration) {
+        match self.idle_timeout_ms.load(Ordering::Relaxed) {
+            0 => (crate::http::HEADER_TIMEOUT, crate::http::BODY_IDLE_TIMEOUT),
+            ms => (Duration::from_millis(ms), Duration::from_millis(ms)),
+        }
+    }
+
+    /// Overrides both idle limits (`None` = defaults). Used by tests.
+    pub fn set_idle_timeout(&self, timeout: Option<Duration>) {
+        let ms = timeout.map_or(0, |t| {
+            u64::try_from(t.as_millis()).unwrap_or(u64::MAX).max(1)
+        });
+        self.idle_timeout_ms.store(ms, Ordering::Relaxed);
     }
 
     /// Live byte count of a running transfer.

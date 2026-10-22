@@ -46,6 +46,9 @@ pub struct ServeOpts {
     pub kbps: u64,
     /// Abort the connection after this many body bytes.
     pub fail_after: Option<u64>,
+    /// Stop sending, with the connection left open, after this many body
+    /// bytes (for [`STALL_HOLD`]).
+    pub stall_after: Option<u64>,
     /// `Content-Disposition` filename.
     pub filename: Option<String>,
 }
@@ -59,6 +62,7 @@ impl ServeOpts {
             content_length: true,
             kbps: 0,
             fail_after: None,
+            stall_after: None,
             filename: None,
         }
     }
@@ -161,7 +165,14 @@ pub fn serve_bytes(headers: &HeaderMap, len: u64, producer: Producer, opts: Serv
     };
     let body_len = if len == 0 { 0 } else { end - start + 1 };
 
-    let body = byte_stream(start, body_len, producer, opts.kbps, opts.fail_after);
+    let body = byte_stream(
+        start,
+        body_len,
+        producer,
+        opts.kbps,
+        opts.fail_after,
+        opts.stall_after,
+    );
     let mut r = Response::new(body);
     *r.status_mut() = status;
     set(&mut r, header::CONTENT_TYPE, opts.content_type);
@@ -216,6 +227,9 @@ fn set(r: &mut Response, name: header::HeaderName, value: &str) {
     }
 }
 
+/// How long a `stall_after` body holds the connection before it ends.
+pub const STALL_HOLD: Duration = Duration::from_secs(600);
+
 struct StreamState {
     pos: u64,
     end: u64,
@@ -223,6 +237,7 @@ struct StreamState {
     producer: Producer,
     kbps: u64,
     fail_after: Option<u64>,
+    stall_after: Option<u64>,
     failed: bool,
 }
 
@@ -232,6 +247,7 @@ fn byte_stream(
     producer: Producer,
     kbps: u64,
     fail_after: Option<u64>,
+    stall_after: Option<u64>,
 ) -> Body {
     let chunk_size: u64 = if kbps > 0 { 16 * 1024 } else { 64 * 1024 };
     let state = StreamState {
@@ -241,6 +257,7 @@ fn byte_stream(
         producer,
         kbps,
         fail_after,
+        stall_after,
         failed: false,
     };
     let stream = futures::stream::unfold(state, move |mut st| async move {
@@ -256,6 +273,13 @@ fn byte_stream(
                     "iptv-mock: simulated connection drop",
                 );
                 return Some((Err(err), st));
+            }
+            n = n.min(limit - st.sent);
+        }
+        if let Some(limit) = st.stall_after {
+            if st.sent >= limit {
+                tokio::time::sleep(STALL_HOLD).await;
+                return None;
             }
             n = n.min(limit - st.sent);
         }

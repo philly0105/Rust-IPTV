@@ -9,6 +9,9 @@
 //! - `size=<bytes>`: override the length (default 20 MiB; nolen 3 MiB).
 //! - `kbps=<KiB/s>`: throttle, so a test can pause mid-transfer.
 //! - `key=<name>` (flaky only): each distinct key fails once.
+//! - `stall=1` (flaky only): the failing response stops sending after
+//!   [`FLAKY_DROP_AFTER`] bytes and holds the connection open instead of
+//!   dropping it.
 
 use std::sync::Arc;
 
@@ -67,6 +70,7 @@ pub struct FileOpts {
     pub size: Option<u64>,
     pub kbps: Option<u64>,
     pub key: Option<String>,
+    pub stall: Option<u8>,
 }
 
 fn producer() -> Producer {
@@ -100,11 +104,19 @@ pub(crate) async fn flaky(
     let first = state.flaky_seen.lock().insert(key.clone());
     let mut o = opts(len, q.kbps.unwrap_or(0), "flaky.bin");
     if first {
-        tracing::info!(
-            key,
-            "flaky.bin: dropping this response after {FLAKY_DROP_AFTER} bytes"
-        );
-        o.fail_after = Some(FLAKY_DROP_AFTER);
+        if q.stall.unwrap_or(0) != 0 {
+            tracing::info!(
+                key,
+                "flaky.bin: stalling this response after {FLAKY_DROP_AFTER} bytes"
+            );
+            o.stall_after = Some(FLAKY_DROP_AFTER);
+        } else {
+            tracing::info!(
+                key,
+                "flaky.bin: dropping this response after {FLAKY_DROP_AFTER} bytes"
+            );
+            o.fail_after = Some(FLAKY_DROP_AFTER);
+        }
     }
     serve_bytes(&headers, len, producer(), o)
 }

@@ -67,8 +67,9 @@ enum AttemptEnd {
     Stopped(i64),
     Error {
         err: CoreError,
+        /// Offset the attempt started writing at.
+        start: i64,
         bytes: i64,
-        progressed: bool,
         discard: bool,
     },
 }
@@ -109,6 +110,11 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
         validator: row.resume_validator.clone(),
     };
     let mut failures = 0u32;
+    // Highest offset this run has written. An attempt that restarted from
+    // zero and re-read bytes it already had made no progress: counting it
+    // would let a server that sends a few bytes and then stalls be retried
+    // forever.
+    let mut reached: Option<i64> = None;
     loop {
         match attempt(state, &row, &dest, ctl, &mut rep, mgr).await {
             AttemptEnd::Done(bytes) => return finalize(&dest, bytes).await,
@@ -121,13 +127,15 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
             }
             AttemptEnd::Error {
                 err,
+                start,
                 bytes,
-                progressed,
                 discard,
             } => {
-                if progressed {
+                let high = reached.unwrap_or(start);
+                if bytes > high {
                     failures = 0;
                 }
+                reached = Some(high.max(bytes));
                 failures += 1;
                 if err.is_retryable() && !discard && failures < MAX_ATTEMPTS {
                     let delay = backoff_delay(failures - 1);
@@ -387,16 +395,16 @@ async fn attempt(
     mgr: &DownloadManager,
 ) -> AttemptEnd {
     let id = row.download.id;
-    let err = |err: CoreError, bytes: i64| AttemptEnd::Error {
+    let error = |err: CoreError, start: i64, bytes: i64| AttemptEnd::Error {
         err,
+        start,
         bytes,
-        progressed: false,
         discard: false,
     };
 
     let existing = match naming::regular_file_len(&dest.part_path) {
         Ok(len) => len.unwrap_or(0) as i64,
-        Err(e) => return err(CoreError::Io(e), 0),
+        Err(e) => return error(CoreError::Io(e), 0, 0),
     };
     // A partial is resumable only with evidence about the representation.
     let resume_from = if existing > 0 && (rep.validator.is_some() || rep.total.is_some()) {
@@ -421,19 +429,21 @@ async fn attempt(
             req = req.header(IF_RANGE, v.as_str());
         }
     }
+    let host = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "the server".into());
+    // A panel that accepts the connection and never answers, or stops in the
+    // middle of the body, costs one idle limit and a reconnect with Range
+    // instead of the shared client's 60 s read timeout.
+    let (head_limit, idle_limit) = mgr.idle_timeouts();
     let resp = tokio::select! {
         _ = ctl.token.cancelled() => return AttemptEnd::Stopped(resume_from),
-        r = req.send() => match r {
+        // send_within names the host, and a redirect the server-mode guard
+        // blocked is `invalid` (not retried), not a network failure.
+        r = crate::http::send_within(req, head_limit) => match r {
             Ok(r) => r,
-            // transport_error: a redirect the server-mode guard blocked is
-            // `invalid` (not retried), not a network failure.
-            Err(e) => {
-                let host = url::Url::parse(&row.download.url)
-                    .ok()
-                    .and_then(|u| u.host_str().map(str::to_owned))
-                    .unwrap_or_else(|| "the server".into());
-                return err(crate::http::transport_error(&host, e), resume_from);
-            }
+            Err(e) => return error(e, resume_from, resume_from),
         },
     };
 
@@ -446,8 +456,8 @@ async fn attempt(
         else {
             return AttemptEnd::Error {
                 err: CoreError::Invalid("server sent an unreadable Content-Range".into()),
+                start: resume_from,
                 bytes: resume_from,
-                progressed: false,
                 discard: true,
             };
         };
@@ -456,8 +466,8 @@ async fn attempt(
                 err: CoreError::Invalid(format!(
                     "server resumed at byte {start} instead of {resume_from}"
                 )),
+                start: resume_from,
                 bytes: resume_from,
-                progressed: false,
                 discard: true,
             };
         }
@@ -467,8 +477,8 @@ async fn attempt(
                     err: CoreError::Invalid(
                         "the remote file changed since the download started".into(),
                     ),
+                    start: resume_from,
                     bytes: resume_from,
-                    progressed: false,
                     discard: true,
                 };
             }
@@ -483,12 +493,13 @@ async fn attempt(
     } else if status == StatusCode::RANGE_NOT_SATISFIABLE && resume_from > 0 {
         // Our partial does not fit the remote file: restart from zero.
         if let Err(e) = truncate(&dest.part_path).await {
-            return err(CoreError::Io(e), resume_from);
+            return error(CoreError::Io(e), resume_from, resume_from);
         }
         rep.total = None;
         rep.validator = None;
-        return err(
+        return error(
             CoreError::Network("server rejected the resume range; restarting".into()),
+            0,
             0,
         );
     } else if status.is_success() {
@@ -502,7 +513,7 @@ async fn attempt(
             .filter(|n| *n > 0);
         rep.validator = validator_of(&resp);
     } else {
-        return err(http_status_error(status), resume_from);
+        return error(http_status_error(status), resume_from, resume_from);
     }
 
     let (total, validator) = (rep.total, rep.validator.clone());
@@ -521,7 +532,7 @@ async fn attempt(
         .await;
     let file = match file {
         Ok(f) => f,
-        Err(e) => return err(CoreError::Io(e), offset),
+        Err(e) => return error(CoreError::Io(e), offset, offset),
     };
     let mut out = tokio::io::BufWriter::with_capacity(WRITE_BUFFER, file);
     let started_at = offset;
@@ -530,10 +541,17 @@ async fn attempt(
     let mut pace = Pace::new(mgr.rate_limit(), offset);
 
     let end = loop {
+        // The idle timer starts after throttle(), so a rate cap never trips it.
         let next = tokio::select! {
             biased;
             _ = ctl.token.cancelled() => break None,
-            n = stream.next() => n,
+            n = tokio::time::timeout(idle_limit, stream.next()) => match n {
+                Ok(n) => n,
+                Err(_) => break Some(Err(CoreError::Timeout(format!(
+                    "{host} stopped sending data in the middle of the download (nothing for {} s). Check that the server is online, then try again.",
+                    idle_limit.as_secs()
+                )))),
+            },
         };
         match next {
             Some(Ok(chunk)) => {
@@ -558,7 +576,6 @@ async fn attempt(
     }
     .await;
     drop(out);
-    let progressed = offset > started_at;
     // The last periodic write lands first, so it never overwrites this one.
     if let Some(write) = progress.persisting.take() {
         let _ = write.await;
@@ -570,28 +587,17 @@ async fn attempt(
         tracing::warn!(id, error = %e, "could not persist download progress");
     }
     if let Err(e) = flushed {
-        return AttemptEnd::Error {
-            err: CoreError::Io(e),
-            bytes: offset,
-            progressed,
-            discard: false,
-        };
+        return error(CoreError::Io(e), started_at, offset);
     }
     match end {
         None => AttemptEnd::Stopped(offset),
-        Some(Err(e)) => AttemptEnd::Error {
-            err: e,
-            bytes: offset,
-            progressed,
-            discard: false,
-        },
+        Some(Err(e)) => error(e, started_at, offset),
         Some(Ok(())) => match rep.total {
-            Some(t) if offset < t => AttemptEnd::Error {
-                err: CoreError::Network("Transfer ended before the advertised size".into()),
-                bytes: offset,
-                progressed,
-                discard: false,
-            },
+            Some(t) if offset < t => error(
+                CoreError::Network("Transfer ended before the advertised size".into()),
+                started_at,
+                offset,
+            ),
             _ => AttemptEnd::Done(offset),
         },
     }

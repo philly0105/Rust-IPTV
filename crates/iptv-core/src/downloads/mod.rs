@@ -64,6 +64,13 @@ pub fn set_stop_timeout(state: &AppState, timeout: Option<std::time::Duration>) 
     manager::manager(state).set_stop_timeout(timeout);
 }
 
+/// Overrides how long a transfer waits for the response head and for each
+/// body chunk before it reconnects (`None` = 15 s and 20 s). Test hook; not a
+/// C4 command.
+pub fn set_idle_timeout(state: &AppState, timeout: Option<std::time::Duration>) {
+    manager::manager(state).set_idle_timeout(timeout);
+}
+
 /// Public view of a row: live byte count for running transfers and derived
 /// `fileAvailable`.
 fn present(state: &AppState, mut d: Download) -> Download {

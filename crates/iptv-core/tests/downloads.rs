@@ -151,6 +151,17 @@ impl Ctx {
     fn downloads_dir(&self) -> PathBuf {
         self.state.downloads_dir()
     }
+
+    /// Requests the mock has served on `path` so far.
+    async fn requests(&self, path: &str) -> u64 {
+        let v: Value = reqwest::get(self.srv.url("/__mock/stats"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        v["requests"][path].as_u64().unwrap_or(0)
+    }
 }
 
 fn part_of(file_path: &str) -> PathBuf {
@@ -294,6 +305,54 @@ async fn flaky_endpoint_retries_and_completes() {
         "flaky download byte-exact"
     );
     assert!(!part_of(&path).exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stalled_body_reconnects_after_the_idle_limit() {
+    let c = ctx().await;
+    iptv_core::downloads::set_idle_timeout(&c.state, Some(Duration::from_millis(500)));
+    // The first response stops sending after 5 MiB and keeps the connection
+    // open; without an idle limit the transfer would sit there for the
+    // client's 60 s read timeout.
+    let started = Instant::now();
+    let d = c
+        .start(
+            "1",
+            "stall",
+            "/files/flaky.bin?key=stall-once&stall=1&size=8388608",
+        )
+        .await;
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    let took = started.elapsed();
+    let path = done.file_path.unwrap();
+    assert!(is_mock_content(Path::new(&path)), "resumed byte-exact");
+    assert_eq!(file_len(Path::new(&path)), Some(8 * 1024 * 1024));
+    assert_eq!(c.requests("/files/flaky.bin").await, 2, "one reconnect");
+    assert!(took < Duration::from_secs(15), "stall cost {took:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_server_that_sends_a_few_bytes_then_stalls_is_not_retried_forever() {
+    let c = ctx().await;
+    iptv_core::downloads::set_idle_timeout(&c.state, Some(Duration::from_millis(300)));
+    // `stall.m3u` sends 8 bytes with no length and then hangs, so every
+    // attempt restarts from zero and re-reads the same 8 bytes: that is not
+    // progress.
+    let d = c.start("1", "stall", "/fail/stall.m3u").await;
+    let failed = c.wait_status(d.id, DownloadStatus::Failed).await;
+    assert_eq!(
+        c.requests("/fail/stall.m3u").await,
+        u64::from(iptv_core::downloads::transfer::MAX_ATTEMPTS)
+    );
+    assert!(
+        failed
+            .error_message
+            .as_deref()
+            .unwrap_or("")
+            .contains("stopped sending data"),
+        "{:?}",
+        failed.error_message
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

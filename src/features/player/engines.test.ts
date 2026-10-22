@@ -62,6 +62,8 @@ class FakeHls {
     AUDIO_TRACK_SWITCHED: 'audioTrackSwitched',
     SUBTITLE_TRACKS_UPDATED: 'subtitleTracksUpdated',
     SUBTITLE_TRACK_SWITCH: 'subtitleTrackSwitch',
+    FRAG_LOADING: 'fragLoading',
+    FRAG_LOADED: 'fragLoaded',
     ERROR: 'hlsError',
   };
   static ErrorTypes = { NETWORK_ERROR: 'networkError', MEDIA_ERROR: 'mediaError' };
@@ -71,10 +73,16 @@ class FakeHls {
   subtitleDisplay = false;
   bandwidthEstimate = Number.NaN;
   destroyed = false;
+  listeners = new Map<string, Listener[]>();
   constructor(public config: Record<string, unknown>) {
     FakeHls.created.push(this);
   }
-  on(): void {}
+  on(evt: string, l: Listener): void {
+    this.listeners.set(evt, [...(this.listeners.get(evt) ?? []), l]);
+  }
+  emit(evt: string, data: unknown): void {
+    for (const l of this.listeners.get(evt) ?? []) l(evt, data);
+  }
   loadSource(): void {}
   attachMedia(): void {}
   destroy(): void {
@@ -301,6 +309,39 @@ describe('hls.js setup', () => {
     // A direct load keeps hls.js's own request.
     await createEngine(video(), hls(), 'http://h/live/2.m3u8', cb(), { captions: false });
     expect(FakeHls.created[1]!.config).toMatchObject({ progressive: true, fetchSetup: undefined });
+  });
+
+  it('counts the bytes of segments still downloading, and never counts down (PL-3)', async () => {
+    const engine = await createEngine(video(), hls(), 'http://h/live/1.m3u8', cb(), { captions: false });
+    const h = FakeHls.created[0]!;
+    const frag = (type: string, loaded = 0) => ({ type, stats: { loaded } });
+    expect(engine.bytesLoaded?.()).toBe(0);
+    const a = frag('main');
+    h.emit(FakeHls.Events.FRAG_LOADING, { frag: a });
+    // hls.js swaps in the loader's stats once the request starts.
+    a.stats = { loaded: 300 };
+    expect(engine.bytesLoaded?.()).toBe(300);
+    a.stats.loaded = 1_000;
+    h.emit(FakeHls.Events.FRAG_LOADED, { frag: a });
+    expect(engine.bytesLoaded?.()).toBe(1_000);
+    // The audio playlist's segment loads alongside.
+    const audio = frag('audio', 50);
+    h.emit(FakeHls.Events.FRAG_LOADING, { frag: audio });
+    const b = frag('main', 400);
+    h.emit(FakeHls.Events.FRAG_LOADING, { frag: b });
+    expect(engine.bytesLoaded?.()).toBe(1_450);
+    // b is retried: a fresh stats object from 0, and what came in before stays counted.
+    b.stats = { loaded: 0 };
+    h.emit(FakeHls.Events.FRAG_LOADING, { frag: b });
+    expect(engine.bytesLoaded?.()).toBe(1_450);
+    b.stats.loaded = 100;
+    expect(engine.bytesLoaded?.()).toBe(1_550);
+    // Replaced before it finished (aborted): its bytes still count, once.
+    const c = frag('main', 10);
+    h.emit(FakeHls.Events.FRAG_LOADING, { frag: c });
+    expect(engine.bytesLoaded?.()).toBe(1_560);
+    h.emit(FakeHls.Events.FRAG_LOADED, { frag: c });
+    expect(engine.bytesLoaded?.()).toBe(1_560);
   });
 
   it('a movie buffers a minute ahead; live keeps the default', async () => {

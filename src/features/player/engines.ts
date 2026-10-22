@@ -59,6 +59,12 @@ export interface Engine {
   /** What the library knows about the stream now (stream info overlay); the element adds the rest. */
   stats?(): Partial<MpvStats>;
   /**
+   * Media bytes received so far, counting what has arrived of segments still downloading (hls.js
+   * only). The live stall check reads it: a stream whose next segment is still coming in is slow,
+   * not dead (`reconnect.ts`).
+   */
+  bytesLoaded?(): number;
+  /**
    * The element took over after mpegts.js found no MPEG-TS in an extensionless live stream
    * (`createEngine`): an element error then is not worth another try through mpegts.js.
    */
@@ -545,6 +551,31 @@ async function hlsEngine(
     cb.onTracks({ qualities, qualityAuto: manualLevel < 0, audio, text });
   };
 
+  // Media bytes received (`bytesLoaded`). Each loader's stats object is counted once, by how far
+  // it grew since last read: hls.js gives a retried segment a fresh one, and a sum over the
+  // segments would then drop, where the stall check looks for growth.
+  let loadedBytes = 0;
+  const counted = new WeakMap<object, number>();
+  /** The segment loading now, per playlist type (main, audio, subtitle). */
+  const loading = new Map<string, { stats: { loaded: number } }>();
+  const count = (frag: { stats: { loaded: number } }): void => {
+    const before = counted.get(frag.stats) ?? 0;
+    if (frag.stats.loaded <= before) return;
+    loadedBytes += frag.stats.loaded - before;
+    counted.set(frag.stats, frag.stats.loaded);
+  };
+  hls.on(Hls.Events.FRAG_LOADING, (_evt, data) => {
+    // The one it replaces was aborted; what it got still came in.
+    const before = loading.get(data.frag.type);
+    if (before) count(before);
+    // The fragment, not its stats: hls.js swaps in the loader's stats when the request starts,
+    // which can be after this event (an init segment, a key first).
+    loading.set(data.frag.type, data.frag);
+  });
+  hls.on(Hls.Events.FRAG_LOADED, (_evt, data) => {
+    count(data.frag);
+    if (loading.get(data.frag.type) === data.frag) loading.delete(data.frag.type);
+  });
   hls.on(Hls.Events.MANIFEST_PARSED, emit);
   hls.on(Hls.Events.LEVELS_UPDATED, emit);
   hls.on(Hls.Events.LEVEL_SWITCHED, emit);
@@ -615,6 +646,10 @@ async function hlsEngine(
       mediaRecoveries = 0;
       hls.startLoad();
       hls.recoverMediaError();
+    },
+    bytesLoaded() {
+      for (const frag of loading.values()) count(frag);
+      return loadedBytes;
     },
     stats() {
       const level = hls.levels[hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel];

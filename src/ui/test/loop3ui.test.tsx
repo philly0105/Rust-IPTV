@@ -19,7 +19,17 @@ import { IMAGE_WIDTH_BUCKETS, imageUrl, imageWidthBucket, sizedImageUrl, WEB_IMA
 
 import { Dialog } from '../Dialog';
 import { Select } from '../Field';
-import { gateImage, imageGateStats, MAX_ACTIVE, noteImageLoaded, pageIsScrolling, resetImageGate, SETTLE_MS } from '../imageGate';
+import {
+  DESKTOP_MAX_ACTIVE,
+  gateImage,
+  imageGateStats,
+  MAX_ACTIVE,
+  maxActive,
+  noteImageLoaded,
+  pageIsScrolling,
+  resetImageGate,
+  SETTLE_MS,
+} from '../imageGate';
 import { comboKeys, Kbd, LivePill } from '../Misc';
 import { Poster, PosterWidthContext } from '../Poster';
 import { EmptyState } from '../States';
@@ -317,6 +327,54 @@ describe('artwork fetch gate (L3-live-1)', () => {
     fireEvent.load(els[0]!);
     expect(els[4]!.getAttribute('src')).toBe(cacheUrl(4));
     expect(imageGateStats()).toEqual({ active: 4, pending: 1 });
+  });
+
+  /** Stands in for the desktop shell (the global `maxActive` checks) while `run` runs. */
+  const onDesktop = <T,>(run: () => T): T => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__TAURI_INTERNALS__ = {};
+    try {
+      return run();
+    } finally {
+      delete w.__TAURI_INTERNALS__;
+    }
+  };
+
+  it(`on desktop keeps ${DESKTOP_MAX_ACTIVE} in flight: the image listener carries no RPCs`, () => {
+    expect(maxActive()).toBe(MAX_ACTIVE);
+    onDesktop(() => {
+      expect(maxActive()).toBe(DESKTOP_MAX_ACTIVE);
+      const els = imgs(8);
+      els.forEach((el, i) => gateImage(el, cacheUrl(i)));
+      expect(imageGateStats()).toEqual({ active: 6, pending: 2 });
+      fireEvent.load(els[0]!);
+      expect(els[6]!.getAttribute('src')).toBe(cacheUrl(6));
+      expect(imageGateStats()).toEqual({ active: 6, pending: 1 });
+    });
+  });
+
+  it('a cold grid of 48 posters fills in 12 rounds in server mode and 8 on desktop', () => {
+    // One round: every request in flight answers after the same upstream latency.
+    const rounds = (n: number): number => {
+      resetImageGate();
+      const els = imgs(n);
+      els.forEach((el, i) => gateImage(el, cacheUrl(i)));
+      const done = new Set<HTMLImageElement>();
+      let count = 0;
+      for (;;) {
+        const inFlight = els.filter((el) => el.hasAttribute('src') && !done.has(el));
+        if (inFlight.length === 0) break;
+        count++;
+        for (const el of inFlight) {
+          done.add(el);
+          fireEvent.load(el);
+        }
+      }
+      expect(done.size).toBe(n);
+      return count;
+    };
+    expect(rounds(48)).toBe(12);
+    expect(onDesktop(() => rounds(48))).toBe(8);
   });
 
   it('cancelling a running picture drops its request and frees its slot', () => {

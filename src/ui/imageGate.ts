@@ -2,13 +2,16 @@
  * Artwork fetch gate (L3-live-1, L3-perf-desktop-3).
  *
  * Posters and logos load from the app's own image cache route: `/api/img` on the same origin
- * as `/api/rpc` in server mode, the loopback proxy (shared with stream segments) on desktop.
- * A browser opens about six HTTP/1.1 connections per host, so a fast scroll through artwork
- * that is not cached yet queued 290-370 image requests ahead of the page RPCs: channel pages
- * that the server answered in 6-10 ms reached the page after 1-1.7 s, and the rows stayed blank.
+ * as `/api/rpc` in server mode; on desktop, the loopback proxy's image listener, a port that
+ * carries nothing but artwork (RPCs go over Tauri IPC, streams to the proxy's other port).
+ * A browser opens about six HTTP/1.1 connections per host and port, so a fast scroll through
+ * artwork that is not cached yet queued 290-370 image requests ahead of the page RPCs: channel
+ * pages that the server answered in 6-10 ms reached the page after 1-1.7 s, and the rows stayed
+ * blank.
  *
- * The gate sets `src` on a cache-route <img> itself, and keeps at most {@link MAX_ACTIVE}
- * such fetches in flight, so RPCs always find a free connection:
+ * The gate sets `src` on a cache-route <img> itself, and keeps at most {@link maxActive} such
+ * fetches in flight: {@link MAX_ACTIVE} in server mode, so RPCs always find a free connection,
+ * and {@link DESKTOP_MAX_ACTIVE} on desktop, where no RPC needs that port:
  * - the newest pictures go first (what the user scrolled to), in DOM order within one commit;
  * - while anything on the page scrolls (the virtual lists and grids, a rail), nothing starts
  *   until the scrolling has stopped for {@link SETTLE_MS}, so cards flung past never ask (nor
@@ -26,8 +29,19 @@
 
 import { isImageCacheUrl } from '@/api/images';
 
-/** Cache-route fetches in flight at once; the rest of the browser's six connections stay free for RPCs. */
+/** Server mode: cache-route fetches in flight at once; the rest of the browser's six connections stay free for RPCs. */
 export const MAX_ACTIVE = 4;
+/** Desktop: the image listener serves artwork only, so the gate may use all six of the webview's connections to it. */
+export const DESKTOP_MAX_ACTIVE = 6;
+
+/**
+ * The cap for this window. It checks the Tauri global, as `isDesktop` in transport.ts does, but
+ * when the gate pumps rather than at import, so a test can stand in for the desktop.
+ */
+export function maxActive(): number {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window ? DESKTOP_MAX_ACTIVE : MAX_ACTIVE;
+}
+
 /** How long the page must stay still after a scroll before waiting pictures start. */
 export const SETTLE_MS = 120;
 /** During a continuous scroll, a picture that has been in view this long starts anyway. */
@@ -190,7 +204,8 @@ function pump(): void {
   const t0 = now();
   const scrolling = t0 - lastScrollAt < SETTLE_MS;
   let wake = Number.POSITIVE_INFINITY;
-  while (active < MAX_ACTIVE) {
+  const cap = maxActive();
+  while (active < cap) {
     let best = -1;
     for (let i = 0; i < pending.length; i++) {
       const t = pending[i]!;

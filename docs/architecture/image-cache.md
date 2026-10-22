@@ -76,6 +76,10 @@ In the UI, `imageUrl(src, sourceId, width)` and the helpers built on it (`imageA
 
 The desktop loopback proxy mounts the same handler, so `w` works there too.
 
+## Loading in the UI
+
+Cache-route pictures load through the fetch gate (`src/ui/imageGate.ts`): it sets `src` itself, newest pictures first, holds them while the page scrolls, and keeps only a few in flight. The cap (`maxActive`) is 4 in server mode, where `/api/img` shares the browser's six HTTP/1.1 connections per host and port with `/api/rpc`, so two stay free for RPCs. On desktop it is 6: RPCs go over Tauri IPC and the image listener carries nothing but artwork. A picture gives its slot back after 3 s without an answer (`SLOT_TIMEOUT_MS`), or when it turns out to be out of view after it started; its request stays open (parked).
+
 ## Commands (C2)
 
 | Command | Behaviour |

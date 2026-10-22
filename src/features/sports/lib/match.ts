@@ -7,7 +7,8 @@
  *   the next 24;
  * - network: the channel is a network ESPN lists for the game. Package services (ESPN+, League Pass,
  *   Peacock, ...) never count by network alone: their channels are per-game feeds, found by the other two.
- * Pure: the hooks feed it the channel index and the guide window.
+ * Pure: the hooks feed it the channel index and the guide window. A game is checked only against the
+ * channels that can match it, found in a map of words and networks built once per index and guide.
  */
 
 import { itemKey, type Channel, type EpgProgram, type ItemKey, type SourceKind } from '@/api/types';
@@ -16,7 +17,17 @@ import { dateTimeFormat } from '@/lib/intl';
 
 import type { IndexedChannel } from '../hooks/useChannelIndex';
 import { ET_ZONE, TYPICAL_LENGTH_MS, gameWindow } from './espn';
-import { mentionsBoth, mentionsTeam, networkAlias, networkIdForBroadcast, otherLeague, teamAt, teamKeys, textTokens } from './names';
+import {
+  mentionsBoth,
+  mentionsTeam,
+  networkAlias,
+  networkIdForBroadcast,
+  otherLeague,
+  teamAt,
+  teamFirstWords,
+  teamKeys,
+  textTokens,
+} from './names';
 import type { Game } from './types';
 
 export type MatchReason = 'guide' | 'event' | 'network';
@@ -364,6 +375,139 @@ function indexMeta(index: readonly IndexedChannel[]): IndexMeta {
   return meta;
 }
 
+// ---------------------------------------------------------------------------
+// Candidates
+
+/**
+ * Where words and networks sit in an index: the positions, ascending, of the channels whose name or guide
+ * programmes (titles and descriptions) hold each word, and of the channels of each network.
+ */
+interface Candidates {
+  byWord: Map<string, number[]>;
+  byNetwork: Map<string, number[]>;
+}
+
+const NO_POSITIONS: readonly number[] = [];
+const candidateMaps = new WeakMap<readonly IndexedChannel[], WeakMap<ReadonlyMap<ItemKey, EpgProgram[]>, Candidates>>();
+
+function addPosition(map: Map<string, number[]>, key: string, i: number): void {
+  const list = map.get(key);
+  if (!list) map.set(key, [i]);
+  else if (list[list.length - 1] !== i) list.push(i);
+}
+
+/** Adds the channels at [from, to) of the index. Their programmes are tokenized here, and matching reuses that. */
+function addChannels(
+  c: Candidates,
+  index: readonly IndexedChannel[],
+  programs: ReadonlyMap<ItemKey, EpgProgram[]>,
+  keys: readonly ItemKey[],
+  from: number,
+  to: number,
+): void {
+  for (let i = from; i < to; i++) {
+    const ch = index[i]!;
+    for (const w of ch.tokens) addPosition(c.byWord, w, i);
+    if (ch.network !== null) addPosition(c.byNetwork, ch.network, i);
+    for (const p of programs.get(keys[i]!) ?? []) {
+      const words = programmeWords(p, programmeText(p));
+      for (const w of words.title) addPosition(c.byWord, w, i);
+      for (const w of words.description) addPosition(c.byWord, w, i);
+    }
+  }
+}
+
+function storeCandidates(index: readonly IndexedChannel[], programs: ReadonlyMap<ItemKey, EpgProgram[]>, c: Candidates): void {
+  let byPrograms = candidateMaps.get(index);
+  if (!byPrograms) {
+    byPrograms = new WeakMap();
+    candidateMaps.set(index, byPrograms);
+  }
+  byPrograms.set(programs, c);
+}
+
+/** The candidate map of `index` and `programs`, built here at once unless `prepareMatch` built it already. */
+function candidatesOf(index: readonly IndexedChannel[], programs: ReadonlyMap<ItemKey, EpgProgram[]>): Candidates {
+  let c = candidateMaps.get(index)?.get(programs);
+  if (!c) {
+    c = { byWord: new Map(), byNetwork: new Map() };
+    addChannels(c, index, programs, indexMeta(index).keys, 0, index.length);
+    storeCandidates(index, programs, c);
+  }
+  return c;
+}
+
+/** Channels `prepareMatch` adds between two yields to the page. */
+export const PREPARE_SLICE = 250;
+
+/** Hands the main thread back to the page (input, paint, timers) between two slices. */
+function yieldToPage(): Promise<void> {
+  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  return scheduler?.yield ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Builds what `matchGame` needs for `index` and `programs` ahead, {@link PREPARE_SLICE} channels at a time
+ * with a yield to the page between slices: tokenizing the guide text of a big index (8,000 channels with 12
+ * programmes each) takes about a second, which in one go would freeze the window. Resolves false when
+ * `signal` aborted first.
+ */
+export async function prepareMatch(
+  index: readonly IndexedChannel[],
+  programs: ReadonlyMap<ItemKey, EpgProgram[]>,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (candidateMaps.get(index)?.get(programs)) return !signal?.aborted;
+  const c: Candidates = { byWord: new Map(), byNetwork: new Map() };
+  const { keys } = indexMeta(index);
+  for (let from = 0; from < index.length; from += PREPARE_SLICE) {
+    if (from > 0) await yieldToPage();
+    if (signal?.aborted) return false;
+    addChannels(c, index, programs, keys, from, Math.min(from + PREPARE_SLICE, index.length));
+  }
+  storeCandidates(index, programs, c);
+  return true;
+}
+
+/** A game's window and the networks that count for it, worked out once per match. */
+interface GameRoutes {
+  window: { from: number; to: number };
+  networks: Map<string, boolean>;
+  locals: string[][];
+}
+
+function routesOf(game: Game): GameRoutes {
+  const networks = gameNetworks(game);
+  const locals = [...networks.keys()].flatMap((id) => (networkAlias(id)?.kind === 'local' ? networkAlias(id)!.phrases : []));
+  return { window: gameWindow(game), networks, locals };
+}
+
+const HOME = 1;
+const BOTH = 3;
+
+/**
+ * Positions, ascending, of the channels that can match `game`: those whose name or guide text holds a first
+ * word of each team, those of the game's networks, and those holding the first word of a local station's call
+ * sign. Every other channel fails all three routes: guide and event matches need both teams named, which
+ * `mentionsTeam` only finds where a first word is, and a network match needs one of the networks or a call
+ * sign in the name.
+ */
+function candidatePositions(c: Candidates, size: number, game: Game, routes: GameRoutes): number[] {
+  const mark = new Uint8Array(size);
+  for (const w of teamFirstWords(teamKeys(game.home, game.league))) for (const i of c.byWord.get(w) ?? NO_POSITIONS) mark[i] = HOME;
+  for (const w of teamFirstWords(teamKeys(game.away, game.league))) {
+    for (const i of c.byWord.get(w) ?? NO_POSITIONS) if (mark[i] === HOME) mark[i] = BOTH;
+  }
+  for (const id of routes.networks.keys()) for (const i of c.byNetwork.get(id) ?? NO_POSITIONS) mark[i] = BOTH;
+  for (const p of routes.locals) for (const i of c.byWord.get(p[0]!) ?? NO_POSITIONS) mark[i] = BOTH;
+  const out: number[] = [];
+  for (let i = 0; i < size; i++) if (mark[i] === BOTH) out.push(i);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Matching
+
 const REASON_RANK: Record<MatchReason, number> = { guide: 0, event: 1, network: 2 };
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
@@ -371,7 +515,9 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
  * The channels that carry `game`, one entry per channel with its strongest route (a guide match on a
  * network channel is a guide match and not regional). Ordered by route, then non-regional first, then feeds
  * from abroad last, then the sources' order, then channel name. `now` is read only by `isCurrentGame` (for
- * event names without a date), so a result stays good for as long as that answer does.
+ * event names without a date), so a result stays good for as long as that answer does. Only the channels
+ * that can match are checked (`candidatePositions`), from a map built once per index and programmes
+ * (`prepareMatch` builds it ahead, in slices).
  */
 export function matchGame(
   game: Game,
@@ -379,12 +525,32 @@ export function matchGame(
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now?: number,
 ): StreamMatch[] {
-  const window = gameWindow(game);
-  const networks = gameNetworks(game);
-  const locals = [...networks.keys()].flatMap((id) => (networkAlias(id)?.kind === 'local' ? networkAlias(id)!.phrases : []));
+  const routes = routesOf(game);
+  return matchAt(game, routes, index, programs, now, candidatePositions(candidatesOf(index, programs), index.length, game, routes));
+}
+
+/** `matchGame` over every channel, without the candidate filter: what the filter must always agree with. */
+export function matchGameScanForTests(
+  game: Game,
+  index: readonly IndexedChannel[],
+  programs: ReadonlyMap<ItemKey, EpgProgram[]>,
+  now?: number,
+): StreamMatch[] {
+  return matchAt(game, routesOf(game), index, programs, now, index.keys());
+}
+
+function matchAt(
+  game: Game,
+  { window, networks, locals }: GameRoutes,
+  index: readonly IndexedChannel[],
+  programs: ReadonlyMap<ItemKey, EpgProgram[]>,
+  now: number | undefined,
+  positions: Iterable<number>,
+): StreamMatch[] {
   const meta = indexMeta(index);
   const found = new Map<ItemKey, { match: StreamMatch; rank: number; foreign: boolean }>();
-  index.forEach((ch, i) => {
+  for (const i of positions) {
+    const ch = index[i]!;
     const key = meta.keys[i]!;
     const list = programs.get(key);
     const program = list ? guideProgramme(list, game, window) : null;
@@ -394,16 +560,16 @@ export function matchGame(
     else if (isEventChannel(ch, game, now)) reason = 'event';
     else {
       const r = networkMatch(ch, networks, locals);
-      if (r === undefined) return;
+      if (r === undefined) continue;
       reason = 'network';
       regional = r;
     }
     const rank = REASON_RANK[reason] * 2 + Number(regional);
     const prev = found.get(key);
-    if (prev && prev.rank <= rank) return;
+    if (prev && prev.rank <= rank) continue;
     const { channel, sourceId, sourceKind, sourceName } = ch;
     found.set(key, { match: { channel, sourceId, sourceKind, sourceName, reason, regional, program }, rank, foreign: ch.foreign });
-  });
+  }
   return [...found.values()]
     .sort(
       (a, b) =>

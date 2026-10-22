@@ -2,7 +2,8 @@
 // with 300-character descriptions, a 60-game Saturday slate). Prints what the page costs: the matching
 // pass, the index and guide reads against a mocked core with fixed latencies and 8 connections, the
 // epg.grid calls and answer bytes, the peak of calls in flight and the longest stretch the main thread
-// was held.
+// was held. Checks that the candidate filter finds what a scan over every channel finds, and that the page
+// keeps to its read limit.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -21,7 +22,7 @@ vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEven
 
 const { queryClient } = await import('@/api/query');
 const { itemKey } = await import('@/api/types');
-const { matchGame } = await import('../lib/match');
+const { matchGame, matchGameScanForTests, prepareMatch } = await import('../lib/match');
 const { useGameStreams } = await import('../hooks/useGameStreams');
 const { NETWORK_SEARCH_LIMIT } = await import('../hooks/useChannelIndex');
 const { PAGE_READS } = await import('../hooks/sportsRead');
@@ -44,28 +45,39 @@ async function longestBlock<T>(run: () => Promise<T>): Promise<{ value: T; longe
     if (on) setTimeout(beat, 0);
   };
   setTimeout(beat, 0);
+  let value: T;
   try {
-    return { value: await run(), longest };
+    value = await run();
   } finally {
     on = false;
-    await sleep(1);
-    longest = Math.max(longest, performance.now() - last);
   }
+  await sleep(1);
+  return { value, longest: Math.max(longest, performance.now() - last) };
 }
 
 describe('matching a 60-game slate against 8,000 channels', () => {
-  it('times the pass cold and warm', () => {
+  it('prepares in slices, then checks each game against its candidates only, with the same result as a full scan', async () => {
     const index = slate.slateIndex();
     const programs = slate.slateProgrammes();
     let t = performance.now();
-    const cold = slate.SLATE.map((g) => matchGame(g, index, programs, slate.SATURDAY_NOW));
-    const coldMs = performance.now() - t;
+    const { longest } = await longestBlock(() => prepareMatch(index, programs));
+    const prepareMs = performance.now() - t;
     t = performance.now();
-    const warm = slate.SLATE.map((g) => matchGame(g, index, programs, slate.SATURDAY_NOW));
-    const warmMs = performance.now() - t;
-    expect(warm).toEqual(cold);
-    const reasons = cold.flat().reduce<Record<string, number>>((acc, m) => ({ ...acc, [m.reason]: (acc[m.reason] ?? 0) + 1 }), {});
-    log(`matching: cold ${ms(coldMs)}, warm ${ms(warmMs)}; matches ${JSON.stringify(reasons)}`);
+    const first = slate.SLATE.map((g) => matchGame(g, index, programs, slate.SATURDAY_NOW));
+    const firstMs = performance.now() - t;
+    t = performance.now();
+    const again = slate.SLATE.map((g) => matchGame(g, index, programs, slate.SATURDAY_NOW));
+    const againMs = performance.now() - t;
+    t = performance.now();
+    const scan = slate.SLATE.map((g) => matchGameScanForTests(g, index, programs, slate.SATURDAY_NOW));
+    const scanMs = performance.now() - t;
+    expect(first).toEqual(scan);
+    expect(again).toEqual(scan);
+    const reasons = scan.flat().reduce<Record<string, number>>((acc, m) => ({ ...acc, [m.reason]: (acc[m.reason] ?? 0) + 1 }), {});
+    log(
+      `matching: prepare ${ms(prepareMs)} (longest block ${ms(longest)}), first pass ${ms(firstMs)}, again ${ms(againMs)}; ` +
+        `full scan ${ms(scanMs)}; matches ${JSON.stringify(reasons)}`,
+    );
   }, 120_000);
 });
 

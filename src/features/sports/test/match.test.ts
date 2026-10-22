@@ -1,12 +1,13 @@
 // matchGame: event channel names in several provider styles, the time and date agreement rule, network
 // matches with their avoid lists and package services, regional flags (NFL Sunday CBS/FOX, RSNs, local
-// stations), guide matches by title and by description, and the order and dedup of the result.
+// stations), guide matches by title and by description, the order and dedup of the result, and the candidate
+// filter, which must find what a scan over every channel finds.
 import { describe, expect, it } from 'vitest';
 
 import { itemKey, type Channel, type EpgProgram, type ItemKey } from '@/api/types';
 
 import { toIndexed, type IndexedChannel } from '../hooks/useChannelIndex';
-import { isEventChannel, matchGame, nameTimeAgrees, type StreamMatch } from '../lib/match';
+import { PREPARE_SLICE, isEventChannel, matchGame, matchGameScanForTests, nameTimeAgrees, prepareMatch, type StreamMatch } from '../lib/match';
 import type { Game, GameBroadcast, GameTeam, League } from '../lib/types';
 
 function team(abbreviation: string, location: string, name: string, shortDisplayName = name, displayName = `${location} ${name}`): GameTeam {
@@ -525,5 +526,83 @@ describe('order and dedup', () => {
     const g = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: national('ESPN') });
     // Network and event at once: the event wins. The same row twice in the index: listed once.
     expect(brief(matchGame(g, [espn, espn], NONE))).toEqual([['ESPN: Knicks vs Celtics', 'event', false]]);
+  });
+});
+
+describe('candidates', () => {
+  // Each route through a different word: a description, a title abbreviation, a call sign mid-name, a network,
+  // an event name; and channels that hold one team only, or the other league's game.
+  const okc = game('nba', team('OKC', 'Oklahoma City', 'Thunder'), team('HOU', 'Houston', 'Rockets'), '2026-10-16T00:30Z', {
+    broadcasts: [...national('NBA TV'), { name: 'KSBI', market: 'away', kind: 'tv' }],
+  });
+  const espnGame = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: [...national('ESPN'), { name: 'NESN', market: 'home', kind: 'tv' }] });
+  // FOX by name, WTTG by the call sign inside it.
+  const wttg = game('nfl', STEELERS, BUCS, '2026-10-18T17:00Z', { broadcasts: [{ name: 'Fox 5 WTTG', market: 'home', kind: 'tv' }] });
+  const games = [espnGame, okc, wttg, MLB_GAME, CFB_GAME, NFL_SUNDAY];
+  const rows = [
+    indexed('Sports 1'),
+    indexed('Sports 2'),
+    indexed('Sports 3'),
+    indexed('MyNetwork KSBI 52 Oklahoma City'),
+    indexed('NBA TV'),
+    indexed('US: ESPN', 's2'),
+    indexed('NESN'),
+    indexed('NBA League Pass 07: Knicks @ Celtics'),
+    indexed('Celtics Nation'),
+    indexed('ESPN+ 12 | Texas vs Georgia'),
+    indexed('MLB 07: Yankees x Red Sox'),
+    indexed('CBS 2 New York'),
+    indexed('NFL Sunday Ticket 3'),
+    indexed('FOX 5 Washington (WTTG)'),
+  ];
+  const index = [...rows, rows[0]!];
+  const programs = guide([
+    [rows[0]!, [programme('NBA Basketball', '2026-10-23T23:00Z', '2026-10-24T01:30Z', 'The Boston Celtics host the New York Knicks.')]],
+    [rows[1]!, [programme('NBA: BOS @ NYK', '2026-10-23T23:00Z', '2026-10-24T01:30Z')]],
+    // One team only, and another league's game of the same names.
+    [rows[2]!, [programme('Celtics Postgame', '2026-10-24T01:30Z', '2026-10-24T02:30Z', 'Boston reacts.')]],
+    [rows[8]!, [programme('MLB Baseball', '2026-10-22T23:00Z', '2026-10-23T02:00Z', 'Yankees at Red Sox.')]],
+    [rows[12]!, [programme('NFL Football', '2026-10-18T17:00Z', '2026-10-18T20:15Z', 'Pittsburgh Steelers at Tampa Bay Buccaneers.')]],
+  ]);
+
+  it('finds what a scan over every channel finds, in the same order', () => {
+    // The day of the NBA game, so its undated event channel is current.
+    const now = Date.parse('2026-10-23T18:00Z');
+    for (const g of games) {
+      expect(matchGame(g, index, programs, now), g.key).toEqual(matchGameScanForTests(g, index, programs, now));
+    }
+    expect(brief(matchGame(espnGame, index, programs, now))).toEqual([
+      ['Sports 1', 'guide', false],
+      ['Sports 2', 'guide', false],
+      ['NBA League Pass 07: Knicks @ Celtics', 'event', false],
+      ['US: ESPN', 'network', false],
+      ['NESN', 'network', true],
+    ]);
+    expect(names(matchGame(okc, index, programs, now))).toEqual(['NBA TV', 'MyNetwork KSBI 52 Oklahoma City']);
+    expect(brief(matchGame(wttg, index, programs, now))).toEqual([
+      ['NFL Sunday Ticket 3', 'guide', false],
+      ['FOX 5 Washington (WTTG)', 'network', true],
+    ]);
+  });
+
+  it('prepares a big index in slices, yielding to the page between them, with the same result', async () => {
+    const big = Array.from({ length: PREPARE_SLICE * 2 + 1 }, (_, i) => indexed(i === PREPARE_SLICE + 3 ? 'Knicks at Celtics' : `Sports ${i}`));
+    const bigPrograms = guide([[big[7]!, [programme('Knicks at Celtics', '2026-10-23T23:00Z', '2026-10-24T01:30Z')]]]);
+    let ticked = false;
+    setTimeout(() => (ticked = true), 0);
+    const prepared = prepareMatch(big, bigPrograms);
+    expect(ticked).toBe(false);
+    await expect(prepared).resolves.toBe(true);
+    expect(ticked).toBe(true);
+    expect(names(matchGame(NBA_GAME, big, bigPrograms))).toEqual(['Sports 7', 'Knicks at Celtics']);
+    expect(matchGame(NBA_GAME, big, bigPrograms)).toEqual(matchGameScanForTests(NBA_GAME, big, bigPrograms));
+  });
+
+  it('stops preparing when its signal aborts', async () => {
+    const big = Array.from({ length: PREPARE_SLICE * 2 }, (_, i) => indexed(`Sports ${i}`));
+    const ctrl = new AbortController();
+    const prepared = prepareMatch(big, NONE, ctrl.signal);
+    ctrl.abort();
+    await expect(prepared).resolves.toBe(false);
   });
 });

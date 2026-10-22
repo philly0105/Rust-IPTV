@@ -434,6 +434,14 @@ export function mentionsTeam(tokens: readonly string[], keys: TeamKeys, opts?: {
   return false;
 }
 
+/**
+ * The first word of every way `keys` names the team. Text that holds none of them never names it:
+ * `mentionsTeam` and `teamAt` look for a phrase only where its first word is.
+ */
+export function teamFirstWords(keys: TeamKeys): string[] {
+  return [...new Set(matchers(keys).map((m) => m.phrase[0]!))];
+}
+
 /** Where `tokens` first name the team (as `mentionsTeam` reads a channel name); -1 when they do not. */
 export function teamAt(tokens: readonly string[], keys: TeamKeys): number {
   if (tokens.length === 0) return -1;

@@ -6,7 +6,7 @@
  */
 
 import { useQueries, type UseQueryResult } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
@@ -15,7 +15,7 @@ import { useNow } from '@/features/parental/time';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import { gameWindow } from '../lib/espn';
-import { isCurrentGame, isEventChannel, matchGame, type StreamMatch } from '../lib/match';
+import { isCurrentGame, isEventChannel, matchGame, prepareMatch, type StreamMatch } from '../lib/match';
 import type { Game, GameTeam, League } from '../lib/types';
 import { sportsRead } from './sportsRead';
 import { toIndexed, useChannelIndex, type IndexedChannel } from './useChannelIndex';
@@ -31,6 +31,7 @@ export const FALLBACK_CONCURRENCY = 2;
 const FALLBACK_STALE_MS = 5 * MINUTE;
 
 const LIVE: ContentType[] = ['live'];
+const NO_CHANNELS: readonly IndexedChannel[] = [];
 const NO_PROGRAMS: ReadonlyMap<ItemKey, EpgProgram[]> = new Map();
 
 let running = 0;
@@ -118,9 +119,15 @@ interface Cached {
   list: StreamMatch[];
 }
 
+interface Prepared {
+  channels: readonly IndexedChannel[];
+  programs: ReadonlyMap<ItemKey, EpgProgram[]>;
+}
+
 /**
  * Matched streams per `game.key` for `games`, which should be the games on screen: the fallback searches run
- * for them. `loading` while the index, the guide window or a fallback search is still on its first answer.
+ * for them. `loading` while the index, the guide window or a fallback search is still on its first answer,
+ * or while the latest index and guide are being prepared for matching.
  */
 export function useGameStreams(
   games: readonly Game[],
@@ -134,11 +141,31 @@ export function useGameStreams(
   const guide = useGuideWindow(index.channels, from, to, on && !index.loading);
   const now = useNow(MINUTE);
 
-  // A new cache whenever the index or the guide changes; between those, a game object a poll left as it was
-  // keeps its matches, and the minute tick re-matches only a game that stopped or started being current.
+  // Matching waits for prepareMatch, which tokenizes the guide text of the whole index in slices with
+  // yields between them rather than in one long task. Until it is done, the last prepared index and guide
+  // stay matched.
+  const { channels } = index;
+  const { programs } = guide;
+  const [prepared, setPrepared] = useState<Prepared | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    const ctrl = new AbortController();
+    void prepareMatch(channels, programs, ctrl.signal).then((done) => {
+      if (done && !ctrl.signal.aborted) setPrepared({ channels, programs });
+    });
+    return () => ctrl.abort();
+  }, [on, channels, programs]);
+  const ready = prepared?.channels === channels && prepared.programs === programs;
+
+  // A new cache whenever the prepared index or guide changes; between those, a game object a poll left as it
+  // was keeps its matches, and the minute tick re-matches only a game that stopped or started being current.
   const inputs = useMemo(
-    () => ({ channels: index.channels, programs: guide.programs, byGame: new WeakMap<Game, Cached>() }),
-    [index.channels, guide.programs],
+    () => ({
+      channels: prepared?.channels ?? NO_CHANNELS,
+      programs: prepared?.programs ?? NO_PROGRAMS,
+      byGame: new WeakMap<Game, Cached>(),
+    }),
+    [prepared],
   );
   const matched = useMemo(() => {
     const out = new Map<string, StreamMatch[]>();
@@ -154,7 +181,7 @@ export function useGameStreams(
     return out;
   }, [games, inputs, now]);
 
-  const settled = on && !index.loading && !guide.loading;
+  const settled = on && !index.loading && !guide.loading && ready;
   const wanted = useMemo(
     () => (settled ? games.filter((g) => wantsFallback(g, now) && (matched.get(g.key)?.length ?? 0) === 0) : []),
     [settled, games, matched, now],
@@ -184,5 +211,5 @@ export function useGameStreams(
     return out;
   }, [wanted, matched, queries, searches.hits, sources, now]);
 
-  return { streams, loading: on && (index.loading || guide.loading || searches.pending) };
+  return { streams, loading: on && (index.loading || guide.loading || !ready || searches.pending) };
 }

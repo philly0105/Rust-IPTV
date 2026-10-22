@@ -111,3 +111,43 @@ async fn measure_hang_to_failed() {
         started.elapsed().as_secs_f64()
     );
 }
+
+/// DL-5: ten 2 MiB downloads at 1 MiB/s (about 2 s each, two at a time)
+/// are queued ahead of the one the user wants, which then gets Download
+/// next (`downloads.prioritize`; a build without it answers an error and
+/// the row waits its turn). Times start to that row's transfer starting.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "measurement"]
+async fn measure_download_next() {
+    let c = ctx().await;
+    for i in 0..10 {
+        c.start(
+            &format!("q{i}"),
+            &format!("/files/video.bin?size=2097152&kbps=1024&n={i}"),
+        )
+        .await;
+    }
+    let started = Instant::now();
+    let wanted = c
+        .start("wanted", "/files/video.bin?size=2097152&kbps=1024&n=x")
+        .await;
+    let prioritized = c
+        .router
+        .dispatch(
+            c.state.clone(),
+            "downloads.prioritize",
+            json!({"id": wanted.id}),
+        )
+        .await
+        .is_ok();
+    c.wait_status(
+        wanted.id,
+        DownloadStatus::Downloading,
+        Duration::from_secs(120),
+    )
+    .await;
+    eprintln!(
+        "DL-5 wanted row behind 10 queued (Download next: {prioritized}): started after {:.1} s",
+        started.elapsed().as_secs_f64()
+    );
+}

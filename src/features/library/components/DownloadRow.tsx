@@ -1,7 +1,7 @@
 /** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
-import { FolderOpen, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowUpToLine, FolderOpen, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -24,6 +24,7 @@ const ICONS: Record<QueueAction, typeof Pause> = {
   retry: RotateCcw,
   remove: Trash2,
   reveal: FolderOpen,
+  next: ArrowUpToLine,
 };
 
 /** Letter shortcut for an action on the focused row (DownloadsPage), shown in the button's tooltip. */

@@ -17,7 +17,7 @@ The download manager keeps a FIFO queue of movie, episode and catch-up programme
 
 ## Commands (C4)
 
-`downloads.list`, `downloads.get`, `downloads.start`, `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.retry`, `downloads.remove {id, deleteFile}`, `downloads.reveal`, `downloads.setDir {path}`, `downloads.dir`, `downloads.setPosition {id, positionSeconds}`, `myvideos.list`, `myvideos.playSource`.
+`downloads.list`, `downloads.get`, `downloads.start`, `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.retry`, `downloads.remove {id, deleteFile}`, `downloads.reveal`, `downloads.setDir {path}`, `downloads.dir`, `downloads.setPosition {id, positionSeconds}`, `downloads.prioritize {id}`, `myvideos.list`, `myvideos.playSource`.
 
 Events: `downloads.update {}` on every state change (queued, started, paused, resumed, canceled, failed, completed, removed) and `downloads.progress {id, bytesDownloaded, totalBytes?, bytesPerSecond}`, at most 4 per second per download. The first chunk of every attempt emits at once, so the UI sees a resumed transfer start where it left off. In the UI a `downloads.update` refetches only `downloads.list` and the `myvideos.` queries (`DEFAULT_EVENT_INVALIDATION` in `src/api/query.ts`), never `downloads.dir`. A `downloads.progress` event re-renders only the /downloads row it is about (`useLiveProgress`), and a movie or series page refetches `downloads.list` only for progress of its own rows ([performance.md](performance.md#progress-clocks-and-formatters)).
 
@@ -37,7 +37,9 @@ completed (file missing) -- retry --> queued
 - `pause`, `cancel`, and `remove` signal the running task and wait (up to 15 s) until it has persisted its final state, so the RPC returns only after the change is on disk. If the task is still winding down after 15 s (for example a write stuck on a network share), the RPC fails with a retryable `Timeout` instead of reporting a change that has not happened; the stop request stays in force, and `remove` leaves the row and files alone so nothing is deleted under a live task. Until the task finishes, the row stays `downloading`, so a second `pause` or `cancel` either waits again or finds the final status. A repeated request can escalate the stop reason (cancel beats remove beats pause, never the other way), so a `cancel` sent after a timed-out `pause` still ends `canceled` with the `.part` deleted. `downloads::set_stop_timeout(state, Some(d))` shortens the 15 s wait for tests.
 - `pause` on a queued row pulls the id out of the queue and marks it `paused`; it never starts until `resume` (or `retry`) puts it back, even when both slots free up.
 - `retry` on a completed row whose file is gone (deleted, moved, or replaced by something that is not a regular file) clears the recorded path and progress, keeps `fileName`, and queues the same row again; the new transfer reserves that name in the current downloads folder (next free number if taken) and never touches the old path. A completed row whose file is still there gets `Conflict`.
-- `init` (boot): rows left `downloading` become `queued`, and every queued row is scheduled in FIFO order (`created_at`, then id). A restored row resumes from its `.part`.
+- `prioritize` (Download next) moves a queued row to the front of the queue, so it takes the next free slot; a running row is left alone and other statuses get `Conflict`. `resume` and `retry` also put the row at the front.
+- The order (running ids in start order, then the queue) is saved in `app_state` under `downloads_queue` whenever it changes, by one task that writes the latest order, so a burst of changes costs one write.
+- `init` (boot): rows left `downloading` become `queued`, and every queued row is scheduled in the saved order: the rows it lists first, in that order (so interrupted transfers, Download next and resumed rows keep their place), then the rest in creation order (`created_at`, then id). A restored row resumes from its `.part`.
 
 ## Destination policy
 
@@ -79,6 +81,7 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 - cancel removes the `.part`, and retry starts over;
 - the same name twice gives `video.bin` and `video (1).bin`, then `(2)`;
 - the flaky endpoint retries and completes byte-exact;
+- Download next: the prioritized row takes the next free slot while an older queued row waits, the saved order lists it first, and a paused row gets `Conflict`;
 - a claim that keeps failing is retried and the id queued again, and the row completes;
 - a body that stalls with the connection open reconnects after the idle limit and completes byte-exact with one extra request, and a server that sends 8 bytes and then stalls (`/fail/stall.m3u`) fails after exactly 5 requests;
 - an existing destination is never overwritten, both at start and when it is occupied while paused;
@@ -105,7 +108,7 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 
 ## The Downloads page
 
-`/downloads` (`DownloadsPage`) lists the queue (downloading, queued, paused) and Needs attention (failed), each under the kit's `SectionHeader` with its count, a hint and its bulk action (Clear failed) at the end of the heading line. A row's actions are ghost icon buttons in a column as wide as the most any row has (three), shown or not, so every bar, badge and button ends on one line, and the folder line above the list shares the list's box. A row that is waiting or paused shows its actions on hover or focus with a fine pointer; a downloading row and a failed one always show them, since a failed row is there to be retried or removed.
+`/downloads` (`DownloadsPage`) lists the queue (downloading, queued, paused) and Needs attention (failed), each under the kit's `SectionHeader` with its count, a hint and its bulk action (Clear failed) at the end of the heading line. A queued row offers Pause, Cancel and Download next (last, so Pause and Cancel stay put when it starts). A row's actions are ghost icon buttons in a column as wide as the most any row has (three), shown or not, so every bar, badge and button ends on one line, and the folder line above the list shares the list's box. A row that is waiting or paused shows its actions on hover or focus with a fine pointer; a downloading row and a failed one always show them, since a failed row is there to be retried or removed.
 
 ## Tests (UI)
 

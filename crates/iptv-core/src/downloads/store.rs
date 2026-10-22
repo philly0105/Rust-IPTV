@@ -345,6 +345,34 @@ pub fn delete(conn: &Connection, id: i64) -> CoreResult<()> {
     Ok(())
 }
 
+/// `app_state` key of the saved queue order (a JSON array of ids).
+const QUEUE_ORDER_KEY: &str = "downloads_queue";
+
+/// The queue order saved by [`save_queue_order`]; empty when none (or it is
+/// unreadable).
+pub fn load_queue_order(conn: &Connection) -> CoreResult<Vec<i64>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_state WHERE key = ?1",
+            [QUEUE_ORDER_KEY],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(raw
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default())
+}
+
+/// Saves the queue order: running ids in start order, then the queue.
+pub fn save_queue_order(conn: &Connection, ids: &[i64]) -> CoreResult<()> {
+    conn.execute(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![QUEUE_ORDER_KEY, serde_json::to_string(ids)?],
+    )?;
+    Ok(())
+}
+
 /// Boot recovery: rows left `downloading` by a previous process go back to
 /// `queued`. Returns the number of rows changed.
 pub fn requeue_interrupted(conn: &Connection) -> CoreResult<usize> {

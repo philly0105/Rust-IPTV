@@ -26,15 +26,17 @@ use std::sync::Arc;
 pub use manager::{DownloadManager, MAX_CONCURRENT};
 
 /// Restores the queue: rows left `downloading` by a previous run become
-/// `queued`, then every queued row is scheduled in FIFO order.
+/// `queued`, then every queued row is scheduled in the saved order (see
+/// [`restore_order`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     let (requeued, queued) = state
         .db_call(|c| {
             let n = store::requeue_interrupted(c)?;
-            Ok((n, store::ids_with_status(c, DownloadStatus::Queued)?))
+            let queued = store::ids_with_status(c, DownloadStatus::Queued)?;
+            Ok((n, restore_order(queued, &store::load_queue_order(c)?)))
         })
         .await?;
-    manager::manager(&state);
+    manager::spawn_order_writer(&state);
     if requeued > 0 {
         tracing::info!(requeued, "interrupted downloads re-queued");
     }
@@ -45,6 +47,16 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
         notify(&state);
     }
     Ok(())
+}
+
+/// `queued` (oldest first) in the order the last run left them: the saved
+/// order (running ids first, then the queue, so "Download next" and resumed
+/// rows keep their place), then rows it does not list in creation order.
+fn restore_order(mut queued: Vec<i64>, saved: &[i64]) -> Vec<i64> {
+    let rank: std::collections::HashMap<i64, usize> =
+        saved.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+    queued.sort_by_key(|id| rank.get(id).copied().unwrap_or(usize::MAX));
+    queued
 }
 
 fn notify(state: &AppState) {
@@ -363,6 +375,20 @@ async fn requeue(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     Ok(())
 }
 
+/// Moves a queued download to the front of the queue ("Download next"), so
+/// it takes the next free slot. Running rows are left alone.
+pub async fn prioritize(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
+    let d = get(state, id).await?;
+    match d.status {
+        DownloadStatus::Queued => {
+            manager::enqueue_front(state, id);
+            Ok(())
+        }
+        DownloadStatus::Downloading => Ok(()),
+        _ => Err(conflict(&d, "move ahead")),
+    }
+}
+
 /// Cancels a download and deletes its `.part`. Completed rows are refused
 /// (use remove). Idempotent for canceled rows.
 pub async fn cancel(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
@@ -637,4 +663,26 @@ pub(crate) fn open_folder(dir: &Path, select: Option<&Path>) -> CoreResult<()> {
         c
     };
     cmd.spawn().map(|_| ()).map_err(CoreError::Io)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_order_follows_the_saved_order_then_creation_order() {
+        // 7 was moved to the front ("Download next"), 3 was running; 9 and
+        // 10 are not in the saved order (queued after the last save).
+        let queued = vec![3, 5, 7, 9, 10];
+        assert_eq!(
+            restore_order(queued.clone(), &[3, 7, 5]),
+            vec![3, 7, 5, 9, 10]
+        );
+        // Saved ids that are no longer queued are skipped.
+        assert_eq!(
+            restore_order(queued.clone(), &[1, 7, 2]),
+            vec![7, 3, 5, 9, 10]
+        );
+        assert_eq!(restore_order(queued.clone(), &[]), queued);
+    }
 }

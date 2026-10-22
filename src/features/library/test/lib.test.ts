@@ -53,7 +53,8 @@ describe('queue', () => {
   it('offers the right actions per status', () => {
     const o = { canReveal: true, hasFile: true };
     expect(actionsFor('downloading', o)).toEqual(['pause', 'cancel']);
-    expect(actionsFor('queued', o)).toEqual(['pause', 'cancel']);
+    // A queued row adds Download next after them, so Pause and Cancel stay put when it starts.
+    expect(actionsFor('queued', o)).toEqual(['pause', 'cancel', 'next']);
     // Two buttons in the same places as when downloading: Pause/Resume, then Cancel/Remove.
     expect(actionsFor('paused', o)).toEqual(['resume', 'remove']);
     expect(actionsFor('failed', o)).toEqual(['retry', 'reveal', 'remove']);
@@ -63,7 +64,8 @@ describe('queue', () => {
 
   it('returns the same actions array for the same answer, so a memoised row keeps its props (VD-4)', () => {
     const o = { canReveal: true, hasFile: true };
-    expect(actionsFor('downloading', o)).toBe(actionsFor('queued', { canReveal: false, hasFile: false }));
+    expect(actionsFor('downloading', o)).toBe(actionsFor('downloading', { canReveal: false, hasFile: false }));
+    expect(actionsFor('queued', o)).toBe(actionsFor('queued', { canReveal: false, hasFile: false }));
     expect(actionsFor('failed', o)).toBe(actionsFor('failed', o));
   });
 

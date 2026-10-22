@@ -22,6 +22,7 @@ pub const COMMANDS: &[&str] = &[
     "downloads.setDir",
     "downloads.dir",
     "downloads.setPosition",
+    "downloads.prioritize",
     "myvideos.list",
     "myvideos.playSource",
 ];
@@ -138,6 +139,9 @@ pub fn register(r: &mut RpcRouter) {
             Ok(super::set_position(&s, a.id, secs).await?)
         },
     );
+    r.add("downloads.prioritize", |s: S, a: IdArgs| async move {
+        Ok::<_, RpcError>(super::prioritize(&s, a.id).await?)
+    });
     r.add("myvideos.list", |s: S, _: ()| async move {
         Ok::<_, RpcError>(super::list_completed(&s).await?)
     });

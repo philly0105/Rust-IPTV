@@ -368,6 +368,59 @@ async fn a_failed_claim_is_retried_instead_of_leaving_the_row_queued() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn download_next_takes_the_next_free_slot_and_keeps_its_place() {
+    let c = ctx().await;
+    // a frees its slot after about 0.5 s; b holds the other for about 4 s.
+    let a = c
+        .start("a", "a", "/files/video.bin?size=262144&kbps=512")
+        .await;
+    let b = c
+        .start("b", "b", "/files/video.bin?size=2097152&kbps=512")
+        .await;
+    let older = c
+        .start("c", "c", "/files/video.bin?size=1048576&kbps=1024")
+        .await;
+    let next = c
+        .start("d", "d", "/files/video.bin?size=1048576&kbps=1024")
+        .await;
+    c.ok("downloads.prioritize", json!({"id": next.id})).await;
+
+    // The saved order (what init restores) lists it ahead of the older row.
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let order = c
+            .state
+            .db_call(|conn| iptv_core::downloads::store::load_queue_order(conn))
+            .await
+            .unwrap();
+        let at = |id: i64| order.iter().position(|x| *x == id);
+        if matches!((at(next.id), at(older.id)), (Some(n), Some(o)) if n < o) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "order never saved: {order:?}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    c.wait_status(next.id, DownloadStatus::Downloading).await;
+    assert_eq!(c.get(older.id).await.status, DownloadStatus::Queued);
+    assert_eq!(c.get(b.id).await.status, DownloadStatus::Downloading);
+    for id in [a.id, b.id, older.id, next.id] {
+        c.wait_status(id, DownloadStatus::Completed).await;
+    }
+
+    // Only a queued row can move ahead.
+    let paused = c
+        .start("e", "e", "/files/video.bin?size=1048576&kbps=64")
+        .await;
+    c.ok("downloads.pause", json!({"id": paused.id})).await;
+    let err = c
+        .call("downloads.prioritize", json!({"id": paused.id}))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::Conflict);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn existing_destination_is_never_overwritten() {
     let mut c = ctx().await;
     let dir = c.downloads_dir();
@@ -639,6 +692,7 @@ fn every_c4_download_command_is_registered() {
         "downloads.setDir",
         "downloads.dir",
         "downloads.setPosition",
+        "downloads.prioritize",
         "myvideos.list",
         "myvideos.playSource",
     ];

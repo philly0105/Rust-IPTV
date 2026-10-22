@@ -1,5 +1,6 @@
 //! Queue runtime: FIFO queue, at most [`MAX_CONCURRENT`] transfers, per-task
-//! stop tokens. Stored in `state.extensions["downloads"]`.
+//! stop tokens. Stored in `state.extensions["downloads"]`. The order (running
+//! ids, then the queue) is saved in `app_state` so `init` restores it.
 
 use super::store;
 use super::transfer::{self, Outcome};
@@ -43,15 +44,18 @@ pub struct TaskCtl {
     /// Live byte count (the DB is written every few seconds only).
     pub bytes: AtomicI64,
     done: tokio::sync::watch::Sender<bool>,
+    /// Start order among running transfers.
+    seq: u64,
 }
 
 impl TaskCtl {
-    fn new() -> Self {
+    fn new(seq: u64) -> Self {
         Self {
             token: CancellationToken::new(),
             reason: Mutex::new(None),
             bytes: AtomicI64::new(0),
             done: tokio::sync::watch::channel(false).0,
+            seq,
         }
     }
 
@@ -65,6 +69,30 @@ impl TaskCtl {
 struct Inner {
     queue: VecDeque<i64>,
     active: HashMap<i64, Arc<TaskCtl>>,
+    /// Next [`TaskCtl::seq`].
+    started: u64,
+}
+
+impl Inner {
+    /// Running ids in start order, then the queue: the order `init` restores.
+    fn order(&self) -> Vec<i64> {
+        let mut running: Vec<(u64, i64)> = self.active.iter().map(|(id, c)| (c.seq, *id)).collect();
+        running.sort_unstable();
+        running
+            .into_iter()
+            .map(|(_, id)| id)
+            .chain(self.queue.iter().copied())
+            .collect()
+    }
+}
+
+/// The latest queue order, for the task that saves it.
+struct OrderTx(tokio::sync::watch::Sender<Vec<i64>>);
+
+impl Default for OrderTx {
+    fn default() -> Self {
+        Self(tokio::sync::watch::channel(Vec::new()).0)
+    }
 }
 
 /// The download queue runtime.
@@ -84,6 +112,7 @@ pub struct DownloadManager {
     failing_claims: AtomicU32,
     /// [`CLAIM_RETRY`] override in milliseconds; 0 = default. Tests only.
     claim_retry_ms: AtomicU64,
+    order: OrderTx,
 }
 
 /// What a stop request found.
@@ -191,10 +220,46 @@ impl DownloadManager {
         }
         if let Some(pos) = inner.queue.iter().position(|q| *q == id) {
             inner.queue.remove(pos);
+            self.publish(&inner);
             return Stopped::Dequeued;
         }
         Stopped::Idle
     }
+
+    /// Hands the current order to the task that saves it (a no-op when it
+    /// did not change).
+    fn publish(&self, inner: &Inner) {
+        let next = inner.order();
+        self.order.0.send_if_modified(|saved| {
+            let changed = *saved != next;
+            if changed {
+                *saved = next;
+            }
+            changed
+        });
+    }
+}
+
+/// Saves the queue order in `app_state` whenever it changes, in its own
+/// task: a burst of changes while one write waits for the database ends in
+/// one write of the latest order. Ends when the runtime is dropped.
+pub fn spawn_order_writer(state: &Arc<AppState>) {
+    let mut rx = manager(state).order.0.subscribe();
+    let state = Arc::downgrade(state);
+    tokio::spawn(async move {
+        while rx.changed().await.is_ok() {
+            let ids = rx.borrow_and_update().clone();
+            let Some(state) = state.upgrade() else {
+                return;
+            };
+            if let Err(err) = state
+                .db_call(move |c| store::save_queue_order(c, &ids))
+                .await
+            {
+                tracing::warn!(error = %err, "could not save the download queue order");
+            }
+        }
+    });
 }
 
 fn rank(r: StopReason) -> u8 {
@@ -217,15 +282,16 @@ pub fn enqueue(state: &Arc<AppState>, id: i64) {
         let mut inner = mgr.inner.lock();
         if !inner.active.contains_key(&id) && !inner.queue.contains(&id) {
             inner.queue.push_back(id);
+            mgr.publish(&inner);
         }
     }
     pump(state, &mgr);
 }
 
-/// [`enqueue`] at the head of the queue, for a download the user resumes or
-/// retries: it was queued before anything added since, so it takes the next
-/// free slot instead of waiting behind newer downloads. An id already queued
-/// moves to the front; a running one is left alone.
+/// [`enqueue`] at the head of the queue, for a download the user resumes,
+/// retries or asks for next: it takes the next free slot instead of waiting
+/// behind the rest. An id already queued moves to the front; a running one
+/// is left alone.
 pub fn enqueue_front(state: &Arc<AppState>, id: i64) {
     let mgr = manager(state);
     {
@@ -235,6 +301,7 @@ pub fn enqueue_front(state: &Arc<AppState>, id: i64) {
                 inner.queue.remove(pos);
             }
             inner.queue.push_front(id);
+            mgr.publish(&inner);
         }
     }
     pump(state, &mgr);
@@ -250,8 +317,10 @@ fn pump(state: &Arc<AppState>, mgr: &Arc<DownloadManager>) {
             let Some(id) = inner.queue.pop_front() else {
                 return;
             };
-            let ctl = Arc::new(TaskCtl::new());
+            let ctl = Arc::new(TaskCtl::new(inner.started));
+            inner.started += 1;
             inner.active.insert(id, ctl.clone());
+            mgr.publish(&inner);
             (id, ctl)
         };
         tokio::spawn(run_task(state.clone(), mgr.clone(), id, ctl));
@@ -352,7 +421,11 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
             retry_later = !ctl.token.is_cancelled();
         }
     }
-    mgr.inner.lock().active.remove(&id);
+    {
+        let mut inner = mgr.inner.lock();
+        inner.active.remove(&id);
+        mgr.publish(&inner);
+    }
     ctl.done.send_replace(true);
     state.emit("downloads.update", serde_json::json!({}));
     if retry_later {

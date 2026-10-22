@@ -541,6 +541,8 @@ export interface RpcMap {
   'downloads.setDir': Cmd<{ path: string }, void>;
   'downloads.dir': Cmd<void, { path: string }>;
   'downloads.setPosition': Cmd<{ id: number; positionSeconds: number }, void>;
+  /** "Download next": a queued row moves to the front of the queue (saved, so a restart keeps it). */
+  'downloads.prioritize': Cmd<{ id: number }, void>;
   /** Completed downloads with `fileAvailable`. */
   'myvideos.list': Cmd<void, Download[]>;
   /**
@@ -867,6 +869,7 @@ export const RPC_COMMANDS = [
   'downloads.setDir',
   'downloads.dir',
   'downloads.setPosition',
+  'downloads.prioritize',
   'myvideos.list',
   'myvideos.playSource',
   'tmdb.movie',

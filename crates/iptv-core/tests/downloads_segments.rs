@@ -2,7 +2,11 @@
 //! download: Auto"), against the mock's `/files/video.bin`, which throttles
 //! each response on its own (`kbps`), the way a provider that caps every
 //! connection does, and its `limit<N>` Xtream accounts, which refuse a file
-//! beyond N open bodies.
+//! beyond N open bodies. `dl_panel` serves what the mock cannot: files that
+//! differ from each other, and a segment refused just as the open stream
+//! reaches it.
+
+mod dl_panel;
 
 use iptv_core::model::{Download, DownloadStatus};
 use iptv_core::rpc::RpcRouter;
@@ -50,13 +54,18 @@ impl Ctx {
     }
 
     async fn start(&self, source: &str, item: &str, path: &str) -> Download {
+        self.start_titled(source, item, &format!("item {item}"), &self.srv.url(path))
+            .await
+    }
+
+    async fn start_titled(&self, source: &str, item: &str, title: &str, url: &str) -> Download {
         let v = self
             .ok(
                 "downloads.start",
                 json!({
                     "ref": {"sourceId": source, "contentType": "movie", "itemId": item},
-                    "title": format!("item {item}"),
-                    "url": self.srv.url(path),
+                    "title": title,
+                    "url": url,
                 }),
             )
             .await;
@@ -469,6 +478,26 @@ async fn a_file_dropped_to_one_after_a_refusal_resumes_where_it_paused() {
     assert!(is_mock_content(Path::new(&file_path)), "byte-exact");
     // One refusal per run: the resumed run tries a second connection again.
     assert!(c.refused().await <= 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_segment_refused_as_the_open_stream_reaches_it_is_not_written_shifted() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    let panel = dl_panel::Panel::spawn(1).await;
+    let size = 16 * MIB;
+    panel.file(1, size, 4096);
+    // The tail's request is refused only once the open stream is 1000
+    // bytes short of the tail's start, and that stream's next chunk, which
+    // crosses it, comes after the refusal has handed the tail back.
+    panel.cut_next_segment(1);
+    let d = c.start_titled("src", "1", "Movie", &panel.url(1)).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert!(panel.cut_fired(), "the refusal landed at the cut");
+    let file_path = done.file_path.unwrap();
+    dl_panel::is_exact(1, size, Path::new(&file_path)).unwrap();
 }
 
 /// Splits a 24 MiB file over two connections and pauses it; returns its

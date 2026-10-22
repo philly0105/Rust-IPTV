@@ -392,7 +392,8 @@ struct Plan {
 enum WorkerEnd {
     /// Its segment is written.
     Finished,
-    /// Asked to give its connection back; its segment is free again.
+    /// Asked to give its connection back, or its stream stopped short of an
+    /// end that moved on; its segment is free again.
     Retired,
 }
 
@@ -730,6 +731,15 @@ async fn worker(
             Ok(Some(Ok(chunk))) => {
                 let room = (end - pos - buf.len() as i64).max(0) as usize;
                 buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                if chunk.len() > room {
+                    // Bytes past the end were dropped, so the stream's next
+                    // byte no longer belongs where the next write would put
+                    // it: this stream is done even if the end has moved on
+                    // meanwhile (a refused segment handed back), and what
+                    // is left gets its own request.
+                    outcome = Ok(WorkerEnd::Retired);
+                    break;
+                }
                 if buf.len() >= WRITE_CHUNK {
                     if let Err(e) = write_at(&mut file, &mut buf, &mut pos, plan, seg).await {
                         outcome = Err(WorkerError::Failed(CoreError::Io(e)));
@@ -787,11 +797,9 @@ async fn worker(
         return Err(WorkerError::Failed(CoreError::Io(e)));
     }
     if matches!(outcome, Ok(WorkerEnd::Finished)) && pos < plan.lock().ranges.segments[seg].end {
-        // Reached the end of what was asked for, but a split never moved it:
-        // the stream ended early.
-        return Err(WorkerError::Failed(CoreError::Network(
-            "Transfer ended before the advertised size".into(),
-        )));
+        // A refused segment was handed back after this stream reached the
+        // old end: the rest is free for its own request.
+        return Ok(WorkerEnd::Retired);
     }
     outcome
 }

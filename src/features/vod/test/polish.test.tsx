@@ -353,6 +353,26 @@ describe('VodLandingPage', () => {
     await waitFor(() => expect(document.activeElement).toBe(again.closest('a')));
     expect(screen.getByTestId('vod-landing-movie').scrollTop).toBe(240);
   });
+
+  it('back restores and records with the categories still cached, as the app keeps them', async () => {
+    // The app's cache keeps the categories for 10 minutes, so Back mounts the landing with them
+    // ready in its first render, before React attaches the page's ref to the scroller.
+    renderAt('/s/src1/movies', [landingRoute, { path: '/s/:sourceId/movies/c/:categoryId', element: <BackStub /> }], { gcTime: 600_000 });
+    const action = await indexed('Action');
+    const scroller = screen.getByTestId('vod-landing-movie');
+    scroller.scrollTop = 240;
+    fireEvent.scroll(scroller);
+    fireEvent.click(action.closest('a')!);
+    fireEvent.click(await screen.findByText('back-stub'));
+    const again = await indexed('Action');
+    await waitFor(() => expect(document.activeElement).toBe(again.closest('a')));
+    const back = screen.getByTestId('vod-landing-movie');
+    expect(back.scrollTop).toBe(240);
+    // That visit's scrolling is remembered too.
+    back.scrollTop = 333;
+    fireEvent.scroll(back);
+    await waitFor(() => expect(recallSpot('/s/src1/movies')?.scrollTop).toBe(333));
+  });
 });
 
 describe('detail pages: Escape goes back', () => {

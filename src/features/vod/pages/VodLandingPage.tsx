@@ -69,6 +69,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   };
   // "All categories" in the chip row opens the index under the rails and takes you there.
   const indexToggleRef = useRef<HTMLButtonElement>(null);
+  const indexRef = useRef<HTMLDivElement>(null);
   const [indexVisits, setIndexVisits] = useState(0);
   const revealPending = useRef(false);
   const showIndex = () => {
@@ -85,6 +86,25 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const allCats = useRpcQuery('catalog.categories', categoriesArgs(sourceId, contentType), { enabled: !!sourceId });
   const shownCats = useMemo(() => allCats.data?.filter((c) => !c.hidden), [allCats.data]);
   const catsLoaded = shownCats !== undefined;
+  // Back from a category: same scroll offset, focus on the category you opened. The index's own
+  // positions only (the rails above hold grid indices of their own), and none while its filter is
+  // on (the index section says when it starts or stops, not per keystroke). Called here, not in
+  // that section: a child's layout effects run before React attaches this page's ref to the
+  // scroller, so with the categories cached at mount (Back) the section found no scroller and
+  // never restored or recorded. All categories pressed before the categories arrived skips the
+  // restore (IDX-M1): it would undo the press.
+  const { pathname } = useLocation();
+  const [indexFiltered, setIndexFiltered] = useState(false);
+  useScrollMemory({
+    key: pathname,
+    getScroller: () => scrollRef.current,
+    ready: catsLoaded && !indexFiltered,
+    restore: indexVisits === 0,
+    onRestored: (spot) => {
+      if (spot.index === undefined) return;
+      indexRef.current?.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
+    },
+  });
   // A layout effect: it runs after the index's own (children first), so the heading is at the top
   // before the frame is painted.
   useLayoutEffect(() => {
@@ -295,7 +315,8 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               open={indexOpen}
               onOpenChange={setIndexOpen}
               onShowIndex={showIndex}
-              restoreScroll={indexVisits === 0}
+              onFilteredChange={setIndexFiltered}
+              indexRef={indexRef}
               toggleRef={indexToggleRef}
               manageLabel={manageLabel}
               onManage={() => setManageOpen(true)}
@@ -391,8 +412,8 @@ const LandingCard = memo(function LandingCard({
 /**
  * "Browse all categories": the heading that opens the index, its filter and the index itself. The
  * filter is this section's own state, so a keystroke re-renders the index, not the page and its
- * rails (VOD-LANDING-RENDERS). The landing's scroll memory lives here too: it keeps the index's
- * unfiltered positions only.
+ * rails (VOD-LANDING-RENDERS); the page hears only when filtering starts or stops, for its scroll
+ * memory, which keeps the index's unfiltered positions only.
  */
 function CategoryIndexSection({
   kind,
@@ -405,7 +426,8 @@ function CategoryIndexSection({
   open,
   onOpenChange,
   onShowIndex,
-  restoreScroll,
+  onFilteredChange,
+  indexRef,
   toggleRef,
   manageLabel,
   onManage,
@@ -422,16 +444,20 @@ function CategoryIndexSection({
   onOpenChange: (open: boolean) => void;
   /** Opens the index and takes its heading to the top of the view (the All categories chip). */
   onShowIndex: () => void;
-  /** False once the index was asked for: the remembered offset must not take the user away from it. */
-  restoreScroll: boolean;
+  /** Whether the filter holds text: the page's scroll memory pauses while it does. */
+  onFilteredChange: (filtered: boolean) => void;
+  /** The index's list, where the scroll memory puts focus back on the category opened. */
+  indexRef: RefObject<HTMLDivElement | null>;
   toggleRef: RefObject<HTMLButtonElement | null>;
   manageLabel: string;
   onManage: () => void;
 }) {
   const { t } = useTranslation('vod');
   const indexId = useId();
-  const indexRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState('');
+  const filtered = !!filter.trim();
+  // In the commit that starts or stops filtering, before a scroll can record a filtered offset.
+  useLayoutEffect(() => onFilteredChange(filtered), [filtered, onFilteredChange]);
   // Open, the index takes at least a screen (IDX-3). A narrowing filter otherwise shortened the
   // page under the view: the browser clamped the scroll, and the field being typed in dropped
   // toward the bottom, with the rails back in view.
@@ -449,26 +475,13 @@ function CategoryIndexSection({
     return [all, ...list];
   }, [shownCats, filter, kind, visibleCount, t, locks]);
 
-  // Back from a category: same scroll offset, focus on the category you opened. The index's own
-  // positions only (the rails above hold grid indices of their own). All categories pressed
-  // before the categories arrived skips the restore (IDX-M1): it would undo the press.
   const { pathname } = useLocation();
-  useScrollMemory({
-    key: pathname,
-    getScroller: () => scrollRef.current,
-    ready: !!shownCats && !filter.trim(),
-    restore: restoreScroll,
-    onRestored: (spot) => {
-      if (spot.index === undefined) return;
-      indexRef.current?.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
-    },
-  });
   // Enter on a focused link also fires click, so this covers the keyboard too.
   const rememberCategory = (e: MouseEvent<HTMLElement>) => {
     const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
     const index = Number(cell?.dataset['gridIndex']);
     // Indices shift while the filter is on, so only unfiltered positions are kept.
-    if (cell && Number.isFinite(index) && !filter.trim()) rememberSpot(pathname, { scrollTop: scrollRef.current?.scrollTop ?? 0, index });
+    if (cell && Number.isFinite(index) && !filtered) rememberSpot(pathname, { scrollTop: scrollRef.current?.scrollTop ?? 0, index });
   };
 
   return (

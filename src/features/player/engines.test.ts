@@ -14,7 +14,7 @@ class FakeTsPlayer {
   cleanupCheck = vi.fn(() => true);
   _player_engine = { _mse_controller: { _needCleanupSourceBuffer: this.cleanupCheck } };
   constructor(
-    public source: { type: string; isLive?: boolean; url?: string },
+    public source: { type: string; isLive?: boolean; url?: string; duration?: number },
     public config: Record<string, unknown>,
   ) {
     FakeTsPlayer.created.push(this);
@@ -225,7 +225,16 @@ describe('engine selection', () => {
     await createEngine(video(), src('http://h/a.ts', { isLive: false }), '/api/proxy?url=x', cb(), { captions: false });
     const p = FakeTsPlayer.created[0]!;
     expect(p.source.url).toBe(new URL('/api/proxy?url=x', window.location.href).href);
-    expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, enableStashBuffer: true });
+    expect(p.config).toMatchObject({ lazyLoad: false, lazyLoadMaxDuration: 60, enableStashBuffer: true });
+  });
+
+  it('bounds finite catch-up TS read-ahead while retaining the programme duration', async () => {
+    await createEngine(video(), src('http://h/archive.ts', { isLive: false, durationSeconds: 3720 }), 'http://h/archive.ts', cb(), {
+      captions: false,
+    });
+    const p = FakeTsPlayer.created[0]!;
+    expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, lazyLoadRecoverDuration: 20, expectedDuration: 3_720_000, enableStashBuffer: true });
+    expect(p.source.duration).toBe(3_720_000);
   });
 
   it('forceMpegts routes an extensionless stream through mpegts.js', async () => {

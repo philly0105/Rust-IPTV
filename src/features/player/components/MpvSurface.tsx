@@ -373,7 +373,7 @@ export function MpvSurface({ className }: { className?: string }) {
         return;
       }
       if (!src || loadedKey.current === null || loadedKey.current !== mpvLoadKey(src)) return;
-      reportProgress(st.timePos, src.isLive ? undefined : st.duration);
+      reportProgress(st.timePos, src.isLive ? undefined : src.durationSeconds ?? st.duration);
       if (st.error) reportStatus('error', st.error);
       else if (st.loaded) reportStatus(st.paused ? 'paused' : 'playing');
       // The first frame of a new item is up: in PiP, the window follows its shape.

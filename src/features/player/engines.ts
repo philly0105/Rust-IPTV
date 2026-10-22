@@ -1095,6 +1095,11 @@ async function mpegtsEngine(
   type TsPlayer = ReturnType<typeof mpegts.createPlayer>;
   const absolute = new URL(url, window.location.href).href;
   const isLive = source.isLive;
+  const traceArchive = import.meta.env.DEV && !isLive && !!source.durationSeconds;
+  if (traceArchive) {
+    const revision = (mpegts as typeof mpegts & { iptvPatchRevision?: string }).iptvPatchRevision;
+    console.info(`[IPTV-TS] runtime revision=${revision ?? 'missing'} origin=${window.location.origin}`);
+  }
   let player: TsPlayer | null = null;
   let destroyed = false;
   let restarts = 0;
@@ -1126,7 +1131,8 @@ async function mpegtsEngine(
   let seekRun = 0;
   let seekAbort: AbortController | null = null;
 
-  const config: Parameters<typeof mpegts.createPlayer>[1] = {
+  type TsConfig = Parameters<typeof mpegts.createPlayer>[1] & { expectedDuration?: number; archiveTrace?: boolean };
+  const config: TsConfig = {
     enableWorker: true,
     // Live: low-latency reads. No latency chasing: servers that burst their buffer on connect
     // (or serve a whole loop at once) would be skipped to the last seconds, then end and reconnect.
@@ -1136,8 +1142,13 @@ async function mpegtsEngine(
     autoCleanupSourceBuffer: true,
     autoCleanupMaxBackwardDuration: profile === 'tile' ? 10 : 60,
     autoCleanupMinBackwardDuration: profile === 'tile' ? 5 : 30,
-    lazyLoad: !isLive,
+    // Keep archive reads close to playback. Reading hours ahead can exhaust WebKit's
+    // SourceBuffer and make providers that limit fast catch-up downloads close the stream.
+    lazyLoad: !isLive && !!source.durationSeconds,
     lazyLoadMaxDuration: 60,
+    lazyLoadRecoverDuration: 20,
+    expectedDuration: source.durationSeconds ? source.durationSeconds * 1000 : 0,
+    archiveTrace: traceArchive,
     reuseRedirectedURL: true,
   };
 
@@ -1178,7 +1189,10 @@ async function mpegtsEngine(
 
   const start = (from = absolute): void => {
     loadComplete = false;
-    const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: withPark(from), cors: true }, config);
+    const p = mpegts.createPlayer({
+      type: 'mpegts', isLive, url: withPark(from), cors: true,
+      ...(source.durationSeconds ? { duration: source.durationSeconds * 1000 } : {}),
+    }, config);
     player = p;
     p.on(mpegts.Events.ERROR, (type: string, detail: string, info?: { code?: number; msg?: string }) => {
       if (player !== p || destroyed || handedOff) return;
@@ -1301,7 +1315,23 @@ async function mpegtsEngine(
     if (isLive) restart(CLOSED_LIVE);
   };
   const onWaiting = (): void => {
+    traceBuffer('waiting');
     if (isLive && loadComplete) restart(CLOSED_LIVE);
+  };
+  let lastTraceSecond = -5;
+  const traceBuffer = (event: string): void => {
+    if (!traceArchive) return;
+    const ranges: string[] = [];
+    for (let i = 0; i < el.buffered.length; i++) ranges.push(`${el.buffered.start(i).toFixed(1)}-${el.buffered.end(i).toFixed(1)}`);
+    console.info(`[IPTV-TS] ${event} time=${el.currentTime.toFixed(1)} buffer=${ranges.join(',')} ready=${el.readyState}`);
+  };
+  const onTraceTimeUpdate = (): void => {
+    if (!traceArchive) return;
+    const second = Math.floor(el.currentTime);
+    if (second >= lastTraceSecond + 5) {
+      lastTraceSecond = second;
+      traceBuffer('playback');
+    }
   };
   el.addEventListener('ended', onEnded);
   el.addEventListener('waiting', onWaiting);
@@ -1309,6 +1339,7 @@ async function mpegtsEngine(
   // connection held until the proxy gives up on it.
   const onPageHide = (): void => releaseParked(absolute);
   if (!isLive) window.addEventListener('pagehide', onPageHide);
+  if (traceArchive) el.addEventListener('timeupdate', onTraceTimeUpdate);
   /** The new pipeline produced media: fix the offset so its clock continues from the anchor. */
   const rebase = (): void => {
     if (anchor === null || player === null || el.readyState < 1 || restartTimer) return;
@@ -1396,6 +1427,9 @@ async function mpegtsEngine(
       if (stableTimer) clearTimeout(stableTimer);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('waiting', onWaiting);
+      if (traceArchive) {
+        el.removeEventListener('timeupdate', onTraceTimeUpdate);
+      }
       el.removeEventListener('timeupdate', markStable);
       el.removeEventListener('timeupdate', rebase);
       el.removeEventListener('loadedmetadata', rebase);

@@ -608,7 +608,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       status: 'loading',
       error: undefined,
       positionSeconds: source.resumeSeconds ?? 0,
-      durationSeconds: undefined,
+      durationSeconds: source.durationSeconds,
       dock: mode === 'external' ? 'hidden' : stageCount > 0 ? 'stage' : 'mini',
       playGeneration: get().playGeneration + 1,
     });

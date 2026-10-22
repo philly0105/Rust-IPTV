@@ -424,6 +424,8 @@ export interface PlayerSource {
   ref?: ItemRef;
   episodeId?: string;
   resumeSeconds?: number;
+  /** Expected length of an archive/catch-up stream, in seconds. */
+  durationSeconds?: number;
   isLive: boolean;
   isRadio: boolean;
   /** ClearKey DRM (UI only; the core never sets it). Such a source plays in the built-in player. */

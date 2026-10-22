@@ -333,7 +333,7 @@ export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className
       if (e.type !== 'progress') {
         // MPEG-TS through mpegts.js has no duration of its own; after a restart the element's covers the new stream only.
         const own = Number.isFinite(el.duration) ? el.duration + off : undefined;
-        const dur = isLive() ? undefined : (engineRef.current?.duration?.() ?? own);
+        const dur = isLive() ? undefined : (engineRef.current?.duration?.() ?? usePlayerStore.getState().source?.durationSeconds ?? own);
         reportProgress(el.currentTime + off, dur);
       }
       const now = performance.now();

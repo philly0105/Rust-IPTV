@@ -85,6 +85,12 @@ afterEach(() => {
 });
 
 describe('store transitions', () => {
+  it('uses an archive source duration for the initial seek timeline', async () => {
+    await usePlayerStore.getState().play(vod('1', { durationSeconds: 25 * 60 }));
+
+    expect(usePlayerStore.getState().durationSeconds).toBe(25 * 60);
+  });
+
   it('play -> loading in the mini dock, recent.add, then stop -> idle', async () => {
     await usePlayerStore.getState().play(vod('1'));
     let s = usePlayerStore.getState();

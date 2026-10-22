@@ -203,11 +203,14 @@ pub fn reserve(dir: &Path, name: &str) -> io::Result<Reservation> {
         let part = part_path(&final_path);
         match OpenOptions::new().write(true).create_new(true).open(&part) {
             Ok(_) => {
+                // A fresh `.part` never inherits the segment layout of an
+                // earlier one under its name (deleted while paused).
+                super::segments::remove(&part);
                 return Ok(Reservation {
                     file_name,
                     final_path,
                     part_path: part,
-                })
+                });
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),

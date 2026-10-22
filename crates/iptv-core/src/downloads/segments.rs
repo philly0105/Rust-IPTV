@@ -153,12 +153,49 @@ pub fn ranges_path(part: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// The sidecar of `part`, when there is a readable, consistent one.
-pub fn load(part: &Path) -> Option<Ranges> {
-    let raw = std::fs::read(ranges_path(part)).ok()?;
-    serde_json::from_slice::<Ranges>(&raw)
+/// What lies next to a `.part`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Sidecar {
+    /// No sidecar: the `.part` was written in one piece and its length is
+    /// what it holds.
+    None,
+    Valid(Ranges),
+    /// A sidecar that cannot be read, does not cover a whole file, or
+    /// records bytes past the end of the `.part` (one deleted and reserved
+    /// again): neither it nor the `.part`'s length says what was written.
+    Invalid,
+}
+
+/// The sidecar of `part`.
+pub fn load(part: &Path) -> Sidecar {
+    let raw = match std::fs::read(ranges_path(part)) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Sidecar::None,
+        Err(_) => return Sidecar::Invalid,
+    };
+    let Some(ranges) = serde_json::from_slice::<Ranges>(&raw)
         .ok()
         .filter(Ranges::is_consistent)
+    else {
+        return Sidecar::Invalid;
+    };
+    // A segment's bytes reach the `.part` before its `pos` is recorded, so
+    // the `.part` is at least as long as the furthest of them.
+    let written = ranges
+        .segments
+        .iter()
+        .filter(|s| s.pos > s.start)
+        .map(|s| s.pos)
+        .max()
+        .unwrap_or(0);
+    let len = super::naming::regular_file_len(part)
+        .ok()
+        .flatten()
+        .unwrap_or(0);
+    if (len as i64) < written {
+        return Sidecar::Invalid;
+    }
+    Sidecar::Valid(ranges)
 }
 
 /// Replaces the sidecar of `part` (written beside it, then renamed over it).
@@ -169,6 +206,16 @@ pub fn save(part: &Path, ranges: &Ranges) -> io::Result<()> {
     let tmp = PathBuf::from(tmp);
     std::fs::write(&tmp, serde_json::to_vec(ranges).map_err(io::Error::other)?)?;
     std::fs::rename(&tmp, &path)
+}
+
+/// Deletes `part`, then its sidecar once `part` is gone (true when there
+/// was a `.part` to delete). A `.part` written in segments has holes: left
+/// without its sidecar (deleting it failed, a locked file on Windows), a
+/// later run would trust its length.
+pub fn remove_part(part: &Path) -> io::Result<bool> {
+    let removed = super::naming::remove_regular_file(part)?;
+    remove(part);
+    Ok(removed)
 }
 
 /// Deletes the sidecar of `part` (missing is fine).
@@ -503,11 +550,13 @@ pub async fn run(
             "segment answer did not match; restarting with one connection"
         );
         let _ = tokio::task::spawn_blocking(move || {
-            remove(&part);
+            // The sidecar goes only once the `.part` is empty.
             std::fs::OpenOptions::new()
                 .write(true)
                 .truncate(true)
-                .open(&part)
+                .open(&part)?;
+            remove(&part);
+            Ok::<_, io::Error>(())
         })
         .await;
         return SegEnd::Changed;
@@ -803,13 +852,63 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let part = dir.path().join("Movie.mp4.part");
         assert!(ranges_path(&part).ends_with("Movie.mp4.part.ranges"));
-        assert_eq!(load(&part), None);
+        assert_eq!(load(&part), Sidecar::None);
         let mut r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
         r.split();
         save(&part, &r).unwrap();
-        assert_eq!(load(&part), Some(r));
+        assert_eq!(load(&part), Sidecar::Valid(r));
         remove(&part);
-        assert_eq!(load(&part), None);
+        assert_eq!(load(&part), Sidecar::None);
         remove(&part);
+    }
+
+    #[test]
+    fn a_sidecar_the_part_does_not_back_is_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("Movie.mp4.part");
+        let mut r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        r.split();
+        r.segments[0].pos = 3 * MIB;
+        r.segments[1].pos = 12 * MIB;
+        save(&part, &r).unwrap();
+        // The `.part` holds the writes up to 12 MiB: the layout stands.
+        std::fs::File::create(&part)
+            .unwrap()
+            .set_len(12 * MIB as u64)
+            .unwrap();
+        assert_eq!(load(&part), Sidecar::Valid(r.clone()));
+        // Deleted and reserved again, or cut short: the sidecar no longer
+        // says what the `.part` holds.
+        std::fs::File::create(&part).unwrap();
+        assert_eq!(load(&part), Sidecar::Invalid);
+        std::fs::remove_file(&part).unwrap();
+        assert_eq!(load(&part), Sidecar::Invalid);
+        // Unreadable or not a whole file: never "no sidecar".
+        std::fs::write(ranges_path(&part), b"{not json").unwrap();
+        assert_eq!(load(&part), Sidecar::Invalid);
+        r.segments.pop();
+        save(&part, &r).unwrap();
+        assert_eq!(load(&part), Sidecar::Invalid);
+    }
+
+    #[test]
+    fn a_part_that_cannot_be_deleted_keeps_its_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("Movie.mp4.part");
+        let r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        // Something that is not a regular file sits at the `.part` path, so
+        // deleting it fails (as a locked file does on Windows).
+        std::fs::create_dir(&part).unwrap();
+        save(&part, &r).unwrap();
+        assert!(remove_part(&part).is_err());
+        assert!(
+            ranges_path(&part).is_file(),
+            "the sidecar stays with its .part"
+        );
+        std::fs::remove_dir(&part).unwrap();
+        std::fs::write(&part, b"partial").unwrap();
+        assert!(remove_part(&part).unwrap());
+        assert!(!part.exists() && !ranges_path(&part).exists());
+        assert!(!remove_part(&part).unwrap(), "nothing left to delete");
     }
 }

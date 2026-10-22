@@ -340,3 +340,64 @@ async fn a_refused_extra_connection_drops_the_file_to_one_and_it_completes() {
     assert!(!ranges_of(&file_path).exists());
     assert_eq!(c.refused().await, 1, "one refusal, then one connection");
 }
+
+/// Splits a 24 MiB file over two connections and pauses it; returns its
+/// row and final path.
+async fn paused_split(c: &Ctx) -> (Download, String) {
+    c.limit("src", 3).await;
+    let path = format!("/files/video.bin?size={}&kbps=2048", 24 * MIB);
+    let d = c.start("src", "1", &path).await;
+    c.wait_until(d.id, "used two connections", |d| {
+        d.connections == Some(2) && d.bytes_downloaded > (4 * MIB) as i64
+    })
+    .await;
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    let paused = c.get(d.id).await;
+    let file_path = paused.file_path.clone().unwrap();
+    assert!(ranges_of(&file_path).is_file());
+    (paused, file_path)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_split_download_whose_part_was_deleted_starts_over_byte_exact() {
+    let c = ctx().await;
+    let (d, file_path) = paused_split(&c).await;
+    // The user frees space by deleting the big partial, not the small file
+    // beside it.
+    std::fs::remove_file(format!("{file_path}.part")).unwrap();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    let file_path = done.file_path.unwrap();
+    assert_eq!(std::fs::metadata(&file_path).unwrap().len(), 24 * MIB);
+    assert!(
+        is_mock_content(Path::new(&file_path)),
+        "no zero-filled gaps"
+    );
+    assert!(!ranges_of(&file_path).exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_split_download_whose_part_is_shorter_than_its_sidecar_starts_over() {
+    let c = ctx().await;
+    let (d, file_path) = paused_split(&c).await;
+    // Cut short (restored from an older copy, a full disk): the sidecar
+    // records bytes the `.part` no longer has.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(format!("{file_path}.part"))
+        .unwrap()
+        .set_len(MIB)
+        .unwrap();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    let file_path = done.file_path.unwrap();
+    assert_eq!(std::fs::metadata(&file_path).unwrap().len(), 24 * MIB);
+    assert!(
+        is_mock_content(Path::new(&file_path)),
+        "no zero-filled gaps"
+    );
+}

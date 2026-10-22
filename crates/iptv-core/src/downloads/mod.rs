@@ -269,9 +269,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                     }
                     if d.status != DownloadStatus::Completed {
                         if let Some(p) = d.file_path.as_deref() {
-                            let part = naming::part_path(Path::new(p));
-                            segments::remove(&part);
-                            naming::remove_regular_file(&part)?;
+                            segments::remove_part(&naming::part_path(Path::new(p)))?;
                         }
                     }
                     store::reset(c, d.id, &new)?;
@@ -464,9 +462,7 @@ async fn cleanup_part(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
     };
     let id = d.id;
     let removed = tokio::task::spawn_blocking(move || {
-        let part = naming::part_path(Path::new(&p));
-        segments::remove(&part);
-        naming::remove_regular_file(&part)
+        segments::remove_part(&naming::part_path(Path::new(&p)))
     })
     .await??;
     if removed {
@@ -496,9 +492,7 @@ pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreRe
     tokio::task::spawn_blocking(move || -> CoreResult<()> {
         if let Some(p) = path.as_deref().map(Path::new) {
             if delete_file || completed {
-                let part = naming::part_path(p);
-                segments::remove(&part);
-                naming::remove_regular_file(&part)?;
+                segments::remove_part(&naming::part_path(p))?;
             }
             if completed && delete_file {
                 naming::remove_regular_file(p)?;

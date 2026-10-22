@@ -1241,8 +1241,7 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
                     StopReason::Yield => store::requeue(c, id, bytes).map(|_| ()),
                     StopReason::Cancel => {
                         if let Some(part) = part {
-                            super::segments::remove(&part);
-                            if let Err(e) = super::naming::remove_regular_file(&part) {
+                            if let Err(e) = super::segments::remove_part(&part) {
                                 // Keep the path so a later cancel/remove can retry the cleanup.
                                 tracing::warn!(id, error = %e, "could not delete .part on cancel");
                                 return store::finish(c, id, DownloadStatus::Canceled, bytes, None);
@@ -1261,8 +1260,7 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
                     tracing::warn!(id, bytes, keep_part, message = %message, "download failed");
                     if !keep_part {
                         if let Some(part) = part {
-                            super::segments::remove(&part);
-                            if super::naming::remove_regular_file(&part).is_ok() {
+                            if super::segments::remove_part(&part).is_ok() {
                                 store::clear_destination(c, id)?;
                                 return store::finish(
                                     c,

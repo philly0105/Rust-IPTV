@@ -422,10 +422,9 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                     std::fs::create_dir_all(&default_dir)?;
                     let fresh = naming::reserve(&default_dir, &requested)?;
                     if std::fs::rename(&part, &fresh.part_path).is_err() {
-                        if let Err(e) = naming::remove_regular_file(&part) {
+                        if let Err(e) = segments::remove_part(&part) {
                             tracing::warn!(id, error = %e, "could not delete the old partial download");
                         }
-                        segments::remove(&part);
                     } else if segments::ranges_path(&part).is_file() {
                         // A split partial needs its sidecar; without it the
                         // moved one starts over.
@@ -435,11 +434,11 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                         )
                         .is_err()
                         {
-                            segments::remove(&part);
                             std::fs::OpenOptions::new()
                                 .write(true)
                                 .truncate(true)
                                 .open(&fresh.part_path)?;
+                            segments::remove(&part);
                         }
                     }
                     return Ok(fresh);
@@ -539,28 +538,35 @@ async fn attempt(
     let part = dest.part_path.clone();
     let sidecar = tokio::task::spawn_blocking(move || segments::load(&part))
         .await
-        .ok()
-        .flatten();
-    if let Some(ranges) = sidecar {
-        if Some(ranges.total) == rep.total && rep.validator.as_deref() == Some(&ranges.validator) {
+        .unwrap_or(segments::Sidecar::Invalid);
+    match sidecar {
+        segments::Sidecar::None => {}
+        segments::Sidecar::Valid(ranges)
+            if Some(ranges.total) == rep.total
+                && rep.validator.as_deref() == Some(&ranges.validator) =>
+        {
             return segmented(state, row, dest, ctl, mgr, rep, ranges, None).await;
         }
-        // Not this file's layout: start over.
-        let part = dest.part_path.clone();
-        let cleared = tokio::task::spawn_blocking(move || {
-            segments::remove(&part);
-            std::fs::OpenOptions::new()
-                .write(true)
-                .truncate(true)
-                .open(&part)
-                .map(|_| ())
-        })
-        .await;
-        if let Ok(Err(e)) | Err(e) = cleared.map_err(std::io::Error::other) {
-            return error(CoreError::Io(e), 0, 0);
+        // Not this file's layout, or not one the `.part` holds: start over.
+        _ => {
+            let part = dest.part_path.clone();
+            let cleared = tokio::task::spawn_blocking(move || {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(&part)?;
+                // Only once the `.part` is empty: with holes and no
+                // sidecar, its length would be taken for what it holds.
+                segments::remove(&part);
+                Ok::<_, std::io::Error>(())
+            })
+            .await;
+            if let Ok(Err(e)) | Err(e) = cleared.map_err(std::io::Error::other) {
+                return error(CoreError::Io(e), 0, 0);
+            }
+            rep.total = None;
+            rep.validator = None;
         }
-        rep.total = None;
-        rep.validator = None;
     }
     let existing = match naming::regular_file_len(&dest.part_path) {
         Ok(len) => len.unwrap_or(0) as i64,
@@ -663,11 +669,11 @@ async fn attempt(
         offset = resume_from;
     } else if status == StatusCode::RANGE_NOT_SATISFIABLE && resume_from > 0 {
         // Our partial does not fit the remote file: restart from zero.
-        let part = dest.part_path.clone();
-        let _ = tokio::task::spawn_blocking(move || segments::remove(&part)).await;
         if let Err(e) = truncate(&dest.part_path).await {
             return error(CoreError::Io(e), resume_from, resume_from);
         }
+        let part = dest.part_path.clone();
+        let _ = tokio::task::spawn_blocking(move || segments::remove(&part)).await;
         rep.total = None;
         rep.validator = None;
         return error(

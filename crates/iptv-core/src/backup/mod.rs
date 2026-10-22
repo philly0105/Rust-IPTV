@@ -139,7 +139,7 @@ pub const APP_SETTING_KEYS: [&str; 41] = [
 /// Settings fields a backup never carries, each with the reason. `epgUrls`
 /// travels on its own (IPTVnator's field) and is listed here only so the
 /// completeness test accounts for it.
-pub const APP_SETTING_EXCLUDED: [(&str, &str); 18] = [
+pub const APP_SETTING_EXCLUDED: [(&str, &str); 19] = [
     ("epgUrls", "exported as the manifest's own settings.epgUrls"),
     (
         "player",
@@ -170,6 +170,10 @@ pub const APP_SETTING_EXCLUDED: [(&str, &str); 18] = [
     ("tourCompleted", "records what this install has shown"),
     ("lastSeenVersion", "records what this install has shown"),
     ("windowStart", "how this machine's screen opens the window"),
+    (
+        "downloadSingleConnection",
+        "names sources by this install's ids, which a restore does not keep",
+    ),
 ];
 
 /// `backup.import` mode.

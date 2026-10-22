@@ -8,8 +8,8 @@
  * the last good counts in the core's cache, and an old one says nothing about this failure.
  * The provider also counts this app's own connections: the stream that just dropped (panels
  * keep a closed connection counted for a while, so it also covers a channel zapped away
- * from) and any recording running on the same source. They go in `own` and `errors.ts`
- * subtracts them; see `connectionsFull` and `connectionsMaybeFull` there.
+ * from), any recording running on the same source and any download running from it. They go in
+ * `own` and `errors.ts` subtracts them; see `connectionsFull` and `connectionsMaybeFull` there.
  */
 
 import { useEffect, useState } from 'react';
@@ -80,14 +80,30 @@ async function ownRecordings(sourceId: string): Promise<number> {
   }
 }
 
+/** Connections this app's downloads hold on `sourceId` right now; 0 when the list is unavailable. */
+async function ownDownloads(sourceId: string): Promise<number> {
+  try {
+    const list = await rpc('downloads.list');
+    return list.filter((d) => d.status === 'downloading' && d.ref.sourceId === sourceId).reduce((n, d) => n + (d.connections ?? 1), 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** Recordings and downloads this app runs from `sourceId`. */
+async function ownTransfers(sourceId: string): Promise<number> {
+  const [recording, downloading] = await Promise.all([ownRecordings(sourceId), ownDownloads(sourceId)]);
+  return recording + downloading;
+}
+
 // failover: the same check outside React, for smart reconnect (`reconnect.ts`).
 /** Counts for a failure on `sourceId` handled now, as `useConnectionCounts` gets them; null when they are no evidence. */
 export async function fetchConnectionCounts(sourceId: string): Promise<ConnectionCounts | null> {
   const requestedAt = Date.now();
   const ownStream = ownStreamRecently(sourceId, requestedAt) ? 1 : 0;
   try {
-    const [s, recording] = await Promise.all([rpc('account.status', { sourceId, refresh: true }), ownRecordings(sourceId)]);
-    return countsFromStatus(s, requestedAt, ownStream + recording);
+    const [s, transfers] = await Promise.all([rpc('account.status', { sourceId, refresh: true }), ownTransfers(sourceId)]);
+    return countsFromStatus(s, requestedAt, ownStream + transfers);
   } catch {
     return null;
   }
@@ -107,9 +123,9 @@ export function useConnectionCounts(input: StreamErrorInput, sourceId: string | 
     let live = true;
     const requestedAt = Date.now();
     const ownStream = ownStreamRecently(sourceId, requestedAt) ? 1 : 0;
-    Promise.all([rpc('account.status', { sourceId, refresh: true }), ownRecordings(sourceId)])
-      .then(([s, recording]) => {
-        if (live) setResult({ key, counts: countsFromStatus(s, requestedAt, ownStream + recording) });
+    Promise.all([rpc('account.status', { sourceId, refresh: true }), ownTransfers(sourceId)])
+      .then(([s, transfers]) => {
+        if (live) setResult({ key, counts: countsFromStatus(s, requestedAt, ownStream + transfers) });
       })
       .catch(() => {
         if (live) setResult({ key, counts: null });

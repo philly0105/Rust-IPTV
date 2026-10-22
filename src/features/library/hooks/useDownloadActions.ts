@@ -35,6 +35,8 @@ async function dispatch(action: DownloadCommand, d: Download, deleteFile: boolea
       return rpc('downloads.remove', { id, deleteFile });
     case 'reveal':
       return rpc('downloads.reveal', { id });
+    case 'next':
+      return rpc('downloads.prioritize', { id });
   }
 }
 

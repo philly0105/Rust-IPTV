@@ -6,7 +6,7 @@
 
 import type { Download, DownloadStatus } from '@/api/types';
 
-export type QueueAction = 'pause' | 'resume' | 'cancel' | 'retry' | 'remove' | 'reveal';
+export type QueueAction = 'pause' | 'resume' | 'cancel' | 'retry' | 'remove' | 'reveal' | 'next';
 export type QueueSection = 'active' | 'attention';
 
 export function sectionOf(status: DownloadStatus): QueueSection | undefined {
@@ -61,6 +61,7 @@ export function buildQueueRows(downloads: readonly Download[]): QueueRow[] {
 }
 
 const PAUSE_CANCEL: readonly QueueAction[] = ['pause', 'cancel'];
+const PAUSE_CANCEL_NEXT: readonly QueueAction[] = ['pause', 'cancel', 'next'];
 const RESUME_REMOVE: readonly QueueAction[] = ['resume', 'remove'];
 const RETRY_REVEAL_REMOVE: readonly QueueAction[] = ['retry', 'reveal', 'remove'];
 const RETRY_REMOVE: readonly QueueAction[] = ['retry', 'remove'];
@@ -72,14 +73,16 @@ const REMOVE: readonly QueueAction[] = ['remove'];
  * action. A row keeps two buttons in the same places while it toggles between
  * downloading and paused (Pause/Resume, then Cancel/Remove), so nothing shifts
  * under the pointer; a paused transfer is removed rather than canceled, since
- * a canceled one would only wait in Needs attention to be removed. The same
- * array comes back for the same answer, so a memoised row keeps its props.
+ * a canceled one would only wait in Needs attention to be removed. A queued row
+ * adds Download next last, so Pause and Cancel stay put when it starts. The
+ * same array comes back for the same answer, so a memoised row keeps its props.
  */
 export function actionsFor(status: DownloadStatus, opts: { canReveal: boolean; hasFile: boolean }): readonly QueueAction[] {
   switch (status) {
     case 'downloading':
-    case 'queued':
       return PAUSE_CANCEL;
+    case 'queued':
+      return PAUSE_CANCEL_NEXT;
     case 'paused':
       return RESUME_REMOVE;
     case 'failed':

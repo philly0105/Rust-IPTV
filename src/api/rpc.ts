@@ -551,6 +551,14 @@ export interface RpcMap {
   'downloads.setDir': Cmd<{ path: string }, void>;
   'downloads.dir': Cmd<void, { path: string }>;
   'downloads.setPosition': Cmd<{ id: number; positionSeconds: number }, void>;
+  /** "Download next": a queued row moves to the front of the queue (saved, so a restart keeps it). */
+  'downloads.prioritize': Cmd<{ id: number }, void>;
+  /**
+   * What this player plays from now (`sourceIds` empty when it stopped). Downloads from a source
+   * leave playback the connections its account allows, and yield when it needs one; the report
+   * lapses after 90 s unless renewed. Resolves once yielding downloads let go (at most 2 s).
+   */
+  'downloads.playback': Cmd<{ clientId: string; sourceIds: string[] }, void>;
   /** Completed downloads with `fileAvailable`. */
   'myvideos.list': Cmd<void, Download[]>;
   /**
@@ -878,6 +886,8 @@ export const RPC_COMMANDS = [
   'downloads.setDir',
   'downloads.dir',
   'downloads.setPosition',
+  'downloads.prioritize',
+  'downloads.playback',
   'myvideos.list',
   'myvideos.playSource',
   'tmdb.movie',

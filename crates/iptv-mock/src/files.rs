@@ -5,16 +5,23 @@
 //! so a test can verify a resumed download byte for byte with
 //! [`video_bytes`] instead of keeping a copy.
 //!
+//! While `/__mock/outage` is on, `video.bin` answers `503`.
+//!
 //! Query options (all optional, all routes):
 //! - `size=<bytes>`: override the length (default 20 MiB; nolen 3 MiB).
 //! - `kbps=<KiB/s>`: throttle, so a test can pause mid-transfer.
 //! - `key=<name>` (flaky only): each distinct key fails once.
+//! - `versioned=1` (video only): the ETag changes with every
+//!   `/__mock/etag-bump`, a file the provider replaced.
+//! - `stall=1` (flaky only): the failing response stops sending after
+//!   [`FLAKY_DROP_AFTER`] bytes and holds the connection open instead of
+//!   dropping it.
 
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use serde::Deserialize;
 
@@ -67,6 +74,9 @@ pub struct FileOpts {
     pub size: Option<u64>,
     pub kbps: Option<u64>,
     pub key: Option<String>,
+    pub stall: Option<u8>,
+    /// `video.bin`: an ETag that changes with `/__mock/etag-bump`.
+    pub versioned: Option<u8>,
 }
 
 fn producer() -> Producer {
@@ -80,14 +90,35 @@ fn opts(len: u64, kbps: u64, filename: &str) -> ServeOpts {
     o
 }
 
-pub(crate) async fn video(headers: HeaderMap, Query(q): Query<FileOpts>) -> Response {
+/// A `503` while `/__mock/outage` is on.
+fn outage(state: &MockState) -> Option<Response> {
+    state
+        .outage_until
+        .lock()
+        .is_some_and(|until| std::time::Instant::now() < until)
+        .then(|| {
+            let mut r = (StatusCode::SERVICE_UNAVAILABLE, "provider outage").into_response();
+            r.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+            r
+        })
+}
+
+pub(crate) async fn video(
+    State(state): State<Arc<MockState>>,
+    headers: HeaderMap,
+    Query(q): Query<FileOpts>,
+) -> Response {
+    if let Some(r) = outage(&state) {
+        return r;
+    }
     let len = q.size.unwrap_or(VIDEO_BIN_LEN).min(MAX_SIZE);
-    serve_bytes(
-        &headers,
-        len,
-        producer(),
-        opts(len, q.kbps.unwrap_or(0), "video.bin"),
-    )
+    let mut o = opts(len, q.kbps.unwrap_or(0), "video.bin");
+    if q.versioned.unwrap_or(0) != 0 {
+        let v = state.etag_version.load(std::sync::atomic::Ordering::SeqCst);
+        o = o.etag(format!("\"iptv-mock-video-v{v}-{len:x}\""));
+    }
+    serve_bytes(&headers, len, producer(), o)
 }
 
 pub(crate) async fn flaky(
@@ -100,11 +131,19 @@ pub(crate) async fn flaky(
     let first = state.flaky_seen.lock().insert(key.clone());
     let mut o = opts(len, q.kbps.unwrap_or(0), "flaky.bin");
     if first {
-        tracing::info!(
-            key,
-            "flaky.bin: dropping this response after {FLAKY_DROP_AFTER} bytes"
-        );
-        o.fail_after = Some(FLAKY_DROP_AFTER);
+        if q.stall.unwrap_or(0) != 0 {
+            tracing::info!(
+                key,
+                "flaky.bin: stalling this response after {FLAKY_DROP_AFTER} bytes"
+            );
+            o.stall_after = Some(FLAKY_DROP_AFTER);
+        } else {
+            tracing::info!(
+                key,
+                "flaky.bin: dropping this response after {FLAKY_DROP_AFTER} bytes"
+            );
+            o.fail_after = Some(FLAKY_DROP_AFTER);
+        }
     }
     serve_bytes(&headers, len, producer(), o)
 }

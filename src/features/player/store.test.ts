@@ -1117,6 +1117,28 @@ describe('external players (need live-channels#2)', () => {
     await usePlayerStore.getState().play(vod('6'), { mode: 'external' });
     expect(players()).toEqual(['vlc', 'vlc', 'mpv']);
   });
+
+  it('opens the player once the core has made room for it on the source (downloads)', async () => {
+    const { bindPlaybackReport } = await import('./playbackReport');
+    let answer: () => void = () => undefined;
+    handlers['downloads.playback'] = () => new Promise<void>((resolve) => (answer = resolve));
+    handlers['player.openExternal'] = () => ({ pid: 1 });
+    const unbind = bindPlaybackReport();
+    try {
+      const playing = usePlayerStore.getState().play(vod('5'), { mode: 'external', externalPlayer: 'vlc' });
+      await vi.waitFor(() => expect(calls('downloads.playback')).toEqual([{ clientId: expect.any(String), sourceIds: ['s1'] }]));
+      await flush();
+      // A download may still hold the account's connection: VLC must not ask for the stream yet.
+      expect(calls('player.openExternal')).toEqual([]);
+      answer();
+      await playing;
+      expect(calls('player.openExternal')).toHaveLength(1);
+      expect(usePlayerStore.getState().status).toBe('playing');
+    } finally {
+      handlers['downloads.playback'] = () => undefined;
+      unbind();
+    }
+  });
 });
 
 describe('the guide answer the player shares with the live page (L3-player-9)', () => {

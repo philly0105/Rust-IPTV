@@ -29,6 +29,7 @@ import { bindInlineExtras } from '../inlineExtras';
 import { focusIfPlayerOwnsFocus, safeImageUrl } from '../format';
 import { noteEngineError, tryAnotherSource, useReconnectStore } from '../reconnect';
 import { needsSizeContainer, pictureStyle, usePictureStore } from '../picture';
+import { reportAnswered } from '../playbackReport';
 import { canShareSource } from '../shareable';
 import { setMediaCommands, useMediaStore, type TimeRange } from '../media';
 import { tsSeekerFor } from '../tsSeek';
@@ -240,11 +241,21 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
         // MPEG-TS seeks past the buffer and resumes by restarting there (tsSeek.ts).
         { captions: captionsDefault, signal: abort.signal, forceMpegts, seeker: tsSeekerFor(src, loadUrl) },
       );
+    // downloads: a stream the element loads from the provider directly (the browser without the
+    // proxy) waits until a download holding the connection it needs has let go; the proxy waits
+    // on its own.
+    const room = loadUrl === src.url ? reportAnswered(src) : null;
     let cancelStart: () => void = () => undefined;
     void new Promise<Engine>((resolve, reject) => {
       cancelStart = afterPaint(() => {
         if (disposed) return;
-        start().then(resolve, reject);
+        if (!room) {
+          start().then(resolve, reject);
+          return;
+        }
+        void room.then(() => {
+          if (!disposed) start().then(resolve, reject);
+        });
       });
     }).then((engine) => {
       if (disposed) {

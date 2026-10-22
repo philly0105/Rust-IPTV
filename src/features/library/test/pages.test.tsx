@@ -85,7 +85,7 @@ describe('DownloadsPage', () => {
         .map((b) => b.dataset['action'])
         .filter(Boolean);
     expect(actions('downloading')).toEqual(['pause', 'cancel']);
-    expect(actions('queued')).toEqual(['pause', 'cancel']);
+    expect(actions('queued')).toEqual(['pause', 'cancel', 'next']);
     expect(actions('paused')).toEqual(['resume', 'remove']);
     expect(actions('failed')).toEqual(['retry', 'remove']);
     expect(actions('canceled')).toEqual(['retry', 'remove']);
@@ -106,6 +106,15 @@ describe('DownloadsPage', () => {
     await waitFor(() => expect(rpc.callsOf('downloads.pause')).toEqual([{ id: 11 }]));
     fireEvent.click(screen.getByRole('button', { name: 'Retry Title failed' }));
     await waitFor(() => expect(rpc.callsOf('downloads.retry')).toEqual([{ id: 14 }]));
+  });
+
+  it('moves a queued row to the front of the queue with Download next', async () => {
+    rpc.handlers['downloads.list'] = () => list;
+    rpc.handlers['downloads.prioritize'] = () => undefined;
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download Title queued next' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.prioritize')).toEqual([{ id: 10 }]));
   });
 
   it('offers Try again on a retryable failure and re-issues the command', async () => {

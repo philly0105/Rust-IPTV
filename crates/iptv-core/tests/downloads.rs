@@ -151,6 +151,17 @@ impl Ctx {
     fn downloads_dir(&self) -> PathBuf {
         self.state.downloads_dir()
     }
+
+    /// Requests the mock has served on `path` so far.
+    async fn requests(&self, path: &str) -> u64 {
+        let v: Value = reqwest::get(self.srv.url("/__mock/stats"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        v["requests"][path].as_u64().unwrap_or(0)
+    }
 }
 
 fn part_of(file_path: &str) -> PathBuf {
@@ -294,6 +305,236 @@ async fn flaky_endpoint_retries_and_completes() {
         "flaky download byte-exact"
     );
     assert!(!part_of(&path).exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stalled_body_reconnects_after_the_idle_limit() {
+    let c = ctx().await;
+    iptv_core::downloads::set_idle_timeout(&c.state, Some(Duration::from_millis(500)));
+    // The first response stops sending after 5 MiB and keeps the connection
+    // open; without an idle limit the transfer would sit there for the
+    // client's 60 s read timeout.
+    let started = Instant::now();
+    let d = c
+        .start(
+            "1",
+            "stall",
+            "/files/flaky.bin?key=stall-once&stall=1&size=8388608",
+        )
+        .await;
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    let took = started.elapsed();
+    let path = done.file_path.unwrap();
+    assert!(is_mock_content(Path::new(&path)), "resumed byte-exact");
+    assert_eq!(file_len(Path::new(&path)), Some(8 * 1024 * 1024));
+    assert_eq!(c.requests("/files/flaky.bin").await, 2, "one reconnect");
+    assert!(took < Duration::from_secs(15), "stall cost {took:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_server_that_sends_a_few_bytes_then_stalls_is_not_retried_forever() {
+    let c = ctx().await;
+    iptv_core::downloads::set_idle_timeout(&c.state, Some(Duration::from_millis(300)));
+    // A timeout is an outage: after its run the row waits for its source
+    // (long here, so the test can look at it).
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(60),
+        Duration::from_secs(3600),
+    );
+    // `stall.m3u` sends 8 bytes with no length and then hangs, so every
+    // attempt restarts from zero and re-reads the same 8 bytes: that is not
+    // progress, and the run ends after 5 attempts.
+    let d = c.start("1", "stall", "/fail/stall.m3u").await;
+    let deadline = Instant::now() + WAIT;
+    let waiting = loop {
+        let d = c.get(d.id).await;
+        if d.waiting.is_some() {
+            break d;
+        }
+        assert!(Instant::now() < deadline, "never waited: {:?}", d.status);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert_eq!(waiting.status, DownloadStatus::Queued);
+    let wait = waiting.waiting.unwrap();
+    assert_eq!(wait.reason, iptv_core::model::WaitReason::Provider);
+    assert!(wait.until.is_some());
+    assert_eq!(
+        c.requests("/fail/stall.m3u").await,
+        u64::from(iptv_core::downloads::transfer::MAX_ATTEMPTS)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_row_that_waits_too_long_for_its_source_fails_with_the_reason() {
+    let c = ctx().await;
+    iptv_core::downloads::set_idle_timeout(&c.state, Some(Duration::from_millis(200)));
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_millis(100),
+        Duration::from_millis(1500),
+    );
+    let d = c.start("1", "stall", "/fail/stall.m3u").await;
+    let failed = c.wait_status(d.id, DownloadStatus::Failed).await;
+    assert!(
+        c.requests("/fail/stall.m3u").await
+            > u64::from(iptv_core::downloads::transfer::MAX_ATTEMPTS)
+    );
+    assert!(
+        failed
+            .error_message
+            .as_deref()
+            .unwrap_or("")
+            .contains("stopped sending data"),
+        "{:?}",
+        failed.error_message
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_claim_is_retried_instead_of_leaving_the_row_queued() {
+    let c = ctx().await;
+    // Every claim of the first run fails, so the id goes back in the queue
+    // after the retry delay, and the next run's first claim fails as well.
+    let attempts = iptv_core::downloads::manager::CLAIM_ATTEMPTS;
+    iptv_core::downloads::fail_next_claims(&c.state, attempts + 1, Duration::from_millis(200));
+    let d = c.start("1", "claim", "/files/video.bin?size=1048576").await;
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn download_next_takes_the_next_free_slot_and_keeps_its_place() {
+    let c = ctx().await;
+    // a frees its slot after about 0.5 s; b holds the other for about 4 s.
+    let a = c
+        .start("a", "a", "/files/video.bin?size=262144&kbps=512")
+        .await;
+    let b = c
+        .start("b", "b", "/files/video.bin?size=2097152&kbps=512")
+        .await;
+    let older = c
+        .start("c", "c", "/files/video.bin?size=1048576&kbps=1024")
+        .await;
+    let next = c
+        .start("d", "d", "/files/video.bin?size=1048576&kbps=1024")
+        .await;
+    c.ok("downloads.prioritize", json!({"id": next.id})).await;
+
+    // The saved order (what init restores) lists it ahead of the older row.
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let order = c
+            .state
+            .db_call(|conn| iptv_core::downloads::store::load_queue_order(conn))
+            .await
+            .unwrap();
+        let at = |id: i64| order.iter().position(|x| *x == id);
+        if matches!((at(next.id), at(older.id)), (Some(n), Some(o)) if n < o) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "order never saved: {order:?}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    c.wait_status(next.id, DownloadStatus::Downloading).await;
+    assert_eq!(c.get(older.id).await.status, DownloadStatus::Queued);
+    assert_eq!(c.get(b.id).await.status, DownloadStatus::Downloading);
+    for id in [a.id, b.id, older.id, next.id] {
+        c.wait_status(id, DownloadStatus::Completed).await;
+    }
+
+    // Only a queued row can move ahead.
+    let paused = c
+        .start("e", "e", "/files/video.bin?size=1048576&kbps=64")
+        .await;
+    c.ok("downloads.pause", json!({"id": paused.id})).await;
+    let err = c
+        .call("downloads.prioritize", json!({"id": paused.id}))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, RpcErrorCode::Conflict);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_provider_outage_requeues_rows_and_the_queue_completes_after_it() {
+    let c = ctx().await;
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(1),
+        Duration::from_secs(3600),
+    );
+    let mut ids = Vec::new();
+    for i in 0..6 {
+        let path = format!("/files/video.bin?size=1048576&kbps=1024&n={i}");
+        ids.push(c.start(&i.to_string(), "outage", &path).await.id);
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Longer than a run's in-task retries (about 4.5 s).
+    reqwest::get(c.srv.url("/__mock/outage?ms=6000"))
+        .await
+        .unwrap();
+    let deadline = Instant::now() + WAIT;
+    let mut waited = false;
+    loop {
+        let list: Vec<Download> =
+            serde_json::from_value(c.ok("downloads.list", Value::Null).await).unwrap();
+        assert!(
+            list.iter().all(|d| d.status != DownloadStatus::Failed),
+            "{:?}",
+            list.iter().map(|d| &d.error_message).collect::<Vec<_>>()
+        );
+        waited |= list.iter().any(|d| {
+            d.waiting
+                .as_ref()
+                .is_some_and(|w| w.reason == iptv_core::model::WaitReason::Provider)
+        });
+        if list.iter().all(|d| d.status == DownloadStatus::Completed) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "queue never finished");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(waited, "rows said they wait for the provider");
+    for id in ids {
+        assert!(is_mock_content(Path::new(
+            &c.get(id).await.file_path.unwrap()
+        )));
+    }
+    // A missing file still fails at once: only the source waits.
+    let missing = c.start("missing", "missing", "/fail/404.m3u").await;
+    c.wait_status(missing.id, DownloadStatus::Failed).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_file_that_keeps_failing_does_not_hold_up_its_source() {
+    let c = ctx().await;
+    // Long enough that the failing rows wait for the whole test.
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_millis(200),
+        Duration::from_secs(3600),
+    );
+    // Two broken files take both of the source's slots and answer 503
+    // every time; a good one is queued behind them.
+    let mut bad = Vec::new();
+    for i in 0..2 {
+        bad.push(c.start(&format!("bad{i}"), "bad", "/fail/503.m3u").await.id);
+    }
+    let good = c
+        .start("good", "good", "/files/video.bin?size=1048576")
+        .await;
+    let started = Instant::now();
+    let done = c.wait_status(good.id, DownloadStatus::Completed).await;
+    let took = started.elapsed();
+    eprintln!("good file behind two failing ones completed after {took:?}");
+    assert!(took < Duration::from_secs(20), "waited {took:?}");
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+    // The broken ones still wait for their source (or try it again); they
+    // fail only after the wait limit.
+    for id in bad {
+        assert_ne!(c.get(id).await.status, DownloadStatus::Failed);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -568,6 +809,8 @@ fn every_c4_download_command_is_registered() {
         "downloads.setDir",
         "downloads.dir",
         "downloads.setPosition",
+        "downloads.prioritize",
+        "downloads.playback",
         "myvideos.list",
         "myvideos.playSource",
     ];

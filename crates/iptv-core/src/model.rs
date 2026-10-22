@@ -802,6 +802,35 @@ pub struct Download {
     pub file_available: Option<bool>,
     #[serde(default)]
     pub position_seconds: i64,
+    /// Why a queued row waits, when it is more than its turn (live, never
+    /// stored).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<DownloadWait>,
+    /// Connections a running transfer holds, when more than one (live).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connections: Option<usize>,
+}
+
+/// Why a queued download waits (`Download.waiting`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadWait {
+    pub reason: WaitReason,
+    /// When the next attempt is due (RFC 3339), for a source that refused or
+    /// was unreachable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WaitReason {
+    /// Playback on the same source uses the connection the account allows.
+    Playback,
+    /// Other downloads, recordings or devices use the source's connections.
+    Connection,
+    /// The source could not be reached; it is tried again at `until`.
+    Provider,
 }
 
 // ---------------------------------------------------------------------------
@@ -1185,6 +1214,10 @@ pub struct Settings {
     // recording:
     /// Minutes a scheduled recording starts before the programme (0..=60).
     pub recording_padding_before_minutes: u32,
+    // downloads:
+    /// Sources whose downloads use one connection per file ("Connections
+    /// per download: 1"); every other source is Auto.
+    pub download_single_connection: Vec<String>,
     /// Minutes a scheduled recording runs past the programme end (0..=120).
     pub recording_padding_after_minutes: u32,
     /// Guide reminders fire while the app runs.
@@ -1287,6 +1320,7 @@ impl Default for Settings {
             epg_short_fallback: true,
             // recording:
             recording_padding_before_minutes: 1,
+            download_single_connection: Vec::new(),
             recording_padding_after_minutes: 5,
             reminders_enabled: true,
             reminder_lead_minutes: 2,

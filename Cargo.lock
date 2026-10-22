@@ -2192,6 +2192,7 @@ dependencies = [
  "image",
  "iptv-fixtures",
  "iptv-mock",
+ "libc",
  "memchr",
  "memory-stats",
  "once_cell",

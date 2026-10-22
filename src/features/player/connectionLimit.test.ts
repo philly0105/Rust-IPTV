@@ -154,6 +154,27 @@ describe('useConnectionCounts', () => {
     usePlayerStore.setState({ source: undefined, status: 'idle', error: undefined });
   });
 
+  it("counts downloads running from the source as the app's own", async () => {
+    resetOwnStreams();
+    rpcMock.mockImplementation((cmd: string) =>
+      Promise.resolve(
+        cmd === 'recordings.list'
+          ? []
+          : cmd === 'downloads.list'
+            ? [
+                { status: 'downloading', ref: { sourceId: 'e', contentType: 'movie', itemId: '1' } },
+                { status: 'queued', ref: { sourceId: 'e', contentType: 'movie', itemId: '2' } },
+                { status: 'downloading', ref: { sourceId: 'other', contentType: 'movie', itemId: '3' } },
+              ]
+            : { sourceId: 'e', kind: 'xtream', isTrial: false, checkedAt: new Date().toISOString(), activeCons: 1, maxConnections: 1 },
+      ),
+    );
+    const { result } = renderHook(() => useConnectionCounts({ message: 'HTTP 503' }, 'e'));
+    await waitFor(() => expect(result.current).toEqual({ active: 1, max: 1, own: 1 }));
+    // The download holds the one connection: not someone else's stream.
+    expect(classifyStreamError({ message: 'HTTP 503', connections: result.current })).toBe('server');
+  });
+
   it('asks nothing while there is no error', () => {
     renderHook(() => useConnectionCounts({ message: undefined }, 'src'));
     expect(rpcMock).not.toHaveBeenCalled();

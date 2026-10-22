@@ -145,6 +145,35 @@ describe('download rows', () => {
     expect(screen.getByTestId('download-actions').className).toContain('pointer-fine:opacity-0');
   });
 
+  it('say what a queued row waits for: its turn, playback, or a free connection on its source', () => {
+    const detail = () => screen.getByTestId('download-detail').textContent;
+    row(makeDownload({ id: 4, status: 'queued' }), ['pause', 'cancel', 'next']);
+    expect(detail()).toBe('Starts when a slot frees up');
+    cleanup();
+    row(makeDownload({ id: 5, status: 'queued', waiting: { reason: 'playback' } }), ['pause', 'cancel', 'next']);
+    expect(detail()).toBe('Waits until playback from this source stops');
+    cleanup();
+    row(makeDownload({ id: 6, status: 'queued', waiting: { reason: 'connection' } }), ['pause', 'cancel', 'next']);
+    expect(detail()).toBe('Waits for a free connection on this source');
+    cleanup();
+    row(makeDownload({ id: 7, status: 'queued', waiting: { reason: 'connection', until: '2026-10-22T14:05:00Z' } }), ['pause', 'cancel', 'next']);
+    expect(detail()).toMatch(/^The provider has no free connection\. Trying again at \S/);
+    cleanup();
+    row(makeDownload({ id: 8, status: 'queued', waiting: { reason: 'provider', until: '2026-10-22T14:05:00Z' } }), ['pause', 'cancel', 'next']);
+    expect(detail()).toMatch(/^Can't reach the provider\. Trying again at \S/);
+  });
+
+  it('say how many connections a split transfer holds', async () => {
+    const { progressStore } = await import('../lib/progress');
+    progressStore.ingest({ id: 9, bytesDownloaded: 1000, totalBytes: 4000, bytesPerSecond: 500 });
+    row(makeDownload({ id: 9, status: 'downloading', bytesDownloaded: 1000, totalBytes: 4000, connections: 2 }), ['pause', 'cancel']);
+    expect(screen.getByTestId('download-detail').textContent).toContain('2 connections');
+    cleanup();
+    progressStore.ingest({ id: 10, bytesDownloaded: 1000, totalBytes: 4000, bytesPerSecond: 500 });
+    row(makeDownload({ id: 10, status: 'downloading', bytesDownloaded: 1000, totalBytes: 4000 }), ['pause', 'cancel']);
+    expect(screen.getByTestId('download-detail').textContent).not.toContain('connections');
+  });
+
   it('reserve the widest row\'s actions column on every row, so bars and badges end on one line', () => {
     row(makeDownload({ id: 3, status: 'paused' }), ['resume', 'remove']);
     expect(screen.getByTestId('download-actions').className).toContain('pointer-fine:w-[calc(3*2rem+2*0.125rem)]');

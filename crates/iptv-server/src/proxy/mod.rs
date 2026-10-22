@@ -366,6 +366,12 @@ async fn proxy(
             .ok_or_else(|| Fail::coded(RpcError::not_found(format!("source {id} not found"))))?,
         None => SourceAccess::default(),
     };
+    // The stream counts as playback from its source while its body is open,
+    // and downloads holding the connection it needs let go first.
+    let hold = match &source_id {
+        Some(id) => Some(iptv_core::downloads::open_stream(&s.app, id).await),
+        None => None,
+    };
     let upstream = Upstream {
         own: s.proxy.clients.get(access.authority.as_ref()),
         open: s.proxy.clients.get(None),
@@ -436,7 +442,7 @@ async fn proxy(
     let resume_from = Some((upstream.clone(), url));
     let park_as = (method == Method::GET).then(|| (Arc::clone(&s.proxy.parking), key, ticket.gen));
     if let Some(out) = respond(resp, current.clone(), rewriter, head, resume_from, park_as).await? {
-        return Ok(out);
+        return Ok(holding(out, hold));
     }
     // The client asked for a byte range of what turned out to be a playlist.
     // A slice of a playlist cannot be rewritten, so fetch the whole of it
@@ -453,11 +459,27 @@ async fn proxy(
     check_upstream_status(resp.status())?;
     let rewriter =
         hls::HlsRewriter::with_params(current.clone(), &params).at_path(&s.opts.proxy_path);
-    respond(resp, current, rewriter, head, None, None).await?.ok_or_else(|| {
-        Fail::coded(RpcError::network(
-            "the stream server answered with part of a playlist although the whole one was requested",
-        ))
-    })
+    respond(resp, current, rewriter, head, None, None)
+        .await?
+        .map(|out| holding(out, hold))
+        .ok_or_else(|| {
+            Fail::coded(RpcError::network(
+                "the stream server answered with part of a playlist although the whole one was requested",
+            ))
+        })
+}
+
+/// Keeps `hold` alive as long as the response body.
+fn holding(res: Response, hold: Option<iptv_core::downloads::StreamHold>) -> Response {
+    let Some(hold) = hold else {
+        return res;
+    };
+    let (parts, body) = res.into_parts();
+    let body = body.into_data_stream().map(move |chunk| {
+        let _ = &hold;
+        chunk
+    });
+    Response::from_parts(parts, Body::from_stream(body))
 }
 
 /// 4xx pass through so players see 404/403/416; 5xx become 502.

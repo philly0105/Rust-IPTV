@@ -17,7 +17,10 @@
 //! - `/files/...` download targets with Range, a flaky one and a chunked one.
 //!   See [`files`].
 //! - `/media/...`, `/img/...` sample media and generated artwork.
-//! - `/health`, `/echo/headers`, `/__mock/stats`, `/__mock/reset`.
+//! - `/health`, `/echo/headers`, `/__mock/stats`, `/__mock/reset`,
+//!   `/__mock/limited-vod` (files of the `limit<N>` Xtream accounts),
+//!   `/__mock/outage?ms=N` (`/files/*` answers 503 for N ms),
+//!   `/__mock/etag-bump` (a new ETag for `video.bin?versioned=1`).
 //!
 //! Every response carries `Access-Control-Allow-Origin: *`.
 //!
@@ -62,7 +65,15 @@ pub struct MockState {
     /// Stalker token generation (token is `mock-token-<n>`).
     pub(crate) stalker_generation: AtomicU32,
     /// Request counts per path.
-    stats: Mutex<BTreeMap<String, u64>>,
+    pub(crate) stats: Mutex<BTreeMap<String, u64>>,
+    /// Open file bodies per `limit<N>` Xtream account.
+    pub(crate) open_streams: Mutex<HashMap<String, u32>>,
+    /// Size and KiB/s of a `limit<N>` account's files.
+    pub(crate) limited_vod: Mutex<(u64, u64)>,
+    /// `/files/*` answers 503 until then (`/__mock/outage`).
+    pub(crate) outage_until: Mutex<Option<std::time::Instant>>,
+    /// Version in the ETag of `video.bin?versioned=1`.
+    pub(crate) etag_version: AtomicU32,
 }
 
 impl MockState {
@@ -72,6 +83,10 @@ impl MockState {
             flaky_seen: Mutex::new(HashSet::new()),
             stalker_generation: AtomicU32::new(1),
             stats: Mutex::new(BTreeMap::new()),
+            open_streams: Mutex::new(HashMap::new()),
+            limited_vod: Mutex::new((LIMITED_VOD_LEN, 0)),
+            outage_until: Mutex::new(None),
+            etag_version: AtomicU32::new(1),
         }
     }
 }
@@ -160,6 +175,12 @@ pub fn router_with_base(base: String) -> Router {
         .route("/echo/headers", get(echo_headers).post(echo_headers))
         .route("/__mock/stats", get(stats))
         .route("/__mock/reset", post(reset).get(reset))
+        .route(
+            "/__mock/limited-vod",
+            post(set_limited_vod).get(set_limited_vod),
+        )
+        .route("/__mock/outage", post(set_outage).get(set_outage))
+        .route("/__mock/etag-bump", post(etag_bump).get(etag_bump))
         .route("/img/{kind}/{file}", get(images::image))
         .route("/media/radio.mp3", get(radio))
         .route("/media/sample.mp4", get(sample_mp4))
@@ -219,6 +240,46 @@ async fn stats(State(state): State<Arc<MockState>>) -> Json<Value> {
         "stalker_token": stalker::token_for(state.stalker_generation.load(Ordering::SeqCst)),
         "flaky_failed_keys": state.flaky_seen.lock().iter().cloned().collect::<Vec<_>>()
     }))
+}
+
+/// Default size of a `limit<N>` account's files (4 MiB).
+pub const LIMITED_VOD_LEN: u64 = 4 * 1024 * 1024;
+
+#[derive(serde::Deserialize)]
+struct LimitedVod {
+    size: Option<u64>,
+    kbps: Option<u64>,
+}
+
+async fn set_limited_vod(
+    State(state): State<Arc<MockState>>,
+    Query(q): Query<LimitedVod>,
+) -> Json<Value> {
+    let mut vod = state.limited_vod.lock();
+    *vod = (
+        q.size.unwrap_or(LIMITED_VOD_LEN).min(files::MAX_SIZE),
+        q.kbps.unwrap_or(0),
+    );
+    Json(json!({ "size": vod.0, "kbps": vod.1 }))
+}
+
+#[derive(serde::Deserialize)]
+struct Outage {
+    ms: u64,
+}
+
+/// `/files/*` answers `503 Service Unavailable` for the next `ms`
+/// milliseconds, a provider outage.
+async fn set_outage(State(state): State<Arc<MockState>>, Query(q): Query<Outage>) -> Json<Value> {
+    *state.outage_until.lock() =
+        Some(std::time::Instant::now() + std::time::Duration::from_millis(q.ms));
+    Json(json!({ "ms": q.ms }))
+}
+
+/// `video.bin?versioned=1` gets a new ETag, as if the file changed.
+async fn etag_bump(State(state): State<Arc<MockState>>) -> Json<Value> {
+    let v = state.etag_version.fetch_add(1, Ordering::SeqCst) + 1;
+    Json(json!({ "version": v }))
 }
 
 async fn reset(State(state): State<Arc<MockState>>) -> Json<Value> {

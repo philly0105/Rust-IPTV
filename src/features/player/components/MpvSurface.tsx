@@ -16,6 +16,7 @@ import { bindMpvExtras, clearMpvUnavailable, markMpvUnavailable, mpvUnavailable,
 import { useStreamInfoStore } from '../streamInfo';
 import { dimOverlayCommand, LAYOUT_WATCH_SELECTOR, measureMpvLayout, measureScrim, OVERLAY_SELECTOR } from '../mpvBounds';
 import { aspectFromVideoParams, exitPip, refreshPipAspect, setPipAspectSource, togglePip, usePipStore } from '../pip';
+import { reportAnswered } from '../playbackReport';
 import { tryAnotherSource, useReconnectStore } from '../reconnect';
 import {
   DOUBLE_CLICK_MS,
@@ -525,23 +526,35 @@ export function MpvSurface({ className }: { className?: string }) {
     }
     let stale = false;
     loadedKey.current = null;
-    rpc('mpv.load', { source: src })
-      .then(() => {
-        if (stale) return;
-        loadedKey.current = loadKey;
-        // The subtitle look again for the new file (C6).
-        void sendSubtitleStyle();
-      })
-      .catch((err: unknown) => {
-        if (stale) return;
-        if (engineMissing(err)) {
-          fallBack.current(err instanceof Error ? err.message : '', true);
-          return;
-        }
-        loadedKey.current = loadKey;
-        useMediaStore.setState({ errorCode: rpcErrorCode(err) });
-        reportStatus('error', err instanceof Error ? err.message : String(err));
+    const load = (): void => {
+      rpc('mpv.load', { source: src })
+        .then(() => {
+          if (stale) return;
+          loadedKey.current = loadKey;
+          // The subtitle look again for the new file (C6).
+          void sendSubtitleStyle();
+        })
+        .catch((err: unknown) => {
+          if (stale) return;
+          if (engineMissing(err)) {
+            fallBack.current(err instanceof Error ? err.message : '', true);
+            return;
+          }
+          loadedKey.current = loadKey;
+          useMediaStore.setState({ errorCode: rpcErrorCode(err) });
+          reportStatus('error', err instanceof Error ? err.message : String(err));
+        });
+    };
+    // downloads: mpv connects to the provider itself, so a download holding the connection it
+    // needs lets go first.
+    const room = reportAnswered(src);
+    if (room) {
+      void room.then(() => {
+        if (!stale) load();
       });
+    } else {
+      load();
+    }
     return () => {
       stale = true;
     };

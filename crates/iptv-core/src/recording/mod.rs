@@ -1369,6 +1369,9 @@ async fn record(
         }
         changed(state, EVENT_RECORDINGS_UPDATE);
     }
+    // The recording takes one of the source's connections from downloads
+    // (which yield if they hold it) until it ends.
+    let _connection = crate::downloads::hold_recording(state, &row.item_ref.source_id).await;
     let until = tokio::time::Instant::now()
         + Duration::from_secs((row.effective_end() - rt.now()).max(0) as u64);
     let dir = dir(state);

@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Settings } from '@/api/types';
 
-import { eagerRoutes, installDomStubs, pending, renderAt, rpcMock, settings } from '../../sources/test/harness';
+import { eagerRoutes, installDomStubs, makeSource, pending, renderAt, rpcMock, settings } from '../../sources/test/harness';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -188,6 +188,22 @@ describe('Downloads folder (web build)', () => {
     fail = false;
     fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(screen.getByTestId('downloads-dir-path').textContent).toBe('E:/dl'));
+  });
+});
+
+describe('Connections per download', () => {
+  it('offers 1 or Auto for each source and saves the sources set to 1', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('a', { name: 'Northwind' }), makeSource('b', { name: 'Harbor' })];
+    current = settings({ downloadSingleConnection: ['b'] });
+    renderAt(settingsRoutes, '/settings/general');
+    const northwind = await screen.findByRole('radiogroup', { name: 'Connections per download from Northwind' });
+    const harbor = screen.getByRole('radiogroup', { name: 'Connections per download from Harbor' });
+    expect(within(northwind).getByRole('radio', { name: 'Auto' }).getAttribute('aria-checked')).toBe('true');
+    expect(within(harbor).getByRole('radio', { name: '1' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(within(northwind).getByRole('radio', { name: '1' }));
+    await waitFor(() => expect(rpcMock.callsOf('settings.update').at(-1)).toEqual({ patch: { downloadSingleConnection: ['b', 'a'] } }));
+    fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Connections per download from Harbor' })).getByRole('radio', { name: 'Auto' }));
+    await waitFor(() => expect(rpcMock.callsOf('settings.update').at(-1)).toEqual({ patch: { downloadSingleConnection: ['a'] } }));
   });
 });
 

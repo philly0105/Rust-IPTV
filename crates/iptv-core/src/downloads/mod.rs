@@ -1,11 +1,13 @@
 //! Download manager and My Videos (SPEC C4 `downloads.*` / `myvideos.*`, C3
 //! `downloads` table). Design notes: `docs/architecture/downloads.md`.
 //!
-//! - [`manager`]: FIFO queue runtime in `state.extensions["downloads"]`, at
-//!   most two concurrent transfers, per-task stop tokens.
+//! - [`manager`]: FIFO queue runtime in `state.extensions["downloads"]`,
+//!   per-source connection budgets, per-task stop tokens.
 //! - [`transfer`]: streaming GET with source headers, Range resume validated
 //!   by ETag/Last-Modified (`resume_validator`), in-task retry with backoff,
 //!   throttled `downloads.progress` events.
+//! - [`segments`]: one file over several Range connections, with a ranges
+//!   sidecar next to the `.part`.
 //! - [`naming`]: Windows-safe names, atomic numbered `.part` reservation,
 //!   finalize without overwrite.
 //! - [`store`]: SQL for the `downloads` table.
@@ -13,6 +15,7 @@
 pub mod manager;
 pub mod naming;
 pub mod rpc;
+pub mod segments;
 pub mod store;
 pub mod transfer;
 
@@ -26,25 +29,38 @@ use std::sync::Arc;
 pub use manager::{DownloadManager, MAX_CONCURRENT};
 
 /// Restores the queue: rows left `downloading` by a previous run become
-/// `queued`, then every queued row is scheduled in FIFO order.
+/// `queued`, then every queued row is scheduled in the saved order (see
+/// [`restore_order`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     let (requeued, queued) = state
         .db_call(|c| {
             let n = store::requeue_interrupted(c)?;
-            Ok((n, store::ids_with_status(c, DownloadStatus::Queued)?))
+            let queued = store::ids_with_status(c, DownloadStatus::Queued)?;
+            Ok((n, restore_order(queued, &store::load_queue_order(c)?)))
         })
         .await?;
-    manager::manager(&state);
+    manager::bind(&state);
+    manager::spawn_order_writer(&state);
     if requeued > 0 {
         tracing::info!(requeued, "interrupted downloads re-queued");
     }
-    for id in &queued {
-        manager::enqueue(&state, *id);
+    for (id, source) in &queued {
+        manager::enqueue(&state, *id, source);
     }
     if !queued.is_empty() {
         notify(&state);
     }
     Ok(())
+}
+
+/// `queued` (oldest first) in the order the last run left them: the saved
+/// order (running ids first, then the queue, so "Download next" and resumed
+/// rows keep their place), then rows it does not list in creation order.
+fn restore_order<T>(mut queued: Vec<(i64, T)>, saved: &[i64]) -> Vec<(i64, T)> {
+    let rank: std::collections::HashMap<i64, usize> =
+        saved.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+    queued.sort_by_key(|(id, _)| rank.get(id).copied().unwrap_or(usize::MAX));
+    queued
 }
 
 fn notify(state: &AppState) {
@@ -64,12 +80,59 @@ pub fn set_stop_timeout(state: &AppState, timeout: Option<std::time::Duration>) 
     manager::manager(state).set_stop_timeout(timeout);
 }
 
+/// Overrides how long a transfer waits for the response head and for each
+/// body chunk before it reconnects (`None` = 15 s and 20 s). Test hook; not a
+/// C4 command.
+pub fn set_idle_timeout(state: &AppState, timeout: Option<std::time::Duration>) {
+    manager::manager(state).set_idle_timeout(timeout);
+}
+
+/// Shortens the waits after a source refused or failed a download: the
+/// first backoff step (`base`, 15 s otherwise) and how long a row waits
+/// before it fails (`limit`, 2 h otherwise). Test hook; not a C4 command.
+pub fn set_wait_timing(state: &AppState, base: std::time::Duration, limit: std::time::Duration) {
+    manager::manager(state).set_wait_timing(base, limit);
+}
+
+/// Shortens how long a `downloads.playback` report counts unless renewed
+/// (90 s otherwise). Test hook; not a C4 command.
+pub fn set_playback_lease(state: &AppState, lease: std::time::Duration) {
+    manager::manager(state).set_playback_lease(lease);
+}
+
+/// Makes the downloads folder act as one that cannot leave holes (FAT,
+/// exFAT), so files keep one connection. Test hook; not a C4 command.
+pub fn set_no_holes(state: &AppState, on: bool) {
+    manager::manager(state).set_no_holes(on);
+}
+
+/// `downloads.playback`: what one player plays now (see
+/// [`manager::set_playback`]).
+pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<String>) {
+    manager::set_playback(state, client, sources).await;
+}
+
+/// See [`manager::open_stream`].
+pub use manager::{hold_recording, open_stream, RecordingHold, StreamHold};
+
+/// Makes the next `failures` queued -> downloading claims fail, and an id
+/// whose claims all failed come back after `retry` (30 s otherwise). Test
+/// hook; not a C4 command.
+pub fn fail_next_claims(state: &AppState, failures: u32, retry: std::time::Duration) {
+    manager::manager(state).fail_next_claims(failures, retry);
+}
+
 /// Public view of a row: live byte count for running transfers and derived
 /// `fileAvailable`.
 fn present(state: &AppState, mut d: Download) -> Download {
-    if let Some(bytes) = manager::manager(state).live_bytes(d.id) {
+    let m = manager::manager(state);
+    if let Some(bytes) = m.live_bytes(d.id) {
         d.bytes_downloaded = bytes;
     }
+    if d.status == DownloadStatus::Queued {
+        d.waiting = m.waiting(d.id);
+    }
+    d.connections = m.connections(d.id);
     store::derive_availability(&mut d);
     d
 }
@@ -95,6 +158,10 @@ async fn present_all(
         if let Some(bytes) = m.live_bytes(d.id) {
             d.bytes_downloaded = bytes;
         }
+        if d.status == DownloadStatus::Queued {
+            d.waiting = m.waiting(d.id);
+        }
+        d.connections = m.connections(d.id);
     }
     Ok(list)
 }
@@ -170,6 +237,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
         return Err(CoreError::Invalid("A download needs a title.".into()));
     }
     let dir = state.downloads_dir();
+    let source_id = item_ref.source_id.clone();
     let headers = req.headers.clone().unwrap_or_default();
     let episode_id = req.episode_id.clone().filter(|e| !e.is_empty());
 
@@ -207,7 +275,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                     }
                     if d.status != DownloadStatus::Completed {
                         if let Some(p) = d.file_path.as_deref() {
-                            naming::remove_regular_file(&naming::part_path(Path::new(p)))?;
+                            segments::remove_part(&naming::part_path(Path::new(p)))?;
                         }
                     }
                     store::reset(c, d.id, &new)?;
@@ -235,7 +303,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
         })
         .await?;
     if fresh {
-        manager::enqueue(state, id);
+        manager::enqueue(state, id, &source_id);
         notify(state);
     }
     get(state, id).await
@@ -283,11 +351,11 @@ pub async fn resume(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     match d.status {
         DownloadStatus::Queued | DownloadStatus::Downloading => {
             if d.status == DownloadStatus::Queued {
-                manager::enqueue(state, id);
+                manager::enqueue(state, id, &d.item_ref.source_id);
             }
             Ok(())
         }
-        DownloadStatus::Paused | DownloadStatus::Failed => requeue(state, id).await,
+        DownloadStatus::Paused | DownloadStatus::Failed => requeue(state, &d).await,
         _ => Err(conflict(&d, "resume")),
     }
 }
@@ -301,7 +369,7 @@ pub async fn retry(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     let d = get(state, id).await?;
     match d.status {
         DownloadStatus::Failed | DownloadStatus::Canceled | DownloadStatus::Paused => {
-            requeue(state, id).await
+            requeue(state, &d).await
         }
         DownloadStatus::Queued | DownloadStatus::Downloading => Ok(()),
         DownloadStatus::Completed if d.file_available == Some(true) => Err(CoreError::Conflict(
@@ -316,7 +384,7 @@ pub async fn retry(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
                     id,
                     "completed download's file is missing; downloading again"
                 );
-                manager::enqueue(state, id);
+                manager::enqueue(state, id, &d.item_ref.source_id);
                 notify(state);
             }
             Ok(())
@@ -324,7 +392,8 @@ pub async fn retry(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     }
 }
 
-async fn requeue(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
+async fn requeue(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
+    let id = d.id;
     // Conditional claim: two rapid clicks can never start two transfers.
     let claimed = state
         .db_call(move |c| {
@@ -343,10 +412,26 @@ async fn requeue(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
         .await?;
     if claimed {
         // Ahead of downloads queued since it was paused or failed.
-        manager::enqueue_front(state, id);
+        manager::enqueue_front(state, id, &d.item_ref.source_id);
         notify(state);
     }
     Ok(())
+}
+
+/// Moves a queued download to the front of the queue ("Download next"), so
+/// it takes the next free slot. A row waiting for its source after an
+/// outage or a refusal is tried again now. Running rows are left alone.
+pub async fn prioritize(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
+    let d = get(state, id).await?;
+    match d.status {
+        DownloadStatus::Queued => {
+            manager::manager(state).unblock(&d.item_ref.source_id);
+            manager::enqueue_front(state, id, &d.item_ref.source_id);
+            Ok(())
+        }
+        DownloadStatus::Downloading => Ok(()),
+        _ => Err(conflict(&d, "move ahead")),
+    }
 }
 
 /// Cancels a download and deletes its `.part`. Completed rows are refused
@@ -383,7 +468,7 @@ async fn cleanup_part(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
     };
     let id = d.id;
     let removed = tokio::task::spawn_blocking(move || {
-        naming::remove_regular_file(&naming::part_path(Path::new(&p)))
+        segments::remove_part(&naming::part_path(Path::new(&p)))
     })
     .await??;
     if removed {
@@ -413,7 +498,7 @@ pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreRe
     tokio::task::spawn_blocking(move || -> CoreResult<()> {
         if let Some(p) = path.as_deref().map(Path::new) {
             if delete_file || completed {
-                naming::remove_regular_file(&naming::part_path(p))?;
+                segments::remove_part(&naming::part_path(p))?;
             }
             if completed && delete_file {
                 naming::remove_regular_file(p)?;
@@ -623,4 +708,27 @@ pub(crate) fn open_folder(dir: &Path, select: Option<&Path>) -> CoreResult<()> {
         c
     };
     cmd.spawn().map(|_| ()).map_err(CoreError::Io)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restore_order_follows_the_saved_order_then_creation_order() {
+        // 7 was moved to the front ("Download next"), 3 was running; 9 and
+        // 10 are not in the saved order (queued after the last save).
+        let ids = |v: Vec<(i64, ())>| v.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+        let queued: Vec<(i64, ())> = [3, 5, 7, 9, 10].map(|id| (id, ())).to_vec();
+        assert_eq!(
+            ids(restore_order(queued.clone(), &[3, 7, 5])),
+            vec![3, 7, 5, 9, 10]
+        );
+        // Saved ids that are no longer queued are skipped.
+        assert_eq!(
+            ids(restore_order(queued.clone(), &[1, 7, 2])),
+            vec![7, 3, 5, 9, 10]
+        );
+        assert_eq!(ids(restore_order(queued.clone(), &[])), ids(queued));
+    }
 }

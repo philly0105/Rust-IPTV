@@ -3,10 +3,11 @@
 
 use super::manager::{DownloadManager, StopReason, TaskCtl};
 use super::naming::{self, Reservation};
+use super::segments::{self, Ranges, SegEnd};
 use super::store::{self, DownloadRow};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{apply_source_headers, backoff_delay};
-use crate::model::{ContentType, SourceKind};
+use crate::model::{ContentType, SourceKind, WaitReason};
 use crate::state::AppState;
 use futures::StreamExt;
 use reqwest::header::{
@@ -16,7 +17,7 @@ use reqwest::StatusCode;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
@@ -31,7 +32,7 @@ const PERSIST_INTERVAL: Duration = Duration::from_secs(2);
 const WRITE_BUFFER: usize = 256 * 1024;
 /// Longest single throttle sleep, so a rate-limit change (or lifting it) is
 /// noticed quickly even when one chunk is worth seconds at the old rate.
-const THROTTLE_SLICE: Duration = Duration::from_millis(200);
+pub(super) const THROTTLE_SLICE: Duration = Duration::from_millis(200);
 
 /// How a run ended.
 #[derive(Debug, Clone)]
@@ -52,6 +53,17 @@ pub enum Outcome {
         keep_part: bool,
         part: Option<PathBuf>,
     },
+    /// The source refused or was unreachable, not this file: the row goes
+    /// back to the queue and its source waits (see `manager::settle`).
+    /// `message` is what the row says if it waits too long and fails.
+    Requeue {
+        reason: WaitReason,
+        message: String,
+        bytes: i64,
+        /// The run wrote bytes the row did not have.
+        progressed: bool,
+        part: Option<PathBuf>,
+    },
 }
 
 /// Destination of a run.
@@ -67,8 +79,9 @@ enum AttemptEnd {
     Stopped(i64),
     Error {
         err: CoreError,
+        /// Offset the attempt started writing at.
+        start: i64,
         bytes: i64,
-        progressed: bool,
         discard: bool,
     },
 }
@@ -94,7 +107,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
     };
     // Xtream URLs embed credentials that can change and Stalker links expire,
     // so every run (start, resume, retry, restart) resolves a fresh URL.
-    tokio::select! {
+    let kind = tokio::select! {
         _ = ctl.token.cancelled() => {
             return Outcome::Stopped {
                 reason: ctl.reason(),
@@ -102,13 +115,22 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                 part: Some(dest.part_path.clone()),
             }
         }
-        _ = refresh_url(state, &mut row) => {}
-    }
+        kind = refresh_url(state, &mut row) => kind,
+    };
     let mut rep = Representation {
         total: row.download.total_bytes,
         validator: row.resume_validator.clone(),
+        one_connection: false,
     };
     let mut failures = 0u32;
+    // Highest offset this run has written. An attempt that restarted from
+    // zero and re-read bytes it already had made no progress: counting it
+    // would let a server that sends a few bytes and then stalls be retried
+    // forever.
+    let mut reached: Option<i64> = None;
+    // What the row had before this run: a run that re-reads it from zero
+    // (a file without resume) gets the row no further.
+    let had = row.download.bytes_downloaded;
     loop {
         match attempt(state, &row, &dest, ctl, &mut rep, mgr).await {
             AttemptEnd::Done(bytes) => return finalize(&dest, bytes).await,
@@ -121,13 +143,15 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
             }
             AttemptEnd::Error {
                 err,
+                start,
                 bytes,
-                progressed,
                 discard,
             } => {
-                if progressed {
+                let high = reached.unwrap_or(start);
+                if bytes > high {
                     failures = 0;
                 }
+                reached = Some(high.max(bytes));
                 failures += 1;
                 if err.is_retryable() && !discard && failures < MAX_ATTEMPTS {
                     let delay = backoff_delay(failures - 1);
@@ -138,6 +162,21 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                         }
                         _ = tokio::time::sleep(delay) => continue,
                     }
+                }
+                let wait = if discard {
+                    None
+                } else {
+                    wait_reason(state, mgr, &err, kind, &row.download.item_ref.source_id).await
+                };
+                if let Some(reason) = wait {
+                    tracing::info!(id, ?reason, error = %err, "download waits for its source");
+                    return Outcome::Requeue {
+                        reason,
+                        message: user_message(&err),
+                        bytes,
+                        progressed: reached.is_some_and(|r| r > had),
+                        part: Some(dest.part_path.clone()),
+                    };
                 }
                 let keep = !discard && bytes > 0 && rep.total.is_some();
                 return failed(
@@ -155,16 +194,8 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
 /// Xtream and Stalker sources and persists it. M3U/file sources, catch-up
 /// programmes (live and radio refs), removed sources, and resolution failures
 /// keep the stored URL; the transfer then reports whatever the server says
-/// about it.
-async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
-    // A catch-up programme's archive URL cannot be rebuilt from its ref: that
-    // would resolve the channel's live stream.
-    if matches!(
-        row.download.item_ref.content_type,
-        ContentType::Live | ContentType::Radio
-    ) {
-        return;
-    }
+/// about it. Returns the source's kind (`None` when it was removed).
+async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) -> Option<SourceKind> {
     let item_ref = row.download.item_ref.clone();
     let episode_id = row.download.episode_id.clone();
     let sid = item_ref.source_id.clone();
@@ -177,25 +208,36 @@ async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
                 .optional()?,
             )
         })
-        .await;
-    let resolved = match kind.ok().flatten().as_deref().map(SourceKind::from_str) {
-        Some(Ok(SourceKind::Xtream)) => {
+        .await
+        .ok()
+        .flatten()
+        .and_then(|k| SourceKind::from_str(&k).ok());
+    // A catch-up programme's archive URL cannot be rebuilt from its ref: that
+    // would resolve the channel's live stream.
+    if matches!(
+        row.download.item_ref.content_type,
+        ContentType::Live | ContentType::Radio
+    ) {
+        return kind;
+    }
+    let resolved = match kind {
+        Some(SourceKind::Xtream) => {
             crate::xtream::service::stream_url(state, &item_ref, episode_id.as_deref()).await
         }
-        Some(Ok(SourceKind::Stalker)) => {
+        Some(SourceKind::Stalker) => {
             crate::stalker::playback::stream_url(state, &item_ref, episode_id.as_deref()).await
         }
-        _ => return,
+        _ => return kind,
     };
     let src = match resolved {
         Ok(src) => src,
         Err(err) => {
             tracing::warn!(id = row.download.id, error = %err, "could not re-resolve download URL; using the stored one");
-            return;
+            return kind;
         }
     };
     if src.url == row.download.url && src.headers.as_ref().is_none_or(|h| *h == row.headers) {
-        return;
+        return kind;
     }
     row.download.url = src.url;
     if let Some(h) = src.headers {
@@ -212,6 +254,79 @@ async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
     {
         tracing::warn!(id, error = %err, "could not persist the re-resolved download URL");
     }
+    kind
+}
+
+/// Whether a run that ended on `err` should wait for its source instead of
+/// failing. An unreachable or failing provider (network errors, refused
+/// connections and unknown hosts included, timeouts, 429 and 5xx) is an
+/// outage, not a broken file: the row waits and its source is tried again
+/// later, so an outage costs one probe per step instead of failing the whole
+/// queue. An Xtream panel answers 401/403 both for wrong credentials and
+/// when every connection is in use, so a refusal there asks the panel for
+/// the account (at most once per [`crate::account::FORCE_MIN_AGE`] per
+/// source): when the credentials work it was the connection limit, and the
+/// row waits for a free connection; when the panel rejects them it fails
+/// with the credentials advice as before; when the panel cannot be asked it
+/// is an outage. Everything else (404/410, a disk error, a certificate that
+/// is not valid, a Content-Range mismatch) fails as before.
+async fn wait_reason(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    err: &CoreError,
+    kind: Option<SourceKind>,
+    source: &str,
+) -> Option<WaitReason> {
+    match err {
+        CoreError::Auth(_) if kind == Some(SourceKind::Xtream) => {
+            match credentials_work(state, mgr, source).await {
+                Some(true) => Some(WaitReason::Connection),
+                Some(false) => None,
+                None => Some(WaitReason::Provider),
+            }
+        }
+        CoreError::Network(m) if crate::http::is_certificate_failure(m) => None,
+        CoreError::Network(_) | CoreError::Timeout(_) | CoreError::Server(_) => {
+            Some(WaitReason::Provider)
+        }
+        _ => None,
+    }
+}
+
+/// How long the account check after a refusal may take.
+const ACCOUNT_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Asks the Xtream panel for the account: `Some(true)` when the credentials
+/// work, `Some(false)` when the panel rejects them, `None` when it could not
+/// be asked. A good answer is stored like any account check, so the source's
+/// connection limit is fresh too.
+async fn credentials_work(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    source: &str,
+) -> Option<bool> {
+    if let Some(ok) = mgr.recent_check(source) {
+        return Some(ok);
+    }
+    let checked = tokio::time::timeout(
+        ACCOUNT_CHECK_TIMEOUT,
+        crate::xtream::service::account_info(state, source),
+    )
+    .await
+    .ok()?;
+    let ok = match checked {
+        Ok(info) => {
+            crate::account::remember_xtream(state, source, info).await;
+            true
+        }
+        Err(CoreError::Auth(_)) => false,
+        Err(err) => {
+            tracing::info!(source, error = %err, "account check after a refused download failed");
+            return None;
+        }
+    };
+    mgr.note_check(source, ok);
+    Some(ok)
 }
 
 fn failed(message: String, bytes: i64, keep_part: bool, part: Option<PathBuf>) -> Outcome {
@@ -225,7 +340,7 @@ fn failed(message: String, bytes: i64, keep_part: bool, part: Option<PathBuf>) -
 
 /// A non-success answer to the file request, as an error whose kind picks
 /// the advice [`user_message`] adds.
-fn http_status_error(status: reqwest::StatusCode) -> CoreError {
+pub(super) fn http_status_error(status: reqwest::StatusCode) -> CoreError {
     let code = status.as_u16();
     match code {
         401 | 403 => CoreError::Auth(format!("The provider refused the request (HTTP {code})")),
@@ -277,6 +392,10 @@ fn user_message(err: &CoreError) -> String {
 struct Representation {
     total: Option<i64>,
     validator: Option<String>,
+    /// A segment answer did not match, the provider refused an extra
+    /// connection, or the file system cannot leave holes: the rest of this
+    /// run uses one connection.
+    one_connection: bool,
 }
 
 /// Reuses the row's retained `.part`, or reserves a fresh numbered one, and
@@ -304,8 +423,23 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                     std::fs::create_dir_all(&default_dir)?;
                     let fresh = naming::reserve(&default_dir, &requested)?;
                     if std::fs::rename(&part, &fresh.part_path).is_err() {
-                        if let Err(e) = naming::remove_regular_file(&part) {
+                        if let Err(e) = segments::remove_part(&part) {
                             tracing::warn!(id, error = %e, "could not delete the old partial download");
+                        }
+                    } else if segments::ranges_path(&part).is_file() {
+                        // A split partial needs its sidecar; without it the
+                        // moved one starts over.
+                        if std::fs::rename(
+                            segments::ranges_path(&part),
+                            segments::ranges_path(&fresh.part_path),
+                        )
+                        .is_err()
+                        {
+                            std::fs::OpenOptions::new()
+                                .write(true)
+                                .truncate(true)
+                                .open(&fresh.part_path)?;
+                            segments::remove(&part);
                         }
                     }
                     return Ok(fresh);
@@ -339,9 +473,15 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
         reservation.file_name.clone(),
         reservation.final_path.to_string_lossy().into_owned(),
     );
-    state
-        .db_call(move |c| store::set_destination(c, id, &name, &path))
-        .await?;
+    // `start` already stored the destination it reserved, so a fresh run
+    // usually has nothing to write here.
+    if d.file_name.as_deref() != Some(name.as_str())
+        || d.file_path.as_deref() != Some(path.as_str())
+    {
+        state
+            .db_call(move |c| store::set_destination(c, id, &name, &path))
+            .await?;
+    }
     Ok(Dest {
         file_name: reservation.file_name,
         final_path: reservation.final_path,
@@ -350,7 +490,7 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
 }
 
 /// `bytes 100-199/2000` -> (100, Some(2000)); `/*` -> None total.
-fn parse_content_range(v: &str) -> Option<(i64, Option<i64>)> {
+pub(super) fn parse_content_range(v: &str) -> Option<(i64, Option<i64>)> {
     let rest = v.trim().strip_prefix("bytes")?.trim();
     let (range, total) = rest.split_once('/')?;
     let (start, _end) = range.split_once('-')?;
@@ -387,16 +527,51 @@ async fn attempt(
     mgr: &DownloadManager,
 ) -> AttemptEnd {
     let id = row.download.id;
-    let err = |err: CoreError, bytes: i64| AttemptEnd::Error {
+    let error = |err: CoreError, start: i64, bytes: i64| AttemptEnd::Error {
         err,
+        start,
         bytes,
-        progressed: false,
         discard: false,
     };
 
+    // A sidecar means the `.part` was written in segments: its length says
+    // nothing, and each segment resumes where it got to.
+    let part = dest.part_path.clone();
+    let sidecar = tokio::task::spawn_blocking(move || segments::load(&part))
+        .await
+        .unwrap_or(segments::Sidecar::Invalid);
+    match sidecar {
+        segments::Sidecar::None => {}
+        segments::Sidecar::Valid(ranges)
+            if Some(ranges.total) == rep.total
+                && rep.validator.as_deref() == Some(&ranges.validator) =>
+        {
+            return segmented(state, row, dest, ctl, mgr, rep, ranges, None).await;
+        }
+        // Not this file's layout, or not one the `.part` holds: start over.
+        _ => {
+            let part = dest.part_path.clone();
+            let cleared = tokio::task::spawn_blocking(move || {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(&part)?;
+                // Only once the `.part` is empty: with holes and no
+                // sidecar, its length would be taken for what it holds.
+                segments::remove(&part);
+                Ok::<_, std::io::Error>(())
+            })
+            .await;
+            if let Ok(Err(e)) | Err(e) = cleared.map_err(std::io::Error::other) {
+                return error(CoreError::Io(e), 0, 0);
+            }
+            rep.total = None;
+            rep.validator = None;
+        }
+    }
     let existing = match naming::regular_file_len(&dest.part_path) {
         Ok(len) => len.unwrap_or(0) as i64,
-        Err(e) => return err(CoreError::Io(e), 0),
+        Err(e) => return error(CoreError::Io(e), 0, 0),
     };
     // A partial is resumable only with evidence about the representation.
     let resume_from = if existing > 0 && (rep.validator.is_some() || rep.total.is_some()) {
@@ -415,39 +590,48 @@ async fn attempt(
     let client = crate::http::source_client(state, &row.download.item_ref.source_id, url).await;
     let mut req =
         apply_source_headers(client.get(url), &row.headers).header(ACCEPT_ENCODING, "identity");
+    // A file may go over several connections: a fresh start asks for a range
+    // too, since only a `206` with a total and a validator shows it can.
+    let source = row.download.item_ref.source_id.as_str();
+    let splittable = may_split(state, source, mgr, rep.one_connection);
+    let ranged = resume_from > 0 || splittable;
     if resume_from > 0 {
         req = req.header(RANGE, format!("bytes={resume_from}-"));
         if let Some(v) = &rep.validator {
             req = req.header(IF_RANGE, v.as_str());
         }
+    } else if splittable {
+        req = req.header(RANGE, "bytes=0-");
     }
+    let host = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "the server".into());
+    // A panel that accepts the connection and never answers, or stops in the
+    // middle of the body, costs one idle limit and a reconnect with Range
+    // instead of the shared client's 60 s read timeout.
+    let (head_limit, idle_limit) = mgr.idle_timeouts();
     let resp = tokio::select! {
         _ = ctl.token.cancelled() => return AttemptEnd::Stopped(resume_from),
-        r = req.send() => match r {
+        // send_within names the host, and a redirect the server-mode guard
+        // blocked is `invalid` (not retried), not a network failure.
+        r = crate::http::send_within(req, head_limit) => match r {
             Ok(r) => r,
-            // transport_error: a redirect the server-mode guard blocked is
-            // `invalid` (not retried), not a network failure.
-            Err(e) => {
-                let host = url::Url::parse(&row.download.url)
-                    .ok()
-                    .and_then(|u| u.host_str().map(str::to_owned))
-                    .unwrap_or_else(|| "the server".into());
-                return err(crate::http::transport_error(&host, e), resume_from);
-            }
+            Err(e) => return error(e, resume_from, resume_from),
         },
     };
 
     let status = resp.status();
     let mut offset: i64;
-    if status == StatusCode::PARTIAL_CONTENT && resume_from > 0 {
+    if status == StatusCode::PARTIAL_CONTENT && ranged {
         let Some((start, total)) = header_str(&resp, CONTENT_RANGE)
             .as_deref()
             .and_then(parse_content_range)
         else {
             return AttemptEnd::Error {
                 err: CoreError::Invalid("server sent an unreadable Content-Range".into()),
+                start: resume_from,
                 bytes: resume_from,
-                progressed: false,
                 discard: true,
             };
         };
@@ -456,10 +640,15 @@ async fn attempt(
                 err: CoreError::Invalid(format!(
                     "server resumed at byte {start} instead of {resume_from}"
                 )),
+                start: resume_from,
                 bytes: resume_from,
-                progressed: false,
                 discard: true,
             };
+        }
+        if resume_from == 0 {
+            // A fresh start: whatever the row knew described another answer.
+            rep.total = None;
+            rep.validator = None;
         }
         if let (Some(known), Some(t)) = (rep.total, total) {
             if known != t {
@@ -467,8 +656,8 @@ async fn attempt(
                     err: CoreError::Invalid(
                         "the remote file changed since the download started".into(),
                     ),
+                    start: resume_from,
                     bytes: resume_from,
-                    progressed: false,
                     discard: true,
                 };
             }
@@ -483,12 +672,15 @@ async fn attempt(
     } else if status == StatusCode::RANGE_NOT_SATISFIABLE && resume_from > 0 {
         // Our partial does not fit the remote file: restart from zero.
         if let Err(e) = truncate(&dest.part_path).await {
-            return err(CoreError::Io(e), resume_from);
+            return error(CoreError::Io(e), resume_from, resume_from);
         }
+        let part = dest.part_path.clone();
+        let _ = tokio::task::spawn_blocking(move || segments::remove(&part)).await;
         rep.total = None;
         rep.validator = None;
-        return err(
+        return error(
             CoreError::Network("server rejected the resume range; restarting".into()),
+            0,
             0,
         );
     } else if status.is_success() {
@@ -502,7 +694,7 @@ async fn attempt(
             .filter(|n| *n > 0);
         rep.validator = validator_of(&resp);
     } else {
-        return err(http_status_error(status), resume_from);
+        return error(http_status_error(status), resume_from, resume_from);
     }
 
     let (total, validator) = (rep.total, rep.validator.clone());
@@ -513,6 +705,29 @@ async fn attempt(
         tracing::warn!(id, error = %e, "could not record download size");
     }
 
+    // Over several connections when the answer allows it and the source has
+    // spare ones now; otherwise a check every second hands this stream over
+    // when they free up (the rest of a season finished, playback stopped).
+    let split_total = rep
+        .total
+        .filter(|_| splittable && status == StatusCode::PARTIAL_CONTENT && rep.validator.is_some());
+    let worth_splitting =
+        |offset: i64| split_total.is_some_and(|t| t - offset >= 2 * segments::MIN_SEGMENT);
+    if worth_splitting(offset) && mgr.connection_allowance(ctl) >= 2 {
+        if sparse(mgr, dest).await {
+            let ranges = Ranges::new(
+                rep.total.unwrap_or(0),
+                rep.validator.clone().unwrap_or_default(),
+                offset,
+            );
+            let first = Some((resp.bytes_stream().boxed(), offset));
+            return segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+        }
+        // The file system cannot leave holes: the rest of the run keeps
+        // one connection and stops asking.
+        rep.one_connection = true;
+    }
+
     let file = tokio::fs::OpenOptions::new()
         .write(true)
         .append(offset > 0)
@@ -521,19 +736,28 @@ async fn attempt(
         .await;
     let file = match file {
         Ok(f) => f,
-        Err(e) => return err(CoreError::Io(e), offset),
+        Err(e) => return error(CoreError::Io(e), offset, offset),
     };
     let mut out = tokio::io::BufWriter::with_capacity(WRITE_BUFFER, file);
     let started_at = offset;
     let mut progress = Progress::new(offset);
-    let mut stream = resp.bytes_stream();
+    let mut stream = resp.bytes_stream().boxed();
     let mut pace = Pace::new(mgr.rate_limit(), offset);
+    let mut split_checked = Instant::now();
+    let mut hand_over = false;
 
     let end = loop {
+        // The idle timer starts after throttle(), so a rate cap never trips it.
         let next = tokio::select! {
             biased;
             _ = ctl.token.cancelled() => break None,
-            n = stream.next() => n,
+            n = tokio::time::timeout(idle_limit, stream.next()) => match n {
+                Ok(n) => n,
+                Err(_) => break Some(Err(CoreError::Timeout(format!(
+                    "{host} stopped sending data in the middle of the download (nothing for {} s). Check that the server is online, then try again.",
+                    idle_limit.as_secs()
+                )))),
+            },
         };
         match next {
             Some(Ok(chunk)) => {
@@ -546,19 +770,42 @@ async fn attempt(
                 if throttle(&mut pace, mgr, ctl, offset).await {
                     break None;
                 }
+                if worth_splitting(offset) && split_checked.elapsed() >= SPLIT_CHECK {
+                    split_checked = Instant::now();
+                    if may_split(state, source, mgr, rep.one_connection)
+                        && mgr.connection_allowance(ctl) >= 2
+                    {
+                        // Asked before the stream is let go: a file system
+                        // that cannot leave holes keeps it.
+                        if sparse(mgr, dest).await {
+                            hand_over = true;
+                            break None;
+                        }
+                        rep.one_connection = true;
+                    }
+                }
             }
             Some(Err(e)) => break Some(Err(CoreError::from(e))),
             None => break Some(Ok(())),
         }
     };
 
+    // The connection closes before the bookkeeping below, unless it is
+    // handed over: the flush, the sync and the progress write can take
+    // seconds (an import holding the write lock), and playback waiting for
+    // this connection gives up after two.
+    let stream = if hand_over {
+        Some(stream)
+    } else {
+        drop(stream);
+        None
+    };
     let flushed = async {
         out.flush().await?;
         out.get_ref().sync_data().await
     }
     .await;
     drop(out);
-    let progressed = offset > started_at;
     // The last periodic write lands first, so it never overwrites this one.
     if let Some(write) = progress.persisting.take() {
         let _ = write.await;
@@ -570,30 +817,158 @@ async fn attempt(
         tracing::warn!(id, error = %e, "could not persist download progress");
     }
     if let Err(e) = flushed {
-        return AttemptEnd::Error {
-            err: CoreError::Io(e),
-            bytes: offset,
-            progressed,
-            discard: false,
-        };
+        return error(CoreError::Io(e), started_at, offset);
+    }
+    if let Some(stream) = stream {
+        let ranges = Ranges::new(
+            rep.total.unwrap_or(0),
+            rep.validator.clone().unwrap_or_default(),
+            offset,
+        );
+        return segmented(
+            state,
+            row,
+            dest,
+            ctl,
+            mgr,
+            rep,
+            ranges,
+            Some((stream, offset)),
+        )
+        .await;
     }
     match end {
         None => AttemptEnd::Stopped(offset),
-        Some(Err(e)) => AttemptEnd::Error {
-            err: e,
-            bytes: offset,
-            progressed,
-            discard: false,
-        },
+        Some(Err(e)) => error(e, started_at, offset),
         Some(Ok(())) => match rep.total {
-            Some(t) if offset < t => AttemptEnd::Error {
-                err: CoreError::Network("Transfer ended before the advertised size".into()),
-                bytes: offset,
-                progressed,
-                discard: false,
-            },
+            Some(t) if offset < t => error(
+                CoreError::Network("Transfer ended before the advertised size".into()),
+                started_at,
+                offset,
+            ),
             _ => AttemptEnd::Done(offset),
         },
+    }
+}
+
+/// How often a single-connection transfer checks whether it may split.
+const SPLIT_CHECK: Duration = Duration::from_secs(1);
+
+/// Whether a transfer from `source` may go over several connections now:
+/// the source's "Connections per download" is Auto, no speed cap is set (it
+/// paces one stream), and nothing in this run asked for one connection
+/// (`one_connection`: a segment answer that did not match, a refused extra
+/// connection, a file system that cannot leave holes). Read again while
+/// the transfer runs, so a change applies to a transfer already split.
+pub(super) fn may_split(
+    state: &AppState,
+    source: &str,
+    mgr: &DownloadManager,
+    one_connection: bool,
+) -> bool {
+    !one_connection
+        && mgr.rate_limit().is_none()
+        && !state
+            .settings
+            .read()
+            .download_single_connection
+            .iter()
+            .any(|s| s == source)
+}
+
+/// Lets the `.part` take writes far past its end without filling the gap
+/// first (see [`segments::make_sparse`]).
+async fn sparse(mgr: &DownloadManager, dest: &Dest) -> bool {
+    if mgr.no_holes() {
+        return false;
+    }
+    let part = dest.part_path.clone();
+    tokio::task::spawn_blocking(move || segments::make_sparse(&part))
+        .await
+        .unwrap_or(false)
+}
+
+/// Runs `ranges` over several connections and maps the end to the
+/// attempt's. `first` is the open answer of the attempt, if any.
+#[allow(clippy::too_many_arguments)]
+async fn segmented(
+    state: &Arc<AppState>,
+    row: &DownloadRow,
+    dest: &Dest,
+    ctl: &TaskCtl,
+    mgr: &DownloadManager,
+    rep: &mut Representation,
+    ranges: Ranges,
+    first: Option<(
+        futures::stream::BoxStream<'static, reqwest::Result<bytes::Bytes>>,
+        i64,
+    )>,
+) -> AttemptEnd {
+    let id = row.download.id;
+    let start = ranges.done();
+    let url = row.download.url.clone();
+    let host = url::Url::parse(&url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "the server".into());
+    let (head_limit, idle_limit) = mgr.idle_timeouts();
+    let one_connection = AtomicBool::new(rep.one_connection);
+    let job = segments::Job {
+        id,
+        client: crate::http::source_client(state, &row.download.item_ref.source_id, &url).await,
+        url,
+        headers: row.headers.clone(),
+        part: dest.part_path.clone(),
+        ctl,
+        mgr,
+        head_limit,
+        idle_limit,
+        host,
+        state,
+        one_connection: &one_connection,
+    };
+    let mut progress = Progress::new(start);
+    let end = segments::run(job, ranges, first, |done, total| {
+        progress.tick(state, id, done, Some(total))
+    })
+    .await;
+    rep.one_connection = one_connection.load(Ordering::Relaxed);
+    // The last periodic write lands first, so it never overwrites this one.
+    if let Some(write) = progress.persisting.take() {
+        let _ = write.await;
+    }
+    let bytes = match &end {
+        SegEnd::Done(b) | SegEnd::Stopped(b) | SegEnd::Error { bytes: b, .. } => *b,
+        SegEnd::Changed => 0,
+    };
+    if let Err(e) = state
+        .db_call(move |c| store::set_progress(c, id, bytes))
+        .await
+    {
+        tracing::warn!(id, error = %e, "could not persist download progress");
+    }
+    match end {
+        SegEnd::Done(total) => AttemptEnd::Done(total),
+        SegEnd::Stopped(bytes) => AttemptEnd::Stopped(bytes),
+        SegEnd::Error { err, bytes } => AttemptEnd::Error {
+            err,
+            start,
+            bytes,
+            discard: false,
+        },
+        SegEnd::Changed => {
+            rep.total = None;
+            rep.validator = None;
+            rep.one_connection = true;
+            AttemptEnd::Error {
+                err: CoreError::Network(
+                    "The server stopped answering byte ranges of this file; it starts over with one connection.".into(),
+                ),
+                start,
+                bytes: 0,
+                discard: false,
+            }
+        }
     }
 }
 
@@ -601,14 +976,14 @@ async fn attempt(
 /// baseline restarts whenever the limit changes, so a new cap neither
 /// "repays" bytes sent at the old rate nor bursts to catch up.
 #[derive(Debug)]
-struct Pace {
+pub(super) struct Pace {
     limit: Option<u64>,
     base_bytes: i64,
     base_time: Instant,
 }
 
 impl Pace {
-    fn new(limit: Option<u64>, offset: i64) -> Self {
+    pub(super) fn new(limit: Option<u64>, offset: i64) -> Self {
         Self {
             limit,
             base_bytes: offset,
@@ -617,7 +992,12 @@ impl Pace {
     }
 
     /// How long to wait before reading past `offset` under `limit`.
-    fn delay(&mut self, limit: Option<u64>, offset: i64, now: Instant) -> Option<Duration> {
+    pub(super) fn delay(
+        &mut self,
+        limit: Option<u64>,
+        offset: i64,
+        now: Instant,
+    ) -> Option<Duration> {
         if limit != self.limit {
             *self = Self {
                 limit,

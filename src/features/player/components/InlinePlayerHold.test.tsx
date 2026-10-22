@@ -241,3 +241,31 @@ describe('MPEG-TS that the engine restarts (PL-2)', () => {
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('a stream the browser loads from the provider directly (downloads)', () => {
+  it('waits until the core has made room for it on the source before the engine connects', async () => {
+    const { rpc } = await import('@/api/transport');
+    const { bindPlaybackReport } = await import('../playbackReport');
+    let answer: () => void = () => undefined;
+    vi.mocked(rpc).mockImplementation(((cmd: string) =>
+      cmd === 'downloads.playback' ? new Promise<void>((resolve) => (answer = resolve)) : Promise.reject(new Error('offline'))) as never);
+    vi.mocked(createEngine).mockClear();
+    const unbind = bindPlaybackReport();
+    try {
+      render(<InlinePlayer />);
+      await tune({ ...vod, ref: { sourceId: 'xt', contentType: 'movie', itemId: '7' } });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      expect(createEngine).not.toHaveBeenCalled();
+      await act(async () => {
+        answer();
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      expect(createEngine).toHaveBeenCalledTimes(1);
+    } finally {
+      unbind();
+      vi.mocked(rpc).mockImplementation(() => Promise.reject(new Error('offline')));
+    }
+  });
+});

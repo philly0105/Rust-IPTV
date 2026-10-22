@@ -469,8 +469,10 @@ function CategoryIndexSection({
   useLayoutEffect(() => onFilteredChange(filtered), [filtered, onFilteredChange]);
   // Open, the index takes at least a screen (IDX-3). A narrowing filter otherwise shortened the
   // page under the view: the browser clamped the scroll, and the field being typed in dropped
-  // toward the bottom, with the rails back in view.
-  const viewport = useClientHeight(scrollRef, open);
+  // toward the bottom, with the rails back in view. Measured while folded too, so the floor is in
+  // the render that opens the index, before the reveal takes its heading to the top: a short index
+  // at the bottom of the page would clamp that scroll as well.
+  const viewport = useClientHeight(scrollRef);
 
   const entries = useMemo<CategoryEntry[]>(() => {
     const list = categoryEntries(shownCats ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));

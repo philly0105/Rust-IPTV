@@ -20,14 +20,13 @@ export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
 }
 
 /**
- * The visible height of a scroller (its clientHeight), kept current while `enabled`. A child that
- * mounts with its page runs this before React attaches the page's ref, so as in useScrollMargin
- * the scroller is looked up again once the commit is done.
+ * The visible height of a scroller (its clientHeight), kept current. A child that mounts with its
+ * page runs this before React attaches the page's ref, so as in useScrollMargin the scroller is
+ * looked up again once the commit is done.
  */
-export function useClientHeight(ref: RefObject<HTMLElement | null>, enabled = true): number {
+export function useClientHeight(ref: RefObject<HTMLElement | null>): number {
   const [height, setHeight] = useState(0);
   useLayoutEffect(() => {
-    if (!enabled) return;
     let ro: ResizeObserver | undefined;
     let cancelled = false;
     const start = () => {
@@ -44,7 +43,7 @@ export function useClientHeight(ref: RefObject<HTMLElement | null>, enabled = tr
       cancelled = true;
       ro?.disconnect();
     };
-  }, [ref, enabled]);
+  }, [ref]);
   return height;
 }
 

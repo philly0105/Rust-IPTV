@@ -6,6 +6,7 @@
  *   stays where it is.
  * - IDX-3: the open index takes at least a screen, so a narrowing filter cannot shorten the page
  *   under the view (the browser clamped the scroll and the filter field dropped down the view).
+ *   The floor is already there when the reveal takes the heading to the top on the first open.
  * - IDX-M1: All categories pressed while the categories load is not undone by the landing's
  *   scroll memory when they arrive, and the heading is taken to the top again once the rails they
  *   bring sit above it. The press belongs to its landing: the page stays mounted when another
@@ -148,6 +149,16 @@ describe('IDX-3: the open index keeps a screen of height', () => {
     expect(body(toggle).style.minHeight).toBe('');
     fireEvent.click(screen.getByTestId('vod-chip-all'));
     await waitFor(() => expect(body(toggle).style.minHeight).toBe(`${VIEWPORT}px`));
+  });
+
+  it('folded at first, the floor is already there when the heading is taken to the top', async () => {
+    landing();
+    const toggle = await heading();
+    // A short index at the bottom of the page: without the floor, the browser clamps that scroll.
+    const atReveal: string[] = [];
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => atReveal.push(body(toggle).style.minHeight));
+    fireEvent.click(screen.getByTestId('vod-chip-all'));
+    expect(atReveal).toEqual([`${VIEWPORT}px`]);
   });
 });
 

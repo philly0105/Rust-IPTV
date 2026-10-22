@@ -392,6 +392,18 @@ export interface Download {
   completedAt?: string;
   fileAvailable?: boolean;
   positionSeconds: number;
+  /** Why a queued row waits, when it is more than its turn (live, never stored). */
+  waiting?: DownloadWait;
+}
+
+/**
+ * `playback`: playback uses the connection the source's account allows; `connection`: other
+ * downloads, recordings or devices use its connections; `provider`: the source could not be
+ * reached. `until` (RFC 3339) is when the next attempt is due, after a refusal or an outage.
+ */
+export interface DownloadWait {
+  reason: 'playback' | 'connection' | 'provider';
+  until?: string;
 }
 
 // ---------------------------------------------------------------------------

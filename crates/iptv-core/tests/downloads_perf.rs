@@ -151,3 +151,105 @@ async fn measure_download_next() {
         started.elapsed().as_secs_f64()
     );
 }
+
+/// DL-1: a six-episode season queued on a 1-connection Xtream account (the
+/// mock's `limit1`, which refuses a second open file with 403), 8 MiB files
+/// at 4 MiB/s. Prints how many complete and fail, the file requests, the
+/// refused ones and the wall time. Then, with one download running, a player
+/// starts on the same source (reporting it through `downloads.playback`
+/// where the build has it) and opens a movie: prints the status it gets.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "measurement"]
+async fn measure_one_connection_season() {
+    let c = ctx().await;
+    iptv_core::xtream::init(c.state.clone()).await.unwrap();
+    reqwest::get(c.srv.url("/__mock/limited-vod?size=8388608&kbps=4096"))
+        .await
+        .unwrap();
+    let (user, pass) = ("limit1", iptv_fixtures::XTREAM_PASSWORD);
+    let cfg =
+        json!({"serverUrl": c.srv.xtream_url(), "username": user, "password": pass}).to_string();
+    c.state
+        .db_call(move |conn| {
+            conn.execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES ('xt', 'xtream', 'xt', ?1)",
+                [&cfg],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    iptv_core::account::status(&c.state, "xt", true)
+        .await
+        .unwrap();
+    let start = |item: u32| {
+        json!({
+            "ref": {"sourceId": "xt", "contentType": "movie", "itemId": item.to_string()},
+            "title": format!("Episode {item}"),
+            "url": c.srv.url(&format!("/xtream/movie/{user}/{pass}/{item}.mp4")),
+        })
+    };
+    let started = Instant::now();
+    let mut ids = Vec::new();
+    for item in 101..107 {
+        let d: Download =
+            serde_json::from_value(c.ok("downloads.start", start(item)).await).unwrap();
+        ids.push(d.id);
+    }
+    let (mut completed, mut failed);
+    loop {
+        (completed, failed) = (0, 0);
+        for id in &ids {
+            let d: Download =
+                serde_json::from_value(c.ok("downloads.get", json!({"id": id})).await).unwrap();
+            match d.status {
+                DownloadStatus::Completed => completed += 1,
+                DownloadStatus::Failed => failed += 1,
+                _ => {}
+            }
+        }
+        if completed + failed == ids.len() || started.elapsed() > Duration::from_secs(120) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let stats: Value = reqwest::get(c.srv.url("/__mock/stats"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let file_requests: u64 = stats["requests"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(k, _)| k.starts_with("/xtream/movie/"))
+        .map(|(_, v)| v.as_u64().unwrap_or(0))
+        .sum();
+    eprintln!(
+        "DL-1 season of 6 on a 1-connection account: {completed} completed, {failed} failed, {file_requests} file requests, {} refused, {:.1} s",
+        stats["requests"]["refused_streams"].as_u64().unwrap_or(0),
+        started.elapsed().as_secs_f64()
+    );
+
+    let d: Download = serde_json::from_value(c.ok("downloads.start", start(150)).await).unwrap();
+    c.wait_status(d.id, DownloadStatus::Downloading, Duration::from_secs(30))
+        .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let reported = c
+        .router
+        .dispatch(
+            c.state.clone(),
+            "downloads.playback",
+            json!({"clientId": "player", "sourceIds": ["xt"]}),
+        )
+        .await
+        .is_ok();
+    let play = reqwest::get(c.srv.url(&format!("/xtream/movie/{user}/{pass}/200.mp4")))
+        .await
+        .unwrap();
+    eprintln!(
+        "DL-1 player opens a movie while a download runs (reported: {reported}): HTTP {}",
+        play.status().as_u16()
+    );
+}

@@ -6,7 +6,7 @@ use super::naming::{self, Reservation};
 use super::store::{self, DownloadRow};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{apply_source_headers, backoff_delay};
-use crate::model::{ContentType, SourceKind};
+use crate::model::{ContentType, SourceKind, WaitReason};
 use crate::state::AppState;
 use futures::StreamExt;
 use reqwest::header::{
@@ -52,6 +52,17 @@ pub enum Outcome {
         keep_part: bool,
         part: Option<PathBuf>,
     },
+    /// The source refused or was unreachable, not this file: the row goes
+    /// back to the queue and its source waits (see `manager::settle`).
+    /// `message` is what the row says if it waits too long and fails.
+    Requeue {
+        reason: WaitReason,
+        message: String,
+        bytes: i64,
+        /// The run wrote bytes the row did not have.
+        progressed: bool,
+        part: Option<PathBuf>,
+    },
 }
 
 /// Destination of a run.
@@ -95,7 +106,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
     };
     // Xtream URLs embed credentials that can change and Stalker links expire,
     // so every run (start, resume, retry, restart) resolves a fresh URL.
-    tokio::select! {
+    let kind = tokio::select! {
         _ = ctl.token.cancelled() => {
             return Outcome::Stopped {
                 reason: ctl.reason(),
@@ -103,8 +114,8 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                 part: Some(dest.part_path.clone()),
             }
         }
-        _ = refresh_url(state, &mut row) => {}
-    }
+        kind = refresh_url(state, &mut row) => kind,
+    };
     let mut rep = Representation {
         total: row.download.total_bytes,
         validator: row.resume_validator.clone(),
@@ -115,6 +126,9 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
     // would let a server that sends a few bytes and then stalls be retried
     // forever.
     let mut reached: Option<i64> = None;
+    // What the row had before this run: a run that re-reads it from zero
+    // (a file without resume) gets the row no further.
+    let had = row.download.bytes_downloaded;
     loop {
         match attempt(state, &row, &dest, ctl, &mut rep, mgr).await {
             AttemptEnd::Done(bytes) => return finalize(&dest, bytes).await,
@@ -147,6 +161,21 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                         _ = tokio::time::sleep(delay) => continue,
                     }
                 }
+                let wait = if discard {
+                    None
+                } else {
+                    wait_reason(state, mgr, &err, kind, &row.download.item_ref.source_id).await
+                };
+                if let Some(reason) = wait {
+                    tracing::info!(id, ?reason, error = %err, "download waits for its source");
+                    return Outcome::Requeue {
+                        reason,
+                        message: user_message(&err),
+                        bytes,
+                        progressed: reached.is_some_and(|r| r > had),
+                        part: Some(dest.part_path.clone()),
+                    };
+                }
                 let keep = !discard && bytes > 0 && rep.total.is_some();
                 return failed(
                     user_message(&err),
@@ -163,16 +192,8 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
 /// Xtream and Stalker sources and persists it. M3U/file sources, catch-up
 /// programmes (live and radio refs), removed sources, and resolution failures
 /// keep the stored URL; the transfer then reports whatever the server says
-/// about it.
-async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
-    // A catch-up programme's archive URL cannot be rebuilt from its ref: that
-    // would resolve the channel's live stream.
-    if matches!(
-        row.download.item_ref.content_type,
-        ContentType::Live | ContentType::Radio
-    ) {
-        return;
-    }
+/// about it. Returns the source's kind (`None` when it was removed).
+async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) -> Option<SourceKind> {
     let item_ref = row.download.item_ref.clone();
     let episode_id = row.download.episode_id.clone();
     let sid = item_ref.source_id.clone();
@@ -185,25 +206,36 @@ async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
                 .optional()?,
             )
         })
-        .await;
-    let resolved = match kind.ok().flatten().as_deref().map(SourceKind::from_str) {
-        Some(Ok(SourceKind::Xtream)) => {
+        .await
+        .ok()
+        .flatten()
+        .and_then(|k| SourceKind::from_str(&k).ok());
+    // A catch-up programme's archive URL cannot be rebuilt from its ref: that
+    // would resolve the channel's live stream.
+    if matches!(
+        row.download.item_ref.content_type,
+        ContentType::Live | ContentType::Radio
+    ) {
+        return kind;
+    }
+    let resolved = match kind {
+        Some(SourceKind::Xtream) => {
             crate::xtream::service::stream_url(state, &item_ref, episode_id.as_deref()).await
         }
-        Some(Ok(SourceKind::Stalker)) => {
+        Some(SourceKind::Stalker) => {
             crate::stalker::playback::stream_url(state, &item_ref, episode_id.as_deref()).await
         }
-        _ => return,
+        _ => return kind,
     };
     let src = match resolved {
         Ok(src) => src,
         Err(err) => {
             tracing::warn!(id = row.download.id, error = %err, "could not re-resolve download URL; using the stored one");
-            return;
+            return kind;
         }
     };
     if src.url == row.download.url && src.headers.as_ref().is_none_or(|h| *h == row.headers) {
-        return;
+        return kind;
     }
     row.download.url = src.url;
     if let Some(h) = src.headers {
@@ -220,6 +252,68 @@ async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) {
     {
         tracing::warn!(id, error = %err, "could not persist the re-resolved download URL");
     }
+    kind
+}
+
+/// Whether a run that ended on `err` should wait for its source instead of
+/// failing. An Xtream panel answers 401/403 both for wrong credentials and
+/// when every connection is in use, so a refusal there asks the panel for
+/// the account (at most once per [`crate::account::FORCE_MIN_AGE`] per
+/// source): when the credentials work it was the connection limit, and the
+/// row waits for a free connection; otherwise it fails with the credentials
+/// advice as before.
+async fn wait_reason(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    err: &CoreError,
+    kind: Option<SourceKind>,
+    source: &str,
+) -> Option<WaitReason> {
+    match err {
+        CoreError::Auth(_) if kind == Some(SourceKind::Xtream) => {
+            credentials_work(state, mgr, source)
+                .await
+                .unwrap_or(false)
+                .then_some(WaitReason::Connection)
+        }
+        _ => None,
+    }
+}
+
+/// How long the account check after a refusal may take.
+const ACCOUNT_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Asks the Xtream panel for the account: `Some(true)` when the credentials
+/// work, `Some(false)` when the panel rejects them, `None` when it could not
+/// be asked. A good answer is stored like any account check, so the source's
+/// connection limit is fresh too.
+async fn credentials_work(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    source: &str,
+) -> Option<bool> {
+    if let Some(ok) = mgr.recent_check(source) {
+        return Some(ok);
+    }
+    let checked = tokio::time::timeout(
+        ACCOUNT_CHECK_TIMEOUT,
+        crate::xtream::service::account_info(state, source),
+    )
+    .await
+    .ok()?;
+    let ok = match checked {
+        Ok(info) => {
+            crate::account::remember_xtream(state, source, info).await;
+            true
+        }
+        Err(CoreError::Auth(_)) => false,
+        Err(err) => {
+            tracing::info!(source, error = %err, "account check after a refused download failed");
+            return None;
+        }
+    };
+    mgr.note_check(source, ok);
+    Some(ok)
 }
 
 fn failed(message: String, bytes: i64, keep_part: bool, part: Option<PathBuf>) -> Outcome {

@@ -13,6 +13,7 @@ import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
 import { bindExternalEvents } from '../external';
+import { bindPlaybackReport } from '../playbackReport';
 import { bindRecovery } from '../reconnect';
 import { useMediaStore } from '../media';
 import { bindLiveProgramme } from '../nowNext';
@@ -266,6 +267,8 @@ export const PlayerDock = memo(function PlayerDock() {
 
   // failover: smart reconnect and live failover follow the player from here.
   useEffect(() => bindRecovery(), []);
+  // downloads: the core leaves playback the connections its account allows.
+  useEffect(() => bindPlaybackReport(), []);
   // A live channel's subtitle follows what airs (title bar, system media controls).
   useEffect(() => bindLiveProgramme(), []);
   // Parental controls locking again re-check what plays (Ask: PIN prompt; Hide: stop).

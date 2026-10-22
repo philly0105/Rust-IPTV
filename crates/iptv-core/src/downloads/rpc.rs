@@ -23,6 +23,7 @@ pub const COMMANDS: &[&str] = &[
     "downloads.dir",
     "downloads.setPosition",
     "downloads.prioritize",
+    "downloads.playback",
     "myvideos.list",
     "myvideos.playSource",
 ];
@@ -73,6 +74,19 @@ pub struct SetPositionArgs {
     /// Seconds; fractional values from the player are rounded.
     pub position_seconds: f64,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackArgs {
+    /// One id per player (window or browser tab), stable while it runs.
+    pub client_id: String,
+    /// Sources it plays from now; empty when it stopped.
+    #[serde(default)]
+    pub source_ids: Vec<String>,
+}
+
+/// Most sources one player reports at once (a multi-view wall has four).
+const MAX_PLAYBACK_SOURCES: usize = 16;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +155,19 @@ pub fn register(r: &mut RpcRouter) {
     );
     r.add("downloads.prioritize", |s: S, a: IdArgs| async move {
         Ok::<_, RpcError>(super::prioritize(&s, a.id).await?)
+    });
+    r.add("downloads.playback", |s: S, a: PlaybackArgs| async move {
+        let client = a.client_id.trim();
+        if client.is_empty() || client.len() > 100 {
+            return Err(RpcError::invalid("clientId must be 1 to 100 characters"));
+        }
+        if a.source_ids.len() > MAX_PLAYBACK_SOURCES {
+            return Err(RpcError::invalid(format!(
+                "at most {MAX_PLAYBACK_SOURCES} sourceIds"
+            )));
+        }
+        super::set_playback(&s, client, a.source_ids).await;
+        Ok(())
     });
     r.add("myvideos.list", |s: S, _: ()| async move {
         Ok::<_, RpcError>(super::list_completed(&s).await?)

@@ -802,6 +802,32 @@ pub struct Download {
     pub file_available: Option<bool>,
     #[serde(default)]
     pub position_seconds: i64,
+    /// Why a queued row waits, when it is more than its turn (live, never
+    /// stored).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<DownloadWait>,
+}
+
+/// Why a queued download waits (`Download.waiting`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadWait {
+    pub reason: WaitReason,
+    /// When the next attempt is due (RFC 3339), for a source that refused or
+    /// was unreachable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WaitReason {
+    /// Playback on the same source uses the connection the account allows.
+    Playback,
+    /// Other downloads, recordings or devices use the source's connections.
+    Connection,
+    /// The source could not be reached; it is tried again at `until`.
+    Provider,
 }
 
 // ---------------------------------------------------------------------------

@@ -55,6 +55,7 @@ fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
             completed_at: completed_at.as_deref().map(to_rfc3339),
             file_available: None,
             position_seconds: r.get(17)?,
+            waiting: None,
         },
         headers,
         resume_validator: r.get(15)?,
@@ -125,11 +126,14 @@ pub fn list(conn: &Connection, completed_only: bool) -> CoreResult<Vec<DownloadR
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-/// Ids in the given status, oldest first (FIFO).
-pub fn ids_with_status(conn: &Connection, status: DownloadStatus) -> CoreResult<Vec<i64>> {
-    let mut stmt =
-        conn.prepare("SELECT id FROM downloads WHERE status = ?1 ORDER BY created_at, id")?;
-    let ids = stmt.query_map([status.as_str()], |r| r.get(0))?;
+/// Ids in the given status with their source, oldest first (FIFO).
+pub fn ids_with_status(
+    conn: &Connection,
+    status: DownloadStatus,
+) -> CoreResult<Vec<(i64, String)>> {
+    let mut stmt = conn
+        .prepare("SELECT id, source_id FROM downloads WHERE status = ?1 ORDER BY created_at, id")?;
+    let ids = stmt.query_map([status.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(ids.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -308,6 +312,17 @@ pub fn finish(
         params![id, status.as_str(), bytes, error, now_rfc3339()],
     )?;
     Ok(())
+}
+
+/// A running transfer goes back to `queued` (it yielded its connection, or
+/// its source refused or was unreachable), keeping its byte count. Only a
+/// row still `downloading`: a pause that landed first stays.
+pub fn requeue(conn: &Connection, id: i64, bytes: i64) -> CoreResult<bool> {
+    Ok(conn.execute(
+        "UPDATE downloads SET status = 'queued', bytes_downloaded = ?2, error_message = NULL, \
+         updated_at = ?3 WHERE id = ?1 AND status = 'downloading'",
+        params![id, bytes, now_rfc3339()],
+    )? > 0)
 }
 
 /// Marks a transfer completed at its final path.

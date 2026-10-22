@@ -3,10 +3,12 @@
 import { k } from '../lib/keys';
 import { ArrowUpToLine, FolderOpen, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import type { Download, Source } from '@/api/types';
 import { cn } from '@/ui/cn';
+import { dateTimeFormat, intlLocale } from '@/lib/intl';
 
 import { IconButton, Poster } from '../deps';
 import { etaSeconds, formatBytes, formatDuration, formatSpeed, percentOf } from '../lib/format';
@@ -112,6 +114,21 @@ export function DialProgress({
   );
 }
 
+/** What a queued row waits for: its turn, or playback or a free connection on its source. */
+function waitingDetail(d: Download, t: TFunction<'library'>, lang: string): string {
+  const w = d.waiting;
+  const at = w?.until ? Date.parse(w.until) : NaN;
+  const time = Number.isNaN(at) ? undefined : dateTimeFormat(intlLocale(lang), { hour: 'numeric', minute: '2-digit' }).format(at);
+  switch (w?.reason) {
+    case 'playback':
+      return t('waitingForPlayback');
+    case 'connection':
+      return time ? t('waitingForConnectionAt', { time }) : t('waitingForConnection');
+    default:
+      return t('waitingForSlot');
+  }
+}
+
 function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
@@ -129,7 +146,7 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
   let detail: string;
   if (d.status === 'downloading') {
     detail = progress.bytesPerSecond ? [formatSpeed(progress.bytesPerSecond, lang), eta !== undefined ? t('etaLeft', { time: formatDuration(eta, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) }) : ''].filter(Boolean).join('   ') : t('stalled');
-  } else if (d.status === 'queued') detail = t('waitingForSlot');
+  } else if (d.status === 'queued') detail = waitingDetail(d, t, lang);
   else if (d.status === 'paused') detail = t('pausedHint');
   else if (d.status === 'failed') detail = d.errorMessage ?? t('failedHint');
   else detail = t('canceledHint');

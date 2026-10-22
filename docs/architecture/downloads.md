@@ -1,15 +1,15 @@
 # Downloads and My Videos
 
-Code: `crates/iptv-core/src/downloads/`. Tests: `crates/iptv-core/tests/downloads.rs` (check 9 / SC7) plus unit tests in `naming.rs`, `transfer.rs`, and `rpc.rs`.
+Code: `crates/iptv-core/src/downloads/`. Tests: `crates/iptv-core/tests/downloads.rs` (check 9 / SC7) and `downloads_conn_limit.rs`, `crates/iptv-server/tests/downloads_playback.rs`, plus unit tests in `naming.rs`, `transfer.rs`, and `rpc.rs`.
 
-The download manager keeps a FIFO queue of movie, episode and catch-up programme downloads, runs at most two transfers at a time, resumes partial files over HTTP Range, and never overwrites a file it did not create. Completed rows make up My Videos, the offline library.
+The download manager keeps a FIFO queue of movie, episode and catch-up programme downloads, runs as many transfers per source as the source's account leaves free after playback (two when it reports no limit), resumes partial files over HTTP Range, and never overwrites a file it did not create. Completed rows make up My Videos, the offline library.
 
 ## Layout
 
 | File | Role |
 | --- | --- |
 | `mod.rs` | Operations behind every command (`start`, `pause`, `resume`, `retry`, `cancel`, `remove`, `set_dir`, `reveal`, `play_source`, ...) and `init`. |
-| `manager.rs` | Queue runtime stored in `state.extensions["downloads"]`: FIFO queue, active map, per-task `CancellationToken`, stop reason, live byte counter, done signal. |
+| `manager.rs` | Queue runtime stored in `state.extensions["downloads"]`: FIFO queue, active map, per-task `CancellationToken`, stop reason, live byte counter, done signal, per-source connection budgets (limits, playback reports, proxied streams, recordings, waits after a refusal). |
 | `transfer.rs` | One transfer: destination preparation, Range resume, streaming to the `.part`, in-task retry, throttled progress, finalize. |
 | `naming.rs` | Windows-safe file names, atomic `.part` reservation, finalize without overwrite. |
 | `store.rs` | SQL for the C3 `downloads` table. |
@@ -17,7 +17,7 @@ The download manager keeps a FIFO queue of movie, episode and catch-up programme
 
 ## Commands (C4)
 
-`downloads.list`, `downloads.get`, `downloads.start`, `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.retry`, `downloads.remove {id, deleteFile}`, `downloads.reveal`, `downloads.setDir {path}`, `downloads.dir`, `downloads.setPosition {id, positionSeconds}`, `downloads.prioritize {id}`, `myvideos.list`, `myvideos.playSource`.
+`downloads.list`, `downloads.get`, `downloads.start`, `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.retry`, `downloads.remove {id, deleteFile}`, `downloads.reveal`, `downloads.setDir {path}`, `downloads.dir`, `downloads.setPosition {id, positionSeconds}`, `downloads.prioritize {id}`, `downloads.playback {clientId, sourceIds}`, `myvideos.list`, `myvideos.playSource`.
 
 Events: `downloads.update {}` on every state change (queued, started, paused, resumed, canceled, failed, completed, removed) and `downloads.progress {id, bytesDownloaded, totalBytes?, bytesPerSecond}`, at most 4 per second per download. The first chunk of every attempt emits at once, so the UI sees a resumed transfer start where it left off. In the UI a `downloads.update` refetches only `downloads.list` and the `myvideos.` queries (`DEFAULT_EVENT_INVALIDATION` in `src/api/query.ts`), never `downloads.dir`. A `downloads.progress` event re-renders only the /downloads row it is about (`useLiveProgress`), and a movie or series page refetches `downloads.list` only for progress of its own rows ([performance.md](performance.md#progress-clocks-and-formatters)).
 
@@ -35,11 +35,22 @@ completed (file missing) -- retry --> queued
 - `start` validates the URL (http/https only) and title, then inserts the row or reuses the row for the same `(ref, episodeId)`. Queued, downloading, and paused rows, and completed rows whose file still exists, come back unchanged. Failed, canceled, and completed-but-missing rows lose any retained `.part` and restart under the same id. Before returning, `start` reserves the destination and persists `fileName`/`filePath`.
 - The runtime claims a row with a conditional `queued -> downloading` update. A claim that fails (the database busy or briefly unavailable) is retried with backoff up to 3 times; when all fail, the id goes back to the front of the queue after 30 s instead of being dropped, so the row never stays `queued` with no task behind it. `downloads::fail_next_claims(state, n, retry)` simulates failing claims for tests. `resume`/`retry` use a conditional `paused|failed|canceled -> queued` claim and the queue rejects duplicate ids, so two rapid clicks can never start two transfers.
 - `pause`, `cancel`, and `remove` signal the running task and wait (up to 15 s) until it has persisted its final state, so the RPC returns only after the change is on disk. If the task is still winding down after 15 s (for example a write stuck on a network share), the RPC fails with a retryable `Timeout` instead of reporting a change that has not happened; the stop request stays in force, and `remove` leaves the row and files alone so nothing is deleted under a live task. Until the task finishes, the row stays `downloading`, so a second `pause` or `cancel` either waits again or finds the final status. A repeated request can escalate the stop reason (cancel beats remove beats pause, never the other way), so a `cancel` sent after a timed-out `pause` still ends `canceled` with the `.part` deleted. `downloads::set_stop_timeout(state, Some(d))` shortens the 15 s wait for tests.
-- `pause` on a queued row pulls the id out of the queue and marks it `paused`; it never starts until `resume` (or `retry`) puts it back, even when both slots free up.
+- `pause` on a queued row pulls the id out of the queue and marks it `paused`; it never starts until `resume` (or `retry`) puts it back, even when connections free up. That includes a row waiting for playback: an automatic stop never overrides a manual one.
 - `retry` on a completed row whose file is gone (deleted, moved, or replaced by something that is not a regular file) clears the recorded path and progress, keeps `fileName`, and queues the same row again; the new transfer reserves that name in the current downloads folder (next free number if taken) and never touches the old path. A completed row whose file is still there gets `Conflict`.
 - `prioritize` (Download next) moves a queued row to the front of the queue, so it takes the next free slot; a running row is left alone and other statuses get `Conflict`. `resume` and `retry` also put the row at the front.
 - The order (running ids in start order, then the queue) is saved in `app_state` under `downloads_queue` whenever it changes, by one task that writes the latest order, so a burst of changes costs one write.
 - `init` (boot): rows left `downloading` become `queued`, and every queued row is scheduled in the saved order: the rows it lists first, in that order (so interrupted transfers, Download next and resumed rows keep their place), then the rest in creation order (`created_at`, then id). A restored row resumes from its `.part`.
+
+## Connections
+
+IPTV panels count every open file request against the account's `max_connections`, and refuse the next one with 401/403 (or close the oldest). So transfers are scheduled per source:
+
+- Budget (`manager::download_budget`): with a limit `L` from the source's cached account status (`AccountStatus.max_connections`, stored by every Xtream sync and account check; the runtime reads it once per source and `account::record` keeps it current), downloads from that source use at most `L - 1` connections, so one stays free for playback, and never more than `L` minus what plays and records from the source. A 1-connection account downloads only while nothing plays or records from it. An unknown or zero limit (M3U, Stalker, unlimited plans) keeps two per source, whatever plays.
+- The pump walks the queue in order and starts every id whose source has a free connection, so a source at its limit never holds up another. An id whose source's limit is still being read waits for that read.
+- What plays, per source, is the most any one signal reports: the players' `downloads.playback {clientId, sourceIds}` reports (the frontend sends one when the player's source changes, renews it every 30 s, and clears it on stop, `src/features/player/playbackReport.ts`; a report lapses after 90 s unless renewed, so a closed window never holds downloads back for long), and the streams the media proxy has open for the source (`open_stream`, called by `/api/proxy` for requests with a `sourceId`; a closed stream still counts for 30 s, the gaps between an HLS player's segment fetches). Recordings count separately (`hold_recording`, held for the life of a recording run).
+- Yield: when a source's budget drops below what its downloads hold (playback starts, a recording starts, the limit shrinks), the newest transfers from that source stop with `StopReason::Yield`: the `.part` is kept, the row goes back to `queued` at the front of the queue (a conditional `downloading -> queued`, so a pause that landed first stays), and it resumes with Range once the connection is free. A user's pause, cancel or remove always wins over a yield. `downloads.playback`, `open_stream` and `hold_recording` return once the yielding transfers have let go (at most 2 s) plus 300 ms, since a panel notices a closed connection a moment after the client closed it, so the stream's own request does not meet a full account.
+- A refusal (401/403) from an Xtream panel can mean wrong credentials or a full account (another device, or playback the app does not see). The transfer asks the panel for the account (`xtream.accountInfo`, at most once per 20 s per source; a good answer is stored like any account check): when the credentials work, the row goes back to `queued` and its source waits 15 s, then 30 s, 1, 2, 5 and 10 min in a row before the next attempt; when they do not, it fails with the credentials advice as before. A row that waits 2 hours without new bytes fails. `downloads::set_wait_timing(state, base, limit)` shortens both for tests.
+- `Download.waiting {reason, until?}` (live, never stored) says why a queued row waits when it is more than its turn: `playback` (playback holds the connection its account allows), `connection` (other downloads, recordings or devices hold the source's connections; with `until` after a refusal). `/downloads` shows it on the row.
 
 ## Destination policy
 
@@ -86,7 +97,7 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 - a body that stalls with the connection open reconnects after the idle limit and completes byte-exact with one extra request, and a server that sends 8 bytes and then stalls (`/fail/stall.m3u`) fails after exactly 5 requests;
 - an existing destination is never overwritten, both at start and when it is occupied while paused;
 - `nolen.bin` downloads without resume;
-- at most two transfers run, and the third stays queued;
+- at most two transfers run from a source with no limit, and the third stays queued;
 - the queue is restored on `init`, and the restored row resumes from its `.part`;
 - My Videos and `playSource`: missing-file derivation, `setPosition`, `remove` with and without `deleteFile`;
 - `setDir` validation, persistence through `settings::save` (one `settings.changed`, none when unchanged, visible to a fresh `AppState`), file-instead-of-folder rejection, and reset;
@@ -110,9 +121,11 @@ This follows the old app's `docs/architecture/download-manager.md`, "Destination
 
 `/downloads` (`DownloadsPage`) lists the queue (downloading, queued, paused) and Needs attention (failed), each under the kit's `SectionHeader` with its count, a hint and its bulk action (Clear failed) at the end of the heading line. A queued row offers Pause, Cancel and Download next (last, so Pause and Cancel stay put when it starts). A row's actions are ghost icon buttons in a column as wide as the most any row has (three), shown or not, so every bar, badge and button ends on one line, and the folder line above the list shares the list's box. A row that is waiting or paused shows its actions on hover or focus with a fine pointer; a downloading row and a failed one always show them, since a failed row is there to be retried or removed.
 
+`cargo test -p iptv-core --test downloads_conn_limit` runs against the mock's `limit<N>` Xtream accounts (a file request beyond N open bodies gets `403 Max connections reached`; file size and speed from `/__mock/limited-vod`): the budget table; a six-file season on a 1-connection account runs one file at a time and completes with no refusal, the rows behind it waiting for a connection; playback reported on the source makes the running download yield (queued, `.part` kept), the player's own request succeeds, and the download resumes and completes byte-exact when playback stops; a row paused while it waits for playback stays paused; a report that is not renewed lapses; a recording holds the connection; a 2-connection account runs one download and a 4-connection account three; a refusal with working credentials waits for a free connection (`waiting.until` set, no error) and completes once the other device's stream closes. `cargo test -p iptv-server --test downloads_playback` opens a movie through `/api/proxy` with a `sourceId` while a download holds a 1-connection account: the download yields first, and resumes after the stream closes.
+
 ## Tests (UI)
 
-`src/features/library/test/round2.test.tsx` (a failed row's actions, the fixed actions column), `src/features/vod/test/pages.test.tsx` (M3U movie, HLS refusal, Download season) and `src/features/live/test/guideArchive.test.tsx` (archive download). `crates/iptv-core/tests/downloads.rs` checks that a catch-up row keeps its archive URL.
+`src/features/library/test/round2.test.tsx` (a failed row's actions, the fixed actions column, what a queued row waits for), `src/features/player/playbackReport.test.ts` (what the player reports and when), `src/features/vod/test/pages.test.tsx` (M3U movie, HLS refusal, Download season) and `src/features/live/test/guideArchive.test.tsx` (archive download). `crates/iptv-core/tests/downloads.rs` checks that a catch-up row keeps its archive URL.
 
 ## Not carried over from the old app
 

@@ -693,6 +693,7 @@ fn every_c4_download_command_is_registered() {
         "downloads.dir",
         "downloads.setPosition",
         "downloads.prioritize",
+        "downloads.playback",
         "myvideos.list",
         "myvideos.playSource",
     ];

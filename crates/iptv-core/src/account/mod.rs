@@ -175,6 +175,8 @@ pub fn save(conn: &Connection, status: &AccountStatus) -> CoreResult<bool> {
 /// the status is a convenience and never fails the caller.
 pub async fn record(state: &AppState, status: AccountStatus) {
     let id = status.source_id.clone();
+    // Downloads follow the source's connection limit.
+    crate::downloads::manager::account_changed(state, &status);
     match state.db_call(move |c| save(c, &status)).await {
         Ok(true) => state.emit(CHANGED_EVENT, serde_json::json!({ "sourceId": id })),
         Ok(false) => {}

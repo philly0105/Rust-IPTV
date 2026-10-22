@@ -224,6 +224,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0022_channel_quality",
         sql: include_str!("migrations/0022_channel_quality.sql"),
     },
+    // catalog: category pages in date-added order from their own range.
+    Migration {
+        version: 24,
+        name: "0024_category_added_index",
+        sql: include_str!("migrations/0024_category_added_index.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

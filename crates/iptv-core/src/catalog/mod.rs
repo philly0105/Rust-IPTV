@@ -1475,7 +1475,11 @@ pub fn query_named(
     // (100-340 ms a page on 60k movies; under 1 ms through the sort index).
     // The sort indexes hold both columns (migration 0019), so a selective
     // filter on a deep page reads index entries, not table rows. The count
-    // keeps the plain column, where the filter's index helps.
+    // keeps the plain column, where the filter's index helps, except in a
+    // category: there the filter's index read the filter's range across the
+    // whole source (with the page's walk, 11-12 ms for a 199-title category
+    // on 182k movies, 0.2 ms now), and the category's own indexes hold both
+    // columns (0018, 0024).
     let sort = q.page.sort;
     let page_rating = if sort == Some(SortKey::Rating) {
         "i.rating"
@@ -1487,9 +1491,13 @@ pub fn query_named(
     } else {
         "+i.year"
     };
+    let (count_rating, count_year) = if q.category_id.is_some() {
+        ("+i.rating", "+i.year")
+    } else {
+        ("i.rating", "i.year")
+    };
     for (i, m) in attempts.iter().enumerate() {
-        // The WHERE of the count (plain filter columns) and of the page;
-        // both take the same `args`.
+        // The WHERE of the count and of the page; both take the same `args`.
         let mut count_where = String::from("i.source_id = ?1 AND i.content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
             q.source_id.clone().into(),
@@ -1508,12 +1516,12 @@ pub fn query_named(
         let mut page_where = count_where.clone();
         if let Some(min) = q.min_rating.filter(|r| r.is_finite() && *r > 0.0) {
             args.push(min.into());
-            count_where.push_str(&format!(" AND i.rating >= ?{}", args.len()));
+            count_where.push_str(&format!(" AND {count_rating} >= ?{}", args.len()));
             page_where.push_str(&format!(" AND {page_rating} >= ?{}", args.len()));
         }
         // vod: year range and "Hide watched" (C4; nothing for channels).
         let mut page_args = args.clone();
-        count_where.push_str(&vodfilter::vod_filter_sql(&q.vod, &mut args));
+        count_where.push_str(&vodfilter::vod_filter_sql_on(&q.vod, count_year, &mut args));
         page_where.push_str(&vodfilter::vod_filter_sql_on(
             &q.vod,
             page_year,

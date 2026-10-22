@@ -1191,16 +1191,38 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
         }
     }
 
-    // The plans of a category page on the default sort and of its count
-    // with a rating floor.
-    for (what, sql) in [
+    // The plans behind the category numbers (migration 0024), written as
+    // `catalog.movies` writes them. A category page on the default sort
+    // reads its category's range in order, also with a rating floor; the
+    // category's count with a rating floor or a decade stays on the
+    // category; a plain count keeps the narrow idx_items_cat, created last.
+    let by_added = "ORDER BY i.added DESC NULLS LAST, i.position LIMIT 60 OFFSET 0";
+    let in_category = "SEARCH i USING COVERING INDEX idx_items_cat_added (source_id=? AND content_type=? AND category_id=?)";
+    for (what, sql, want) in [
         (
             "category page by added",
-            "SELECT i.rowid FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2 ORDER BY i.added DESC NULLS LAST, i.position LIMIT 60",
+            format!("SELECT i.rowid FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2 {by_added}"),
+            in_category,
+        ),
+        (
+            "category page by added, minRating",
+            format!("SELECT i.rowid FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2 AND +i.rating >= 6 {by_added}"),
+            in_category,
         ),
         (
             "category count, minRating",
-            "SELECT count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2 AND i.rating >= 6",
+            "SELECT count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2 AND +i.rating >= 6".into(),
+            in_category,
+        ),
+        (
+            "category count, decade",
+            "SELECT count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2 AND +i.year >= 1990 AND +i.year <= 1999".into(),
+            "SEARCH i USING COVERING INDEX idx_items_cat (source_id=? AND content_type=? AND category_id=?)",
+        ),
+        (
+            "category count",
+            "SELECT count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2".into(),
+            "SEARCH i USING COVERING INDEX idx_items_cat (source_id=? AND content_type=? AND category_id=?)",
         ),
     ] {
         let s = sid.clone();
@@ -1208,14 +1230,24 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
             .state
             .db_call(move |c| {
                 let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                let args = [s, block_cat_id(MID)];
+                let n = stmt.parameter_count();
                 let rows = stmt
-                    .query_map([s, block_cat_id(MID)], |r| r.get::<_, String>(3))?
+                    .query_map(rusqlite::params_from_iter(&args[..n]), |r| {
+                        r.get::<_, String>(3)
+                    })?
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
             .await
             .unwrap();
         eprintln!("l2_query_perf: blocks plan, {what}: {plan:?}");
+        if plan.first().map(String::as_str) != Some(want) {
+            failures.push(format!("plan, {what}: {plan:?}, want {want:?} first"));
+        }
+        if what.contains("page by added") && plan.iter().any(|d| d.contains("TEMP B-TREE")) {
+            failures.push(format!("plan, {what} sorts through a temp b-tree: {plan:?}"));
+        }
     }
 
     eprintln!("l2_query_perf: blocks summary\n{}", table.join("\n"));

@@ -175,6 +175,23 @@ async fn bulk_rewrites_keep_every_index_and_store_exact_verdicts() {
                 );
                 assert!(p.contains(index) && !p.contains("TEMP B-TREE"), "{sort}: {p}");
             }
+            // Migration 0024: a category page by date added reads its
+            // category's range in order, and the rebuild creates the narrow
+            // idx_items_cat after it again, so a plain count still reads it.
+            let p = plan(
+                c,
+                "SELECT rowid FROM items WHERE source_id = 's1' AND content_type = 'movie' AND category_id = 'c2' AND non_english = 0 ORDER BY added DESC NULLS LAST, position LIMIT 60 OFFSET 600",
+            );
+            assert!(
+                p.contains("COVERING INDEX idx_items_cat_added (source_id=? AND content_type=? AND category_id=?)")
+                    && !p.contains("TEMP B-TREE"),
+                "{p}"
+            );
+            let p = plan(
+                c,
+                "SELECT count(*) FROM items WHERE source_id = 's1' AND content_type = 'movie' AND category_id = 'c2' AND non_english = 0",
+            );
+            assert!(p.contains("COVERING INDEX idx_items_cat ("), "{p}");
             let counts: i64 = c.query_row(
                 "SELECT sum(item_count) FROM categories WHERE source_id = 's1' AND content_type = 'movie'",
                 [],

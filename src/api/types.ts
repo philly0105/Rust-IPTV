@@ -414,6 +414,16 @@ export interface PlayerSource {
   isRadio: boolean;
   /** ClearKey DRM (UI only; the core never sets it). Such a source plays in the built-in player. */
   drm?: PlayerDrm;
+  /**
+   * The item's length in seconds, for a stream that can't tell it (UI only): MPEG-TS played by
+   * mpegts.js reports none. Catch-up carries its programme's length.
+   */
+  durationSeconds?: number;
+  /**
+   * Xtream catch-up (UI only): the programme's start (RFC 3339) and length, so the built-in player
+   * can ask for the archive again from a later minute to seek (players.md, Seeking in MPEG-TS).
+   */
+  catchup?: { start: string; durationMinutes: number };
 }
 
 /** ClearKey for shaka (`drm.clearKeys` / `drm.servers['org.w3.clearkey']`). */

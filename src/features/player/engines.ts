@@ -14,6 +14,7 @@ import type { MpvStats, PlayerSource } from '@/api/types';
 import { intlLocale } from '@/lib/intl';
 
 import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
+import type { TsSeeker } from './tsSeek';
 
 export interface TrackOption {
   id: string;
@@ -39,6 +40,11 @@ export interface EngineError {
 export interface EngineCallbacks {
   onTracks(tracks: EngineTracks): void;
   onError(err: EngineError): void;
+  /**
+   * mpegts.js restarts at a seek (tsSeek.ts): the element has no media until the new stream
+   * comes, and fires no `waiting` meanwhile.
+   */
+  onWaiting?(): void;
 }
 
 export interface Engine {
@@ -52,10 +58,23 @@ export interface Engine {
   recover(): void;
   /**
    * Seconds to add to `el.currentTime` (and buffered/seekable ranges) for display, and to
-   * subtract when seeking. Non-zero only after mpegts.js reconnected a live stream: the new
-   * pipeline restarts the element clock at 0, the shown position must not jump back.
+   * subtract when seeking. Non-zero only after mpegts.js started a new pipeline, which starts the
+   * element clock at 0: a live reconnect (the shown position must not jump back), or a restart
+   * at a seek in non-live MPEG-TS (the item time the new stream starts at).
    */
   timeOffset?(): number;
+  /**
+   * The item's length, for media whose element can't tell it: mpegts.js reports none for
+   * MPEG-TS, so it comes from the source or the file (tsSeek.ts).
+   */
+  duration?(): number | undefined;
+  /**
+   * Seeks to `seconds` (shown time) that the element can't reach itself: mpegts.js restarts the
+   * pipeline there (tsSeek.ts). False when the element should seek, as it does inside what it holds.
+   */
+  seek?(seconds: number): boolean;
+  /** The engine started at `source.resumeSeconds` itself: the caller must not seek there again. */
+  readonly resumes?: boolean;
   /** What the library knows about the stream now (stream info overlay); the element adds the rest. */
   stats?(): Partial<MpvStats>;
   /**
@@ -323,6 +342,13 @@ export async function fetchFailureStatus(url: string): Promise<{ status: number;
 // ---------------------------------------------------------------------------
 // Native element
 // ---------------------------------------------------------------------------
+
+/** Element time `t` is inside what the element holds: a seek there needs no new data. */
+export function bufferedAt(el: HTMLMediaElement, t: number): boolean {
+  const b = el.buffered;
+  for (let i = 0; i < b.length; i++) if (t >= b.start(i) && t < b.end(i)) return true;
+  return false;
+}
 
 /** Which engine last attached to an element; a stale native engine must not reset it on destroy. */
 const nativeOwner = new WeakMap<HTMLMediaElement, object>();
@@ -951,6 +977,9 @@ export function tsRestartDelay(n: number): number {
 
 const CLOSED_LIVE: EngineError = { message: 'The live stream closed the connection', fatal: true, kind: 'network' };
 
+/** A restart that lands this close before its target plays on from there instead of seeking again. */
+const TS_LEFTOVER_MIN_S = 0.25;
+
 async function mpegtsEngine(
   el: HTMLMediaElement,
   source: PlayerSource,
@@ -960,6 +989,8 @@ async function mpegtsEngine(
   signal?: AbortSignal,
   /** Called instead of `cb.onError` when the stream turns out not to be MPEG-TS before any media played. */
   onNotTs?: () => void,
+  /** Non-live: where to restart for a seek past the buffer or a resume (tsSeek.ts). */
+  seeker?: TsSeeker,
 ): Promise<Engine> {
   const { default: mpegts } = await import('mpegts.js');
   // A superseded engine attaching late would steal the element from the newer one.
@@ -989,10 +1020,23 @@ async function mpegtsEngine(
   let hadMedia = false;
   /** Handed to `onNotTs`: whatever this pipeline reports after that is moot. */
   let handedOff = false;
-  /** Live only: element time lost to reconnects, so the displayed position keeps running. */
+  /**
+   * Item time at element time 0. Live: element time lost to reconnects, so the displayed position
+   * keeps running. Non-live: where a restart at a seek started the new stream.
+   */
   let offset = 0;
   /** Set by a reconnect until the new pipeline has media: the displayed position to continue from. */
   let anchor: number | null = null;
+  const restartable = !isLive && !!seeker;
+  /** A restart's target until the new stream is there and sought: the display holds at it. */
+  let hold: number | null = null;
+  /** What the new stream still has to be sought by once it has media (catch-up starts on a whole minute). */
+  let leftover = 0;
+  /** Whether the restart under way plays once loaded; a seek that replaces it keeps that. */
+  let restartPlays = false;
+  /** Bumped by every restart, so a superseded one's answer is dropped. */
+  let seekRun = 0;
+  let seekAbort: AbortController | null = null;
 
   const config: Parameters<typeof mpegts.createPlayer>[1] = {
     enableWorker: true,
@@ -1032,9 +1076,9 @@ async function mpegtsEngine(
     if (!destroyed) cb.onError(err);
   };
 
-  const start = (): void => {
+  const start = (from = absolute): void => {
     loadComplete = false;
-    const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: absolute, cors: true }, config);
+    const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: from, cors: true }, config);
     player = p;
     p.on(mpegts.Events.ERROR, (type: string, detail: string, info?: { code?: number; msg?: string }) => {
       if (player !== p || destroyed || handedOff) return;
@@ -1047,8 +1091,8 @@ async function mpegtsEngine(
         if (info?.code && info.code > 0) {
           const status = info.code;
           // mpegts.js drops the body; our own server (proxy guard, relayed status) is asked once for the reason.
-          if (isOwnServerUrl(absolute)) {
-            void fetchFailureReason(absolute).then((r) => {
+          if (isOwnServerUrl(from)) {
+            void fetchFailureReason(from).then((r) => {
               if (player === p) fail({ message: withReason(message, r?.reason ?? null, r?.status ?? status), fatal: true, kind: 'network' });
             });
           } else fail({ message, fatal: true, kind: 'network' });
@@ -1085,8 +1129,9 @@ async function mpegtsEngine(
       return;
     }
     restarts++;
+    const shown = hold ?? offset + (Number.isFinite(el.currentTime) ? el.currentTime : 0);
     // Remember where the display stood; the first media time of the new pipeline is rebased onto it.
-    if (isLive && anchor === null) anchor = offset + (Number.isFinite(el.currentTime) ? el.currentTime : 0);
+    if (isLive && anchor === null) anchor = shown;
     if (stableTimer) {
       clearTimeout(stableTimer);
       stableTimer = null;
@@ -1094,11 +1139,60 @@ async function mpegtsEngine(
     restartTimer = setTimeout(() => {
       restartTimer = null;
       if (destroyed) return;
+      // A movie, recording or programme comes back where it dropped, not at its start.
+      if (restartable && seeker?.usable()) {
+        restartAt(shown, true);
+        return;
+      }
       if (player) teardown(player);
       start();
       void el.play().catch(() => undefined);
     }, tsRestartDelay(restarts));
   }
+
+  /**
+   * Restarts at `target` (shown seconds) for a seek past the buffer or a resume. The old pipeline
+   * goes first, so its connection to the provider closes before the new one opens (one-connection
+   * accounts); then the stream loads where the seeker says and the rest is sought inside it. With
+   * no start from the seeker it loads from 0 and seeks there, as every seek used to. `play`: start
+   * playing once loaded (a seek while paused stays paused).
+   */
+  function restartAt(target: number, play: boolean): void {
+    if (!seeker) return;
+    const run = ++seekRun;
+    seekAbort?.abort();
+    const ctl = new AbortController();
+    seekAbort = ctl;
+    if (restartTimer) clearTimeout(restartTimer);
+    restartTimer = null;
+    if (player) teardown(player);
+    player = null;
+    hold = target;
+    restartPlays = play;
+    cb.onWaiting?.();
+    seeker.startAt(target, ctl.signal).then(
+      (plan) => {
+        if (destroyed || run !== seekRun) return;
+        offset = plan?.at ?? 0;
+        leftover = target - offset;
+        start(plan ? new URL(plan.url, window.location.href).href : absolute);
+        if (play) void el.play().catch(() => undefined);
+      },
+      (err: unknown) => {
+        if (destroyed || run !== seekRun) return;
+        hold = null;
+        fail({ message: err instanceof Error ? err.message : String(err), fatal: true, kind: 'network' });
+      },
+    );
+  }
+
+  /** The restarted stream has media: seek the rest inside it, then show the element's own time again. */
+  const land = (): void => {
+    if (hold === null || player === null || el.readyState < 1) return;
+    if (leftover > TS_LEFTOVER_MIN_S) el.currentTime = leftover;
+    leftover = 0;
+    hold = null;
+  };
 
   // A live TS connection that closes plays out its buffer and then ends or stalls: reconnect.
   const onEnded = (): void => {
@@ -1122,15 +1216,32 @@ async function mpegtsEngine(
   };
   el.addEventListener('timeupdate', rebase);
   el.addEventListener('loadedmetadata', rebase);
+  el.addEventListener('loadedmetadata', land);
   el.addEventListener('timeupdate', markStable);
   el.addEventListener('loadeddata', onData);
-  start();
+  // A resume starts where it resumes instead of loading everything before it.
+  const resumeAt = restartable && source.resumeSeconds && source.resumeSeconds > 0 ? source.resumeSeconds : 0;
+  if (resumeAt) restartAt(resumeAt, true);
+  else start();
+  if (restartable) void seeker?.prepare?.();
 
   return {
     kind: 'mpegts',
+    resumes: resumeAt > 0,
     setQuality() {},
     setAudio() {},
     setText() {},
+    duration() {
+      return restartable ? seeker?.duration() : undefined;
+    },
+    seek(target) {
+      if (!restartable || destroyed || !Number.isFinite(target) || !seeker?.usable()) return false;
+      // Inside what the element holds (and no restart under way) the element seeks itself.
+      if (hold === null && target >= offset && bufferedAt(el, target - offset)) return false;
+      // The torn-down element reads as paused while a restart is under way.
+      restartAt(target, hold !== null ? restartPlays : !el.paused);
+      return true;
+    },
     recover() {
       restarts = 0;
       if (restartTimer) clearTimeout(restartTimer);
@@ -1161,11 +1272,14 @@ async function mpegtsEngine(
       return out;
     },
     timeOffset() {
-      // While reconnecting the display holds at the anchor whatever the element reports.
-      return anchor !== null ? anchor - (Number.isFinite(el.currentTime) ? el.currentTime : 0) : offset;
+      // While reconnecting or restarting the display holds at the anchor or the target, whatever the element reports.
+      const t = Number.isFinite(el.currentTime) ? el.currentTime : 0;
+      if (hold !== null) return hold - t;
+      return anchor !== null ? anchor - t : offset;
     },
     destroy() {
       destroyed = true;
+      seekAbort?.abort();
       if (restartTimer) clearTimeout(restartTimer);
       if (stableTimer) clearTimeout(stableTimer);
       el.removeEventListener('ended', onEnded);
@@ -1173,6 +1287,7 @@ async function mpegtsEngine(
       el.removeEventListener('timeupdate', markStable);
       el.removeEventListener('timeupdate', rebase);
       el.removeEventListener('loadedmetadata', rebase);
+      el.removeEventListener('loadedmetadata', land);
       el.removeEventListener('loadeddata', onData);
       if (player) teardown(player);
       player = null;
@@ -1235,7 +1350,8 @@ async function tsFirstEngine(
 
 /**
  * Attach the right engine. `loadUrl` is `proxiedUrl(source)`.
- * Resume for direct/file (including MPEG-TS VOD) is applied by the caller on `loadedmetadata`.
+ * Resume for direct/file is applied by the caller on `loadedmetadata`, unless the engine did it
+ * (`Engine.resumes`: MPEG-TS with a `seeker` restarts there, tsSeek.ts).
  * `forceMpegts` is set after the element rejected an extensionless direct stream.
  * `profile` defaults to the main player's buffers.
  */
@@ -1244,7 +1360,7 @@ export async function createEngine(
   source: PlayerSource,
   loadUrl: string,
   cb: EngineCallbacks,
-  opts: { captions: boolean; signal?: AbortSignal; forceMpegts?: boolean; profile?: EngineProfile },
+  opts: { captions: boolean; signal?: AbortSignal; forceMpegts?: boolean; profile?: EngineProfile; seeker?: TsSeeker },
 ): Promise<Engine> {
   const profile = opts.profile ?? 'main';
   const released = shakaReleased(el);
@@ -1259,7 +1375,7 @@ export async function createEngine(
       return shakaEngine(el, source, loadUrl, cb, opts.captions, opts.signal);
     default:
       if (!mseSupported()) return nativeEngine(el, loadUrl, cb, opts.captions);
-      if (opts.forceMpegts || looksLikeMpegTs(source)) return mpegtsEngine(el, source, loadUrl, cb, profile, opts.signal);
+      if (opts.forceMpegts || looksLikeMpegTs(source)) return mpegtsEngine(el, source, loadUrl, cb, profile, opts.signal, undefined, opts.seeker);
       // The element would download until FFmpeg's probe gives up on raw MPEG-TS, then error.
       if (isUnlabelledLive(source) && liveFormatFor(source) !== 'native') return tsFirstEngine(el, source, loadUrl, cb, profile, opts.signal, opts.captions);
       return nativeEngine(el, loadUrl, cb, opts.captions);

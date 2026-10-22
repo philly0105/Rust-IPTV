@@ -305,6 +305,30 @@ async fn switching_a_source_to_one_connection_reaches_a_split_transfer() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_folder_that_cannot_leave_holes_keeps_one_request() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    // FAT or exFAT: a write far past the end would zero-fill the gap.
+    iptv_core::downloads::set_no_holes(&c.state, true);
+    let path = format!("/files/video.bin?size={}&kbps=4096", 12 * MIB);
+    let d = c.start("src", "1", &path).await;
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let d = c.get(d.id).await;
+        assert_eq!(d.connections, None, "one connection");
+        if d.status == DownloadStatus::Completed {
+            assert!(is_mock_content(Path::new(&d.file_path.unwrap())));
+            break;
+        }
+        assert!(Instant::now() < deadline, "never completed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // The file system is asked once per run: no hand-over a second later
+    // that breaks the stream and reconnects.
+    assert_eq!(c.requests("/files/video.bin").await, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_queued_download_gets_the_connection_a_split_one_gives_back() {
     let c = ctx().await;
     c.limit("src", 3).await;

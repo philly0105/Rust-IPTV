@@ -100,6 +100,12 @@ pub fn set_playback_lease(state: &AppState, lease: std::time::Duration) {
     manager::manager(state).set_playback_lease(lease);
 }
 
+/// Makes the downloads folder act as one that cannot leave holes (FAT,
+/// exFAT), so files keep one connection. Test hook; not a C4 command.
+pub fn set_no_holes(state: &AppState, on: bool) {
+    manager::manager(state).set_no_holes(on);
+}
+
 /// `downloads.playback`: what one player plays now (see
 /// [`manager::set_playback`]).
 pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<String>) {

@@ -19,7 +19,7 @@ use crate::model::{DownloadStatus, DownloadWait, WaitReason};
 use crate::state::AppState;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -346,6 +346,9 @@ pub struct DownloadManager {
     wait_limit_ms: AtomicU64,
     /// [`PLAYBACK_LEASE`] override in milliseconds; 0 = default. Tests only.
     lease_ms: AtomicU64,
+    /// The downloads folder behaves as one that cannot leave holes (FAT,
+    /// exFAT). Tests only.
+    no_holes: AtomicBool,
 }
 
 /// What a stop request found.
@@ -536,6 +539,16 @@ impl DownloadManager {
         let ms = |d: Duration| u64::try_from(d.as_millis()).unwrap_or(u64::MAX).max(1);
         self.wait_base_ms.store(ms(base), Ordering::Relaxed);
         self.wait_limit_ms.store(ms(limit), Ordering::Relaxed);
+    }
+
+    /// Makes every `.part` act as one on a file system that cannot leave
+    /// holes, so no file splits. Used by tests.
+    pub fn set_no_holes(&self, on: bool) {
+        self.no_holes.store(on, Ordering::Relaxed);
+    }
+
+    pub(crate) fn no_holes(&self) -> bool {
+        self.no_holes.load(Ordering::Relaxed)
     }
 
     /// Shortens how long a playback report counts. Used by tests.

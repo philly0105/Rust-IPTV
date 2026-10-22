@@ -232,7 +232,8 @@ pub fn remove(part: &Path) {
 /// Lets writes far past the end of the `.part` leave a hole. On NTFS a
 /// write beyond the valid data length otherwise zero-fills everything up to
 /// it first, a synchronous multi-gigabyte write. False when the file system
-/// cannot do it (exFAT, FAT): the transfer then keeps one connection.
+/// cannot do it (exFAT, FAT): the transfer then keeps one connection, and
+/// so do the other systems' file systems that zero-fill.
 #[cfg(windows)]
 pub fn make_sparse(part: &Path) -> bool {
     use std::os::windows::io::AsRawHandle;
@@ -270,8 +271,74 @@ pub fn make_sparse(part: &Path) -> bool {
     }
 }
 
+/// Linux leaves holes on its own, except on the file systems that
+/// zero-fill a gap a write leaves past the end (FAT, exFAT, HFS, HFS+) and
+/// on mounts whose holes depend on a server or a userspace driver (SMB, 9p
+/// as WSL and VMs share Windows folders, VirtualBox shares, FUSE: exfat-fuse
+/// among them).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn make_sparse(part: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(part.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: an all-zero statfs is valid; `path` is a C string and `st` a
+    // statfs for the call to fill.
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(path.as_ptr(), &mut st) } != 0 {
+        return false;
+    }
+    // The magic is 32 bits whatever the field's type (signed on some ABIs).
+    leaves_holes((st.f_type as u64) & 0xffff_ffff)
+}
+
+/// `statfs` magic numbers (Linux) of the file systems [`make_sparse`]
+/// refuses.
+#[cfg(any(target_os = "linux", target_os = "android", test))]
+const NO_HOLES: [u64; 10] = [
+    0x4d44,      // MSDOS_SUPER_MAGIC: FAT, vfat
+    0x2011_bab0, // EXFAT_SUPER_MAGIC
+    0x4244,      // HFS_SUPER_MAGIC
+    0x482b,      // HFSPLUS_SUPER_MAGIC
+    0x517b,      // SMB_SUPER_MAGIC
+    0xff53_4d42, // CIFS_MAGIC_NUMBER
+    0xfe53_4d42, // SMB2_MAGIC_NUMBER
+    0x0102_1997, // V9FS_MAGIC
+    0x786f_4256, // VBOXSF_SUPER_MAGIC
+    0x6573_5546, // FUSE_SUPER_MAGIC
+];
+
+#[cfg(any(target_os = "linux", target_os = "android", test))]
+fn leaves_holes(fs_type: u64) -> bool {
+    !NO_HOLES.contains(&fs_type)
+}
+
+/// On macOS only APFS (and ZFS) leave holes: HFS+, FAT and exFAT zero-fill
+/// the gap, and a network share depends on its server.
+#[cfg(target_os = "macos")]
+pub fn make_sparse(part: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(part.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: an all-zero statfs is valid; `path` is a C string and `st` a
+    // statfs for the call to fill.
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(path.as_ptr(), &mut st) } != 0 {
+        return false;
+    }
+    // SAFETY: the kernel fills `f_fstypename` with a NUL-terminated name.
+    let name = unsafe { std::ffi::CStr::from_ptr(st.f_fstypename.as_ptr()) };
+    matches!(name.to_bytes(), b"apfs" | b"zfs")
+}
+
 /// Other systems leave holes on their own.
-#[cfg(not(windows))]
+#[cfg(not(any(
+    windows,
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos"
+)))]
 pub fn make_sparse(_part: &Path) -> bool {
     true
 }
@@ -849,6 +916,43 @@ mod tests {
             }],
         };
         assert!(!r.is_consistent(), "pos past the end");
+    }
+
+    #[test]
+    fn file_systems_that_zero_fill_a_gap_keep_one_connection() {
+        // ext4, XFS, Btrfs, tmpfs, overlayfs (Docker), NFS leave holes.
+        for fs in [
+            0xef53,
+            0x5846_5342,
+            0x9123_683e,
+            0x0102_1994,
+            0x794c_7630,
+            0x6969,
+        ] {
+            assert!(leaves_holes(fs), "{fs:#x}");
+        }
+        // FAT, exFAT, HFS+, SMB, 9p (WSL), FUSE do not.
+        for fs in [
+            0x4d44,
+            0x2011_bab0,
+            0x482b,
+            0xff53_4d42,
+            0x0102_1997,
+            0x6573_5546,
+        ] {
+            assert!(!leaves_holes(fs), "{fs:#x}");
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let part = dir.path().join("Movie.mp4.part");
+            std::fs::write(&part, b"").unwrap();
+            assert!(
+                make_sparse(&part),
+                "the test folder's file system leaves holes"
+            );
+            assert!(!make_sparse(&dir.path().join("missing.part")));
+        }
     }
 
     #[test]

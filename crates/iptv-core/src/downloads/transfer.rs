@@ -392,8 +392,9 @@ fn user_message(err: &CoreError) -> String {
 struct Representation {
     total: Option<i64>,
     validator: Option<String>,
-    /// A segment answer did not match, or the provider refused an extra
-    /// connection: the rest of this run uses one connection.
+    /// A segment answer did not match, the provider refused an extra
+    /// connection, or the file system cannot leave holes: the rest of this
+    /// run uses one connection.
     one_connection: bool,
 }
 
@@ -712,14 +713,19 @@ async fn attempt(
         .filter(|_| splittable && status == StatusCode::PARTIAL_CONTENT && rep.validator.is_some());
     let worth_splitting =
         |offset: i64| split_total.is_some_and(|t| t - offset >= 2 * segments::MIN_SEGMENT);
-    if worth_splitting(offset) && mgr.connection_allowance(ctl) >= 2 && sparse(dest).await {
-        let ranges = Ranges::new(
-            rep.total.unwrap_or(0),
-            rep.validator.clone().unwrap_or_default(),
-            offset,
-        );
-        let first = Some((resp.bytes_stream().boxed(), offset));
-        return segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+    if worth_splitting(offset) && mgr.connection_allowance(ctl) >= 2 {
+        if sparse(mgr, dest).await {
+            let ranges = Ranges::new(
+                rep.total.unwrap_or(0),
+                rep.validator.clone().unwrap_or_default(),
+                offset,
+            );
+            let first = Some((resp.bytes_stream().boxed(), offset));
+            return segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+        }
+        // The file system cannot leave holes: the rest of the run keeps
+        // one connection and stops asking.
+        rep.one_connection = true;
     }
 
     let file = tokio::fs::OpenOptions::new()
@@ -769,8 +775,13 @@ async fn attempt(
                     if may_split(state, source, mgr, rep.one_connection)
                         && mgr.connection_allowance(ctl) >= 2
                     {
-                        hand_over = true;
-                        break None;
+                        // Asked before the stream is let go: a file system
+                        // that cannot leave holes keeps it.
+                        if sparse(mgr, dest).await {
+                            hand_over = true;
+                            break None;
+                        }
+                        rep.one_connection = true;
                     }
                 }
             }
@@ -809,34 +820,22 @@ async fn attempt(
         return error(CoreError::Io(e), started_at, offset);
     }
     if let Some(stream) = stream {
-        if sparse(dest).await {
-            let ranges = Ranges::new(
-                rep.total.unwrap_or(0),
-                rep.validator.clone().unwrap_or_default(),
-                offset,
-            );
-            return segmented(
-                state,
-                row,
-                dest,
-                ctl,
-                mgr,
-                rep,
-                ranges,
-                Some((stream, offset)),
-            )
-            .await;
-        }
-    }
-    if hand_over {
-        // The file system cannot leave holes: go on with one connection
-        // (the next attempt resumes this one with Range).
-        rep.one_connection = true;
-        return error(
-            CoreError::Network("continuing with one connection".into()),
-            started_at,
+        let ranges = Ranges::new(
+            rep.total.unwrap_or(0),
+            rep.validator.clone().unwrap_or_default(),
             offset,
         );
+        return segmented(
+            state,
+            row,
+            dest,
+            ctl,
+            mgr,
+            rep,
+            ranges,
+            Some((stream, offset)),
+        )
+        .await;
     }
     match end {
         None => AttemptEnd::Stopped(offset),
@@ -859,8 +858,8 @@ const SPLIT_CHECK: Duration = Duration::from_secs(1);
 /// the source's "Connections per download" is Auto, no speed cap is set (it
 /// paces one stream), and nothing in this run asked for one connection
 /// (`one_connection`: a segment answer that did not match, a refused extra
-/// connection). Read again while the transfer runs, so a change applies to
-/// a transfer already split.
+/// connection, a file system that cannot leave holes). Read again while
+/// the transfer runs, so a change applies to a transfer already split.
 pub(super) fn may_split(
     state: &AppState,
     source: &str,
@@ -879,7 +878,10 @@ pub(super) fn may_split(
 
 /// Lets the `.part` take writes far past its end without filling the gap
 /// first (see [`segments::make_sparse`]).
-async fn sparse(dest: &Dest) -> bool {
+async fn sparse(mgr: &DownloadManager, dest: &Dest) -> bool {
+    if mgr.no_holes() {
+        return false;
+    }
     let part = dest.part_path.clone();
     tokio::task::spawn_blocking(move || segments::make_sparse(&part))
         .await

@@ -41,7 +41,7 @@ import { invalidate, queryClient as appQueryClient, rpcKey, useRpcQuery } from '
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Settings, type Source, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
@@ -1076,7 +1076,8 @@ export function EpgGridPage() {
   };
 
   // ---- channel row menu (C2: rename and hide from the guide, plus the Live page's other entries) ----
-  const [rowMenu, setRowMenu] = useState<{ pos: { x: number; y: number }; channel: Channel } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; programme?: EpgProgram } | null>(null);
+  const [programmeLink, setProgrammeLink] = useState<string | null>(null);
   const closeRowMenu = useCallback(() => setRowMenu(null), []);
   // "Match guide channel" from the row menu and the no-match notice, as on the Live page.
   const [mapping, setMapping] = useState<Channel | null>(null);
@@ -1456,7 +1457,7 @@ export function EpgGridPage() {
   const focusCell = useStable((row: number, program: EpgProgram) =>
     setCursor((c) => (c.row === row && c.time >= ms(program.start) && c.time < ms(program.end) ? c : { row, time: Math.max(ms(program.start), start) })),
   );
-  const rowMenuAt = useStable((channel: Channel, x: number, y: number) => setRowMenu({ pos: { x, y }, channel }));
+  const rowMenuAt = useStable((channel: Channel, x: number, y: number, programme?: EpgProgram) => setRowMenu({ pos: { x, y }, channel, programme }));
   const fitText = useCallback((row: HTMLElement) => fitCellText(row, scrollX.current, shiftPx.current), []);
   const pressCell = useStable((channel: Channel, program: EpgProgram) => prefetchProgramDescription(queryClient, channel.ref, program, offsetMs));
   // The preview band follows the pointer after it rests a moment (a sweep across the grid does
@@ -1831,6 +1832,9 @@ export function EpgGridPage() {
           source={rowMenu.channel.ref.sourceId === source?.id ? source : undefined}
           // The grid shows the channel's programmes anyway; the header names the airing one.
           nowTitle={programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title}
+          programme={rowMenu.programme}
+          now={now}
+          onProgrammeLink={setProgrammeLink}
           onPlay={playLive}
           onMapGuide={setMapping}
           onToggleFavorite={toggleFavorite}
@@ -1838,6 +1842,21 @@ export function EpgGridPage() {
         />
       ) : null}
       <MemoMappingDialog channel={mapping} onClose={closeMapping} />
+      <Dialog open={programmeLink !== null} onClose={() => setProgrammeLink(null)} title={t('copyUrl')} size="lg">
+        <p className="mb-2 text-sm text-fg-muted">Select the stream address and copy it manually.</p>
+        <input
+          type="text"
+          readOnly
+          value={programmeLink ?? ''}
+          aria-label={t('copyUrl')}
+          data-autofocus
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full rounded-md border border-edge bg-bg px-3 py-2 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        />
+        <div className="mt-3 flex justify-end">
+          <Button onClick={() => setProgrammeLink(null)}>{t('close')}</Button>
+        </div>
+      </Dialog>
 
       {selection ? (
         <ProgramPopover
@@ -2301,14 +2320,20 @@ function GuideRowMenu({
   menu,
   source,
   nowTitle,
+  programme,
+  now,
+  onProgrammeLink,
   onPlay,
   onMapGuide,
   onToggleFavorite,
   onClose,
 }: {
-  menu: { pos: { x: number; y: number }; channel: Channel };
+  menu: { pos: { x: number; y: number }; channel: Channel; programme?: EpgProgram };
   source: Source | undefined;
   nowTitle: string | undefined;
+  programme?: EpgProgram;
+  now: number;
+  onProgrammeLink(url: string): void;
   onPlay(channel: Channel): void;
   onMapGuide(channel: Channel): void;
   onToggleFavorite(channel: Channel, wasFavorite: boolean): void;
@@ -2319,7 +2344,7 @@ function GuideRowMenu({
   const name = displayChannelName(ch.name, stripCountryPrefix);
   const favorites = useRpcQuery('favorites.contains', { refs: [ch.ref] });
   const favorite = favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined;
-  const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide });
+  const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide, programme, now, onProgrammeLink });
   return <ContextMenu pos={menu.pos} items={items} header={channelMenuHeader(ch, name, nowTitle)} label={name} onClose={onClose} />;
 }
 

@@ -76,7 +76,7 @@ export interface GuideRowHandlers {
   play(channel: Channel): void;
   open(row: number, channel: Channel, program: EpgProgram, el: HTMLElement): void;
   focusCell(row: number, program: EpgProgram): void;
-  menu(channel: Channel, x: number, y: number): void;
+  menu(channel: Channel, x: number, y: number, program?: EpgProgram): void;
   /** Fits the text of the row's cells to the grid's current scroll (fitCellText). */
   fitText(row: HTMLElement): void;
   /** A press on a cell, before its click opens the detail: the detail's data can be fetched ahead. */
@@ -186,7 +186,11 @@ export const GuideRow = memo(function GuideRow({
       onContextMenu={(e: MouseEvent) => {
         if (!ch) return;
         e.preventDefault();
-        handlers.menu(ch, e.clientX, e.clientY);
+        // Keep the programme under the pointer when the context menu is opened from a cell. The
+        // row itself still opens the channel menu, while a programme can resolve its archive URL.
+        const cell = e.target instanceof Element ? e.target.closest<HTMLButtonElement>('button[data-start]') : null;
+        const program = cell ? programs?.find((p) => p.start === cell.dataset.start) : undefined;
+        handlers.menu(ch, e.clientX, e.clientY, program);
       }}
     >
       <div

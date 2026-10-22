@@ -15,8 +15,9 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
 import { isDesktop } from '@/api/transport';
-import type { Channel, Source } from '@/api/types';
+import type { Channel, EpgProgram, Source } from '@/api/types';
 import { errorDescription, toast } from '@/ui';
+import { copyText } from '@/lib/clipboard';
 import { useChannelEditMenuItems } from '@/features/channeledit';
 import { useAddToListMenuItem } from '@/features/lists/hooks/useAddToList';
 import { channelInput } from '@/features/multiview/addChannel';
@@ -29,7 +30,8 @@ import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import type { MenuEntry, MenuHeader, MenuItem } from '../components/ContextMenu';
 import { archivePath, canBrowseArchive } from '../lib/archive';
 import { displayChannelName } from '../lib/channelName';
-import { openChannelSource } from '../lib/playback';
+import { canCatchUp } from '../lib/epgTime';
+import { catchupSource, openChannelSource } from '../lib/playback';
 import { useDisplayPrefs } from './useDisplayPrefs';
 
 export interface ChannelMenuOptions {
@@ -48,6 +50,12 @@ export interface ChannelMenuOptions {
    * list rows); the guide does not.
    */
   editHints?: boolean;
+  /** Programme under the pointer, when this menu was opened from an EPG cell. */
+  programme?: EpgProgram;
+  /** Current wall-clock time, used to avoid offering archive links for future programmes. */
+  now?: number;
+  /** Receives a resolved programme URL for display when clipboard access is unavailable. */
+  onProgrammeLink?(url: string): void;
 }
 
 const sep = (id: string): MenuEntry => ({ id, type: 'separator' });
@@ -73,7 +81,7 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
     channel ? { sourceId: channel.ref.sourceId, contentType: channel.ref.contentType, kind: 'item', targetId: channel.ref.itemId, name } : null,
     { categoryId: channel?.categoryId },
   );
-  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, editHints = false } = opts;
+  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, editHints = false, programme, now = Date.now(), onProgrammeLink } = opts;
 
   return useMemo((): MenuEntry[] => {
     if (!channel) return [];
@@ -107,7 +115,27 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
           toast({ title: t('copyFailed'), variant: 'error' });
           return;
         }
-        await navigator.clipboard.writeText(s.url);
+        await copyText(s.url);
+        toast({ title: t('urlCopied'), variant: 'success' });
+      } catch (err) {
+        toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
+      }
+    };
+    const copyProgramme = async () => {
+      if (!src || !programme) return;
+      try {
+        const s = await catchupSource(ch, src.kind, programme, now);
+        // Timeshift URLs from Xtream/Stalker must retain the provider login in their path so that
+        // VLC/MPV can open them. Ordinary channel copies still use the stricter policy.
+        if (!canShareSource(s, () => src.kind, { allowCredentials: true })) {
+          toast({ title: t('copyFailed'), variant: 'error' });
+          return;
+        }
+        if (onProgrammeLink) {
+          onProgrammeLink(s.url);
+          return;
+        }
+        await copyText(s.url);
         toast({ title: t('urlCopied'), variant: 'success' });
       } catch (err) {
         toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
@@ -141,15 +169,18 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
       sep('sep-channel'),
       // Xtream and Stalker links carry the login (and so can a playlist link): only a link with no
       // credentials in it is offered, and the resolved link is checked again before it is copied.
-      ...(src?.kind === 'm3u' && !!ch.url && isShareableUrl(ch.url)
+      ...(!programme && src?.kind === 'm3u' && !!ch.url && isShareableUrl(ch.url)
         ? [{ id: 'copy', label: t('copyUrl'), icon: <Copy className="size-4" />, onSelect: () => void copy() }]
+        : []),
+      ...(src && programme && canCatchUp(programme, ch, src.kind, now)
+        ? [{ id: 'copy-programme', label: t('copyUrl'), icon: <Copy className="size-4" />, onSelect: () => void copyProgramme() }]
         : []),
       ...editItems.map((a) => plain(a, editHints)),
       ...(onMapGuide ? [{ id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => onMapGuide(ch) }] : []),
       ...lockItems.map((a) => plain(a, false)),
     ];
     return out;
-  }, [channel, source, favorite, name, live, t, navigate, onPlay, onToggleFavorite, onMapGuide, organize, editHints, multiviewItem, addToListItem, editItems, lockItems]);
+  }, [channel, source, favorite, name, live, t, navigate, onPlay, onToggleFavorite, onMapGuide, organize, editHints, multiviewItem, addToListItem, editItems, lockItems, programme, now, onProgrammeLink]);
 }
 
 /**

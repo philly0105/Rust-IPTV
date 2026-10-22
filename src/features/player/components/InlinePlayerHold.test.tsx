@@ -204,6 +204,23 @@ describe('MPEG-TS that the engine restarts (PL-2)', () => {
   beforeEach(() => vi.mocked(createEngine).mockClear());
   afterEach(() => vi.mocked(createEngine).mockImplementation(async () => ({ destroy: vi.fn() }) as never));
 
+  it("leaves the resume to an engine that started there, and shows the engine's length", async () => {
+    const { el, writes } = await playOn({ resumes: true, duration: () => 5400 });
+    act(() => void el.dispatchEvent(new Event('loadedmetadata')));
+    expect(writes).toEqual([]);
+    act(() => void el.dispatchEvent(new Event('timeupdate')));
+    // The element's own length covers only the stream since the restart.
+    expect(usePlayerStore.getState().durationSeconds).toBe(5400);
+  });
+
+  it('an engine that did not resume gets the element seek at loadedmetadata, and the element length', async () => {
+    const { el, writes } = await playOn({});
+    act(() => void el.dispatchEvent(new Event('loadedmetadata')));
+    expect(writes).toEqual([600]);
+    act(() => void el.dispatchEvent(new Event('timeupdate')));
+    expect(usePlayerStore.getState().durationSeconds).toBe(700);
+  });
+
   it('a pause or play between two pipelines goes to the engine, and the status follows it', async () => {
     let between = true;
     const setPaused = vi.fn(() => between);

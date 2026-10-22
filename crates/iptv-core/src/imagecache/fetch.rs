@@ -263,4 +263,39 @@ mod tests {
         assert!(!looks_like_html(b"<svg/>"));
         assert!(!looks_like_html(b"\x89PNG\r\n\x1a\n"));
     }
+
+    /// A connect timeout counts as no answer, toward the host's breaker. The
+    /// image head deadline usually ends a connect first; this one comes
+    /// sooner when hyper-util splits the connect timeout over a host's
+    /// addresses. Linux only: there a listener whose full accept queue is
+    /// never drained drops further SYNs, like a firewalled host.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_connect_timeout_is_no_answer() {
+        use std::time::Duration;
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let listener = socket.listen(0).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut queued = Vec::new();
+        while queued.len() < 16 {
+            let connect = tokio::net::TcpStream::connect(addr);
+            match tokio::time::timeout(Duration::from_millis(200), connect).await {
+                Ok(Ok(stream)) => queued.push(stream),
+                _ => break,
+            }
+        }
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(300))
+            .build()
+            .unwrap();
+        let err = client
+            .get(format!("http://{addr}/a.png"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.is_connect(), "{err:?}");
+        assert_eq!(transport("127.0.0.1", err).kind, ImageErrorKind::NoAnswer);
+        drop((listener, queued));
+    }
 }

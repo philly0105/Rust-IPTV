@@ -93,11 +93,13 @@ pub const EVICT_TARGET_PERCENT: u64 = 90;
 pub const MAX_URL_LEN: usize = 8 * 1024;
 /// Deadline for one upstream fetch, response head and body together.
 pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
-/// Deadline for an upstream image's response head, connecting included (the
-/// image client gives up connecting after 3 s, [`http::image_client`]).
+/// Deadline for an upstream image's response head, connecting included.
 /// Shorter than [`http::HEADER_TIMEOUT`]: a poster host that accepts the
 /// connection and never answers held the picture, and the request waiting on
-/// it, for 15 s.
+/// it, for 15 s. It also ends a host that does not take the connection: the
+/// client's own [`http::CONNECT_TIMEOUT`] is longer. A shorter connect
+/// timeout would cut the DNS lookup too (reqwest counts it as connecting), so
+/// a resolver that takes 5 s would fail every image.
 pub const HEAD_TIMEOUT: Duration = Duration::from_secs(8);
 /// [`set_head_timeout_for_tests`]'s value in ms; 0 means [`HEAD_TIMEOUT`].
 static HEAD_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
@@ -1167,7 +1169,7 @@ pub async fn fetch_sized_within(
         trusted,
         &source.headers,
     );
-    let client = http::image_client(state, trusted);
+    let client = http::guarded_client(state, trusted);
     let host = url.host_str().unwrap_or("the image server").to_owned();
     let job = Job {
         url,
@@ -1188,9 +1190,8 @@ pub async fn fetch_sized_within(
 
 /// Disk hit, or fetch, validate and store. Concurrent calls for one URL share
 /// one fetch (single flight).
-/// Fetched with [`http::image_client`]: on desktop `state.http` with a 3 s
-/// connect timeout; in server mode the guarded client with the same, trusting
-/// the source's `host:port` only for an image on exactly it.
+/// Desktop: `state.http`. Server mode: the guarded client, trusting the
+/// source's `host:port` only for an image on exactly it.
 /// Non-image content type -> Unsupported; body over [`MAX_IMAGE_BYTES`] ->
 /// Invalid; upstream 404 -> NotFound; other failures -> Network.
 /// Failures are remembered in memory for 10 min (no refetch storm).

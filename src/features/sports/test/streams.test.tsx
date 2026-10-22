@@ -26,6 +26,7 @@ const { etDate } = await import('../lib/espn');
 const { toIndexed, useChannelIndex, INDEX_PAGE_LIMIT, NETWORK_SEARCH_LIMIT } = await import('../hooks/useChannelIndex');
 const { useGuideWindow, GRID_CHUNK } = await import('../hooks/useGuideWindow');
 const { useGameStreams, fallbackQuery, FALLBACK_CONCURRENCY, FALLBACK_LIMIT } = await import('../hooks/useGameStreams');
+const { PAGE_READS } = await import('../hooks/sportsRead');
 
 // ---------------------------------------------------------------------------
 // rpc recorder
@@ -239,6 +240,64 @@ describe('useChannelIndex', () => {
     expect(result.current.error).toBeNull();
   });
 
+  describe('a source with many sports groups', () => {
+    // Sizes in rows: 2500 is three pages, 0 is skipped.
+    const sizes = [2500, 3, 1200, 0, 5, 7, 1, 2, 4];
+    const groups = Object.fromEntries(
+      sizes.map((n, g) => [`s1/c${g}`, Array.from({ length: n }, (_, i) => ch('s1', `c${g}-${i}`, `US| SPORTS ${g}-${i}`))]),
+    );
+
+    function serveMany(fail?: string) {
+      handlers['sources.list'] = () => [SOURCES[0]];
+      handlers['catalog.categories'] = () => sizes.map((n, g) => cat(`c${g}`, `SPORTS ${g}`, n));
+      handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+      const serveGroup = pages(groups);
+      const open = new Map<string, number>();
+      const stats = { inFlight: 0, peak: 0, overlap: false };
+      handlers['catalog.channels'] = async (a: ChannelsArgs) => {
+        if (a.categoryId === fail) throw new Error('db');
+        stats.inFlight += 1;
+        stats.peak = Math.max(stats.peak, stats.inFlight);
+        // A group's pages are never in flight together.
+        if (open.get(a.categoryId)) stats.overlap = true;
+        open.set(a.categoryId, 1);
+        await tick(5);
+        open.set(a.categoryId, 0);
+        stats.inFlight -= 1;
+        return serveGroup(a);
+      };
+      return stats;
+    }
+
+    it('reads four groups at once, each group’s pages in order, and lists the rows in the groups’ order', async () => {
+      const stats = serveMany();
+      const { result } = renderHook(() => useChannelIndex(), { wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(stats.peak).toBe(4);
+      expect(stats.overlap).toBe(false);
+      const asked = callsOf<ChannelsArgs>('catalog.channels');
+      for (const [g, n] of sizes.entries()) {
+        const offsets = asked.filter((a) => a.categoryId === `c${g}`).map((a) => a.query.offset);
+        expect(offsets, `c${g}`).toEqual(n === 0 ? [] : Array.from({ length: Math.ceil(n / INDEX_PAGE_LIMIT) }, (_, p) => p * INDEX_PAGE_LIMIT));
+      }
+      const names = result.current.channels.map((r) => r.channel.name);
+      expect(names).toEqual(sizes.flatMap((_, g) => groups[`s1/c${g}`]!.map((c) => c.name)));
+    });
+
+    it('stops reading the source’s other groups after a failed page', async () => {
+      serveMany('c1');
+      const { result } = renderHook(() => useChannelIndex(), { wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.error).toBeInstanceOf(Error);
+      await tick(30);
+      // c0, c1, c2 and c4 started (c3 is empty); once c1 failed, no group after them and no further page of
+      // c0 was asked.
+      const asked = callsOf<ChannelsArgs>('catalog.channels');
+      expect([...new Set(asked.map((a) => a.categoryId))].sort()).toEqual(['c0', 'c1', 'c2', 'c4']);
+      expect(asked.filter((a) => a.categoryId === 'c0').map((a) => a.query.offset)).toEqual([0]);
+    });
+  });
+
   it('searches each network once, keeps real network channels and lists every channel once', async () => {
     const peak = serve();
     const { result } = renderHook(() => useChannelIndex(), { wrapper });
@@ -365,6 +424,29 @@ describe('useGuideWindow', () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it('sends no chunk still waiting for its turn once the page has gone', async () => {
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    handlers['epg.grid'] = async () => {
+      await held;
+      return {};
+    };
+    const big = Array.from({ length: 3500 }, (_, i) => toIndexed(ch('s1', `b${i}`, `Channel ${i}`), source, true));
+    const { unmount } = renderHook(() => useGuideWindow(big, Date.parse('2026-10-23T22:30Z'), Date.parse('2026-10-24T03:30Z'), true), {
+      wrapper,
+    });
+    await waitFor(() => expect(callsOf('epg.grid')).toHaveLength(PAGE_READS));
+    await tick(20);
+    expect(callsOf('epg.grid')).toHaveLength(PAGE_READS);
+    unmount();
+    release();
+    await tick(20);
+    // The two chunks still in line went with the page. On desktop a sent call runs to its end, so a visit
+    // leaves at most PAGE_READS of them behind.
+    expect(callsOf('epg.grid')).toHaveLength(PAGE_READS);
+  });
+
   it('asks nothing while disabled', async () => {
     handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
     renderHook(() => useGuideWindow(index, Date.now(), Date.now() + HOUR, false), { wrapper });
@@ -475,6 +557,112 @@ describe('useGameStreams', () => {
     ]);
   });
 
+  it('keeps the matches and their fallback hits on screen while a guide refresh or an index edit is prepared', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    const nfl = game('nfl', STEELERS, BUCS, now + 26 * HOUR);
+    const slot = ch('s1', 'st3', 'NFL Sunday Ticket 3');
+    let guide: Record<string, EpgProgram[]> = {};
+    serve([slot], {
+      guide: () => guide,
+      // Only the search finds the game's event channel: its group's name doesn't look like sports.
+      search: () => [ch('s1', 'ev', 'NBA 05: Knicks @ Celtics', { categoryName: 'Events' })],
+    });
+    const games = [live, nfl];
+    const seen: { hits: number; loading: boolean }[] = [];
+    const { result } = renderHook(
+      () => {
+        const r = useGameStreams(games);
+        seen.push({ hits: r.streams.get(live.key)?.length ?? 0, loading: r.loading });
+        return r;
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.streams.get(live.key)!.map((m) => [m.channel.name, m.reason])).toEqual([['NBA 05: Knicks @ Celtics', 'event']]);
+    seen.length = 0;
+    // A guide refresh with a new answer for the same window...
+    guide = {
+      [itemKey(slot.ref)]: [
+        { channelId: 'st3', title: 'NFL Football', start: new Date(nfl.startMs).toISOString(), end: new Date(nfl.startMs + 3 * HOUR).toISOString(), description: 'Steelers at Buccaneers.' },
+      ],
+    };
+    await invalidate('epg.');
+    await waitFor(() => expect(result.current.streams.get(nfl.key)?.map((m) => m.reason)).toEqual(['guide']));
+    // ...and an edit that renames a channel.
+    handlers['catalog.channels'] = pages({ 's1/c1': [{ ...slot, name: 'NFL Sunday Ticket 3 HD' }] });
+    await invalidate('catalog.');
+    await waitFor(() => expect(result.current.streams.get(nfl.key)?.map((m) => m.channel.name)).toEqual(['NFL Sunday Ticket 3 HD']));
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((s) => s.hits !== 1 || s.loading)).toEqual([]);
+  });
+
+  it('searches for a game only after matching it against the whole guide', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    const slot = ch('s1', 'p1', 'US| SPORTS 1');
+    serve([slot], { search: () => [] });
+    let release!: () => void;
+    const late = new Promise<void>((r) => (release = r));
+    handlers['epg.grid'] = async () => {
+      await late;
+      return {
+        [itemKey(slot.ref)]: [
+          { channelId: 'p1', title: 'NBA Basketball: Knicks at Celtics', start: new Date(live.startMs).toISOString(), end: new Date(live.startMs + 3 * HOUR).toISOString() },
+        ],
+      };
+    };
+    const games = [live];
+    const seen: { hits: number; loading: boolean }[] = [];
+    const { result } = renderHook(
+      () => {
+        const r = useGameStreams(games);
+        seen.push({ hits: r.streams.get(live.key)?.length ?? 0, loading: r.loading });
+        return r;
+      },
+      { wrapper },
+    );
+    // The index is matched before the guide answers.
+    await waitFor(() => expect(callsOf('epg.grid')).toHaveLength(1));
+    await tick(20);
+    release();
+    await waitFor(() => expect(result.current.streams.get(live.key)?.map((m) => m.reason)).toEqual(['guide']));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await tick(20);
+    expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toEqual([]);
+    expect(seen.filter((s) => s.hits === 0 && !s.loading)).toEqual([]);
+  });
+
+  it('never stands in the guide of other games while the games on screen are prepared', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    const nfl = game('nfl', STEELERS, BUCS, now + 26 * HOUR);
+    const slot = ch('s1', 'p1', 'US| SPORTS 1');
+    const start = new Date(live.startMs).toISOString();
+    const end = new Date(live.startMs + 3 * HOUR).toISOString();
+    serve([slot], {
+      // Only what overlaps the asked window, as the core answers.
+      guide: (a) =>
+        a.from < end && start < a.to ? { [itemKey(slot.ref)]: [{ channelId: 'p1', title: 'NBA Basketball: Knicks at Celtics', start, end }] } : {},
+      search: () => [],
+    });
+    let games = [live];
+    const { result, rerender } = renderHook(() => useGameStreams(games), { wrapper });
+    await waitFor(() => expect(result.current.streams.get(live.key)?.map((m) => m.reason)).toEqual(['guide']));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // Another day, then back: the live game's guide answer is cached and comes back at once.
+    games = [nfl];
+    rerender();
+    await waitFor(() => expect(callsOf('epg.grid')).toHaveLength(2));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    games = [live];
+    rerender();
+    await waitFor(() => expect(result.current.streams.get(live.key)?.map((m) => m.reason)).toEqual(['guide']));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await tick(20);
+    expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toEqual([]);
+  });
+
   it(`runs at most ${FALLBACK_CONCURRENCY} fallback searches at once`, async () => {
     const now = Date.now();
     const teams = ['Hawks', 'Bulls', 'Nets', 'Suns', 'Kings', 'Magic'].map((n, i) => team(`T${i}`, `City${i}`, n));
@@ -494,6 +682,39 @@ describe('useGameStreams', () => {
     await waitFor(() => expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toHaveLength(6));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(peak).toBe(FALLBACK_CONCURRENCY);
+  });
+
+  it(`keeps every read of the page within ${PAGE_READS} in flight, and asks the guide chunks in order`, async () => {
+    const now = Date.now();
+    // No channel names the game, so it also gets the fallback searches.
+    const games = [game('nba', KNICKS, CELTICS, now + HOUR)];
+    const groups = Object.fromEntries(
+      Array.from({ length: 8 }, (_, g) => [`s1/c${g}`, Array.from({ length: 400 }, (_, i) => ch('s1', `c${g}-${i}`, `US| SPORTS ${g}-${i}`))]),
+    );
+    handlers['sources.list'] = () => [SOURCES[0]];
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    handlers['catalog.categories'] = () => Array.from({ length: 8 }, (_, g) => cat(`c${g}`, `SPORTS ${g}`, 400));
+    let inFlight = 0;
+    let peak = 0;
+    const timed =
+      <A,>(answer: (a: A) => unknown) =>
+      async (a: A) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await tick(3);
+        inFlight -= 1;
+        return answer(a);
+      };
+    handlers['catalog.channels'] = timed(pages(groups));
+    handlers['catalog.search'] = timed(() => ({ live: [], movies: [], series: [] }));
+    handlers['epg.grid'] = timed(() => ({}));
+    const { result } = renderHook(() => useGameStreams(games), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toHaveLength(2));
+    // Four group workers and three network searches wanted seven at once.
+    expect(peak).toBe(PAGE_READS);
+    // 3,200 channels in seven chunks, first chunk first.
+    expect(callsOf<GridArgs>('epg.grid').map((a) => a.refs[0]!.itemId)).toEqual(['c0-0', 'c1-100', 'c2-200', 'c3-300', 'c5-0', 'c6-100', 'c7-200']);
   });
 
   it('asks nothing for no games or while disabled', async () => {

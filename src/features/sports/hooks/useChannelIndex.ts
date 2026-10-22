@@ -13,11 +13,11 @@ import { useMemo } from 'react';
 import { categoriesArgs } from '@/api/bootPrefetch';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
-import { rpcRaw } from '@/api/transport';
 import { itemKey, type Category, type Channel, type ItemKey, type Page, type Source, type SourceKind } from '@/api/types';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import { NETWORKS, foreignFeed, hasMatchup, isSportsGroup, nameTokens, networkIdForChannel, textTokens } from '../lib/names';
+import { sportsRead } from './sportsRead';
 
 export interface IndexedChannel {
   channel: Channel;
@@ -36,9 +36,14 @@ export interface IndexedChannel {
 
 /** Rows per `catalog.channels` page: the core's cap. */
 export const INDEX_PAGE_LIMIT = 1000;
+/**
+ * Sports groups of a source read at once. A big provider has dozens of them, mostly one page each, so one
+ * after another they took longer than the network searches that run beside them.
+ */
+const GROUP_CONCURRENCY = 4;
 /** Hits asked of each network search. */
 export const NETWORK_SEARCH_LIMIT = 200;
-/** Network searches in flight at once: the core has 8 database connections, and pages keep reading. */
+/** Network searches in flight at once, so the group pages keep part of the page's read limit (sportsRead.ts). */
 const NETWORK_CONCURRENCY = 3;
 /** Event channels are renamed on a provider refresh, which invalidates 'catalog.' keys anyway. */
 const INDEX_STALE_MS = 10 * 60_000;
@@ -87,26 +92,45 @@ export function toIndexed(channel: Channel, source: Pick<Source, 'id' | 'kind' |
 /**
  * The channels of a source's sports groups. The groups come from the Live page's own `catalog.categories`
  * query (shown and hidden in one answer), and hidden ones are skipped here: `catalog.channels` with a
- * `categoryId` would list a hidden group's channels.
+ * `categoryId` would list a hidden group's channels. Up to {@link GROUP_CONCURRENCY} groups are read at once,
+ * each group's pages in order, and the rows come back in the groups' order, so the index is the same as read
+ * one group after another.
  */
 async function loadSportsGroups(client: QueryClient, sourceId: string, signal: AbortSignal): Promise<Channel[]> {
   const args = categoriesArgs(sourceId, 'live');
   const categories = await client.fetchQuery({
     queryKey: rpcKey('catalog.categories', args),
-    queryFn: async ({ signal: s }) => (await rpcRaw('catalog.categories', args, { signal: s })) as Category[],
+    queryFn: async ({ signal: s }) => (await sportsRead('catalog.categories', args, s)) as Category[],
   });
-  const out: Channel[] = [];
-  for (const group of categories) {
-    if (group.hidden || group.itemCount === 0 || !isSportsGroup(group.name)) continue;
-    for (let offset = 0; ; ) {
-      const query = { offset, limit: INDEX_PAGE_LIMIT };
-      const page = (await rpcRaw('catalog.channels', { sourceId, categoryId: group.id, query }, { signal })) as Page<Channel>;
-      out.push(...page.items);
-      offset += page.items.length;
-      if (page.items.length === 0 || offset >= page.total) break;
+  const groups = categories.filter((g) => !g.hidden && g.itemCount !== 0 && isSportsGroup(g.name));
+  const lists: Channel[][] = [];
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (next < groups.length && !failed) {
+      const i = next++;
+      const rows: Channel[] = [];
+      for (let offset = 0; ; ) {
+        const query = { offset, limit: INDEX_PAGE_LIMIT };
+        const page = (await sportsRead('catalog.channels', { sourceId, categoryId: groups[i]!.id, query }, signal)) as Page<Channel>;
+        if (failed) return;
+        rows.push(...page.items);
+        offset += page.items.length;
+        if (page.items.length === 0 || offset >= page.total) break;
+      }
+      lists[i] = rows;
     }
-  }
-  return out;
+  };
+  // One failed page fails the source; the other workers stop instead of reading on for nothing.
+  await Promise.all(
+    Array.from({ length: Math.min(GROUP_CONCURRENCY, groups.length) }, () =>
+      worker().catch((e: unknown) => {
+        failed = true;
+        throw e;
+      }),
+    ),
+  );
+  return lists.flat();
 }
 
 /**
@@ -125,7 +149,7 @@ async function loadNetworkChannels(signal: AbortSignal): Promise<Channel[]> {
       const i = next++;
       const args = { query: queries[i]!, contentTypes: ['live'], limit: NETWORK_SEARCH_LIMIT };
       try {
-        const res = (await rpcRaw('catalog.search', args, { signal })) as CatalogSearchResult;
+        const res = (await sportsRead('catalog.search', args, signal)) as CatalogSearchResult;
         answers[i] = res.live.filter((ch) => {
           const d = describe(ch);
           return !ch.isRadio && (d.network !== null || hasMatchup(d.tokens));

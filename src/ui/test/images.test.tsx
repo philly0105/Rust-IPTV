@@ -30,6 +30,8 @@ import { useImageChain } from '@/ui/image';
 
 const cache = (url: string, sourceId?: string, w?: number) =>
   `${WEB_IMAGE_ROUTE}?${new URLSearchParams(sourceId ? { url, sourceId } : { url }).toString()}${w ? `&w=${w}` : ''}`;
+/** The second try of a cache URL, after the original failed too. */
+const retry = (cacheUrl: string) => `${cacheUrl}&retry=1`;
 
 /** A stand-in for `Image` that records what preloadImage made. */
 function stubImage() {
@@ -100,18 +102,20 @@ describe('imageUrl (server mode)', () => {
     expect(isImageCacheUrl(undefined)).toBe(false);
   });
 
-  it('lists the cache URL then the original for each source, without repeats', () => {
+  it('lists the cache URL, the original and the cache URL again for each source, without repeats', () => {
     const provider = 'http://cdn.example/p.jpg';
     const tmdb = 'https://image.tmdb.org/t/p/w342/t.jpg';
     expect(imageAttempts([provider, null, tmdb], 's1')).toEqual([
       { url: cache(provider, 's1'), source: provider },
       { url: provider, source: provider },
+      { url: retry(cache(provider, 's1')), source: provider },
       { url: cache(tmdb, 's1'), source: tmdb },
       { url: tmdb, source: tmdb },
+      { url: retry(cache(tmdb, 's1')), source: tmdb },
     ]);
     // A picture that cannot be cached is tried once; the same source twice is tried once.
     expect(imageCandidates(['data:image/png;base64,AA', 'data:image/png;base64,AA'])).toEqual(['data:image/png;base64,AA']);
-    expect(imageCandidates([provider, ` ${provider} `], 's1')).toEqual([cache(provider, 's1'), provider]);
+    expect(imageCandidates([provider, ` ${provider} `], 's1')).toEqual([cache(provider, 's1'), provider, retry(cache(provider, 's1'))]);
     expect(imageCandidates([undefined, '', null])).toEqual([]);
   });
 
@@ -154,6 +158,8 @@ describe('useImageChain', () => {
     act(() => firstOnError());
     expect(result.current.url).toBe(a);
     act(() => result.current.onError());
+    expect(result.current).toMatchObject({ url: retry(cache(a, 's1')), source: a, failed: false });
+    act(() => result.current.onError());
     expect(result.current).toMatchObject({ url: undefined, failed: true });
     rerender({ src: b });
     expect(result.current).toMatchObject({ url: cache(b, 's1'), failed: false });
@@ -165,16 +171,16 @@ describe('Poster', () => {
   const tmdb = 'https://image.tmdb.org/t/p/w342/alpha.jpg';
   const img = (c: HTMLElement) => c.querySelector('img');
 
-  it('tries the cache, the original, the stand-in the same way, then shows the initials', () => {
+  it('tries the cache, the original, the cache again, the stand-in the same way, then shows the initials', () => {
     const { container } = render(<Poster src={provider} fallbackSrc={tmdb} sourceId="s1" alt="Alpha Beta" />);
     const seen: (string | null)[] = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const el = img(container)!;
       seen.push(el.getAttribute('src'));
       expect(el.dataset.posterState).toBe('loading');
       fireEvent.error(el);
     }
-    expect(seen).toEqual([cache(provider, 's1'), provider, cache(tmdb, 's1'), tmdb]);
+    expect(seen).toEqual([cache(provider, 's1'), provider, retry(cache(provider, 's1')), cache(tmdb, 's1'), tmdb, retry(cache(tmdb, 's1'))]);
     expect(img(container)).toBeNull();
     expect(container.textContent).toBe('AB');
   });
@@ -225,13 +231,15 @@ describe('Poster', () => {
 });
 
 describe('ChannelLogo', () => {
-  it('tries the cache route, then the original once, then shows letters', () => {
+  it('tries the cache route, then the original once, then the cache route again, then shows letters', () => {
     const logo = 'http://logos.example/bbc-one.png';
     const { container, rerender } = render(<ChannelLogo src={logo} name="BBC One" sourceId="s2" />);
     // A 36 px logo asks the cache for the 64 px copy at 1x (L3-serve-ui-1).
     expect(container.querySelector('img')!.getAttribute('src')).toBe(cache(logo, 's2', 64));
     fireEvent.error(container.querySelector('img')!);
     expect(container.querySelector('img')!.getAttribute('src')).toBe(logo);
+    fireEvent.error(container.querySelector('img')!);
+    expect(container.querySelector('img')!.getAttribute('src')).toBe(retry(cache(logo, 's2', 64)));
     fireEvent.error(container.querySelector('img')!);
     expect(container.querySelector('img')).toBeNull();
     expect(container.textContent).toBe('BO');
@@ -336,12 +344,32 @@ describe('failed pictures are remembered', () => {
     const first = render(<ChannelLogo src={logo} name="Dead Channel" sourceId="s2" />);
     fireEvent.error(first.container.querySelector('img')!);
     fireEvent.error(first.container.querySelector('img')!);
+    fireEvent.error(first.container.querySelector('img')!);
     expect(first.container.querySelector('img')).toBeNull();
     // A virtual row scrolled out and back in.
     first.unmount();
     const again = render(<ChannelLogo src={logo} name="Dead Channel" sourceId="s2" />);
     expect(again.container.querySelector('img')).toBeNull();
     expect(again.container.textContent).toBe('DC');
+  });
+
+  it('asks the cache again when the original fails after a cache error, and a remount starts at that retry once it loaded', () => {
+    // A slow logo host: the sized cache request answered 504 after 4 s while the core went on
+    // fetching, and the original cannot load here (an http logo on an https page, or a host that
+    // wants the source's User-Agent).
+    const slow = 'http://logos.example/slow.png';
+    const first = render(<ChannelLogo src={slow} name="Slow Channel" sourceId="s2" />);
+    const el = () => first.container.querySelector('img');
+    fireEvent.error(el()!);
+    expect(el()!.getAttribute('src')).toBe(slow);
+    fireEvent.error(el()!);
+    expect(el()!.getAttribute('src')).toBe(retry(cache(slow, 's2', 64)));
+    fireEvent.load(el()!);
+    expect(el()).not.toBeNull();
+    // Scrolled out and back in: the two URLs that failed are skipped, the retry that loaded is not.
+    first.unmount();
+    const again = render(<ChannelLogo src={slow} name="Slow Channel" sourceId="s2" />);
+    expect(again.container.querySelector('img')!.getAttribute('src')).toBe(retry(cache(slow, 's2', 64)));
   });
 
   it('a remounted picture whose cache route failed starts at the original', () => {

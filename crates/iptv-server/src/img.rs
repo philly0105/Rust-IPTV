@@ -267,11 +267,13 @@ mod tests {
 
     #[test]
     fn unknown_parameters_such_as_the_clients_gen_are_ignored() {
-        // The client adds `gen=<n>` after Clear to skip the browser's copies;
-        // it must not change what the route reads.
+        // The client adds `gen=<n>` after Clear to skip the browser's copies,
+        // and `retry=1` to its second try of a cache URL after the original
+        // failed; neither may change what the route reads.
         let plain = parse_query(Some("url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1"));
         for query in [
             "url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1&gen=3",
+            "url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1&retry=1",
             "gen=3&url=http%3A%2F%2Fa.example%2Fp.png&x=&sourceId=s1",
         ] {
             assert_eq!(parse_query(Some(query)), plain, "{query}");

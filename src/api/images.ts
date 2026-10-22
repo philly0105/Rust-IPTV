@@ -17,9 +17,14 @@
  *
  * The cache route can fail where the provider would not (an old server
  * without the route, a guard refusal), so callers fall back to the original
- * URL once before giving up: `imageCandidates` lists both, in that order.
- * A URL that failed is remembered for a few minutes (`markImageFailed`), so a
- * remounted row skips it instead of asking the cache and the provider again.
+ * URL once. The original can fail where the cache would not (an http logo on
+ * an https page, a host that wants the source's User-Agent) while the cache is
+ * still fetching a slow host's picture (a sized request answers 504 after
+ * 4 s), so the cache URL is tried once more, at an address of its own
+ * (`retry=1`), before giving up: `imageCandidates` lists all three, in that
+ * order. A URL that failed is remembered for a few minutes
+ * (`markImageFailed`), so a remounted row skips it instead of asking the cache
+ * and the provider again.
  *
  * Cache responses are kept by the browser for a week. Clearing the cache bumps
  * a generation (`bumpImageCacheGeneration`) that every later cache URL
@@ -248,8 +253,9 @@ export function isImageCacheUrl(url: string | null | undefined): boolean {
 
 /**
  * The URLs to try for one picture, best first: for each source in order, its
- * cache URL and then the original (once), duplicates dropped. A poster with a
- * TMDB stand-in passes both: `[provider, tmdb]`.
+ * cache URL, the original (once) and the cache URL again (`retry=1`),
+ * duplicates dropped. A poster with a TMDB stand-in passes both:
+ * `[provider, tmdb]`.
  */
 export function imageCandidates(sources: readonly (string | null | undefined)[], sourceId?: string, width?: number): string[] {
   return imageAttempts(sources, sourceId, width).map((a) => a.url);
@@ -264,13 +270,20 @@ export interface ImageAttempt {
 /**
  * `imageCandidates` with the source each URL belongs to, so a caller can style a stand-in differently.
  * `width` sizes the cache URLs only; the original URL is the provider's picture as it is.
+ *
+ * The second cache attempt is for a 504: the route stopped waiting for a slow host, but its fetch
+ * goes on and stores the picture, so by the time the original has failed the cache often has it,
+ * or the request joins the fetch. The route ignores `retry`; the parameter gives the attempt its own
+ * failure memory and browser-cache entry, so a remounted picture whose retry loaded starts there.
  */
 export function imageAttempts(sources: readonly (string | null | undefined)[], sourceId?: string, width?: number): ImageAttempt[] {
   const out: ImageAttempt[] = [];
   for (const s of sources) {
     const original = s?.trim();
     if (!original) continue;
-    for (const url of [imageUrl(original, sourceId, width), original]) {
+    const cached = imageUrl(original, sourceId, width);
+    const again = cached && isImageCacheUrl(cached) ? `${cached}&retry=1` : undefined;
+    for (const url of [cached, original, again]) {
       if (url && !out.some((a) => a.url === url)) out.push({ url, source: original });
     }
   }

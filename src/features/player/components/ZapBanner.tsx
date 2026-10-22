@@ -74,8 +74,9 @@ function useClock(active: boolean, everyMs = 5000): number {
 
 /**
  * The channel's logo: the guide's logo, else the item's own picture, each through the image
- * cache (C3) and then its original URL once. When none loads, the channel's monogram, the same
- * tile the channel list and the guide draw (LG-14); the TV icon only for a channel with no name.
+ * cache (C3), then its original URL once and the cache again. When none loads, the channel's
+ * monogram, the same tile the channel list and the guide draw (LG-14); the TV icon only for a
+ * channel with no name.
  */
 function Logo({
   urls,

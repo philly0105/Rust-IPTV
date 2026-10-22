@@ -44,7 +44,8 @@ function startChain(
 
 /**
  * Walks the attempts for one picture: the cache URL of each source, then its
- * original URL once, then the next source (`imageAttempts`).
+ * original URL once, then the cache URL once more, then the next source
+ * (`imageAttempts`).
  *
  * - The attempts are fixed when the picture starts. When the desktop cache
  *   base or the cache generation changes later, a picture already on screen

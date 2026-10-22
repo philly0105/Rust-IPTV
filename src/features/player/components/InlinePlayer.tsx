@@ -137,7 +137,7 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
   // A new play of the same URL (Start over, a recovery that resolved the same link) loads again.
   const generation = usePlayerStore((s) => s.playGeneration);
   const settings = usePlayerSettings();
-  // The VOD poster (C3): through the image cache, then its own URL once. It is the video's
+  // The VOD poster (C3): through the image cache, then its own URL once and the cache again. It is the video's
   // poster and, with ambient mode on, the soft colour field behind the picture.
   const art = useImageChain([as === 'video' && source && !source.isLive ? safeImageUrl(source.posterUrl) : undefined], source?.ref?.sourceId);
   const elRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);

@@ -114,14 +114,15 @@ function reveal(img: HTMLImageElement, url: string, instant: boolean): void {
  * or fails.
  *
  * Remote artwork loads through the image cache (`imageUrl`). When the cache
- * route errors, the original URL is tried once, then `fallbackSrc` the same
- * way, and only then the initials tile. The reveal animates opacity only: a
- * blur or scale transition on every card of a grid costs a filter pass per
- * card per frame (C5, src/perf-budget.test.ts). Only a slow network load
- * fades (150 ms): a picture that is already decoded, loaded before in this
- * session, or arrives within {@link INSTANT_REVEAL_MS} of mounting shows at
- * once, so cached artwork never waits on the fade (L2-perf-desktop-9). The
- * placeholder's shimmer stops while the frame is out of view (offscreen.ts).
+ * route errors, the original URL is tried once and then the cache once more,
+ * then `fallbackSrc` the same way, and only then the initials tile. The
+ * reveal animates opacity only: a blur or scale transition on every card of a
+ * grid costs a filter pass per card per frame (C5, src/perf-budget.test.ts).
+ * Only a slow network load fades (150 ms): a picture that is already decoded,
+ * loaded before in this session, or arrives within {@link INSTANT_REVEAL_MS}
+ * of mounting shows at once, so cached artwork never waits on the fade
+ * (L2-perf-desktop-9). The placeholder's shimmer stops while the frame is out
+ * of view (offscreen.ts).
  * Cache-route pictures start through the fetch gate (imageGate.ts), which keeps
  * connections free for RPCs and skips rows that only fly past in a fast scroll.
  */

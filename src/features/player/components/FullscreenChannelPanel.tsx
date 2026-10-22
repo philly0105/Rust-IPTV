@@ -19,7 +19,8 @@ import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
 import { locateChannel } from './channelPanelLocate';
 
 /**
- * A row's channel logo through the image cache (C3), then its own URL once, then a blank tile.
+ * A row's channel logo through the image cache (C3), then its own URL once and the cache again,
+ * then a blank tile.
  * Fetched through the shared image gate (ui/imageGate.ts), as ChannelLogo's: at most four at once,
  * the rows in view first, and a row that leaves before its turn asks nothing. `defer` (the list
  * is scrolling) is RowLogo's own latch on top of the gate: `allowed` holds the last address let

@@ -42,6 +42,7 @@ export { ChannelLogo } from '@/features/live/components/ChannelLogo';
 export { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, RowSkeleton } from '@/features/live/components/ChannelRow';
 export { ContextMenu, type MenuEntry, type MenuItem } from '@/features/live/components/ContextMenu';
 export { ScopePicker } from '@/features/live/components/ScopePicker';
+export { QualityFilterNote, useLiveQuality } from '@/features/live/components/QualityFilterButton';
 export { channelMenuHeader, useChannelMenuItems } from '@/features/live/hooks/useChannelMenuItems';
 export { nowTitleOf, SCOPE_ALL, scopeOfList, useBrowseSections, useChannelBrowse, type BrowseScope } from '@/features/live/hooks/useChannelBrowse';
 export { CHANNEL_PAGE_SIZE, type PagedChannels } from '@/features/live/hooks/usePagedChannels';

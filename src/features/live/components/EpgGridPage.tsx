@@ -1520,8 +1520,8 @@ export function EpgGridPage() {
             </div>
           ))}
         </div>
-      ) : count === 0 && quality.min !== null && source?.channelCount !== 0 ? (
-        <QualityEmptyState hideUntagged={quality.hideUntagged} onChange={quality.update} />
+      ) : count === 0 && quality.filtering && source?.channelCount !== 0 ? (
+        <QualityEmptyState quality={quality} />
       ) : count === 0 && view ? (
         <EmptyState
           icon={<Tv className="size-8" />}

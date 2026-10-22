@@ -44,7 +44,7 @@ Giving up restores the original error message and RPC code, so the overlay shows
 
 ## Live failover
 
-`live.alternates {ref}` returns the same channel elsewhere, best first (see Matching). The player prefetches it when a live channel starts (`trackAlternates`, cached 5 minutes) so the menu and a failover need no extra wait.
+`live.alternates {ref}` returns the same channel elsewhere, best first (see Matching). The player prefetches it when a live channel starts (`trackAlternates`, cached 5 minutes) so the menu and a failover need no extra wait. The core leaves out copies the Live TV quality filter hides (see Matching), and the cache is not a React Query entry the shell could invalidate, so `bindLiveFailover` watches the filter itself (`liveQualityKey` from `src/lib/liveQuality.ts`, as the shell does). When it changes, the player empties the cache and asks for the playing channel's copies again; an answer to a lookup made before the change is dropped.
 
 `tryLiveFailover(failed)` keeps one chain per failure: the original, every copy tried, the copy now playing and whether it has played. It walks the ranked list, skips copies already tried, resolves each through the normal play path (`resolveSource`, so Stalker links are fresh) and moves on when a link cannot be resolved. A copy that fails before it ever played goes straight to the next copy without retries. A chain never returns to a copy it tried; it ends when the user plays something else. When no copy is left, the error shows on the last one. Account-wide failures change the order (`forAccountFailure`): after `connectionLimit` the chain skips every copy on a source it found full; after `auth`, copies on the refusing source go after all other sources.
 
@@ -58,9 +58,9 @@ The player's options menu gets "Alternate sources" when the channel has any: eac
 
 `matcher::signature(name)` reduces a channel name to:
 
-- `key`: lowercased, Latin diacritics folded, the country prefix removed by the same rules as the UI's `stripCountryPrefix` (`UK: `, `UK | `, `[UK] `, `|UK| `), and quality, codec and backup words removed (`HD`, `FHD`, `UHD`, `4K`, `HEVC`, `H.265`, `50fps`, `(backup)`, `alt 2`).
+- `key`: lowercased, Latin diacritics folded, the country prefix removed by the same rules as the UI's `stripCountryPrefix` (`UK: `, `UK | `, `[UK] `, `|UK| `), and quality, codec and backup words removed (`HD`, `FHD`, `Full HD`, `UHD`, `4K`, `HEVC`, `H.265`, `50fps`, `(backup)`, `alt 2`).
 - `region`: the country prefix (`GB`/`GBR` read as `UK`, `USA` as `US`, `GER`/`DEU` as `DE`). Two names with different regions never match; a missing region matches any. A trailing `(UK)` stays part of the name, so "Discovery (UK)" and "Discovery" do not match.
-- `quality`: the highest marker found (`sd`, `hd`, `fhd`, `uhd`).
+- `quality`: the highest marker found (`sd`, `hd`, `fhd`, `uhd`), in the name or in the country or group tag in front of it, which is read word by word (`4K | Sky Cinema`, `4K-DE - Das Erste`, `UK HD | Sky`). `Full HD` and `Ultra HD` written as two words count as `fhd` and `uhd`. `matcher::quality(name)` returns the same value without building the key; the catalog stores it for the Live TV quality filter (catalog.md).
 - `timeshift`: `+1`, `+24` and so on. "Film4" and "Film4 +1" are different channels.
 
 Numbers stay in the key, so "Sky Sports 1" and "Sky Sports 2" (and "Sky Sports 12") stay apart. "Canal" and "Canal+" stay apart too. Known limits: "Sports1" does not match "Sports 1", and "One" does not match "1".
@@ -77,4 +77,4 @@ The item itself, any copy with the very same URL and channels in hidden categori
 - `crates/iptv-core/src/live/matcher.rs`: country prefixes, pairs that must match, pairs that must not (Sky Sports 1/2/12, Film4/+1, Canal/Canal+, UK/DE, ESPN/ESPN 2), quality, region, timeshift, FTS phrase.
 - `crates/iptv-core/tests/live_alternates.rs`: ordering, guide-id and manual-mapping matches, placeholder ids, the +1 guard, same-URL exclusion, errors; and three sources of 50,000 channels each, with query plans checked (FTS and `idx_items_epg`, no table scan) and every lookup under 100 ms after a warm-up.
 - `src/features/player/reconnect.test.ts` (fake timers): backoff timing, give-up, attempt timeout, the 20 s window, budget reset, flapping, non-retryable classes, the setting off, VOD resume, stall detection, Stalker refresh; for streams that never played, one retry for a 503, none for a 4xx, the full ladder once a stream played, `connecting` after `SLOW_START_MS`, and Try another source with no other copy.
-- `src/features/player/failover.live.test.ts`: switch with undo toast, next copy without retries, no loop back, unresolvable copy skipped, Undo restores the original and stops switching, pin order and pin redirect, retries before the switch.
+- `src/features/player/failover.live.test.ts`: switch with undo toast, next copy without retries, no loop back, unresolvable copy skipped, Undo restores the original and stops switching, pin order and pin redirect, retries before the switch, a quality filter change asking for the copies again (and dropping an answer to a lookup made before it).

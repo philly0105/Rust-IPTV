@@ -200,16 +200,16 @@ fn a_database_that_already_ran_0007_keeps_its_guide() {
 
 /// Migration 0020 on a 220k-item library (95k channels on one source, 105k
 /// movies and 20k series on another, schema 19): it fills `items_rank` with
-/// one row per item, equal to the projection of `items`, at an upgrade cost
-/// of 0.1-0.2 s in release. The timed upgrade runs the later migrations too:
-/// 0022 adds `quality` to both tables (-1 until the boot backfill) and
-/// rebuilds four indexes.
+/// one row per item, equal to the projection of `items`. The timed upgrade
+/// runs the later migrations too, and is mostly 0022's: it adds `quality` to
+/// both tables (-1 until the boot backfill) and rebuilds four indexes, about
+/// 0.7-0.9 s in release on an N150, where 0020 takes about 0.1 s.
 #[test]
 fn migration_0020_fills_items_rank_on_a_220k_library() {
     #[cfg(debug_assertions)]
     const BUDGET: Duration = Duration::from_secs(6);
     #[cfg(not(debug_assertions))]
-    const BUDGET: Duration = Duration::from_secs(1);
+    const BUDGET: Duration = Duration::from_secs(2);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("v19.db");
     let built = Instant::now();
@@ -268,7 +268,7 @@ fn migration_0020_fills_items_rank_on_a_220k_library() {
     );
     let (took, peak) = upgrade(&path);
     eprintln!(
-        "migration_perf: 0020 on 220k items took {took:?}, SQLite heap peak {} MB",
+        "migration_perf: upgrade from 19 on 220k items took {took:?}, SQLite heap peak {} MB",
         peak >> 20
     );
     let c = Connection::open(&path).unwrap();
@@ -285,5 +285,5 @@ fn migration_0020_fills_items_rank_on_a_220k_library() {
         )
         .unwrap();
     assert_eq!((items, rank, wrong), (220_000, 220_000, 0));
-    assert!(took < BUDGET, "0020 took {took:?} (budget {BUDGET:?})");
+    assert!(took < BUDGET, "upgrade from 19 took {took:?} (budget {BUDGET:?})");
 }

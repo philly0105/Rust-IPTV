@@ -17,6 +17,7 @@ import { create } from 'zustand';
 import { rpc } from '@/api/transport';
 import { itemKey, type ItemKey, type ItemRef, type LiveAlternate, type LiveAlternates, type PlayerSource } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
+import { liveQualityKey } from '@/lib/liveQuality';
 import { toast } from '@/ui';
 
 import type { StreamErrorClass } from './errors';
@@ -31,6 +32,7 @@ import {
   resolveSource,
   sameSource,
   sourceKindOf,
+  subscribeSettings,
   usePlayerStore,
   type PlayItemArgs,
 } from './store';
@@ -122,6 +124,8 @@ export function failoverVod(failed: PlayerSource): void {
 const ALTERNATES_TTL_MS = 5 * 60_000;
 const ALTERNATES_CACHE_MAX = 64;
 const alternatesCache = new Map<ItemKey, { at: number; value: Promise<LiveAlternates> }>();
+/** Bumped when the Live TV quality filter changes: a lookup made before then answers for the old filter. */
+let alternatesGen = 0;
 
 /** Live and radio refs only: anything else is not a channel and the core would refuse it. */
 export function isChannelRef(ref: ItemRef | undefined): ref is ItemRef {
@@ -167,13 +171,15 @@ export function trackAlternates(ref: ItemRef | undefined): void {
   const cur = useAlternatesStore.getState();
   if (cur.forKey === key && cur.status !== 'error') return;
   useAlternatesStore.setState({ forKey: key, status: 'loading', data: undefined });
+  const gen = alternatesGen;
   loadAlternates(ref).then(
     (data) => {
+      if (gen !== alternatesGen) return;
       if (useAlternatesStore.getState().forKey === key) useAlternatesStore.setState({ status: 'ready', data });
       void maybeRedirectToPin(ref, data);
     },
     () => {
-      if (useAlternatesStore.getState().forKey === key) useAlternatesStore.setState({ status: 'error' });
+      if (gen === alternatesGen && useAlternatesStore.getState().forKey === key) useAlternatesStore.setState({ status: 'error' });
     },
   );
 }
@@ -414,6 +420,8 @@ async function maybeRedirectToPin(ref: ItemRef, data: LiveAlternates): Promise<v
 /**
  * Follow the player: keep the alternates list on the playing channel, mark a switched-to copy
  * as played, and end the chain (and any undo suppression) when the user plays something else.
+ * The core leaves out copies the Live TV quality filter hides, so a change of the filter drops
+ * every lookup made under the old one and asks for the playing channel's copies again.
  */
 export function bindLiveFailover(): () => void {
   const onChange = (s: ReturnType<typeof usePlayerStore.getState>, prev: ReturnType<typeof usePlayerStore.getState>): void => {
@@ -434,9 +442,30 @@ export function bindLiveFailover(): () => void {
     trackAlternates(s.source?.isLive && !isPendingZap(s.source) ? ref : undefined);
   };
   const unsub = usePlayerStore.subscribe(onChange);
+  // Unknown until settings first load: their arrival is the baseline, not a change.
+  const qualityNow = (): string | undefined => {
+    const settings = peekSettings();
+    return settings ? liveQualityKey(settings) : undefined;
+  };
+  let quality = qualityNow();
+  const unSettings = subscribeSettings(() => {
+    const next = qualityNow();
+    if (next === undefined || next === quality) return;
+    const known = quality !== undefined;
+    quality = next;
+    if (!known) return;
+    alternatesCache.clear();
+    alternatesGen++;
+    useAlternatesStore.setState({ forKey: undefined, status: 'idle', data: undefined });
+    const cur = usePlayerStore.getState().source;
+    trackAlternates(cur?.isLive && !isPendingZap(cur) ? cur.ref : undefined);
+  });
   const s = usePlayerStore.getState();
   trackAlternates(s.source?.isLive ? s.source.ref : undefined);
-  return unsub;
+  return () => {
+    unsub();
+    unSettings();
+  };
 }
 
 /** Testing only. */

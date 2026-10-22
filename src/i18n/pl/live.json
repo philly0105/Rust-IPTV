@@ -125,6 +125,7 @@
   "qualityEmptyHintUntagged": "Kanały, których nazwa wskazuje niższą jakość lub nie podaje jej wcale, są ukryte.",
   "qualityShowAll": "Pokaż każdą jakość",
   "qualityShowUntagged": "Pokaż kanały bez oznaczenia",
+  "qualityMayHide": "Filtr jakości telewizji na żywo może ukrywać część kanałów.",
   "openSources": "Otwórz źródła",
   "noGuideFor": "Brak danych przewodnika dla {{name}}",
   "noGuideHint": "Dopasuj ten kanał do kanału przewodnika lub dodaj adres XMLTV w ustawieniach EPG.",

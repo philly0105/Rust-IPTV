@@ -113,7 +113,8 @@ describe('settings.changed: refresh interval', () => {
 });
 
 describe('settings.changed: live quality filter', () => {
-  const FILTERED = ['catalog.channels', 'favorites.list', 'recent.list', 'lists.items', 'epg.search', 'live.alternates'] as const;
+  // No live.alternates: no query holds them (the player looks them up again, failover.live.test.ts).
+  const FILTERED = ['catalog.channels', 'favorites.list', 'recent.list', 'lists.items', 'epg.search'] as const;
   const stale = (cmd: RpcCommand) => queryClient.getQueryState(rpcKey(cmd))?.isInvalidated ?? false;
   const seed = () => {
     for (const cmd of [...FILTERED, 'epg.grid'] as const) queryClient.setQueryData(rpcKey(cmd), {});

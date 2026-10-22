@@ -780,6 +780,43 @@ describe('zap', () => {
     expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
   });
 
+  it('keeps walking the favorites from a playing favorite the quality filter then hides', async () => {
+    const fav = (ch: Channel, position: number) => ({ ref: ch.ref, position, addedAt: '2026-01-01T00:00:00Z', snapshot: { title: ch.name, contentType: ch.ref.contentType } });
+    // Stored order 1, 2, 3 (FHD, HD, UHD); `shown` is what favorites.list answers under the filter.
+    let stored = [fav(channel(1), 0), fav(channel(2), 1), fav(channel(3), 2)];
+    let shown = stored;
+    handlers['favorites.list'] = () => shown;
+    handlers['favorites.contains'] = (a) => (a as { refs: ItemRef[] }).refs.filter((r) => stored.some((f) => f.ref.itemId === r.itemId));
+    handlers['catalog.item'] = (a) => channel(Number((a as { ref: ItemRef }).ref.itemId) - 100);
+    handlers['catalog.neighbors'] = () => ({ next: channel(7) });
+    const favorites = { sourceId: 's1', favorites: { sourceId: 's1' } };
+    queryClient.removeQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('favorites.') });
+    await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
+    usePlayerStore.setState({ zapContext: favorites });
+    await zap('down');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('102');
+    await flush();
+
+    // 'Full HD and up' while channel 2 plays: the list leaves it out, and it is still a favorite.
+    shown = [stored[0]!, stored[2]!];
+    await queryClient.invalidateQueries({ queryKey: ['favorites.list'] });
+    await zap('down');
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('103');
+    expect(usePlayerStore.getState().zapContext).toEqual(favorites);
+    expect(calls('favorites.contains')).toEqual([{ refs: [channel(2).ref] }]);
+    expect(calls('catalog.neighbors')).toHaveLength(0);
+    await flush();
+
+    // One taken out of the favorites meanwhile still zaps through its source.
+    stored = [stored[0]!];
+    shown = stored;
+    await queryClient.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('favorites.') });
+    await zap('down');
+    expect(calls('catalog.neighbors')).toEqual([{ ref: channel(3).ref }, { ref: channel(7).ref }]);
+    expect(usePlayerStore.getState().source?.ref?.itemId).toBe('107');
+    expect(usePlayerStore.getState().zapContext).toEqual({ sourceId: 's1' });
+  });
+
   it('zapToNumber resolves catalog.channelByNumber', async () => {
     await playItem({ title: 'Ch 1', isLive: true, ref: channel(1).ref, sourceKind: 'xtream' });
     handlers['catalog.channelByNumber'] = () => channel(42);

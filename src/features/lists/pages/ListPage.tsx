@@ -36,6 +36,7 @@ import {
   ErrorState,
   IconButton,
   PlayerStage,
+  QualityFilterNote,
   RowSkeleton,
   SourceMonogram,
   buttonClass,
@@ -44,6 +45,7 @@ import {
   errorDescription,
   useDisplayPrefs,
   useMediaQuery,
+  useLiveQuality,
   useNow,
   usePlayerStore,
   useRowHeight,
@@ -87,6 +89,8 @@ export function ListPage() {
   const locks = useListLocks(paged.channels);
   const actions = useListActions();
   const settings = useRpcQuery('settings.get', undefined);
+  // The Live TV quality filter leaves out the channels it hides: an empty list may be its doing.
+  const quality = useLiveQuality();
   const sources = useVisibleSources();
   const sourceById = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
   const firstSource = sources.data?.[0];
@@ -426,6 +430,7 @@ export function ListPage() {
             >
               {t('browseChannels')}
             </Link>
+            <QualityFilterNote quality={quality} />
           </div>
         }
       />

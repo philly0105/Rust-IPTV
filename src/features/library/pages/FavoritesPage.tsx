@@ -14,7 +14,7 @@ import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonList, useShortcut, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, SkeletonList, useLiveQuality, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -61,6 +61,8 @@ export function FavoritesPage() {
   const query = useRpcQuery('favorites.list', args);
   const { pending, run } = usePending<string>();
   const [search, setSearch] = useUrlSearch();
+  // An empty page may be the Live TV quality filter's doing: it leaves out the channels it hides.
+  const quality = useLiveQuality();
   const [drag, setDrag] = useState<{ key: string; over?: { key: string; where: 'before' | 'after' } } | null>(null);
 
   const entries = useMemo(() => sortFavorites(query.data ?? []), [query.data]);
@@ -235,7 +237,12 @@ export function FavoritesPage() {
         icon={<Star size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
         description={sourceId ? t('favoritesEmptySourceBody') : sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
-        action={<BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />}
+        action={
+          <>
+            <BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />
+            <QualityFilterNote quality={quality} />
+          </>
+        }
       />
     );
   else if (rows.length === 0) body = (

@@ -17,6 +17,7 @@ import type { ImportProgressEvent, Settings, Source, SourceKind, WindowState } f
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
 import { addSourcePathFromDeepLink } from '@/features/sources/lib/links';
 import { applyLanguage, languageUnresolved } from '@/i18n';
+import { liveQualityKey } from '@/lib/liveQuality';
 // Not sources/lib/files or format: those whole modules would land in the entry chunk.
 import { formatCount, formatFileSize } from '@/lib/numbers';
 import { dismissToast, toast } from '@/ui';
@@ -48,15 +49,10 @@ export const EVENT_INVALIDATION: Record<string, string[]> = {
 
 /**
  * What the core filters by the live quality settings: catalog reads, favorites, recently
- * watched, custom lists, guide search (exact, so the other `epg.` queries stay) and failover
- * alternates.
+ * watched, custom lists and guide search (exact, so the other `epg.` queries stay). Failover
+ * alternates are no query: the player looks them up again itself (bindLiveFailover).
  */
-const LIVE_QUALITY_PREFIXES = ['catalog.', 'favorites.', 'recent.', 'lists.', 'epg.search', 'live.alternates'] as const;
-
-/** The live quality filter in effect ('' = off: the untagged toggle needs a minimum). */
-function liveQualityKey(s: Settings): string {
-  return s.liveMinQuality == null ? '' : `${s.liveMinQuality}|${s.liveHideUntagged === true}`;
-}
+const LIVE_QUALITY_PREFIXES = ['catalog.', 'favorites.', 'recent.', 'lists.', 'epg.search'] as const;
 
 /**
  * Maps an `iptv://` URL to an in-app path, or null when unsupported. Add links

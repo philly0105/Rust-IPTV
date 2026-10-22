@@ -66,7 +66,7 @@ Counts:
 
 - `item_count` is stored without hidden channels. `CatalogWriter::finish` and every edit call `recount_categories`, which counts the items and subtracts the hidden ones per category.
 - A category that hiding empties is dropped from `catalog.categories` (its stored count is 0 but it had channels); with `includeHidden` (the manage-categories view) it stays, with 0 and `emptiedByEdits: true`. That answer sets `emptiedByEdits` on every category, true only for one that is not hidden, has 0 channels and holds hidden channels; answers without `includeHidden` carry no `emptiedByEdits` key. The Live page asks once with `includeHidden` and filters the sidebar itself (`shownGroups` in `LivePage.tsx`): it drops hidden groups and groups marked `emptiedByEdits`; without that flag, while the source has hidden channels, it drops every group with no channels.
-- English-only counts (`english_categories`) add the `scoped` clause to their count query.
+- Re-counted category counts (`filtered_categories`, used while English-only or the Live TV quality filter is on) add the `scoped` clause to their count query.
 - Parental hide mode subtracts locked items from the counts; a channel that is both locked and hidden would be subtracted twice, so `visible_categories` adds back the overlap (`locked_hidden_counts`).
 
 ## Renames

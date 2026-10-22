@@ -115,6 +115,7 @@
   "qualityEmptyHintUntagged": "Channels whose name marks a lower quality, or no quality, are hidden.",
   "qualityShowAll": "Show all qualities",
   "qualityShowUntagged": "Show untagged channels",
+  "qualityMayHide": "The Live TV quality filter may be hiding channels.",
   "openSources": "Open sources",
   "noGuideFor": "No guide data for {{name}}",
   "noGuideHint": "Match this channel to a guide channel, or add an XMLTV address in EPG settings.",

@@ -123,23 +123,24 @@ pub fn signature(name: &str) -> Signature {
     }
 }
 
-/// The highest quality marker in a channel name, or a group tag that is one
-/// ("4K | Sky Cinema"): exactly [`signature`]`(name).quality`, without
-/// building the key. The Live TV quality filter stores it per channel
-/// (`catalog::quality`).
+/// The highest quality marker in a channel name, its country or group tag
+/// included ("4K | Sky Cinema", "4K-DE - Das Erste"): exactly
+/// [`signature`]`(name).quality`, without building the key. The Live TV
+/// quality filter stores it per channel (`catalog::quality`).
 pub fn quality(name: &str) -> Option<Quality> {
     let (rest, tag) = split_country_prefix(name);
     words_quality(tag.and_then(tag_quality), &fold(&rest.to_lowercase()))
 }
 
-/// The quality a stripped country or group tag names, when the whole tag is
-/// a marker.
+/// The highest marker among the words of a stripped country or group tag
+/// ("4K", "4K-DE", "UK HD"). A country tag ("UK") is one word and no marker,
+/// so it stays a region.
 fn tag_quality(tag: &str) -> Option<Quality> {
-    quality_of(&tag.to_lowercase())
+    words_quality(None, &fold(&tag.to_lowercase()))
 }
 
-/// The highest of `tag` and the markers among the words of `folded` (the
-/// lowercased, folded rest of the name). [`signature`] and [`quality`] both
+/// The highest of `tag` and the markers among the words of `folded` (a
+/// lowercased, folded name or tag). [`signature`] and [`quality`] both
 /// read quality here, so the two never disagree. It reads the words before
 /// [`signature`]'s `h.265` rewrite, which changes no marker: it only joins
 /// `h` and `265` into one word, and no marker ends in `h`, starts with
@@ -595,6 +596,8 @@ mod tests {
             "ITV 720",
             "Rai 1 1080",
             "UHD4K Demo",
+            "[DE-4K] Das Erste",
+            "FULL HD | Sky",
             "BBC One SD HD",
             "DE: ProSieben HD backup 2",
             "SKY SPORTS 1 (backup) 576i",
@@ -612,6 +615,11 @@ mod tests {
         for (name, want) in [
             ("UK: Sky Sports 1 FHD", Some(Quality::Fhd)),
             ("4K | Sky Cinema", Some(Quality::Uhd)),
+            // A tag of several words counts through its markers.
+            ("4K-DE - Das Erste", Some(Quality::Uhd)),
+            ("[DE-4K] Das Erste", Some(Quality::Uhd)),
+            ("UK HD | Sky", Some(Quality::Hd)),
+            ("FULL HD | Sky", Some(Quality::Fhd)),
             ("BBC One HD 4K", Some(Quality::Uhd)),
             ("Channel 5 SD", Some(Quality::Sd)),
             ("Das Erste 1080p", Some(Quality::Fhd)),

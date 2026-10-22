@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ItemRef } from '@/api/types';
+import { DEFAULT_SETTINGS, type ItemRef } from '@/api/types';
 
 const rpcMock = vi.hoisted(() => ({
   current: null as null | { call: (cmd: string, args?: unknown) => Promise<unknown> },
@@ -515,5 +515,22 @@ describe('edit channels', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'All lists' }));
     const manage = await screen.findByTestId('manage-lists-dialog');
     await waitFor(() => expect(document.activeElement).toBe(row(manage, 'L2').querySelector('[data-sort-part="name"]')));
+  });
+
+  it('an empty list says the Live TV quality filter may be hiding channels while it is on', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [])]);
+    rpc.handlers['settings.get'] = () => ({ ...DEFAULT_SETTINGS, liveMinQuality: 'hd' });
+    render(
+      <h.Providers>
+        <ListsDialogHost />
+      </h.Providers>,
+    );
+    act(() => openEditListItems('L1'));
+    const dialog = await screen.findByTestId('edit-list-dialog');
+    expect(await within(dialog).findByText('This list is empty')).toBeTruthy();
+    const note = await within(dialog).findByTestId('live-quality-note');
+    expect(within(note).getByText('The Live TV quality filter may be hiding channels.')).toBeTruthy();
+    expect(within(note).getByRole('button', { name: 'Show all qualities' })).toBeTruthy();
+    expect(within(note).queryByRole('button', { name: 'Show untagged channels' })).toBeNull();
   });
 });

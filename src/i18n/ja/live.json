@@ -115,6 +115,7 @@
   "qualityEmptyHintUntagged": "名前が低い画質を示すチャンネルと、画質の表記がないチャンネルは非表示になっています。",
   "qualityShowAll": "すべての画質を表示",
   "qualityShowUntagged": "画質の表記がないチャンネルを表示",
+  "qualityMayHide": "ライブTVの画質フィルターでチャンネルが非表示になっている可能性があります。",
   "openSources": "ソースを開く",
   "noGuideFor": "{{name}}の番組表データはありません",
   "noGuideHint": "このチャンネルを番組表のチャンネルに対応付けるか、EPG設定でXMLTVのアドレスを追加してください。",

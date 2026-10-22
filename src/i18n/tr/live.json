@@ -115,6 +115,7 @@
   "qualityEmptyHintUntagged": "Adı daha düşük bir kalite belirten veya hiç kalite belirtmeyen kanallar gizlenir.",
   "qualityShowAll": "Tüm kaliteleri göster",
   "qualityShowUntagged": "Etiketsiz kanalları göster",
+  "qualityMayHide": "Canlı TV kalite filtresi bazı kanalları gizliyor olabilir.",
   "openSources": "Kaynakları aç",
   "noGuideFor": "{{name}} için rehber verisi yok",
   "noGuideHint": "Bu kanalı bir rehber kanalıyla eşleyin veya EPG ayarlarında bir XMLTV adresi ekleyin.",

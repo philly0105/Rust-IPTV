@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { itemKey, type Channel, type ParentalLock, type SourceKind } from '@/api/types';
+import { DEFAULT_SETTINGS, itemKey, type Channel, type ParentalLock, type Settings, type SourceKind } from '@/api/types';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | { call: (cmd: string, args?: unknown) => Promise<unknown> } }));
 const played = vi.hoisted(() => [] as { channel: Channel; kind: SourceKind | undefined; name: string }[]);
@@ -169,6 +169,35 @@ describe('list page', () => {
     expect(screen.getByText(/choose Add to list\. With a keyboard, press L/)).toBeTruthy();
     // Browse channels opens Live TV, not `/` (which restores the saved screen: this one).
     await waitFor(() => expect(screen.getByTestId('list-browse-channels').getAttribute('href')).toBe('/s/src1/live'));
+    // The quality filter is off: nothing about it.
+    expect(screen.queryByTestId('live-quality-note')).toBeNull();
+  });
+
+  it('an empty list says the quality filter may be hiding channels, and Show all qualities brings them back', async () => {
+    const core = h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN])]);
+    stubLiveExtras();
+    // As the core with Full HD and up and untagged channels hidden: neither name carries a tag.
+    const hide = (hidden: boolean) => core.lists[0]!.items.forEach((i) => (i.hidden = hidden));
+    hide(true);
+    let stored: Settings = { ...DEFAULT_SETTINGS, liveMinQuality: 'fhd', liveHideUntagged: true };
+    rpc.handlers['settings.get'] = () => stored;
+    rpc.handlers['settings.update'] = (a) => {
+      stored = { ...stored, ...(a as { patch: Partial<Settings> }).patch };
+      hide(stored.liveMinQuality !== null);
+      return stored;
+    };
+    h.renderAt('/lists/L1', routes);
+    expect(await screen.findByText('This list is empty')).toBeTruthy();
+    const note = await screen.findByTestId('live-quality-note');
+    expect(within(note).getByText('The Live TV quality filter may be hiding channels.')).toBeTruthy();
+    expect(within(note).getByRole('button', { name: 'Show untagged channels' })).toBeTruthy();
+    // The list may really be empty: Add channels stays beside it.
+    expect(within(note.parentElement!).getByRole('button', { name: 'Add channels' })).toBeTruthy();
+
+    fireEvent.click(within(note).getByRole('button', { name: 'Show all qualities' }));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: null } }]);
+    expect(screen.queryByTestId('live-quality-note')).toBeNull();
   });
 
   it('a list whose channels were all dropped says so', async () => {

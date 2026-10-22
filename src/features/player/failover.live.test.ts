@@ -231,7 +231,58 @@ describe('live failover', () => {
     await vi.waitFor(() => expect(failover.useAlternatesStore.getState().status).toBe('ready'));
     expect(failover.useAlternatesStore.getState().data?.alternates).toHaveLength(2);
   });
+
+  it('asks for the copies again when the quality filter changes, for the menu and for failover', async () => {
+    await vi.waitFor(() => expect(alternates().status).toBe('ready'));
+    const before = lookups();
+
+    // Settings writes that leave the filter as it is ask nothing (the untagged toggle needs a minimum).
+    settings({ lastRoute: '/live' });
+    settings({ liveHideUntagged: true });
+    await settle();
+    expect(lookups()).toBe(before);
+
+    // The core now leaves out the s2 copy; the lookup cached before the change is not used.
+    handlers['live.alternates'] = () => ({ key: 'sky sports 1', quality: 'hd', alternates: [alt('s3', '30')] });
+    settings({ liveMinQuality: 'fhd' });
+    expect(lookups()).toBe(before + 1);
+    await vi.waitFor(() => expect(alternates().status).toBe('ready'));
+    expect(alternates().data?.alternates.map((a) => a.channel.ref.sourceId)).toEqual(['s3']);
+    reportStatus('error', 'HTTP 404');
+    await vi.waitFor(() => expect(sourceIdNow()).toBe('s3'));
+    expect(streamUrlCalls()).toEqual(['s3']);
+  });
+
+  it('drops an answer asked for before the quality filter changed', async () => {
+    await vi.waitFor(() => expect(alternates().status).toBe('ready'));
+    let answer: (v: unknown) => void = () => undefined;
+    handlers['live.alternates'] = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    await usePlayerStore.getState().play({ ...origin, url: 'http://s1/live/2.m3u8', ref: ref('s1', '2') });
+    await settle();
+    expect(alternates()).toMatchObject({ forKey: 's1|live|2', status: 'loading' });
+    const unfiltered = answer;
+
+    handlers['live.alternates'] = () => ({ key: 'sky sports 1', quality: 'hd', alternates: [alt('s3', '30')] });
+    settings({ liveMinQuality: 'fhd', liveHideUntagged: true });
+    await vi.waitFor(() => expect(alternates().status).toBe('ready'));
+    // The lookup from before the change answers last, with a copy the filter now hides.
+    unfiltered({ key: 'sky sports 1', quality: 'hd', alternates: ALTS });
+    await settle();
+    expect(alternates().forKey).toBe('s1|live|2');
+    expect(alternates().data?.alternates.map((a) => a.channel.ref.sourceId)).toEqual(['s3']);
+  });
 });
+
+function alternates(): ReturnType<typeof failover.useAlternatesStore.getState> {
+  return failover.useAlternatesStore.getState();
+}
+
+function lookups(): number {
+  return rpcMock.mock.calls.filter(([n]) => n === 'live.alternates').length;
+}
 
 function reconnectPhase(): string {
   return reconnect.useReconnectStore.getState().phase;

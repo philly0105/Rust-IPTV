@@ -115,6 +115,7 @@
   "qualityEmptyHintUntagged": "名称标明较低画质或未标明画质的频道已隐藏。",
   "qualityShowAll": "显示所有画质",
   "qualityShowUntagged": "显示未标明画质的频道",
+  "qualityMayHide": "直播电视的画质筛选可能隐藏了部分频道。",
   "openSources": "打开源",
   "noGuideFor": "{{name}} 暂无节目指南数据",
   "noGuideHint": "将此频道与节目指南频道匹配，或在 EPG 设置中添加 XMLTV 地址。",

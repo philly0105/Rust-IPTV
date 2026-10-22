@@ -11,7 +11,7 @@ import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonList, clearSearches, recentSearchList, rememberSearch, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, SkeletonList, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
@@ -59,6 +59,8 @@ export function RecentPage() {
   const [search, setSearch] = useUrlSearch();
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  // An empty history may be the Live TV quality filter's doing: it leaves out the channels it hides.
+  const quality = useLiveQuality();
 
   // Playback in the mini player saves positions and history while this page is
   // open; when it stops or switches title, refresh so progress and finished
@@ -248,7 +250,12 @@ export function RecentPage() {
         icon={<History size={28} aria-hidden />}
         title={t('recentEmptyTitle')}
         description={!sourceId && sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('recentEmptyBody')}
-        action={<BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />}
+        action={
+          <>
+            <BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />
+            <QualityFilterNote quality={quality} />
+          </>
+        }
       />
     );
   else if (rows.length === 0 && search) body = (

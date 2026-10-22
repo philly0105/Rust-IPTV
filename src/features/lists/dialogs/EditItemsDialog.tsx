@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type CustomListEntry } from '@/api/types';
 
-import { Button, ChannelLogo, Dialog, EmptyState, ErrorState, IconButton, Skeleton, cn, displayChannelName, useDisplayPrefs, useVisibleSources } from '../deps';
+import { Button, ChannelLogo, Dialog, EmptyState, ErrorState, IconButton, QualityFilterNote, Skeleton, cn, displayChannelName, useDisplayPrefs, useLiveQuality, useVisibleSources } from '../deps';
 import { SortableList } from '../components/SortableList';
 import { useListActions } from '../hooks/useListActions';
 import { useListItems, useLists } from '../hooks/useLists';
@@ -23,6 +23,8 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
   const lists = useLists();
   const list = lists.data?.find((l) => l.id === listId);
   const items = useListItems(listId);
+  // The Live TV quality filter leaves out the channels it hides: an empty list may be its doing.
+  const quality = useLiveQuality();
   const actions = useListActions();
   const sources = useVisibleSources();
   const sourceName = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
@@ -72,7 +74,15 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
   } else if (!list) {
     body = <EmptyState size="inline" icon={<ListOrdered className="size-6" />} title={t('notFoundTitle')} description={t('notFoundHint')} />;
   } else if (entries.length === 0) {
-    body = <EmptyState size="inline" icon={<ListOrdered className="size-6" />} title={t('listEmptyTitle')} description={t('listEmptyHint')} />;
+    body = (
+      <EmptyState
+        size="inline"
+        icon={<ListOrdered className="size-6" />}
+        title={t('listEmptyTitle')}
+        description={t('listEmptyHint')}
+        action={quality.filtering ? <QualityFilterNote quality={quality} /> : undefined}
+      />
+    );
   } else {
     body = (
       <div className="-mx-2 max-h-[min(60vh,520px)] overflow-y-auto px-2">

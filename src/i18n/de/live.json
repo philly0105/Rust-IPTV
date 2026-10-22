@@ -115,6 +115,7 @@
   "qualityEmptyHintUntagged": "Sender, deren Name eine niedrigere oder gar keine Qualität angibt, sind ausgeblendet.",
   "qualityShowAll": "Alle Qualitäten anzeigen",
   "qualityShowUntagged": "Sender ohne Angabe anzeigen",
+  "qualityMayHide": "Der Qualitätsfilter von Live-TV blendet möglicherweise Sender aus.",
   "openSources": "Quellen öffnen",
   "noGuideFor": "Keine Programmdaten für {{name}}",
   "noGuideHint": "Ordnen Sie diesen Sender einem EPG-Sender zu oder fügen Sie in den EPG-Einstellungen eine XMLTV-Adresse hinzu.",

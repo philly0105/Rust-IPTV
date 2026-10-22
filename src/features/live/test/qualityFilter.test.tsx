@@ -2,6 +2,8 @@
  * The Live TV quality filter: the list toolbar's picker writes liveMinQuality and
  * liveHideUntagged (TV only, never on Radio), and a live list or the guide the filter leaves
  * empty says so and offers every quality again, before the group, view and source empty states.
+ * After Show all qualities that state stays up until the core has saved the change and the list
+ * has been read again, so the stale filtered answer never shows as "no channels".
  */
 import { cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -55,6 +57,18 @@ let stored: Settings;
 const patches = () => rpcMock.calls.filter((c) => c.cmd === 'settings.update').map((c) => (c.args as { patch: unknown }).patch);
 const trigger = () => screen.getByTestId('live-quality-filter');
 const panel = () => screen.getByRole('dialog', { name: 'Channel quality' });
+const reads = (cmd: string) => rpcMock.calls.filter((c) => c.cmd === cmd).length;
+/** Holds the answers of `cmd` until the returned function is called. */
+function hold(cmd: string): () => void {
+  const real = rpcMock.handlers[cmd]!;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  rpcMock.handlers[cmd] = async (a) => {
+    await gate;
+    return real(a);
+  };
+  return release;
+}
 
 vi.setConfig({ testTimeout: 15_000 });
 beforeAll(() => {
@@ -183,6 +197,48 @@ describe('Lists the quality filter empties', () => {
     expect(await screen.findByText('This group has no channels')).toBeTruthy();
   });
 
+  it('Show all qualities keeps that state up until the core has saved it and the group is read again', async () => {
+    stored = settings({ liveMinQuality: 'fhd' });
+    // As the core: none of these names marks Full HD.
+    const all = Array.from({ length: 20 }, (_, i) => makeChannel(i));
+    rpcMock.handlers['catalog.channels'] = (a) => serve(stored.liveMinQuality ? [] : all)(a);
+    renderAt('/s/src1/live/g1', LIVE);
+    expect(await screen.findByText('No channels match the quality filter')).toBeTruthy();
+
+    const saved = hold('settings.update');
+    fireEvent.click(screen.getByRole('button', { name: 'Show all qualities' }));
+    // The filter is off on screen at once, but the group's answer is still the filtered one.
+    await waitFor(() => expect(screen.getByTestId('live-quality-show-all').getAttribute('aria-busy')).toBe('true'));
+    expect(screen.getByText('No channels match the quality filter')).toBeTruthy();
+    expect(screen.queryByText('This group has no channels')).toBeNull();
+
+    const before = reads('catalog.channels');
+    const read = hold('catalog.channels');
+    saved();
+    await waitFor(() => expect(reads('catalog.channels')).toBeGreaterThan(before));
+    expect(screen.getByText('No channels match the quality filter')).toBeTruthy();
+    expect(screen.queryByText('This group has no channels')).toBeNull();
+
+    read();
+    expect(await screen.findByText('Channel 0')).toBeTruthy();
+    expect(screen.queryByText('No channels match the quality filter')).toBeNull();
+  });
+
+  it('lets go of that state when the route changes meanwhile', async () => {
+    stored = settings({ liveMinQuality: 'fhd' });
+    rpcMock.handlers['catalog.channels'] = serve([]);
+    rpcMock.handlers['settings.update'] = () => new Promise(() => undefined);
+    renderAt('/s/src1/live/g1', LIVE);
+    expect(await screen.findByText('No channels match the quality filter')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all qualities' }));
+    await waitFor(() => expect(screen.getByTestId('live-quality-show-all').getAttribute('aria-busy')).toBe('true'));
+
+    const nav = screen.getByRole('navigation', { name: 'Groups' });
+    fireEvent.click(within(nav).getByRole('link', { name: /^All channels/ }));
+    expect(await screen.findByText('No channels in this source')).toBeTruthy();
+    expect(screen.queryByText('No channels match the quality filter')).toBeNull();
+  });
+
   it('Favorites, Recently watched and All channels show it before their own empty states', async () => {
     stored = settings({ liveMinQuality: 'uhd' });
     rpcMock.handlers['catalog.channels'] = serve([]);
@@ -208,7 +264,7 @@ describe('Lists the quality filter empties', () => {
     expect(screen.queryByText('No channels match the quality filter')).toBeNull();
   });
 
-  it('the guide says so too, and Show all qualities turns the filter off', async () => {
+  it('the guide says so too, and Show all qualities turns the filter off once the channels are read again', async () => {
     stored = settings({ liveMinQuality: 'fhd' });
     rpcMock.handlers['catalog.channels'] = serve([]);
     renderAt('/epg?source=src1', GUIDE);
@@ -216,8 +272,19 @@ describe('Lists the quality filter empties', () => {
     expect(screen.getByText('Channels whose name marks a lower quality are hidden.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Show untagged channels' })).toBeNull();
 
+    const saved = hold('settings.update');
     fireEvent.click(screen.getByRole('button', { name: 'Show all qualities' }));
+    await waitFor(() => expect(screen.getByTestId('live-quality-show-all').getAttribute('aria-busy')).toBe('true'));
+    expect(screen.queryByText('No channels in this source')).toBeNull();
+    const before = reads('catalog.channels');
+    const read = hold('catalog.channels');
+    saved();
     await waitFor(() => expect(patches()).toEqual([{ liveMinQuality: null }]));
+    await waitFor(() => expect(reads('catalog.channels')).toBeGreaterThan(before));
+    expect(screen.getByText('No channels match the quality filter')).toBeTruthy();
+    expect(screen.queryByText('No channels in this source')).toBeNull();
+    read();
     expect(await screen.findByText('No channels in this source')).toBeTruthy();
+    expect(screen.queryByText('No channels match the quality filter')).toBeNull();
   });
 });

@@ -15,6 +15,7 @@ import { isDesktop, rpc } from '@/api/transport';
 import { QUIT_FLUSH_EVENT, type QuitFlushDetail } from '@/api/window';
 import type {
   Channel,
+  ItemKey,
   ItemRef,
   ItemSnapshot,
   PlaybackPosition,
@@ -1679,11 +1680,37 @@ async function favoriteChannel(ref: ItemRef): Promise<Channel | undefined> {
   }
 }
 
+/** A favorite's place in the stored order, as `favorites.list` sorts it. */
+type FavoriteSlot = { position: number; addedAt: string };
+
+const favoriteOrder = (a: FavoriteSlot, b: FavoriteSlot): number => a.position - b.position || a.addedAt.localeCompare(b.addedAt);
+
+/**
+ * The place of the favorite `favoriteNeighbours` last found in the list. A filter can take the
+ * playing favorite out of `favorites.list` afterwards (the Live TV quality filter, a channel
+ * edit, parental hide mode); zapping from it then steps from this place.
+ */
+let favoriteSlot: (FavoriteSlot & { key: ItemKey }) | null = null;
+
+/** Whether `ref` is a favorite, shown or not (`favorites.contains` reads every stored row). */
+async function isStoredFavorite(ref: ItemRef): Promise<boolean> {
+  const args = { refs: [ref] };
+  const present = await queryClient.fetchQuery({
+    queryKey: rpcKey('favorites.contains', args),
+    queryFn: () => rpc('favorites.contains', args),
+    staleTime: NEIGHBOURS_STALE_MS,
+    retry: false,
+  });
+  return present.length > 0;
+}
+
 /**
  * The channels either side of `ref` in favorites order (the `favorites.list` the Favorites page
  * shows, so its reorders apply at once), among favorites of the same type (live or radio). It
- * wraps like catalog.neighbors and steps over favorites the catalog no longer has. Undefined
- * when `ref` is not one of them.
+ * wraps like catalog.neighbors and steps over favorites the catalog no longer has. A favorite
+ * the list now leaves out (a filter hides it) is placed where it was last seen, so its
+ * neighbours are the nearest favorites shown. Undefined when `ref` is not a favorite, or is
+ * hidden and was never seen in the list.
  */
 async function favoriteNeighbours(ref: ItemRef, scope: { sourceId?: string }): Promise<Neighbours | undefined> {
   const args = scope.sourceId ? { sourceId: scope.sourceId } : {};
@@ -1693,12 +1720,20 @@ async function favoriteNeighbours(ref: ItemRef, scope: { sourceId?: string }): P
     staleTime: NEIGHBOURS_STALE_MS,
     retry: false,
   });
-  const refs = [...entries]
-    .sort((a, b) => a.position - b.position || a.addedAt.localeCompare(b.addedAt))
-    .map((e) => e.ref)
-    .filter((r) => r.contentType === ref.contentType);
-  const at = refs.findIndex((r) => sameRef(r, ref));
-  if (at < 0) return undefined;
+  const sorted = entries.filter((e) => e.ref.contentType === ref.contentType).sort(favoriteOrder);
+  const refs = sorted.map((e) => e.ref);
+  const key = itemKey(ref);
+  let at = refs.findIndex((r) => sameRef(r, ref));
+  if (at >= 0) {
+    const { position, addedAt } = sorted[at]!;
+    favoriteSlot = { key, position, addedAt };
+  } else {
+    const slot = favoriteSlot?.key === key ? favoriteSlot : null;
+    if (!slot || !(await isStoredFavorite(ref))) return undefined;
+    at = sorted.findIndex((e) => favoriteOrder(e, slot) > 0);
+    if (at < 0) at = refs.length;
+    refs.splice(at, 0, ref);
+  }
   const step = async (dir: 1 | -1): Promise<Channel | undefined> => {
     for (let i = 1; i < refs.length; i++) {
       const ch = await favoriteChannel(refs[(at + dir * i + refs.length) % refs.length]!);
@@ -2228,6 +2263,7 @@ export function __resetPlayerForTests(): void {
   if (prefetchTimer) clearTimeout(prefetchTimer);
   prefetchTimer = null;
   knownChannels.clear();
+  favoriteSlot = null;
   queryClient.removeQueries({ queryKey: ['settings.get'] });
   queryClient.removeQueries({ queryKey: ['catalog.neighbors'] });
   queryClient.removeQueries({ queryKey: ['lists.neighbors'] });

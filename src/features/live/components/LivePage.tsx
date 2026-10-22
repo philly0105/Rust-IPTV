@@ -661,7 +661,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // The quality filter (TV only) can empty a group, a pinned view or the whole list: say so, and
   // offer every quality again, rather than "no channels" or "refresh the source".
   const quality = useLiveQuality();
-  const qualityFiltering = !isRadio && quality.min !== null;
+  const qualityFiltering = !isRadio && quality.filtering;
   const unlockParental = useCallback(() => {
     void requestPin({
       title: t('parentalUnlockTitle'),
@@ -771,7 +771,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       />
     );
   } else if (listEmpty && qualityFiltering && (liveView || categoryId || sourceCount > 0)) {
-    listBody = <QualityEmptyState hideUntagged={quality.hideUntagged} onChange={quality.update} />;
+    listBody = <QualityEmptyState quality={quality} />;
   } else if (listEmpty && liveView) {
     listBody = (
       <EmptyState

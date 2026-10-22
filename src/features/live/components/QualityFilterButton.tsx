@@ -12,13 +12,16 @@
  * does Tab past either end (the panel is portaled, so the browser's own Tab would leave the page);
  * a press outside it closes it too.
  *
- * No player imports here: the guide's route chunk reads QualityEmptyState from this file.
+ * No player imports here: the guide's route chunk reads QualityEmptyState from this file, and the
+ * custom list, Favorites and Recently watched pages read QualityFilterNote.
  */
 
+import { useQueryClient, type Query } from '@tanstack/react-query';
 import { Hd, SlidersHorizontal } from 'lucide-react';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router';
 
 import type { ChannelQuality, Settings } from '@/api/types';
 import { useUpdateSettings } from '@/features/settings/lib/useUpdateSettings';
@@ -42,13 +45,63 @@ const CHOICES: readonly { value: Choice; key: string }[] = [
 const selectMin = (s: Settings) => s.liveMinQuality ?? null;
 const selectHideUntagged = (s: Settings) => s.liveHideUntagged === true;
 
-/** The filter as set (`min` null = off) and the optimistic settings write that changes it. */
-export function useLiveQuality(): { min: ChannelQuality | null; hideUntagged: boolean; update: (patch: QualityPatch) => void } {
+/** What the core filters by quality and an empty state may stand for: read again by `loosen`. */
+const FILTERED = ['catalog.', 'favorites.', 'recent.', 'lists.'] as const;
+const isFiltered = (q: Query) => {
+  const head = q.queryKey[0];
+  return typeof head === 'string' && FILTERED.some((p) => head.startsWith(p));
+};
+
+/** The filter as set and the writes that change it. */
+export interface LiveQuality {
+  /** The lowest quality listed; null = off. */
+  min: ChannelQuality | null;
+  hideUntagged: boolean;
+  /** The picker's write: optimistic, as every settings write. */
+  update(patch: QualityPatch): void;
+  /**
+   * An empty state's write. "Show all qualities" turns the filter off on screen at once, but the
+   * list's answer stays the filtered one until it is read again, so the page would show its plain
+   * empty state ("No channels in this source") in between. `clearing` holds the quality one up
+   * until the core has saved the change and the lists on screen are read again, whatever they
+   * hold then, or until the route changes.
+   */
+  loosen(patch: QualityPatch): void;
+  clearing: boolean;
+  /** A minimum is set, or "Show all qualities" is still on its way: an empty list may be the filter's doing. */
+  filtering: boolean;
+}
+
+export function useLiveQuality(): LiveQuality {
   const min = useSettingsValue(selectMin).data ?? null;
   const hideUntagged = useSettingsValue(selectHideUntagged).data ?? false;
   const updateSettings = useUpdateSettings();
+  const queryClient = useQueryClient();
+  const { pathname, search } = useLocation();
+  const route = pathname + search;
+  const [clearingAt, setClearingAt] = useState<string | null>(null);
+  const clears = useRef(0);
   const update = useCallback((patch: QualityPatch) => void updateSettings(patch), [updateSettings]);
-  return { min, hideUntagged, update };
+  const loosen = useCallback(
+    (patch: QualityPatch) => {
+      if (patch.liveMinQuality !== null) {
+        update(patch);
+        return;
+      }
+      const run = ++clears.current;
+      setClearingAt(route);
+      // Read after the save, so the answers are the unfiltered ones (a refetch the settings.changed
+      // echo starts meanwhile takes this one's place, and this waits for it).
+      void updateSettings(patch)
+        .then((saved) => (saved ? queryClient.refetchQueries({ predicate: isFiltered, type: 'active' }) : undefined))
+        .finally(() => {
+          if (clears.current === run) setClearingAt(null);
+        });
+    },
+    [queryClient, route, update, updateSettings],
+  );
+  const clearing = clearingAt === route;
+  return { min, hideUntagged, update, loosen, clearing, filtering: min !== null || clearing };
 }
 
 const GAP = 4;
@@ -235,29 +288,54 @@ export function QualityFilterButton({ min, hideUntagged, onChange }: QualityFilt
   );
 }
 
+/** Show all qualities, and Show untagged channels while they are hidden. */
+function QualityActions({ quality }: { quality: LiveQuality }) {
+  const { t } = useTranslation('live');
+  return (
+    <>
+      <Button size="sm" loading={quality.clearing} onClick={() => quality.loosen({ liveMinQuality: null })} data-testid="live-quality-show-all">
+        {t('qualityShowAll')}
+      </Button>
+      {quality.hideUntagged ? (
+        <Button size="sm" onClick={() => quality.loosen({ liveHideUntagged: false })} data-testid="live-quality-show-untagged">
+          {t('qualityShowUntagged')}
+        </Button>
+      ) : null}
+    </>
+  );
+}
+
 /**
  * The empty state of a live list the quality filter left empty (a group, All channels, a pinned
  * view, the guide): it says so and offers to show every quality, or the untagged channels again.
  */
-export function QualityEmptyState({ hideUntagged, onChange }: { hideUntagged: boolean; onChange(patch: QualityPatch): void }) {
+export function QualityEmptyState({ quality }: { quality: LiveQuality }) {
   const { t } = useTranslation('live');
   return (
     <EmptyState
       icon={<SlidersHorizontal className="size-6" />}
       title={t('qualityEmpty')}
-      description={t(hideUntagged ? 'qualityEmptyHintUntagged' : 'qualityEmptyHint')}
-      action={
-        <>
-          <Button size="sm" onClick={() => onChange({ liveMinQuality: null })} data-testid="live-quality-show-all">
-            {t('qualityShowAll')}
-          </Button>
-          {hideUntagged ? (
-            <Button size="sm" onClick={() => onChange({ liveHideUntagged: false })} data-testid="live-quality-show-untagged">
-              {t('qualityShowUntagged')}
-            </Button>
-          ) : null}
-        </>
-      }
+      description={t(quality.hideUntagged ? 'qualityEmptyHintUntagged' : 'qualityEmptyHint')}
+      action={<QualityActions quality={quality} />}
     />
+  );
+}
+
+/**
+ * What the empty state of a custom list, Favorites or Recently watched adds while the filter is on,
+ * on a line of its own under the page's actions. Those lists leave out the live channels the
+ * filter hides, and the page cannot tell such a list from an empty one, so it keeps its own empty
+ * state and says the filter may be why. Nothing while the filter is off.
+ */
+export function QualityFilterNote({ quality }: { quality: LiveQuality }) {
+  const { t } = useTranslation('live');
+  if (!quality.filtering) return null;
+  return (
+    <div className="flex basis-full flex-col items-center gap-2 pt-2" data-testid="live-quality-note">
+      <p className="text-sm text-fg-muted">{t('qualityMayHide')}</p>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <QualityActions quality={quality} />
+      </div>
+    </div>
   );
 }

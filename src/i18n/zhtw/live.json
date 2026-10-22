@@ -115,6 +115,7 @@
   "qualityEmptyHintUntagged": "名稱標示較低畫質或未標示畫質的頻道已隱藏。",
   "qualityShowAll": "顯示所有畫質",
   "qualityShowUntagged": "顯示未標示畫質的頻道",
+  "qualityMayHide": "直播電視的畫質篩選可能隱藏了部分頻道。",
   "openSources": "開啟來源",
   "noGuideFor": "{{name}} 尚無節目表資料",
   "noGuideHint": "請將此頻道對應到節目表頻道，或在 EPG 設定中新增 XMLTV 位址。",

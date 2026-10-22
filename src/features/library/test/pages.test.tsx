@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DownloadStatus, Source } from '@/api/types';
+import { DEFAULT_SETTINGS, type DownloadStatus, type Settings, type Source } from '@/api/types';
+import live from '@/i18n/en/live.json';
 
 import { DownloadsPage } from '../pages/DownloadsPage';
 import { FavoritesPage } from '../pages/FavoritesPage';
@@ -10,7 +11,7 @@ import { MyVideosPage } from '../pages/MyVideosPage';
 import { RecentPage } from '../pages/RecentPage';
 import { stopTrackingDownloadPosition } from '../lib/positionSync';
 import { makeDownload, makeEpisode, makeFavorite, makePosition, makeRecent } from './fixtures';
-import { fakePlayer, installDomStubs, renderAt } from './harness';
+import { fakePlayer, i18n, installDomStubs, renderAt } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
 
@@ -42,7 +43,11 @@ const sources: Partial<Source>[] = [
   { id: 'src2', kind: 'm3u', name: 'Backup list' },
 ];
 
-beforeAll(installDomStubs);
+beforeAll(() => {
+  installDomStubs();
+  // The quality filter's note on the empty pages is in Live TV's strings.
+  i18n.addResourceBundle('en', 'live', live);
+});
 beforeEach(() => {
   rpc.reset();
   rpc.handlers['sources.list'] = () => sources;
@@ -298,6 +303,23 @@ describe('FavoritesPage', () => {
     rpc.handlers['favorites.list'] = () => [];
     renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
     expect(await screen.findByText('No favorites yet')).toBeTruthy();
+    expect(screen.queryByTestId('live-quality-note')).toBeNull();
+  });
+
+  it('empty while the quality filter is on, says it may be hiding channels and offers every quality again', async () => {
+    let stored: Settings = { ...DEFAULT_SETTINGS, liveMinQuality: 'fhd' };
+    rpc.handlers['settings.get'] = () => stored;
+    rpc.handlers['settings.update'] = (a) => (stored = { ...stored, ...(a as { patch: Partial<Settings> }).patch });
+    // As the core: the one favorite is a channel the filter hides.
+    rpc.handlers['favorites.list'] = () => (stored.liveMinQuality ? [] : [favs[0]!]);
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    expect(await screen.findByText('No favorites yet')).toBeTruthy();
+    const note = await screen.findByTestId('live-quality-note');
+    expect(within(note).getByText('The Live TV quality filter may be hiding channels.')).toBeTruthy();
+
+    fireEvent.click(within(note).getByRole('button', { name: 'Show all qualities' }));
+    expect(await screen.findAllByTestId('entry-row')).toHaveLength(1);
+    expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: null } }]);
   });
 });
 
@@ -318,6 +340,18 @@ describe('RecentPage', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Clear history' }));
     await waitFor(() => expect(rpc.callsOf('recent.clear')).toEqual([{}]));
+  });
+
+  it('empty while the quality filter is on, says it may be hiding channels', async () => {
+    rpc.handlers['settings.get'] = () => ({ ...DEFAULT_SETTINGS, liveMinQuality: 'uhd', liveHideUntagged: true });
+    rpc.handlers['recent.list'] = () => [];
+    rpc.handlers['positions.continueWatching'] = () => [];
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+    expect(await screen.findByText('Nothing watched yet')).toBeTruthy();
+    const note = await screen.findByTestId('live-quality-note');
+    expect(within(note).getByText('The Live TV quality filter may be hiding channels.')).toBeTruthy();
+    expect(within(note).getByRole('button', { name: 'Show all qualities' })).toBeTruthy();
+    expect(within(note).getByRole('button', { name: 'Show untagged channels' })).toBeTruthy();
   });
 
   it('scopes to a source and removes one entry', async () => {

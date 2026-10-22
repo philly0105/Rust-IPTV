@@ -36,6 +36,9 @@ pub struct AppState {
     pub extensions: DashMap<&'static str, Arc<dyn Any + Send + Sync>>,
     /// Admits one user write at a time to the pool; see [`Self::db_write`].
     write_gate: Arc<tokio::sync::Semaphore>,
+    /// Admits one periodic background write at a time; see
+    /// [`Self::db_background`].
+    background_gate: Arc<tokio::sync::Semaphore>,
     /// Writes started with [`DbWriter::spawn`] that have not finished.
     background_writes: Arc<AtomicUsize>,
 }
@@ -209,6 +212,7 @@ impl AppState {
             is_desktop,
             extensions: DashMap::new(),
             write_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            background_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             background_writes: Arc::new(AtomicUsize::new(0)),
         }))
     }
@@ -290,6 +294,31 @@ impl AppState {
             .await
             .map_err(|_| CoreError::Other(anyhow::anyhow!("the database is closing")))?;
         self.db_call(f).await
+    }
+
+    /// [`Self::db_call`] for the periodic writes nobody waits on: download
+    /// progress, a recording's byte count and the image cache index. They
+    /// pass a gate of their own one at a time before they take a pooled
+    /// connection, so while an import holds SQLite's write lock they park one
+    /// connection between them instead of one each, and user writes never
+    /// queue behind them (DB-1R).
+    pub async fn db_background<T, F>(&self, f: F) -> CoreResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> CoreResult<T> + Send + 'static,
+    {
+        let _permit = self
+            .background_gate
+            .acquire()
+            .await
+            .map_err(|_| CoreError::Other(anyhow::anyhow!("the database is closing")))?;
+        self.db_call(f).await
+    }
+
+    /// The gate of [`Self::db_background`], for a writer that holds only the
+    /// pool (the image cache index).
+    pub(crate) fn background_gate(&self) -> Arc<tokio::sync::Semaphore> {
+        Arc::clone(&self.background_gate)
     }
 
     /// A handle for best-effort writes that run through the gate of

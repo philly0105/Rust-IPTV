@@ -1,6 +1,7 @@
 //! SQLite side of parental controls: the `parental_config` row and the
 //! `parental_locks` table (migration 0011). Synchronous, `&Connection`
-//! based; [`super`] runs these through `AppState::db_call`.
+//! based; [`super`] runs the reads through `AppState::db_call` and the writes
+//! through `AppState::db_write`.
 
 use super::pin;
 use super::{ParentalLock, ParentalLockKind, ParentalLockTarget, ParentalMode};

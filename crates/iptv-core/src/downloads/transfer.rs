@@ -749,7 +749,7 @@ impl Progress {
             let state = Arc::clone(state);
             self.persisting = Some(tokio::spawn(async move {
                 if let Err(e) = state
-                    .db_call(move |c| store::set_progress(c, id, bytes))
+                    .db_background(move |c| store::set_progress(c, id, bytes))
                     .await
                 {
                     tracing::warn!(id, error = %e, "could not persist download progress");

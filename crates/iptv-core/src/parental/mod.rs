@@ -281,7 +281,7 @@ async fn verify(state: &AppState, rt: &Runtime, pin: &str) -> Result<(), RpcErro
     let pin = pin.to_string();
     let now = rt.now();
     let (verdict, cfg) = state
-        .db_call(move |c| Ok((store::check_pin(c, &pin, now)?, store::load_config(c)?)))
+        .db_write(move |c| Ok((store::check_pin(c, &pin, now)?, store::load_config(c)?)))
         .await?;
     rt.cache(&cfg);
     let err = match verdict {
@@ -390,7 +390,7 @@ pub async fn set_pin_with(
     }
     let new_pin = new_pin.to_string();
     let cfg = state
-        .db_call(move |c| {
+        .db_write(move |c| {
             let stored = pin::hash_new(&new_pin);
             store::set_pin(c, &stored)?;
             store::load_config(c)
@@ -417,7 +417,7 @@ pub async fn disable(state: &AppState, pin: &str) -> Result<ParentalStatus, RpcE
     }
     verify(state, &rt, pin).await?;
     let cfg = state
-        .db_call(|c| {
+        .db_write(|c| {
             store::clear_pin(c)?;
             store::load_config(c)
         })
@@ -446,7 +446,7 @@ pub async fn configure(
     let cfg = config_held(state, &rt).await?;
     authorize(state, &rt, &cfg, pin, "change parental settings").await?;
     let cfg = state
-        .db_call(move |c| {
+        .db_write(move |c| {
             store::set_options(c, mode, auto_adult, unlock_minutes)?;
             store::load_config(c)
         })
@@ -512,7 +512,7 @@ pub async fn set_locked(
         authorize(state, &rt, &cfg, pin, "remove a lock").await?;
     }
     let changed = state
-        .db_call(move |c| {
+        .db_write(move |c| {
             if locked {
                 store::add_lock(c, &target, &crate::db::now_rfc3339())
             } else {
@@ -563,7 +563,7 @@ pub async fn set_locked_many(
         authorize(state, &rt, &cfg, pin, "remove a lock").await?;
     }
     let changed = state
-        .db_call(move |c| {
+        .db_write(move |c| {
             let tx = c.transaction()?;
             let created_at = crate::db::now_rfc3339();
             let mut changed = 0;
@@ -842,7 +842,7 @@ pub async fn restore_options(
         return Ok(false);
     }
     let next = state
-        .db_call(move |c| {
+        .db_write(move |c| {
             store::set_options(c, mode, auto_adult, unlock_minutes)?;
             store::load_config(c)
         })

@@ -434,6 +434,8 @@ struct Job {
 /// drops the writer's sender, and the writer exits once its queue drains.
 struct ImageCache {
     pool: DbPool,
+    /// `AppState::db_background`'s gate, for the writer's batches.
+    background_gate: Arc<Semaphore>,
     db_path: PathBuf,
     dir: PathBuf,
     settings: Arc<RwLock<Settings>>,
@@ -470,6 +472,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
         let (tx, rx) = mpsc::unbounded_channel();
         Arc::new(ImageCache {
             pool: state.db.clone(),
+            background_gate: state.background_gate(),
             db_path: state.db_path(),
             dir: state.data_dir.join(DIR_NAME),
             settings: state.settings.clone(),
@@ -519,6 +522,7 @@ impl ImageCache {
                 if let Some(rx) = self.rx.lock().take() {
                     let writer = store::Writer {
                         pool: self.pool.clone(),
+                        gate: self.background_gate.clone(),
                         db_path: self.db_path.clone(),
                         dir: self.dir.clone(),
                         settings: self.settings.clone(),

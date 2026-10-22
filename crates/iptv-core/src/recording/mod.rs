@@ -1587,7 +1587,7 @@ fn spawn_progress(
                 let key = id.clone();
                 // Bytes only: the parts list is the engine's to write.
                 if let Err(e) = state
-                    .db_call(move |c| store::set_bytes(c, &key, bytes))
+                    .db_background(move |c| store::set_bytes(c, &key, bytes))
                     .await
                 {
                     tracing::debug!(error = %e, "could not save recording bytes");

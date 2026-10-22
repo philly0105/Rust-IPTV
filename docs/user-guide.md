@@ -9,6 +9,7 @@ This guide covers the desktop app for Windows and the same interface in a browse
 - [Live TV](#live-tv)
 - [TV guide](#tv-guide)
 - [Catch-up](#catch-up)
+- [Sports](#sports)
 - [Movies and series](#movies-and-series)
 - [The player](#the-player)
 - [Picture-in-picture](#picture-in-picture)
@@ -94,6 +95,27 @@ The filter applies wherever live channels appear: the channel list and the group
 
 Right-click a channel with catch-up and choose "Browse catch-up" (also in the fullscreen channel list and the guide's programme dialog). Pick a day, then play any past programme, or "Watch from start" on the one airing now. A day with no guide at all lists the archive's hours instead, so you can still watch from a time. The download button next to a finished programme saves it (My Videos lists it under the channel).
 
+## Sports
+
+Sports (in the side rail under Watch; on phones under More) lists NFL, college football, NBA and MLB games from a week ago to a week ahead, with the channels of your sources that carry each one. College football means the top division (FBS).
+
+- Pick a league at the top (All shows all four) and a day in the strip below it. Days follow US Eastern time, the way ESPN lists games, so a late game can fall on a different day where you live; start times show in your own time zone. While a game is on, "Live now" leads the page, whatever day you picked.
+- Each game shows both teams with their logos, records, college rankings and the score, the clock, the result or the start time (TBD while the time isn't set), the TV networks, and a Gamecast link to the game's page on ESPN.
+- Under each game are the streams found for it: three at first, and "Show all" for the rest. A badge says why each one is there. "In guide" means a TV guide programme on that channel at that time names both teams; it is the surest kind. "Event channel" means the channel's own name names both teams, as providers name their per-game channels. "Network" means the channel is a network ESPN lists for the game, such as ESPN or TNT. "Regional" marks a network channel that may be showing another game: CBS and FOX on NFL Sundays, regional sports networks and local stations.
+- Watch appears 15 minutes before the start and plays the channel live. Once the game is over, Replay plays it from the channel's catch-up archive; it shows only when your provider keeps an archive for that channel and the game is still inside it. Before the start, Record (where recording is available) schedules a recording of the guide's programme for the game, or, when the guide doesn't have it, from 10 minutes before the start. When the start time is known, the recording runs to at least an hour past the league's usual game length, to allow for overtime and late starts. The [recording](#recording-and-reminders) padding comes on top.
+- "No stream found" means nothing matched. While the [quality filter](#filtering-by-quality) is on, the page also says it may be hiding channels: per-game event channels rarely have a quality in their name, so "Hide channels with no quality tag" hides most of them.
+
+Things to know:
+
+- Scores and schedules come from ESPN's public scoreboard. ESPN doesn't document it or support it for other apps, so it can change or stop answering. When it fails, the page says it couldn't load scores and keeps showing what it already had.
+- Streams are matched from channel names, the TV guide and network names; nothing ties a game to a channel for certain. A game can be missed (a channel named only with a slot number or with team abbreviations the app doesn't know, an event channel in a group whose name doesn't look like sports, a channel you renamed) or matched to the wrong broadcast.
+- The TV guide usually holds only about two days of past programmes, so older games are matched by channel name and network only.
+- Past games play only where your provider keeps a catch-up archive for the channel, and only as far back as that archive goes.
+- The page lists the same channels Live TV does: the quality filter, parental controls, English only and hidden channels and groups apply here too.
+- The page asks ESPN only for what it shows: the day you pick for the leagues you pick, plus today and yesterday for "Live now". It refreshes every 30 seconds while a game is live, less often otherwise, and not at all while the app's window is hidden. In the browser the requests go from your browser to ESPN, not through the server.
+
+See [sports.md](architecture/sports.md).
+
 ## Movies and series
 
 - Movies and episodes remember where you stopped. The detail page offers "Resume from m:ss" and "Start over".
@@ -177,7 +199,7 @@ To use a phone, turn on "Allow phones on this network" under Settings > Remote (
 
 ## Phones and touch screens
 
-Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists the Library pages, each source's pages and Settings. The theme switch is then in Settings > Appearance and the command palette. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
+Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists the Library pages, each source's pages, Sports, Multi-view and Settings. The theme switch is then in Settings > Appearance and the command palette. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
 
 ## Appearance, language and startup
 

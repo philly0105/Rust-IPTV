@@ -3,9 +3,9 @@
 // Prints every JavaScript chunk in dist/assets, largest first, and exits 1 when the entry chunk
 // (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when
 // Home's route chunk statically loads player code (performance audit SH-2), when the Search,
-// Settings or category-grid route chunks statically load the player's UI, or when there is no
-// build to check. The Live and Guide route chunks are measured too and noted while they still load
-// the player's controls (see ROUTES). Plain Node, no dependencies.
+// Settings, category-grid or Sports route chunks statically load the player's UI, or when there is
+// no build to check. The Live and Guide route chunks are measured too and noted while they still
+// load the player's controls (see ROUTES). Plain Node, no dependencies.
 //
 //   node tools/check-bundle.mjs [distDir]    (default: dist)
 //
@@ -38,8 +38,8 @@ const PLAYER_UI = /^(?:player-index|PlayerStage|PlayerDock|Controls|hls|mpegts|s
 const CONTROLS = /^Controls-[\w-]+\.js$/;
 /**
  * Lazy route chunks, named after their page module, and the player chunks each must not reach
- * through static imports. Home plays only through import() (SH-2); Search plays a channel and a
- * category grid's poster menu plays a movie the same way.
+ * through static imports. Home plays only through import() (SH-2); Search plays a channel, a
+ * category grid's poster menu plays a movie and Sports plays a game's channel the same way.
  *
  * Live and the guide draw the stage (`PlayerStage`), but the controls come with the dock, which the
  * shell loads; they reach the controls chunk only because the `@/features/player` barrel exports
@@ -53,6 +53,7 @@ const ROUTES = [
   { name: 'Search', chunk: /^SearchPage-[\w-]+\.js$/, page: 'src/features/vod/pages/SearchPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
   { name: 'Settings', chunk: /^SettingsPage-[\w-]+\.js$/, page: 'src/features/settings/SettingsPage.tsx', forbid: PLAYER, what: 'player code' },
   { name: 'Category grid', chunk: /^CategoryGridPage-[\w-]+\.js$/, page: 'src/features/vod/pages/CategoryGridPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
+  { name: 'Sports', chunk: /^SportsPage-[\w-]+\.js$/, page: 'src/features/sports/pages/SportsPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
   { name: 'Live', chunk: /^LivePage-[\w-]+\.js$/, page: 'src/features/live/components/LivePage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
   { name: 'Guide', chunk: /^EpgGridPage-[\w-]+\.js$/, page: 'src/features/live/components/EpgGridPage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
 ];
@@ -163,4 +164,4 @@ for (const note of notes) console.log(`size:check: note: ${note}`);
 if (leaks.length > 0) {
   fail(`${leaks.join(' ')} Load the player inside the click handler with import('@/features/player'), and import the store from '@/features/player/store' where a page reads it; see docs/architecture/performance.md.`);
 }
-console.log("size:check: no player code in the Home or Settings route chunks' static imports, and none of the player's UI in Search's or the category grid's.");
+console.log("size:check: no player code in the Home or Settings route chunks' static imports, and none of the player's UI in Search's, the category grid's or Sports'.");

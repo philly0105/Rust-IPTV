@@ -14,7 +14,7 @@
  * off in German, Greek, Polish and Belarusian.
  */
 
-import { CalendarRange, ChevronRight, House, LayoutGrid, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
+import { CalendarRange, ChevronRight, House, LayoutGrid, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Trophy, Tv, type LucideIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
@@ -225,6 +225,7 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
       <ul className="flex flex-col gap-0.5 border-t border-divider pt-3">
         {(
           [
+            { to: '/sports', label: t('sports:title'), icon: Trophy },
             { to: '/multiview', label: t('navMultiview'), icon: LayoutGrid },
             { to: '/sources', label: t('manageSources'), icon: ListVideo },
             { to: '/settings', label: t('navSettings'), icon: SettingsIcon },

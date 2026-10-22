@@ -33,6 +33,7 @@ const C7_PATHS = [
   '/lists',
   '/lists/l1',
   '/stats',
+  '/sports',
   '/search',
   '/epg',
   '/live/archive/x/1',

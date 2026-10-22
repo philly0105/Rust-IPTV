@@ -43,6 +43,8 @@ export const NAMESPACES = [
   'stats',
   // Run 3: first-run tour and What's new.
   'onboarding',
+  // NFL, college football, NBA and MLB games with the channels that carry them.
+  'sports',
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 

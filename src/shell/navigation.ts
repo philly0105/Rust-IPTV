@@ -18,6 +18,7 @@ import {
   LayoutGrid,
   ListOrdered,
   Search,
+  Trophy,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -48,6 +49,8 @@ export const WATCH_LINKS: readonly NavLinkDef[] = [
   { to: '/dashboard', labelKey: 'navDashboard', icon: House },
   { to: '/search', labelKey: 'navSearch', icon: Search },
   { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
+  // Games from ESPN with the channels that carry them; the label is the page's title.
+  { to: '/sports', labelKey: 'sports:title', icon: Trophy },
   { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },
 ];
 

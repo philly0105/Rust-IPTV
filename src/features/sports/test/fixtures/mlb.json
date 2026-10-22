@@ -1,0 +1,2038 @@
+{
+  "leagues": [
+    {
+      "id": "10",
+      "uid": "s:1~l:10",
+      "name": "Major League Baseball",
+      "abbreviation": "MLB",
+      "slug": "mlb",
+      "season": {
+        "year": 2026,
+        "startDate": "2026-02-19T08:00Z",
+        "endDate": "2026-11-12T07:59Z",
+        "displayName": "2026",
+        "type": {
+          "id": "3",
+          "type": 3,
+          "name": "Postseason",
+          "abbreviation": "post"
+        }
+      },
+      "calendarType": "day",
+      "calendarIsWhitelist": false,
+      "calendarStartDate": "2026-02-19T08:00Z",
+      "calendarEndDate": "2026-11-12T07:59Z"
+    }
+  ],
+  "events": [
+    {
+      "id": "401908025",
+      "uid": "s:1~l:10~e:401908025",
+      "date": "2026-10-15T17:00Z",
+      "name": "Tampa Bay Rays at Cleveland Guardians",
+      "shortName": "TB @ CLE",
+      "season": {
+        "year": 2026,
+        "type": 3,
+        "slug": "post-season"
+      },
+      "competitions": [
+        {
+          "id": "401908025",
+          "uid": "s:1~l:10~e:401908025~c:401908025",
+          "date": "2026-10-15T17:00Z",
+          "attendance": 30101,
+          "type": {
+            "id": "16",
+            "abbreviation": "SEMI"
+          },
+          "timeValid": true,
+          "neutralSite": false,
+          "conferenceCompetition": true,
+          "playByPlayAvailable": true,
+          "recent": false,
+          "wasSuspended": false,
+          "venue": {
+            "id": "5",
+            "fullName": "Progressive Field",
+            "address": {
+              "city": "Cleveland",
+              "state": "Ohio"
+            },
+            "indoor": false
+          },
+          "competitors": [
+            {
+              "id": "5",
+              "uid": "s:1~l:10~t:5",
+              "type": "team",
+              "order": 0,
+              "homeAway": "home",
+              "winner": true,
+              "score": "3",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "85-77"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "41-40"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "44-37"
+                }
+              ],
+              "record": "2-1",
+              "hits": 6,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Gavin Williams"
+                  }
+                }
+              ],
+              "team": {
+                "id": "5",
+                "uid": "s:1~l:10~t:5",
+                "location": "Cleveland",
+                "name": "Guardians",
+                "abbreviation": "CLE",
+                "displayName": "Cleveland Guardians",
+                "shortDisplayName": "Guardians",
+                "color": "002b5c",
+                "alternateColor": "e31937",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/cle.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/cle.png"
+              }
+            },
+            {
+              "id": "30",
+              "uid": "s:1~l:10~t:30",
+              "type": "team",
+              "order": 1,
+              "homeAway": "away",
+              "winner": false,
+              "score": "2",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "98-64"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "55-26"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "43-38"
+                }
+              ],
+              "record": "1-2",
+              "hits": 3,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Griffin Jax"
+                  }
+                }
+              ],
+              "team": {
+                "id": "30",
+                "uid": "s:1~l:10~t:30",
+                "location": "Tampa Bay",
+                "name": "Rays",
+                "abbreviation": "TB",
+                "displayName": "Tampa Bay Rays",
+                "shortDisplayName": "Rays",
+                "color": "092c5c",
+                "alternateColor": "8fbce6",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tb.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/tb.png"
+              }
+            }
+          ],
+          "notes": [
+            {
+              "type": "event",
+              "headline": "ALCS - Game 3"
+            }
+          ],
+          "status": {
+            "clock": 0.0,
+            "displayClock": "0:00",
+            "period": 9,
+            "type": {
+              "id": "3",
+              "name": "STATUS_FINAL",
+              "state": "post",
+              "completed": true,
+              "description": "Final",
+              "detail": "Final",
+              "shortDetail": "Final"
+            }
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "TBS",
+                "truTV"
+              ]
+            }
+          ],
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "startDate": "2026-10-15T17:00Z",
+          "series": {
+            "type": "playoff",
+            "title": "Playoff Series",
+            "summary": "CLE leads series 2-1",
+            "completed": false,
+            "totalCompetitions": 7
+          },
+          "broadcast": "TBS/truTV",
+          "geoBroadcasts": [
+            {
+              "type": {
+                "id": "5",
+                "shortName": "Radio"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "ERADM"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "TBS"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "truTV"
+              },
+              "lang": "en",
+              "region": "us"
+            }
+          ],
+          "headlines": [
+            {
+              "type": "Recap",
+              "shortLinkText": "Halpin’s go-ahead homer flips Game 3 as Guardians beat Rays 3-2 for 2-1 AL Championship Series lead"
+            }
+          ]
+        }
+      ],
+      "links": [
+        {
+          "language": "en-US",
+          "rel": [
+            "summary",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/game/_/gameId/401908025/rays-guardians",
+          "text": "Gamecast",
+          "shortText": "Gamecast",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "boxscore",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/boxscore/_/gameId/401908025",
+          "text": "Box Score",
+          "shortText": "Box Score",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "pbp",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/playbyplay/_/gameId/401908025",
+          "text": "Play-by-Play",
+          "shortText": "Play-by-Play",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "recap",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/recap?gameId=401908025",
+          "text": "Recap",
+          "shortText": "Recap",
+          "isExternal": false,
+          "isPremium": false
+        }
+      ],
+      "status": {
+        "clock": 0.0,
+        "displayClock": "0:00",
+        "period": 9,
+        "type": {
+          "id": "3",
+          "name": "STATUS_FINAL",
+          "state": "post",
+          "completed": true,
+          "description": "Final",
+          "detail": "Final",
+          "shortDetail": "Final"
+        }
+      }
+    },
+    {
+      "id": "401908042",
+      "uid": "s:1~l:10~e:401908042",
+      "date": "2026-10-24T00:00Z",
+      "name": "Tampa Bay Rays at Milwaukee Brewers",
+      "shortName": "TB @ MIL",
+      "season": {
+        "year": 2026,
+        "type": 3,
+        "slug": "post-season"
+      },
+      "competitions": [
+        {
+          "id": "401908042",
+          "uid": "s:1~l:10~e:401908042~c:401908042",
+          "date": "2026-10-24T00:00Z",
+          "attendance": 0,
+          "type": {
+            "id": "17",
+            "abbreviation": "FINAL"
+          },
+          "timeValid": true,
+          "neutralSite": false,
+          "conferenceCompetition": false,
+          "playByPlayAvailable": false,
+          "recent": false,
+          "wasSuspended": false,
+          "venue": {
+            "id": "4242",
+            "fullName": "American Family Field",
+            "address": {
+              "city": "Milwaukee",
+              "state": "Wisconsin"
+            },
+            "indoor": true
+          },
+          "competitors": [
+            {
+              "id": "8",
+              "uid": "s:1~l:10~t:8",
+              "type": "team",
+              "order": 0,
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "103-59"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "55-26"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "48-33"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Jacob Misiorowski"
+                  }
+                }
+              ],
+              "team": {
+                "id": "8",
+                "uid": "s:1~l:10~t:8",
+                "location": "Milwaukee",
+                "name": "Brewers",
+                "abbreviation": "MIL",
+                "displayName": "Milwaukee Brewers",
+                "shortDisplayName": "Brewers",
+                "color": "13294b",
+                "alternateColor": "ffc72c",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/mil.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/mil.png"
+              }
+            },
+            {
+              "id": "30",
+              "uid": "s:1~l:10~t:30",
+              "type": "team",
+              "order": 1,
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "98-64"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "55-26"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "43-38"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "team": {
+                "id": "30",
+                "uid": "s:1~l:10~t:30",
+                "location": "Tampa Bay",
+                "name": "Rays",
+                "abbreviation": "TB",
+                "displayName": "Tampa Bay Rays",
+                "shortDisplayName": "Rays",
+                "color": "092c5c",
+                "alternateColor": "8fbce6",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tb.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/tb.png"
+              }
+            }
+          ],
+          "notes": [
+            {
+              "type": "event",
+              "headline": "World Series - Game 1"
+            }
+          ],
+          "status": {
+            "clock": 0.0,
+            "displayClock": "0:00",
+            "period": 1,
+            "type": {
+              "id": "1",
+              "name": "STATUS_SCHEDULED",
+              "state": "pre",
+              "completed": false,
+              "description": "Scheduled",
+              "detail": "Scheduled",
+              "shortDetail": "10/23 - 8:00 PM EDT"
+            }
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "Fox"
+              ]
+            }
+          ],
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "startDate": "2026-10-24T00:00Z",
+          "series": {
+            "type": "playoff",
+            "title": "Playoff Series",
+            "summary": "Series starts 10/23",
+            "completed": false,
+            "totalCompetitions": 7
+          },
+          "broadcast": "Fox",
+          "geoBroadcasts": [
+            {
+              "type": {
+                "id": "5",
+                "shortName": "Radio"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "ERADM"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "Fox"
+              },
+              "lang": "en",
+              "region": "us"
+            }
+          ],
+          "headlines": []
+        }
+      ],
+      "links": [
+        {
+          "language": "en-US",
+          "rel": [
+            "summary",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/game/_/gameId/401908042/rays-brewers",
+          "text": "Gamecast",
+          "shortText": "Gamecast",
+          "isExternal": false,
+          "isPremium": false
+        }
+      ],
+      "weather": {
+        "displayValue": "Mostly clear",
+        "temperature": 60,
+        "highTemperature": 60,
+        "conditionId": "34",
+        "link": {
+          "language": "en-US",
+          "rel": [
+            "53295"
+          ],
+          "href": "http://www.accuweather.com/en/us/american-family-field-wi/53202/hourly-weather-forecast/46045_poi?day=2&hbhhour=19&lang=en-us",
+          "text": "Weather",
+          "shortText": "Weather",
+          "isExternal": true,
+          "isPremium": false
+        }
+      },
+      "status": {
+        "clock": 0.0,
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "id": "1",
+          "name": "STATUS_SCHEDULED",
+          "state": "pre",
+          "completed": false,
+          "description": "Scheduled",
+          "detail": "Scheduled",
+          "shortDetail": "10/23 - 8:00 PM EDT"
+        }
+      }
+    },
+    {
+      "id": "401908046",
+      "uid": "s:1~l:10~e:401908046",
+      "date": "2026-10-29T00:00Z",
+      "name": "Milwaukee Brewers at Tampa Bay Rays",
+      "shortName": "MIL @ TB",
+      "season": {
+        "year": 2026,
+        "type": 3,
+        "slug": "post-season"
+      },
+      "competitions": [
+        {
+          "id": "401908046",
+          "uid": "s:1~l:10~e:401908046~c:401908046",
+          "date": "2026-10-29T00:00Z",
+          "attendance": 0,
+          "type": {
+            "id": "17",
+            "abbreviation": "FINAL"
+          },
+          "timeValid": true,
+          "neutralSite": false,
+          "conferenceCompetition": false,
+          "playByPlayAvailable": false,
+          "recent": false,
+          "wasSuspended": false,
+          "venue": {
+            "id": "31",
+            "fullName": "Tropicana Field",
+            "address": {
+              "city": "St. Petersburg",
+              "state": "Florida"
+            },
+            "indoor": true
+          },
+          "competitors": [
+            {
+              "id": "30",
+              "uid": "s:1~l:10~t:30",
+              "type": "team",
+              "order": 0,
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "98-64"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "55-26"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "43-38"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "team": {
+                "id": "30",
+                "uid": "s:1~l:10~t:30",
+                "location": "Tampa Bay",
+                "name": "Rays",
+                "abbreviation": "TB",
+                "displayName": "Tampa Bay Rays",
+                "shortDisplayName": "Rays",
+                "color": "092c5c",
+                "alternateColor": "8fbce6",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tb.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/tb.png"
+              }
+            },
+            {
+              "id": "8",
+              "uid": "s:1~l:10~t:8",
+              "type": "team",
+              "order": 1,
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "103-59"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "55-26"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "48-33"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "team": {
+                "id": "8",
+                "uid": "s:1~l:10~t:8",
+                "location": "Milwaukee",
+                "name": "Brewers",
+                "abbreviation": "MIL",
+                "displayName": "Milwaukee Brewers",
+                "shortDisplayName": "Brewers",
+                "color": "13294b",
+                "alternateColor": "ffc72c",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/mil.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/mil.png"
+              }
+            }
+          ],
+          "notes": [
+            {
+              "type": "event",
+              "headline": "World Series - Game 5 If Necessary"
+            }
+          ],
+          "status": {
+            "clock": 0.0,
+            "displayClock": "0:00",
+            "period": 1,
+            "type": {
+              "id": "1",
+              "name": "STATUS_SCHEDULED",
+              "state": "pre",
+              "completed": false,
+              "description": "Scheduled",
+              "detail": "Scheduled",
+              "shortDetail": "10/28 - 8:00 PM EDT"
+            }
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "Fox"
+              ]
+            }
+          ],
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "startDate": "2026-10-29T00:00Z",
+          "series": {
+            "type": "playoff",
+            "title": "Playoff Series",
+            "summary": "Series starts 10/23",
+            "completed": false,
+            "totalCompetitions": 7
+          },
+          "broadcast": "Fox",
+          "geoBroadcasts": [
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "Fox"
+              },
+              "lang": "en",
+              "region": "us"
+            }
+          ],
+          "headlines": []
+        }
+      ],
+      "links": [
+        {
+          "language": "en-US",
+          "rel": [
+            "summary",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/game/_/gameId/401908046/brewers-rays",
+          "text": "Gamecast",
+          "shortText": "Gamecast",
+          "isExternal": false,
+          "isPremium": false
+        }
+      ],
+      "weather": {
+        "displayValue": "Clear",
+        "temperature": 78,
+        "highTemperature": 78,
+        "conditionId": "33",
+        "link": {
+          "language": "en-US",
+          "rel": [
+            "33705"
+          ],
+          "href": "http://www.accuweather.com/en/us/tropicana-field-fl/33712/hourly-weather-forecast/44502_poi?day=7&hbhhour=20&lang=en-us",
+          "text": "Weather",
+          "shortText": "Weather",
+          "isExternal": true,
+          "isPremium": false
+        }
+      },
+      "status": {
+        "clock": 0.0,
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "id": "1",
+          "name": "STATUS_SCHEDULED",
+          "state": "pre",
+          "completed": false,
+          "description": "Scheduled",
+          "detail": "Scheduled",
+          "shortDetail": "10/28 - 8:00 PM EDT"
+        }
+      }
+    },
+    {
+      "id": "401815137",
+      "uid": "s:1~l:10~e:401815137",
+      "date": "2026-04-29T22:10Z",
+      "name": "San Francisco Giants at Philadelphia Phillies",
+      "shortName": "SF @ PHI",
+      "season": {
+        "year": 2026,
+        "type": 2,
+        "slug": "regular-season"
+      },
+      "competitions": [
+        {
+          "id": "401815137",
+          "uid": "s:1~l:10~e:401815137~c:401815137",
+          "date": "2026-04-29T22:10Z",
+          "attendance": 0,
+          "type": {
+            "id": "1",
+            "abbreviation": "STD"
+          },
+          "timeValid": true,
+          "neutralSite": false,
+          "conferenceCompetition": false,
+          "playByPlayAvailable": false,
+          "recent": false,
+          "wasSuspended": false,
+          "venue": {
+            "id": "84",
+            "fullName": "Citizens Bank Park",
+            "address": {
+              "city": "Philadelphia",
+              "state": "Pennsylvania"
+            },
+            "indoor": false
+          },
+          "competitors": [
+            {
+              "id": "22",
+              "uid": "s:1~l:10~t:22",
+              "type": "team",
+              "order": 0,
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "88-74"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "43-38"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "45-36"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Cristopher Sanchez"
+                  }
+                }
+              ],
+              "team": {
+                "id": "22",
+                "uid": "s:1~l:10~t:22",
+                "location": "Philadelphia",
+                "name": "Phillies",
+                "abbreviation": "PHI",
+                "displayName": "Philadelphia Phillies",
+                "shortDisplayName": "Phillies",
+                "color": "e81828",
+                "alternateColor": "003278",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/phi.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/phi.png"
+              }
+            },
+            {
+              "id": "26",
+              "uid": "s:1~l:10~t:26",
+              "type": "team",
+              "order": 1,
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "65-97"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "37-44"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "28-53"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Logan Webb"
+                  }
+                }
+              ],
+              "team": {
+                "id": "26",
+                "uid": "s:1~l:10~t:26",
+                "location": "San Francisco",
+                "name": "Giants",
+                "abbreviation": "SF",
+                "displayName": "San Francisco Giants",
+                "shortDisplayName": "Giants",
+                "color": "000000",
+                "alternateColor": "fd5a1e",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/sf.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/sf.png"
+              }
+            }
+          ],
+          "notes": [
+            {
+              "type": "event",
+              "headline": "Inclement Weather - Makeup date April 30"
+            }
+          ],
+          "status": {
+            "clock": 0.0,
+            "displayClock": "0:00",
+            "period": 1,
+            "type": {
+              "id": "6",
+              "name": "STATUS_POSTPONED",
+              "state": "post",
+              "completed": false,
+              "description": "Postponed",
+              "detail": "Postponed",
+              "shortDetail": "Postponed"
+            }
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "MLB.TV",
+                "MLB Net"
+              ]
+            },
+            {
+              "market": "away",
+              "names": [
+                "NBC Sports BA"
+              ]
+            },
+            {
+              "market": "home",
+              "names": [
+                "NBC Sports Phil +",
+                "NBC Sports Phil"
+              ]
+            }
+          ],
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "startDate": "2026-04-29T22:10Z",
+          "broadcast": "MLB.TV/MLB Net",
+          "geoBroadcasts": [
+            {
+              "type": {
+                "id": "4",
+                "shortName": "Streaming"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "MLB.TV",
+                "logo": "https://a.espncdn.com/guid/0db644c3-9f87-37e7-9884-858c2ed45218/logos/default.png",
+                "darkLogo": ""
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "MLB Net"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "3",
+                "type": "Away"
+              },
+              "media": {
+                "shortName": "NBC Sports BA"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "2",
+                "type": "Home"
+              },
+              "media": {
+                "shortName": "NBC Sports Phil +"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "2",
+                "type": "Home"
+              },
+              "media": {
+                "shortName": "NBC Sports Phil"
+              },
+              "lang": "en",
+              "region": "us"
+            }
+          ],
+          "headlines": []
+        }
+      ],
+      "links": [
+        {
+          "language": "en-US",
+          "rel": [
+            "summary",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/game/_/gameId/401815137/giants-phillies",
+          "text": "Gamecast",
+          "shortText": "Gamecast",
+          "isExternal": false,
+          "isPremium": false
+        }
+      ],
+      "status": {
+        "clock": 0.0,
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "id": "6",
+          "name": "STATUS_POSTPONED",
+          "state": "post",
+          "completed": false,
+          "description": "Postponed",
+          "detail": "Postponed",
+          "shortDetail": "Postponed"
+        }
+      }
+    },
+    {
+      "id": "401815136",
+      "uid": "s:1~l:10~e:401815136",
+      "date": "2026-04-29T22:35Z",
+      "name": "Houston Astros at Baltimore Orioles",
+      "shortName": "HOU @ BAL",
+      "season": {
+        "year": 2026,
+        "type": 2,
+        "slug": "regular-season"
+      },
+      "competitions": [
+        {
+          "id": "401815136",
+          "uid": "s:1~l:10~e:401815136~c:401815136",
+          "date": "2026-04-29T22:35Z",
+          "attendance": 0,
+          "type": {
+            "id": "1",
+            "abbreviation": "STD"
+          },
+          "timeValid": true,
+          "neutralSite": false,
+          "conferenceCompetition": false,
+          "playByPlayAvailable": false,
+          "recent": false,
+          "wasSuspended": false,
+          "venue": {
+            "id": "1",
+            "fullName": "Oriole Park at Camden Yards",
+            "address": {
+              "city": "Baltimore",
+              "state": "Maryland"
+            },
+            "indoor": false
+          },
+          "competitors": [
+            {
+              "id": "1",
+              "uid": "s:1~l:10~t:1",
+              "type": "team",
+              "order": 0,
+              "homeAway": "home",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "79-82"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "39-42"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "40-40"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Chris Bassitt"
+                  }
+                }
+              ],
+              "team": {
+                "id": "1",
+                "uid": "s:1~l:10~t:1",
+                "location": "Baltimore",
+                "name": "Orioles",
+                "abbreviation": "BAL",
+                "displayName": "Baltimore Orioles",
+                "shortDisplayName": "Orioles",
+                "color": "df4601",
+                "alternateColor": "000000",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/bal.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/bal.png"
+              }
+            },
+            {
+              "id": "18",
+              "uid": "s:1~l:10~t:18",
+              "type": "team",
+              "order": 1,
+              "homeAway": "away",
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Total",
+                  "type": "total",
+                  "summary": "81-81"
+                },
+                {
+                  "name": "Home",
+                  "abbreviation": "Home",
+                  "type": "home",
+                  "summary": "39-42"
+                },
+                {
+                  "name": "Road",
+                  "abbreviation": "AWAY",
+                  "type": "road",
+                  "summary": "42-39"
+                }
+              ],
+              "hits": 0,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Peter Lambert"
+                  }
+                }
+              ],
+              "team": {
+                "id": "18",
+                "uid": "s:1~l:10~t:18",
+                "location": "Houston",
+                "name": "Astros",
+                "abbreviation": "HOU",
+                "displayName": "Houston Astros",
+                "shortDisplayName": "Astros",
+                "color": "002d62",
+                "alternateColor": "eb6e1f",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/hou.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/hou.png"
+              }
+            }
+          ],
+          "notes": [
+            {
+              "type": "event",
+              "headline": "Rain - Makeup date April 30"
+            }
+          ],
+          "status": {
+            "clock": 0.0,
+            "displayClock": "0:00",
+            "period": 1,
+            "type": {
+              "id": "6",
+              "name": "STATUS_POSTPONED",
+              "state": "post",
+              "completed": false,
+              "description": "Postponed",
+              "detail": "Postponed",
+              "shortDetail": "Postponed"
+            }
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "MLB.TV"
+              ]
+            },
+            {
+              "market": "home",
+              "names": [
+                "MASN"
+              ]
+            },
+            {
+              "market": "away",
+              "names": [
+                "Space City Home Network"
+              ]
+            }
+          ],
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "startDate": "2026-04-29T22:35Z",
+          "broadcast": "MLB.TV",
+          "geoBroadcasts": [
+            {
+              "type": {
+                "id": "4",
+                "shortName": "Streaming"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "MLB.TV",
+                "logo": "https://a.espncdn.com/guid/0db644c3-9f87-37e7-9884-858c2ed45218/logos/default.png",
+                "darkLogo": ""
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "2",
+                "type": "Home"
+              },
+              "media": {
+                "shortName": "MASN"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "3",
+                "type": "Away"
+              },
+              "media": {
+                "shortName": "Space City Home Network"
+              },
+              "lang": "en",
+              "region": "us"
+            }
+          ],
+          "headlines": []
+        }
+      ],
+      "links": [
+        {
+          "language": "en-US",
+          "rel": [
+            "summary",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/game/_/gameId/401815136/astros-orioles",
+          "text": "Gamecast",
+          "shortText": "Gamecast",
+          "isExternal": false,
+          "isPremium": false
+        }
+      ],
+      "status": {
+        "clock": 0.0,
+        "displayClock": "0:00",
+        "period": 1,
+        "type": {
+          "id": "6",
+          "name": "STATUS_POSTPONED",
+          "state": "post",
+          "completed": false,
+          "description": "Postponed",
+          "detail": "Postponed",
+          "shortDetail": "Postponed"
+        }
+      }
+    },
+    {
+      "id": "401815141",
+      "uid": "s:1~l:10~e:401815141",
+      "date": "2026-04-29T17:10Z",
+      "name": "Los Angeles Angels at Chicago White Sox",
+      "shortName": "LAA @ CHW",
+      "season": {
+        "year": 2026,
+        "type": 2,
+        "slug": "regular-season"
+      },
+      "competitions": [
+        {
+          "id": "401815141",
+          "uid": "s:1~l:10~e:401815141~c:401815141",
+          "date": "2026-04-29T17:10Z",
+          "attendance": 15901,
+          "type": {
+            "id": "1",
+            "abbreviation": "STD"
+          },
+          "timeValid": true,
+          "neutralSite": false,
+          "conferenceCompetition": false,
+          "playByPlayAvailable": true,
+          "recent": false,
+          "wasSuspended": false,
+          "venue": {
+            "id": "4",
+            "fullName": "Rate Field",
+            "address": {
+              "city": "Chicago",
+              "state": "Illinois"
+            },
+            "indoor": false
+          },
+          "competitors": [
+            {
+              "id": "4",
+              "uid": "s:1~l:10~t:4",
+              "type": "team",
+              "order": 0,
+              "homeAway": "home",
+              "winner": true,
+              "score": "3",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Game",
+                  "type": "total",
+                  "summary": "14-17"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "7-8"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "7-9"
+                }
+              ],
+              "hits": 7,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Erick Fedde"
+                  }
+                }
+              ],
+              "team": {
+                "id": "4",
+                "uid": "s:1~l:10~t:4",
+                "location": "Chicago",
+                "name": "White Sox",
+                "abbreviation": "CHW",
+                "displayName": "Chicago White Sox",
+                "shortDisplayName": "White Sox",
+                "color": "000000",
+                "alternateColor": "c4ced4",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/chw.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/chw.png"
+              }
+            },
+            {
+              "id": "3",
+              "uid": "s:1~l:10~t:3",
+              "type": "team",
+              "order": 1,
+              "homeAway": "away",
+              "winner": false,
+              "score": "2",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Game",
+                  "type": "total",
+                  "summary": "12-20"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "5-7"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "7-13"
+                }
+              ],
+              "hits": 6,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Yusei Kikuchi"
+                  }
+                }
+              ],
+              "team": {
+                "id": "3",
+                "uid": "s:1~l:10~t:3",
+                "location": "Los Angeles",
+                "name": "Angels",
+                "abbreviation": "LAA",
+                "displayName": "Los Angeles Angels",
+                "shortDisplayName": "Angels",
+                "color": "ba0021",
+                "alternateColor": "c4ced4",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/laa.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/laa.png"
+              }
+            }
+          ],
+          "notes": [],
+          "status": {
+            "clock": 0.0,
+            "displayClock": "0:00",
+            "period": 10,
+            "type": {
+              "id": "3",
+              "name": "STATUS_FINAL",
+              "state": "post",
+              "completed": true,
+              "description": "Final",
+              "detail": "Final/10",
+              "shortDetail": "Final/10",
+              "altDetail": "F/10"
+            }
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "MLB.TV"
+              ]
+            },
+            {
+              "market": "away",
+              "names": [
+                "FanDuel SN West"
+              ]
+            },
+            {
+              "market": "home",
+              "names": [
+                "CHSN"
+              ]
+            }
+          ],
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "startDate": "2026-04-29T17:10Z",
+          "broadcast": "MLB.TV",
+          "geoBroadcasts": [
+            {
+              "type": {
+                "id": "4",
+                "shortName": "Streaming"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "MLB.TV",
+                "logo": "https://a.espncdn.com/guid/0db644c3-9f87-37e7-9884-858c2ed45218/logos/default.png",
+                "darkLogo": ""
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "3",
+                "type": "Away"
+              },
+              "media": {
+                "shortName": "FanDuel SN West"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "2",
+                "type": "Home"
+              },
+              "media": {
+                "shortName": "CHSN"
+              },
+              "lang": "en",
+              "region": "us"
+            }
+          ],
+          "headlines": [
+            {
+              "type": "Recap",
+              "shortLinkText": "Antonacci, Montgomery lead White Sox to 3-2, 10-inning win for sweep that extends Angels' skid to 6"
+            }
+          ]
+        }
+      ],
+      "links": [
+        {
+          "language": "en-US",
+          "rel": [
+            "summary",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/game/_/gameId/401815141/angels-white-sox",
+          "text": "Gamecast",
+          "shortText": "Gamecast",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "boxscore",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/boxscore/_/gameId/401815141",
+          "text": "Box Score",
+          "shortText": "Box Score",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "pbp",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/playbyplay/_/gameId/401815141",
+          "text": "Play-by-Play",
+          "shortText": "Play-by-Play",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "recap",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/recap?gameId=401815141",
+          "text": "Recap",
+          "shortText": "Recap",
+          "isExternal": false,
+          "isPremium": false
+        }
+      ],
+      "status": {
+        "clock": 0.0,
+        "displayClock": "0:00",
+        "period": 10,
+        "type": {
+          "id": "3",
+          "name": "STATUS_FINAL",
+          "state": "post",
+          "completed": true,
+          "description": "Final",
+          "detail": "Final/10",
+          "shortDetail": "Final/10",
+          "altDetail": "F/10"
+        }
+      }
+    },
+    {
+      "id": "401815143",
+      "uid": "s:1~l:10~e:401815143",
+      "date": "2026-04-29T18:35Z",
+      "name": "New York Yankees at Texas Rangers",
+      "shortName": "NYY @ TEX",
+      "season": {
+        "year": 2026,
+        "type": 2,
+        "slug": "regular-season"
+      },
+      "competitions": [
+        {
+          "id": "401815143",
+          "uid": "s:1~l:10~e:401815143~c:401815143",
+          "date": "2026-04-29T18:35Z",
+          "attendance": 30408,
+          "type": {
+            "id": "1",
+            "abbreviation": "STD"
+          },
+          "timeValid": true,
+          "neutralSite": false,
+          "conferenceCompetition": false,
+          "playByPlayAvailable": true,
+          "recent": false,
+          "wasSuspended": false,
+          "venue": {
+            "id": "231",
+            "fullName": "Globe Life Field",
+            "address": {
+              "city": "Arlington",
+              "state": "Texas"
+            },
+            "indoor": true
+          },
+          "competitors": [
+            {
+              "id": "13",
+              "uid": "s:1~l:10~t:13",
+              "type": "team",
+              "order": 0,
+              "homeAway": "home",
+              "winner": true,
+              "score": "3",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Game",
+                  "type": "total",
+                  "summary": "15-16"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "7-8"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "8-8"
+                }
+              ],
+              "hits": 7,
+              "errors": 1,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Nathan Eovaldi"
+                  }
+                }
+              ],
+              "team": {
+                "id": "13",
+                "uid": "s:1~l:10~t:13",
+                "location": "Texas",
+                "name": "Rangers",
+                "abbreviation": "TEX",
+                "displayName": "Texas Rangers",
+                "shortDisplayName": "Rangers",
+                "color": "003278",
+                "alternateColor": "c0111f",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/tex.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/tex.png"
+              }
+            },
+            {
+              "id": "10",
+              "uid": "s:1~l:10~t:10",
+              "type": "team",
+              "order": 1,
+              "homeAway": "away",
+              "winner": false,
+              "score": "0",
+              "records": [
+                {
+                  "name": "overall",
+                  "abbreviation": "Game",
+                  "type": "total",
+                  "summary": "20-11"
+                },
+                {
+                  "name": "Home",
+                  "type": "home",
+                  "summary": "8-5"
+                },
+                {
+                  "name": "Road",
+                  "type": "road",
+                  "summary": "12-6"
+                }
+              ],
+              "hits": 5,
+              "errors": 0,
+              "probables": [
+                {
+                  "name": "probableStartingPitcher",
+                  "displayName": "Probable Starting Pitcher",
+                  "athlete": {
+                    "displayName": "Elmer Rodriguez"
+                  }
+                }
+              ],
+              "team": {
+                "id": "10",
+                "uid": "s:1~l:10~t:10",
+                "location": "New York",
+                "name": "Yankees",
+                "abbreviation": "NYY",
+                "displayName": "New York Yankees",
+                "shortDisplayName": "Yankees",
+                "color": "132448",
+                "alternateColor": "c4ced4",
+                "isActive": true,
+                "logo": "https://a.espncdn.com/i/teamlogos/mlb/500/scoreboard/nyy.png",
+                "logoDark": "https://a.espncdn.com/i/teamlogos/mlb/500-dark/scoreboard/nyy.png"
+              }
+            }
+          ],
+          "notes": [],
+          "status": {
+            "clock": 0.0,
+            "displayClock": "0:00",
+            "period": 9,
+            "type": {
+              "id": "3",
+              "name": "STATUS_FINAL",
+              "state": "post",
+              "completed": true,
+              "description": "Final",
+              "detail": "Final",
+              "shortDetail": "Final"
+            }
+          },
+          "broadcasts": [
+            {
+              "market": "national",
+              "names": [
+                "MLB.TV"
+              ]
+            },
+            {
+              "market": "home",
+              "names": [
+                "Rangers Sports Network"
+              ]
+            },
+            {
+              "market": "away",
+              "names": [
+                "YES"
+              ]
+            }
+          ],
+          "format": {
+            "regulation": {
+              "periods": 9
+            }
+          },
+          "startDate": "2026-04-29T18:35Z",
+          "broadcast": "MLB.TV",
+          "geoBroadcasts": [
+            {
+              "type": {
+                "id": "4",
+                "shortName": "Streaming"
+              },
+              "market": {
+                "id": "1",
+                "type": "National"
+              },
+              "media": {
+                "shortName": "MLB.TV",
+                "logo": "https://a.espncdn.com/guid/0db644c3-9f87-37e7-9884-858c2ed45218/logos/default.png",
+                "darkLogo": ""
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "2",
+                "type": "Home"
+              },
+              "media": {
+                "shortName": "Rangers Sports Network"
+              },
+              "lang": "en",
+              "region": "us"
+            },
+            {
+              "type": {
+                "id": "1",
+                "shortName": "TV"
+              },
+              "market": {
+                "id": "3",
+                "type": "Away"
+              },
+              "media": {
+                "shortName": "YES"
+              },
+              "lang": "en",
+              "region": "us"
+            }
+          ],
+          "headlines": [
+            {
+              "type": "Recap",
+              "shortLinkText": "Nathan Eovaldi pitches 7 innings in Rangers' 3-0 win over Yankees to avoid series sweep"
+            }
+          ]
+        }
+      ],
+      "links": [
+        {
+          "language": "en-US",
+          "rel": [
+            "summary",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/game/_/gameId/401815143/yankees-rangers",
+          "text": "Gamecast",
+          "shortText": "Gamecast",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "boxscore",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/boxscore/_/gameId/401815143",
+          "text": "Box Score",
+          "shortText": "Box Score",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "pbp",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/playbyplay/_/gameId/401815143",
+          "text": "Play-by-Play",
+          "shortText": "Play-by-Play",
+          "isExternal": false,
+          "isPremium": false
+        },
+        {
+          "language": "en-US",
+          "rel": [
+            "recap",
+            "desktop",
+            "event"
+          ],
+          "href": "https://www.espn.com/mlb/recap?gameId=401815143",
+          "text": "Recap",
+          "shortText": "Recap",
+          "isExternal": false,
+          "isPremium": false
+        }
+      ],
+      "status": {
+        "clock": 0.0,
+        "displayClock": "0:00",
+        "period": 9,
+        "type": {
+          "id": "3",
+          "name": "STATUS_FINAL",
+          "state": "post",
+          "completed": true,
+          "description": "Final",
+          "detail": "Final",
+          "shortDetail": "Final"
+        }
+      }
+    }
+  ]
+}

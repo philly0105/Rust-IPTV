@@ -13,6 +13,7 @@ import { multiviewRoutes } from '@/features/multiview/routes';
 import { myListRoutes } from '@/features/mylist/routes';
 import { settingsRoutes } from '@/features/settings/routes';
 import { sourcesRoutes } from '@/features/sources/routes';
+import { sportsRoutes } from '@/features/sports/routes';
 import { statsRoutes } from '@/features/stats/routes';
 import { vodRoutes } from '@/features/vod/routes';
 import { ShellLayout, sourceHomePath, useShellHeader, useShellStore } from '@/shell';
@@ -203,6 +204,7 @@ export const routes: RouteObject[] = [
           ...myListRoutes,
           ...listsRoutes,
           ...statsRoutes,
+          ...sportsRoutes,
           ...sourceRootRoutes,
           { path: '*', element: <NotFoundPage /> },
         ],

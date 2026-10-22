@@ -97,7 +97,7 @@ describe('rail (SH-rail-ia)', () => {
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
     await within(nav).findByText('Night Portal');
     const group = (name: string) => within(nav).getByRole('group', { name });
-    expect(within(group('Watch')).getAllByRole('link').map((l) => l.textContent)).toEqual(['Home', 'Search', 'TV guide', 'Multi-view']);
+    expect(within(group('Watch')).getAllByRole('link').map((l) => l.textContent)).toEqual(['Home', 'Search', 'TV guide', 'Sports', 'Multi-view']);
     expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual([
       'My List',
       'Favorites',
@@ -302,6 +302,8 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     expect(more.getAttribute('aria-expanded')).toBe('true');
     expect(within(sheet).getByRole('link', { name: 'My List' })).toBeTruthy();
+    // Sports is a Watch page the bar has no tab for: phones reach it here.
+    expect(within(sheet).getByRole('link', { name: 'Sports' }).getAttribute('href')).toBe('/sports');
     expect(within(sheet).getByRole('link', { name: 'Settings' })).toBeTruthy();
     const backup = within(sheet).getByRole('list', { name: 'Backup' });
     // What the source holds; its favourites and history are in Library above.

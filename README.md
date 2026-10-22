@@ -65,6 +65,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - Favorites and Recently watched sit at the top of each source's groups, in Live TV and Radio. Type a channel number in the guide to jump to its row.
 - Make your own channel lists across sources, or add a whole group at once, and rename or hide channels without changing the provider's data.
 - Hide channels below a picture quality, such as anything under 1080p, read from the provider's channel names.
+- Follow NFL, college football, NBA and MLB on the Sports page: games from a week ago to a week ahead with scores from ESPN, each with the channels of yours that carry it, found by channel name, the guide and the TV network. Watch a game live, replay it from a channel's archive, or record it.
 
 ![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png)
 
@@ -121,6 +122,7 @@ Tsrust IPTV has no telemetry, analytics, crash reporting, ads or account, and it
 - Your providers: the playlist, guide and portal addresses you enter, and the streams, logos and posters they list. Xtream accounts send VLC's User-Agent unless you set your own request headers.
 - TMDB, only after you turn it on in Settings > Metadata with your own API key. TMDB then receives your key, your interface language, and the titles and years of the movies and series you open or point at, plus requests for its trending list. Posters and backdrops come from TMDB's image server.
 - YouTube's privacy-enhanced player (youtube-nocookie.com), only when you play a trailer.
+- ESPN, only while the Sports page is open. The page asks ESPN's public scoreboard (site.api.espn.com) for the leagues and days on screen and loads team logos from ESPN's image server. In the browser these requests come from the browser, not the server.
 
 Everything else stays on your computer or your server: sources and their logins, favorites, history, watch stats, settings, the image cache and the logs, in which secrets are redacted. By default, exports omit the separate Xtream and Stalker password fields and Stalker signature keys. Playlist and guide URLs, playlist contents, and Stalker MAC addresses remain and may contain credentials. Treat every backup as private.
 

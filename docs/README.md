@@ -47,6 +47,7 @@ The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`
 | [ui-shell.md](architecture/ui-shell.md) | Design tokens, UI primitives, shell layout, shortcuts, dashboard, i18n |
 | [appearance.md](architecture/appearance.md) | Accent colours, OLED black, density and UI scale, glass tokens, contrast checks, cards, the dashboard hero |
 | [multiview.md](architecture/multiview.md) | Multi-view wall at `/multiview`: store, layouts, independent tiles, sound, keyboard, connection-limit warning, parental gate |
+| [sports.md](architecture/sports.md) | Sports page at `/sports` (frontend only): NFL, college football, NBA and MLB games from ESPN's unofficial scoreboard API, its requests and polling, the sports channel index, matching games to channels by guide, event channel name and network, and the limits of each |
 | [subtitles.md](architecture/subtitles.md) | Subtitle files (SRT, WebVTT, ASS/SSA) in the built-in player and embedded mpv, and the subtitle look settings |
 | [performance.md](architecture/performance.md) | Query cache timing per command, hover prefetch of VOD details, and the entry chunk budget (`pnpm size:check`) |
 | [onboarding.md](architecture/onboarding.md) | The first-run tour and What's new: the startup decision, the settings markers, release notes, anchors |

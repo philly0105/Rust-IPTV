@@ -16,6 +16,7 @@ Work after the 0.2.0 notes were written: the redesign, fixes that followed the O
 - CI checks for dependency advisories and licences (cargo-deny), the minimum Rust version, the Docker image, the desktop release build, and the Playwright suite.
 - A user guide, a contributing guide and a security policy.
 - A quality filter for live TV: the button next to the channel search hides channels whose name marks a lower quality than the one you pick (HD, Full HD or 4K), and can hide channels with no quality in their name too. The guide, search, zapping, number entry, favorites, recently watched, custom lists and the phone remote follow it. Radio is never filtered.
+- A Sports page (in the side rail, and under More on phones) with NFL, college football, NBA and MLB games from a week ago to a week ahead: live scores, results and start times from ESPN's public scoreboard, and the channels of your sources that carry each game, with Watch while it is on, Replay from the channel's catch-up archive afterwards and Record before it starts. Streams are matched from channel names, the TV guide and the networks ESPN lists, so a game can be missed or matched to another regional broadcast.
 
 ### Changed
 

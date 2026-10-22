@@ -171,7 +171,44 @@ async fn run_flow(srv: stub::Server) {
         format!("{}/live/demo/secret/101.ts", srv.server_url)
     );
     assert_eq!(live_ts["kind"], "direct");
+    // Auto (the default) takes the caller's autoFormat; without one it is HLS.
+    state.settings.write().stream_format = StreamFormat::Auto;
+    let auto_ts = call(
+        &r,
+        &state,
+        "xtream.streamUrl",
+        json!({"ref": item_ref(&sid, "live", "101"), "autoFormat": "ts"}),
+    )
+    .await;
+    assert_eq!(
+        auto_ts["url"],
+        format!("{}/live/demo/secret/101.ts", srv.server_url)
+    );
+    assert_eq!(auto_ts["kind"], "direct");
+    let auto_plain = call(
+        &r,
+        &state,
+        "xtream.streamUrl",
+        json!({"ref": item_ref(&sid, "live", "101")}),
+    )
+    .await;
+    assert_eq!(
+        auto_plain["url"],
+        format!("{}/live/demo/secret/101.m3u8", srv.server_url)
+    );
+    // A format the user picked wins over the hint.
     state.settings.write().stream_format = StreamFormat::M3u8;
+    let picked = call(
+        &r,
+        &state,
+        "xtream.streamUrl",
+        json!({"ref": item_ref(&sid, "live", "101"), "autoFormat": "ts"}),
+    )
+    .await;
+    assert_eq!(
+        picked["url"],
+        format!("{}/live/demo/secret/101.m3u8", srv.server_url)
+    );
 
     // Movie URL.
     let movie = call(

@@ -376,7 +376,7 @@ export async function sourceKindOf(sourceId: string): Promise<SourceKind> {
  * a desktop backup) plays in the built-in player instead of failing every time. A ClearKey source
  * (`drm`) always plays in the built-in player: neither mpv nor VLC takes the keys.
  */
-export function modeForSettings(player: VideoPlayer | undefined, source: PlayerSource): PlayerMode {
+export function modeForSettings(player: VideoPlayer | undefined, source: Pick<PlayerSource, 'drm' | 'isRadio'>): PlayerMode {
   if ((player === 'mpv' || player === 'vlc') && isDesktop && !source.drm) return 'external';
   if (source.isRadio) return 'radio';
   if (player === 'embedded-mpv' && !source.drm) return 'embedded-mpv';
@@ -1152,12 +1152,36 @@ export function forgetGatePass(): void {
   allowedRefKey = null;
 }
 
+/**
+ * W3C Media Source Extensions with H.264 and AAC, the check mpegts.js makes before it plays live
+ * TS. iPhone Safari has only ManagedMediaSource and plays HLS natively, so it counts as without.
+ */
+function liveTsPlayable(): boolean {
+  return typeof window !== 'undefined' && typeof window.MediaSource === 'function' && window.MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E,mp4a.40.2"');
+}
+
+/**
+ * What an Xtream live channel asks for under `streamFormat: 'auto'`: TS when the built-in player
+ * plays it here (mpegts.js starts on the panel's connect burst, where hls.js first waits for the
+ * playlist and a whole segment). Undefined, which the core takes as HLS, everywhere else: a
+ * browser without MSE, and mpv and VLC, which keep the HLS they always got.
+ */
+async function autoLiveFormat(args: PlayItemArgs): Promise<'ts' | undefined> {
+  if ((args.ref.contentType !== 'live' && args.ref.contentType !== 'radio') || !liveTsPlayable()) return undefined;
+  const settings = peekSettings() ?? (await getSettings());
+  if (settings?.streamFormat !== 'auto') return undefined;
+  const mode = modeForSettings(settings.player, { isRadio: !!args.isRadio });
+  // play() moves embedded mpv to the built-in player outside the desktop app.
+  return mode === 'inline' || mode === 'radio' || (mode === 'embedded-mpv' && !isDesktop) ? 'ts' : undefined;
+}
+
 /** Resolve a catalog item to a PlayerSource by source kind. Exported for tests. */
 export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
   const { ref, episodeId } = args;
   let resolved: PlayerSource;
   if (args.sourceKind === 'xtream') {
-    resolved = await rpc('xtream.streamUrl', episodeId ? { ref, episodeId } : { ref });
+    const autoFormat = await autoLiveFormat(args);
+    resolved = await rpc('xtream.streamUrl', { ref, ...(episodeId ? { episodeId } : {}), ...(autoFormat ? { autoFormat } : {}) });
   } else if (args.sourceKind === 'stalker') {
     resolved = await rpc('stalker.streamUrl', episodeId ? { ref, episodeId } : { ref });
   } else if (episodeId) {

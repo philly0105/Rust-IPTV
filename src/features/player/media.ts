@@ -22,6 +22,8 @@ export interface MediaCommands {
   setRate(rate: number): void;
   togglePip(): void;
   retry(): void;
+  /** Media bytes the engine has received (`Engine.bytesLoaded`); undefined when it doesn't say. */
+  bytesLoaded?(): number | undefined;
 }
 
 export interface ExternalRun {

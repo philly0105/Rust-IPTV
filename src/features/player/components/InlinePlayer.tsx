@@ -429,6 +429,7 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
         else void (el as HTMLVideoElement).requestPictureInPicture().catch(() => undefined);
       },
       retry: () => setRetryNonce((n) => n + 1),
+      bytesLoaded: () => engineRef.current?.bytesLoaded?.(),
     });
     // Subtitle delay (Sync menu) and the stream info overlay.
     const unExtras = bindInlineExtras(el, () => engineRef.current);

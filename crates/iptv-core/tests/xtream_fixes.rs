@@ -213,7 +213,8 @@ async fn catchup_respects_the_channel_archive() {
 
 #[tokio::test]
 async fn allowed_output_formats_reach_account_and_live_urls() {
-    // Panel allows m3u8: the default streamFormat (m3u8) is kept.
+    // Panel allows m3u8: the default streamFormat (auto, asked without a
+    // player's autoFormat) gives m3u8.
     let (srv, _dir, state, r, sid) = synced(stub::USER).await;
     let acc = call(&r, &state, "xtream.accountInfo", json!({"sourceId": sid})).await;
     assert_eq!(acc["allowedOutputFormats"], json!(["m3u8", "ts"]));

@@ -2264,6 +2264,7 @@ dependencies = [
  "futures",
  "iptv-core",
  "iptv-fixtures",
+ "parking_lot",
  "percent-encoding",
  "reqwest 0.12.28",
  "rusqlite",

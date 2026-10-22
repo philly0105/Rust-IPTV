@@ -425,7 +425,11 @@ export interface PlayerDrm {
 }
 
 export type VideoPlayer = 'html5' | 'videojs' | 'embedded-mpv' | 'mpv' | 'vlc';
-export type StreamFormat = 'm3u8' | 'ts';
+/**
+ * Xtream live container. `auto`: TS when the built-in player can play it (W3C Media Source
+ * Extensions), HLS elsewhere and for mpv and VLC (`autoLiveFormat` in the player store).
+ */
+export type StreamFormat = 'auto' | 'm3u8' | 'ts';
 export type Theme = 'light' | 'dark' | 'system';
 export type StartupBehavior = 'first-view' | 'restore-last-view';
 /** How the desktop window opens (`settings.windowStart`): as it closed, maximized or fullscreen. */
@@ -642,7 +646,7 @@ export interface Settings {
 /** Defaults identical to `impl Default for Settings` in model.rs. */
 export const DEFAULT_SETTINGS: Settings = {
   player: 'html5',
-  streamFormat: 'm3u8',
+  streamFormat: 'auto',
   epgUrls: [],
   language: 'en',
   theme: 'system',

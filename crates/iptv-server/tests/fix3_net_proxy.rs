@@ -211,3 +211,73 @@ async fn fix3_net_proxy_cross_source_redirect_refused() {
         .await;
     assert_eq!(status, 403, "{body}");
 }
+
+/// STR-2: a proxied request reads its source row without a pooled
+/// connection. During an import's save (write lock held, long waits allowed)
+/// plain writers park every pooled connection; segment requests must still
+/// pass instead of waiting the pool's 15 s and failing with 500.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn str2_proxy_source_lookup_does_not_queue_behind_a_parked_pool() {
+    let port = spawn_upstream("127.0.0.1").await.unwrap();
+    let h = start().await;
+    let named = format!("http://localhost:{port}");
+    h.add_source(
+        "nas",
+        "m3u",
+        serde_json::json!({ "url": format!("{named}/list.m3u") }),
+    )
+    .await;
+
+    let holder = rusqlite::Connection::open(h.server.app.db_path()).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let long = iptv_core::db::long_write();
+    let writers: Vec<_> = (0..iptv_core::db::POOL_MAX)
+        .map(|i| {
+            let app = h.server.app.clone();
+            tokio::spawn(async move {
+                app.db_call(move |c| {
+                    c.execute(
+                        "INSERT INTO app_state(key, value) VALUES (?1, 'x')",
+                        [format!("w{i}")],
+                    )?;
+                    Ok(())
+                })
+                .await
+            })
+        })
+        .collect();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let mut took = Vec::new();
+    for i in 0..20 {
+        let started = std::time::Instant::now();
+        let (status, body) = h.proxy(&format!("{named}/secret-{i}"), Some("nas")).await;
+        took.push(started.elapsed());
+        assert_eq!(
+            status,
+            200,
+            "request {i} after {:?}: {body}",
+            started.elapsed()
+        );
+    }
+    took.sort();
+    eprintln!(
+        "20 proxied requests with the pool parked: median {:?}, max {:?}",
+        took[9], took[19]
+    );
+    assert!(took[19] < std::time::Duration::from_secs(2), "{took:?}");
+
+    holder.execute_batch("COMMIT").unwrap();
+    for w in writers {
+        w.await.unwrap().unwrap();
+    }
+    drop(long);
+    // The row is still read per request: a removed source is a 404 at once.
+    h.server
+        .app
+        .db_call(|c| Ok(c.execute("DELETE FROM sources WHERE id = 'nas'", [])?))
+        .await
+        .unwrap();
+    let (status, _) = h.proxy(&format!("{named}/secret-gone"), Some("nas")).await;
+    assert_eq!(status, 404);
+}

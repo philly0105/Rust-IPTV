@@ -182,6 +182,7 @@ export function PlaybackSection({ settings, update }: SectionProps) {
               label={t('streamFormat')}
               value={settings.streamFormat}
               options={[
+                { value: 'auto', label: t('streamFormatAuto') },
                 { value: 'm3u8', label: t('streamFormatHls') },
                 { value: 'ts', label: t('streamFormatTs') },
               ]}

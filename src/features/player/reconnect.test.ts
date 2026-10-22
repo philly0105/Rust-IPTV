@@ -242,6 +242,41 @@ describe('smart reconnect', () => {
     }
   });
 
+  it('waits on a live stream whose next segment is still coming in, at most STALL_MS (PL-3)', () => {
+    const { LIVE_STALL_MS, LIVE_DATA_GRACE_MS } = reconnect;
+    let bytes = 0;
+    let sending = true;
+    media.setMediaCommands({ ...media.useMediaStore.getState().commands!, bytesLoaded: () => bytes });
+    // A slow link: hls.js is waiting while the next segment trickles in.
+    start(live, 10);
+    const t0 = Date.now();
+    media.useMediaStore.setState({ waiting: true });
+    const second = (): void => {
+      if (sending) bytes += 50_000;
+      vi.advanceTimersByTime(1000);
+    };
+    for (let s = 1; s <= LIVE_STALL_MS / 1000 + 2; s++) second();
+    expect(phase()).toBe('idle');
+    // Bytes that come in but never play don't hold it past STALL_MS.
+    while (Date.now() - t0 < STALL_MS - 1000) second();
+    expect(phase()).toBe('idle');
+    second();
+    expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1 });
+
+    // Once the bytes stop, LIVE_STALL_MS counts again.
+    store.__resetPlayerForTests();
+    reconnect.__resetReconnect();
+    media.useMediaStore.setState({ waiting: false });
+    start(live, 10);
+    media.useMediaStore.setState({ waiting: true });
+    for (let s = 1; s <= 4; s++) second();
+    sending = false;
+    for (let s = 1; s < LIVE_DATA_GRACE_MS / 1000; s++) second();
+    expect(phase()).toBe('idle');
+    second();
+    expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1 });
+  });
+
   it('keeps STALL_MS for a live stream that is not buffering, and for VOD that is', () => {
     const { LIVE_STALL_MS } = reconnect;
     start(live, 10);

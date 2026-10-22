@@ -5,6 +5,7 @@ use iptv_core::model::{PlayerKind, PlayerSource, RequestHeaders, Settings};
 use iptv_core::player::args::{
     embedded_mpv_args, escape_mpv_list_value, loadfile_options, mpv_external_args,
     mpv_header_fields, mpv_pipe_name, split_shell_args, validate_play_url, vlc_external_args,
+    UserProbeOptions,
 };
 use iptv_core::player::embedded::{
     is_click_message, legacy_options, recording_file_name, stream_record_command, validate_command,
@@ -106,6 +107,7 @@ fn mpv_external_minimal() {
         s(&[
             "--title=News HD",
             "--force-media-title=News HD",
+            "--demuxer-lavf-analyzeduration=2",
             "--",
             "http://h/live.m3u8"
         ])
@@ -131,6 +133,7 @@ fn mpv_external_with_headers_and_user_args() {
             "--referrer=http://ref.example/",
             "--http-header-fields=Origin:http://origin.example",
             "--force-media-title=Sports 1",
+            "--demuxer-lavf-analyzeduration=2",
             "--fs",
             "--profile=low latency",
             "--",
@@ -142,7 +145,10 @@ fn mpv_external_with_headers_and_user_args() {
 #[test]
 fn mpv_external_skips_blank_headers_and_title() {
     let src = source("http://h/a.ts", "  ", headers(Some(""), Some("   "), None));
-    assert_eq!(mpv_external_args(&src, ""), s(&["--", "http://h/a.ts"]));
+    assert_eq!(
+        mpv_external_args(&src, ""),
+        s(&["--demuxer-lavf-analyzeduration=2", "--", "http://h/a.ts"])
+    );
 }
 
 #[test]
@@ -445,7 +451,7 @@ fn loadfile_options_headers_title_and_resume() {
     );
     src.is_live = false;
     src.resume_seconds = Some(95);
-    let opts = loadfile_options(&src);
+    let opts = loadfile_options(&src, UserProbeOptions::default());
     assert_eq!(opts["force-media-title"], json!("Film"));
     assert_eq!(opts["user-agent"], json!("UA, with comma"));
     assert_eq!(opts["referrer"], json!("http://r/"));
@@ -457,15 +463,110 @@ fn loadfile_options_headers_title_and_resume() {
 fn loadfile_options_never_seek_live_or_zero() {
     let mut src = source("http://h/live", "Live", None);
     src.resume_seconds = Some(120);
-    assert!(!loadfile_options(&src).contains_key("start"));
+    assert!(!loadfile_options(&src, UserProbeOptions::default()).contains_key("start"));
     // Live gets the timeshift cache instead.
-    let live = loadfile_options(&src);
+    let live = loadfile_options(&src, UserProbeOptions::default());
     assert_eq!(live["force-seekable"], json!("yes"));
     assert_eq!(live["demuxer-max-back-bytes"], json!("256MiB"));
     src.is_live = false;
-    assert!(!loadfile_options(&src).contains_key("force-seekable"));
+    assert!(!loadfile_options(&src, UserProbeOptions::default()).contains_key("force-seekable"));
     src.resume_seconds = Some(0);
-    assert!(!loadfile_options(&src).contains_key("start"));
+    assert!(!loadfile_options(&src, UserProbeOptions::default()).contains_key("start"));
+}
+
+/// STR-3: live loads cut FFmpeg's stream analysis short, unless the user's
+/// own configuration set the option (a per-file value would replace theirs);
+/// `fpsprobesize` is appended to their `demuxer-lavf-o` list. VOD keeps
+/// FFmpeg's defaults.
+#[test]
+fn live_loads_shorten_stream_analysis_unless_the_user_set_it() {
+    let mut src = source("http://h/live/1.ts", "Live", None);
+    let live = loadfile_options(&src, UserProbeOptions::default());
+    assert_eq!(live["demuxer-lavf-analyzeduration"], json!("2"));
+    assert_eq!(live["demuxer-lavf-o-append"], json!("fpsprobesize=0"));
+    assert!(!live.contains_key("demuxer-lavf-o"));
+    let analyze = loadfile_options(
+        &src,
+        UserProbeOptions {
+            analyzeduration: true,
+            fpsprobesize: false,
+        },
+    );
+    assert!(!analyze.contains_key("demuxer-lavf-analyzeduration"));
+    assert_eq!(analyze["demuxer-lavf-o-append"], json!("fpsprobesize=0"));
+    let fps = loadfile_options(
+        &src,
+        UserProbeOptions {
+            analyzeduration: false,
+            fpsprobesize: true,
+        },
+    );
+    assert_eq!(fps["demuxer-lavf-analyzeduration"], json!("2"));
+    assert!(!fps.contains_key("demuxer-lavf-o-append"));
+
+    // External mpv: before the user's args, so theirs win.
+    let ext = mpv_external_args(&src, "--demuxer-lavf-analyzeduration=10");
+    let ours = ext
+        .iter()
+        .position(|a| a == "--demuxer-lavf-analyzeduration=2")
+        .expect("live flag");
+    let user = ext
+        .iter()
+        .position(|a| a == "--demuxer-lavf-analyzeduration=10")
+        .expect("user flag");
+    assert!(ours < user, "{ext:?}");
+    // A profile applies where it stands, so it comes after the flag too.
+    let ext = mpv_external_args(&src, "--profile=low-latency");
+    assert_eq!(
+        &ext[ext.len() - 4..],
+        [
+            "--demuxer-lavf-analyzeduration=2",
+            "--profile=low-latency",
+            "--",
+            "http://h/live/1.ts"
+        ]
+    );
+
+    src.is_live = false;
+    let vod = loadfile_options(&src, UserProbeOptions::default());
+    assert!(!vod.contains_key("demuxer-lavf-analyzeduration"));
+    assert!(!vod.contains_key("demuxer-lavf-o-append"));
+    assert!(!mpv_external_args(&src, "")
+        .iter()
+        .any(|a| a.starts_with("--demuxer-lavf")));
+}
+
+/// STR-3 review: mpv's global values decide what the user set, whatever set
+/// them. The low-latency pair is what mpv 0.37 reports after
+/// `--profile=low-latency`.
+#[test]
+fn probe_options_come_from_mpvs_globals() {
+    let read = |analyze: serde_json::Value, list: serde_json::Value| {
+        UserProbeOptions::from_globals(Some(&analyze), Some(&list))
+    };
+    assert_eq!(read(json!(0.0), json!({})), UserProbeOptions::default());
+    assert_eq!(
+        read(json!(0.1), json!({"fflags": "+nobuffer"})),
+        UserProbeOptions {
+            analyzeduration: true,
+            fpsprobesize: false,
+        }
+    );
+    assert_eq!(
+        read(json!(0.0), json!({"probesize": "32", "fpsprobesize": "5"})),
+        UserProbeOptions {
+            analyzeduration: false,
+            fpsprobesize: true,
+        }
+    );
+    // What could not be read is left alone.
+    assert_eq!(
+        UserProbeOptions::from_globals(None, None),
+        UserProbeOptions {
+            analyzeduration: true,
+            fpsprobesize: true,
+        }
+    );
 }
 
 #[test]
@@ -473,7 +574,7 @@ fn legacy_options_use_length_quoting() {
     let mut src = source("http://h/x", "A, B", headers(Some("UA, x"), None, None));
     src.is_live = false;
     src.resume_seconds = Some(5);
-    let legacy = legacy_options(&loadfile_options(&src));
+    let legacy = legacy_options(&loadfile_options(&src, UserProbeOptions::default()));
     assert!(legacy.contains("force-media-title=%4%A, B"), "{legacy}");
     assert!(legacy.contains("user-agent=%5%UA, x"), "{legacy}");
     assert!(legacy.contains("start=%2%+5"), "{legacy}");

@@ -70,6 +70,12 @@ export const STALL_MS = 12_000;
  * VOD and catch-up keep STALL_MS (a slow server there often catches up).
  */
 export const LIVE_STALL_MS = 5_000;
+/**
+ * A live stream whose engine received bytes this recently (`bytesLoaded`, hls.js) is still
+ * downloading its next segment: it gets STALL_MS instead of LIVE_STALL_MS. A rebuild would throw
+ * the nearly finished segment away and start behind the edge again.
+ */
+export const LIVE_DATA_GRACE_MS = 2_000;
 /** Playback this long without a failure restores the full retry budget. */
 export const HEALTHY_MS = 30_000;
 /** Retries for a stream that never played (the full ladder is for streams that played and dropped). */
@@ -169,6 +175,9 @@ let lastPos = -1;
 let lastMoveAt = 0;
 /** Where the data held at the position ended on the last tick (`heldUntil`). */
 let lastHeld = -1;
+/** A live engine's `bytesLoaded` on the last tick (-1: it doesn't say), and when it last grew. */
+let lastBytes = -1;
+let lastBytesAt = 0;
 /** `keyOf` the item that reached playback: only it gets the full retry ladder. */
 let playedKey: string | null = null;
 let slowTimer: ReturnType<typeof setTimeout> | null = null;
@@ -403,6 +412,12 @@ function heldUntil(position: number): number {
   return end;
 }
 
+/** A live stream's engine bytes (`MediaCommands.bytesLoaded`); -1 for VOD or an engine that doesn't say. */
+function liveBytes(isLive: boolean): number {
+  if (!isLive) return -1;
+  return useMediaStore.getState().commands?.bytesLoaded?.() ?? -1;
+}
+
 /**
  * Stall detector: a `playing` stream whose position stands still. A movie or episode whose data
  * is still coming in is waiting on a slow server, not stalled: a reload would throw away what
@@ -418,6 +433,9 @@ function tick(): void {
   const held = s.source.isLive ? -1 : heldUntil(s.positionSeconds);
   const arriving = held > lastHeld;
   lastHeld = held;
+  const bytes = liveBytes(s.source.isLive);
+  if (bytes > lastBytes && lastBytes >= 0) lastBytesAt = now;
+  lastBytes = bytes;
   if (s.positionSeconds !== lastPos) {
     lastPos = s.positionSeconds;
     lastMoveAt = now;
@@ -427,7 +445,9 @@ function tick(): void {
     lastMoveAt = now;
     return;
   }
-  const stallAfter = s.source.isLive && useMediaStore.getState().waiting ? LIVE_STALL_MS : STALL_MS;
+  // Bytes still coming in don't hold a live stream past STALL_MS: one that sends but never plays recovers too.
+  const downloading = now - lastBytesAt < LIVE_DATA_GRACE_MS;
+  const stallAfter = s.source.isLive && useMediaStore.getState().waiting && !downloading ? LIVE_STALL_MS : STALL_MS;
   if (now - lastMoveAt < stallAfter || !(peekSettings()?.streamReconnect ?? true)) return;
   lastMoveAt = now;
   const key = keyOf(s.source);
@@ -444,6 +464,8 @@ function syncTick(s: PlayerState): void {
     lastPos = s.positionSeconds;
     lastMoveAt = Date.now();
     lastHeld = s.source?.isLive ? -1 : heldUntil(s.positionSeconds);
+    lastBytes = liveBytes(!!s.source?.isLive);
+    lastBytesAt = 0;
     tickTimer = setInterval(tick, TICK_MS);
   } else if (!want && tickTimer) {
     clearInterval(tickTimer);
@@ -556,4 +578,6 @@ export function __resetReconnect(): void {
   lastPos = -1;
   lastMoveAt = 0;
   lastHeld = -1;
+  lastBytes = -1;
+  lastBytesAt = 0;
 }

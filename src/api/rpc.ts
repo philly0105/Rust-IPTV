@@ -476,7 +476,8 @@ export interface RpcMap {
   'xtream.sync': Cmd<{ sourceId: string; contentTypes?: ContentType[] }, ImportSummary>;
   'xtream.vodDetail': Cmd<{ ref: ItemRef }, VodDetail>;
   'xtream.seriesDetail': Cmd<{ ref: ItemRef }, SeriesDetail>;
-  'xtream.streamUrl': Cmd<{ ref: ItemRef; episodeId?: string }, PlayerSource>;
+  /** `autoFormat`: what `streamFormat: 'auto'` means for the player this is for (live only; HLS without it). */
+  'xtream.streamUrl': Cmd<{ ref: ItemRef; episodeId?: string; autoFormat?: 'm3u8' | 'ts' }, PlayerSource>;
   /** `start` is RFC 3339. */
   'xtream.catchupUrl': Cmd<{ ref: ItemRef; start: string; durationMinutes: number }, PlayerSource>;
   'xtream.shortEpg': Cmd<{ ref: ItemRef; limit?: number }, EpgProgram[]>;

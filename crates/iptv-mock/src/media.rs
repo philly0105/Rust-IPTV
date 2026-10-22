@@ -391,8 +391,8 @@ pub fn live_segment(n: u64) -> Vec<u8> {
     retime_ts(LIVE_SEGMENTS[(n % LOOP_SEGMENTS) as usize], offset)
 }
 
-/// One pass of the loop (32 s) as a single MPEG-TS body, for direct `.ts`
-/// stream URLs.
+/// One pass of the loop (32 s) as a single MPEG-TS body, for archive
+/// (`timeshift`) `.ts` URLs.
 pub fn live_loop_ts() -> Vec<u8> {
     LIVE_SEGMENTS.concat()
 }

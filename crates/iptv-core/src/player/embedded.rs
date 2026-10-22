@@ -13,7 +13,7 @@
 //! Every operation is serialized by the manager's op lock, so attach, load,
 //! and detach never interleave.
 
-use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name};
+use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name, UserProbeOptions};
 use super::detect::{find_mpv, DetectEnv};
 use super::ipc::MpvClient;
 use super::mpv_state::OBSERVED_PROPERTIES;
@@ -269,6 +269,8 @@ struct Session {
     watcher: Mutex<Option<JoinHandle<()>>>,
     /// Title of the loaded item (names recordings).
     title: Mutex<String>,
+    /// The live probe options the user's configuration set, read at attach.
+    probe: Mutex<UserProbeOptions>,
 }
 
 impl Session {
@@ -405,6 +407,18 @@ fn startup_exit_error(code: Option<i32>) -> CoreError {
     ))
 }
 
+/// Reads mpv's global stream analysis options, which every source of the
+/// user's configuration (`mpvArgs`, a `--profile` or `--include` in them,
+/// `mpv.conf`) ends up in. Runs right after mpv starts, while it is idle:
+/// during playback mpv reports the per-file values instead.
+async fn read_user_probe_options(client: &MpvClient) -> UserProbeOptions {
+    let (analyzeduration, lavf_o) = tokio::join!(
+        client.get_property("demuxer-lavf-analyzeduration"),
+        client.get_property("demuxer-lavf-o"),
+    );
+    UserProbeOptions::from_globals(analyzeduration.ok().as_ref(), lavf_o.ok().as_ref())
+}
+
 /// Registers the property observers, failing with a Timeout when mpv does
 /// not answer within `limit` (a wedged or half-started mpv).
 async fn handshake(client: &MpvClient, limit: Duration) -> CoreResult<()> {
@@ -504,6 +518,7 @@ async fn attach_locked(
         clicks: Mutex::new(None),
         watcher: Mutex::new(None),
         title: Mutex::new(String::new()),
+        probe: Mutex::new(UserProbeOptions::default()),
     });
 
     if let Err(e) = handshake(&client, ATTACH_HANDSHAKE).await {
@@ -517,6 +532,8 @@ async fn attach_locked(
         .await;
         return Err(e);
     }
+    let probe = read_user_probe_options(&client).await;
+    *session.probe.lock() = probe;
 
     let emit_state = Arc::clone(state);
     let emitter = client.spawn_state_emitter(STATE_EMIT_INTERVAL, move |mut s| {
@@ -568,7 +585,7 @@ pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()
         st.tracks.clear();
     });
 
-    let opts = loadfile_options(source);
+    let opts = loadfile_options(source, *s.probe.lock());
     // mpv >= 0.38 takes `loadfile url flags index options`.
     let modern = vec![
         json!("loadfile"),
@@ -1502,5 +1519,86 @@ mod tests {
             "{err:?}"
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// Answers each `get_property` with `globals(name)`, like an idle mpv.
+    async fn fake_mpv(theirs: tokio::io::DuplexStream, globals: fn(&str) -> Option<Value>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let (r, mut w) = tokio::io::split(theirs);
+        let mut lines = tokio::io::BufReader::new(r).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let req: Value = serde_json::from_str(&line).unwrap();
+            let name = req["command"][1].as_str().unwrap_or_default();
+            let reply = match globals(name) {
+                Some(data) => {
+                    json!({"data": data, "error": "success", "request_id": req["request_id"]})
+                }
+                None => json!({"error": "property not found", "request_id": req["request_id"]}),
+            };
+            w.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
+        }
+    }
+
+    async fn probe_options_of(globals: fn(&str) -> Option<Value>) -> UserProbeOptions {
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(fake_mpv(theirs, globals));
+        let client = MpvClient::new(ours, MpvState::default());
+        read_user_probe_options(&client).await
+    }
+
+    /// STR-3 review: what the user's configuration set of the live probe
+    /// options is read from mpv, so a `--profile` or `--include` in mpvArgs
+    /// (and mpv.conf) counts. The low-latency globals are what mpv 0.37 reports
+    /// after `--profile=low-latency`; reading mpvArgs saw neither option there.
+    #[tokio::test]
+    async fn live_loads_keep_what_the_users_profile_set() {
+        let live = PlayerSource {
+            url: "http://h/live/1.ts".into(),
+            kind: crate::model::PlayerKind::Direct,
+            headers: None,
+            title: "Live".into(),
+            subtitle: None,
+            poster_url: None,
+            item_ref: None,
+            episode_id: None,
+            resume_seconds: None,
+            is_live: true,
+            is_radio: false,
+        };
+
+        let low_latency = probe_options_of(|name| match name {
+            "demuxer-lavf-analyzeduration" => Some(json!(0.1)),
+            "demuxer-lavf-o" => Some(json!({"fflags": "+nobuffer"})),
+            _ => None,
+        })
+        .await;
+        let opts = loadfile_options(&live, low_latency);
+        assert!(
+            !opts.contains_key("demuxer-lavf-analyzeduration"),
+            "{opts:?}"
+        );
+        // Appended for the file, so fflags=+nobuffer stays in the list.
+        assert!(!opts.contains_key("demuxer-lavf-o"), "{opts:?}");
+        assert_eq!(opts["demuxer-lavf-o-append"], json!("fpsprobesize=0"));
+
+        let defaults = probe_options_of(|name| match name {
+            "demuxer-lavf-analyzeduration" => Some(json!(0.0)),
+            "demuxer-lavf-o" => Some(json!({})),
+            _ => None,
+        })
+        .await;
+        assert_eq!(defaults, UserProbeOptions::default());
+        let opts = loadfile_options(&live, defaults);
+        assert_eq!(opts["demuxer-lavf-analyzeduration"], json!("2"));
+        assert_eq!(opts["demuxer-lavf-o-append"], json!("fpsprobesize=0"));
+
+        // An mpv that can't report them gets neither.
+        let unknown = probe_options_of(|_| None).await;
+        let opts = loadfile_options(&live, unknown);
+        assert!(
+            !opts.contains_key("demuxer-lavf-analyzeduration"),
+            "{opts:?}"
+        );
+        assert!(!opts.contains_key("demuxer-lavf-o-append"), "{opts:?}");
     }
 }

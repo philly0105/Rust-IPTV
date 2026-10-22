@@ -53,7 +53,6 @@ async fn every_route_answers_with_cors() {
         "/xtream/player_api.php?username=demo&password=secret&action=get_short_epg&stream_id=101",
         "/xtream/xmltv.php?username=demo&password=secret",
         "/xtream/live/demo/secret/101.m3u8",
-        "/xtream/live/demo/secret/101.ts",
         "/xtream/seg/5.ts",
         "/xtream/movie/demo/secret/201.mp4",
         "/xtream/series/demo/secret/3001.mp4",
@@ -87,6 +86,55 @@ async fn every_route_answers_with_cors() {
     let r = c.get(format!("{}/nope", m.base)).send().await.unwrap();
     assert_eq!(r.status(), 404);
     assert_eq!(r.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+}
+
+/// A channel's direct live `.ts` is endless like a panel's: no length or
+/// ranges, the connect burst at once, then one 2 s segment every 2 s (it used
+/// to be one 32 s file, which a player reached the end of after 32 s).
+#[tokio::test]
+async fn xtream_live_ts_is_endless_and_paced() {
+    use iptv_mock::live::CONNECT_BURST;
+    use iptv_mock::media::live_segment;
+    use std::time::{Duration, Instant};
+    let m = spawn().await;
+    let c = client();
+    for path in [
+        "/xtream/live/demo/secret/101.ts",
+        "/xtream/live/demo/secret/101",
+    ] {
+        let mut r = c.get(format!("{}{path}", m.base)).send().await.unwrap();
+        assert_eq!(r.status(), 200, "{path}");
+        assert_eq!(r.headers()[header::CONTENT_TYPE], "video/mp2t", "{path}");
+        assert_eq!(r.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN], "*");
+        assert!(!r.headers().contains_key(header::CONTENT_LENGTH), "{path}");
+        assert!(!r.headers().contains_key(header::ACCEPT_RANGES), "{path}");
+        assert_eq!(r.chunk().await.unwrap().unwrap()[0], 0x47, "{path}");
+    }
+
+    let burst: usize = (0..CONNECT_BURST).map(|n| live_segment(n).len()).sum();
+    let started = Instant::now();
+    let mut r = c
+        .get(format!("{}/xtream/live/demo/secret/101.ts", m.base))
+        .send()
+        .await
+        .unwrap();
+    let mut got = 0;
+    while got < burst {
+        got += r.chunk().await.unwrap().expect("the burst").len();
+    }
+    let burst_at = started.elapsed();
+    assert!(
+        burst_at < Duration::from_secs(1),
+        "burst after {burst_at:?}"
+    );
+    if got == burst {
+        r.chunk().await.unwrap().expect("the stream goes on");
+    }
+    let next_at = started.elapsed();
+    assert!(
+        next_at >= Duration::from_millis(1_500),
+        "the segment after the burst came after {next_at:?}"
+    );
 }
 
 #[tokio::test]

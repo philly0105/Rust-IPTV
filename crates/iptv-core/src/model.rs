@@ -873,14 +873,17 @@ string_enum!(VideoPlayer {
     Vlc => "vlc",
 });
 
-/// Preferred Xtream live stream container.
+/// Preferred Xtream live stream container. `Auto` lets the caller pick per player
+/// (`xtream.streamUrl`'s `autoFormat`: the UI asks for ts where its built-in player
+/// plays MPEG-TS) and is m3u8 for a caller that names none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StreamFormat {
+    Auto,
     M3u8,
     Ts,
 }
-string_enum!(StreamFormat { M3u8 => "m3u8", Ts => "ts" });
+string_enum!(StreamFormat { Auto => "auto", M3u8 => "m3u8", Ts => "ts" });
 
 /// Color theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1239,7 +1242,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             player: VideoPlayer::Html5,
-            stream_format: StreamFormat::M3u8,
+            stream_format: StreamFormat::Auto,
             epg_urls: Vec::new(),
             language: "en".to_string(),
             theme: Theme::System,
@@ -1768,6 +1771,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&StreamFormat::M3u8).unwrap(),
             "\"m3u8\""
+        );
+        assert_eq!(
+            serde_json::to_string(&StreamFormat::Auto).unwrap(),
+            "\"auto\""
         );
         assert_eq!(
             "embedded-mpv".parse::<VideoPlayer>().unwrap(),

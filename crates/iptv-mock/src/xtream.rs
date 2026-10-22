@@ -10,7 +10,8 @@
 //!   `get_simple_data_table`. Wrong credentials: `{"user_info":{"auth":0}}`.
 //! - `xmltv.php`: XMLTV for the 40 channels, yesterday through tomorrow.
 //! - `get.php`: M3U of the live channels (`type=m3u_plus`).
-//! - Streams: `live/{u}/{p}/{id}.m3u8|.ts`, `seg/{n}.ts`,
+//! - Streams: `live/{u}/{p}/{id}.m3u8|.ts` (`.ts` and no extension: an
+//!   endless stream paced in real time, [`crate::live::channel_ts`]), `seg/{n}.ts`,
 //!   `movie/{u}/{p}/{id}.mp4|.webm|.mkv`, `series/{u}/{p}/{id}.mp4`,
 //!   `timeshift/{u}/{p}/{dur}/{start}/{id}.ts|.m3u8`, `timeshift.php`.
 //!   Any numeric id plays, so generated playlists are playable too.
@@ -582,7 +583,6 @@ fn forbidden() -> Response {
 
 async fn live(
     Base(base): Base,
-    headers: HeaderMap,
     Path((user, pass, file)): Path<(String, String, String)>,
 ) -> Response {
     if !authed(&user, &pass) {
@@ -593,12 +593,7 @@ async fn live(
     }
     match split_id_ext(&file) {
         Some((_, "m3u8")) => media::m3u8_response(media::live_playlist(&base, catalog::now())),
-        Some((_, "ts")) | Some((_, "")) => media::serve_owned(
-            &headers,
-            media::live_loop_ts(),
-            "video/mp2t",
-            "\"live-loop\"".to_string(),
-        ),
+        Some((_, "ts")) | Some((_, "")) => crate::live::channel_ts(),
         _ => (StatusCode::NOT_FOUND, "unknown stream").into_response(),
     }
 }

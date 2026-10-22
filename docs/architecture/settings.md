@@ -108,4 +108,6 @@ Parental controls are not part of `Settings`: their options and PIN live in the 
 
 Stored JSON from older builds reads with these defaults (struct-level `#[serde(default)]`).
 
+A changed default reaches only documents without the field, and every save writes every field, so an existing install keeps the old value. `streamFormat` is the one default moved for them: it became `auto` (Settings > Playback offers Auto, HLS and MPEG-TS; xtream.md says what Auto picks), and migration 0023 rewrote a stored `m3u8`, the old default, to `auto` once. A user who had picked HLS can't be told apart and picks it again; that pick then stays.
+
 `settings.changed` carries the full document; the module never logs the document. In the desktop app it includes `tmdb.apiKey` as stored. In server mode `settings.get`, `settings.update`, `settings.reset` and `settings.changed` all pass through `settings::for_client`, which masks the key as `••••` plus its last 4 characters (only `••••` for 4 or fewer), so a browser on the network never gets it back. A server-mode patch whose `tmdb.apiKey` starts with that mask (the UI resends the whole `tmdb` object, and Undo after a reset resends the old settings) keeps the stored key.

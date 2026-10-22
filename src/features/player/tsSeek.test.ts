@@ -163,7 +163,9 @@ describe('seeking a local recording or download by byte (PL-2)', () => {
     await seeker.prepare?.();
     // The last frame's PTS, across the wrap.
     expect(seeker.duration()).toBeCloseTo((FRAMES - 1) / 25, 3);
-    expect(served.requests).toEqual([`bytes=0-${PROBE_BYTES - 1}`, `bytes=${TOTAL - PROBE_BYTES}-${TOTAL - 1}`]);
+    // The head, the tail, and the middle, whose PTS must lie in between.
+    const mid = Math.floor(TOTAL / 2 / 188) * 188;
+    expect(served.requests).toEqual([`bytes=0-${PROBE_BYTES - 1}`, `bytes=${TOTAL - PROBE_BYTES}-${TOTAL - 1}`, `bytes=${mid}-${mid + PROBE_BYTES - 1}`]);
 
     for (const target of [600, 1200, 1500.5, 1790]) {
       served.requests.length = 0;
@@ -211,6 +213,18 @@ describe('seeking a local recording or download by byte (PL-2)', () => {
     expect(600 - plan.at).toBeLessThan(1);
   });
 
+  it('a reconnect part whose clock restarted: no length, and the element seeks itself', async () => {
+    // From minute 25 the PTS run on from two hours below the first: the last PTS read as about
+    // 24.6 hours after it.
+    const reset = 25 * 60 * 25;
+    serveRanges({ pts: (f) => (f < reset ? ptsOf(f) : (FIRST_PTS - 2 * 3600 * 90_000 + (f - reset) * 3600 + 2 ** 33) % 2 ** 33) });
+    const seeker = tsSeekerFor(vod(LOCAL), LOCAL)!;
+    await seeker.prepare?.();
+    expect(seeker.duration()).toBeUndefined();
+    expect(seeker.usable()).toBe(false);
+    expect(await seeker.startAt(600, signal)).toBeNull();
+  });
+
   it('a file with no PES in its tail has no length: the element seeks itself', async () => {
     serveRanges({ pts: (f) => (f < FRAMES - 200 ? ptsOf(f) : undefined) });
     const seeker = tsSeekerFor(vod(LOCAL), LOCAL)!;
@@ -255,7 +269,7 @@ describe('seeking a remote TS file through the proxy by estimate (PL-2)', () => 
     expect(seeker.duration()).toBeUndefined();
     const plan = (await seeker.startAt(1200, signal))!;
     expect(seeker.duration()).toBeCloseTo(1799.96, 2);
-    // The head and the tail, then the search.
+    // The head and the tail, no middle (a request to the provider each), then the search.
     expect(served.requests.slice(0, 2)).toEqual([`bytes=0-${PROBE_BYTES - 1}`, `bytes=${TOTAL - PROBE_BYTES}-${TOTAL - 1}`]);
     expect(served.requests.length).toBeLessThanOrEqual(2 + REMOTE_PROBES);
     expect(1200 - plan.at).toBeLessThan(3);

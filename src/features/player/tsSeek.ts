@@ -192,12 +192,23 @@ async function probe(url: string, from: number, length: number, signal?: AbortSi
   return { bytes: new Uint8Array(await res.arrayBuffer()), total };
 }
 
+/** The first PES in `bytes` (read from file offset `byte`) on the time PID, else the first one; null when there is none. */
+function pointIn(l: Layout, byte: number, bytes: Uint8Array): Point | null {
+  const starts = pesStarts(bytes);
+  const hit = starts.find((s) => s.pid === l.pid) ?? starts[0];
+  return hit ? { byte: byte + hit.offset, time: since(l.firstPts, hit.pts) } : null;
+}
+
 /**
  * The file's packets and first PTS and, with `wantEnd`, its length from the last PES. Null when it
  * can't be searched by byte: no byte ranges, not MPEG-TS, or no length where one is wanted (the
- * element then seeks itself).
+ * element then seeks itself). `checkMiddle` (a local file, where a probe costs nothing) also reads
+ * the middle: a recording joins a reconnect's part to the one before (recording/mod.rs,
+ * `MERGE_MAX_BYTES`), and a stream whose clock restarted there gives a last PTS unrelated to the
+ * first, so a length of anything up to 26.5 h and PTS that don't follow the bytes. The time in the
+ * middle byte must lie between a fifth and four fifths of the length.
  */
-async function readLayout(url: string, wantEnd: boolean): Promise<Layout | null> {
+async function readLayout(url: string, wantEnd: boolean, checkMiddle: boolean): Promise<Layout | null> {
   const head = await probe(url, 0, PROBE_BYTES);
   const grid = head && tsGrid(head.bytes);
   if (!head || !grid) return null;
@@ -210,7 +221,14 @@ async function readLayout(url: string, wantEnd: boolean): Promise<Layout | null>
   const tail = await probe(url, head.total - PROBE_BYTES, PROBE_BYTES);
   const last = tail ? pesStarts(tail.bytes).filter((s) => s.pid === first.pid).pop() : undefined;
   if (!last) return null;
-  return { ...out, duration: since(first.pts, last.pts) };
+  const duration = since(first.pts, last.pts);
+  if (checkMiddle) {
+    const at = grid.origin + Math.floor((head.total / 2 - grid.origin) / grid.size) * grid.size;
+    const chunk = await probe(url, at, PROBE_BYTES);
+    const mid = chunk && pointIn(out, at, chunk.bytes);
+    if (!mid || !(mid.time >= duration / 5 && mid.time <= (duration * 4) / 5)) return null;
+  }
+  return { ...out, duration };
 }
 
 /**
@@ -228,7 +246,7 @@ function byteSeeker(loadUrl: string, known: number | undefined, local: boolean):
   /** Throws when asking failed in a way the next seek may get past. */
   const learn = (): Promise<Layout | null> => {
     if (layout || failed) return Promise.resolve(layout);
-    learning ??= readLayout(loadUrl, known === undefined).then(
+    learning ??= readLayout(loadUrl, known === undefined, local).then(
       (l) => {
         learning = null;
         layout = l;
@@ -246,10 +264,7 @@ function byteSeeker(loadUrl: string, known: number | undefined, local: boolean):
   /** The first PES at or after `byte` (on the time PID if it has one there); null when it can't tell. */
   const pointAt = async (l: Layout, byte: number, signal: AbortSignal): Promise<Point | null> => {
     const chunk = await probe(loadUrl, byte, PROBE_BYTES, signal).catch(() => null);
-    if (!chunk) return null;
-    const starts = pesStarts(chunk.bytes);
-    const hit = starts.find((s) => s.pid === l.pid) ?? starts[0];
-    return hit ? { byte: byte + hit.offset, time: since(l.firstPts, hit.pts) } : null;
+    return chunk && pointIn(l, byte, chunk.bytes);
   };
   return {
     duration: length,

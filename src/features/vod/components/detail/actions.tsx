@@ -81,6 +81,7 @@ export function WatchedButton({
   size = 'lg',
   labels,
   name,
+  disabled,
 }: {
   itemRef: ItemRef;
   /** Height of the labelled button: `lg` in a hero, `sm` beside a section heading. */
@@ -96,6 +97,8 @@ export function WatchedButton({
   labels?: { mark: string; unmark: string };
   /** What the toast says was marked ("Season 2", the series title). */
   name?: string;
+  /** Not pressable yet: what a press marks is still loading (a series' episodes). */
+  disabled?: boolean;
 }) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
@@ -139,16 +142,16 @@ export function WatchedButton({
         // Watched is a state, so it reads as pressed (neutral), with the green tick; the label says what a press does.
         className={cn('rounded-full', watched && 'bg-selected text-fg')}
         onClick={() => void onClick()}
-        disabled={setWatched.isPending}
+        disabled={disabled || setWatched.isPending}
         data-testid="vod-watched-button"
       />
     );
   }
   if (compact) {
-    return <IconButton label={label} icon={icon} onClick={() => void onClick()} disabled={setWatched.isPending} />;
+    return <IconButton label={label} icon={icon} onClick={() => void onClick()} disabled={disabled || setWatched.isPending} />;
   }
   return (
-    <Button size={size} variant="ghost" icon={icon} loading={setWatched.isPending} onClick={() => void onClick()}>
+    <Button size={size} variant="ghost" icon={icon} loading={setWatched.isPending} disabled={disabled} onClick={() => void onClick()}>
       {label}
     </Button>
   );

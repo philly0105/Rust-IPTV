@@ -364,7 +364,8 @@ export function SeriesDetailPage() {
         <FavoriteButton itemRef={ref} snapshot={snapshot} isFavorite={isFavorite} round />
       </HeroIcon>
       <HeroIcon caption={t('watched')}>
-        {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too. */}
+        {/* C4: the series as a whole, which ticks its poster; marking it marks every episode too,
+            so it waits for the seasons (from the list row alone it would write the series row only). */}
         <WatchedButton
           itemRef={ref}
           episodeIds={seriesWrite.episodeIds}
@@ -372,6 +373,7 @@ export function SeriesDetailPage() {
           name={model.titleBase ?? model.title}
           watched={seriesWatched}
           round
+          disabled={placeholder}
           labels={{ mark: t('markSeriesWatched'), unmark: t('markSeriesUnwatched') }}
         />
       </HeroIcon>

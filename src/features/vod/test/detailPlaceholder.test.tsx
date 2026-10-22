@@ -6,7 +6,8 @@
  * - Movies: the hero and an enabled Play at once; the "provider details unavailable" notice and
  *   the TMDB lookup wait for the real answer (it may bring the tmdbId, so an early lookup would be
  *   a second one).
- * - Series: the hero at once; Play and the episodes wait for the seasons.
+ * - Series: the hero at once; Play, the series' Watched button (it marks every episode) and the
+ *   episodes wait for the seasons.
  * - Stalker keeps waiting for its details: the parental gate needs the title's category from them.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -201,6 +202,25 @@ describe('VOD-DETAIL-PLACEHOLDER: series', () => {
     expect((play as HTMLButtonElement).disabled).toBe(false);
     expect(within(episodes).queryByRole('status')).toBeNull();
     await waitFor(() => expect(callsOf('tmdb.tv')).toHaveLength(1));
+  });
+
+  it('holds the series Watched button until the seasons come, since it marks every episode', async () => {
+    const detail = later<SeriesDetail>();
+    rpcMock.handlers['xtream.seriesDetail'] = () => detail.promise;
+    seedGrid('series', seriesRow);
+    open('/s/src1/series/s1');
+    await screen.findByRole('heading', { level: 1, name: 'Severance' });
+    // With no episodes yet, a press would write the series row alone (L1-vod-1).
+    const watched = () => screen.getByTestId('vod-watched-button') as HTMLButtonElement;
+    expect(watched().disabled).toBe(true);
+    fireEvent.click(watched());
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(callsOf('userstate.setWatched')).toEqual([]);
+
+    const ep = { id: 'e11', seriesRef, season: 1, episode: 1, title: 'Good News About Hell' };
+    await act(async () => detail.resolve({ item: seriesRow, seasons: [{ number: 1, episodes: [ep] }], cast: [], backdrops: [], providerDetailsUnavailable: false }));
+    await screen.findByRole('button', { name: i18n.t('vod:playEpisode', { code: 'S01E01' }) });
+    expect(watched().disabled).toBe(false);
   });
 });
 

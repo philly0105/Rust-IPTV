@@ -1,5 +1,6 @@
-// Performance audit, VOD detail: a detail page refetches the download list only for its own
-// transfers (VD-3), and the hover prefetch also starts the TMDB lookup the page sends next (VD-8).
+// Performance audit, VOD detail: a detail page refetches the download list for downloads.update
+// only, not for transfer progress (VD-3, then DL-7: the controls read the live samples), and the
+// hover prefetch also starts the TMDB lookup the page sends next (VD-8).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -56,8 +57,8 @@ beforeEach(() => {
 });
 afterEach(() => queryClient.clear());
 
-describe('useItemDownloads (VD-3)', () => {
-  it('refetches the list for progress of its own rows only', async () => {
+describe('useItemDownloads (VD-3, DL-7)', () => {
+  it('refetches the list for downloads.update, not for progress of any row', async () => {
     const own = movie('7');
     rpcState.downloads = [download(1, own), download(2, movie('8'))];
     const { result } = renderHook(() => useItemDownloads(own, true), { wrapper });
@@ -65,10 +66,11 @@ describe('useItemDownloads (VD-3)', () => {
     const before = listCalls();
 
     emit('downloads.progress', { id: 2, bytesDownloaded: 10, bytesPerSecond: 1 });
+    emit('downloads.progress', { id: 1, bytesDownloaded: 10, bytesPerSecond: 1 });
     await new Promise((r) => setTimeout(r, 700));
     expect(listCalls()).toBe(before);
 
-    emit('downloads.progress', { id: 1, bytesDownloaded: 10, bytesPerSecond: 1 });
+    emit('downloads.update', {});
     await waitFor(() => expect(listCalls()).toBe(before + 1), { timeout: 2000 });
   });
 });

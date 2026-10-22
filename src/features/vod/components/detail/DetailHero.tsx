@@ -56,6 +56,12 @@ export interface DetailHeroProps {
   note?: ReactNode;
   /** Inline status above the actions (e.g. provider details unavailable). */
   notice?: ReactNode;
+  /**
+   * The provider's details are still coming (a catalog row stands in): the hero keeps the
+   * artwork's room above the poster, as the skeleton does, so it does not drop when a backdrop
+   * arrives with them.
+   */
+  pending?: boolean;
   /** Cast names link to their actor pages only when TMDB can show them (VL-tmdb-deadend). */
   castLinks?: boolean;
   /**
@@ -71,7 +77,7 @@ export interface DetailHeroProps {
  * artwork reads and the title and buttons stay legible on any image. Poster and title sit on its
  * lower edge; the title is the one large type moment on the page.
  */
-export function DetailHero({ model, sourceId, actions, icons, progress, chips, note, notice, castLinks = true, back }: DetailHeroProps) {
+export function DetailHero({ model, sourceId, actions, icons, progress, chips, note, notice, pending, castLinks = true, back }: DetailHeroProps) {
   const { t, i18n } = useTranslation('vod');
   const [expanded, setExpanded] = useState(false);
   const formatRuntime = useFormatRuntime();
@@ -81,7 +87,7 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
   const plotLong = (model.plot?.length ?? 0) > 360;
   // The header names the section until this h1 scrolls away, then fades the title in.
   const titleRef = useHeaderTitleAnchor();
-  const top = model.backdropUrl ? (back ? HERO_TOP_WITH_ART_BACK : HERO_TOP_WITH_ART) : back ? HERO_TOP_PLAIN_BACK : HERO_TOP_PLAIN;
+  const top = model.backdropUrl || pending ? (back ? HERO_TOP_WITH_ART_BACK : HERO_TOP_WITH_ART) : back ? HERO_TOP_PLAIN_BACK : HERO_TOP_PLAIN;
 
   return (
     // Not `isolate`: the backdrop's -z-10 must resolve against the page's

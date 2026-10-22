@@ -6,6 +6,7 @@ import { Link } from 'react-router';
 import { invalidate, useRpcMutation } from '@/api/query';
 import type { Download, ItemRef, ItemSnapshot } from '@/api/types';
 
+import { useLiveProgress, type EffectiveProgress } from '@/features/library/lib/progress';
 import { captureWatched } from '@/features/library/lib/watchedUndo';
 import { intlLocale } from '@/lib/intl';
 
@@ -80,6 +81,7 @@ export function WatchedButton({
   size = 'lg',
   labels,
   name,
+  disabled,
 }: {
   itemRef: ItemRef;
   /** Height of the labelled button: `lg` in a hero, `sm` beside a section heading. */
@@ -95,6 +97,8 @@ export function WatchedButton({
   labels?: { mark: string; unmark: string };
   /** What the toast says was marked ("Season 2", the series title). */
   name?: string;
+  /** Not pressable yet: what a press marks is still loading (a series' episodes). */
+  disabled?: boolean;
 }) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
@@ -138,24 +142,33 @@ export function WatchedButton({
         // Watched is a state, so it reads as pressed (neutral), with the green tick; the label says what a press does.
         className={cn('rounded-full', watched && 'bg-selected text-fg')}
         onClick={() => void onClick()}
-        disabled={setWatched.isPending}
+        disabled={disabled || setWatched.isPending}
         data-testid="vod-watched-button"
       />
     );
   }
   if (compact) {
-    return <IconButton label={label} icon={icon} onClick={() => void onClick()} disabled={setWatched.isPending} />;
+    return <IconButton label={label} icon={icon} onClick={() => void onClick()} disabled={disabled || setWatched.isPending} />;
   }
   return (
-    <Button size={size} variant="ghost" icon={icon} loading={setWatched.isPending} onClick={() => void onClick()}>
+    <Button size={size} variant="ghost" icon={icon} loading={setWatched.isPending} disabled={disabled} onClick={() => void onClick()}>
       {label}
     </Button>
   );
 }
 
-export function downloadPercent(d: Download): number | undefined {
+export function downloadPercent(d: Pick<EffectiveProgress, 'bytesDownloaded' | 'totalBytes'>): number | undefined {
   if (!d.totalBytes || d.totalBytes <= 0) return undefined;
   return Math.min(100, Math.round((d.bytesDownloaded / d.totalBytes) * 100));
+}
+
+/**
+ * How much of `d` is in, from its live `downloads.progress` sample while it transfers (DL-7). The
+ * page no longer refetches `downloads.list` for progress, so this is what moves the ring and the
+ * percent, and an event re-renders only the control that calls it.
+ */
+function useDownloadPercent(d: Download): number | undefined {
+  return downloadPercent(useLiveProgress(d));
 }
 
 /** Download control reflecting the queue row for this item or episode. */
@@ -199,18 +212,7 @@ export function DownloadButton({
       </Link>
     );
   }
-  if (status === 'downloading' || status === 'queued') {
-    const pct = download ? downloadPercent(download) : undefined;
-    const text = pct !== undefined ? t('downloadingPercent', { percent: pct }) : status === 'queued' ? t('downloadQueuedShort') : t('downloading');
-    return (
-      <Tooltip content={compact ? text : null} describe={false}>
-        <Link to="/downloads" aria-label={`${text}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', size, compact ? 'w-auto px-2 text-xs' : undefined)}>
-          <LoaderCircle aria-hidden size={compact ? 14 : 18} className="motion-safe:animate-spin" />
-          {compact ? (pct !== undefined ? `${pct}%` : null) : text}
-        </Link>
-      </Tooltip>
-    );
-  }
+  if (download && (download.status === 'downloading' || download.status === 'queued')) return <DownloadingLink download={download} compact={compact} ctx={ctx} />;
   if (status === 'paused') {
     return (
       <Tooltip content={compact ? t('downloadPaused') : null} describe={false}>
@@ -238,6 +240,21 @@ export function DownloadButton({
     <Button size={size} variant="secondary" icon={<DownloadIcon aria-hidden size={18} />} loading={pending} onClick={onStart}>
       {text}
     </Button>
+  );
+}
+
+/** {@link DownloadButton} while its row is queued or coming in: the percent from the live sample. */
+function DownloadingLink({ download, compact, ctx }: { download: Download; compact: boolean | undefined; ctx: string }) {
+  const { t } = useTranslation('vod');
+  const pct = useDownloadPercent(download);
+  const text = pct !== undefined ? t('downloadingPercent', { percent: pct }) : download.status === 'queued' ? t('downloadQueuedShort') : t('downloading');
+  return (
+    <Tooltip content={compact ? text : null} describe={false}>
+      <Link to="/downloads" aria-label={`${text}${ctx}`} className={buttonClass(compact ? 'ghost' : 'secondary', compact ? 'sm' : 'lg', compact ? 'w-auto px-2 text-xs' : undefined)}>
+        <LoaderCircle aria-hidden size={compact ? 14 : 18} className="motion-safe:animate-spin" />
+        {compact ? (pct !== undefined ? `${pct}%` : null) : text}
+      </Link>
+    </Tooltip>
   );
 }
 
@@ -285,51 +302,10 @@ function RoundDownloadButton({
   onStart: () => void;
   downloadedHref: string;
 }) {
-  const { t, i18n } = useTranslation('vod');
+  const { t } = useTranslation('vod');
   const status = download?.status;
-  const round = buttonClass('secondary', 'lg', 'relative w-12 rounded-full px-0');
-  if (status === 'completed' || status === 'downloading' || status === 'queued' || status === 'paused') {
-    const pct = download ? downloadPercent(download) : undefined;
-    const text =
-      status === 'completed'
-        ? t('downloaded')
-        : status === 'paused'
-          ? t('downloadPaused')
-          : pct !== undefined
-            ? t('downloadingPercent', { percent: pct })
-            : status === 'queued'
-              ? t('downloadQueuedShort')
-              : t('downloading');
-    const caption =
-      status === 'completed'
-        ? t('downloaded')
-        : status === 'paused'
-          ? t('captionPaused')
-          : pct !== undefined
-            ? new Intl.NumberFormat(intlLocale(i18n.language), { style: 'percent' }).format(pct / 100)
-            : status === 'queued'
-              ? t('downloadQueuedShort')
-              : t('downloading');
-    let icon: ReactNode;
-    if (status === 'completed') icon = <Check aria-hidden size={18} className="text-success" />;
-    else if (pct !== undefined) {
-      icon = (
-        <>
-          <DownloadRing percent={pct} moving={status === 'downloading'} />
-          {status === 'paused' ? <Pause aria-hidden size={16} /> : <DownloadIcon aria-hidden size={16} />}
-        </>
-      );
-    } else if (status === 'paused') icon = <Pause aria-hidden size={18} />;
-    else icon = <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" />;
-    return (
-      <HeroIcon caption={caption}>
-        <Tooltip content={text} describe={false}>
-          <Link to={status === 'completed' ? downloadedHref : '/downloads'} aria-label={text} className={round} data-testid="vod-download-button">
-            {icon}
-          </Link>
-        </Tooltip>
-      </HeroIcon>
-    );
+  if (download && (status === 'completed' || status === 'downloading' || status === 'queued' || status === 'paused')) {
+    return <RoundDownloadState download={download} downloadedHref={downloadedHref} />;
   }
   const failed = status === 'failed';
   return (
@@ -347,6 +323,54 @@ function RoundDownloadButton({
         className="rounded-full"
         data-testid="vod-download-button"
       />
+    </HeroIcon>
+  );
+}
+
+/** {@link RoundDownloadButton} once its row is under way or done: the ring moves with the live sample. */
+function RoundDownloadState({ download, downloadedHref }: { download: Download; downloadedHref: string }) {
+  const { t, i18n } = useTranslation('vod');
+  const status = download.status;
+  const round = buttonClass('secondary', 'lg', 'relative w-12 rounded-full px-0');
+  const pct = useDownloadPercent(download);
+  const text =
+    status === 'completed'
+      ? t('downloaded')
+      : status === 'paused'
+        ? t('downloadPaused')
+        : pct !== undefined
+          ? t('downloadingPercent', { percent: pct })
+          : status === 'queued'
+            ? t('downloadQueuedShort')
+            : t('downloading');
+  const caption =
+    status === 'completed'
+      ? t('downloaded')
+      : status === 'paused'
+        ? t('captionPaused')
+        : pct !== undefined
+          ? new Intl.NumberFormat(intlLocale(i18n.language), { style: 'percent' }).format(pct / 100)
+          : status === 'queued'
+            ? t('downloadQueuedShort')
+            : t('downloading');
+  let icon: ReactNode;
+  if (status === 'completed') icon = <Check aria-hidden size={18} className="text-success" />;
+  else if (pct !== undefined) {
+    icon = (
+      <>
+        <DownloadRing percent={pct} moving={status === 'downloading'} />
+        {status === 'paused' ? <Pause aria-hidden size={16} /> : <DownloadIcon aria-hidden size={16} />}
+      </>
+    );
+  } else if (status === 'paused') icon = <Pause aria-hidden size={18} />;
+  else icon = <LoaderCircle aria-hidden size={18} className="motion-safe:animate-spin" />;
+  return (
+    <HeroIcon caption={caption}>
+      <Tooltip content={text} describe={false}>
+        <Link to={status === 'completed' ? downloadedHref : '/downloads'} aria-label={text} className={round} data-testid="vod-download-button">
+          {icon}
+        </Link>
+      </Tooltip>
     </HeroIcon>
   );
 }

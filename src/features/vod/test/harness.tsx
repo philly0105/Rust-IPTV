@@ -109,8 +109,12 @@ function LocationProbe() {
   return null;
 }
 
-export function renderAt(path: string, routes: { path: string; element: ReactNode }[]) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+/**
+ * Renders `routes` at `path`. `gcTime` 0 drops a query once no page reads it, so Back fetches
+ * again; a test about what the app's cache keeps across a round trip passes a longer one.
+ */
+export function renderAt(path: string, routes: { path: string; element: ReactNode }[], { gcTime = 0 }: { gcTime?: number } = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime } } });
   return render(
     <QueryClientProvider client={client}>
       <I18nextProvider i18n={i18n}>

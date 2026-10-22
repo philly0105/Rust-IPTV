@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
 import { onAppEvent } from '@/api/events';
 import { invalidate, queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
+import type { CatalogSearchResult } from '@/api/rpc';
 import { RpcError, rpcRaw } from '@/api/transport';
 import type {
   ItemRef,
@@ -25,7 +26,7 @@ import type {
   VodDetail,
   VodItem,
 } from '@/api/types';
-import { DEFAULT_SETTINGS } from '@/api/types';
+import { DEFAULT_SETTINGS, sameRef } from '@/api/types';
 
 import { buildPageRequest, type GridQueryInput } from '../lib/paging';
 import { invalidateWatched } from '../lib/watchedQueries';
@@ -285,12 +286,47 @@ export function seriesDetailQuery(sourceKind: SourceKind | undefined, ref: ItemR
   });
 }
 
-export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<VodDetail, RpcError> {
-  return useQuery({ ...movieDetailQuery(source?.kind, ref), enabled: !!source });
+/**
+ * The catalog row a grid page, a rail, Recently added or a search answer already holds for `ref`
+ * (VOD-DETAIL-PLACEHOLDER): title, poster, year, rating, category and container.
+ */
+export function cachedCatalogRow(qc: QueryClient, ref: ItemRef): VodItem | SeriesItem | undefined {
+  const find = (rows: unknown) => (Array.isArray(rows) ? (rows as (VodItem | SeriesItem)[]).find((r) => sameRef(r.ref, ref)) : undefined);
+  const movie = ref.contentType === 'movie';
+  const lists = [
+    ...qc.getQueriesData<Page<VodItem | SeriesItem>>({ queryKey: [movie ? 'catalog.movies' : 'catalog.series'] }).map(([, page]) => page?.items),
+    ...qc.getQueriesData<(VodItem | SeriesItem)[]>({ queryKey: ['catalog.recentlyAdded'] }).map(([, rows]) => rows),
+    ...qc.getQueriesData<CatalogSearchResult>({ queryKey: ['catalog.search'] }).map(([, result]) => (movie ? result?.movies : result?.series)),
+  ];
+  for (const rows of lists) {
+    const hit = find(rows);
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
+/**
+ * placeholderData for an Xtream title's detail query: its cached catalog row, which the query's
+ * `select` wraps as a detail, so the page shows the hero and Play while the provider answers
+ * get_vod_info or get_series_info. Not for m3u, whose detail is the local row already, nor for
+ * Stalker, whose page waits for the details to learn the title's category for the parental gate.
+ */
+function useRowPlaceholder(sourceKind: SourceKind | undefined, ref: ItemRef): (() => VodItem | SeriesItem | undefined) | undefined {
+  const qc = useQueryClient();
+  // One function per title: query-core keeps a placeholder only while the function is the same.
+  return useMemo(() => (sourceKind === 'xtream' ? () => cachedCatalogRow(qc, ref) : undefined), [qc, sourceKind, ref]);
+}
+
+/** The movie's detail; for Xtream, its catalog row stands in until the provider answers (`isPlaceholderData`). */
+export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<VodDetail, RpcError> {
+  const placeholderData = useRowPlaceholder(source?.kind, ref);
+  return useQuery({ ...movieDetailQuery(source?.kind, ref), enabled: !!source, placeholderData });
+}
+
+/** As {@link useMovieDetail}: the placeholder has no seasons, which come with the provider's answer. */
 export function useSeriesDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<SeriesDetail, RpcError> {
-  return useQuery({ ...seriesDetailQuery(source?.kind, ref), enabled: !!source });
+  const placeholderData = useRowPlaceholder(source?.kind, ref);
+  return useQuery({ ...seriesDetailQuery(source?.kind, ref), enabled: !!source, placeholderData });
 }
 
 interface TmdbLookup {
@@ -352,11 +388,12 @@ export function useIsFavorite(ref: ItemRef): boolean {
 }
 
 /**
- * Downloads list kept fresh by `downloads.update` / `downloads.progress` events. With `tracked`,
- * progress refetches only for the ids it holds (the page's own rows, VD-3): a transfer of some
- * other title does not refetch the whole list twice a second.
+ * Downloads list kept fresh by `downloads.update` events (a new row, a status change). Progress
+ * does not refetch it (DL-7): the controls that show a transfer's bytes read its live
+ * `downloads.progress` samples (`useLiveProgress`), so a running download no longer refetches the
+ * whole list twice a second.
  */
-export function useDownloads(enabled = true, tracked?: { readonly current: ReadonlySet<number> }) {
+export function useDownloads(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -367,16 +404,12 @@ export function useDownloads(enabled = true, tracked?: { readonly current: Reado
         void invalidate('downloads.list');
       }, 500);
     };
-    const off1 = onAppEvent('downloads.update', bump);
-    const off2 = onAppEvent('downloads.progress', (e) => {
-      if (!tracked || (e && tracked.current.has(e.id))) bump();
-    });
+    const off = onAppEvent('downloads.update', bump);
     return () => {
-      off1();
-      off2();
+      off();
       if (timer) clearTimeout(timer);
     };
-  }, [enabled, tracked]);
+  }, [enabled]);
   return useRpcQuery('downloads.list', undefined, { enabled, staleTime: 10_000 });
 }
 

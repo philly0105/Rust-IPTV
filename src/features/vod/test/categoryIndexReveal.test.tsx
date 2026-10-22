@@ -8,19 +8,21 @@
  *   under the view (the browser clamped the scroll and the filter field dropped down the view).
  * - IDX-M1: All categories pressed while the categories load is not undone by the landing's
  *   scroll memory when they arrive, and the heading is taken to the top again once the rails they
- *   bring sit above it.
+ *   bring sit above it. The press belongs to its landing: the page stays mounted when another
+ *   source's landing opens, and that one restores its own offset.
  *
  * jsdom has no layout: the tests place the heading with getBoundingClientRect and give the
  * scroller a height, and stand in for the scroll with the scrollIntoView calls.
  */
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { useNavigate } from 'react-router';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Category } from '@/api/types';
 
 import { forgetSpots, rememberSpot } from '../hooks/useScrollMemory';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { currentLocation, findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -205,5 +207,44 @@ describe('IDX-M1: All categories pressed while the categories load', () => {
     release();
     await screen.findAllByTestId('vod-category-chip');
     await waitFor(() => expect(scroller.scrollTop).toBe(1500));
+  });
+
+  it.each(['after', 'before'])("a press on one source's landing %s its categories came leaves the next source's landing alone", async (when) => {
+    // One route for every source, so React Router keeps the page mounted from A's landing to B's.
+    rpcMock.handlers['sources.get'] = (a) => makeSource((a as { id: string }).id, 'xtream', 'Alpha IPTV');
+    if (when === 'before') {
+      rpcMock.handlers['catalog.categories'] = (a) => ((a as { sourceId: string }).sourceId === 'src1' ? new Promise(() => undefined) : cats);
+    }
+    rememberSpot('/s/src2/movies', { scrollTop: 900 });
+    let go: (to: string) => void = () => undefined;
+    function NavProbe() {
+      const navigate = useNavigate();
+      go = (to) => void navigate(to);
+      return null;
+    }
+    renderAt('/s/src1/movies', [
+      {
+        path: '/s/:sourceId/movies',
+        element: (
+          <>
+            <NavProbe />
+            <VodLandingPage kind="movie" />
+          </>
+        ),
+      },
+    ]);
+    if (when === 'after') await heading();
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView');
+    fireEvent.click(await screen.findByTestId('vod-chip-all'));
+    expect(spy).toHaveBeenCalledTimes(1);
+    const scroller = screen.getByTestId('vod-landing-movie');
+    scroller.scrollTop = 300;
+    act(() => go('/s/src2/movies'));
+    await waitFor(() => expect(currentLocation).toBe('/s/src2/movies'));
+    expect(screen.getByTestId('vod-landing-movie')).toBe(scroller);
+    // B's remembered offset comes back, and A's pending reveal does not move B's page.
+    await waitFor(() => expect(scroller.scrollTop).toBe(900));
+    await frames();
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

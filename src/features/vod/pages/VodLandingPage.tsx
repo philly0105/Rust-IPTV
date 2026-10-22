@@ -70,11 +70,16 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // "All categories" in the chip row opens the index under the rails and takes you there.
   const indexToggleRef = useRef<HTMLButtonElement>(null);
   const indexRef = useRef<HTMLDivElement>(null);
-  const [indexVisits, setIndexVisits] = useState(0);
+  const { pathname } = useLocation();
+  // The last press on this landing, a new object per press so the reveal runs for each. React
+  // Router keeps this page mounted from one landing to the next (another source, or Movies to
+  // Series), so a press belongs to the landing it was made on and is dropped when the path changes.
+  const [indexAsked, setIndexAsked] = useState<{ pathname: string }>();
+  if (indexAsked && indexAsked.pathname !== pathname) setIndexAsked(undefined);
   const revealPending = useRef(false);
   const showIndex = () => {
     setIndexOpen(true);
-    setIndexVisits((n) => n + 1);
+    setIndexAsked({ pathname });
     revealPending.current = true;
   };
   const source = useSource(sourceId);
@@ -91,15 +96,14 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // on (the index section says when it starts or stops, not per keystroke). Called here, not in
   // that section: a child's layout effects run before React attaches this page's ref to the
   // scroller, so with the categories cached at mount (Back) the section found no scroller and
-  // never restored or recorded. All categories pressed before the categories arrived skips the
-  // restore (IDX-M1): it would undo the press.
-  const { pathname } = useLocation();
+  // never restored or recorded. All categories pressed on this landing before the categories
+  // arrived skips the restore (IDX-M1): it would undo the press.
   const [indexFiltered, setIndexFiltered] = useState(false);
   useScrollMemory({
     key: pathname,
     getScroller: () => scrollRef.current,
     ready: catsLoaded && !indexFiltered,
-    restore: indexVisits === 0,
+    restore: !indexAsked,
     onRestored: (spot) => {
       if (spot.index === undefined) return;
       indexRef.current?.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
@@ -110,6 +114,11 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   useLayoutEffect(() => {
     const toggle = indexToggleRef.current;
     if (!revealPending.current || !toggle) return;
+    // Pressed on the landing this page showed before: not this one's to reveal.
+    if (!indexAsked) {
+      revealPending.current = false;
+      return;
+    }
     // The heading at the top of the view, and focus on its disclosure (now expanded), so Tab
     // goes on to the filter and the list.
     toggle.scrollIntoView({ block: 'start' });
@@ -117,7 +126,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     // Pressed while the categories load (IDX-M1): their rails go in above the index when they
     // arrive, so the heading is taken to the top once more then.
     if (catsLoaded) revealPending.current = false;
-  }, [indexVisits, catsLoaded]);
+  }, [indexAsked, catsLoaded]);
   const recent = useRecentlyAdded(source.data, kind);
   const resume = useResumeMap(sourceId, kind);
   const continuing = useSectionContinue(sourceId, kind);

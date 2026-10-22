@@ -856,7 +856,8 @@ async fn long_ts_harness() -> (LongTs, Harness, String) {
         serde_json::json!({ "serverUrl": ts.base, "username": "u", "password": "p" }),
     )
     .await;
-    let url = h.proxy_url(&format!("{}{LONG_TS_PATH}", ts.base), Some("x-1"));
+    // mpegts.js asks for parking on its non-live loads.
+    let url = h.proxy_url(&format!("{}{LONG_TS_PATH}", ts.base), Some("x-1")) + "&park=1";
     (ts, h, url)
 }
 
@@ -973,6 +974,27 @@ async fn proxy_does_not_park_a_body_whose_next_request_came_first() {
     drop(old);
     ts.wait_open(1).await;
     assert!(seek.chunk().await.unwrap().is_some());
+    assert_eq!(ts.requests(), 2);
+}
+
+/// Parking is for mpegts.js's lazy loads, which ask for it with `park=1`.
+/// Any other long MPEG-TS body, such as a high-bitrate HLS segment hls.js
+/// drops at a stop or a zap (it never sends `release=1`), lets go of the
+/// provider's connection as soon as the player lets go of it.
+#[tokio::test]
+async fn proxy_parks_only_a_body_the_player_asked_to_park() {
+    let (ts, h, url) = long_ts_harness().await;
+    let segment = url.replace("&park=1", "");
+    let got = read_then_let_go(&h, &segment, 0, 1 << 20).await;
+    ts.wait_open(0).await;
+    let r = h
+        .http
+        .get(&segment)
+        .header(header::RANGE, format!("bytes={got}-"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
     assert_eq!(ts.requests(), 2);
 }
 
@@ -1616,9 +1638,10 @@ async fn proxy_query_headers_override_source_headers() {
         "ChannelUA/2|http://source.example/|https://chan.example"
     );
 
-    // Overrides are carried into rewritten playlists and used by segments.
+    // Overrides are carried into rewritten playlists and used by segments;
+    // `park=1` is not, since hls.js never releases a parked segment.
     let url = format!(
-        "{}&ua=TestUA%2F1&referer=http%3A%2F%2Fref.example%2F",
+        "{}&ua=TestUA%2F1&referer=http%3A%2F%2Fref.example%2F&park=1",
         h.proxy_url(&format!("{stub}/live/index.m3u8"), Some("plain"))
     );
     let r = h.http.get(&url).send().await.unwrap();
@@ -1631,6 +1654,7 @@ async fn proxy_query_headers_override_source_headers() {
         .to_owned();
     assert!(seg.contains("ua=TestUA%2F1"), "{seg}");
     assert!(seg.contains("referer=http%3A%2F%2Fref.example%2F"), "{seg}");
+    assert!(!text.contains("park"), "{text}");
     let r = h.http.get(format!("{}{seg}", h.base)).send().await.unwrap();
     assert_eq!(r.status(), 200);
 }

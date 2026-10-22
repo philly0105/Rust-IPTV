@@ -117,7 +117,7 @@ anything is subscribed:
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
 use it for container and Playwright readiness probes.
 
-### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=&release=]`
+### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=&park=&release=]`
 Used by the web UI (`proxiedUrl()` in `src/api/transport.ts`) when a stream
 needs source headers or would be mixed content.
 
@@ -177,33 +177,40 @@ needs source headers or would be mixed content.
    as the client lets go of the response, which frees the provider's
    connection. Bodies without a length (live MPEG-TS) pass through as they
    come.
-   The exception is a GET for MPEG-TS (`video/mp2t`, `application/x-mpegts`,
-   or an untyped `.ts` path) of 16 MiB or more (`src/proxy/park.rs`):
-   mpegts.js loads catch-up and TS movies lazily, lets go of the request once
-   it holds 60 s ahead and asks for the rest (`Range: bytes=<n>-`) after
-   30 s of playback, which used to close the provider's connection and open
-   a new one about twice a minute, and a panel that ignores Range answered
-   the resume from byte 0. When such a client lets go before the end, its
-   reader parks for 45 s: it keeps the connection and what it read from at
-   least 16 MiB behind what the client took (the socket and the browser
-   still hold some of that), and reads on until it holds 48 MiB. A GET for
-   the same URL, source and header overrides whose `bytes=<n>-` (after
-   `from`) starts at a byte it holds is answered 206 from it, with no new
-   upstream request. Any other request with the same `sourceId` (or for the
-   same host, without one) lets the parked reader go, and waits (at most
-   0.5 s) until the reader has dropped its upstream body before it asks
-   upstream itself, so a seek or the next item doesn't run two connections.
-   A body whose source had a later request never parks: a seek's request can
-   reach the proxy before it notices the old player went away, and that
-   request is the player now. A newer park on that source, the time running
-   out, and `release=1` let the reader go too. `release=1` fetches nothing,
-   answers 204, and keeps a reader of that source from parking for the next
-   5 s, since it can land before the proxy noticed the player let go. The
-   built-in player sends it when it tears an MPEG-TS player down (a stop,
-   another item, Open in MPV) and when the page goes away while one plays
-   (`pagehide`: a closed tab or a reload, where React unmounts nothing), with
-   `keepalive` so the navigation does not cancel it. At most 4 readers are
-   parked at once.
+   The exception is a GET with `park=1` for MPEG-TS (`video/mp2t`,
+   `application/x-mpegts`, or an untyped `.ts` path) of 16 MiB or more
+   (`src/proxy/park.rs`): mpegts.js loads catch-up and TS movies lazily,
+   lets go of the request once it holds 60 s ahead and asks for the rest
+   (`Range: bytes=<n>-`) after 30 s of playback, which used to close the
+   provider's connection and open a new one about twice a minute, and a
+   panel that ignores Range answered the resume from byte 0. When such a
+   client lets go before the end, its reader parks for 45 s: it keeps the
+   connection and what it read from at least 16 MiB behind what the client
+   took (the socket and the browser still hold some of that), and reads on
+   until it holds 48 MiB. A GET for the same URL, source and header
+   overrides whose `bytes=<n>-` (after `from`) starts at a byte it holds is
+   answered 206 from it, with no new upstream request. Any other request
+   with the same `sourceId` (or for the same host, without one) lets the
+   parked reader go, and waits (at most 0.5 s) until the reader has dropped
+   its upstream body before it asks upstream itself, so a seek or the next
+   item doesn't run two connections. A body whose source had a later
+   request never parks: a seek's request can reach the proxy before it
+   notices the old player went away, and that request is the player now. A
+   newer park on that source, the time running out, and `release=1` let the
+   reader go too. `release=1` fetches nothing, answers 204, and keeps a
+   reader of that source from parking for the next 5 s, since it can land
+   before the proxy noticed the player let go. The built-in player sends it
+   when it tears an MPEG-TS player down (a stop, another item, Open in MPV)
+   and when the page goes away while one plays (`pagehide`: a closed tab or
+   a reload, where React unmounts nothing), with `keepalive` so the
+   navigation does not cancel it. At most 4 readers are parked at once.
+   Only mpegts.js's non-live loads send `park=1` (its restarts at a seek
+   included); its seeker's probes and failure-reason requests do not, and
+   the playlist rewriter does not carry it into segment URLs. Before, any
+   long MPEG-TS GET parked, so a 10 s HLS segment of a 4K stream (about
+   31 MB at 25 Mbit/s) that hls.js dropped at a Stop or a zap went on
+   downloading to its end with the provider's connection held, since hls.js
+   never sends `release=1`.
 7. HLS playlists are detected by content type (`*mpegurl*`) or, for untyped
    responses (`text/plain`, `application/octet-stream`, none), by sniffing
    `#EXTM3U` in the first bytes. They are rewritten line by line as chunks

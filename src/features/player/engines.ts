@@ -1139,9 +1139,21 @@ async function mpegtsEngine(
     if (!destroyed) cb.onError(err);
   };
 
+  /**
+   * What mpegts.js loads: a non-live body through the proxy asks it to park for the lazy-load
+   * resume (`park=1`, server.md). Only this player resumes such a body and releases it, so the
+   * proxy parks nothing else (an HLS segment). The reason lookup and the seeker's probes go without.
+   */
+  const withPark = (from: string): string => {
+    if (isLive || !proxyRoute(from)) return from;
+    const u = new URL(from);
+    u.searchParams.set('park', '1');
+    return u.href;
+  };
+
   const start = (from = absolute): void => {
     loadComplete = false;
-    const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: from, cors: true }, config);
+    const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: withPark(from), cors: true }, config);
     player = p;
     p.on(mpegts.Events.ERROR, (type: string, detail: string, info?: { code?: number; msg?: string }) => {
       if (player !== p || destroyed || handedOff) return;

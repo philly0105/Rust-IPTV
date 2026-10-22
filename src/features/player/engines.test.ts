@@ -929,6 +929,36 @@ describe('MPEG-TS restarts at a seek or a resume (PL-2)', () => {
     }
   });
 
+  it('only its own non-live loads ask the proxy to park (park=1), a restart at a seek included (seam-3)', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const proxied = '/api/proxy?url=http%3A%2F%2Fh%2Fv.ts&sourceId=s1';
+      const seeker = seekerOf((t) => ({ url: `${proxied}&from=${t * 1000}`, at: t }));
+      const vod = await createEngine(clockedVideo().el, vodTs(), proxied, cb(), { captions: false, seeker });
+      vod.seek?.(600);
+      await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(2));
+      const asked = FakeTsPlayer.created.map((p) => Object.fromEntries(new URL(p.source.url!).searchParams));
+      expect(asked).toEqual([
+        { url: 'http://h/v.ts', sourceId: 's1', park: '1' },
+        { url: 'http://h/v.ts', sourceId: 's1', from: '600000', park: '1' },
+      ]);
+      // Its release goes out without the flag; the seeker's probes never had it.
+      vod.destroy();
+      expect(new URL(String((fetchMock.mock.calls[0] as unknown[])[0])).searchParams.has('park')).toBe(false);
+
+      // A live stream never parks, and a URL off the proxy goes to the provider as it is.
+      const live = await createEngine(video(), src('http://h/a.ts'), '/api/proxy?url=http%3A%2F%2Fh%2Fa.ts&sourceId=s1', cb(), { captions: false });
+      const direct = await createEngine(video(), vodTs(), 'http://h/v.ts', cb(), { captions: false });
+      expect(new URL(FakeTsPlayer.created[2]!.source.url!).searchParams.has('park')).toBe(false);
+      expect(FakeTsPlayer.created[3]!.source.url).toBe('http://h/v.ts');
+      live.destroy();
+      direct.destroy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('bufferedAt: inside a range, not at its end', () => {
     const { el, state } = clockedVideo();
     state.ranges = [

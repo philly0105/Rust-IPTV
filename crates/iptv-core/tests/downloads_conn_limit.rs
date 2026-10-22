@@ -153,6 +153,22 @@ fn is_mock_content(p: &Path) -> bool {
     got == iptv_fixtures::video_bytes(0, got.len())
 }
 
+/// Holds the SQLite write lock from a separate connection for `hold`, the
+/// way an import's save does.
+fn hold_write_lock(state: &AppState, hold: Duration) -> std::thread::JoinHandle<()> {
+    let path = state.db_path();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let h = std::thread::spawn(move || {
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        tx.send(()).unwrap();
+        std::thread::sleep(hold);
+        conn.execute_batch("COMMIT").unwrap();
+    });
+    rx.recv().unwrap();
+    h
+}
+
 #[test]
 fn the_budget_keeps_one_connection_for_playback() {
     use iptv_core::downloads::manager::download_budget;
@@ -255,6 +271,31 @@ async fn playback_takes_the_connection_from_a_download_and_gives_it_back() {
         .await;
     assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
     assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_download_yielding_to_playback_closes_its_connection_before_saving() {
+    let c = ctx().await;
+    c.files(4 * 1024 * 1024, 512).await;
+    let sid = c.source("limit1").await;
+    let d = c.start(&sid, "limit1", 101).await;
+    c.wait_until(d.id, "made progress", |d| {
+        d.status == DownloadStatus::Downloading && d.bytes_downloaded > 256 * 1024
+    })
+    .await;
+    // An import holds the write lock: the yielding download cannot save its
+    // progress for longer than playback waits for it.
+    let lock = hold_write_lock(&c.state, Duration::from_secs(4));
+    c.playback("player-1", &[&sid]).await;
+    let play = reqwest::get(c.movie_url("limit1", 200)).await.unwrap();
+    assert!(play.status().is_success(), "{}", play.status());
+    drop(play);
+    lock.join().unwrap();
+    c.playback("player-1", &[]).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

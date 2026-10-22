@@ -776,6 +776,16 @@ async fn attempt(
         }
     };
 
+    // The connection closes before the bookkeeping below, unless it is
+    // handed over: the flush, the sync and the progress write can take
+    // seconds (an import holding the write lock), and playback waiting for
+    // this connection gives up after two.
+    let stream = if hand_over {
+        Some(stream)
+    } else {
+        drop(stream);
+        None
+    };
     let flushed = async {
         out.flush().await?;
         out.get_ref().sync_data().await
@@ -795,23 +805,25 @@ async fn attempt(
     if let Err(e) = flushed {
         return error(CoreError::Io(e), started_at, offset);
     }
-    if hand_over && sparse(dest).await {
-        let ranges = Ranges::new(
-            rep.total.unwrap_or(0),
-            rep.validator.clone().unwrap_or_default(),
-            offset,
-        );
-        return segmented(
-            state,
-            row,
-            dest,
-            ctl,
-            mgr,
-            rep,
-            ranges,
-            Some((stream, offset)),
-        )
-        .await;
+    if let Some(stream) = stream {
+        if sparse(dest).await {
+            let ranges = Ranges::new(
+                rep.total.unwrap_or(0),
+                rep.validator.clone().unwrap_or_default(),
+                offset,
+            );
+            return segmented(
+                state,
+                row,
+                dest,
+                ctl,
+                mgr,
+                rep,
+                ranges,
+                Some((stream, offset)),
+            )
+            .await;
+        }
     }
     if hand_over {
         // The file system cannot leave holes: go on with one connection

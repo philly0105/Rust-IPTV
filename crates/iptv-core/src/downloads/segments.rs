@@ -700,6 +700,9 @@ async fn worker(
             }
         }
     }
+    // The connection closes before the last write and the sync, which a
+    // slow disk can hold up while playback waits for it.
+    drop(stream);
     let flushed = async {
         write_at(&mut file, &mut buf, &mut pos, plan, seg).await?;
         file.sync_data().await

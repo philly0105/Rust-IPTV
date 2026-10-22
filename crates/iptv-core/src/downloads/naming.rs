@@ -8,6 +8,7 @@
 //! - completion moves the `.part` to the final path without overwriting; when
 //!   the final path got occupied meanwhile, the next free numbered name wins.
 
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -188,6 +189,22 @@ pub struct Reservation {
     pub file_name: String,
     pub final_path: PathBuf,
     pub part_path: PathBuf,
+}
+
+/// Final paths other unfinished downloads record, matched without regard to
+/// case: NTFS and APFS (the default file systems on Windows and macOS) take
+/// names that differ only in case for one file. Where case tells two names
+/// apart, a reservation only skips a few more names.
+pub struct HeldPaths(HashSet<String>);
+
+impl HeldPaths {
+    pub fn new(paths: impl IntoIterator<Item = String>) -> Self {
+        Self(paths.into_iter().map(|p| p.to_lowercase()).collect())
+    }
+
+    pub fn contains(&self, path: &Path) -> bool {
+        self.0.contains(&path.to_string_lossy().to_lowercase())
+    }
 }
 
 /// Reserves the first free `name`, `name (1)`, ... in `dir`: the final path must
@@ -516,6 +533,18 @@ mod tests {
         // The paused one gets its own name back when it resumes.
         let back = reserve(dir.path(), "Movie.mp4", |p: &Path| p == next.final_path).unwrap();
         assert_eq!(back.final_path, paused);
+    }
+
+    #[test]
+    fn a_name_held_in_another_case_is_held() {
+        let dir = tempfile::tempdir().unwrap();
+        // A paused download recorded Movie.mp4; on NTFS or APFS movie.mp4
+        // is the same file.
+        let paused = dir.path().join("Movie.mp4");
+        let held = HeldPaths::new([paused.to_string_lossy().into_owned()]);
+        assert!(held.contains(&dir.path().join("MOVIE.MP4")));
+        let next = reserve(dir.path(), "movie.mp4", |p| held.contains(p)).unwrap();
+        assert_eq!(next.file_name, "movie (1).mp4");
     }
 
     #[test]

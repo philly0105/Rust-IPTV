@@ -416,12 +416,14 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
     // Names other unfinished rows record are never handed out again.
     let others = state.db_call(move |c| store::held_paths(c, id)).await?;
     let reservation = tokio::task::spawn_blocking(move || -> CoreResult<Reservation> {
-        let held = |p: &Path| others.contains(&*p.to_string_lossy());
+        let held = |p: &Path| others.contains(p);
         if let Some(final_path) = retained {
             let part = naming::part_path(&final_path);
-            // Another unfinished row records this path too (both reserved it
-            // before reservations checked the rows): the `.part` there is
-            // that row's, never adopted or moved.
+            // Another unfinished row records this path too, maybe in another
+            // case (both reserved it before reservations checked the rows):
+            // the `.part` there is that row's, never adopted or moved. Where
+            // case tells the two apart it is this row's own, which then
+            // starts over under a new name instead.
             let ours = !held(&final_path);
             let moved_folder = final_path.parent() != Some(default_dir.as_path());
             if moved_folder && ours {

@@ -303,7 +303,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                 req.file_name_hint.as_deref(),
             );
             let held = store::held_paths(c, id)?;
-            let r = naming::reserve(&dir, &name, |p| held.contains(&*p.to_string_lossy()))?;
+            let r = naming::reserve(&dir, &name, |p| held.contains(p))?;
             store::set_destination(c, id, &r.file_name, &r.final_path.to_string_lossy())?;
             tx.commit()?;
             Ok((id, true))

@@ -117,7 +117,7 @@ anything is subscribed:
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
 use it for container and Playwright readiness probes.
 
-### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=]`
+### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=]`
 Used by the web UI (`proxiedUrl()` in `src/api/transport.ts`) when a stream
 needs source headers or would be mixed content.
 
@@ -131,7 +131,13 @@ needs source headers or would be mixed content.
    `referer` and `origin` query parameters override them, for per-channel
    `#EXTVLCOPT` headers; an override that is not a valid header value, such
    as one with CR/LF, is a 400) and the client's
-   `Range` / `If-Range` (not for `.m3u8`/`.m3u` paths). Redirects are followed by
+   `Range` / `If-Range` (not for `.m3u8`/`.m3u` paths). With `from=<byte>`
+   the body starts at that byte: no Range asks for `bytes=<from>-`, and the
+   client's `bytes=a-b` moves up by `from` (`files::shifted_range`), so the
+   built-in player can restart an MPEG-TS file mid-way and mpegts.js's later
+   Range requests still line up (players.md, Seeking in MPEG-TS). An upstream
+   that answers such a GET with 200, the whole file, is refused with 502
+   instead of being played from its start. Redirects are followed by
    hand, up to 5, and each hop is re-validated. Connect failures and timeouts
    are retried twice with the core's backoff. Response headers must arrive
    within 15 s.
@@ -223,7 +229,11 @@ Serves a completed download for the web player (`myvideos.playSource` returns
 never from the request. Not completed: 409. Missing row, missing file, or a
 path that is not a regular file (directories and symlinks are refused): 404.
 Range, `If-Range`, conditional GET and HEAD are handled by
-`tower_http::services::ServeFile`. `Content-Disposition: inline` (video,
+`tower_http::services::ServeFile`. `?from=<byte>` serves the file as if it
+began at that byte (`files::byte_start`): the request's Range is moved up by it
+before `ServeFile` reads it, and a request without one gets `bytes=<from>-`
+(206). The built-in player seeks in MPEG-TS downloads and recordings that way.
+`Content-Disposition: inline` (video,
 audio and image types) or `attachment` (anything else) with an RFC 5987
 filename, plus the sandbox CSP and `nosniff`. Downloads whose extension is not
 a media/subtitle type are saved as `.bin`.
@@ -232,8 +242,8 @@ a media/subtitle type are saved as `.bin`.
 Serves a recording file for the web player (`recordings.playSource` returns
 `/api/recordings/{id}` in server mode). `id` is a `recordings.library` entry id;
 the core resolves it to a path inside the recordings folder, never taking a
-path from the request. Unknown id or missing file: 404. Range handling and
-headers as for `/api/files`.
+path from the request. Unknown id or missing file: 404. Range handling,
+`?from=<byte>` and headers as for `/api/files`.
 
 ### Everything else: the UI
 `ServeDir` over `--static` (`precompressed_br`, `precompressed_gzip`). When

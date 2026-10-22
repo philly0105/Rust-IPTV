@@ -525,6 +525,62 @@ async fn proxy_passes_range_through() {
     assert_eq!(r.headers()[header::CONTENT_LENGTH], "1000");
 }
 
+/// `from` starts the body at that byte: the client's Range counts from it
+/// (the player's MPEG-TS restart, players.md), and an upstream that ignores
+/// Range is refused rather than played from its start.
+#[tokio::test]
+async fn proxy_starts_a_body_at_from() {
+    let stub = spawn_stub().await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let url = format!(
+        "{}&from=100",
+        h.proxy_url(&format!("{stub}/bytes"), Some("x-1"))
+    );
+
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 100-999/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[100..]);
+
+    // mpegts.js resuming after its lazy-load pause.
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, "bytes=850-")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[950..]);
+
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 110-119/1000");
+
+    let whole = format!(
+        "{}&from=5",
+        h.proxy_url(&format!("{stub}/headers.ts"), Some("x-1"))
+    );
+    let r = h.http.get(&whole).send().await.unwrap();
+    assert_eq!(r.status(), 502);
+    let v: serde_json::Value = r.json().await.unwrap();
+    assert!(
+        v["message"].as_str().unwrap().contains("byte ranges"),
+        "{v}"
+    );
+}
+
 /// The Range and If-Range headers of every request.
 type RangeLog = Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
 
@@ -804,6 +860,33 @@ async fn files_serve_completed_downloads_with_range() {
     assert_eq!(r.headers()[header::ACCEPT_RANGES], "bytes");
     assert_eq!(r.bytes().await.unwrap().len(), 1000);
 
+    // `from`: the file as if it began at that byte.
+    let r = h
+        .http
+        .get(format!("{}/api/files/1?from=100", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 100-999/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[100..]);
+    let r = h
+        .http
+        .get(format!("{}/api/files/1?from=100", h.base))
+        .header(header::RANGE, "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 110-119/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[110..120]);
+    let r = h
+        .http
+        .get(format!("{}/api/files/1?from=1000", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 416);
+
     for (id, status) in [
         ("2", 409),
         ("3", 404),
@@ -819,6 +902,40 @@ async fn files_serve_completed_downloads_with_range() {
             .unwrap();
         assert_eq!(r.status(), status, "download {id}");
     }
+}
+
+#[tokio::test]
+async fn recordings_start_a_file_at_from() {
+    let h = start().await;
+    let dir = h.server.app.downloads_dir().join("recordings");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("rec.ts"), bytes_1000()).unwrap();
+    let id = format!("f.{}", hex_name("rec.ts"));
+
+    let r = h
+        .http
+        .get(format!("{}/api/recordings/{id}?from=376", h.base))
+        .header(header::RANGE, "bytes=0-187")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "video/mp2t");
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 376-563/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[376..564]);
+
+    let r = h
+        .http
+        .get(format!("{}/api/recordings/{id}", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.bytes().await.unwrap().len(), 1000);
+}
+
+fn hex_name(name: &str) -> String {
+    name.bytes().map(|b| format!("{b:02x}")).collect()
 }
 
 #[tokio::test]

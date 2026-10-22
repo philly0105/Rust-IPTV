@@ -2,7 +2,8 @@
 //!
 //! `id` is a `recordings.library` entry id; the core turns it into a path
 //! (never taken from the request) and checks it is a regular file. Headers
-//! follow `files.rs`: sandbox CSP, `nosniff`, inline only for media types.
+//! follow `files.rs`: sandbox CSP, `nosniff`, inline only for media types, and
+//! `?from=<byte>` starts the body at that byte (`files::byte_start`).
 
 use crate::api::error_response;
 use crate::Server;
@@ -14,7 +15,12 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
-pub async fn handler(State(s): State<Server>, Path(id): Path<String>, req: Request) -> Response {
+pub async fn handler(
+    State(s): State<Server>,
+    Path(id): Path<String>,
+    mut req: Request,
+) -> Response {
+    crate::files::start_at_byte(&mut req);
     let target = match iptv_core::recording::library::resolve(&s.app, id.trim()).await {
         Ok(t) => t,
         Err(e) => return error_response(e.into()),

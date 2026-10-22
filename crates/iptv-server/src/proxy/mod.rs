@@ -10,7 +10,9 @@
 //!
 //! `ua`, `referer` and `origin` query parameters override the source's
 //! headers (per-channel `#EXTVLCOPT` headers) and are carried into rewritten
-//! playlists.
+//! playlists. `from=<byte>` starts a media body at that byte, as on the file
+//! routes (`files::byte_start`); an upstream that answers such a request with
+//! the whole file is refused with 502.
 //!
 //! Responses are served from the app's origin, so upstream content must never
 //! run as a page: every response carries `Content-Security-Policy: sandbox;
@@ -95,6 +97,9 @@ pub struct ProxyQuery {
     pub referer: Option<String>,
     /// Origin override.
     pub origin: Option<String>,
+    /// The byte the body starts at (`files::byte_start`): the client's Range
+    /// counts from it. For media only; a playlist is always fetched whole.
+    pub from: Option<u64>,
 }
 
 /// Source headers with the non-empty query overrides applied.
@@ -310,12 +315,39 @@ async fn proxy(
     // Playlists are rewritten whole; never ask for a slice of one.
     let path = url.path().to_ascii_lowercase();
     let forward_range = !(path.ends_with(".m3u8") || path.ends_with(".m3u"));
+    let from = q.from.filter(|&n| n > 0 && forward_range);
+    let shifted;
+    let headers = match from {
+        Some(n) => {
+            let mut h = headers.clone();
+            let range = crate::files::shifted_range(
+                headers.get(header::RANGE).and_then(|v| v.to_str().ok()),
+                n,
+            );
+            if let Ok(v) = HeaderValue::from_str(&range) {
+                h.insert(header::RANGE, v);
+            }
+            shifted = h;
+            &shifted
+        }
+        None => headers,
+    };
 
     let (resp, current) = upstream
         .fetch(&method, url.clone(), headers, forward_range)
         .await?;
 
     check_upstream_status(resp.status())?;
+    // A server that ignores Range answers from byte 0: passed on, the player
+    // would show the time it asked for over the start of the file.
+    if from.is_some() && method == Method::GET && resp.status() == reqwest::StatusCode::OK {
+        return Err(Fail(
+            StatusCode::BAD_GATEWAY,
+            RpcError::network(
+                "The stream server does not take byte ranges, so playback cannot start in the middle of this file.",
+            ),
+        ));
+    }
 
     let params = [
         ("sourceId", source_id.as_deref().unwrap_or("")),

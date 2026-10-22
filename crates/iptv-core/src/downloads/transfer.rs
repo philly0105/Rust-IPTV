@@ -347,9 +347,15 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
         reservation.file_name.clone(),
         reservation.final_path.to_string_lossy().into_owned(),
     );
-    state
-        .db_call(move |c| store::set_destination(c, id, &name, &path))
-        .await?;
+    // `start` already stored the destination it reserved, so a fresh run
+    // usually has nothing to write here.
+    if d.file_name.as_deref() != Some(name.as_str())
+        || d.file_path.as_deref() != Some(path.as_str())
+    {
+        state
+            .db_call(move |c| store::set_destination(c, id, &name, &path))
+            .await?;
+    }
     Ok(Dest {
         file_name: reservation.file_name,
         final_path: reservation.final_path,

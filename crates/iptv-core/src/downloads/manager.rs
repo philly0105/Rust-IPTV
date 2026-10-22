@@ -8,7 +8,7 @@ use crate::model::DownloadStatus;
 use crate::state::AppState;
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -19,6 +19,11 @@ pub const EXT_KEY: &str = "downloads";
 pub const MAX_CONCURRENT: usize = 2;
 /// How long an RPC waits for a running transfer to stop.
 const STOP_TIMEOUT: Duration = Duration::from_secs(15);
+/// Attempts at the `queued -> downloading` claim within one run. The claim
+/// waits for the database, which a long import or guide save can hold.
+pub const CLAIM_ATTEMPTS: u32 = 3;
+/// How long an id whose claims all failed waits before it is queued again.
+const CLAIM_RETRY: Duration = Duration::from_secs(30);
 
 /// Why a running transfer was asked to stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +80,10 @@ pub struct DownloadManager {
     /// defaults ([`crate::http::HEADER_TIMEOUT`], [`crate::http::BODY_IDLE_TIMEOUT`]).
     /// Tests only.
     idle_timeout_ms: AtomicU64,
+    /// Claims that fail on purpose before a real one runs. Tests only.
+    failing_claims: AtomicU32,
+    /// [`CLAIM_RETRY`] override in milliseconds; 0 = default. Tests only.
+    claim_retry_ms: AtomicU64,
 }
 
 /// What a stop request found.
@@ -131,6 +140,22 @@ impl DownloadManager {
             u64::try_from(t.as_millis()).unwrap_or(u64::MAX).max(1)
         });
         self.idle_timeout_ms.store(ms, Ordering::Relaxed);
+    }
+
+    /// Makes the next `failures` claims fail and an id whose claims all
+    /// failed come back after `retry` instead of [`CLAIM_RETRY`]. Used by
+    /// tests.
+    pub fn fail_next_claims(&self, failures: u32, retry: Duration) {
+        self.failing_claims.store(failures, Ordering::Relaxed);
+        let ms = u64::try_from(retry.as_millis()).unwrap_or(u64::MAX).max(1);
+        self.claim_retry_ms.store(ms, Ordering::Relaxed);
+    }
+
+    fn claim_retry(&self) -> Duration {
+        match self.claim_retry_ms.load(Ordering::Relaxed) {
+            0 => CLAIM_RETRY,
+            ms => Duration::from_millis(ms),
+        }
     }
 
     /// Live byte count of a running transfer.
@@ -257,19 +282,44 @@ pub async fn wait_stopped(
     }
 }
 
+/// The conditional `queued -> downloading` claim, retried with backoff a
+/// few times when the database is busy or briefly unavailable.
+async fn claim(state: &Arc<AppState>, mgr: &DownloadManager, id: i64) -> CoreResult<bool> {
+    let mut attempt = 0;
+    loop {
+        let simulated = mgr
+            .failing_claims
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+            .is_ok();
+        let claimed = if simulated {
+            Err(CoreError::Timeout("simulated claim failure".into()))
+        } else {
+            state
+                .db_call(move |c| {
+                    store::transition(
+                        c,
+                        id,
+                        &[DownloadStatus::Queued],
+                        DownloadStatus::Downloading,
+                        None,
+                    )
+                })
+                .await
+        };
+        match claimed {
+            Err(err) if attempt + 1 < CLAIM_ATTEMPTS => {
+                tracing::warn!(id, attempt, error = %err, "could not claim download; retrying");
+                tokio::time::sleep(crate::http::backoff_delay(attempt)).await;
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
 async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl: Arc<TaskCtl>) {
-    let claimed = state
-        .db_call(move |c| {
-            store::transition(
-                c,
-                id,
-                &[DownloadStatus::Queued],
-                DownloadStatus::Downloading,
-                None,
-            )
-        })
-        .await;
-    match claimed {
+    let mut retry_later = false;
+    match claim(&state, &mgr, id).await {
         Ok(true) => {
             state.emit("downloads.update", serde_json::json!({}));
             // A panic in the transfer must still free the concurrency slot
@@ -294,11 +344,24 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
             persist_outcome(&state, id, outcome).await;
         }
         Ok(false) => tracing::debug!(id, "download no longer queued; skipping"),
-        Err(err) => tracing::error!(id, error = %err, "could not claim download"),
+        Err(err) => {
+            // The row is still `queued` in the database: dropping the id
+            // would leave it waiting with no task until the next launch.
+            let delay = mgr.claim_retry();
+            tracing::error!(id, error = %err, ?delay, "could not claim download; queueing it again later");
+            retry_later = !ctl.token.is_cancelled();
+        }
     }
     mgr.inner.lock().active.remove(&id);
     ctl.done.send_replace(true);
     state.emit("downloads.update", serde_json::json!({}));
+    if retry_later {
+        let (state, delay) = (state.clone(), mgr.claim_retry());
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            enqueue_front(&state, id);
+        });
+    }
     pump(&state, &mgr);
 }
 

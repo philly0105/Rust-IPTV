@@ -356,6 +356,18 @@ async fn a_server_that_sends_a_few_bytes_then_stalls_is_not_retried_forever() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_claim_is_retried_instead_of_leaving_the_row_queued() {
+    let c = ctx().await;
+    // Every claim of the first run fails, so the id goes back in the queue
+    // after the retry delay, and the next run's first claim fails as well.
+    let attempts = iptv_core::downloads::manager::CLAIM_ATTEMPTS;
+    iptv_core::downloads::fail_next_claims(&c.state, attempts + 1, Duration::from_millis(200));
+    let d = c.start("1", "claim", "/files/video.bin?size=1048576").await;
+    let done = c.wait_status(d.id, DownloadStatus::Completed).await;
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn existing_destination_is_never_overwritten() {
     let mut c = ctx().await;
     let dir = c.downloads_dir();

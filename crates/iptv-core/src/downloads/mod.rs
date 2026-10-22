@@ -71,6 +71,13 @@ pub fn set_idle_timeout(state: &AppState, timeout: Option<std::time::Duration>) 
     manager::manager(state).set_idle_timeout(timeout);
 }
 
+/// Makes the next `failures` queued -> downloading claims fail, and an id
+/// whose claims all failed come back after `retry` (30 s otherwise). Test
+/// hook; not a C4 command.
+pub fn fail_next_claims(state: &AppState, failures: u32, retry: std::time::Duration) {
+    manager::manager(state).fail_next_claims(failures, retry);
+}
+
 /// Public view of a row: live byte count for running transfers and derived
 /// `fileAvailable`.
 fn present(state: &AppState, mut d: Download) -> Download {

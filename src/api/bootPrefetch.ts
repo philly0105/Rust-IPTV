@@ -44,6 +44,25 @@ export function channelPageArgs(list: ChannelListArgs, page: number, size: numbe
   };
 }
 
+/**
+ * Live's pinned views, Favorites and Recently watched, by the ids the route has where a group id
+ * would be (`/s/:id/live/@favorites`, `?category=@recent` on Radio).
+ */
+export const LIVE_VIEW_ID = { favorites: '@favorites', recent: '@recent' } as const;
+
+/** Recently watched entries Live's view reads. */
+export const LIVE_RECENT_LIMIT = 100;
+
+/** `favorites.list` as Live's Favorites view (and the guide's) asks it: the source's favorites. */
+export function liveFavoritesArgs(sourceId: string): RpcArgs<'favorites.list'> {
+  return { sourceId };
+}
+
+/** `recent.list` as Live's Recently watched view asks it. */
+export function liveRecentArgs(sourceId: string): RpcArgs<'recent.list'> {
+  return { sourceId, limit: LIVE_RECENT_LIMIT };
+}
+
 /** `catalog.recentlyAdded` for the recently added rail of a source kept in SQLite (not Stalker). */
 export function recentlyAddedArgs(sourceId: string, kind: 'movie' | 'series', limit: number = RECENTLY_ADDED_LIMIT): RpcArgs<'catalog.recentlyAdded'> {
   return { sourceId, contentType: kind, limit };
@@ -82,6 +101,9 @@ function prefetch<K extends RpcCommand>(cmd: K, args: RpcArgs<K>): void {
 function prefetchChannelList(sourceId: string, categoryId: string | undefined, radio: boolean): void {
   prefetch('sources.get', { id: sourceId });
   prefetch('catalog.categories', categoriesArgs(sourceId, radio ? 'radio' : 'live'));
+  // The pinned views list the user's entries, not a page of a group: no group has their ids.
+  if (categoryId === LIVE_VIEW_ID.favorites) return prefetch('favorites.list', liveFavoritesArgs(sourceId));
+  if (categoryId === LIVE_VIEW_ID.recent) return prefetch('recent.list', liveRecentArgs(sourceId));
   prefetch('catalog.channels', channelPageArgs({ sourceId, categoryId, radio }, 0));
 }
 
@@ -129,7 +151,8 @@ function prefetchHome(): void {
 
 /**
  * Starts the first requests of the page at `path` (pathname and query), if it is a channel list
- * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`), a VOD landing page
+ * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`, Favorites and Recently watched
+ * included), a VOD landing page
  * (`/s/:id/movies`, `/s/:id/series`) or Home (`/dashboard`). Any other path asks for nothing.
  */
 export function prefetchScreenData(path: string): void {

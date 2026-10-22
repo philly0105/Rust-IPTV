@@ -8,6 +8,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { useLiveViewChannels } from '@/features/live/hooks/useLiveViewChannels';
 import { usePagedChannels } from '@/features/live/hooks/usePagedChannels';
 import { LIST_KEY } from '@/features/mylist/lib/cache';
 import { useRecentlyAdded, useSource } from '@/features/vod/hooks/queries';
@@ -20,6 +21,8 @@ import {
   homeFavoritesArgs,
   homeRecentArgs,
   homeRecentlyAddedArgs,
+  liveFavoritesArgs,
+  liveRecentArgs,
   prefetchScreenData,
   recentlyAddedArgs,
 } from './bootPrefetch';
@@ -36,6 +39,7 @@ vi.mock('./transport', async (importOriginal) => ({
     if (cmd === 'settings.get') return sources.settings;
     if (cmd === 'catalog.channels') return { items: [], total: 0 };
     if (cmd === 'catalog.categories' || cmd === 'catalog.recentlyAdded') return [];
+    if (cmd === 'favorites.list' || cmd === 'recent.list') return [];
     return {};
   }),
 }));
@@ -68,6 +72,21 @@ describe('prefetchScreenData', () => {
     await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
     expect(calls('catalog.categories')).toEqual([categoriesArgs('s1', 'radio')]);
     expect(calls('catalog.channels')).toEqual([channelPageArgs({ sourceId: 's1', categoryId: 'r2', radio: true }, 0)]);
+  });
+
+  it("asks for Live's Favorites and Recently watched by their lists, not as a group's channel page", async () => {
+    prefetchScreenData('/s/s1/live/@favorites');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('favorites.list')).toEqual([{ sourceId: 's1' }]);
+    expect(calls('catalog.channels')).toEqual([]);
+    expect(calls('sources.get')).toEqual([{ id: 's1' }]);
+    queryClient.clear();
+    raw.mockClear();
+    prefetchScreenData('/s/s1/radio?category=@recent');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('recent.list')).toEqual([{ sourceId: 's1', limit: 100 }]);
+    expect(calls('catalog.categories')).toEqual([categoriesArgs('s1', 'radio')]);
+    expect(calls('catalog.channels')).toEqual([]);
   });
 
   it('asks for a VOD landing page: the groups and, for a SQLite source, the recently added rail', async () => {
@@ -136,6 +155,16 @@ describe('the pages read what the boot prefetch asked for', () => {
     const { result } = renderHook(() => usePagedChannels({ sourceId: 's1', categoryId: 'c9' }), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(calls('catalog.channels')).toHaveLength(1);
+  });
+
+  it.each([
+    ['favorites', '/s/s1/live/@favorites', 'favorites.list', liveFavoritesArgs('s1')],
+    ['recent', '/s/s1/live/@recent', 'recent.list', liveRecentArgs('s1')],
+  ] as const)("Live's %s view sends no second request for its list", async (view, path, cmd, args) => {
+    prefetchScreenData(path);
+    const { result } = renderHook(() => useLiveViewChannels(view, { sourceId: 's1', contentType: 'live' }), { wrapper });
+    await waitFor(() => expect(result.current?.total).toBe(0));
+    expect(calls(cmd)).toEqual([args]);
   });
 
   it('useRecentlyAdded sends no second request for the rail', async () => {

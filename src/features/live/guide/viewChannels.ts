@@ -8,6 +8,7 @@
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 
+import { liveFavoritesArgs } from '@/api/bootPrefetch';
 import { rpcKey, useRpcQuery } from '@/api/query';
 import { rpcRaw, type RpcResult } from '@/api/transport';
 import { sameRef, type Channel, type FavoriteEntry, type ItemRef } from '@/api/types';
@@ -49,7 +50,7 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
   const listId = view?.kind === 'list' ? view.id : '';
   const favoritesOn = view?.kind === 'favorites' && !!sourceId;
   const list = useRpcQuery('lists.items', { id: listId }, { enabled: !!listId, staleTime: 60_000 });
-  const favs = useRpcQuery('favorites.list', { sourceId }, { enabled: favoritesOn });
+  const favs = useRpcQuery('favorites.list', liveFavoritesArgs(sourceId), { enabled: favoritesOn });
 
   const listChannels = useMemo(
     () =>

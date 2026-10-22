@@ -164,7 +164,8 @@ describe('CategoryGridPage: back from a detail view', () => {
     await screen.findByText('Movie 2');
     await waitFor(() => expect(optionAt(2)?.getAttribute('data-active')).toBe('true'));
     expect(listbox().scrollTop).toBe(120);
-    expect(document.activeElement).toBe(listbox());
+    // Focus comes in the frame after the restore (useScrollMemory's onRestored), the cursor at mount.
+    await waitFor(() => expect(document.activeElement).toBe(listbox()));
     expect(currentLocation).toBe('/s/src1/movies/c/c1');
   });
 

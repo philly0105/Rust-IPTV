@@ -3,15 +3,29 @@
  * press Alt+ArrowUp / Alt+ArrowDown anywhere in a row. Plain ArrowUp/Down
  * moves focus to the same control in the row above or below. After a move
  * focus stays on the control that had it, and a polite live region says
- * where the row went.
+ * where the row went. With `virtual`, only the rows near the screen are
+ * mounted (Edit channels holds up to 2,000), and a keyboard move or step
+ * scrolls its row into view.
  */
 
+import { defaultRangeExtractor, type Range } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react';
 import type { TFunction } from 'i18next';
-import { memo, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { IconButton, Tooltip, cn } from '../deps';
+import { IconButton, Tooltip, cn, useListVirtualizer } from '../deps';
 
 export interface SortableListProps<T> {
   items: readonly T[];
@@ -27,27 +41,58 @@ export interface SortableListProps<T> {
   /** Extra classes for a row (a flex row: the grip, `renderRow`'s content, then the move arrows below md). */
   rowClassName?: (item: T) => string | undefined;
   testId?: string;
+  /**
+   * Mount only the rows near the screen. The list then scrolls in its own box, with these classes
+   * (its height cap and overflow), and every row is `rowHeight` px tall.
+   */
+  virtual?: { rowHeight: number; scrollerClassName: string };
 }
 
 type Over = { key: string; where: 'before' | 'after' };
 
 export function SortableList<T>(props: SortableListProps<T>) {
-  const { items, getKey, getLabel, onMove, renderRow, label, locked, rowClassName, testId } = props;
+  const { items, getKey, getLabel, onMove, renderRow, label, locked, rowClassName, testId, virtual } = props;
   const { t } = useTranslation('lists');
   const [drag, setDrag] = useState<{ key: string; over?: Over } | null>(null);
   const [announce, setAnnounce] = useState('');
   const pendingFocus = useRef<{ key: string; part: string } | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
 
-  // Put focus back on the control that had it once the moved row re-renders.
+  // A dragged row stays mounted while it scrolls out of view: its dragend has to reach React.
+  const dragIndex = drag ? items.findIndex((x) => getKey(x) === drag.key) : -1;
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const shown = defaultRangeExtractor(range);
+      return dragIndex < 0 || shown.includes(dragIndex) ? shown : [...shown, dragIndex].sort((a, b) => a - b);
+    },
+    [dragIndex],
+  );
+  const virtualizer = useListVirtualizer({
+    count: virtual ? items.length : 0,
+    getScrollElement: () => scrollerRef.current,
+    estimateSize: () => virtual?.rowHeight ?? 0,
+    overscan: 8,
+    initialRect: { width: 480, height: 520 },
+    rangeExtractor,
+  });
+
+  // Put focus back on the control that had it once the moved row re-renders. A virtual list may
+  // render the row only once it has scrolled to it; a row that left the list is not waited for.
   useLayoutEffect(() => {
     const want = pendingFocus.current;
     if (!want || !listRef.current) return;
-    pendingFocus.current = null;
     const row = listRef.current.querySelector<HTMLElement>(`[data-sort-key="${CSS.escape(want.key)}"]`);
+    if (!row && virtual && items.some((x) => getKey(x) === want.key)) return;
+    pendingFocus.current = null;
     const el = row?.querySelector<HTMLElement>(`[data-sort-part="${CSS.escape(want.part)}"]`) ?? row?.querySelector<HTMLElement>('[data-sort-part]');
     if (el && document.activeElement !== el) el.focus();
   });
+
+  /** Brings row `index` into view in a virtual list (an outer list shows every row). */
+  const reveal = (index: number) => {
+    if (virtual) virtualizer.scrollToIndex(index, { align: 'auto' });
+  };
 
   const moveBy = (index: number, delta: number, part: string) => {
     const to = index + delta;
@@ -55,6 +100,7 @@ export function SortableList<T>(props: SortableListProps<T>) {
     if (!item || to < 0 || to >= items.length || locked?.(item)) return;
     pendingFocus.current = { key: getKey(item), part };
     onMove(index, to);
+    reveal(to);
     setAnnounce(t('movedTo', { name: getLabel(item), position: to + 1, total: items.length }));
   };
 
@@ -77,8 +123,12 @@ export function SortableList<T>(props: SortableListProps<T>) {
     // Plain arrows walk the same control up and down the rows.
     const next = items[index + delta];
     if (!next) return;
+    reveal(index + delta);
     const row = listRef.current?.querySelector<HTMLElement>(`[data-sort-key="${CSS.escape(getKey(next))}"]`);
-    (row?.querySelector<HTMLElement>(`[data-sort-part="${CSS.escape(part)}"]`) ?? row?.querySelector<HTMLElement>('[data-sort-part]'))?.focus();
+    const el = row?.querySelector<HTMLElement>(`[data-sort-part="${CSS.escape(part)}"]`) ?? row?.querySelector<HTMLElement>('[data-sort-part]');
+    if (el) el.focus();
+    // Not mounted yet: the layout effect focuses it once the scroll has rendered it.
+    else pendingFocus.current = { key: getKey(next), part };
   };
 
   const onDragOver = (e: DragEvent<HTMLLIElement>, key: string) => {
@@ -122,30 +172,51 @@ export function SortableList<T>(props: SortableListProps<T>) {
     [],
   );
 
+  const row = (item: T, index: number, top?: number) => {
+    const key = getKey(item);
+    return (
+      <SortableRow<T>
+        key={key}
+        item={item}
+        index={index}
+        last={index === items.length - 1}
+        rowKey={key}
+        name={getLabel(item)}
+        isLocked={locked?.(item) ?? false}
+        over={drag?.over?.key === key ? drag.over.where : undefined}
+        dragging={drag?.key === key}
+        className={rowClassName?.(item)}
+        renderRow={renderRow}
+        handlers={handlers}
+        t={t}
+        top={top}
+        height={virtual?.rowHeight}
+        setSize={virtual ? items.length : undefined}
+      />
+    );
+  };
+
+  const list = (
+    <ul
+      ref={listRef}
+      aria-label={label}
+      className="flex flex-col"
+      data-testid={testId}
+      style={virtual ? { position: 'relative', height: virtualizer.getTotalSize() } : undefined}
+    >
+      {virtual ? virtualizer.getVirtualItems().map((v) => row(items[v.index]!, v.index, v.start)) : items.map((item, index) => row(item, index))}
+    </ul>
+  );
+
   return (
     <>
-      <ul ref={listRef} aria-label={label} className="flex flex-col" data-testid={testId}>
-        {items.map((item, index) => {
-          const key = getKey(item);
-          return (
-            <SortableRow<T>
-              key={key}
-              item={item}
-              index={index}
-              last={index === items.length - 1}
-              rowKey={key}
-              name={getLabel(item)}
-              isLocked={locked?.(item) ?? false}
-              over={drag?.over?.key === key ? drag.over.where : undefined}
-              dragging={drag?.key === key}
-              className={rowClassName?.(item)}
-              renderRow={renderRow}
-              handlers={handlers}
-              t={t}
-            />
-          );
-        })}
-      </ul>
+      {virtual ? (
+        <div ref={scrollerRef} className={virtual.scrollerClassName}>
+          {list}
+        </div>
+      ) : (
+        list
+      )}
       <p className="sr-only" aria-live="polite" role="status">
         {announce}
       </p>
@@ -178,12 +249,35 @@ interface SortableRowProps<T> {
   handlers: RowHandlers;
   /** The `lists` namespace. */
   t: TFunction;
+  /** In a virtual list: the row's offset and height, and the list's length for screen readers. */
+  top?: number;
+  height?: number;
+  setSize?: number;
 }
 
-const SortableRow = memo(function SortableRow<T>({ item, index, last, rowKey: key, name, isLocked, over, dragging, className, renderRow, handlers, t }: SortableRowProps<T>) {
+const SortableRow = memo(function SortableRow<T>({
+  item,
+  index,
+  last,
+  rowKey: key,
+  name,
+  isLocked,
+  over,
+  dragging,
+  className,
+  renderRow,
+  handlers,
+  t,
+  top,
+  height,
+  setSize,
+}: SortableRowProps<T>) {
   return (
     <li
       data-sort-key={key}
+      aria-setsize={setSize}
+      aria-posinset={setSize === undefined ? undefined : index + 1}
+      style={top === undefined ? undefined : { position: 'absolute', top: 0, left: 0, right: 0, height, transform: `translateY(${top}px)` }}
       onKeyDown={(e) => handlers.keyDown(e, index)}
       onDragOver={(e) => handlers.dragOver(e, key)}
       onDrop={handlers.drop}

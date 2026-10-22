@@ -10,12 +10,34 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type CustomListEntry } from '@/api/types';
 
-import { Button, ChannelLogo, Dialog, EmptyState, ErrorState, IconButton, QualityFilterNote, Skeleton, cn, displayChannelName, useDisplayPrefs, useLiveQuality, useVisibleSources } from '../deps';
+import {
+  Button,
+  ChannelLogo,
+  Dialog,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  QualityFilterNote,
+  Skeleton,
+  cn,
+  displayChannelName,
+  useDisplayPrefs,
+  useLiveQuality,
+  useRowHeight,
+  useVisibleSources,
+} from '../deps';
 import { SortableList } from '../components/SortableList';
 import { useListActions } from '../hooks/useListActions';
 import { useListItems, useLists } from '../hooks/useLists';
 import { move } from '../lib/cache';
 import { openManageLists } from '../store';
+
+/**
+ * A row at 100 %: the two text lines (text-sm and text-xs, 33.75 px), its py-1.5 padding and its
+ * border. The padding is the part compact density tightens.
+ */
+const ROW_PX = 46;
+const ROW_SPACING_PX = 11;
 
 export function EditItemsDialog({ listId, fromManage, onClose }: { listId: string; fromManage: boolean; onClose(): void }) {
   const { t } = useTranslation('lists');
@@ -30,6 +52,9 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
   const sourceName = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const focusAfter = useRef<string | null | undefined>(undefined);
+  // A list holds up to 2,000 channels: only the rows near the screen are mounted.
+  const rowHeight = useRowHeight(ROW_PX, ROW_SPACING_PX);
+  const virtual = useMemo(() => ({ rowHeight, scrollerClassName: '-mx-2 max-h-[min(60vh,520px)] overflow-y-auto px-2' }), [rowHeight]);
 
   const entries = items.data ?? [];
   const strip = prefs.stripCountryPrefix;
@@ -111,18 +136,17 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
     );
   } else {
     body = (
-      <div className="-mx-2 max-h-[min(60vh,520px)] overflow-y-auto px-2">
-        <SortableList<CustomListEntry>
-          items={entries}
-          label={list.name}
-          testId="edit-list-items"
-          getKey={entryKey}
-          getLabel={nameOf}
-          onMove={onMove}
-          rowClassName={unavailableClass}
-          renderRow={renderRow}
-        />
-      </div>
+      <SortableList<CustomListEntry>
+        items={entries}
+        virtual={virtual}
+        label={list.name}
+        testId="edit-list-items"
+        getKey={entryKey}
+        getLabel={nameOf}
+        onMove={onMove}
+        rowClassName={unavailableClass}
+        renderRow={renderRow}
+      />
     );
   }
 

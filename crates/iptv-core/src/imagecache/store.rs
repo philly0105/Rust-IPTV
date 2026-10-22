@@ -27,7 +27,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Semaphore};
 
 /// Operations applied in one transaction at most.
 const MAX_BATCH: usize = 256;
@@ -185,6 +185,8 @@ pub(super) async fn write_file(dir: &Path, key: &str, body: Vec<u8>) -> CoreResu
 /// The writer task's state.
 pub(super) struct Writer {
     pub pool: DbPool,
+    /// Taken by a batch that writes; see `AppState::db_background`.
+    pub gate: Arc<Semaphore>,
     pub db_path: PathBuf,
     pub dir: PathBuf,
     pub settings: Arc<RwLock<Settings>>,
@@ -230,6 +232,16 @@ pub(super) async fn run(mut w: Writer, mut rx: mpsc::UnboundedReceiver<Op>) {
             .map(str::to_owned)
             .collect();
         protected.extend(w.pending.lock().keys().cloned());
+        // A batch that writes passes the background gate first, so while an
+        // import holds the write lock it waits there, not on a connection. A
+        // batch of barriers alone only reads the total unless the cache is
+        // over its cap; `images.stats` sends one and must not wait behind an
+        // import.
+        let _permit = if ops.iter().all(|o| matches!(o, Op::Evict { .. })) {
+            None
+        } else {
+            w.gate.clone().acquire_owned().await.ok()
+        };
         let batch = Batch {
             pool: w.pool.clone(),
             db_path: w.db_path.clone(),

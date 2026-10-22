@@ -80,6 +80,20 @@ async fn app() -> App {
                 }
             }
             ins.execute(params!["s2", "movie", "m1", "c1", "Alpha Twin", 1999, 0])?;
+            // As `CatalogWriter::finish` leaves them: a category row for every
+            // item and its count (unfiltered totals add the counts up).
+            c.execute(
+                "INSERT INTO categories(source_id, content_type, category_id, name, position)
+                 VALUES ('s2', 'movie', 'c1', 'Action', 0)",
+                [],
+            )?;
+            for (source, ct) in [
+                ("s1", ContentType::Movie),
+                ("s1", ContentType::Series),
+                ("s2", ContentType::Movie),
+            ] {
+                iptv_core::catalog::recount_categories(c, source, ct)?;
+            }
             Ok(())
         })
         .await

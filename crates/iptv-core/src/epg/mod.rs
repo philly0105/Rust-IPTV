@@ -388,7 +388,7 @@ pub async fn set_enabled(state: Arc<AppState>, url: String, enabled: bool) -> Co
         )
     })?;
     let needs_data = state
-        .db_call(move |c| {
+        .db_write(move |c| {
             store::set_enabled(c, &cfg, enabled)?;
             Ok(store::source_row(c, &cfg.url)?
                 .is_none_or(|r| r.program_count == 0 && r.status != "fetching"))

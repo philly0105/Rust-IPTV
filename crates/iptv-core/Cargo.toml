@@ -57,4 +57,5 @@ tempfile = { workspace = true }
 memory-stats = { workspace = true }
 iptv-fixtures = { workspace = true }
 iptv-mock = { workspace = true }
-tokio = { workspace = true }
+# test-util: paused time, for timers too slow to wait out (recording byte saves).
+tokio = { workspace = true, features = ["test-util"] }

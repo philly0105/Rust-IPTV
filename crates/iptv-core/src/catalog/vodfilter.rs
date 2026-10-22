@@ -2,8 +2,8 @@
 //! for `catalog.movies` / `catalog.series`, and the year facets behind the
 //! decade chips (`catalog.yearFacets`). See `docs/architecture/vod-browsing.md`.
 //!
-//! [`vod_filter_sql`] is appended by [`super::query_named`] to both the count
-//! and the page statement, so `total` always counts the filtered set.
+//! [`vod_filter_sql_on`] is appended by [`super::query_named`] to both the
+//! count and the page statement, so `total` always counts the filtered set.
 //!
 //! - Year bounds compare `items.year`; a NULL year fails every comparison, so
 //!   titles without a year drop out as soon as either bound is set.
@@ -86,7 +86,8 @@ pub fn vod_filter_sql(f: &VodFilter, args: &mut Vec<SqlValue>) -> String {
 
 /// [`vod_filter_sql`] comparing `year_col` (`i.year`, or `+i.year` in a page
 /// statement sorted by another key, which keeps the year range off the index
-/// choice so the sort's index answers the page without a temp b-tree).
+/// choice so the sort's index answers the page without a temp b-tree, and in
+/// a category's count, which then reads the category's range).
 pub fn vod_filter_sql_on(f: &VodFilter, year_col: &str, args: &mut Vec<SqlValue>) -> String {
     let mut sql = String::new();
     if f.year_from.is_some() || f.year_to.is_some() {

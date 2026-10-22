@@ -230,6 +230,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0023_stream_format_auto",
         sql: include_str!("migrations/0023_stream_format_auto.sql"),
     },
+    // catalog: category pages in date-added order from their own range.
+    Migration {
+        version: 24,
+        name: "0024_category_added_index",
+        sql: include_str!("migrations/0024_category_added_index.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

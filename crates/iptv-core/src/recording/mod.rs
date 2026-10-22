@@ -1587,7 +1587,7 @@ fn spawn_progress(
                 let key = id.clone();
                 // Bytes only: the parts list is the engine's to write.
                 if let Err(e) = state
-                    .db_call(move |c| store::set_bytes(c, &key, bytes))
+                    .db_background(move |c| store::set_bytes(c, &key, bytes))
                     .await
                 {
                     tracing::debug!(error = %e, "could not save recording bytes");
@@ -2042,5 +2042,59 @@ mod tests {
         let t = 1_800_000_000;
         assert_eq!(parse_time("start", &rfc3339(t)).unwrap(), t);
         assert!(parse_time("start", "tomorrow").is_err());
+    }
+
+    /// DB-1R: the byte count saved every [`SAVE_BYTES_EVERY`] ticks passes
+    /// `AppState::db_background`'s gate, so while another background write
+    /// holds it (one parked on an import's write lock) the save waits there
+    /// instead of on a connection. Paused time: the save is due 8 s in.
+    #[tokio::test(start_paused = true)]
+    async fn byte_saves_wait_at_the_background_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        state
+            .db_call(|c| {
+                c.execute(
+                    "INSERT INTO recordings (id, source_id, content_type, item_id, channel_name,
+                       kind, start_at, end_at, status, created_at)
+                     VALUES ('r1', 's1', 'live', 'c1', 'Alpha', 'programme', 0, 1, 'recording', 0)",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let saved = |state: Arc<AppState>| async move {
+            state
+                .db_call(|c| {
+                    let sql = "SELECT bytes FROM recordings WHERE id = 'r1'";
+                    Ok(c.query_row(sql, [], |r| r.get::<_, i64>(0))?)
+                })
+                .await
+                .unwrap()
+        };
+        let part = dir.path().join("r1.ts");
+        std::fs::write(&part, vec![0u8; 4096]).unwrap();
+        let held = state.background_gate().acquire_owned().await.unwrap();
+        let ticker = spawn_progress(
+            state.clone(),
+            "r1".into(),
+            vec![part.to_string_lossy().into_owned()],
+            0,
+        );
+        // The first tick is at once, so the fifth (the save) comes at 8 s.
+        tokio::time::sleep(PROGRESS_EVERY * SAVE_BYTES_EVERY).await;
+        assert_eq!(saved(state.clone()).await, 0, "the save waits at the gate");
+        drop(held);
+        // The gate admits in order, so this passes once the save is done.
+        state.db_background(|_| Ok(())).await.unwrap();
+        assert_eq!(saved(state.clone()).await, 4096);
+        ticker.abort();
     }
 }

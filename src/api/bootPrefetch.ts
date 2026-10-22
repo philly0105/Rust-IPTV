@@ -12,6 +12,9 @@
 
 import { matchPath } from 'react-router';
 
+// A leaf module (no imports): the source the guide opens on when its URL names none.
+import { defaultGuideSource } from '@/features/live/guide/lastSource';
+
 import { queryClient, rpcKey, type RpcCommand } from './query';
 import { rpcRaw, type RpcArgs } from './transport';
 import type { Channel, ContentType, ItemRef, Page, Settings, Source } from './types';
@@ -81,6 +84,25 @@ export function favoritesContainsArgs(refs: ItemRef[]): RpcArgs<'favorites.conta
 export function epgOffsetMinutesOf(settings: Settings | undefined): number {
   const offset = Number((settings as { epgOffsetMinutes?: unknown } | undefined)?.epgOffsetMinutes ?? 0);
   return Number.isFinite(offset) ? Math.trunc(offset) : 0;
+}
+
+/** `catalog.categories` as the guide's group picker asks it: the shown groups only. */
+export function guideCategoriesArgs(sourceId: string): RpcArgs<'catalog.categories'> {
+  return { sourceId, contentType: 'live' };
+}
+
+/** Asks for the guide's first grid chunk for these rows, as the guide page will (see {@link setGuideGridPrefetch}). */
+export type GuideGridPrefetch = (refs: ItemRef[], params: URLSearchParams, settings: Settings | undefined) => void;
+
+let guideGrid: GuideGridPrefetch | null = null;
+
+/**
+ * Set by the guide page's module as it loads. The grid's window follows the page's width, which
+ * only a guide laid out earlier in the session knows, and its arguments are the page's own; until
+ * then the function asks for nothing. Kept here as a hook, so no guide code joins the entry chunk.
+ */
+export function setGuideGridPrefetch(fn: GuideGridPrefetch | null): void {
+  guideGrid = fn;
 }
 
 /** `catalog.recentlyAdded` for the recently added rail of a source kept in SQLite (not Stalker). */
@@ -156,6 +178,33 @@ function prefetchVodLanding(sourceId: string, kind: 'movie' | 'series'): void {
 }
 
 /**
+ * The guide's first data, as EpgGridPage asks it: its source (the URL's, else the one browsed
+ * last, else the first with live channels), the source's groups, then the first channel page and,
+ * once a window has been laid out this session, the first grid chunk for it. A favorites or list
+ * view asks for its list instead; a `focus` link opens elsewhere in the list, so its first chunk
+ * is left to the page.
+ */
+function prefetchGuide(params: URLSearchParams): void {
+  void queryClient
+    .ensureQueryData({ queryKey: rpcKey('sources.list'), queryFn: () => rpcRaw('sources.list') })
+    .then(async (list) => {
+      const live = (list as Source[] | undefined)?.filter((s) => s.channelCount !== 0);
+      const sourceId = params.get('source') ?? defaultGuideSource(live);
+      if (!sourceId) return;
+      prefetch('catalog.categories', guideCategoriesArgs(sourceId));
+      const view = params.get('view');
+      if (view === 'favorites') return prefetch('favorites.list', liveFavoritesArgs(sourceId));
+      if (view?.startsWith('list:') && view.length > 5) return prefetch('lists.items', { id: view.slice(5) });
+      const page = await fetched('catalog.channels', channelPageArgs({ sourceId, categoryId: params.get('category') ?? undefined }, 0));
+      const refs = (page as Page<Channel> | undefined)?.items.map((c) => c.ref) ?? [];
+      if (refs.length === 0 || params.get('focus') || !guideGrid) return;
+      const settings = await queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpcRaw('settings.get') });
+      guideGrid(refs, params, settings as Settings | undefined);
+    })
+    .catch(() => undefined);
+}
+
+/**
  * Home's rail queries (performance audit SH-3), once the boot `settings.get` and `sources.list`
  * answer, under DashboardPage's keys and arguments: nothing without a source (Home shows its
  * welcome), and the new arrivals and TMDB trending only when a rail on screen reads them.
@@ -187,8 +236,9 @@ function prefetchHome(): void {
 /**
  * Starts the first requests of the page at `path` (pathname and query), if it is a channel list
  * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`, Favorites and Recently watched
- * included; a group's first page with its now/next and favourite flags), a VOD landing page
- * (`/s/:id/movies`, `/s/:id/series`) or Home (`/dashboard`). Any other path asks for nothing.
+ * included; a group's first page with its now/next and favourite flags), the TV guide (`/epg`),
+ * a VOD landing page (`/s/:id/movies`, `/s/:id/series`) or Home (`/dashboard`). Any other path
+ * asks for nothing.
  */
 export function prefetchScreenData(path: string): void {
   let url: URL;
@@ -199,6 +249,7 @@ export function prefetchScreenData(path: string): void {
   }
   const at = (pattern: string) => matchPath(pattern, url.pathname)?.params;
   if (at('/dashboard')) return prefetchHome();
+  if (at('/epg')) return prefetchGuide(url.searchParams);
   const live = at('/s/:sourceId/live/:categoryId') ?? at('/s/:sourceId/live');
   if (live?.sourceId) return prefetchChannelList(live.sourceId, live.categoryId, false);
   const radio = at('/s/:sourceId/radio');

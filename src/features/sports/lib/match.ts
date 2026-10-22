@@ -238,7 +238,7 @@ interface ProgrammeWords {
 interface ProgrammeText {
   start: number;
   end: number;
-  /** Tokenized on first use: only programmes overlapping some game need it. */
+  /** Tokenized once, for every programme of the index, by the candidate map (`prepareMatch`); `guideProgramme` reuses it. */
   words?: ProgrammeWords;
 }
 

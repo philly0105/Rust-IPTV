@@ -206,11 +206,13 @@ fn a_database_that_already_ran_0007_keeps_its_guide() {
 /// indexes, about 0.7-0.9 s in release on an N150, where 0020 takes about
 /// 0.1 s. 0024 builds the category date-added index and idx_items_cat again:
 /// the release upgrade went from about 0.8 s to 1.1 s in a 4 vCPU
-/// sandbox. A debug build on CI's Windows runner took 12.6 s before 0024.
+/// sandbox. A debug build on CI's Windows runner took 12.6 s before 0024, and
+/// 39.0 s on a slower run of the same runner (master, 2026-10-22), so the debug
+/// budget leaves room for 0024 on top of that spread.
 #[test]
 fn migration_0020_fills_items_rank_on_a_220k_library() {
     #[cfg(debug_assertions)]
-    const BUDGET: Duration = Duration::from_secs(30);
+    const BUDGET: Duration = Duration::from_secs(90);
     #[cfg(not(debug_assertions))]
     const BUDGET: Duration = Duration::from_secs(2);
     let dir = tempfile::tempdir().unwrap();

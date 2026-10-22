@@ -6,7 +6,7 @@ vi.mock('@/api/transport', async (orig) => ({
   rpc: (cmd: string, args?: unknown) => rpcMock(cmd, args),
 }));
 
-const { bindPlaybackReport, playingSource, RENEW_MS } = await import('./playbackReport');
+const { bindPlaybackReport, playingSource, reportAnswered, RENEW_MS, REPORT_WAIT_MS } = await import('./playbackReport');
 const { usePlayerStore } = await import('./store');
 
 const ref = (sourceId: string) => ({ sourceId, contentType: 'live' as const, itemId: '1' });
@@ -49,5 +49,42 @@ describe('playback report', () => {
     usePlayerStore.setState({ source: live('c'), status: 'playing' });
     unbind();
     expect(reports().at(-1)).toEqual([]);
+  });
+
+  it('lets a player that connects to the provider itself wait for the answer to its report', async () => {
+    vi.useFakeTimers();
+    let answer: () => void = () => undefined;
+    rpcMock.mockImplementation((cmd: string) =>
+      cmd === 'downloads.playback' ? new Promise((resolve) => (answer = () => resolve(undefined))) : Promise.resolve(undefined),
+    );
+    const unbind = bindPlaybackReport();
+    try {
+      expect(reportAnswered(live('a'))).toBeNull();
+      usePlayerStore.setState({ source: live('a'), status: 'loading' });
+      const waiting = reportAnswered(live('a'));
+      expect(waiting).not.toBeNull();
+      // Another source, or a local file, has nothing to wait for.
+      expect(reportAnswered(live('b'))).toBeNull();
+      expect(reportAnswered({ ...live('a'), kind: 'file' })).toBeNull();
+      let done = false;
+      void waiting!.then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(done).toBe(false);
+      answer();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done).toBe(true);
+      expect(reportAnswered(live('a'))).toBeNull();
+      // A core that never answers holds a player back for REPORT_WAIT_MS at most.
+      usePlayerStore.setState({ source: live('b'), status: 'loading' });
+      let late = false;
+      void reportAnswered(live('b'))!.then(() => (late = true));
+      await vi.advanceTimersByTimeAsync(REPORT_WAIT_MS - 1);
+      expect(late).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(late).toBe(true);
+    } finally {
+      unbind();
+      rpcMock.mockImplementation(() => Promise.resolve(undefined));
+    }
   });
 });

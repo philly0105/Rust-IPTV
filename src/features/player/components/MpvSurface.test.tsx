@@ -13,7 +13,10 @@ let attachGate: Promise<void> | null = null;
 let attachError: Error | null = null;
 /** When set, `mpv.load` resolves or rejects through it. */
 let loadImpl: ((args: unknown) => Promise<unknown>) | null = null;
+/** When set, `downloads.playback` answers once it resolves. */
+let reportGate: Promise<void> | null = null;
 const rpcMock = vi.fn(async (name: string, _args?: unknown): Promise<unknown> => {
+  if (name === 'downloads.playback' && reportGate) return reportGate;
   if (name === 'mpv.attach') {
     if (attachGate) await attachGate;
     if (attachError) throw attachError;
@@ -132,6 +135,7 @@ beforeEach(() => {
   attachGate = null;
   attachError = null;
   loadImpl = null;
+  reportGate = null;
   stateListeners.clear();
   mpvState = {
     attached: true,
@@ -910,6 +914,25 @@ describe('embedded mpv recovery', () => {
     await tick();
     expect(calls('mpv.load').length).toBe(loadsBefore + 1);
     expect((calls('mpv.load').at(-1)![1] as { source: { url: string } }).source.url).toBe('http://h/movie/1.mkv');
+  });
+
+  it('loads a provider stream once the core has made room for it on the source (downloads)', async () => {
+    const { bindPlaybackReport } = await import('../playbackReport');
+    let answer: () => void = () => undefined;
+    reportGate = new Promise<void>((resolve) => (answer = resolve));
+    const unbind = bindPlaybackReport();
+    onTestFinished(unbind);
+    act(() =>
+      usePlayerStore.setState({ source: { ...usePlayerStore.getState().source!, ref: { sourceId: 'xt', contentType: 'movie', itemId: '1' } } }),
+    );
+    render(surfaceTree);
+    await tick();
+    expect(calls('downloads.playback')).toHaveLength(1);
+    // A download may still hold the account's connection: mpv must not ask for the stream yet.
+    expect(calls('mpv.load')).toHaveLength(0);
+    answer();
+    await tick();
+    expect(calls('mpv.load')).toHaveLength(1);
   });
 
   it('a placeholder without a stream URL pauses mpv instead of loading an empty URL', async () => {

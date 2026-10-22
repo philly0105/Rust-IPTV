@@ -37,6 +37,7 @@ import { resetMedia, showOsd, UP_NEXT_SECONDS, useMediaStore } from './media';
 import { __resetNowNextForTests, fetchNowNext, holdNowNext, passNowNext, peekNowNext } from './nowNext';
 import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
 import { hideModeNow, lockedNow, onPlaybackHidden } from './parentalLocks';
+import { reportAnswered } from './playbackReport';
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 
@@ -609,6 +610,13 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       const chosen = opts?.externalPlayer ?? (externalChoice && sameSource(externalChoice.source, source) ? externalChoice.player : undefined);
       externalChoice = chosen ? { source, player: chosen } : null;
       const player = chosen ?? (settings?.player === 'vlc' ? 'vlc' : 'mpv');
+      // downloads: the player connects to the provider itself, so a download holding the
+      // connection it needs lets go first.
+      const room = reportAnswered(source);
+      if (room) {
+        await room;
+        if (token !== playToken) return;
+      }
       try {
         await rpc('player.openExternal', { player, source });
         if (token === playToken) set({ status: 'playing' });

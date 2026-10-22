@@ -14,6 +14,7 @@ import { onAppEvent } from '@/api/events';
 import { bindEventInvalidation, invalidate, queryClient, rpcKey } from '@/api/query';
 import { isDesktop, rpc } from '@/api/transport';
 import type { ImportProgressEvent, Settings, Source, SourceKind, WindowState } from '@/api/types';
+import { progressStore } from '@/features/library/lib/progress';
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
 import { addSourcePathFromDeepLink } from '@/features/sources/lib/links';
 import { applyLanguage, languageUnresolved } from '@/i18n';
@@ -288,6 +289,12 @@ export function useShellEvents(): void {
     // position, a recent channel) drops its "skip the skeleton" flag right away.
     offs.push(bindRailEmptySync(queryClient));
     offs.push(bindTmdbCacheSync(queryClient));
+    // Live download progress is collected from launch, not only while /downloads or a detail page
+    // listens, so either shows the current bytes and speed as soon as it opens. This also keeps
+    // the store in the entry: /downloads and the VOD detail pages share it, and as a small shared
+    // module the chunk merge put it in a player chunk, which Settings and Search then loaded
+    // before their first render (pnpm size:check).
+    offs.push(progressStore.subscribe(() => undefined));
 
     // englishOnly and the live quality filter apply in the core, so the lists they
     // filter refetch when they change; the refresh interval moves every next-refresh

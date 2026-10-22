@@ -170,6 +170,7 @@ Fixes from the 2026-10-19 performance audit (SH-5, VD-1, VD-2, LV-1 to LV-8):
 Fixes from the 2026-10-22 speed pass:
 
 - The category filter (VOD-LANDING-RENDERS): the filter field, its text, the filtered entries and the index live in `CategoryIndexSection` (`VodLandingPage.tsx`), so a keystroke re-renders the index and not the page above it. Before, every keystroke re-rendered every mounted rail card: typing "netflix" with the 12 category rails mounted drew 2,023 cards (`landingRenders.test.tsx`), now none.
+- The landing's rails (VOD-LANDING-RENDERS): Top rated and the category rails are a memoized `LandingRail` with plain props (the category, the sort, one memoized set of grid arguments), which builds its `CatalogRail` input itself. Their cards and Recently added's are a memoized `LandingCard`, which builds the My List target, the prefetch target and the language once per title, as the grid's `GridPoster` does, and `ContinueSectionRail` is memoized. A query answer re-renders the cards it changed: a cold landing with every rail mounted drew 1,132 card renders for 289 cards, now 294, and a new resume answer re-rendered 296 cards, now 13 (the card it moves and the Continue watching rail).
 
 ## Progress, clocks and formatters
 

@@ -1,5 +1,5 @@
 import { ChevronRight, Clapperboard, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
@@ -10,13 +10,14 @@ import { itemKey, type Category, type ItemSnapshot, type PlaybackPosition, type 
 import { preloadEngines } from '@/features/player/enginePreload';
 import { snapshotTitle } from '@/lib/title';
 
-import { CatalogRail } from '../components/CatalogRail';
+import { CatalogRail, type CatalogRailProps } from '../components/CatalogRail';
 import { CategoryIndex, FROM_LANDING, categoryEntries, type CategoryEntry } from '../components/CategoryIndex';
 import { HiddenCategoriesDialog } from '../components/HiddenCategoriesDialog';
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { itemLanguage } from '../lib/language';
 import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
+import type { PrefetchTarget } from '../hooks/prefetch';
 import { resumeKey, useRecentlyAdded, useResumeMap, useSectionContinue, useSettings, useSource } from '../hooks/queries';
 import { useEdgeFades } from '../hooks/useEdgeFades';
 import { usePageHeader } from '../hooks/usePageHeader';
@@ -152,21 +153,8 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const sourceKind = source.data?.kind;
   const minRating = effectiveMinRating(settings.vodMinRating, new URLSearchParams());
   const hideWatched = settings.vodHideWatched === true;
-  const gridInput = useCallback(
-    (categoryId: string, sort: GridQueryInput['sort']): GridQueryInput | undefined =>
-      sourceKind
-        ? {
-            sourceKind,
-            kind,
-            sourceId,
-            categoryId,
-            sort,
-            dir: 'desc',
-            search: '',
-            minRating,
-            ...(hideWatched ? { hideWatched } : {}),
-          }
-        : undefined,
+  const grid = useMemo<RailGrid | undefined>(
+    () => (sourceKind ? { sourceKind, kind, sourceId, dir: 'desc', search: '', minRating, ...(hideWatched ? { hideWatched } : {}) } : undefined),
     [sourceKind, kind, sourceId, minRating, hideWatched],
   );
   // Categories with titles (a Stalker portal may not count them), in the provider's order. Locked
@@ -192,21 +180,14 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
 
   const card = useCallback(
     (item: VodItem | SeriesItem, i: number, rail: RailCardProps, isWatched: boolean) => (
-      <PosterCard
+      <LandingCard
+        item={item}
         index={i}
         tabIndex={rail.tabIndex}
-        title={item.titleBase || item.title}
-        fullTitle={item.title}
-        href={detailHref(item.ref) ?? '#'}
-        posterUrl={item.posterUrl}
-        year={item.year}
-        rating={item.rating}
         progress={resume.get(resumeKey(item.ref))}
         watched={isWatched}
-        language={itemLanguage(item.title, item.categoryName)}
-        myList={myListTarget(item)}
         locked={locks.itemLocked(item)}
-        prefetch={sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined}
+        sourceKind={sourceKind}
       />
     ),
     [resume, locks, sourceKind],
@@ -269,21 +250,25 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
             />
             {/* A Stalker portal sorts by name or by date added only: its "top rated" would be the newest. */}
             {sourceKind !== 'stalker' && (
-              <CatalogRail
+              <LandingRail
                 title={t('topRated')}
-                seeAll={{ to: `${allHref}?sort=rating&dir=desc` }}
-                input={gridInput(ALL_CATEGORIES, 'rating')}
+                seeAllTo={`${allHref}?sort=rating&dir=desc`}
+                grid={grid}
+                categoryId={ALL_CATEGORIES}
+                sort="rating"
                 rootRef={scrollRef}
                 card={card}
               />
             )}
             {railCats.map((c) => (
-              <CatalogRail
+              <LandingRail
                 key={c.id}
                 title={c.name}
                 count={c.itemCount > 0 ? fmt.format(c.itemCount) : undefined}
-                seeAll={{ to: hrefFor(c.id) }}
-                input={gridInput(c.id, 'added')}
+                seeAllTo={hrefFor(c.id)}
+                grid={grid}
+                categoryId={c.id}
+                sort="added"
                 rootRef={scrollRef}
                 card={card}
               />
@@ -311,6 +296,86 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     </div>
   );
 }
+
+/** The grid arguments every landing rail shares; each rail adds its category and sort. */
+type RailGrid = Omit<GridQueryInput, 'categoryId' | 'sort'>;
+
+/**
+ * Top rated or a category's rail (VOD-LANDING-RENDERS). Memoized on plain props, and it builds its
+ * grid's arguments and See all itself, so a page render (another query's answer) leaves it and
+ * its cards alone.
+ */
+const LandingRail = memo(function LandingRail({
+  title,
+  count,
+  seeAllTo,
+  grid,
+  categoryId,
+  sort,
+  rootRef,
+  card,
+}: {
+  title: string;
+  count?: string | undefined;
+  seeAllTo: string;
+  grid: RailGrid | undefined;
+  categoryId: string;
+  sort: GridQueryInput['sort'];
+  rootRef: RefObject<HTMLDivElement | null>;
+  card: CatalogRailProps['card'];
+}) {
+  const input = useMemo(() => (grid ? { ...grid, categoryId, sort } : undefined), [grid, categoryId, sort]);
+  const seeAll = useMemo(() => ({ to: seeAllTo }), [seeAllTo]);
+  return <CatalogRail title={title} count={count} seeAll={seeAll} input={input} rootRef={rootRef} card={card} />;
+});
+
+/**
+ * A poster of the landing's rails (VOD-LANDING-RENDERS). Memoized, and it builds the card's My
+ * List target, prefetch target and language once per title, as the grids' GridPoster does, so a
+ * rail that re-renders draws only the cards whose title, progress, watched mark or lock changed.
+ */
+const LandingCard = memo(function LandingCard({
+  item,
+  index,
+  tabIndex,
+  progress,
+  watched,
+  locked,
+  sourceKind,
+}: {
+  item: VodItem | SeriesItem;
+  index: number;
+  tabIndex: number;
+  progress: number | undefined;
+  watched: boolean;
+  locked: boolean;
+  sourceKind: SourceKind | undefined;
+}) {
+  const myList = useMemo(() => myListTarget(item), [item]);
+  const language = useMemo(() => itemLanguage(item.title, item.categoryName), [item]);
+  const prefetch = useMemo<PrefetchTarget | undefined>(
+    () => (sourceKind ? { ref: item.ref, sourceKind, posterUrl: item.posterUrl, backdropUrl: item.backdropUrl } : undefined),
+    [item, sourceKind],
+  );
+  return (
+    <PosterCard
+      index={index}
+      tabIndex={tabIndex}
+      title={item.titleBase || item.title}
+      fullTitle={item.title}
+      href={detailHref(item.ref) ?? '#'}
+      posterUrl={item.posterUrl}
+      year={item.year}
+      rating={item.rating}
+      progress={progress}
+      watched={watched}
+      language={language}
+      myList={myList}
+      locked={locked}
+      prefetch={prefetch}
+    />
+  );
+});
 
 /**
  * "Browse all categories": the heading that opens the index, its filter and the index itself. The
@@ -506,9 +571,10 @@ function CategoryChips({
 /**
  * Continue watching for this source and section (CB-VOD-LANDING): the titles started here, newest
  * first, each opening its detail page, where Resume is the primary action. The poster shows how
- * far you got; the caption says the episode or the time left.
+ * far you got; the caption says the episode or the time left. Memoized: its props hold while the
+ * page re-renders for other answers (VOD-LANDING-RENDERS).
  */
-function ContinueSectionRail({
+const ContinueSectionRail = memo(function ContinueSectionRail({
   positions,
   locked,
   sourceKind,
@@ -552,4 +618,4 @@ function ContinueSectionRail({
       }}
     />
   );
-}
+});

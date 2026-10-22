@@ -175,9 +175,10 @@ interface Point {
 }
 
 /**
- * `length` bytes from `from`. Null when the server sent the whole file (200): it takes no byte
- * ranges. Any other answer throws, since it may pass (a one-connection account still counting the
- * stream just closed).
+ * `length` bytes from `from`. Null when the server sent the whole file (200: it takes no byte
+ * ranges) or a part without the file's size (`/*`, a stream that is still going): neither can be
+ * searched by byte. Any other answer throws, since it may pass (a one-connection account still
+ * counting the stream just closed).
  */
 async function probe(url: string, from: number, length: number, signal?: AbortSignal): Promise<{ bytes: Uint8Array; total: number } | null> {
   const res = await fetch(url, { headers: { Range: `bytes=${from}-${from + length - 1}` }, cache: 'no-store', signal });
@@ -185,12 +186,17 @@ async function probe(url: string, from: number, length: number, signal?: AbortSi
   if (res.status !== 206 || !Number.isFinite(total)) {
     // Let go of the body (a 200 is the whole file) at once.
     void res.body?.cancel().catch(() => undefined);
-    if (res.status === 200) return null;
+    if (res.status === 200 || res.status === 206) return null;
     throw new Error(`HTTP ${res.status} to a byte range request`);
   }
   return { bytes: new Uint8Array(await res.arrayBuffer()), total };
 }
 
+/**
+ * The file's packets and first PTS and, with `wantEnd`, its length from the last PES. Null when it
+ * can't be searched by byte: no byte ranges, not MPEG-TS, or no length where one is wanted (the
+ * element then seeks itself).
+ */
 async function readLayout(url: string, wantEnd: boolean): Promise<Layout | null> {
   const head = await probe(url, 0, PROBE_BYTES);
   const grid = head && tsGrid(head.bytes);
@@ -199,12 +205,12 @@ async function readLayout(url: string, wantEnd: boolean): Promise<Layout | null>
   const first = starts.find((s) => s.video) ?? starts[0];
   if (!first) return null;
   const out: Layout = { total: head.total, ...grid, pid: first.pid, firstPts: first.pts };
-  if (wantEnd && head.total > PROBE_BYTES) {
-    const tail = await probe(url, head.total - PROBE_BYTES, PROBE_BYTES);
-    const last = tail ? pesStarts(tail.bytes).filter((s) => s.pid === first.pid).pop() : undefined;
-    if (last) out.duration = since(first.pts, last.pts);
-  }
-  return out;
+  if (!wantEnd) return out;
+  if (head.total <= PROBE_BYTES) return null;
+  const tail = await probe(url, head.total - PROBE_BYTES, PROBE_BYTES);
+  const last = tail ? pesStarts(tail.bytes).filter((s) => s.pid === first.pid).pop() : undefined;
+  if (!last) return null;
+  return { ...out, duration: since(first.pts, last.pts) };
 }
 
 /**
@@ -216,7 +222,7 @@ function byteSeeker(loadUrl: string, known: number | undefined, local: boolean):
   const budget = local ? LOCAL_PROBES : REMOTE_PROBES;
   const close = local ? 1 : 3;
   let layout: Layout | null = null;
-  /** The file takes no byte ranges or is not MPEG-TS: it only starts at its beginning. */
+  /** The file takes no byte ranges, is not MPEG-TS or has no length: it only starts at its beginning. */
   let failed = false;
   let learning: Promise<Layout | null> | null = null;
   /** Throws when asking failed in a way the next seek may get past. */

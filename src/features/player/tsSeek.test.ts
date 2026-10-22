@@ -94,12 +94,14 @@ const TOTAL = PACKETS * 188;
 const frameOfPacket = new Int32Array(PACKETS).fill(-1);
 frameAt.forEach((p, f) => (frameOfPacket[p] = f));
 const ptsOf = (f: number): number => (FIRST_PTS + f * 3600) % 2 ** 33;
+/** Each frame's PTS; undefined: no PES starts there. */
+type PtsOf = (f: number) => number | undefined;
 
-function fileBytes(from: number, to: number): Uint8Array<ArrayBuffer> {
+function fileBytes(from: number, to: number, pts: PtsOf = ptsOf): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(to - from + 1);
   for (let pkt = Math.floor(from / 188); pkt * 188 <= to; pkt++) {
     const f = frameOfPacket[pkt] ?? -1;
-    const bytes = packet(VIDEO_PID, f >= 0 ? ptsOf(f) : undefined);
+    const bytes = packet(VIDEO_PID, f >= 0 ? pts(f) : undefined);
     const start = pkt * 188;
     const lo = Math.max(from, start);
     const hi = Math.min(to, start + 187);
@@ -116,7 +118,8 @@ interface Served {
   bytes: number;
 }
 
-function serveRanges(opts: { ranges?: boolean } = {}): Served {
+/** Serves the virtual file with Range. `noSize`: Content-Range gives `*` for the size; `pts`: the frames' PTS. */
+function serveRanges(opts: { ranges?: boolean; noSize?: boolean; pts?: PtsOf } = {}): Served {
   const served: Served = { requests: [], bytes: 0 };
   vi.stubGlobal(
     'fetch',
@@ -128,7 +131,8 @@ function serveRanges(opts: { ranges?: boolean } = {}): Served {
       const from = Number(m[1]);
       const to = Math.min(Number(m[2]), TOTAL - 1);
       served.bytes += to - from + 1;
-      return new Response(fileBytes(from, to), { status: 206, headers: { 'Content-Range': `bytes ${from}-${to}/${TOTAL}` } });
+      const range206 = `bytes ${from}-${to}/${opts.noSize ? '*' : TOTAL}`;
+      return new Response(fileBytes(from, to, opts.pts), { status: 206, headers: { 'Content-Range': range206 } });
     }),
   );
   return served;
@@ -207,6 +211,14 @@ describe('seeking a local recording or download by byte (PL-2)', () => {
     expect(600 - plan.at).toBeLessThan(1);
   });
 
+  it('a file with no PES in its tail has no length: the element seeks itself', async () => {
+    serveRanges({ pts: (f) => (f < FRAMES - 200 ? ptsOf(f) : undefined) });
+    const seeker = tsSeekerFor(vod(LOCAL), LOCAL)!;
+    await seeker.prepare?.();
+    expect(seeker.duration()).toBeUndefined();
+    expect(seeker.usable()).toBe(false);
+  });
+
   it('server mode: the same-origin file route', () => {
     expect(tsSeekerFor(vod('/api/files/12'), '/api/files/12')).toBeDefined();
     expect(withByteStart('/api/files/12', 376)).toBe(new URL('/api/files/12?from=376', window.location.href).href);
@@ -235,6 +247,25 @@ describe('seeking a remote TS file through the proxy by estimate (PL-2)', () => 
     served.requests.length = 0;
     await seeker.startAt(300, signal);
     expect(served.requests.length).toBeLessThanOrEqual(REMOTE_PROBES);
+  });
+
+  it('without a length from the source, the first seek reads it from the tail', async () => {
+    const served = serveRanges();
+    const seeker = tsSeekerFor(vod('http://prov/movie/u/p/7.ts', { kind: 'direct' }), PROXIED)!;
+    expect(seeker.duration()).toBeUndefined();
+    const plan = (await seeker.startAt(1200, signal))!;
+    expect(seeker.duration()).toBeCloseTo(1799.96, 2);
+    // The head and the tail, then the search.
+    expect(served.requests.slice(0, 2)).toEqual([`bytes=0-${PROBE_BYTES - 1}`, `bytes=${TOTAL - PROBE_BYTES}-${TOTAL - 1}`]);
+    expect(served.requests.length).toBeLessThanOrEqual(2 + REMOTE_PROBES);
+    expect(1200 - plan.at).toBeLessThan(3);
+  });
+
+  it('a stream that answers a range without its size (`/*`) is not searched: no seek by restart', async () => {
+    serveRanges({ noSize: true });
+    const seeker = tsSeekerFor(vod('http://prov/movie/u/p/7.ts', { kind: 'direct' }), PROXIED)!;
+    expect(await seeker.startAt(600, signal)).toBeNull();
+    expect(seeker.usable()).toBe(false);
   });
 
   it('a direct remote URL and live TV get no seeker', () => {

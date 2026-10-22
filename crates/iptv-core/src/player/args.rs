@@ -176,7 +176,9 @@ fn is_local_absolute_path(s: &str) -> bool {
 /// `--title=<title> --user-agent=<ua> --referrer=<ref>
 /// --http-header-fields=Origin:<o> --force-media-title=<title>`, then
 /// `--demuxer-lavf-analyzeduration` for a live source ([`LIVE_PROBE_OPTIONS`]),
-/// then the user's `mpvArgs` (a later option wins, so theirs do), then `--`
+/// then the user's `mpvArgs` (a later option wins, so theirs do, a `--profile`
+/// or `--include` among them too; a value in `mpv.conf` loses to the flag,
+/// since mpv reads its config before the command line), then `--`
 /// and the URL (the separator keeps a playlist URL such as `--script=...`
 /// from being read as an option). Header flags appear only when set.
 pub fn mpv_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> {
@@ -308,20 +310,52 @@ pub const LIVE_ANALYZE_SECONDS: &str = "2";
 /// second audio track or a data PID held each zap until the limit. Two seconds
 /// still reach a video keyframe and the audio of a normal channel, and
 /// `fpsprobesize=0` stops it waiting for 20 frames to guess the frame rate,
-/// which live TS timestamps carry anyway. Each is left out when the user's
-/// `mpvArgs` set it: a per-file option replaces the global one, and for the
-/// `demuxer-lavf-o` key-value list that would drop all of theirs.
+/// which live TS timestamps carry anyway. `fpsprobesize` goes in through
+/// `demuxer-lavf-o-append`, which adds it to the user's list for that file
+/// (a per-file `demuxer-lavf-o` would replace the whole list). Each is left
+/// out when the user's own configuration sets it ([`UserProbeOptions`]).
 pub const LIVE_PROBE_OPTIONS: &[(&str, &str)] = &[
     ("demuxer-lavf-analyzeduration", LIVE_ANALYZE_SECONDS),
-    ("demuxer-lavf-o", "fpsprobesize=0"),
+    ("demuxer-lavf-o-append", "fpsprobesize=0"),
 ];
 
-/// The user's mpv arguments set `option` (`--demuxer-lavf-o=...`, or one of
-/// its `-append` / `-add` forms).
-fn user_sets(user_args: &[String], option: &str) -> bool {
-    user_args
-        .iter()
-        .any(|a| a.trim_start_matches('-').starts_with(option))
+/// Which of [`LIVE_PROBE_OPTIONS`] the user's own mpv configuration sets.
+/// Embedded mpv reports its global values right after it starts
+/// (`embedded::attach`), so `mpvArgs`, a `--profile` or `--include` in them,
+/// and `mpv.conf` all count; a per-file value would replace theirs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UserProbeOptions {
+    /// `demuxer-lavf-analyzeduration` is not mpv's default, 0 (FFmpeg's own
+    /// limit), which is also how an explicit 0 reads.
+    pub analyzeduration: bool,
+    /// `demuxer-lavf-o` has an `fpsprobesize` entry.
+    pub fpsprobesize: bool,
+}
+
+impl UserProbeOptions {
+    /// From mpv's `get_property` replies for `demuxer-lavf-analyzeduration`
+    /// and `demuxer-lavf-o` (`None` when a read failed). A value that could
+    /// not be read counts as set: the app does not replace what it can't see.
+    pub fn from_globals(
+        analyzeduration: Option<&serde_json::Value>,
+        lavf_o: Option<&serde_json::Value>,
+    ) -> Self {
+        Self {
+            analyzeduration: analyzeduration.and_then(serde_json::Value::as_f64) != Some(0.0),
+            fpsprobesize: lavf_o
+                .and_then(serde_json::Value::as_object)
+                .is_none_or(|list| list.contains_key("fpsprobesize")),
+        }
+    }
+
+    /// The user set the option behind `name`, one of [`LIVE_PROBE_OPTIONS`].
+    fn sets(self, name: &str) -> bool {
+        if name == "demuxer-lavf-analyzeduration" {
+            self.analyzeduration
+        } else {
+            self.fpsprobesize
+        }
+    }
 }
 
 /// Per-file mpv options for movies and episodes: read far ahead, and after a
@@ -336,8 +370,8 @@ pub const VOD_BUFFER_OPTIONS: &[(&str, &str)] = &[
 
 /// Per-file options for `loadfile` in embedded mode: `force-media-title`,
 /// `user-agent`, `referrer`, `http-header-fields`, and `start=+<seconds>`
-/// for a resume position (live sources never seek). `user_args` is
-/// `settings.mpvArgs`, which embedded mpv started with.
+/// for a resume position (live sources never seek). `user` is what the
+/// running mpv reported of [`LIVE_PROBE_OPTIONS`].
 ///
 /// Every item starts playing (`pause=no`): mpv's `pause` is global, so a
 /// user pause, or `keep-open` pausing at the end of an episode, would
@@ -349,7 +383,7 @@ pub const VOD_BUFFER_OPTIONS: &[(&str, &str)] = &[
 /// over instead of freezing on the last frame (`mpv_state::apply_event`).
 pub fn loadfile_options(
     source: &PlayerSource,
-    user_args: &str,
+    user: UserProbeOptions,
 ) -> serde_json::Map<String, serde_json::Value> {
     use serde_json::Value;
     let mut opts = serde_json::Map::new();
@@ -382,9 +416,8 @@ pub fn loadfile_options(
         for (k, v) in LIVE_TIMESHIFT_OPTIONS {
             opts.insert((*k).into(), Value::String((*v).to_string()));
         }
-        let user = split_shell_args(user_args);
         for (k, v) in LIVE_PROBE_OPTIONS {
-            if !user_sets(&user, k) {
+            if !user.sets(k) {
                 opts.insert((*k).into(), Value::String((*v).to_string()));
             }
         }
@@ -399,7 +432,7 @@ pub fn loadfile_options(
 
 #[cfg(test)]
 mod loadfile_tests {
-    use super::loadfile_options;
+    use super::{loadfile_options, UserProbeOptions};
     use crate::model::{PlayerKind, PlayerSource};
     use serde_json::json;
 
@@ -419,14 +452,19 @@ mod loadfile_tests {
         }
     }
 
+    /// Options for a user who set none of the live probe options.
+    fn options(is_live: bool) -> serde_json::Map<String, serde_json::Value> {
+        loadfile_options(&source(is_live), UserProbeOptions::default())
+    }
+
     /// L2-desktop-1: mpv's pause is global. A zap after a user pause, and the
     /// Up next episode after `keep-open` paused at the end, must start playing.
     #[test]
     fn every_item_starts_playing() {
         for live in [true, false] {
-            assert_eq!(loadfile_options(&source(live), "")["pause"], json!("no"));
+            assert_eq!(options(live)["pause"], json!("no"));
         }
-        let legacy = crate::player::embedded::legacy_options(&loadfile_options(&source(false), ""));
+        let legacy = crate::player::embedded::legacy_options(&options(false));
         assert!(legacy.contains("pause=%2%no"), "{legacy}");
     }
 
@@ -434,24 +472,15 @@ mod loadfile_tests {
     /// on its last frame; VOD keeps the global `keep-open` (pause at the end).
     #[test]
     fn live_items_end_instead_of_pausing_at_the_end() {
-        assert_eq!(
-            loadfile_options(&source(true), "")["keep-open"],
-            json!("no")
-        );
-        assert!(!loadfile_options(&source(false), "").contains_key("keep-open"));
+        assert_eq!(options(true)["keep-open"], json!("no"));
+        assert!(!options(false).contains_key("keep-open"));
     }
 
     /// Movies and episodes refill a few seconds after a stall; live keeps zapping fast.
     #[test]
     fn vod_items_buffer_ahead_and_live_items_do_not() {
-        assert_eq!(
-            loadfile_options(&source(false), "")["cache-pause-wait"],
-            json!("5")
-        );
-        assert_eq!(
-            loadfile_options(&source(false), "")["demuxer-readahead-secs"],
-            json!("120")
-        );
-        assert!(!loadfile_options(&source(true), "").contains_key("cache-pause-wait"));
+        assert_eq!(options(false)["cache-pause-wait"], json!("5"));
+        assert_eq!(options(false)["demuxer-readahead-secs"], json!("120"));
+        assert!(!options(true).contains_key("cache-pause-wait"));
     }
 }

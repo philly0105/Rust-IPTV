@@ -174,10 +174,11 @@ fn is_local_absolute_path(s: &str) -> bool {
 
 /// Arguments for an external mpv (SPEC C4):
 /// `--title=<title> --user-agent=<ua> --referrer=<ref>
-/// --http-header-fields=Origin:<o> --force-media-title=<title>`, then the
-/// user's `mpvArgs`, then `--` and the URL (the separator keeps a playlist
-/// URL such as `--script=...` from being read as an option). Header flags
-/// appear only when set.
+/// --http-header-fields=Origin:<o> --force-media-title=<title>`, then
+/// `--demuxer-lavf-analyzeduration` for a live source ([`LIVE_PROBE_OPTIONS`]),
+/// then the user's `mpvArgs` (a later option wins, so theirs do), then `--`
+/// and the URL (the separator keeps a playlist URL such as `--script=...`
+/// from being read as an option). Header flags appear only when set.
 pub fn mpv_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> {
     let mut args = Vec::new();
     let title = source.title.trim();
@@ -197,6 +198,11 @@ pub fn mpv_external_args(source: &PlayerSource, user_args: &str) -> Vec<String> 
     }
     if !title.is_empty() {
         args.push(format!("--force-media-title={title}"));
+    }
+    if source.is_live {
+        args.push(format!(
+            "--demuxer-lavf-analyzeduration={LIVE_ANALYZE_SECONDS}"
+        ));
     }
     args.extend(split_shell_args(user_args));
     args.push("--".to_string());
@@ -292,6 +298,32 @@ pub const LIVE_TIMESHIFT_OPTIONS: &[(&str, &str)] = &[
     ("force-seekable", "yes"),
 ];
 
+/// Seconds of a live stream FFmpeg analyzes before playback (see
+/// [`LIVE_PROBE_OPTIONS`]).
+pub const LIVE_ANALYZE_SECONDS: &str = "2";
+
+/// Per-file mpv options that cut FFmpeg's stream analysis of a live stream
+/// short (STR-3). With FFmpeg's defaults (5 MB, up to 7 s of stream) the lavf
+/// demuxer waits for codec parameters of every PID the panel lists: a silent
+/// second audio track or a data PID held each zap until the limit. Two seconds
+/// still reach a video keyframe and the audio of a normal channel, and
+/// `fpsprobesize=0` stops it waiting for 20 frames to guess the frame rate,
+/// which live TS timestamps carry anyway. Each is left out when the user's
+/// `mpvArgs` set it: a per-file option replaces the global one, and for the
+/// `demuxer-lavf-o` key-value list that would drop all of theirs.
+pub const LIVE_PROBE_OPTIONS: &[(&str, &str)] = &[
+    ("demuxer-lavf-analyzeduration", LIVE_ANALYZE_SECONDS),
+    ("demuxer-lavf-o", "fpsprobesize=0"),
+];
+
+/// The user's mpv arguments set `option` (`--demuxer-lavf-o=...`, or one of
+/// its `-append` / `-add` forms).
+fn user_sets(user_args: &[String], option: &str) -> bool {
+    user_args
+        .iter()
+        .any(|a| a.trim_start_matches('-').starts_with(option))
+}
+
 /// Per-file mpv options for movies and episodes: read far ahead, and after a
 /// stall refill a few seconds before playing again, so a stream that arrives
 /// barely faster than its bitrate pauses rarely instead of every few seconds.
@@ -304,7 +336,8 @@ pub const VOD_BUFFER_OPTIONS: &[(&str, &str)] = &[
 
 /// Per-file options for `loadfile` in embedded mode: `force-media-title`,
 /// `user-agent`, `referrer`, `http-header-fields`, and `start=+<seconds>`
-/// for a resume position (live sources never seek).
+/// for a resume position (live sources never seek). `user_args` is
+/// `settings.mpvArgs`, which embedded mpv started with.
 ///
 /// Every item starts playing (`pause=no`): mpv's `pause` is global, so a
 /// user pause, or `keep-open` pausing at the end of an episode, would
@@ -314,7 +347,10 @@ pub const VOD_BUFFER_OPTIONS: &[(&str, &str)] = &[
 /// stream only ends when the provider drops it, and the resulting `end-file`
 /// (reason `eof`) is reported as an error, so the player reconnects or fails
 /// over instead of freezing on the last frame (`mpv_state::apply_event`).
-pub fn loadfile_options(source: &PlayerSource) -> serde_json::Map<String, serde_json::Value> {
+pub fn loadfile_options(
+    source: &PlayerSource,
+    user_args: &str,
+) -> serde_json::Map<String, serde_json::Value> {
     use serde_json::Value;
     let mut opts = serde_json::Map::new();
     opts.insert("pause".into(), Value::String("no".into()));
@@ -345,6 +381,12 @@ pub fn loadfile_options(source: &PlayerSource) -> serde_json::Map<String, serde_
         // jump back to the live edge.
         for (k, v) in LIVE_TIMESHIFT_OPTIONS {
             opts.insert((*k).into(), Value::String((*v).to_string()));
+        }
+        let user = split_shell_args(user_args);
+        for (k, v) in LIVE_PROBE_OPTIONS {
+            if !user_sets(&user, k) {
+                opts.insert((*k).into(), Value::String((*v).to_string()));
+            }
         }
         opts.insert("keep-open".into(), Value::String("no".into()));
     } else {
@@ -382,9 +424,9 @@ mod loadfile_tests {
     #[test]
     fn every_item_starts_playing() {
         for live in [true, false] {
-            assert_eq!(loadfile_options(&source(live))["pause"], json!("no"));
+            assert_eq!(loadfile_options(&source(live), "")["pause"], json!("no"));
         }
-        let legacy = crate::player::embedded::legacy_options(&loadfile_options(&source(false)));
+        let legacy = crate::player::embedded::legacy_options(&loadfile_options(&source(false), ""));
         assert!(legacy.contains("pause=%2%no"), "{legacy}");
     }
 
@@ -392,21 +434,24 @@ mod loadfile_tests {
     /// on its last frame; VOD keeps the global `keep-open` (pause at the end).
     #[test]
     fn live_items_end_instead_of_pausing_at_the_end() {
-        assert_eq!(loadfile_options(&source(true))["keep-open"], json!("no"));
-        assert!(!loadfile_options(&source(false)).contains_key("keep-open"));
+        assert_eq!(
+            loadfile_options(&source(true), "")["keep-open"],
+            json!("no")
+        );
+        assert!(!loadfile_options(&source(false), "").contains_key("keep-open"));
     }
 
     /// Movies and episodes refill a few seconds after a stall; live keeps zapping fast.
     #[test]
     fn vod_items_buffer_ahead_and_live_items_do_not() {
         assert_eq!(
-            loadfile_options(&source(false))["cache-pause-wait"],
+            loadfile_options(&source(false), "")["cache-pause-wait"],
             json!("5")
         );
         assert_eq!(
-            loadfile_options(&source(false))["demuxer-readahead-secs"],
+            loadfile_options(&source(false), "")["demuxer-readahead-secs"],
             json!("120")
         );
-        assert!(!loadfile_options(&source(true)).contains_key("cache-pause-wait"));
+        assert!(!loadfile_options(&source(true), "").contains_key("cache-pause-wait"));
     }
 }

@@ -106,6 +106,7 @@ fn mpv_external_minimal() {
         s(&[
             "--title=News HD",
             "--force-media-title=News HD",
+            "--demuxer-lavf-analyzeduration=2",
             "--",
             "http://h/live.m3u8"
         ])
@@ -131,6 +132,7 @@ fn mpv_external_with_headers_and_user_args() {
             "--referrer=http://ref.example/",
             "--http-header-fields=Origin:http://origin.example",
             "--force-media-title=Sports 1",
+            "--demuxer-lavf-analyzeduration=2",
             "--fs",
             "--profile=low latency",
             "--",
@@ -142,7 +144,10 @@ fn mpv_external_with_headers_and_user_args() {
 #[test]
 fn mpv_external_skips_blank_headers_and_title() {
     let src = source("http://h/a.ts", "  ", headers(Some(""), Some("   "), None));
-    assert_eq!(mpv_external_args(&src, ""), s(&["--", "http://h/a.ts"]));
+    assert_eq!(
+        mpv_external_args(&src, ""),
+        s(&["--demuxer-lavf-analyzeduration=2", "--", "http://h/a.ts"])
+    );
 }
 
 #[test]
@@ -445,7 +450,7 @@ fn loadfile_options_headers_title_and_resume() {
     );
     src.is_live = false;
     src.resume_seconds = Some(95);
-    let opts = loadfile_options(&src);
+    let opts = loadfile_options(&src, "");
     assert_eq!(opts["force-media-title"], json!("Film"));
     assert_eq!(opts["user-agent"], json!("UA, with comma"));
     assert_eq!(opts["referrer"], json!("http://r/"));
@@ -457,15 +462,54 @@ fn loadfile_options_headers_title_and_resume() {
 fn loadfile_options_never_seek_live_or_zero() {
     let mut src = source("http://h/live", "Live", None);
     src.resume_seconds = Some(120);
-    assert!(!loadfile_options(&src).contains_key("start"));
+    assert!(!loadfile_options(&src, "").contains_key("start"));
     // Live gets the timeshift cache instead.
-    let live = loadfile_options(&src);
+    let live = loadfile_options(&src, "");
     assert_eq!(live["force-seekable"], json!("yes"));
     assert_eq!(live["demuxer-max-back-bytes"], json!("256MiB"));
     src.is_live = false;
-    assert!(!loadfile_options(&src).contains_key("force-seekable"));
+    assert!(!loadfile_options(&src, "").contains_key("force-seekable"));
     src.resume_seconds = Some(0);
-    assert!(!loadfile_options(&src).contains_key("start"));
+    assert!(!loadfile_options(&src, "").contains_key("start"));
+}
+
+/// STR-3: live loads cut FFmpeg's stream analysis short, unless the user's
+/// mpvArgs set the option (a per-file value would replace theirs); VOD keeps
+/// FFmpeg's defaults.
+#[test]
+fn live_loads_shorten_stream_analysis_unless_the_user_set_it() {
+    let mut src = source("http://h/live/1.ts", "Live", None);
+    let live = loadfile_options(&src, "--fs");
+    assert_eq!(live["demuxer-lavf-analyzeduration"], json!("2"));
+    assert_eq!(live["demuxer-lavf-o"], json!("fpsprobesize=0"));
+    let theirs = loadfile_options(&src, "--demuxer-lavf-o=probesize=32 --fs");
+    assert!(!theirs.contains_key("demuxer-lavf-o"));
+    assert_eq!(theirs["demuxer-lavf-analyzeduration"], json!("2"));
+    let appended = loadfile_options(&src, "--demuxer-lavf-o-append=probesize=32");
+    assert!(!appended.contains_key("demuxer-lavf-o"));
+    let analyze = loadfile_options(&src, "--demuxer-lavf-analyzeduration=10");
+    assert!(!analyze.contains_key("demuxer-lavf-analyzeduration"));
+    assert_eq!(analyze["demuxer-lavf-o"], json!("fpsprobesize=0"));
+
+    // External mpv: before the user's args, so theirs win.
+    let ext = mpv_external_args(&src, "--demuxer-lavf-analyzeduration=10");
+    let ours = ext
+        .iter()
+        .position(|a| a == "--demuxer-lavf-analyzeduration=2")
+        .expect("live flag");
+    let user = ext
+        .iter()
+        .position(|a| a == "--demuxer-lavf-analyzeduration=10")
+        .expect("user flag");
+    assert!(ours < user, "{ext:?}");
+
+    src.is_live = false;
+    let vod = loadfile_options(&src, "");
+    assert!(!vod.contains_key("demuxer-lavf-analyzeduration"));
+    assert!(!vod.contains_key("demuxer-lavf-o"));
+    assert!(!mpv_external_args(&src, "")
+        .iter()
+        .any(|a| a.starts_with("--demuxer-lavf")));
 }
 
 #[test]
@@ -473,7 +517,7 @@ fn legacy_options_use_length_quoting() {
     let mut src = source("http://h/x", "A, B", headers(Some("UA, x"), None, None));
     src.is_live = false;
     src.resume_seconds = Some(5);
-    let legacy = legacy_options(&loadfile_options(&src));
+    let legacy = legacy_options(&loadfile_options(&src, ""));
     assert!(legacy.contains("force-media-title=%4%A, B"), "{legacy}");
     assert!(legacy.contains("user-agent=%5%UA, x"), "{legacy}");
     assert!(legacy.contains("start=%2%+5"), "{legacy}");

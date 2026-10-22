@@ -568,7 +568,8 @@ pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()
         st.tracks.clear();
     });
 
-    let opts = loadfile_options(source);
+    let user_args = state.settings.read().mpv_args.clone();
+    let opts = loadfile_options(source, &user_args);
     // mpv >= 0.38 takes `loadfile url flags index options`.
     let modern = vec![
         json!("loadfile"),

@@ -1,6 +1,6 @@
 # Downloads and My Videos
 
-Code: `crates/iptv-core/src/downloads/`. Tests: `crates/iptv-core/tests/downloads.rs` (check 9 / SC7) and `downloads_conn_limit.rs`, `crates/iptv-server/tests/downloads_playback.rs`, plus unit tests in `naming.rs`, `transfer.rs`, and `rpc.rs`.
+Code: `crates/iptv-core/src/downloads/`. Tests: `crates/iptv-core/tests/downloads.rs` (check 9 / SC7), `downloads_conn_limit.rs` and `downloads_segments.rs`, `crates/iptv-server/tests/downloads_playback.rs`, plus unit tests in `naming.rs`, `segments.rs`, `transfer.rs`, and `rpc.rs`.
 
 The download manager keeps a FIFO queue of movie, episode and catch-up programme downloads, runs as many transfers per source as the source's account leaves free after playback (two when it reports no limit), resumes partial files over HTTP Range, and never overwrites a file it did not create. Completed rows make up My Videos, the offline library.
 

@@ -406,8 +406,16 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
     el.addEventListener('leavepictureinpicture', onLeavePip);
 
     const unController = setController({
-      play: () => void el.play().catch(() => undefined),
-      pause: () => el.pause(),
+      // Between two MPEG-TS pipelines the element fires nothing: the engine keeps the wish and
+      // the status follows it here.
+      play: () => {
+        if (engineRef.current?.setPaused?.(false)) reportStatus('playing');
+        else void el.play().catch(() => undefined);
+      },
+      pause: () => {
+        if (engineRef.current?.setPaused?.(true)) reportStatus('paused');
+        else el.pause();
+      },
       seekTo: (s) => {
         if (!Number.isFinite(s) || engineRef.current?.seek?.(s)) return;
         el.currentTime = Math.max(0, s - offset());

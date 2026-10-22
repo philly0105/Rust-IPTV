@@ -75,6 +75,13 @@ export interface Engine {
   seek?(seconds: number): boolean;
   /** The engine started at `source.resumeSeconds` itself: the caller must not seek there again. */
   readonly resumes?: boolean;
+  /**
+   * A pause (true) or play (false) while the engine has no pipeline: an MPEG-TS restart tore the
+   * old one down and asks where to start (tsSeek.ts). The element reads as paused then and fires
+   * no `pause`, and attaching the new stream would undo its `play()`. True when the engine took it
+   * and applies it once the new stream loads; false when the element should.
+   */
+  setPaused?(paused: boolean): boolean;
   /** What the library knows about the stream now (stream info overlay); the element adds the rest. */
   stats?(): Partial<MpvStats>;
   /**
@@ -1043,7 +1050,10 @@ async function mpegtsEngine(
   let hold: number | null = null;
   /** What the new stream still has to be sought by once it has media (catch-up starts on a whole minute). */
   let leftover = 0;
-  /** Whether the restart under way plays once loaded; a seek that replaces it keeps that. */
+  /**
+   * Whether the restart under way plays once loaded: the seek's play state, then a play or pause
+   * that came meanwhile (`setPaused`). A seek that replaces the restart keeps it.
+   */
   let restartPlays = false;
   /** Bumped by every restart, so a superseded one's answer is dropped. */
   let seekRun = 0;
@@ -1165,8 +1175,9 @@ async function mpegtsEngine(
    * Restarts at `target` (shown seconds) for a seek past the buffer or a resume. The old pipeline
    * goes first, so its connection to the provider closes before the new one opens (one-connection
    * accounts); then the stream loads where the seeker says and the rest is sought inside it. With
-   * no start from the seeker it loads from 0 and seeks there, as every seek used to. `play`: start
-   * playing once loaded (a seek while paused stays paused).
+   * no start from the seeker (it learnt only now that the file can't be searched) it loads from 0
+   * and seeks there. `play`: start playing once loaded (a seek while paused stays paused), unless a
+   * pause comes meanwhile (`setPaused`).
    */
   function restartAt(target: number, play: boolean): void {
     if (!seeker) return;
@@ -1187,7 +1198,7 @@ async function mpegtsEngine(
         offset = plan?.at ?? 0;
         leftover = target - offset;
         start(plan ? new URL(plan.url, window.location.href).href : absolute);
-        if (play) void el.play().catch(() => undefined);
+        if (restartPlays) void el.play().catch(() => undefined);
       },
       (err: unknown) => {
         if (destroyed || run !== seekRun) return;
@@ -1245,12 +1256,18 @@ async function mpegtsEngine(
     duration() {
       return restartable ? seeker?.duration() : undefined;
     },
+    setPaused(paused) {
+      // Once the new pipeline is attached the element plays and pauses itself.
+      if (hold === null || player !== null || destroyed) return false;
+      restartPlays = !paused;
+      return true;
+    },
     seek(target) {
       if (!restartable || destroyed || !Number.isFinite(target) || !seeker?.usable()) return false;
       // Inside what the element holds (and no restart under way) the element seeks itself.
       if (hold === null && target >= offset && bufferedAt(el, target - offset)) return false;
-      // The torn-down element reads as paused while a restart is under way.
-      restartAt(target, hold !== null ? restartPlays : !el.paused);
+      // The torn-down element reads as paused until the new pipeline is attached.
+      restartAt(target, hold !== null && player === null ? restartPlays : !el.paused);
       return true;
     },
     recover() {

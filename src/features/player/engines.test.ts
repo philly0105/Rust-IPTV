@@ -747,6 +747,41 @@ describe('MPEG-TS restarts at a seek or a resume (PL-2)', () => {
     expect(state.t + (engine.timeOffset?.() ?? 0)).toBe(900);
   });
 
+  it('a pause while a restart resolves is kept: the new stream loads paused', async () => {
+    const { el, state } = clockedVideo();
+    let resolve!: (p: Plan) => void;
+    const seeker = seekerOf(() => new Promise<Plan>((r) => (resolve = r)));
+    const onWaiting = vi.fn();
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', { ...cb(), onWaiting }, { captions: false, seeker });
+    expect(engine.setPaused?.(true)).toBe(false);
+    engine.seek?.(600);
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+    // The torn-down element reads as paused and fires no `pause`: the engine takes it.
+    state.paused = true;
+    expect(engine.setPaused?.(true)).toBe(true);
+    resolve({ url: 'http://h/v.ts?from=600', at: 600 });
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(2));
+    await Promise.resolve();
+    expect(el.play).not.toHaveBeenCalled();
+    // The new pipeline is attached: from here the element pauses and plays itself.
+    expect(engine.setPaused?.(false)).toBe(false);
+  });
+
+  it('a play while a paused restart resolves plays once the new stream is attached', async () => {
+    const { el, state } = clockedVideo();
+    state.paused = true;
+    let resolve!: (p: Plan) => void;
+    const seeker = seekerOf(() => new Promise<Plan>((r) => (resolve = r)));
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', cb(), { captions: false, seeker });
+    engine.seek?.(600);
+    expect(engine.setPaused?.(false)).toBe(true);
+    // A seek meanwhile keeps the play.
+    engine.seek?.(700);
+    resolve({ url: 'http://h/v.ts?from=700', at: 700 });
+    await vi.waitFor(() => expect(el.play).toHaveBeenCalledTimes(1));
+    expect(FakeTsPlayer.created.map((p) => p.source.url)).toEqual(['http://h/v.ts', 'http://h/v.ts?from=700']);
+  });
+
   it('without a start from the seeker it loads from 0 and seeks there; a failed lookup is a network error', async () => {
     const { el, state } = clockedVideo();
     const engine = await createEngine(el, vodTs(), 'http://h/v.ts', cb(), { captions: false, seeker: seekerOf(() => null) });

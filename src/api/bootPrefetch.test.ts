@@ -114,6 +114,19 @@ describe('prefetchScreenData', () => {
     expect(calls('catalog.channels')).toEqual([]);
   });
 
+  it('reads ids the way the router does: decoded, as the links encode them', async () => {
+    // The sidebar's links and the address bar encode the ids: `@` and spaces included.
+    prefetchScreenData('/s/s1/live/%40favorites');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('favorites.list')).toEqual([liveFavoritesArgs('s1')]);
+    expect(calls('catalog.channels')).toEqual([]);
+    queryClient.clear();
+    raw.mockClear();
+    prefetchScreenData('/s/s1/live/News%20%26%20Sport%2FUK');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('catalog.channels')).toEqual([channelPageArgs({ sourceId: 's1', categoryId: 'News & Sport/UK' }, 0)]);
+  });
+
   it('asks for a VOD landing page: the groups and, for a SQLite source, the recently added rail', async () => {
     sources.list = [{ id: 's1', kind: 'xtream' }];
     prefetchScreenData('/s/s1/series');

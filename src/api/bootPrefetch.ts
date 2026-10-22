@@ -242,12 +242,20 @@ function prefetchHome(): void {
  */
 export function prefetchScreenData(path: string): void {
   let url: URL;
+  let pathname: string;
   try {
     url = new URL(path, 'http://boot.invalid');
+    // Decoded a segment at a time, as the router matches it: links encode their ids (a pinned
+    // view is `/live/%40favorites`), and matchPath leaves them encoded. An encoded slash stays
+    // one, and matchPath turns it back into a slash inside its param.
+    pathname = url.pathname
+      .split('/')
+      .map((s) => decodeURIComponent(s).replace(/\//g, '%2F'))
+      .join('/');
   } catch {
     return;
   }
-  const at = (pattern: string) => matchPath(pattern, url.pathname)?.params;
+  const at = (pattern: string) => matchPath(pattern, pathname)?.params;
   if (at('/dashboard')) return prefetchHome();
   if (at('/epg')) return prefetchGuide(url.searchParams);
   const live = at('/s/:sourceId/live/:categoryId') ?? at('/s/:sourceId/live');

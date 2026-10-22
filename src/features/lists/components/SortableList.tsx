@@ -59,14 +59,23 @@ export function SortableList<T>(props: SortableListProps<T>) {
   const listRef = useRef<HTMLUListElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
-  // A dragged row stays mounted while it scrolls out of view: its dragend has to reach React.
+  // A dragged row stays mounted while it scrolls out of view: its dragend has to reach React. So
+  // does the row with focus in it: unmounted, it would drop focus to <body>, outside the dialog,
+  // whose Escape and Tab handling then no longer hears the keys. A ref, not state: a step from
+  // row to row need not re-render the list, and the extractor runs again on the next scroll.
   const dragIndex = drag ? items.findIndex((x) => getKey(x) === drag.key) : -1;
+  const focusedKey = useRef<string | null>(null);
   const rangeExtractor = useCallback(
     (range: Range) => {
       const shown = defaultRangeExtractor(range);
-      return dragIndex < 0 || shown.includes(dragIndex) ? shown : [...shown, dragIndex].sort((a, b) => a - b);
+      const focused = focusedKey.current;
+      const focusIndex = focused === null ? -1 : items.findIndex((x) => getKey(x) === focused);
+      const kept = new Set(shown);
+      if (dragIndex >= 0) kept.add(dragIndex);
+      if (focusIndex >= 0) kept.add(focusIndex);
+      return kept.size === shown.length ? shown : [...kept].sort((a, b) => a - b);
     },
-    [dragIndex],
+    [dragIndex, items, getKey],
   );
   const virtualizer = useListVirtualizer({
     count: virtual ? items.length : 0,
@@ -203,6 +212,12 @@ export function SortableList<T>(props: SortableListProps<T>) {
       className="flex flex-col"
       data-testid={testId}
       style={virtual ? { position: 'relative', height: virtualizer.getTotalSize() } : undefined}
+      onFocus={(e) => {
+        focusedKey.current = (e.target as HTMLElement).closest<HTMLElement>('[data-sort-key]')?.dataset.sortKey ?? null;
+      }}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) focusedKey.current = null;
+      }}
     >
       {virtual ? virtualizer.getVirtualItems().map((v) => row(items[v.index]!, v.index, v.start)) : items.map((item, index) => row(item, index))}
     </ul>

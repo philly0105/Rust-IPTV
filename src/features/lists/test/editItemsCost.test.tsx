@@ -166,4 +166,31 @@ describe('Edit channels as a virtual list (LV-6b)', () => {
     fireEvent.dragEnd(grip(list, 0)!);
     await waitFor(() => expect(grip(list, 0)).toBeNull());
   });
+
+  it('keeps the row with focus mounted while the list scrolls away from it, so Escape still closes the dialog', async () => {
+    const { dialog, list } = await openEdit();
+    const scrollTo = scrollable(list);
+    const remove = within(list).getByRole('button', { name: 'Remove Ch 0' });
+    act(() => remove.focus());
+    // End, or the wheel, past the overscan: unmounted, the row would drop focus to <body>, where
+    // the dialog's own key handling no longer hears Escape or Tab.
+    await scrollTo(46 * 1990);
+    await waitFor(() => expect(grip(list, 1999)).not.toBeNull());
+    expect(grip(list, 1)).toBeNull();
+    expect(document.activeElement).toBe(remove);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('edit-list-dialog')).toBeNull());
+  });
+
+  it('lets the row go once focus has left the list', async () => {
+    const { dialog, list } = await openEdit();
+    const scrollTo = scrollable(list);
+    act(() => within(list).getByRole('button', { name: 'Remove Ch 0' }).focus());
+    act(() => within(dialog).getByRole('button', { name: 'Done' }).focus());
+    await scrollTo(46 * 1990);
+    await waitFor(() => expect(grip(list, 1999)).not.toBeNull());
+    expect(grip(list, 0)).toBeNull();
+  });
 });

@@ -20,6 +20,35 @@ export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
 }
 
 /**
+ * The visible height of a scroller (its clientHeight), kept current while `enabled`. A child that
+ * mounts with its page runs this before React attaches the page's ref, so as in useScrollMargin
+ * the scroller is looked up again once the commit is done.
+ */
+export function useClientHeight(ref: RefObject<HTMLElement | null>, enabled = true): number {
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    if (!enabled) return;
+    let ro: ResizeObserver | undefined;
+    let cancelled = false;
+    const start = () => {
+      const el = ref.current;
+      if (cancelled || !el) return;
+      setHeight(el.clientHeight);
+      if (typeof ResizeObserver === 'undefined') return;
+      ro = new ResizeObserver(() => setHeight(el.clientHeight));
+      ro.observe(el);
+    };
+    if (ref.current) start();
+    else queueMicrotask(start);
+    return () => {
+      cancelled = true;
+      ro?.disconnect();
+    };
+  }, [ref, enabled]);
+  return height;
+}
+
+/**
  * Offset of `el` from the top of the scroll content of `scroller` (for virtualizer scrollMargin).
  *
  * A list that mounts in the same commit as its page (the page opened with its data cached, or

@@ -19,6 +19,7 @@ import { PosterRail, type RailCardProps } from '../components/PosterRail';
 import { SourceMissing, isSourceMissing } from '../components/SourceMissing';
 import type { PrefetchTarget } from '../hooks/prefetch';
 import { resumeKey, useRecentlyAdded, useResumeMap, useSectionContinue, useSettings, useSource } from '../hooks/queries';
+import { useClientHeight } from '../hooks/useContainerColumns';
 import { useEdgeFades } from '../hooks/useEdgeFades';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
@@ -419,6 +420,10 @@ function CategoryIndexSection({
   const indexId = useId();
   const indexRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState('');
+  // Open, the index takes at least a screen (IDX-3). A narrowing filter otherwise shortened the
+  // page under the view: the browser clamped the scroll, and the field being typed in dropped
+  // toward the bottom, with the rails back in view.
+  const viewport = useClientHeight(scrollRef, open);
 
   const entries = useMemo<CategoryEntry[]>(() => {
     const list = categoryEntries(shownCats ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));
@@ -484,7 +489,7 @@ function CategoryIndexSection({
           </Button>
         </div>
       </div>
-      <div id={indexId} hidden={!open}>
+      <div id={indexId} hidden={!open} style={open && viewport > 0 ? { minHeight: viewport } : undefined}>
         {!open ? null : cats.isError ? (
           <ErrorState error={cats.error} onRetry={() => void cats.refetch()} />
         ) : cats.isPending ? (

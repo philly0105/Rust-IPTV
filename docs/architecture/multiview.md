@@ -1,6 +1,6 @@
 # Multi-view
 
-`src/features/multiview/` is the wall: two to four live channels playing at once at `/multiview`, one of them with sound. It is frontend only. Each tile resolves its stream the same way the main player does and plays it on its own `<video>`; the core sees ordinary stream requests. Contract C4.
+`src/features/multiview/` is the wall: two to four live channels playing at once at `/multiview`, one of them with sound. It is frontend only. Each tile resolves its stream the same way the main player does and plays it on its own `<video>`; the core sees ordinary stream requests and the wall's playback report (see Downloads). Contract C4.
 
 ## Public surface (`index.ts`)
 
@@ -90,6 +90,10 @@ Chrome follows the broadcast multiviewer pattern:
 - The chrome is glass on video: C8 tokens (`--color-glass*`, `--color-on-glass`) with `var()` fallbacks. The label strip and pills, on screen all the time over up to four videos, use the solid `GLASS` (strong fill, no blur); only the hover tools and the error and lock panels use `GLASS_BLUR` (`glass-blur`, Run 3 C5). Both are in `styles.ts`.
 - Panels with actions (error, lock, lock-check failure, source removed) are centred in the band above the label strip, so the strip never covers their buttons. Every slot is 16:9, so the tile's width (`@container/tile`) also gives its height, and the panel grows in steps: below 20rem the icon sits beside the headline and the help line is left out; from 20rem the icon stands above it; from 26rem the help line shows.
 
+## Downloads
+
+Opening the wall stops the main player, which clears its `downloads.playback` report, so the wall reports for itself (`wallReport.ts`, its own client id). Every tile that is not locked counts from the start of its lookup until it fails or goes, one entry per tile, so two tiles on one source count two connections of it: downloads from that source leave the wall what its account allows and yield when a tile needs a connection ([downloads.md](downloads.md#connections)). Tiles that change together (the wall opening, a clear) send one report; it is renewed every 30 s while any tile counts and cleared when the last one stops. A tile that loads from the provider directly (the browser without the media proxy) waits for the core's answer to the report naming its source, at most 3 s, before it creates its engine; a stream through the proxy goes on at once, since the proxy makes room itself.
+
 ## Page
 
 `MultiviewPage` states:
@@ -169,6 +173,7 @@ All copy is in the `multiview` namespace, in all 19 locales. The shared Close, C
   - parental locks, the connection-limit banner (with `account.status` read when a channel is added), and the empty, loading and no-source states;
   - staggered tile starts and the quick-picks skeleton;
   - the picker add flow.
+- `wallReport.test.tsx` covers the wall's playback report: one entry per playing tile in one report for tiles that start together, a closed or locked tile dropped from it, renewal, the clear when the wall goes, and a direct-loading tile held until the core answers (at most the cap) while a proxied one starts at once.
 - `tilePlayback.test.tsx` covers a server-refused stream failing at once with its reason, the mpegts.js retry without a request first, no retry after an mpegts.js fallback, the tile buffer profile, and the start delay (none for the first slot, none for a retry).
 - `tileReconnect.test.tsx` runs a tile on the player's real engines with mpegts.js faked: a live MPEG-TS stream that ends is reconnected and fails the tile only once the restarts run out, and a live stream on the element that ends fails it at once.
 - `addChannel.test.tsx` covers the gate, duplicates and a full wall after the gate, replace, and `useMultiviewMenuItem`: disabled states, navigation, toasts and a cancelled PIN.

@@ -110,9 +110,16 @@ impl Ranges {
     }
 
     /// Covers `0..total` without gaps or overlaps, every `pos` in its
-    /// segment: a sidecar that is not is ignored.
+    /// segment: a sidecar that is not is ignored. An emptied segment (a
+    /// refused one handed back to the segment before it) covers nothing and
+    /// stays in the plan, since workers address segments by index.
     pub fn is_consistent(&self) -> bool {
-        let mut segs = self.segments.clone();
+        let mut segs: Vec<Seg> = self
+            .segments
+            .iter()
+            .filter(|s| !(s.start == s.end && s.pos == s.start))
+            .copied()
+            .collect();
         segs.sort_by_key(|s| s.start);
         let mut at = 0;
         for s in &segs {
@@ -197,6 +204,19 @@ pub fn load(part: &Path) -> Sidecar {
         return Sidecar::Invalid;
     }
     Sidecar::Valid(ranges)
+}
+
+/// [`save`] once the `.part` is on disk. A segment's `pos` is recorded once
+/// its bytes reach the OS, and the sidecar can reach the disk before those
+/// pages do: after an OS crash or a power cut it would mark bytes as written
+/// that never were, and the finished file would have zeroed gaps. `ranges`
+/// is a snapshot taken before the call, so the sync covers all it records.
+pub fn save_synced(part: &Path, ranges: &Ranges) -> io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(part)?
+        .sync_data()?;
+    save(part, ranges)
 }
 
 /// Replaces the sidecar of `part` (written beside it, then renamed over it).
@@ -385,7 +405,8 @@ struct Plan {
 enum WorkerEnd {
     /// Its segment is written.
     Finished,
-    /// Asked to give its connection back; its segment is free again.
+    /// Asked to give its connection back, or its stream stopped short of an
+    /// end that moved on; its segment is free again.
     Retired,
 }
 
@@ -431,6 +452,21 @@ pub async fn run(
             (seg, end)
         }
     };
+    // Connections the transfer may hold now. "Connections per download: 1",
+    // a speed cap and a refused segment keep one (resuming a split file one
+    // segment after another).
+    let allowance = || {
+        let one = job.one_connection.load(Ordering::Relaxed);
+        let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.mgr, one) {
+            MAX_CONNECTIONS
+        } else {
+            1
+        };
+        job.mgr
+            .connection_allowance(job.ctl)
+            .min(cap)
+            .clamp(1, MAX_CONNECTIONS)
+    };
 
     let mut first = first.and_then(|(stream, at)| {
         let mut p = plan.lock();
@@ -453,6 +489,14 @@ pub async fn run(
     let mut saved_plan = 0;
 
     let mut last_save = Instant::now();
+    // The save in flight. Its sync can take a while on a slow disk, and the
+    // workers only run while this loop polls them, so the loop never waits
+    // for it: a periodic save is skipped meanwhile, and the next save starts
+    // once it lands (two would share the temporary file).
+    let mut saving: Option<tokio::task::JoinHandle<io::Result<()>>> = None;
+    // Segments that start once the plan save in flight lands. Meanwhile the
+    // loop goes on retiring workers and watching the stop token.
+    let mut pending: Vec<(usize, Option<BoxStream<'static, reqwest::Result<Bytes>>>)> = Vec::new();
     let began = plan.lock().ranges.done();
     let mut reported = false;
     let mut failure: Option<WorkerError> = None;
@@ -461,27 +505,15 @@ pub async fn run(
         if !stopping {
             // As many connections as the transfer may hold: start free
             // segments (splitting the largest when none is free), or retire
-            // the newest workers. "Connections per download: 1", a speed cap
-            // and a refused segment keep one (resuming a split file one
-            // segment after another).
-            let one = job.one_connection.load(Ordering::Relaxed);
-            let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.mgr, one) {
-                MAX_CONNECTIONS
-            } else {
-                1
-            };
-            let allowed = job
-                .mgr
-                .connection_allowance(job.ctl)
-                .min(cap)
-                .clamp(1, MAX_CONNECTIONS);
+            // the newest workers.
+            let allowed = allowance();
+            // Nothing new starts while a plan save is in flight.
             let mut starting: Vec<(usize, Option<BoxStream<'static, reqwest::Result<Bytes>>>)> =
-                first
-                    .take()
-                    .map(|(i, s)| (i, Some(s)))
-                    .into_iter()
-                    .collect();
-            while running.len() + starting.len() < allowed {
+                Vec::new();
+            if pending.is_empty() {
+                starting.extend(first.take().map(|(i, s)| (i, Some(s))));
+            }
+            while pending.is_empty() && running.len() + starting.len() < allowed {
                 let next = {
                     let mut p = plan.lock();
                     let free = p
@@ -507,17 +539,9 @@ pub async fn run(
             let segments = plan.lock().ranges.segments.len();
             if !starting.is_empty() && segments != saved_plan {
                 saved_plan = segments;
-                let (part, snapshot) = (job.part.clone(), plan.lock().ranges.clone());
-                let saved = tokio::task::spawn_blocking(move || save(&part, &snapshot)).await;
-                if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
-                    // Without the sidecar a split `.part` could not resume:
-                    // end the attempt before anything writes.
-                    plan.lock().taken.iter_mut().for_each(|t| *t = false);
-                    failure = Some(WorkerError::Failed(CoreError::Io(e)));
-                    stopping = true;
-                    all.cancel();
-                    starting.clear();
-                }
+                let snapshot = plan.lock().ranges.clone();
+                saving = Some(spawn_save(job, snapshot, saving.take()));
+                pending = std::mem::take(&mut starting);
             }
             let wait =
                 closed_at.map_or(Duration::ZERO, |t| CLOSE_GRACE.saturating_sub(t.elapsed()));
@@ -540,8 +564,42 @@ pub async fn run(
             _ = job.ctl.token.cancelled(), if !stopping => {
                 stopping = true;
                 all.cancel();
+                pending.clear();
             }
-            ended = workers.next() => match ended {
+            saved = async { saving.as_mut().expect("a plan save in flight").await },
+                if !pending.is_empty() =>
+            {
+                saving = None;
+                match saved.map_err(io::Error::other).and_then(|r| r) {
+                    Ok(()) => {
+                        // What the transfer may hold now: playback may have
+                        // asked for connections meanwhile.
+                        let room = allowance().saturating_sub(running.len());
+                        let wait = closed_at.map_or(Duration::ZERO, |t| {
+                            CLOSE_GRACE.saturating_sub(t.elapsed())
+                        });
+                        let starting = std::mem::take(&mut pending);
+                        for (n, (seg, stream)) in starting.into_iter().enumerate() {
+                            if n < room {
+                                workers.push(spawn(seg, stream, wait, &mut running));
+                            } else {
+                                plan.lock().taken[seg] = false;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Without the sidecar a split `.part` could not
+                        // resume: end the attempt before anything writes.
+                        pending.clear();
+                        plan.lock().taken.iter_mut().for_each(|t| *t = false);
+                        failure = Some(WorkerError::Failed(CoreError::Io(e)));
+                        stopping = true;
+                        all.cancel();
+                    }
+                }
+            }
+            // With no worker left, an empty set would answer at once.
+            ended = workers.next(), if !workers.is_empty() || pending.is_empty() => match ended {
                 Some((seg, end)) => {
                     running.retain(|(s, _)| *s != seg);
                     closed_at = Some(Instant::now());
@@ -575,6 +633,7 @@ pub async fn run(
                             }
                             stopping = true;
                             all.cancel();
+                            pending.clear();
                         }
                     }
                 }
@@ -594,19 +653,21 @@ pub async fn run(
         job.ctl.bytes.store(done, Ordering::Relaxed);
         progress(done, total);
         reported |= done > began;
-        if last_save.elapsed() >= SAVE_EVERY {
+        if pending.is_empty()
+            && last_save.elapsed() >= SAVE_EVERY
+            && saving.as_ref().is_none_or(|s| s.is_finished())
+        {
             last_save = Instant::now();
-            let part = job.part.clone();
-            let saved = tokio::task::spawn_blocking(move || save(&part, &snapshot)).await;
-            if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
-                tracing::warn!(id = job.id, error = %e, "could not save download ranges");
-            }
+            saving = Some(spawn_save(job, snapshot, saving.take()));
         }
         if stopping && workers.is_empty() {
             break;
         }
     }
     job.ctl.connections.store(1, Ordering::Relaxed);
+    // Before the sidecar is removed or saved for the last time, so an older
+    // snapshot never lands after it.
+    settle_save(job.id, saving.take()).await;
 
     let ranges = plan.lock().ranges.clone();
     let done = ranges.done();
@@ -633,15 +694,41 @@ pub async fn run(
         let _ = tokio::task::spawn_blocking(move || remove(&part)).await;
         return SegEnd::Done(total);
     }
-    let saved = tokio::task::spawn_blocking(move || save(&part, &ranges)).await;
-    if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
-        tracing::warn!(id = job.id, error = %e, "could not save download ranges");
-    }
+    settle_save(job.id, Some(spawn_save(job, ranges, None))).await;
     match failure {
         Some(WorkerError::Failed(err) | WorkerError::Refused(err)) => {
             SegEnd::Error { err, bytes: done }
         }
         _ => SegEnd::Stopped(done),
+    }
+}
+
+/// Saves `ranges` with [`save_synced`] once `before` (the save in flight,
+/// if any) has landed.
+fn spawn_save(
+    job: &Job<'_>,
+    ranges: Ranges,
+    before: Option<tokio::task::JoinHandle<io::Result<()>>>,
+) -> tokio::task::JoinHandle<io::Result<()>> {
+    let (id, part, slow) = (job.id, job.part.clone(), job.mgr.slow_sync());
+    tokio::spawn(async move {
+        settle_save(id, before).await;
+        tokio::task::spawn_blocking(move || {
+            if !slow.is_zero() {
+                std::thread::sleep(slow);
+            }
+            save_synced(&part, &ranges)
+        })
+        .await
+        .map_err(io::Error::other)?
+    })
+}
+
+/// Waits for a save in flight, if any, and logs its failure.
+async fn settle_save(id: i64, saving: Option<tokio::task::JoinHandle<io::Result<()>>>) {
+    let Some(saving) = saving else { return };
+    if let Ok(Err(e)) | Err(e) = saving.await.map_err(io::Error::other) {
+        tracing::warn!(id, error = %e, "could not save download ranges");
     }
 }
 
@@ -723,6 +810,15 @@ async fn worker(
             Ok(Some(Ok(chunk))) => {
                 let room = (end - pos - buf.len() as i64).max(0) as usize;
                 buf.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                if chunk.len() > room {
+                    // Bytes past the end were dropped, so the stream's next
+                    // byte no longer belongs where the next write would put
+                    // it: this stream is done even if the end has moved on
+                    // meanwhile (a refused segment handed back), and what
+                    // is left gets its own request.
+                    outcome = Ok(WorkerEnd::Retired);
+                    break;
+                }
                 if buf.len() >= WRITE_CHUNK {
                     if let Err(e) = write_at(&mut file, &mut buf, &mut pos, plan, seg).await {
                         outcome = Err(WorkerError::Failed(CoreError::Io(e)));
@@ -780,18 +876,19 @@ async fn worker(
         return Err(WorkerError::Failed(CoreError::Io(e)));
     }
     if matches!(outcome, Ok(WorkerEnd::Finished)) && pos < plan.lock().ranges.segments[seg].end {
-        // Reached the end of what was asked for, but a split never moved it:
-        // the stream ended early.
-        return Err(WorkerError::Failed(CoreError::Network(
-            "Transfer ended before the advertised size".into(),
-        )));
+        // A refused segment was handed back after this stream reached the
+        // old end: the rest is free for its own request.
+        return Ok(WorkerEnd::Retired);
     }
     outcome
 }
 
-/// Writes `buf` at `pos` and records the new position in the plan.
-async fn write_at(
-    file: &mut tokio::fs::File,
+/// Writes `buf` at `pos` and records the new position in the plan. A write
+/// that fails drops `buf`: it may have stored part of it and moved the
+/// file's position past `pos`, so writing it again would land it shifted.
+/// None of it was recorded, so the next attempt fetches it again.
+async fn write_at<W: tokio::io::AsyncWrite + Unpin>(
+    file: &mut W,
     buf: &mut Vec<u8>,
     pos: &mut i64,
     plan: &Mutex<Plan>,
@@ -800,13 +897,18 @@ async fn write_at(
     if buf.is_empty() {
         return Ok(());
     }
-    file.write_all(buf).await?;
     // tokio hands the write to a blocking thread; flushing waits for it, so
     // the position recorded below is on disk (in the OS's cache) when the
     // sidecar says so.
-    file.flush().await?;
-    *pos += buf.len() as i64;
+    let written = async {
+        file.write_all(buf).await?;
+        file.flush().await
+    }
+    .await;
+    let len = buf.len() as i64;
     buf.clear();
+    written?;
+    *pos += len;
     plan.lock().ranges.segments[seg].pos = *pos;
     Ok(())
 }
@@ -919,6 +1021,29 @@ mod tests {
     }
 
     #[test]
+    fn a_plan_with_a_refused_segment_handed_back_stays_consistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("Movie.mp4.part");
+        let mut r = Ranges::new(32 * MIB, "\"e\"".into(), 0);
+        let tail = r.split().unwrap();
+        // The tail was refused untouched: the open answer's segment takes
+        // its range and the tail is left empty at its old start.
+        r.segments[0].end = r.segments[tail].end;
+        r.segments[tail].end = r.segments[tail].start;
+        r.segments[0].pos = 5 * MIB;
+        assert!(r.is_consistent());
+        save(&part, &r).unwrap();
+        std::fs::File::create(&part)
+            .unwrap()
+            .set_len(5 * MIB as u64)
+            .unwrap();
+        assert_eq!(load(&part), Sidecar::Valid(r.clone()), "resumes at 5 MiB");
+        // An empty segment never hides a gap.
+        r.segments[0].end = 30 * MIB;
+        assert!(!r.is_consistent());
+    }
+
+    #[test]
     fn file_systems_that_zero_fill_a_gap_keep_one_connection() {
         // ext4, XFS, Btrfs, tmpfs, overlayfs (Docker), NFS leave holes.
         for fs in [
@@ -968,6 +1093,96 @@ mod tests {
         remove(&part);
         assert_eq!(load(&part), Sidecar::None);
         remove(&part);
+    }
+
+    /// A file that stores `short` bytes of the first write and then fails,
+    /// the way write(2) does on a disk that fills up mid-call, and takes
+    /// every write after that. Records where each byte landed.
+    struct ShortThenOk {
+        short: usize,
+        failed: bool,
+        at: usize,
+        data: Vec<u8>,
+    }
+
+    impl tokio::io::AsyncWrite for ShortThenOk {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<io::Result<usize>> {
+            let n = if self.failed {
+                buf.len()
+            } else if self.at < self.short {
+                buf.len().min(self.short - self.at)
+            } else {
+                self.failed = true;
+                return std::task::Poll::Ready(Err(io::ErrorKind::StorageFull.into()));
+            };
+            let at = self.at;
+            if self.data.len() < at + n {
+                self.data.resize(at + n, 0);
+            }
+            self.data[at..at + n].copy_from_slice(&buf[..n]);
+            self.at += n;
+            std::task::Poll::Ready(Ok(n))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_write_that_failed_part_way_is_not_written_again_shifted() {
+        let ranges = Ranges::new(1024, "\"e\"".into(), 0);
+        let plan = Mutex::new(Plan {
+            taken: vec![true],
+            ranges,
+        });
+        let mut file = ShortThenOk {
+            short: 100,
+            failed: false,
+            at: 0,
+            data: Vec::new(),
+        };
+        let mut buf: Vec<u8> = (0..=255).collect();
+        let mut pos = 0;
+        assert!(write_at(&mut file, &mut buf, &mut pos, &plan, 0)
+            .await
+            .is_err());
+        // The worker's last write after the loop, with whatever is left in
+        // its buffer: nothing, since none of it was recorded.
+        write_at(&mut file, &mut buf, &mut pos, &plan, 0)
+            .await
+            .unwrap();
+        assert_eq!(pos, 0);
+        assert_eq!(plan.lock().ranges.segments[0].pos, 0, "nothing recorded");
+        assert_eq!(file.data.len(), 100, "nothing written past the short write");
+    }
+
+    #[test]
+    fn a_synced_save_goes_through_the_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("Movie.mp4.part");
+        let r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        // The `.part` is synced before the sidecar records its bytes: with
+        // no `.part` to sync, no sidecar is written.
+        assert!(save_synced(&part, &r).is_err());
+        assert!(!ranges_path(&part).exists());
+        std::fs::write(&part, b"").unwrap();
+        save_synced(&part, &r).unwrap();
+        assert_eq!(load(&part), Sidecar::Valid(r));
     }
 
     #[test]

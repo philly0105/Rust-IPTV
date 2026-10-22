@@ -40,6 +40,12 @@ const MAKE_ROOM_WAIT: Duration = Duration::from_secs(2);
 /// connection a moment after the client closed it, and a stream asking
 /// sooner can still be refused.
 const YIELD_GRACE: Duration = Duration::from_millis(300);
+/// How long a stream a player stops reporting, or a recording that ends,
+/// still takes a connection of its source, on top of what else uses it. A
+/// player answers its report before it lets the old stream go (mpv loads
+/// the next channel only once the report for it is answered), and the panel
+/// counts the closed connection a moment longer.
+pub const RELEASE_GRACE: Duration = Duration::from_secs(3);
 /// How long a source waits after refusing or failing a download, by step
 /// in a row, in multiples of [`WAIT_BASE`]: 15 s, 30 s, 1, 2, 5, then
 /// 10 min.
@@ -136,8 +142,12 @@ struct Inner {
     streams: HashMap<String, usize>,
     /// Until when a source counts as playing after its last proxied stream.
     lingering: HashMap<String, Instant>,
+    /// Streams players stopped reporting a moment ago.
+    released: Closed,
     /// Recordings running, per source.
     recordings: HashMap<String, usize>,
+    /// Recordings that ended a moment ago.
+    ended: Closed,
     /// Sources whose downloads wait before the next attempt, and why.
     blocked: HashMap<String, Block>,
     /// When each queued id started waiting on a blocked source.
@@ -160,6 +170,35 @@ enum Limit {
 struct Lease {
     sources: Vec<String>,
     until: Instant,
+}
+
+/// Connections that closed a moment ago, per source, each with when it
+/// stops counting ([`RELEASE_GRACE`]): the panel still counts them, on top
+/// of whatever else uses the source.
+#[derive(Default)]
+struct Closed(HashMap<String, Vec<Instant>>);
+
+impl Closed {
+    fn add(&mut self, source: &str, until: Instant) {
+        self.0.entry(source.to_string()).or_default().push(until);
+    }
+
+    fn count(&self, source: &str, now: Instant) -> usize {
+        self.0
+            .get(source)
+            .map_or(0, |t| t.iter().filter(|t| **t > now).count())
+    }
+
+    fn expire(&mut self, now: Instant) {
+        self.0.retain(|_, t| {
+            t.retain(|t| *t > now);
+            !t.is_empty()
+        });
+    }
+
+    fn ends(&self) -> impl Iterator<Item = Instant> + '_ {
+        self.0.values().flatten().copied()
+    }
 }
 
 /// Why and until when downloads from a source wait (the provider refused a
@@ -191,14 +230,17 @@ pub fn download_budget(limit: Option<i64>, playing: usize, recording: usize) -> 
 
 impl Inner {
     /// Streams playing from `source`: the most any one signal reports (a
-    /// player's lease and the proxy see the same playback).
+    /// player's lease and the proxy see the same playback). A stream a
+    /// player let go a moment ago counts beside the ones players report; a
+    /// proxied one is still among the proxy's streams or lingering.
     fn playing(&self, source: &str, now: Instant) -> usize {
-        let reported: usize = self
+        let reported = self
             .leases
             .values()
             .filter(|l| l.until > now)
             .map(|l| l.sources.iter().filter(|s| *s == source).count())
-            .sum();
+            .sum::<usize>()
+            + self.released.count(source, now);
         let proxied = self
             .streams
             .get(source)
@@ -210,8 +252,8 @@ impl Inner {
         reported.max(proxied)
     }
 
-    fn recording(&self, source: &str) -> usize {
-        self.recordings.get(source).copied().unwrap_or(0)
+    fn recording(&self, source: &str, now: Instant) -> usize {
+        self.recordings.get(source).copied().unwrap_or(0) + self.ended.count(source, now)
     }
 
     /// `None` while the source's limit is still being read.
@@ -221,7 +263,7 @@ impl Inner {
             Limit::Known(limit) => Some(download_budget(
                 *limit,
                 self.playing(source, now),
-                self.recording(source),
+                self.recording(source, now),
             )),
         }
     }
@@ -271,6 +313,8 @@ impl Inner {
     fn expire(&mut self, now: Instant) {
         self.leases.retain(|_, l| l.until > now);
         self.lingering.retain(|_, t| *t > now);
+        self.released.expire(now);
+        self.ended.expire(now);
         self.blocked.retain(|_, b| b.until > now);
     }
 
@@ -285,6 +329,8 @@ impl Inner {
             .values()
             .map(|l| l.until)
             .chain(self.lingering.values().copied())
+            .chain(self.released.ends())
+            .chain(self.ended.ends())
             .chain(self.blocked.values().map(|b| b.until))
             .filter(|t| *t > now)
             .min()?;
@@ -349,6 +395,9 @@ pub struct DownloadManager {
     /// The downloads folder behaves as one that cannot leave holes (FAT,
     /// exFAT). Tests only.
     no_holes: AtomicBool,
+    /// Extra time every sidecar save of a split file takes, in
+    /// milliseconds: a slow disk's sync. Tests only.
+    slow_sync_ms: AtomicU64,
 }
 
 /// What a stop request found.
@@ -455,7 +504,7 @@ impl DownloadManager {
         if used < inner.budget(source, now)? {
             return None;
         }
-        let without_playback = download_budget(Some(limit), 0, inner.recording(source));
+        let without_playback = download_budget(Some(limit), 0, inner.recording(source, now));
         let reason = if without_playback > used {
             WaitReason::Playback
         } else {
@@ -551,6 +600,17 @@ impl DownloadManager {
         self.no_holes.load(Ordering::Relaxed)
     }
 
+    /// Makes every sidecar save of a split file take `extra` longer, the
+    /// way a slow disk's sync does. Used by tests.
+    pub fn set_slow_sync(&self, extra: Duration) {
+        let ms = u64::try_from(extra.as_millis()).unwrap_or(u64::MAX);
+        self.slow_sync_ms.store(ms, Ordering::Relaxed);
+    }
+
+    pub(crate) fn slow_sync(&self) -> Duration {
+        Duration::from_millis(self.slow_sync_ms.load(Ordering::Relaxed))
+    }
+
     /// Shortens how long a playback report counts. Used by tests.
     pub fn set_playback_lease(&self, lease: Duration) {
         let ms = u64::try_from(lease.as_millis()).unwrap_or(u64::MAX).max(1);
@@ -578,8 +638,9 @@ impl DownloadManager {
     /// Books a run's outcome against its source. A `Requeue` blocks the
     /// source for the next backoff step and keeps the row's waiting clock,
     /// or becomes `Failed` once the row waited [`WAIT_LIMIT`] without new
-    /// bytes. Bytes from the source (a completed or progressing run) end
-    /// its streak.
+    /// bytes. Bytes from the source (a completed or progressing run, one
+    /// that yielded to playback included) end its streak and the row's
+    /// waiting clock.
     fn settle(&self, id: i64, source: &str, outcome: Outcome) -> Outcome {
         let now = Instant::now();
         let (base, limit) = self.wait_timing();
@@ -592,13 +653,22 @@ impl DownloadManager {
             part,
         } = outcome
         else {
-            if matches!(outcome, Outcome::Completed { .. }) {
+            if matches!(
+                outcome,
+                Outcome::Completed { .. }
+                    | Outcome::Stopped {
+                        reason: StopReason::Yield,
+                        progressed: true,
+                        ..
+                    }
+            ) {
                 inner.streaks.remove(source);
             }
             if !matches!(
                 outcome,
                 Outcome::Stopped {
                     reason: StopReason::Yield,
+                    progressed: false,
                     ..
                 }
             ) {
@@ -923,17 +993,35 @@ pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<Stri
     let mgr = manager(state);
     {
         let mut inner = mgr.inner.lock();
-        if sources.is_empty() {
-            inner.leases.remove(client);
+        let now = Instant::now();
+        let before = if sources.is_empty() {
+            inner.leases.remove(client)
         } else {
-            let until = Instant::now() + mgr.playback_lease();
+            let until = now + mgr.playback_lease();
             inner.leases.insert(
                 client.to_string(),
                 Lease {
                     sources: sources.clone(),
                     until,
                 },
-            );
+            )
+        };
+        // The player still holds the streams it reported last when this
+        // returns: each entry of that report the new one no longer has (a
+        // source it left, one of a wall's two tiles on a source) stays its
+        // own a moment longer.
+        let before = before
+            .filter(|l| l.until > now)
+            .map(|l| l.sources)
+            .unwrap_or_default();
+        let mut kept: Vec<&String> = sources.iter().collect();
+        for source in &before {
+            match kept.iter().position(|s| *s == source) {
+                Some(i) => {
+                    kept.swap_remove(i);
+                }
+                None => inner.released.add(source, now + RELEASE_GRACE),
+            }
         }
     }
     let done = pump(state, &mgr);
@@ -1023,6 +1111,11 @@ impl Drop for RecordingHold {
                 if *n == 0 {
                     inner.recordings.remove(&self.source);
                 }
+                // The recording's connection closed a moment ago, and the
+                // panel still counts it.
+                inner
+                    .ended
+                    .add(&self.source, Instant::now() + RELEASE_GRACE);
             }
         }
         pump_if_running(&state, &mgr);
@@ -1143,6 +1236,7 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
                     reason: StopReason::Yield,
                     bytes,
                     part,
+                    ..
                 } => Some((*bytes, part.clone(), false)),
                 Outcome::Requeue { bytes, part, .. } => Some((*bytes, part.clone(), true)),
                 _ => None,
@@ -1152,10 +1246,12 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
         Ok(false) => tracing::debug!(id, "download no longer queued; skipping"),
         Err(err) => {
             // The row is still `queued` in the database: dropping the id
-            // would leave it waiting with no task until the next launch.
+            // would leave it waiting with no task until the next launch. A
+            // yield asked for meanwhile does not change that; a user's stop
+            // does, and the RPC that asked for it saves it.
             let delay = mgr.claim_retry();
             tracing::error!(id, error = %err, ?delay, "could not claim download; queueing it again later");
-            retry_later = !ctl.token.is_cancelled();
+            retry_later = matches!(*ctl.reason.lock(), None | Some(StopReason::Yield));
         }
     }
     // A row that yielded goes back to the front of the queue, and one that
@@ -1197,6 +1293,7 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
                 reason,
                 bytes,
                 part,
+                progressed: false,
             },
         )
         .await;
@@ -1260,6 +1357,7 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
                     reason,
                     bytes,
                     part,
+                    ..
                 } => match reason {
                     StopReason::Pause | StopReason::Detach => {
                         store::finish(c, id, DownloadStatus::Paused, bytes, None)

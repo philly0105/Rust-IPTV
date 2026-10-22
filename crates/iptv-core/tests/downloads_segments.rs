@@ -2,7 +2,11 @@
 //! download: Auto"), against the mock's `/files/video.bin`, which throttles
 //! each response on its own (`kbps`), the way a provider that caps every
 //! connection does, and its `limit<N>` Xtream accounts, which refuse a file
-//! beyond N open bodies.
+//! beyond N open bodies. `dl_panel` serves what the mock cannot: files that
+//! differ from each other, and a segment refused just as the open stream
+//! reaches it.
+
+mod dl_panel;
 
 use iptv_core::model::{Download, DownloadStatus};
 use iptv_core::rpc::RpcRouter;
@@ -20,11 +24,12 @@ struct Ctx {
     state: Arc<AppState>,
     router: RpcRouter,
     srv: iptv_fixtures::MockHandle,
+    events: parking_lot::Mutex<tokio::sync::broadcast::Receiver<iptv_core::AppEvent>>,
 }
 
 async fn ctx() -> Ctx {
     let tmp = tempfile::tempdir().unwrap();
-    let (sink, _events) = BroadcastSink::channel(65_536);
+    let (sink, events) = BroadcastSink::channel(65_536);
     let state = AppState::new(tmp.path().join("data"), Arc::new(sink), false)
         .await
         .unwrap();
@@ -36,6 +41,7 @@ async fn ctx() -> Ctx {
         state,
         router,
         srv: iptv_fixtures::spawn_mock().await,
+        events: parking_lot::Mutex::new(events),
     }
 }
 
@@ -48,13 +54,18 @@ impl Ctx {
     }
 
     async fn start(&self, source: &str, item: &str, path: &str) -> Download {
+        self.start_titled(source, item, &format!("item {item}"), &self.srv.url(path))
+            .await
+    }
+
+    async fn start_titled(&self, source: &str, item: &str, title: &str, url: &str) -> Download {
         let v = self
             .ok(
                 "downloads.start",
                 json!({
                     "ref": {"sourceId": source, "contentType": "movie", "itemId": item},
-                    "title": format!("item {item}"),
-                    "url": self.srv.url(path),
+                    "title": title,
+                    "url": url,
                 }),
             )
             .await;
@@ -80,6 +91,32 @@ impl Ctx {
                 d.error_message
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Forgets the events received so far.
+    fn drain_events(&self) {
+        let mut events = self.events.lock();
+        while matches!(
+            events.try_recv(),
+            Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_))
+        ) {}
+    }
+
+    /// Bytes of the next `downloads.progress` event of `id`: where a resumed
+    /// transfer starts.
+    async fn next_progress(&self, id: i64) -> i64 {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            assert!(Instant::now() < deadline, "no progress for {id}");
+            let got = self.events.lock().try_recv();
+            match got {
+                Ok(ev) if ev.kind == "downloads.progress" && ev.payload["id"] == id => {
+                    return ev.payload["bytesDownloaded"].as_i64().unwrap();
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+                Err(_) => tokio::time::sleep(Duration::from_millis(5)).await,
+            }
         }
     }
 
@@ -398,6 +435,165 @@ async fn a_refused_extra_connection_drops_the_file_to_one_and_it_completes() {
     assert!(is_mock_content(Path::new(&file_path)), "byte-exact");
     assert!(!ranges_of(&file_path).exists());
     assert_eq!(c.refused().await, 1, "one refusal, then one connection");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_file_dropped_to_one_after_a_refusal_resumes_where_it_paused() {
+    let c = ctx().await;
+    c.limit("xt", 3).await;
+    c.limited_files(16 * MIB, 2048).await;
+    let d = c.start("xt", "1", &c.one_connection_movie(101)).await;
+    let deadline = Instant::now() + WAIT;
+    while c.refused().await == 0 || c.get(d.id).await.bytes_downloaded < (2 * MIB) as i64 {
+        assert!(Instant::now() < deadline, "never refused and went on");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    let paused = c.get(d.id).await;
+    let part = PathBuf::from(format!("{}.part", paused.file_path.clone().unwrap()));
+    // The refused segment was handed back to the open answer's: the plan
+    // that records it must still be one a resume trusts.
+    assert!(
+        matches!(
+            iptv_core::downloads::segments::load(&part),
+            iptv_core::downloads::segments::Sidecar::Valid(_)
+        ),
+        "the sidecar after the refusal is valid"
+    );
+    c.drain_events();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let first = c.next_progress(d.id).await;
+    assert!(
+        first >= paused.bytes_downloaded,
+        "the resume started over: {first} after pausing at {}",
+        paused.bytes_downloaded
+    );
+    let done = c
+        .wait_until(d.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    let file_path = done.file_path.unwrap();
+    assert!(is_mock_content(Path::new(&file_path)), "byte-exact");
+    // One refusal per run: the resumed run tries a second connection again.
+    assert!(c.refused().await <= 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_segment_refused_as_the_open_stream_reaches_it_is_not_written_shifted() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    let panel = dl_panel::Panel::spawn(1).await;
+    let size = 16 * MIB;
+    panel.file(1, size, 4096);
+    // The tail's request is refused only once the open stream is 1000
+    // bytes short of the tail's start, and that stream's next chunk, which
+    // crosses it, comes after the refusal has handed the tail back.
+    panel.cut_next_segment(1);
+    let d = c.start_titled("src", "1", "Movie", &panel.url(1)).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert!(panel.cut_fired(), "the refusal landed at the cut");
+    let file_path = done.file_path.unwrap();
+    dl_panel::is_exact(1, size, Path::new(&file_path)).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_split_download_makes_room_for_playback_while_a_slow_disk_saves_its_plan() {
+    let c = ctx().await;
+    // An account allowing four leaves downloads three.
+    c.limit("src", 4).await;
+    // Each sidecar save takes 3 s, longer than playback waits for a
+    // download to make room.
+    iptv_core::downloads::set_slow_sync(&c.state, Duration::from_secs(3));
+    let panel = dl_panel::Panel::spawn(6).await;
+    let size = 48 * MIB;
+    // The open answer covers the first half at loopback speed, and the two
+    // quarters come at 2 MiB/s: once the half is written, the next split
+    // saves the plan while both quarters still stream.
+    panel.file(1, size, 0);
+    let head = panel.hold_next_head();
+    let d = c.start_titled("src", "1", "Movie", &panel.url(1)).await;
+    head.held().await;
+    panel.set_speed(1, 2048);
+    head.release();
+    let deadline = Instant::now() + WAIT;
+    while !(panel.log().len() == 3 && panel.open() == 2) {
+        assert!(Instant::now() < deadline, "the first half never finished");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // The last of the half reaches the disk and the plan save starts.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let asked = Instant::now();
+    c.ok(
+        "downloads.playback",
+        json!({"clientId": "player", "sourceIds": ["src"]}),
+    )
+    .await;
+    assert_eq!(
+        panel.open(),
+        1,
+        "the download still held an extra connection {:?} after playback asked for it",
+        asked.elapsed()
+    );
+    c.ok(
+        "downloads.playback",
+        json!({"clientId": "player", "sourceIds": []}),
+    )
+    .await;
+    let done = c
+        .wait_until(d.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    dl_panel::is_exact(1, size, Path::new(&done.file_path.unwrap())).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_paused_rows_name_is_not_handed_out_while_its_part_is_gone() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    let panel = dl_panel::Panel::spawn(2).await;
+    let (a_size, b_size) = (24 * MIB, 32 * MIB);
+    panel.file(1, a_size, 2048);
+    panel.file(2, b_size, 2048);
+    let a = c.start_titled("src", "1", "Movie", &panel.url(1)).await;
+    c.wait_until(a.id, "used two connections", |d| {
+        d.connections == Some(2) && d.bytes_downloaded > (4 * MIB) as i64
+    })
+    .await;
+    c.ok("downloads.pause", json!({"id": a.id})).await;
+    let a_path = c.get(a.id).await.file_path.unwrap();
+    // The user frees space by deleting the paused partial by hand.
+    std::fs::remove_file(format!("{a_path}.part")).unwrap();
+    // Another movie with the same title.
+    let b = c.start_titled("src", "2", "Movie", &panel.url(2)).await;
+    let b_path = b.file_path.clone().unwrap();
+    assert_ne!(b_path, a_path, "the paused row keeps its name");
+    c.wait_until(b.id, "made progress", |d| {
+        d.bytes_downloaded > (2 * MIB) as i64
+    })
+    .await;
+    c.ok("downloads.resume", json!({"id": a.id})).await;
+    let b_done = c
+        .wait_until(b.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    let a_done = c
+        .wait_until(a.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    let (a_file, b_file) = (a_done.file_path.unwrap(), b_done.file_path.unwrap());
+    assert_ne!(a_file, b_file);
+    dl_panel::is_exact(1, a_size, Path::new(&a_file)).unwrap();
+    dl_panel::is_exact(2, b_size, Path::new(&b_file)).unwrap();
 }
 
 /// Splits a 24 MiB file over two connections and pauses it; returns its

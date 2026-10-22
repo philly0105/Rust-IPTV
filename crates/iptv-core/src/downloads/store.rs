@@ -138,6 +138,20 @@ pub fn ids_with_status(
     Ok(ids.collect::<Result<Vec<_>, _>>()?)
 }
 
+/// Final paths the other unfinished rows record. A paused row's `.part` can
+/// be gone for now (deleted by hand to free space), and a reservation that
+/// handed its name out again would give two rows one `.part`.
+pub fn held_paths(conn: &Connection, except: i64) -> CoreResult<super::naming::HeldPaths> {
+    let mut stmt = conn.prepare(
+        "SELECT file_path FROM downloads \
+         WHERE id != ?1 AND status != 'completed' AND file_path IS NOT NULL",
+    )?;
+    let paths = stmt.query_map([except], |r| r.get(0))?;
+    Ok(super::naming::HeldPaths::new(
+        paths.collect::<Result<Vec<String>, _>>()?,
+    ))
+}
+
 /// Fields for a fresh (or reset) queued row.
 pub struct NewDownload<'a> {
     pub item_ref: &'a ItemRef,

@@ -7,6 +7,10 @@
  * Sound: the element is muted unless this tile has the wall's sound. Browsers refuse sound
  * before the first user gesture on the page (a reload straight into the wall): the tile then
  * plays muted, reports `soundBlocked`, and turns its sound on at the next click or key.
+ *
+ * Downloads: from the start of a lookup until it stops or fails, the tile counts in the wall's
+ * playback report (`wallReport.ts`), and a stream the element loads from the provider directly
+ * waits for that report's answer first.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -27,6 +31,7 @@ import {
 import type { TileFault } from './errors';
 import { resolveTileSource } from './stream';
 import type { MultiviewChannelInput } from './types';
+import { tilePlaying, tileStopped, wallReportAnswered } from './wallReport';
 
 /** A stream that has not shown a frame by then counts as failed. */
 export const START_TIMEOUT_MS = 25_000;
@@ -167,6 +172,7 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
       failed = true;
       clearTimers();
       release();
+      tileStopped(key);
       setState({ phase: 'error', fault, buffering: false, soundBlocked: false });
     };
 
@@ -237,10 +243,18 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
           if (!isCurrent()) return;
           source = src;
           setState((s) => (s.phase === 'resolving' ? { ...s, phase: 'loading' } : s));
+          const loadUrl = proxiedUrl(src);
+          // A stream loaded from the provider directly waits until a download holding the
+          // connection it needs has let go; the proxy waits on its own.
+          const room = loadUrl === src.url ? wallReportAnswered(chRef.current.ref.sourceId) : null;
+          if (room) {
+            await room;
+            if (!isCurrent()) return;
+          }
           const engine = await createEngine(
             el,
             src,
-            proxiedUrl(src),
+            loadUrl,
             {
               onTracks: () => undefined,
               onError: (err) => {
@@ -261,12 +275,15 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
           fail(code ? { code, message: errorText(err) } : { message: errorText(err) });
         });
     };
+    // Counted from now, so tiles that start together (staggered) send one report.
+    tilePlaying(key, chRef.current.ref.sourceId);
     const delay = startedRef.current ? 0 : startDelayRef.current;
     if (delay > 0) beginTimer = setTimeout(begin, delay);
     else begin();
 
     return () => {
       disposed = true;
+      tileStopped(key);
       abort.abort();
       clearTimeout(beginTimer);
       clearTimers();

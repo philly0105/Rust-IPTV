@@ -1,6 +1,9 @@
 //! DL-1: downloads follow the source account's connection limit. Against the
 //! mock's `limit<N>` Xtream accounts, which refuse a file beyond N open
-//! bodies with `403 Max connections reached`, the way panels do.
+//! bodies with `403 Max connections reached`, the way panels do, and
+//! `dl_panel` where a test needs to hold a response head back.
+
+mod dl_panel;
 
 use iptv_core::model::{Download, DownloadStatus, WaitReason};
 use iptv_core::rpc::RpcRouter;
@@ -91,17 +94,41 @@ impl Ctx {
     }
 
     async fn start(&self, sid: &str, user: &str, item: u32) -> Download {
+        self.start_url(sid, item, &self.movie_url(user, item)).await
+    }
+
+    async fn start_url(&self, sid: &str, item: u32, url: &str) -> Download {
         let v = self
             .ok(
                 "downloads.start",
                 json!({
                     "ref": {"sourceId": sid, "contentType": "movie", "itemId": item.to_string()},
                     "title": format!("Movie {item}"),
-                    "url": self.movie_url(user, item),
+                    "url": url,
                 }),
             )
             .await;
         serde_json::from_value(v).unwrap()
+    }
+
+    /// Caches an account status allowing `n` connections for a source with
+    /// no row of its own (a download from `dl_panel`).
+    async fn limit(&self, source: &str, n: i64) {
+        iptv_core::account::record(
+            &self.state,
+            iptv_core::account::AccountStatus {
+                source_id: source.into(),
+                kind: iptv_core::model::SourceKind::Xtream,
+                status: None,
+                exp_date: None,
+                is_trial: false,
+                active_cons: Some(0),
+                max_connections: Some(n),
+                checked_at: "2026-10-22T00:00:00Z".into(),
+                error: None,
+            },
+        )
+        .await;
     }
 
     async fn get(&self, id: i64) -> Download {
@@ -410,4 +437,293 @@ async fn a_refusal_with_working_credentials_waits_for_a_free_connection() {
         .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
         .await;
     assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_download_asked_to_yield_while_its_size_waits_for_the_database_lets_go() {
+    let c = ctx().await;
+    c.limit("src", 1).await;
+    let panel = dl_panel::Panel::spawn(3).await;
+    panel.file(1, 8 * 1024 * 1024, 1024);
+    let head = panel.hold_next_head();
+    let d = c.start_url("src", 1, &panel.url(1)).await;
+    head.held().await;
+    // An import takes the write lock just before the answer arrives, so the
+    // download waits to record the file's size with the answer in hand.
+    let lock = hold_write_lock(&c.state, Duration::from_secs(4));
+    head.release();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(panel.open(), 1);
+    let asked = Instant::now();
+    c.playback("player-1", &["src"]).await;
+    // The player connects now: the account's one connection must be free.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        panel.open(),
+        0,
+        "the download still held its connection {:?} after playback asked for it",
+        asked.elapsed()
+    );
+    lock.join().unwrap();
+    c.playback("player-1", &[]).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    dl_panel::is_exact(1, 8 * 1024 * 1024, Path::new(&done.file_path.unwrap())).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stream_kept_for_a_split_is_let_go_when_playback_asks_meanwhile() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    let panel = dl_panel::Panel::spawn(4).await;
+    panel.file(1, 64 * 1024 * 1024, 4096);
+    // Playback on the source keeps the file on one connection until its
+    // report lapses, half a second in.
+    iptv_core::downloads::set_playback_lease(&c.state, Duration::from_millis(500));
+    c.playback("player-1", &["src"]).await;
+    let d = c.start_url("src", 1, &panel.url(1)).await;
+    c.wait_until(d.id, "made progress", |d| {
+        d.status == DownloadStatus::Downloading && d.bytes_downloaded > 512 * 1024
+    })
+    .await;
+    let lock = hold_write_lock(&c.state, Duration::from_secs(8));
+    // Within a second of the lapse the stream is kept for the split while
+    // the attempt's progress waits for the database.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(panel.open(), 1, "still on its one stream");
+    assert_eq!(panel.log().len(), 1, "no segment asked for yet");
+    // Three players on the account: downloads get none of its connections.
+    let asked = Instant::now();
+    c.playback("player-1", &["src", "src", "src"]).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        panel.open(),
+        0,
+        "the download still held its connection {:?} after playback asked for it",
+        asked.elapsed()
+    );
+    lock.join().unwrap();
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_player_that_switches_away_keeps_its_connection_until_its_stream_closes() {
+    let c = ctx().await;
+    c.files(1024 * 1024, 1024).await;
+    let sid = c.source("limit1").await;
+    // Embedded mpv plays a movie from the source.
+    c.playback("player-1", &[&sid]).await;
+    let play = reqwest::get(c.movie_url("limit1", 200)).await.unwrap();
+    assert!(play.status().is_success());
+    let d = c.start(&sid, "limit1", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // The user zaps to another source: mpv lets the old stream go once the
+    // report for the new one is answered, and the panel notices a little
+    // later still.
+    c.playback("player-1", &["elsewhere"]).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(play);
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+    assert_eq!(
+        c.stats().await["requests"]["refused_streams"],
+        Value::Null,
+        "the download asked while the player's stream was still open"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recording_that_ends_keeps_its_connection_a_moment() {
+    let c = ctx().await;
+    c.files(1024 * 1024, 1024).await;
+    let sid = c.source("limit1").await;
+    let recording = iptv_core::downloads::hold_recording(&c.state, &sid).await;
+    let stream = reqwest::get(c.movie_url("limit1", 300)).await.unwrap();
+    assert!(stream.status().is_success());
+    let d = c.start(&sid, "limit1", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // The recording ends; the panel still counts its connection a moment.
+    drop(recording);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(stream);
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recording_that_ends_while_a_player_stays_keeps_its_connection_a_moment() {
+    let c = ctx().await;
+    c.files(2 * 1024 * 1024, 1024).await;
+    let sid = c.source("limit2").await;
+    // Embedded mpv plays one channel of the account while a recording
+    // takes the other connection.
+    c.playback("player-1", &[&sid]).await;
+    let play = reqwest::get(c.movie_url("limit2", 200)).await.unwrap();
+    assert!(play.status().is_success());
+    let recording = iptv_core::downloads::hold_recording(&c.state, &sid).await;
+    let stream = reqwest::get(c.movie_url("limit2", 300)).await.unwrap();
+    assert!(stream.status().is_success());
+    let d = c.start(&sid, "limit2", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // The recording ends; the panel still counts its connection a moment,
+    // beside the player's.
+    drop(recording);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(stream);
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
+    drop(play);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_wall_tile_that_goes_keeps_its_connection_a_moment() {
+    let c = ctx().await;
+    c.files(2 * 1024 * 1024, 1024).await;
+    let sid = c.source("limit2").await;
+    // Two wall tiles on the account's two connections, loaded directly.
+    c.playback("wall", &[&sid, &sid]).await;
+    let tile_1 = reqwest::get(c.movie_url("limit2", 200)).await.unwrap();
+    let tile_2 = reqwest::get(c.movie_url("limit2", 201)).await.unwrap();
+    assert!(tile_1.status().is_success() && tile_2.status().is_success());
+    let d = c.start(&sid, "limit2", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // One tile goes: the wall reports the other alone, and the closed
+    // tile's stream lets go a moment later.
+    c.playback("wall", &[&sid]).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(tile_2);
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
+    drop(tile_1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_proxied_player_that_stops_is_not_counted_twice() {
+    let c = ctx().await;
+    c.files(2 * 1024 * 1024, 256).await;
+    let sid = c.source("limit3").await;
+    // A player plays through the media proxy: its report and the proxy's
+    // stream are one connection, and downloads get the other two.
+    c.playback("player-1", &[&sid]).await;
+    let proxied = iptv_core::downloads::open_stream(&c.state, &sid).await;
+    let a = c.start(&sid, "limit3", 101).await;
+    let b = c.start(&sid, "limit3", 102).await;
+    for d in [&a, &b] {
+        c.wait_until(d.id, "started", |d| d.status == DownloadStatus::Downloading)
+            .await;
+    }
+    // The player stops: the proxy still holds its stream for a moment,
+    // and that is the connection the report let go, not another one.
+    c.playback("player-1", &[]).await;
+    for d in [&a, &b] {
+        assert_eq!(
+            c.get(d.id).await.status,
+            DownloadStatus::Downloading,
+            "a download yielded to a stream counted twice"
+        );
+    }
+    drop(proxied);
+    c.ok("downloads.cancel", json!({"id": a.id})).await;
+    c.ok("downloads.cancel", json!({"id": b.id})).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_row_that_yielded_after_new_bytes_starts_its_wait_over() {
+    let c = ctx().await;
+    c.files(4 * 1024 * 1024, 256).await;
+    // A row fails after 3 s of waiting without new bytes.
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_millis(200),
+        Duration::from_secs(3),
+    );
+    let sid = c.source("limit1").await;
+    // Another device holds the account's connection: the download is
+    // refused and waits.
+    let other = reqwest::get(c.movie_url("limit1", 300)).await.unwrap();
+    let d = c.start(&sid, "limit1", 101).await;
+    c.wait_until(d.id, "was refused", |d| {
+        d.waiting
+            .as_ref()
+            .is_some_and(|w| w.reason == WaitReason::Connection && w.until.is_some())
+    })
+    .await;
+    drop(other);
+    c.wait_until(d.id, "made progress", |d| {
+        d.status == DownloadStatus::Downloading && d.bytes_downloaded > 256 * 1024
+    })
+    .await;
+    // The user watches for longer than the wait limit; the download yields
+    // with new bytes, and the other device is back meanwhile.
+    c.playback("player-1", &[&sid]).await;
+    let other = reqwest::get(c.movie_url("limit1", 300)).await.unwrap();
+    assert!(other.status().is_success());
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    c.playback("player-1", &[]).await;
+    // Refused once more: that is the start of a new wait, not 2 h of one.
+    c.wait_until(d.id, "was refused again", |d| {
+        assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+        d.waiting
+            .as_ref()
+            .is_some_and(|w| w.reason == WaitReason::Connection && w.until.is_some())
+    })
+    .await;
+    drop(other);
+    let done = c
+        .wait_until(d.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+}
+
+/// Starts a download whose three claims fail (the database busy), so it
+/// sits in the claim's backoff for about a second.
+async fn in_claim_backoff(c: &Ctx) -> (String, Download) {
+    c.files(1024 * 1024, 1024).await;
+    let sid = c.source("limit1").await;
+    iptv_core::downloads::fail_next_claims(&c.state, 3, Duration::from_millis(300));
+    let d = c.start(&sid, "limit1", 101).await;
+    (sid, d)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_download_yielding_while_its_claim_is_retried_comes_back() {
+    let c = ctx().await;
+    let (sid, d) = in_claim_backoff(&c).await;
+    c.playback("player-1", &[&sid]).await;
+    c.playback("player-1", &[]).await;
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_download_paused_or_canceled_while_its_claim_is_retried_stays_so() {
+    let c = ctx().await;
+    let (_, d) = in_claim_backoff(&c).await;
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Paused);
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+
+    let c = ctx().await;
+    let (_, d) = in_claim_backoff(&c).await;
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let canceled = c.get(d.id).await;
+    assert_eq!(canceled.status, DownloadStatus::Canceled);
+    assert_eq!(canceled.file_path, None, "its .part is gone");
 }

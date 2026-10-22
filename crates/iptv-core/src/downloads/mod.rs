@@ -106,6 +106,12 @@ pub fn set_no_holes(state: &AppState, on: bool) {
     manager::manager(state).set_no_holes(on);
 }
 
+/// Makes every sidecar save of a split download take `extra` longer, the
+/// way a slow disk's sync does. Test hook; not a C4 command.
+pub fn set_slow_sync(state: &AppState, extra: std::time::Duration) {
+    manager::manager(state).set_slow_sync(extra);
+}
+
 /// `downloads.playback`: what one player plays now (see
 /// [`manager::set_playback`]).
 pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<String>) {
@@ -296,7 +302,8 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                 new.url,
                 req.file_name_hint.as_deref(),
             );
-            let r = naming::reserve(&dir, &name)?;
+            let held = store::held_paths(c, id)?;
+            let r = naming::reserve(&dir, &name, |p| held.contains(p))?;
             store::set_destination(c, id, &r.file_name, &r.final_path.to_string_lossy())?;
             tx.commit()?;
             Ok((id, true))
@@ -325,7 +332,28 @@ pub async fn pause(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
         _ => return Err(conflict(&d, "pause")),
     }
     match manager::manager(state).stop(id, StopReason::Pause) {
-        Stopped::Running(rx) => manager::wait_stopped(state, rx).await?,
+        Stopped::Running(rx) => {
+            manager::wait_stopped(state, rx).await?;
+            // A run whose claim never went through stopped with the row
+            // still `queued` (a no-op when the run saved `paused`, and left
+            // alone once the row is queued again).
+            if !manager::manager(state).is_tracked(id) {
+                let paused = state
+                    .db_call(move |c| {
+                        store::transition(
+                            c,
+                            id,
+                            &[DownloadStatus::Queued],
+                            DownloadStatus::Paused,
+                            None,
+                        )
+                    })
+                    .await?;
+                if paused {
+                    notify(state);
+                }
+            }
+        }
         Stopped::Dequeued | Stopped::Idle => {
             state
                 .db_call(move |c| {
@@ -437,7 +465,7 @@ pub async fn prioritize(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
 /// Cancels a download and deletes its `.part`. Completed rows are refused
 /// (use remove). Idempotent for canceled rows.
 pub async fn cancel(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
-    let d = get(state, id).await?;
+    let mut d = get(state, id).await?;
     match d.status {
         DownloadStatus::Canceled => {
             // Retry a cleanup that failed earlier (locked file).
@@ -449,7 +477,12 @@ pub async fn cancel(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     }
     if let Stopped::Running(rx) = manager::manager(state).stop(id, StopReason::Cancel) {
         manager::wait_stopped(state, rx).await?;
-        return Ok(());
+        // A run whose claim never went through stopped with the row still
+        // `queued`: it is canceled here, like a row that never ran.
+        d = get(state, id).await?;
+        if d.status != DownloadStatus::Queued || manager::manager(state).is_tracked(id) {
+            return Ok(());
+        }
     }
     cleanup_part(state, &d).await?;
     state

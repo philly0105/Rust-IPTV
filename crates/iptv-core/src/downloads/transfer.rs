@@ -46,6 +46,8 @@ pub enum Outcome {
         reason: StopReason,
         bytes: i64,
         part: Option<PathBuf>,
+        /// The run wrote bytes the row did not have.
+        progressed: bool,
     },
     Failed {
         message: String,
@@ -113,6 +115,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                 reason: ctl.reason(),
                 bytes: row.download.bytes_downloaded,
                 part: Some(dest.part_path.clone()),
+                progressed: false,
             }
         }
         kind = refresh_url(state, &mut row) => kind,
@@ -139,6 +142,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                     reason: ctl.reason(),
                     bytes,
                     part: Some(dest.part_path.clone()),
+                    progressed: reached.unwrap_or(0).max(bytes) > had,
                 }
             }
             AttemptEnd::Error {
@@ -158,7 +162,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
                     tracing::info!(id, attempt = failures, ?delay, error = %err, "download interrupted; retrying");
                     tokio::select! {
                         _ = ctl.token.cancelled() => {
-                            return Outcome::Stopped { reason: ctl.reason(), bytes, part: Some(dest.part_path.clone()) };
+                            return Outcome::Stopped { reason: ctl.reason(), bytes, part: Some(dest.part_path.clone()), progressed: reached.is_some_and(|r| r > had) };
                         }
                         _ = tokio::time::sleep(delay) => continue,
                     }
@@ -409,11 +413,20 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
         .clone()
         .unwrap_or_else(|| naming::build_file_name(&d.title, d.subtitle.as_deref(), &d.url, None));
     let id = d.id;
+    // Names other unfinished rows record are never handed out again.
+    let others = state.db_call(move |c| store::held_paths(c, id)).await?;
     let reservation = tokio::task::spawn_blocking(move || -> CoreResult<Reservation> {
+        let held = |p: &Path| others.contains(p);
         if let Some(final_path) = retained {
             let part = naming::part_path(&final_path);
+            // Another unfinished row records this path too, maybe in another
+            // case (both reserved it before reservations checked the rows):
+            // the `.part` there is that row's, never adopted or moved. Where
+            // case tells the two apart it is this row's own, which then
+            // starts over under a new name instead.
+            let ours = !held(&final_path);
             let moved_folder = final_path.parent() != Some(default_dir.as_path());
-            if moved_folder {
+            if moved_folder && ours {
                 if let Ok(Some(_)) = naming::regular_file_len(&part) {
                     // The user chose another downloads folder (the advice for
                     // a full disk): continue there. The partial moves along
@@ -421,7 +434,7 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                     // transfer restarts there and the old partial is deleted
                     // so it stops taking space on the full disk.
                     std::fs::create_dir_all(&default_dir)?;
-                    let fresh = naming::reserve(&default_dir, &requested)?;
+                    let fresh = naming::reserve(&default_dir, &requested, held)?;
                     if std::fs::rename(&part, &fresh.part_path).is_err() {
                         if let Err(e) = segments::remove_part(&part) {
                             tracing::warn!(id, error = %e, "could not delete the old partial download");
@@ -445,7 +458,7 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                     return Ok(fresh);
                 }
             }
-            if let Ok(Some(_)) = naming::regular_file_len(&part) {
+            if ours && matches!(naming::regular_file_len(&part), Ok(Some(_))) {
                 let file_name = final_path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -457,16 +470,17 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                 });
             }
             // The retained partial is gone (or replaced by something that is
-            // not ours): reserve again in the same folder, never touching it.
+            // not ours, or another row's): reserve again in the same folder,
+            // never touching it.
             let dir = final_path
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or(default_dir);
             std::fs::create_dir_all(&dir)?;
-            return Ok(naming::reserve(&dir, &requested)?);
+            return Ok(naming::reserve(&dir, &requested, held)?);
         }
         std::fs::create_dir_all(&default_dir)?;
-        Ok(naming::reserve(&default_dir, &requested)?)
+        Ok(naming::reserve(&default_dir, &requested, held)?)
     })
     .await??;
     let (name, path) = (
@@ -697,13 +711,18 @@ async fn attempt(
         return error(http_status_error(status), resume_from, resume_from);
     }
 
+    // Written in its own task and waited for only once the stream is gone:
+    // an import can hold the write lock for seconds, and a transfer asked to
+    // yield must let its connection go before playback stops waiting for it.
     let (total, validator) = (rep.total, rep.validator.clone());
-    if let Err(e) = state
-        .db_call(move |c| store::set_representation(c, id, total, validator.as_deref()))
-        .await
-    {
-        tracing::warn!(id, error = %e, "could not record download size");
-    }
+    let recorded = {
+        let state = Arc::clone(state);
+        tokio::spawn(async move {
+            state
+                .db_call(move |c| store::set_representation(c, id, total, validator.as_deref()))
+                .await
+        })
+    };
 
     // Over several connections when the answer allows it and the source has
     // spare ones now; otherwise a check every second hands this stream over
@@ -721,7 +740,9 @@ async fn attempt(
                 offset,
             );
             let first = Some((resp.bytes_stream().boxed(), offset));
-            return segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+            let end = segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+            settle_recorded(id, recorded).await;
+            return end;
         }
         // The file system cannot leave holes: the rest of the run keeps
         // one connection and stops asking.
@@ -736,7 +757,11 @@ async fn attempt(
         .await;
     let file = match file {
         Ok(f) => f,
-        Err(e) => return error(CoreError::Io(e), offset, offset),
+        Err(e) => {
+            drop(resp);
+            settle_recorded(id, recorded).await;
+            return error(CoreError::Io(e), offset, offset);
+        }
     };
     let mut out = tokio::io::BufWriter::with_capacity(WRITE_BUFFER, file);
     let started_at = offset;
@@ -794,7 +819,7 @@ async fn attempt(
     // handed over: the flush, the sync and the progress write can take
     // seconds (an import holding the write lock), and playback waiting for
     // this connection gives up after two.
-    let stream = if hand_over {
+    let mut stream = if hand_over {
         Some(stream)
     } else {
         drop(stream);
@@ -806,15 +831,33 @@ async fn attempt(
     }
     .await;
     drop(out);
-    // The last periodic write lands first, so it never overwrites this one.
-    if let Some(write) = progress.persisting.take() {
-        let _ = write.await;
-    }
-    let persist = state
-        .db_call(move |c| store::set_progress(c, id, offset))
-        .await;
-    if let Err(e) = persist {
-        tracing::warn!(id, error = %e, "could not persist download progress");
+    let writes = async {
+        settle_recorded(id, recorded).await;
+        // The last periodic write lands first, so it never overwrites this one.
+        if let Some(write) = progress.persisting.take() {
+            let _ = write.await;
+        }
+        let persist = state
+            .db_call(move |c| store::set_progress(c, id, offset))
+            .await;
+        if let Err(e) = persist {
+            tracing::warn!(id, error = %e, "could not persist download progress");
+        }
+    };
+    tokio::pin!(writes);
+    if stream.is_some() {
+        // A stream kept for the hand-over is let go if the transfer is asked
+        // to stop while these writes wait for the database.
+        tokio::select! {
+            biased;
+            _ = ctl.token.cancelled() => {
+                stream = None;
+                writes.await;
+            }
+            _ = &mut writes => {}
+        }
+    } else {
+        writes.await;
     }
     if let Err(e) = flushed {
         return error(CoreError::Io(e), started_at, offset);
@@ -848,6 +891,13 @@ async fn attempt(
             ),
             _ => AttemptEnd::Done(offset),
         },
+    }
+}
+
+/// Waits for an attempt's representation write and logs its failure.
+async fn settle_recorded(id: i64, recorded: tokio::task::JoinHandle<CoreResult<()>>) {
+    if let Ok(Err(e)) = recorded.await {
+        tracing::warn!(id, error = %e, "could not record download size");
     }
 }
 

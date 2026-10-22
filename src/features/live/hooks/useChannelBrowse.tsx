@@ -11,12 +11,11 @@ import { History, LayoutList, ListVideo, Star } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { rpcKey, useRpcQuery } from '@/api/query';
+import { batchedItemQuery, rpcKey, useRpcQuery } from '@/api/query';
 import { rpcRaw, type RpcArgs, type RpcResult } from '@/api/transport';
 import { itemKey, type Channel, type EpgNowNext, type FavoriteEntry, type ItemKey, type ItemRef, type RecentEntry } from '@/api/types';
 
 import { foldForFilter } from '../components/CategorySidebar';
-import { batchedItemQuery } from '../lib/itemBatch';
 import type { PickerSection } from '../components/ScopePicker';
 
 /** `''` all channels, `@favorites`, `@recent`, `@list:<id>`, else a group id. */

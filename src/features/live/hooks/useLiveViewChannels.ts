@@ -15,12 +15,11 @@ import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { LIVE_VIEW_ID, liveFavoritesArgs, liveRecentArgs } from '@/api/bootPrefetch';
-import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
+import { batchedItemQuery, invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import type { RpcResult } from '@/api/transport';
 import { itemKey, type Channel, type ContentType, type EpgNowNext, type FavoriteEntry, type ItemKey, type ItemRef, type RecentEntry } from '@/api/types';
 
 import { foldForFilter } from '../components/CategorySidebar';
-import { batchedItemQuery } from '../lib/itemBatch';
 import { MINUTE, ms } from '../lib/epgTime';
 import type { PagedChannels } from './usePagedChannels';
 

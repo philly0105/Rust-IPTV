@@ -16,8 +16,9 @@ import {
 
 import { desktopAppInfo } from './bootInfo';
 import { onAnyAppEvent } from './events';
+import { batchedItem } from './itemBatch';
 import { RpcError, rpcRaw, type RpcArgs, type RpcName, type RpcResult } from './transport';
-import type { Settings } from './types';
+import type { ItemRef, Settings } from './types';
 
 const MAX_RETRIES = 2;
 
@@ -137,6 +138,20 @@ export function useRpcQuery<K extends RpcName>(
   if (opts?.keepPrevious) options.placeholderData = keepPreviousData;
   if (opts?.queryKeyHashFn) options.queryKeyHashFn = opts.queryKeyHashFn;
   return useQuery<RpcResult<K>, RpcError>(options);
+}
+
+/**
+ * Query options for `ref`'s `catalog.item` entry, fetched through the `catalog.items` batch
+ * (`itemBatch.ts`). `staleTime` as the caller's readers want it; a failed lookup is not retried (a
+ * dropped channel falls back to its stored snapshot).
+ */
+export function batchedItemQuery(ref: ItemRef, staleTime: number) {
+  return {
+    queryKey: rpcKey('catalog.item', { ref }),
+    queryFn: () => batchedItem(ref),
+    staleTime,
+    retry: false,
+  };
 }
 
 export function useRpcMutation<K extends RpcName>(

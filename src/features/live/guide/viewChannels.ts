@@ -9,12 +9,11 @@ import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 
 import { liveFavoritesArgs } from '@/api/bootPrefetch';
-import { rpcKey, useRpcQuery } from '@/api/query';
+import { batchedItemQuery, rpcKey, useRpcQuery } from '@/api/query';
 import type { RpcResult } from '@/api/transport';
 import { sameRef, type Channel, type FavoriteEntry, type ItemRef } from '@/api/types';
 
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { batchedItemQuery } from '../lib/itemBatch';
 
 export type GuideView = { kind: 'favorites' } | { kind: 'list'; id: string };
 

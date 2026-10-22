@@ -8,12 +8,18 @@
  *
  * A sent batch is never aborted: the queries do not hand it their signal, so a row that scrolls
  * away does not cancel the rows still on screen, and its answer is cached like any other.
+ *
+ * It is part of the entry, through `batchedItemQuery` in `query.ts`. As a lazy module that Live,
+ * the guide and the pickers share, it made a chunk under 4 kB, and the min-size merge put it in the
+ * player's subtitle chunk and moved other small modules after it: the player's zap hooks ended up
+ * in a chunk Search loads, and Search waited for the player's controls before its first render
+ * (pnpm size:check). It cannot be a manual chunk like `src/lib/duration.ts`: Rollup puts a manual
+ * chunk's imports in it too, and these are the entry's transport and types modules.
  */
 
-import { rpcKey } from '@/api/query';
-import { RpcError, rpcRaw, type RpcResult } from '@/api/transport';
-import type { CatalogItemAnswer } from '@/api/rpc';
-import { itemKey, type ItemKey, type ItemRef } from '@/api/types';
+import type { CatalogItemAnswer } from './rpc';
+import { RpcError, rpcRaw, type RpcResult } from './transport';
+import { itemKey, type ItemKey, type ItemRef } from './types';
 
 /** Most refs per `catalog.items` call (the core's `MAX_ITEMS_REFS`). */
 export const ITEMS_BATCH_MAX = 500;
@@ -73,18 +79,4 @@ export function batchedItem(ref: ItemRef): Promise<Item> {
     if (waiters) waiters.push(w);
     else pending.set(key, [w]);
   });
-}
-
-/**
- * Query options for `ref`'s `catalog.item` entry, fetched through the batch. `staleTime` as the
- * caller's readers want it; a failed lookup is not retried (a dropped channel falls back to its
- * stored snapshot).
- */
-export function batchedItemQuery(ref: ItemRef, staleTime: number) {
-  return {
-    queryKey: rpcKey('catalog.item', { ref }),
-    queryFn: () => batchedItem(ref),
-    staleTime,
-    retry: false,
-  };
 }

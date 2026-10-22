@@ -5,11 +5,11 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { rpcKey } from '@/api/query';
+import { batchedItem, ITEMS_BATCH_MAX } from '@/api/itemBatch';
+import { batchedItemQuery, rpcKey } from '@/api/query';
 import { isParentalLocked, RpcError, rpcRaw } from '@/api/transport';
 import type { ItemRef } from '@/api/types';
 
-import { batchedItem, batchedItemQuery, ITEMS_BATCH_MAX } from '../lib/itemBatch';
 import { makeChannel } from './harness';
 
 vi.mock('@/api/transport', async (orig) => ({ ...(await orig<object>()), rpcRaw: vi.fn() }));

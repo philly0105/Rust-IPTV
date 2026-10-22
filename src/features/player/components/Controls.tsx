@@ -1031,7 +1031,7 @@ function PositionSeekBar({
   duration: number | undefined;
   edgeSlack: number;
   times: boolean;
-  onSeek(seconds: number): void;
+  onSeek(seconds: number, step?: boolean): void;
 }) {
   const position = useWhileShown(usePlayerStore, (s) => s.positionSeconds, shown);
   const buffered = useWhileShown(useMediaStore, (s) => s.buffered, shown);
@@ -1594,7 +1594,7 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
                 duration={duration}
                 edgeSlack={edgeSlack}
                 times={!compact}
-                onSeek={(s) => store.seekTo(s)}
+                onSeek={(s, step) => store.seekTo(s, { step })}
               />
             )}
             <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1')}>

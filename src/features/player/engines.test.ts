@@ -784,6 +784,15 @@ describe('MPEG-TS restarts at a seek or a resume (PL-2)', () => {
     expect(state.t + (engine.timeOffset?.() ?? 0)).toBe(756);
   });
 
+  it('bufferedAt: inside a range, not at its end', () => {
+    const { el, state } = clockedVideo();
+    state.ranges = [
+      [0, 40],
+      [100, 130],
+    ];
+    expect([0, 39.9, 40, 99, 100, 129.9, 130].map((t) => engines.bufferedAt(el, t))).toEqual([true, true, false, false, true, true, false]);
+  });
+
   it('live streams and other engines ignore the seeker', async () => {
     const seeker = seekerOf(() => ({ url: 'x', at: 1 }));
     const live = await createEngine(video(), src('http://h/a.ts', { resumeSeconds: 50 }), 'http://h/a.ts', cb(), { captions: false, seeker });

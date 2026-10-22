@@ -277,9 +277,12 @@ describe('seek bar keys', () => {
     render(<SeekBar min={0} max={600} value={100} buffered={[]} onSeek={onSeek} />);
     const slider = screen.getByRole('slider');
     fireEvent.keyDown(slider, { key: 'ArrowRight' });
-    expect(onSeek).toHaveBeenLastCalledWith(110);
+    // Steps, which the store coalesces while they repeat (PL-4); Home and End are jumps.
+    expect(onSeek).toHaveBeenLastCalledWith(110, true);
     fireEvent.keyDown(slider, { key: 'ArrowLeft', shiftKey: true });
-    expect(onSeek).toHaveBeenLastCalledWith(70);
+    expect(onSeek).toHaveBeenLastCalledWith(70, true);
+    fireEvent.keyDown(slider, { key: 'Home' });
+    expect(onSeek).toHaveBeenLastCalledWith(0, false);
   });
 });
 

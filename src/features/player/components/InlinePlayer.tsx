@@ -10,6 +10,7 @@ import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import {
+  bufferedAt,
   createEngine,
   EMPTY_TRACKS,
   fetchFailureStatus,
@@ -411,6 +412,7 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
         if (!Number.isFinite(s) || engineRef.current?.seek?.(s)) return;
         el.currentTime = Math.max(0, s - offset());
       },
+      holds: (s) => bufferedAt(el, s - offset()),
       setVolume: (v) => {
         el.volume = v;
       },

@@ -12,7 +12,7 @@ vi.mock('@/api/transport', () => ({
 vi.mock('../parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 
-const { usePlayerStore, __resetPlayerForTests } = await import('../store');
+const { usePlayerStore, __resetPlayerForTests, SEEK_SETTLE_MS } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
 const { InlinePlayer, ENGINE_ERROR_GRACE_MS } = await import('./InlinePlayer');
 
@@ -156,6 +156,32 @@ describe('stream error overlay', () => {
       await new Promise((r) => setTimeout(r, 10));
     });
     expect(vi.mocked(rpc).mock.calls.filter((c) => c[0] === 'xtream.streamUrl').length).toBe(before + 1);
+  });
+});
+
+describe('step seeks (PL-4)', () => {
+  it('seek the element at once inside what it holds, and once for a run of steps past it', async () => {
+    vi.useFakeTimers();
+    try {
+      render(<InlinePlayer />);
+      act(() => usePlayerStore.setState({ source: placeholder, mode: 'inline', status: 'playing', positionSeconds: 100, durationSeconds: 3600 }));
+      const el = document.querySelector('video')!;
+      const writes: number[] = [];
+      Object.defineProperty(el, 'buffered', { configurable: true, get: () => ({ length: 1, start: () => 90, end: () => 130 }) });
+      Object.defineProperty(el, 'currentTime', { configurable: true, get: () => writes.at(-1) ?? 100, set: (v: number) => void writes.push(v) });
+      act(() => usePlayerStore.getState().seekBy(10));
+      expect(writes).toEqual([110]);
+      act(() => {
+        for (let i = 0; i < 5; i++) usePlayerStore.getState().seekBy(30);
+      });
+      expect(writes).toEqual([110]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SEEK_SETTLE_MS);
+      });
+      expect(writes).toEqual([110, 260]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

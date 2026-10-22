@@ -448,6 +448,11 @@ export function MpvSurface({ className }: { className?: string }) {
             play: () => void rpc('mpv.setProperty', { name: 'pause', value: false }).catch(() => undefined),
             pause: () => void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined),
             seekTo: (s) => void rpc('mpv.command', { cmd: ['seek', s, 'absolute'] }).catch(() => undefined),
+            // mpv's demuxer cache: a seek inside it reads nothing from the network.
+            holds: (s) => {
+              const r = useMediaStore.getState().mpv?.seekable;
+              return !!r && s >= r.start && s < r.end;
+            },
             setVolume: (v) => void rpc('mpv.setProperty', { name: 'volume', value: Math.round(v * 100) }).catch(() => undefined),
             setMuted: (m) => void rpc('mpv.setProperty', { name: 'mute', value: m }).catch(() => undefined),
           });

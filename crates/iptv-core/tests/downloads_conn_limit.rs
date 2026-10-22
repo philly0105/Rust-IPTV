@@ -506,3 +506,52 @@ async fn a_stream_kept_for_a_split_is_let_go_when_playback_asks_meanwhile() {
     lock.join().unwrap();
     c.ok("downloads.cancel", json!({"id": d.id})).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_player_that_switches_away_keeps_its_connection_until_its_stream_closes() {
+    let c = ctx().await;
+    c.files(1024 * 1024, 1024).await;
+    let sid = c.source("limit1").await;
+    // Embedded mpv plays a movie from the source.
+    c.playback("player-1", &[&sid]).await;
+    let play = reqwest::get(c.movie_url("limit1", 200)).await.unwrap();
+    assert!(play.status().is_success());
+    let d = c.start(&sid, "limit1", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // The user zaps to another source: mpv lets the old stream go once the
+    // report for the new one is answered, and the panel notices a little
+    // later still.
+    c.playback("player-1", &["elsewhere"]).await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(play);
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+    assert_eq!(
+        c.stats().await["requests"]["refused_streams"],
+        Value::Null,
+        "the download asked while the player's stream was still open"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recording_that_ends_keeps_its_connection_a_moment() {
+    let c = ctx().await;
+    c.files(1024 * 1024, 1024).await;
+    let sid = c.source("limit1").await;
+    let recording = iptv_core::downloads::hold_recording(&c.state, &sid).await;
+    let stream = reqwest::get(c.movie_url("limit1", 300)).await.unwrap();
+    assert!(stream.status().is_success());
+    let d = c.start(&sid, "limit1", 101).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Queued);
+    // The recording ends; the panel still counts its connection a moment.
+    drop(recording);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    drop(stream);
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    assert_eq!(c.stats().await["requests"]["refused_streams"], Value::Null);
+}

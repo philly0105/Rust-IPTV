@@ -40,6 +40,12 @@ const MAKE_ROOM_WAIT: Duration = Duration::from_secs(2);
 /// connection a moment after the client closed it, and a stream asking
 /// sooner can still be refused.
 const YIELD_GRACE: Duration = Duration::from_millis(300);
+/// How long a source still counts as playing after a player that connects
+/// itself reports it no longer plays from it, or a recording from it ends.
+/// A player answers its report before it lets the old stream go (mpv loads
+/// the next channel only once the report for it is answered), and the panel
+/// counts the closed connection a moment longer.
+pub const RELEASE_GRACE: Duration = Duration::from_secs(3);
 /// How long a source waits after refusing or failing a download, by step
 /// in a row, in multiples of [`WAIT_BASE`]: 15 s, 30 s, 1, 2, 5, then
 /// 10 min.
@@ -265,6 +271,12 @@ impl Inner {
             }
         }
         done
+    }
+
+    /// Counts `source` as playing until `until`, or longer if it already is.
+    fn linger(&mut self, source: String, until: Instant) {
+        let at = self.lingering.entry(source).or_insert(until);
+        *at = (*at).max(until);
     }
 
     /// Drops reports, lingers and blocks that ran out.
@@ -923,17 +935,27 @@ pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<Stri
     let mgr = manager(state);
     {
         let mut inner = mgr.inner.lock();
-        if sources.is_empty() {
-            inner.leases.remove(client);
+        let now = Instant::now();
+        let before = if sources.is_empty() {
+            inner.leases.remove(client)
         } else {
-            let until = Instant::now() + mgr.playback_lease();
+            let until = now + mgr.playback_lease();
             inner.leases.insert(
                 client.to_string(),
                 Lease {
                     sources: sources.clone(),
                     until,
                 },
-            );
+            )
+        };
+        // The player still holds the stream it reported last when this
+        // returns: what it no longer plays stays its own a moment longer.
+        let released = before
+            .filter(|l| l.until > now)
+            .map(|l| l.sources)
+            .unwrap_or_default();
+        for source in released.into_iter().filter(|s| !sources.contains(s)) {
+            inner.linger(source, now + RELEASE_GRACE);
         }
     }
     let done = pump(state, &mgr);
@@ -1022,6 +1044,9 @@ impl Drop for RecordingHold {
                 *n = n.saturating_sub(1);
                 if *n == 0 {
                     inner.recordings.remove(&self.source);
+                    // The recording's connection closed a moment ago, and
+                    // the panel still counts it.
+                    inner.linger(self.source.clone(), Instant::now() + RELEASE_GRACE);
                 }
             }
         }

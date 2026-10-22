@@ -542,11 +542,13 @@ export function EpgGridPage() {
   const fromIso = new Date(dataStart - offsetMs).toISOString();
   const toIso = new Date(dataEnd - offsetMs).toISOString();
 
+  // A view (favorites, a list) knows each row's ref before its channel arrives: its chunk is
+  // asked once with every ref, not again as each batch of `catalog.item` answers lands.
   const chunkRefs = (c: number) => {
     const refs = [];
     for (let i = c * GRID_CHUNK; i < Math.min(count, (c + 1) * GRID_CHUNK); i++) {
-      const ch = paged.getChannel(i);
-      if (ch) refs.push(ch.ref);
+      const ref = paged.refAt ? paged.refAt(i) : paged.getChannel(i)?.ref;
+      if (ref) refs.push(ref);
     }
     return refs;
   };

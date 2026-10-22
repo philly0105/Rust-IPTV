@@ -76,6 +76,11 @@ export interface PagedChannels {
    * in the list. `loaded` holds only the favorites near the rows on screen.
    */
   indexOf?(ref: ItemRef): number | undefined;
+  /**
+   * The ref of the row at `index` in such a list, before its channel has arrived: the guide asks
+   * a chunk's programmes once, with every ref, instead of again as each batch of channels lands.
+   */
+  refAt?(index: number): ItemRef | undefined;
 }
 
 type ChannelsArgs = RpcArgs<'catalog.channels'>;

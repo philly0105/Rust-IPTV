@@ -103,6 +103,8 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
     },
     [listChannels],
   );
+  const listRefAt = useCallback((index: number) => listChannels[index]?.ref, [listChannels]);
+  const favoriteRefAt = useCallback((index: number) => favorites[index]?.ref, [favorites]);
   const favoriteIndexOf = useCallback(
     (ref: ItemRef) => {
       const i = favorites.findIndex((e) => sameRef(e.ref, ref));
@@ -134,9 +136,10 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
       retry: () => void q.refetch(),
       loaded,
       indexOf: isList ? listIndexOf : favoriteIndexOf,
+      refAt: isList ? listRefAt : favoriteRefAt,
       pageSize: total,
       guideUnavailable: false,
       retryGuide: () => undefined,
     };
-  }, [view?.kind, list, favs, listChannels, favorites, listChannel, favoriteChannel, listIndexOf, favoriteIndexOf, setVisibleRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view?.kind, list, favs, listChannels, favorites, listChannel, favoriteChannel, listIndexOf, favoriteIndexOf, listRefAt, favoriteRefAt, setVisibleRange]); // eslint-disable-line react-hooks/exhaustive-deps
 }

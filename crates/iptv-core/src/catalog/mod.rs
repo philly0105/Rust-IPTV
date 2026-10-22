@@ -1515,16 +1515,30 @@ pub fn query_named(
         && locked.is_empty()
         && edited.is_empty()
         && quality_sql.is_empty();
+    // A word-prefix search with few matches in the whole library: the
+    // matched rowids drive the count and the page. Without statistics SQLite
+    // rates the match list at 25 rows and the source's index range at about
+    // 9, so it walked every title of the source and probed the list, once for
+    // the count and again for the page (21-24 ms for a 37-title search on
+    // 182k movies). `+` on the scope's columns leaves the list as the only
+    // way in: at most FTS_DRIVEN_MAX rows read, then sorted. A broad term
+    // keeps the walk, which finds a page's rows early.
+    let few_matches = match search.and_then(fts_query) {
+        Some(fts) => fts_matches_at_most(conn, &fts, FTS_DRIVEN_MAX)?,
+        None => false,
+    };
     for (i, m) in attempts.iter().enumerate() {
+        let driven = *m == Match::Fts && few_matches;
+        let col = if driven { "+i." } else { "i." };
         // The scope of the count and of the page; both take the same `args`.
-        let mut scope = String::from("i.source_id = ?1 AND i.content_type = ?2");
+        let mut scope = format!("{col}source_id = ?1 AND {col}content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
             q.source_id.clone().into(),
             q.content_type.as_str().to_string().into(),
         ];
         if let Some(cat) = &q.category_id {
             args.push(cat.clone().into());
-            scope.push_str(&format!(" AND i.category_id = ?{}", args.len()));
+            scope.push_str(&format!(" AND {col}category_id = ?{}", args.len()));
         } else if filter_hidden {
             // Same rows as `COALESCE(c.hidden, 0) = 0` on the join (an item
             // whose category is missing stays visible), without a join per row.
@@ -1600,8 +1614,12 @@ pub fn query_named(
         }
         // A short list spread through the source: read it from an index of
         // its category or filter and sort it, rather than walk the sort's
-        // index to its end for a few rows.
-        let index = sorted_read_index(q, min_rating.is_some(), total);
+        // index to its end for a few rows. Matched rowids need no index.
+        let index = if driven {
+            None
+        } else {
+            sorted_read_index(q, min_rating.is_some(), *m == Match::Like, total)
+        };
         let page_rating = if sort == Some(SortKey::Rating) || index == Some("idx_items_rating") {
             "i.rating"
         } else {
@@ -1642,6 +1660,21 @@ pub fn query_named(
     Ok(Page::empty(offset, limit))
 }
 
+/// Most matches a word-prefix search may have in the whole library for its
+/// matched rowids to drive the count and the page ([`query_named`]).
+const FTS_DRIVEN_MAX: i64 = 2_000;
+
+/// True when the FTS query `fts` matches at most `max` titles of any source
+/// and type; reads at most `max + 1` matches.
+fn fts_matches_at_most(conn: &Connection, fts: &str, max: i64) -> CoreResult<bool> {
+    let n: i64 = conn
+        .prepare_cached(
+            "SELECT count(*) FROM (SELECT 1 FROM items_fts WHERE items_fts MATCH ?1 LIMIT ?2)",
+        )?
+        .query_row(params![fts, max + 1], |r| r.get(0))?;
+    Ok(n <= max)
+}
+
 /// Lists of at most this many rows may be read from the index of their
 /// category or filter and sorted ([`sorted_read_index`]). Spread evenly
 /// through a source of N titles, a list of T finds a page's rows after about
@@ -1660,10 +1693,18 @@ const SORTED_READ_MAX: i64 = 3_000;
 /// position reads its category's range in order (idx_items_cat_added,
 /// idx_items_cat). When hidden categories or English-only leave a short list
 /// in a long range, the range is read whole, which is still no more than the
-/// walk reads for a last page. `INDEXED BY` fixes the plan, where a unary `+`
-/// only tips a cost tie. The total is the count of the same list, so every
-/// page of one list takes the same plan.
-fn sorted_read_index(q: &CatalogQuery, min_rating: bool, total: i64) -> Option<&'static str> {
+/// walk reads for a last page. A substring search on All (`like`, the LIKE
+/// fallback) reads `idx_items_title`, which holds the title: the date-added
+/// walk read a table row per entry to test it (68 ms for a 37-match page on
+/// 182k titles, 22 ms through the title index). `INDEXED BY` fixes the
+/// plan, where a unary `+` only tips a cost tie. The total is the count of
+/// the same list, so every page of one list takes the same plan.
+fn sorted_read_index(
+    q: &CatalogQuery,
+    min_rating: bool,
+    like: bool,
+    total: i64,
+) -> Option<&'static str> {
     if total > SORTED_READ_MAX {
         return None;
     }
@@ -1684,6 +1725,8 @@ fn sorted_read_index(q: &CatalogQuery, min_rating: bool, total: i64) -> Option<&
         Some("idx_items_year")
     } else if min_rating {
         Some("idx_items_rating")
+    } else if like {
+        Some("idx_items_title")
     } else {
         None
     }

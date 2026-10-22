@@ -1121,14 +1121,16 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
         offset: 0,
         budget: SEARCH_BUDGET,
     });
-    probes.push(Probe {
-        label: "all, search \"rchard walls\" (substring)".into(),
-        args: page(None, By::Added, 0, Some("rchard walls"), json!({})),
-        keep: Box::new(|m: &BlockMovie| m.title.to_lowercase().contains("rchard walls")),
-        by: By::Added,
-        offset: 0,
-        budget: SEARCH_BUDGET,
-    });
+    for term in ["rchard walls", "ow 10"] {
+        probes.push(Probe {
+            label: format!("all, search \"{term}\" (substring)"),
+            args: page(None, By::Added, 0, Some(term), json!({})),
+            keep: Box::new(move |m: &BlockMovie| m.title.to_lowercase().contains(term)),
+            by: By::Added,
+            offset: 0,
+            budget: SEARCH_BUDGET,
+        });
+    }
     // All movies (and Top rated), shallow and a few scroll steps down.
     let hidden: HashSet<usize> = (0..BLOCK_CATS)
         .filter(|k| k % 7 == 3)
@@ -1214,14 +1216,18 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
         }
     }
 
-    // The plans behind the category numbers (migration 0024), written as
-    // `catalog.movies` writes them. A category page on the default sort
-    // reads its category's range in order, also with a rating floor; the
-    // category's count with a rating floor or a decade stays on the
-    // category; a plain count keeps the narrow idx_items_cat, created last;
-    // a sparse decade on All reads the decade's range.
+    // The plans behind the numbers above, written as `catalog.movies` writes
+    // them. A category page on the default sort reads its category's range
+    // in order (migration 0024), also with a rating floor; the category's
+    // count with a rating floor or a decade stays on the category; a plain
+    // count keeps the narrow idx_items_cat, created last; a search with few
+    // matches starts from the matched rowids, count and page; a substring
+    // page tests the titles in idx_items_title; a sparse decade on All reads
+    // the decade's range.
     let by_added = "ORDER BY i.added DESC NULLS LAST, i.position LIMIT 60 OFFSET 0";
     let in_category = "SEARCH i USING COVERING INDEX idx_items_cat_added (source_id=? AND content_type=? AND category_id=?)";
+    let few =
+        "i.rowid IN (SELECT rowid FROM items_fts WHERE items_fts MATCH '\"orchard\"* \"walls\"*')";
     for (what, sql, want) in [
         (
             "category page by added",
@@ -1247,6 +1253,21 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
             "category count",
             "SELECT count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2".into(),
             "SEARCH i USING COVERING INDEX idx_items_cat (source_id=? AND content_type=? AND category_id=?)",
+        ),
+        (
+            "search count, few matches",
+            format!("SELECT count(*) FROM items i WHERE +i.source_id = ?1 AND +i.content_type = 'movie' AND {few}"),
+            "SEARCH i USING INTEGER PRIMARY KEY (rowid=?)",
+        ),
+        (
+            "search page, few matches",
+            format!("SELECT i.rowid FROM items i WHERE +i.source_id = ?1 AND +i.content_type = 'movie' AND {few} {by_added}"),
+            "SEARCH i USING INTEGER PRIMARY KEY (rowid=?)",
+        ),
+        (
+            "substring page",
+            format!("SELECT i.rowid FROM items i INDEXED BY idx_items_title WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.title LIKE '%rchard walls%' ESCAPE '\\' {by_added}"),
+            "SEARCH i USING INDEX idx_items_title (source_id=? AND content_type=?)",
         ),
         (
             "all, sparse decade",

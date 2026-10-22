@@ -6,16 +6,19 @@
  *   stays where it is.
  * - IDX-3: the open index takes at least a screen, so a narrowing filter cannot shorten the page
  *   under the view (the browser clamped the scroll and the filter field dropped down the view).
+ * - IDX-M1: All categories pressed while the categories load is not undone by the landing's
+ *   scroll memory when they arrive, and the heading is taken to the top again once the rails they
+ *   bring sit above it.
  *
  * jsdom has no layout: the tests place the heading with getBoundingClientRect and give the
  * scroller a height, and stand in for the scroll with the scrollIntoView calls.
  */
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Category } from '@/api/types';
 
-import { forgetSpots } from '../hooks/useScrollMemory';
+import { forgetSpots, rememberSpot } from '../hooks/useScrollMemory';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
 import { findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
@@ -143,5 +146,64 @@ describe('IDX-3: the open index keeps a screen of height', () => {
     expect(body(toggle).style.minHeight).toBe('');
     fireEvent.click(screen.getByTestId('vod-chip-all'));
     await waitFor(() => expect(body(toggle).style.minHeight).toBe(`${VIEWPORT}px`));
+  });
+});
+
+describe('IDX-M1: All categories pressed while the categories load', () => {
+  // jsdom has no scrolling: back scrollTop with a per-element store so offsets can be written and read.
+  const scrollTops = new WeakMap<Element, number>();
+  const originalScrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+  beforeAll(() => {
+    Object.defineProperty(Element.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: Element) {
+        return scrollTops.get(this) ?? 0;
+      },
+      set(this: Element, v: number) {
+        scrollTops.set(this, v);
+      },
+    });
+  });
+  afterAll(() => {
+    if (originalScrollTop) Object.defineProperty(Element.prototype, 'scrollTop', originalScrollTop);
+  });
+
+  /** Holds the categories answer until `release`. */
+  function slowCategories() {
+    let release: () => void = () => undefined;
+    const answer = new Promise<Category[]>((resolve) => {
+      release = () => resolve(cats);
+    });
+    rpcMock.handlers['catalog.categories'] = () => answer;
+    return () => release();
+  }
+  const frames = () => new Promise((r) => setTimeout(r, 50));
+
+  it('the remembered offset does not undo the press, and the heading goes to the top once they arrive', async () => {
+    rememberSpot('/s/src1/movies', { scrollTop: 1500 });
+    const release = slowCategories();
+    landing();
+    const scroller = await screen.findByTestId('vod-landing-movie');
+    const toggle = screen.getByRole('button', { name: i18n.t('vod:browseAllCategories') });
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView');
+    fireEvent.click(screen.getByTestId('vod-chip-all'));
+    expect(revealed(spy)).toEqual([toggle]);
+
+    release();
+    expect(await findIndexLink(/Category 3/)).toBeTruthy();
+    await frames();
+    expect(scroller.scrollTop).not.toBe(1500);
+    expect(revealed(spy)).toEqual([toggle, toggle]);
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it('without a press, the remembered offset still comes back once they arrive', async () => {
+    rememberSpot('/s/src1/movies', { scrollTop: 1500 });
+    const release = slowCategories();
+    landing();
+    const scroller = await screen.findByTestId('vod-landing-movie');
+    release();
+    await screen.findAllByTestId('vod-category-chip');
+    await waitFor(() => expect(scroller.scrollTop).toBe(1500));
   });
 });

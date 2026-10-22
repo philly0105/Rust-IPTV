@@ -1,5 +1,5 @@
 import { ChevronRight, Clapperboard, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
@@ -70,18 +70,12 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // "All categories" in the chip row opens the index under the rails and takes you there.
   const indexToggleRef = useRef<HTMLButtonElement>(null);
   const [indexVisits, setIndexVisits] = useState(0);
+  const revealPending = useRef(false);
   const showIndex = () => {
     setIndexOpen(true);
     setIndexVisits((n) => n + 1);
+    revealPending.current = true;
   };
-  useEffect(() => {
-    const toggle = indexToggleRef.current;
-    if (!indexVisits || !toggle) return;
-    // The heading at the top of the view, and focus on its disclosure (now expanded), so Tab
-    // goes on to the filter and the list.
-    toggle.scrollIntoView({ block: 'start' });
-    toggle.focus({ preventScroll: true });
-  }, [indexVisits]);
   const source = useSource(sourceId);
   const settings = useSettings();
   const contentType = kind;
@@ -90,6 +84,20 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // Manage dialog ask with the same arguments, so they read it from the cache.
   const allCats = useRpcQuery('catalog.categories', categoriesArgs(sourceId, contentType), { enabled: !!sourceId });
   const shownCats = useMemo(() => allCats.data?.filter((c) => !c.hidden), [allCats.data]);
+  const catsLoaded = shownCats !== undefined;
+  // A layout effect: it runs after the index's own (children first), so the heading is at the top
+  // before the frame is painted.
+  useLayoutEffect(() => {
+    const toggle = indexToggleRef.current;
+    if (!revealPending.current || !toggle) return;
+    // The heading at the top of the view, and focus on its disclosure (now expanded), so Tab
+    // goes on to the filter and the list.
+    toggle.scrollIntoView({ block: 'start' });
+    toggle.focus({ preventScroll: true });
+    // Pressed while the categories load (IDX-M1): their rails go in above the index when they
+    // arrive, so the heading is taken to the top once more then.
+    if (catsLoaded) revealPending.current = false;
+  }, [indexVisits, catsLoaded]);
   const recent = useRecentlyAdded(source.data, kind);
   const resume = useResumeMap(sourceId, kind);
   const continuing = useSectionContinue(sourceId, kind);
@@ -287,6 +295,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               open={indexOpen}
               onOpenChange={setIndexOpen}
               onShowIndex={showIndex}
+              restoreScroll={indexVisits === 0}
               toggleRef={indexToggleRef}
               manageLabel={manageLabel}
               onManage={() => setManageOpen(true)}
@@ -396,6 +405,7 @@ function CategoryIndexSection({
   open,
   onOpenChange,
   onShowIndex,
+  restoreScroll,
   toggleRef,
   manageLabel,
   onManage,
@@ -412,6 +422,8 @@ function CategoryIndexSection({
   onOpenChange: (open: boolean) => void;
   /** Opens the index and takes its heading to the top of the view (the All categories chip). */
   onShowIndex: () => void;
+  /** False once the index was asked for: the remembered offset must not take the user away from it. */
+  restoreScroll: boolean;
   toggleRef: RefObject<HTMLButtonElement | null>;
   manageLabel: string;
   onManage: () => void;
@@ -438,12 +450,14 @@ function CategoryIndexSection({
   }, [shownCats, filter, kind, visibleCount, t, locks]);
 
   // Back from a category: same scroll offset, focus on the category you opened. The index's own
-  // positions only (the rails above hold grid indices of their own).
+  // positions only (the rails above hold grid indices of their own). All categories pressed
+  // before the categories arrived skips the restore (IDX-M1): it would undo the press.
   const { pathname } = useLocation();
   useScrollMemory({
     key: pathname,
     getScroller: () => scrollRef.current,
     ready: !!shownCats && !filter.trim(),
+    restore: restoreScroll,
     onRestored: (spot) => {
       if (spot.index === undefined) return;
       indexRef.current?.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });

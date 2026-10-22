@@ -123,8 +123,9 @@ function reveal(img: HTMLImageElement, url: string, instant: boolean): void {
  * of mounting shows at once, so cached artwork never waits on the fade
  * (L2-perf-desktop-9). The placeholder's shimmer stops while the frame is out
  * of view (offscreen.ts).
- * Cache-route pictures start through the fetch gate (imageGate.ts), which keeps
- * connections free for RPCs and skips rows that only fly past in a fast scroll.
+ * Cache-route pictures start through the fetch gate (imageGate.ts), which in
+ * server mode keeps connections free for RPCs, and skips rows that only fly
+ * past in a fast scroll.
  */
 export function Poster({
   src,

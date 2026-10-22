@@ -205,7 +205,7 @@ describe('fullscreen channel panel keyboard (L3-player-6)', () => {
     await waitFor(() => expect(row(45)?.querySelector('img')).toBeTruthy());
   });
 
-  it('logos go through the shared image gate: at most four requests at a time (L3-player-ui-x6)', async () => {
+  it(`logos go through the shared image gate: at most ${MAX_ACTIVE} requests at a time in server mode (L3-player-ui-x6)`, async () => {
     // An observer that never reports: every row counts as in view, so only the cap holds them back.
     class SilentObserver {
       observe(): void {}

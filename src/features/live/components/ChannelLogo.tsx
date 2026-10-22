@@ -95,10 +95,10 @@ export function measureLogo(img: HTMLImageElement): LogoReading {
  * 1x and 96 px at 2x instead of the provider's full-size image.
  *
  * Cache-route logos start through the fetch gate (src/ui/imageGate.ts, L3-live-ch-x3), as posters do: at
- * most four at once, the ones in view first, none while the page scrolls unless one has stayed in view, and
- * a logo whose row goes is dropped. Rows flung past never ask; a waiting logo shows the plate alone (no
- * letters flashing before it), and a logo already showing stays, since its <img> is kept while the address
- * is the same.
+ * most `maxActive()` at once (4 in server mode, 6 on desktop), the ones in view first, none while the page
+ * scrolls unless one has stayed in view, and a logo whose row goes is dropped. Rows flung past never ask; a
+ * waiting logo shows the plate alone (no letters flashing before it), and a logo already showing stays,
+ * since its <img> is kept while the address is the same.
  */
 export function ChannelLogo({
   src,

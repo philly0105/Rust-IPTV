@@ -503,6 +503,12 @@ async function hlsEngine(
       },
     },
     renderTextTracksNatively: true,
+    // Segments reach the transmuxer as they download (fetch streams, in 128 KB chunks) instead
+    // of whole: a live tune shows its first frame after the first GOP of the segment, not after
+    // all 6-10 s of it. The fetch loader never calls xhrSetup, so the rewrite goes through
+    // fetchSetup too; xhrSetup stays for a browser without fetch streams, where hls.js keeps XHR.
+    progressive: true,
+    fetchSetup: rewrite ? (context: { url: string }, init: RequestInit) => new Request(rewrite(context.url), init) : undefined,
     xhrSetup: rewrite
       ? (xhr: XMLHttpRequest, reqUrl: string) => {
           const target = rewrite(reqUrl);

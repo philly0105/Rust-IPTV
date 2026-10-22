@@ -20,6 +20,7 @@ import { vodRoutes } from '@/features/vod/routes';
 import { ShellLayout, sourceHomePath, useShellHeader, useShellStore } from '@/shell';
 import { useOffline } from '@/shell/connection';
 import { PHONE_QUERY } from '@/shell/navigation';
+import { setRouteWarmer } from '@/shell/routeIntent';
 import { ShellSkeleton } from '@/shell/ShellLayout';
 import { loadDashboard, StartupRedirect } from '@/shell/StartupRedirect';
 import { useMediaQuery } from '@/shell/useMediaQuery';
@@ -236,6 +237,9 @@ export function preloadRoute(path: string): void {
     if (typeof route.lazy === 'function') void route.lazy().catch(() => undefined);
   }
 }
+
+// The shell's intent prefetch (a link rested on) loads a page's chunks through this.
+setRouteWarmer(preloadRoute);
 
 /**
  * Starts the first data of the screen a navigation is loading, while its page chunks download

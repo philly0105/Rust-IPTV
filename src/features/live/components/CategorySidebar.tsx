@@ -1,9 +1,10 @@
 import { EllipsisVertical, EyeOff, Lock, SlidersHorizontal } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Category } from '@/api/types';
+import { useRouteIntent } from '@/shell/routeIntent';
 
 import { Button, cn, ErrorState, IconButton, SearchInput, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
@@ -236,7 +237,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
         const on = props.activeId === p.id;
         return (
           <div key={p.id} className="px-2" style={{ height: rowHeight }}>
-            <Link
+            <ViewLink
               to={props.hrefFor(p.id)}
               onClick={props.onNavigate}
               data-cat-index={`pin-${k}`}
@@ -247,13 +248,13 @@ export function CategorySidebar(props: CategorySidebarProps) {
                 {p.icon}
               </span>
               <span className="flex-1 truncate">{p.label}</span>
-            </Link>
+            </ViewLink>
           </div>
         );
       })}
       <div className="px-2" style={{ height: rowHeight }}>
         {/* Plain links with an explicit aria-current: radio groups differ only in `?category=`, which NavLink ignores. */}
-        <Link
+        <ViewLink
           to={props.hrefFor(undefined)}
           onClick={props.onNavigate}
           data-cat-index="all"
@@ -262,7 +263,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
         >
           <span className="flex-1 truncate">{props.totalLabel}</span>
           <span className={countClass(allActive)}>{props.categories ? fmt.format(allCount) : ''}</span>
-        </Link>
+        </ViewLink>
       </div>
 
       {props.error ? (
@@ -344,6 +345,15 @@ export function CategorySidebar(props: CategorySidebarProps) {
 }
 
 /**
+ * A pinned view's link or All channels. A rest of the pointer or focus on it asks for the view's
+ * first data (`useRouteIntent`), as on a group's link.
+ */
+function ViewLink({ to, ...rest }: ComponentProps<typeof Link> & { to: string }) {
+  const intent = useRouteIntent(to);
+  return <Link {...intent} to={to} {...rest} />;
+}
+
+/**
  * A group's row: its link, and its menu (LG-13) from a right click, the context-menu key (the
  * list's own handler), a long press, or on touch a ⋮ button. iOS Safari fires no `contextmenu` on
  * a long press, so "Add all to list…" and "Open in TV guide" were out of reach on an iPhone or
@@ -374,13 +384,20 @@ function GroupLink({
 }) {
   const { t } = useTranslation('live');
   const longPress = useLongPress((x, y) => onMenu?.({ x, y }));
+  // A rest on the link asks for the group's first page with its now/next and favourite flags, so
+  // a click shows complete rows at once. Rows that scroll under a still pointer do not count.
+  const intent = useRouteIntent(to);
   // Inside the row's slot (a flex row): the link, then the touch screen's ⋮.
   return (
     <>
       <Link
+        {...intent}
         to={to}
         onClick={onNavigate}
-        onFocus={onFocus}
+        onFocus={(e) => {
+          onFocus();
+          intent.onFocus(e);
+        }}
         data-cat-index={index}
         tabIndex={tabbable ? 0 : -1}
         aria-current={active ? 'page' : undefined}

@@ -426,6 +426,8 @@ export interface PlayerSource {
   resumeSeconds?: number;
   /** Expected length of an archive/catch-up stream, in seconds. */
   durationSeconds?: number;
+  /** Display-time EPG start of the catch-up programme selected for this stream. */
+  catchupProgramStart?: string;
   isLive: boolean;
   isRadio: boolean;
   /** ClearKey DRM (UI only; the core never sets it). Such a source plays in the built-in player. */

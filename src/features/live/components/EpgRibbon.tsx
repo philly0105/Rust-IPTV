@@ -5,7 +5,8 @@ import { Link } from 'react-router';
 
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
-import type { Channel, EpgProgram, SourceKind } from '@/api/types';
+import { sameRef, type Channel, type EpgProgram, type ItemRef, type SourceKind } from '@/api/types';
+import { usePlayerStore } from '@/features/player';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
@@ -16,6 +17,7 @@ import { useShortEpgEnabled } from '../hooks/useShortEpg';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
 import { displayChannelName } from '../lib/channelName';
+import { mergePrograms } from '../lib/epgMerge';
 import {
   HOUR,
   MINUTE,
@@ -38,6 +40,7 @@ import {
   type Block,
 } from '../lib/epgTime';
 import { playCatchup } from '../lib/playback';
+import { markFromProvider } from '../lib/shortEpg';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../lib/rtl';
 // recording:
 import { RibbonActions, ScheduleMark } from '@/features/recording';
@@ -53,6 +56,7 @@ export const RIBBON_PX_PER_MIN = 4;
 export const RIBBON_NOW_LEAD_PX = 60;
 const AHEAD = 12 * HOUR;
 const LIST_ROW = 52;
+const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 
 type Mode = 'timeline' | 'list';
 /**
@@ -96,10 +100,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const [localMode, setLocalMode] = useState<Mode | null>(null);
   const mode: Mode = localMode ?? settings.data?.epgViewMode ?? 'timeline';
   const { channel, sourceKind } = props;
+  const playerSource = usePlayerStore((s) => s.source);
+  // Keep the guide on the programme being watched without re-rendering it for every video frame.
+  const positionSeconds = usePlayerStore((s) => Math.floor(Math.max(0, Number.isFinite(s.positionSeconds) ? s.positionSeconds : 0) / 5) * 5);
+  const channelPlaying = !!channel && !!playerSource?.ref && sameRef(playerSource.ref, channel.ref);
+  const catchupStart = channelPlaying && playerSource && !playerSource.isLive ? playerSource.catchupProgramStart : undefined;
+  const catchupStartMs = catchupStart ? ms(catchupStart) : NaN;
+  const watchingCatchup = Number.isFinite(catchupStartMs);
+  const playbackAt = watchingCatchup ? catchupStartMs + positionSeconds * 1000 : undefined;
 
   // Stable window: recomputed every 15 minutes so the query key does not churn.
   const anchor = floorTo(now, 15 * MINUTE);
-  const from = anchor - lookbackMs(channel);
+  const from = watchingCatchup ? Math.min(anchor - lookbackMs(channel), floorTo(catchupStartMs, 15 * MINUTE) - HOUR) : anchor - lookbackMs(channel);
   const to = anchor + AHEAD;
   const prefs = useDisplayPrefs();
   // `[from, to)` is display time; programmes show `epgOffsetMinutes` later than the guide says,
@@ -109,9 +121,30 @@ export function EpgRibbon(props: EpgRibbonProps) {
   // guide: Xtream channels without an airing XMLTV programme fall back to the provider's short guide.
   const shortEpgOn = useShortEpgEnabled(sourceKind);
   const programs = useChannelPrograms(channel, sourceKind, from - offsetMs, to - offsetMs, { enabled: shortEpgOn, guideNow: now - offsetMs });
-  const list = useMemo(() => shiftPrograms(programs.programs, prefs.epgOffsetMinutes), [programs.programs, prefs.epgOffsetMinutes]);
+  // XMLTV often starts only a day ago. Fetch the full table for the one Xtream channel currently
+  // playing catch-up, so its earlier programme and neighbours can appear in the mini guide.
+  const archiveTable = useRpcQuery('catchup.table', { ref: channel?.ref ?? EMPTY_REF }, {
+    enabled: watchingCatchup && sourceKind === 'xtream', staleTime: 20 * MINUTE,
+  });
+  const list = useMemo(() => {
+    const table = archiveTable.data?.filter((p) => ms(p.end) > from - offsetMs && ms(p.start) < to - offsetMs);
+    const merged = table?.length ? mergePrograms(markFromProvider(table), programs.programs) : programs.programs;
+    const shifted = shiftPrograms(merged, prefs.epgOffsetMinutes);
+    if (!watchingCatchup || !catchupStart || shifted.some((p) => p.start === catchupStart)) return shifted;
+    // The selected programme can precede both guides, or the provider can still be answering.
+    // The player already knows its title and duration, so the card need not show a live show.
+    const duration = playerSource?.durationSeconds;
+    const fallback: EpgProgram = {
+      channelId: channel?.ref.itemId ?? '', title: playerSource?.subtitle ?? playerSource?.title ?? channel?.name ?? '',
+      start: catchupStart,
+      end: new Date(catchupStartMs + (duration && Number.isFinite(duration) && duration > 0 ? duration : 30 * 60) * 1000).toISOString(),
+    };
+    return mergePrograms([fallback], shifted);
+  }, [archiveTable.data, programs.programs, prefs.epgOffsetMinutes, from, to, offsetMs, watchingCatchup, catchupStart, catchupStartMs, channel?.ref.itemId, channel?.name, playerSource?.subtitle, playerSource?.title, playerSource?.durationSeconds]);
   const channelName = displayChannelName(channel?.name, prefs.stripCountryPrefix);
   const current = useMemo(() => list.find((p) => programWhen(p, now) === 'now'), [list, now]);
+  const catchupProgram = playbackAt === undefined ? undefined : list.find((p) => programWhen(p, playbackAt) === 'now') ?? list.find((p) => p.start === catchupStart);
+  const playingProgramStart = watchingCatchup ? catchupProgram?.start : channelPlaying && playerSource?.isLive ? current?.start : undefined;
   // LG-06: the pointer previews (the header follows a hovered block and goes back once the pointer
   // leaves the timeline); a click, Enter or keyboard focus picks (the header stays on it, the
   // block is ringed, and "Back to now" returns). A zap clears both.
@@ -122,7 +155,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
     window.clearTimeout(lingerTimer.current);
     setHovered(undefined);
     setPinned(undefined);
-  }, [channel?.ref.itemId]);
+  }, [channel?.ref.itemId, playerSource?.url, playerSource?.catchupProgramStart]);
   useEffect(() => () => window.clearTimeout(lingerTimer.current), []);
   const preview = useCallback((p: EpgProgram | undefined) => {
     window.clearTimeout(lingerTimer.current);
@@ -138,8 +171,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const locks = useParentalLocks(channel?.ref.sourceId, channel?.ref.contentType === 'radio' ? 'radio' : 'live');
   const locked = locks.channelLocked(channel);
   const chosen = pinned && !(current && samePrograms(pinned, current)) ? pinned : undefined;
-  const shown = locked ? undefined : (hovered ?? chosen ?? current);
-  const awayFromNow = !!shown && !!current && !samePrograms(shown, current);
+  const restingProgram = catchupProgram ?? current;
+  const shown = locked ? undefined : (hovered ?? chosen ?? restingProgram);
+  const awayFromRest = !!shown && !!restingProgram && !samePrograms(shown, restingProgram);
   // LG-17: below md the ribbon is one line until it is opened, so a phone keeps room for the list.
   const [phoneOpen, setPhoneOpen] = useState(false);
   // Where the timeline's view ends while it rests on now: Up next starts after it, so the column
@@ -188,6 +222,10 @@ export function EpgRibbon(props: EpgRibbonProps) {
       {shown.title}
     </p>
   ) : null;
+  const showingCatchup = !!shown && !!catchupProgram && samePrograms(shown, catchupProgram);
+  const shownTime = showingCatchup ? playbackAt! : now;
+  const shownHasProgress = showingCatchup || shownWhen === 'now';
+  const shownIsLive = shownWhen === 'now' && !showingCatchup;
   const header = (
     // Below 480 px (the Now card: below 26rem of stage column, as on a tablet) the programme
     // lines take the full width and the buttons wrap under them, so the time range and title are
@@ -234,15 +272,16 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   "27 min left" and leaves the category out (it used to read "2.. N"). The Now card
                   makes room for them first (the art goes, then the buttons wrap). */}
               <p className={cn('flex min-w-0 items-center gap-2 overflow-hidden text-fg-muted', details ? 'text-caption md:mt-0.5' : 'text-xs')}>
-                {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
+                {shownIsLive ? <LivePill size="sm" dot="none" /> : null}
+                {showingCatchup ? <span className="shrink-0 text-accent" data-testid="ribbon-playing">{t('playingNow')}</span> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                   {shownWhen !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ? `${formatDay(ms(shown.start), i18n.language)} ` : ''}
                   {formatRange(shown, i18n.language)}
                 </span>
-                {shownWhen === 'now' ? (
-                  <span className="shrink-0 whitespace-nowrap" data-testid="ribbon-remaining" title={t('minutesLeft', { count: minutesLeft(shown, now) })}>
-                    <span className="@[22rem]/ribbon:hidden">{t('minutesLeftShort', { count: minutesLeft(shown, now) })}</span>
-                    <span className="hidden @[22rem]/ribbon:inline">{t('minutesLeft', { count: minutesLeft(shown, now) })}</span>
+                {shownHasProgress ? (
+                  <span className="shrink-0 whitespace-nowrap" data-testid="ribbon-remaining" title={t('minutesLeft', { count: minutesLeft(shown, shownTime) })}>
+                    <span className="@[22rem]/ribbon:hidden">{t('minutesLeftShort', { count: minutesLeft(shown, shownTime) })}</span>
+                    <span className="hidden @[22rem]/ribbon:inline">{t('minutesLeft', { count: minutesLeft(shown, shownTime) })}</span>
                   </span>
                 ) : null}
                 {/* The category is the first thing to go: in a narrow pane it would be no more than "Ne…". */}
@@ -257,19 +296,19 @@ export function EpgRibbon(props: EpgRibbonProps) {
                     {t('fromProvider')}
                   </span>
                 ) : null}
-                {awayFromNow ? (
-                  // LG-06: the header is on another programme than the airing one; this brings it back.
+                {awayFromRest ? (
+                  // LG-06: a preview returns to what the player is showing, or to the airing show.
                   <button type="button" onClick={() => pick(undefined)} className={cn(TEXT_LINK, 'ms-auto inline-flex shrink-0 items-center gap-1 text-xs')} data-testid="ribbon-back-to-now">
                     <Undo2 className="size-3" aria-hidden />
-                    {t('guideBackToNow')}
+                    {watchingCatchup ? t('goToPlaying', { ns: 'guide', defaultValue: 'Go to playing' }) : t('guideBackToNow')}
                   </button>
                 ) : null}
               </p>
               {details ? null : titleLine}
               {details ? (
-                // The airing programme's progress; the row keeps its height for the others.
-                <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full overflow-hidden rounded-full bg-surface-3 md:block', shownWhen !== 'now' && 'md:invisible')}>
-                  <span className="absolute inset-y-0 start-0 rounded-full bg-accent-mark" style={{ width: `${shownWhen === 'now' ? programProgress(shown, now) * 100 : 0}%` }} />
+                // The playing programme uses video time; an airing preview uses wall time.
+                <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full overflow-hidden rounded-full bg-surface-3 md:block', !shownHasProgress && 'md:invisible')}>
+                  <span className="absolute inset-y-0 start-0 rounded-full bg-accent-mark" style={{ width: `${shownHasProgress ? programProgress(shown, shownTime) * 100 : 0}%` }} />
                 </span>
               ) : null}
               {shown.description && !details ? (
@@ -370,17 +409,18 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const phoneLine =
     details && !phoneOpen ? (
       <div className="relative flex min-h-11 items-center gap-2 ps-4 pe-2 md:hidden" data-testid="ribbon-phone-line">
-        {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
+        {shownIsLive ? <LivePill size="sm" dot="none" /> : null}
+        {showingCatchup ? <span className="shrink-0 text-caption text-accent">{t('playingNow')}</span> : null}
         <p dir="auto" className="min-w-0 flex-1 truncate text-match-parent text-body-sm font-medium text-fg">
           {shown?.title ?? (channelName || t('guide'))}
         </p>
-        {shown && shownWhen === 'now' ? (
-          <span className="shrink-0 text-caption tabular-nums text-fg-muted">{t('minutesLeftShort', { count: minutesLeft(shown, now) })}</span>
+        {shown && shownHasProgress ? (
+          <span className="shrink-0 text-caption tabular-nums text-fg-muted">{t('minutesLeftShort', { count: minutesLeft(shown, shownTime) })}</span>
         ) : null}
         <IconButton size="sm" label={t('showRibbon')} aria-expanded={false} icon={<ChevronDown className="size-4" />} onClick={() => setPhoneOpen(true)} />
-        {shown && shownWhen === 'now' ? (
+        {shown && shownHasProgress ? (
           <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-surface-3">
-            <span className="block h-full bg-accent-mark" style={{ width: `${programProgress(shown, now) * 100}%` }} />
+            <span className="block h-full bg-accent-mark" style={{ width: `${programProgress(shown, shownTime) * 100}%` }} />
           </span>
         ) : null}
       </div>
@@ -403,7 +443,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
         </Button>
       </RibbonNote>
     );
-  } else if (programs.error) {
+  } else if (programs.error && list.length === 0) {
     body = (
       <RibbonNote
         icon={<CircleAlert className="size-4 text-danger" />}
@@ -416,7 +456,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
         </Button>
       </RibbonNote>
     );
-  } else if (programs.isLoading) {
+  } else if (programs.isLoading && list.length === 0) {
     // Shaped like what lands: programme blocks for the timeline, rows for the list.
     body =
       mode === 'list' ? (
@@ -461,6 +501,8 @@ export function EpgRibbon(props: EpgRibbonProps) {
         now={now}
         channel={channel}
         kind={sourceKind}
+        playingProgramStart={playingProgramStart}
+        playbackAt={playbackAt}
         watchingLive={props.watchingLive}
         resetKey={channel.ref.itemId}
         onActivate={activate}
@@ -471,11 +513,11 @@ export function EpgRibbon(props: EpgRibbonProps) {
       />
     );
   } else {
-    body = <ProgramList programs={list} now={now} channel={channel} kind={sourceKind} watchingLive={props.watchingLive} onActivate={activate} onFocusProgram={pick} />;
+    body = <ProgramList programs={list} now={now} channel={channel} kind={sourceKind} watchingLive={props.watchingLive} playingProgramStart={playingProgramStart} onActivate={activate} onFocusProgram={pick} />;
   }
 
   // The list view already lists every programme, so Up next comes with the timeline only.
-  const showUpNext = details && mode === 'timeline' && !!channel && !locked && !programs.error && !programs.isLoading && list.length > 0;
+  const showUpNext = details && mode === 'timeline' && !!channel && !locked && list.length > 0;
   return (
     <section
       aria-label={t('guide')}
@@ -488,7 +530,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       <div className={cn(BODY_HEIGHT[mode], 'overflow-hidden', details && !phoneOpen && 'max-md:hidden')} data-testid="ribbon-body">
         {body}
       </div>
-      {showUpNext ? <UpNext programs={list} now={now} after={timelineEnd} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
+      {showUpNext ? <UpNext programs={list} now={now} guideTime={playbackAt} after={timelineEnd} channel={channel} channelName={channelName} shown={shown} onSelect={pick} /> : null}
     </section>
   );
 }
@@ -565,6 +607,8 @@ interface ViewProps {
   kind?: SourceKind;
   /** The channel's live stream is playing, so activating the airing programme restarts it from its start. */
   watchingLive: boolean;
+  playingProgramStart?: string;
+  playbackAt?: number;
   onActivate(p: EpgProgram): void;
   onFocusProgram(p: EpgProgram | undefined): void;
 }
@@ -583,7 +627,7 @@ function Timeline(
   },
 ) {
   const { t, i18n } = useTranslation('live');
-  const { programs, from, to, now, channel, kind, onRestEnd } = props;
+  const { programs, from, to, now, channel, kind, onRestEnd, playbackAt } = props;
   const scroller = useRef<HTMLDivElement>(null);
   const rtl = useIsRtl();
   // `view.left` is the distance from the track's inline start (time `from`), in both directions.
@@ -592,26 +636,26 @@ function Timeline(
   const width = ((to - from) / MINUTE) * RIBBON_PX_PER_MIN;
   const nowX = ((now - from) / MINUTE) * RIBBON_PX_PER_MIN;
 
-  const scrollToNow = useCallback(
-    (smooth: boolean) => {
+  const scrollToTime = useCallback(
+    (time: number, smooth: boolean) => {
       const el = scroller.current;
       if (!el) return;
       const w = el.clientWidth || 1200;
-      // From the local half hour now is in, as the guide opens: the airing block and the first
-      // hour label start whole at the edge, not as a clipped sliver. Just past the half hour, the
-      // half hour before, so the now line's head is not under the first label at the edge.
-      const left = nowRestLeft(now, from, RIBBON_PX_PER_MIN, w, RIBBON_NOW_LEAD_PX);
+      // Rest on the local half hour around the playing position (or now for live TV).
+      const left = nowRestLeft(time, from, RIBBON_PX_PER_MIN, w, RIBBON_NOW_LEAD_PX);
       const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       el.scrollTo({ left: scrollLeftFor(left, rtl), behavior: smooth && !reduced ? 'smooth' : 'auto' });
       setView({ left, width: w });
       onRestEnd?.(from + ((left + w) / RIBBON_PX_PER_MIN) * MINUTE);
     },
-    [now, rtl, from, onRestEnd],
+    [rtl, from, onRestEnd],
   );
+  const scrollToNow = useCallback((smooth: boolean) => scrollToTime(now, smooth), [now, scrollToTime]);
+  const scrollToPlaying = useCallback((smooth: boolean) => scrollToTime(playbackAt ?? now, smooth), [playbackAt, now, scrollToTime]);
 
   useLayoutEffect(() => {
-    scrollToNow(false);
-  }, [props.resetKey, programs.length, rtl]); // eslint-disable-line react-hooks/exhaustive-deps
+    scrollToPlaying(false);
+  }, [props.resetKey, programs.length > 0, rtl, props.playingProgramStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onScroll = () => {
     const el = scroller.current;
@@ -643,8 +687,9 @@ function Timeline(
     target?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   };
 
+  const playingIndex = blocks.findIndex((b) => b.program.start === props.playingProgramStart);
   const nowIndex = blocks.findIndex((b) => b.when === 'now');
-  const tabStop = blocks[nowIndex >= 0 ? nowIndex : 0];
+  const tabStop = blocks[playingIndex >= 0 ? playingIndex : nowIndex >= 0 ? nowIndex : 0];
   // The tab-stop block can be windowed out (or there are no blocks at all); the
   // scroller then takes the tab stop itself so keyboard users can still reach and
   // scroll it (axe scrollable-region-focusable).
@@ -699,6 +744,7 @@ function Timeline(
               channel={channel}
               kind={kind}
               watchingLive={props.watchingLive}
+              playing={b.program.start === props.playingProgramStart}
               rtl={rtl}
               tabbable={b === tabStop}
               pinned={!!props.pinned && props.pinned.start === b.program.start && props.pinned.title === b.program.title}
@@ -709,17 +755,20 @@ function Timeline(
           ))}
         </div>
       </div>
-      {Math.abs(view.left + view.width * 0.25 - nowX) > view.width * 0.6 ? (
-        <button
-          type="button"
-          onClick={() => scrollToNow(true)}
-          // A way back, not a live mark (LG-15): the accent's filled control, not the LIVE red.
-          className="absolute end-3 bottom-3 z-20 inline-flex items-center gap-1 rounded-full bg-accent-solid px-3 py-1 text-xs font-semibold text-accent-solid-fg shadow-2 outline-none hover:bg-accent-solid-hover focus-visible:ring-2 focus-visible:ring-focus active:bg-accent-solid-pressed"
-        >
-          <RotateCcw className="size-3" aria-hidden />
-          {t('jumpToNow')}
-        </button>
-      ) : null}
+      <div className="pointer-events-none absolute end-3 bottom-3 z-20 flex items-center gap-2">
+        {playbackAt !== undefined && Math.abs(view.left + view.width * 0.25 - ((playbackAt - from) / MINUTE) * RIBBON_PX_PER_MIN) > view.width * 0.6 ? (
+          <button type="button" onClick={() => scrollToPlaying(true)} className="pointer-events-auto inline-flex items-center gap-1 rounded-full bg-accent-solid px-3 py-1 text-xs font-semibold text-accent-solid-fg shadow-2 outline-none hover:bg-accent-solid-hover focus-visible:ring-2 focus-visible:ring-focus active:bg-accent-solid-pressed">
+            <RotateCcw className="size-3" aria-hidden />
+            {t('goToPlaying', { ns: 'guide', defaultValue: 'Go to playing' })}
+          </button>
+        ) : null}
+        {Math.abs(view.left + view.width * 0.25 - nowX) > view.width * 0.6 ? (
+          <button type="button" onClick={() => scrollToNow(true)} className="pointer-events-auto inline-flex items-center gap-1 rounded-full bg-accent-solid px-3 py-1 text-xs font-semibold text-accent-solid-fg shadow-2 outline-none hover:bg-accent-solid-hover focus-visible:ring-2 focus-visible:ring-focus active:bg-accent-solid-pressed">
+            <RotateCcw className="size-3" aria-hidden />
+            {t('jumpToNow')}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -732,6 +781,7 @@ const TimelineBlock = memo(function TimelineBlock({
   channel,
   kind,
   watchingLive,
+  playing,
   rtl,
   tabbable,
   pinned,
@@ -746,6 +796,7 @@ const TimelineBlock = memo(function TimelineBlock({
   channel: Channel;
   kind?: SourceKind;
   watchingLive: boolean;
+  playing: boolean;
   rtl: boolean;
   tabbable: boolean;
   pinned: boolean;
@@ -758,7 +809,9 @@ const TimelineBlock = memo(function TimelineBlock({
   const catchup = canCatchUp(p, channel, kind, now);
   const progress = block.when === 'now' ? programProgress(p, now) : 0;
   const tone =
-    block.when === 'now'
+    playing
+      ? 'border-edge bg-selected text-fg ring-1 ring-accent-mark ring-inset'
+      : block.when === 'now'
       ? // On now: the raised block (white with a shadow in light, the next surface step in dark).
         // Opaque, so the now line (painted first) and the hour lines stay off its title; the line
         // shows above and below it and as a stub at its foot. Amber only in the elapsed share below.
@@ -772,6 +825,7 @@ const TimelineBlock = memo(function TimelineBlock({
     p.title,
     formatRange(p, i18n.language),
     block.when === 'now' ? t('onNow') : '',
+    playing ? t('playingNow') : '',
     block.when === 'past' && catchup ? t('catchupAvailable') : '',
     block.when === 'now' && catchup && watchingLive ? t('startOverAvailable') : '',
   ]
@@ -782,6 +836,7 @@ const TimelineBlock = memo(function TimelineBlock({
       type="button"
       data-start={p.start}
       data-when={block.when}
+      data-playing={playing ? '' : undefined}
       tabIndex={tabbable ? 0 : -1}
       aria-label={label}
       title={p.description ? `${p.title}\n${p.description}` : p.title}
@@ -838,14 +893,16 @@ function ProgramList(props: ViewProps) {
     initialRect: { width: 600, height: 224 },
   });
   const nowIndex = programs.findIndex((p) => programWhen(p, now) === 'now');
+  const playingIndex = programs.findIndex((p) => p.start === props.playingProgramStart);
+  const restIndex = playingIndex >= 0 ? playingIndex : nowIndex;
 
   useLayoutEffect(() => {
-    if (nowIndex >= 0) virtualizer.scrollToIndex(nowIndex, { align: 'start' });
-  }, [channel.ref.itemId, programs.length]);
+    if (restIndex >= 0) virtualizer.scrollToIndex(restIndex, { align: 'start' });
+  }, [channel.ref.itemId, restIndex, programs.length]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    const cur = Number((document.activeElement as HTMLElement | null)?.dataset.index ?? nowIndex);
+    const cur = Number((document.activeElement as HTMLElement | null)?.dataset.index ?? restIndex);
     const next = Math.max(0, Math.min(programs.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1)));
     e.preventDefault();
     virtualizer.scrollToIndex(next, { align: 'auto' });
@@ -858,6 +915,7 @@ function ProgramList(props: ViewProps) {
         {virtualizer.getVirtualItems().map((v) => {
           const p = programs[v.index]!;
           const when = programWhen(p, now);
+          const playing = p.start === props.playingProgramStart;
           const catchup = canCatchUp(p, channel, kind, now);
           // A list can span a week of archive: the first programme of each local day carries the date.
           const prevDay = localDayKey(v.index > 0 ? ms(programs[v.index - 1]!.start) : now);
@@ -867,12 +925,15 @@ function ProgramList(props: ViewProps) {
               <button
                 type="button"
                 data-index={v.index}
-                tabIndex={v.index === (nowIndex >= 0 ? nowIndex : 0) ? 0 : -1}
+                data-playing={playing ? '' : undefined}
+                aria-current={playing ? 'true' : undefined}
+                aria-label={playing ? `${p.title}, ${formatRange(p, i18n.language)}, ${t('playingNow')}` : undefined}
+                tabIndex={v.index === (restIndex >= 0 ? restIndex : 0) ? 0 : -1}
                 onClick={() => props.onActivate(p)}
                 onFocus={() => props.onFocusProgram(p)}
                 className={`flex h-full w-full items-center gap-3 px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset ${
-                  when === 'now' ? 'tuning-tick bg-selected' : 'hover:bg-hover'
-                } ${when === 'past' && !catchup ? 'text-fg-subtle' : 'text-fg'}`}
+                  playing || (when === 'now' && !props.playingProgramStart) ? 'tuning-tick bg-selected' : 'hover:bg-hover'
+                } ${when === 'past' && !catchup && !playing ? 'text-fg-subtle' : 'text-fg'}`}
               >
                 <span className="flex w-24 shrink-0 flex-col text-xs tabular-nums text-fg-muted">
                   {day ? (

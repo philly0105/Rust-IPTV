@@ -108,6 +108,8 @@ export interface GuideRowProps {
   highlighted: boolean;
   /** The channel playing in the app (LG-01): its channel cell carries the tick and a playing mark. */
   playing: boolean;
+  /** Start of the programme playing on this channel, if it is in the guide. */
+  playingProgramStart?: string;
   /** The genre the guide is filtered to: cells of other genres step back (CB-GUIDE-GENRE). */
   genreFilter: Genre | null;
   /** Each genre's name in the UI language: a cell's accessible name ends with its genre. */
@@ -140,6 +142,7 @@ export const GuideRow = memo(function GuideRow({
   kind,
   highlighted,
   playing,
+  playingProgramStart,
   genreFilter,
   genreNames,
   labels,
@@ -294,15 +297,18 @@ export const GuideRow = memo(function GuideRow({
               const genre = genreOf(p.category);
               // Filtered to a genre: the others step back to plain text on no fill.
               const muted = !!genreFilter && genre !== genreFilter;
+              const isPlaying = p.start === playingProgramStart;
               return (
                 <button
                   key={p.start}
                   type="button"
                   data-cell-row={index}
                   data-start={p.start}
+                  data-playing={isPlaying ? '' : undefined}
+                  aria-current={isPlaying ? 'true' : undefined}
                   tabIndex={cursorStart === p.start ? 0 : -1}
                   // The genre too: the filter dims cells, which a screen reader does not see.
-                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}${genre ? `, ${genreNames[genre]}` : ''}`}
+                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}${isPlaying ? `, ${t('playingNow')}` : ''}${genre ? `, ${genreNames[genre]}` : ''}`}
                   // The full title on hover: a narrow or clipped cell truncates it (L3-visual-12).
                   title={p.title}
                   onPointerDown={() => {
@@ -324,7 +330,9 @@ export const GuideRow = memo(function GuideRow({
                     // shows only in the gutters, the ruler and the airing cell's foot, so it never
                     // strikes through a title or a time. A see-through airing cell let it through
                     // every glyph gap.
-                    muted
+                    isPlaying
+                      ? 'bg-selected font-medium text-fg ring-1 ring-accent-mark ring-inset hover:bg-selected'
+                      : muted
                       ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
                         'bg-bg text-fg-subtle hover:bg-surface'
                       : // What airs now reads as one band down the grid. On now: the raised cell (white
@@ -342,7 +350,7 @@ export const GuideRow = memo(function GuideRow({
                   style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
                 >
                   {/* CB-GUIDE-GENRE: the bucket's stripe on the inline start. */}
-                  {genre && !muted ? (
+                  {genre && !muted && !isPlaying ? (
                     <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
                   ) : null}
                   {/* The airing programme's progress along its foot (LG-18). In the accent's mark tone

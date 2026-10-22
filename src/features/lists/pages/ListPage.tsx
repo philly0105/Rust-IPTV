@@ -20,6 +20,9 @@ import { EpgRibbon } from '@/features/live/components/EpgRibbon';
 import { LiveStageColumn } from '@/features/live/components/LiveStageColumn';
 import { StageIdle } from '@/features/live/components/StageIdle';
 import { useFitsWidth } from '@/features/live/hooks/useFitsWidth';
+import { catchupResumeFor } from '@/features/player/catchupResume';
+import { canCatchUp } from '@/features/live/lib/epgTime';
+import { playCatchup } from '@/features/live/lib/playback';
 import { useLastChannel } from '@/features/live/hooks/useLastChannel';
 import { useListEngaged } from '@/features/live/hooks/useListEngaged';
 import { intlLocale } from '@/lib/intl';
@@ -168,6 +171,15 @@ export function ListPage() {
   const idleChannel = stageBusy ? undefined : idleCard?.channel;
   const ribbonChannel = playingChannel ?? idleChannel ?? activeChannel;
   const ribbonKind: SourceKind | undefined = ribbonChannel ? sourceById.get(ribbonChannel.ref.sourceId)?.kind : undefined;
+  const savedCatchup = !cursorChannel ? catchupResumeFor(last?.channel?.ref) : null;
+  const resumeKind = last?.channel ? sourceById.get(last.channel.ref.sourceId)?.kind : undefined;
+  const resumeCatchup = savedCatchup && last?.channel && canCatchUp(savedCatchup.program, last.channel, resumeKind, now) ? savedCatchup : null;
+  const resumeLast = (channel: Channel) => {
+    if (!resumeCatchup || !resumeKind || !sameRef(channel.ref, resumeCatchup.ref)) return play(channel);
+    const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+    void playCatchup(channel, resumeKind, resumeCatchup.program, Date.now(), name, resumeCatchup.positionSeconds)
+      .catch((err: unknown) => toast({ title: tl('catchupFailed'), description: errorDescription(err), variant: 'error' }));
+  };
   const watchingLive = !!playerSource?.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
   const watchingArchive = !!playerSource && !playerSource.isLive && !!ribbonChannel && sameRef(playerSource.ref, ribbonChannel.ref);
   // The idle card's button starts the channel the ribbon describes: the ribbon leaves out its own.
@@ -579,13 +591,14 @@ export function ListPage() {
           <StageIdle
             kind="live"
             last={idleCard}
+            resumeProgram={resumeCatchup?.program && { title: resumeCatchup.program.title, positionSeconds: resumeCatchup.positionSeconds }}
             highlighted={!!cursorChannel}
             locked={locks.channelLocked(idleCard?.channel)}
             now={now}
             stripPrefix={prefs.stripCountryPrefix}
             epgOffsetMinutes={prefs.epgOffsetMinutes}
             hint={t('stageIdleHint')}
-            onResume={(c) => play(c)}
+            onResume={resumeLast}
           />
         }
         ribbon={

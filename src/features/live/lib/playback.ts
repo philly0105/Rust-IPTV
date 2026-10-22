@@ -145,16 +145,19 @@ export async function playCatchup(
   program: EpgProgram,
   now = Date.now(),
   displayName?: string,
+  resumeSeconds?: number,
 ): Promise<void> {
   const src = await catchupSource(channel, kind, program, now);
   await playSource({
     ...src,
     title: displayName || src.title || channel.name,
     subtitle: program.title,
+    catchupProgramStart: program.start,
     posterUrl: src.posterUrl ?? channel.logoUrl,
     ref: src.ref ?? channel.ref,
     isLive: false,
     isRadio: false,
+    ...(resumeSeconds !== undefined ? { resumeSeconds } : {}),
   });
 }
 

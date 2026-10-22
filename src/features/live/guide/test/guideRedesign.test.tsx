@@ -182,6 +182,32 @@ describe('what is playing (LG-01)', () => {
     expect(within(playing).getByTestId('guide-playing-mark')).toBeTruthy();
     expect(playing.closest('[role="rowheader"]')!.className).toContain('tuning-tick');
     expect(document.querySelector('[data-channel-row="1"]')!.hasAttribute('aria-current')).toBe(false);
+    expect(screen.getByRole('button', { name: /^c2 P0,/ }).hasAttribute('data-playing')).toBe(true);
+    expect(screen.getByRole('button', { name: /^c1 P0,/ }).hasAttribute('data-playing')).toBe(false);
+  });
+
+  it('moves the playing mark between catch-up programmes on the same channel', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const first = await screen.findByRole('button', { name: /^c2 P-2,/ });
+    const second = screen.getByRole('button', { name: /^c2 P-1,/ });
+    const otherChannel = screen.getByRole('button', { name: /^c1 P-2,/ });
+    const source = { url: 'http://archive/first', kind: 'hls', title: 'Channel 2', ref: makeChannel(2).ref, isLive: false, isRadio: false };
+
+    act(() => fakes.usePlayerStore.setState({ source: { ...source, catchupProgramStart: first.dataset.start } } as never));
+    expect(first.getAttribute('aria-current')).toBe('true');
+    expect(first.className).toContain('ring-accent-mark');
+    expect(first.getAttribute('aria-label')).toContain('playing');
+    expect(second.hasAttribute('data-playing')).toBe(false);
+    expect(otherChannel.hasAttribute('data-playing')).toBe(false);
+    expect(screen.getByRole('button', { name: /^c2 P0,/ }).hasAttribute('data-playing')).toBe(false);
+
+    act(() => fakes.usePlayerStore.setState({ source: { ...source, url: 'http://archive/second', catchupProgramStart: second.dataset.start } } as never));
+    expect(first.hasAttribute('data-playing')).toBe(false);
+    expect(second.hasAttribute('data-playing')).toBe(true);
+    expect(document.querySelectorAll('button[data-cell-row][data-playing]')).toHaveLength(1);
+
+    act(() => fakes.usePlayerStore.setState({ source: undefined } as never));
+    expect(second.hasAttribute('data-playing')).toBe(false);
   });
 
   // Round 4: an amber foot under every airing cell stacked into stripes; amber is for "here".

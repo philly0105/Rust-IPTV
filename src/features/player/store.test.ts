@@ -26,6 +26,7 @@ vi.mock('@/features/vod/lib/watchedQueries', async (importOriginal) => ({
 }));
 
 const store = await import('./store');
+const { CATCHUP_RESUME_KEY, readCatchupResume } = await import('./catchupResume');
 const media = await import('./media');
 const nowNext = await import('./nowNext');
 const { queryClient, rpcKey } = await import('@/api/query');
@@ -411,6 +412,28 @@ describe('up next and queue advance', () => {
 });
 
 describe('resume persistence', () => {
+  it('keeps an archived live programme and its position across a restart without saving its URL', async () => {
+    vi.useFakeTimers();
+    const start = new Date('2026-10-23T10:00:00Z').toISOString();
+    await usePlayerStore.getState().play({
+      url: 'http://provider.example/archive?password=secret', kind: 'direct', title: 'Channel 1',
+      subtitle: 'Morning Show', ref: liveRef, isLive: false, isRadio: false,
+      catchupProgramStart: start, durationSeconds: 3600,
+    });
+    store.reportStatus('playing');
+    store.reportProgress(1800, 3600);
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS);
+    expect(readCatchupResume()).toMatchObject({
+      ref: liveRef, program: { title: 'Morning Show', start }, positionSeconds: 1800,
+    });
+    expect(localStorage.getItem(CATCHUP_RESUME_KEY)).not.toContain('password=secret');
+    usePlayerStore.getState().stop();
+    expect(readCatchupResume()?.positionSeconds).toBe(1800);
+    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+    await usePlayerStore.getState().play({ url: 'http://h/live.m3u8', kind: 'hls', title: 'Live', isLive: true, isRadio: false, ref: liveRef });
+    expect(readCatchupResume()).toBeNull();
+  });
+
   it('writes sessionStorage on play and positions.set every 5 s for VOD', async () => {
     vi.useFakeTimers();
     await usePlayerStore.getState().play(vod('1'));

@@ -550,8 +550,9 @@ export function EpgGridPage() {
   const quality = useLiveQuality();
 
   // ---- what plays, the genre filter, the preview band ----------------------------
-  // LG-01: the channel playing in the app is marked in its row.
-  const playingRef = usePlayerStore((s) => s.source?.ref);
+  // Subscribe to the source itself: switching catch-up programmes on one channel must update its cell.
+  const playingSource = usePlayerStore((s) => s.source);
+  const playingRef = playingSource?.ref;
   const playingKey = playingRef && playingRef.contentType === 'live' ? itemKey(playingRef) : null;
   // Its catalog row says whether a group on screen holds it and gives "Go to playing" its number,
   // so the row is found in a few page reads (a view knows its entries itself).
@@ -1810,6 +1811,13 @@ export function EpgGridPage() {
                   forced layout and again at the width it found (P2-GUIDE-2). */}
               {pageMeasured && vItems.map((v) => {
                 const ch = paged.getChannel(v.index);
+                const programs = programsFor(ch);
+                const playing = !!ch && playingKey === itemKey(ch.ref);
+                const playingProgramStart = playing
+                  ? playingSource?.isLive
+                    ? programs?.find((p) => ms(p.start) <= now && now < ms(p.end))?.start
+                    : playingSource?.catchupProgramStart
+                  : undefined;
                 return (
                   <GuideRow
                     key={v.key}
@@ -1817,7 +1825,7 @@ export function EpgGridPage() {
                     top={headerH + v.start}
                     height={rowH}
                     channel={ch}
-                    programs={programsFor(ch)}
+                    programs={programs}
                     origin={origin}
                     now={now}
                     pxPerMin={pxPerMin}
@@ -1827,7 +1835,8 @@ export function EpgGridPage() {
                     rtl={rtl}
                     kind={kind}
                     highlighted={!!ch && highlight === itemKey(ch.ref)}
-                    playing={!!ch && playingKey === itemKey(ch.ref)}
+                    playing={playing}
+                    playingProgramStart={playingProgramStart}
                     genreFilter={genreFilter}
                     genreNames={genreNames}
                     labels={rowLabels}

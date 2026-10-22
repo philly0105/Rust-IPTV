@@ -30,6 +30,7 @@ import { displayChannelName } from '@/features/live/lib/channelName';
 import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
 import { parseClearKey } from './clearKey';
+import { clearCatchupResume, syncCatchupResume } from './catchupResume';
 import { preloadEngineFor } from './enginePreload';
 import { enterVideoFullscreen } from './fullscreen';
 import { rpcErrorCode } from './errors';
@@ -438,6 +439,7 @@ export function readResume(): ResumeRecord | null {
 function writeResume(): void {
   const state = usePlayerStore.getState();
   const { source, positionSeconds, mode } = state;
+  if (!isPendingZap(source)) syncCatchupResume(source, positionSeconds, mode === 'external' || isEndedState(state));
   try {
     // A zap's placeholder names a channel it has not tuned yet: the record keeps what played.
     if (isPendingZap(source)) return;
@@ -627,6 +629,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     if (mode === 'external') {
       stopSaver();
       clearResume();
+      clearCatchupResume();
       const chosen = opts?.externalPlayer ?? (externalChoice && sameSource(externalChoice.source, source) ? externalChoice.player : undefined);
       externalChoice = chosen ? { source, player: chosen } : null;
       const player = chosen ?? (settings?.player === 'vlc' ? 'vlc' : 'mpv');

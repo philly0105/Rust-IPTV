@@ -7,7 +7,7 @@ import { useRowHeight } from '@/ui/scale';
 // recording:
 import { ProgramActionsView, ScheduleMarkView, useProgramActionsShared } from '@/features/recording';
 
-import { durationMinutes, formatClock, formatDay, localDayKey, ms, programWhen } from '../lib/epgTime';
+import { durationMinutes, formatClock, formatDay, localDayKey, ms } from '../lib/epgTime';
 
 /** One Up next row at 100 % (h-11). */
 export const UP_NEXT_ROW_PX = 44;
@@ -28,6 +28,8 @@ export interface UpNextProps {
   /** The channel's display-time programmes, sorted. */
   programs: EpgProgram[];
   now: number;
+  /** Time the mini guide is showing; archive playback can be earlier than wall time. */
+  guideTime?: number;
   /** Where the timeline above ends: only programmes starting from then are listed (none: all future ones). */
   after?: number;
   channel: Channel;
@@ -44,7 +46,7 @@ export interface UpNextProps {
  * half. Choosing a row puts it in the ribbon's header, whose bell and record menu act on it; that
  * is how a touch screen reaches them, as three 44 px buttons per row cut the titles to "Busines…".
  */
-export function UpNext({ programs, now, after, channel, channelName, shown, onSelect }: UpNextProps) {
+export function UpNext({ programs, now, guideTime = now, after, channel, channelName, shown, onSelect }: UpNextProps) {
   const { t, i18n } = useTranslation('live');
   const lang = i18n.language;
   const box = useRef<HTMLDivElement>(null);
@@ -61,7 +63,7 @@ export function UpNext({ programs, now, after, channel, channelName, shown, onSe
   // h-11 and the label's padding are Tailwind spacing: they follow the UI scale and density.
   const rowPx = useRowHeight(UP_NEXT_ROW_PX, UP_NEXT_ROW_PX);
   const upcoming = programs
-    .filter((p) => programWhen(p, now) === 'future' && (after === undefined || ms(p.start) >= after))
+    .filter((p) => ms(p.start) > guideTime && (after === undefined || ms(p.start) >= after))
     .slice(0, upNextRows(height, rowPx));
   const shared = useProgramActionsShared();
 

@@ -184,9 +184,13 @@ needs source headers or would be mixed content.
    the same URL, source and header overrides whose `bytes=<n>-` (after
    `from`) starts at a byte it holds is answered 206 from it, with no new
    upstream request. Any other request with the same `sourceId` (or for the
-   same host, without one) lets the parked reader go first, so a seek or the
-   next item never runs two connections; so does a newer park on that source,
-   the time running out, and `release=1`, which the built-in player sends
+   same host, without one) lets the parked reader go, and waits (at most
+   0.5 s) until the reader has dropped its upstream body before it asks
+   upstream itself, so a seek or the next item doesn't run two connections.
+   A body whose source had a later request never parks: a seek's request can
+   reach the proxy before it notices the old player went away, and that
+   request is the player now. A newer park on that source, the time running
+   out, and `release=1` let the reader go too; the built-in player sends that
    when it tears an MPEG-TS player down (a stop, another item, Open in MPV):
    it fetches nothing, answers 204, and keeps a reader of that source from
    parking for the next 5 s, since it can land before the proxy noticed the

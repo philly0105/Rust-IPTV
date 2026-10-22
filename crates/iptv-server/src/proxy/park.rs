@@ -17,7 +17,11 @@
 //! upstream request. Any other request for the same source (or host, without
 //! one), `release=1` (the player was torn down), a newer park on the same
 //! source or the time running out lets the reader go, which closes the
-//! connection.
+//! connection. A request that lets readers go waits, briefly
+//! ([`Ticket::let_go`]), until they have dropped their upstream bodies before
+//! it asks upstream itself, and a body whose source had a later request never
+//! parks: its player let go after the next request came (a seek that reached
+//! the proxy before it noticed), and parking would keep a second connection.
 
 use super::readahead::{self, Chunk, Span, READAHEAD_BYTES};
 use axum::http::header::HeaderMap;
@@ -48,6 +52,9 @@ const MAX_PARKED: usize = 4;
 /// A release lands before the reader notices the player let go: a source
 /// released this recently doesn't park.
 const RELEASE_GRACE: Duration = Duration::from_secs(5);
+/// Most a request waits for the readers it let go of to drop their upstream
+/// bodies; a reader does that as soon as its task runs.
+const LET_GO_WAIT: Duration = Duration::from_millis(500);
 
 /// The source a request is for (its id, else the URL's host): one parked
 /// reader each, and any request for it lets that reader go.
@@ -108,6 +115,8 @@ struct Attach {
     from: u64,
     tx: mpsc::UnboundedSender<Chunk>,
     accepted: oneshot::Sender<bool>,
+    /// The continuing request's [`Ticket::gen`].
+    gen: u64,
 }
 
 /// A parked reader, handed to the request that may continue it.
@@ -117,21 +126,32 @@ pub(crate) struct Slot {
     meta: ParkMeta,
     taken: Arc<AtomicU64>,
     attach: oneshot::Sender<Attach>,
+    /// Closes once the reader has dropped its upstream body.
+    gone: mpsc::Sender<()>,
 }
 
 impl Slot {
-    /// The rest of the body from byte `from`, or `None` when the reader no
-    /// longer holds that byte (it is let go then).
+    /// The rest of the body from byte `from` for the request of generation
+    /// `gen` ([`Ticket::gen`]), or `None` when the reader no longer holds that
+    /// byte (it is let go then).
     pub(crate) async fn attach(
         self,
         from: u64,
+        gen: u64,
     ) -> Option<(
         impl Stream<Item = io::Result<Bytes>> + Send + 'static,
         ParkMeta,
     )> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (accepted, answer) = oneshot::channel();
-        self.attach.send(Attach { from, tx, accepted }).ok()?;
+        self.attach
+            .send(Attach {
+                from,
+                tx,
+                accepted,
+                gen,
+            })
+            .ok()?;
         if !answer.await.unwrap_or(false) {
             return None;
         }
@@ -144,7 +164,28 @@ impl Slot {
 struct Inner {
     slots: Vec<Slot>,
     released: HashMap<String, Instant>,
+    /// Each source's latest request ([`Ticket::gen`]).
+    latest: HashMap<String, u64>,
     ids: u64,
+}
+
+/// What a request learns from [`Parking::take`].
+pub(crate) struct Ticket {
+    /// The request's place among all requests: a body it starts parks only
+    /// while no later request for its source came.
+    pub gen: u64,
+    /// The readers it let go of, until each has dropped its upstream body.
+    gone: Vec<mpsc::Sender<()>>,
+}
+
+impl Ticket {
+    /// Waits, at most [`LET_GO_WAIT`], until the readers this request let go
+    /// of have dropped their upstream bodies, so a one-connection account
+    /// sees the old connection close before the new request.
+    pub(crate) async fn let_go(&self) {
+        let all = futures::future::join_all(self.gone.iter().map(|g| g.closed()));
+        let _ = tokio::time::timeout(LET_GO_WAIT, all).await;
+    }
 }
 
 /// The proxy's parked readers.
@@ -158,18 +199,27 @@ impl Parking {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Parks a reader whose body a request of generation `gen` started or
+    /// last continued; `None` when it must stop instead.
     fn park(
         &self,
         key: ParkKey,
         meta: ParkMeta,
         taken: Arc<AtomicU64>,
         attach: oneshot::Sender<Attach>,
+        gen: u64,
+        gone: mpsc::Sender<()>,
     ) -> Option<u64> {
         let mut g = self.lock();
         let now = Instant::now();
         g.released
             .retain(|_, at| now.duration_since(*at) < RELEASE_GRACE);
         if g.released.contains_key(&key.scope) {
+            return None;
+        }
+        // A later request for the source came before this reader's player let
+        // go: that request is the player now.
+        if g.latest.get(&key.scope).is_some_and(|&n| n > gen) {
             return None;
         }
         g.slots.retain(|s| s.key.scope != key.scope);
@@ -184,6 +234,7 @@ impl Parking {
             meta,
             taken,
             attach,
+            gone,
         });
         Some(id)
     }
@@ -193,18 +244,27 @@ impl Parking {
     }
 
     /// A request for `key`'s source: whatever is parked for that source is let
-    /// go, except a reader of `key` itself, which is handed over.
-    pub(crate) fn take(&self, key: &ParkKey) -> Option<Slot> {
+    /// go, except a reader of `key` itself, which is handed over (and let go
+    /// too unless it continues). The ticket orders the request among the
+    /// source's requests and waits for the readers it let go of.
+    pub(crate) fn take(&self, key: &ParkKey) -> (Option<Slot>, Ticket) {
         let mut g = self.lock();
+        g.ids += 1;
+        let gen = g.ids;
+        g.latest.insert(key.scope.clone(), gen);
         let mut found = None;
+        let mut gone = Vec::new();
         for s in std::mem::take(&mut g.slots) {
             if s.key.scope != key.scope {
                 g.slots.push(s);
-            } else if found.is_none() && s.key == *key {
+                continue;
+            }
+            gone.push(s.gone.clone());
+            if found.is_none() && s.key == *key {
                 found = Some(s);
             }
         }
-        found
+        (found, Ticket { gen, gone })
     }
 
     /// The player was torn down: let go of what is parked for `scope`, and of a
@@ -216,7 +276,7 @@ impl Parking {
     }
 
     #[cfg(test)]
-    fn parked(&self) -> usize {
+    pub(crate) fn parked(&self) -> usize {
         self.lock().slots.len()
     }
 }
@@ -274,11 +334,17 @@ impl Kept {
     }
 }
 
-/// A body's way to park: the registry, its key and its upstream headers.
+/// A body's way to park: the registry, its key, its upstream headers and the
+/// generation of the request that started it or last continued it.
 pub(crate) struct Park {
-    pub parking: Arc<Parking>,
-    pub key: ParkKey,
-    pub headers: HeaderMap,
+    parking: Arc<Parking>,
+    key: ParkKey,
+    headers: HeaderMap,
+    gen: u64,
+    /// Dropped with the reader, after its upstream body, which closes `gone`
+    /// and the clones a slot hands out ([`Ticket::let_go`]).
+    _alive: mpsc::Receiver<()>,
+    gone: mpsc::Sender<()>,
 }
 
 /// Where a parked reader stands: `sent` bytes of `span` read from upstream,
@@ -291,11 +357,25 @@ pub(crate) struct Progress<'a> {
 }
 
 impl Park {
+    /// `gen`: the [`Ticket::gen`] of the request that starts the body.
+    pub(crate) fn new(parking: Arc<Parking>, key: ParkKey, gen: u64, headers: HeaderMap) -> Self {
+        let (gone, alive) = mpsc::channel(1);
+        Self {
+            parking,
+            key,
+            headers,
+            gen,
+            _alive: alive,
+            gone,
+        }
+    }
+
     /// The player let go of the body. Unless it had all of it, waits for a
     /// continuation, reading on meanwhile, and returns the new player's
-    /// channel and the byte it starts at; `None` when the reader should stop.
+    /// channel and the byte it starts at; `None` when the reader should stop
+    /// (it drops its upstream body, then this `Park`).
     pub(crate) async fn wait(
-        &self,
+        &mut self,
         span: Span,
         taken: &Arc<AtomicU64>,
         p: Progress<'_>,
@@ -308,9 +388,14 @@ impl Park {
             headers: self.headers.clone(),
         };
         let (attach, mut asked) = oneshot::channel::<Attach>();
-        let id = self
-            .parking
-            .park(self.key.clone(), meta, Arc::clone(taken), attach)?;
+        let id = self.parking.park(
+            self.key.clone(),
+            meta,
+            Arc::clone(taken),
+            attach,
+            self.gen,
+            self.gone.clone(),
+        )?;
         let expiry = tokio::time::sleep(PARK_FOR);
         tokio::pin!(expiry);
         loop {
@@ -322,6 +407,7 @@ impl Park {
                     let held = a.from >= p.kept.start && a.from <= p.kept.end() && a.from <= span.end;
                     if held {
                         taken.store(a.from, Ordering::Relaxed);
+                        self.gen = a.gen;
                     }
                     let _ = a.accepted.send(held);
                     return held.then_some((a.tx, a.from));
@@ -370,9 +456,15 @@ mod tests {
         }
     }
 
+    /// Parks a reader of `k` whose request came after every other one.
     fn park(p: &Parking, k: &ParkKey) -> (Option<u64>, oneshot::Receiver<Attach>) {
+        park_from(p, k, u64::MAX)
+    }
+
+    fn park_from(p: &Parking, k: &ParkKey, gen: u64) -> (Option<u64>, oneshot::Receiver<Attach>) {
         let (tx, rx) = oneshot::channel();
-        (p.park(k.clone(), meta(), Arc::default(), tx), rx)
+        let (gone, _) = mpsc::channel(1);
+        (p.park(k.clone(), meta(), Arc::default(), tx, gen, gone), rx)
     }
 
     #[test]
@@ -397,14 +489,14 @@ mod tests {
         let (_, _other_rx) = park(&p, &other);
         assert_eq!(p.parked(), 2);
         // Another URL of the same source: `a` is let go, `other` stays.
-        assert!(p.take(&key("source:x", "http://p/b.ts")).is_none());
+        assert!(p.take(&key("source:x", "http://p/b.ts")).0.is_none());
         assert!(matches!(
             a_rx.try_recv(),
             Err(oneshot::error::TryRecvError::Closed)
         ));
         assert_eq!(p.parked(), 1);
         let (_, _a_rx) = park(&p, &a);
-        let slot = p.take(&a).expect("the same key is handed over");
+        let slot = p.take(&a).0.expect("the same key is handed over");
         assert_eq!(slot.key, a);
         assert_eq!(p.parked(), 1);
     }
@@ -425,6 +517,23 @@ mod tests {
             park(&p, &key(&format!("host:{i}"), "http://p/a.ts"));
         }
         assert_eq!(p.parked(), MAX_PARKED);
+    }
+
+    #[test]
+    fn a_body_whose_source_had_a_later_request_does_not_park() {
+        let p = Parking::default();
+        let a = key("source:x", "http://p/a.ts");
+        let (_, first) = p.take(&a);
+        // A seek's request reached the proxy before it noticed the player let
+        // go of the first body: that body must not park next to the new one.
+        let (_, seek) = p.take(&a);
+        assert!(seek.gen > first.gen);
+        assert_eq!(park_from(&p, &a, first.gen).0, None);
+        assert!(park_from(&p, &a, seek.gen).0.is_some());
+        // Another source's requests don't count.
+        let (_, elsewhere) = p.take(&key("source:y", "http://p/a.ts"));
+        assert!(elsewhere.gen > seek.gen);
+        assert!(park_from(&p, &a, seek.gen).0.is_some());
     }
 
     #[test]

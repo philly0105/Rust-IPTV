@@ -226,7 +226,7 @@ async fn read(
     span: Span,
     resume: Option<Resume>,
     mut tx: mpsc::UnboundedSender<Chunk>,
-    park: Option<Park>,
+    mut park: Option<Park>,
     taken: Arc<AtomicU64>,
 ) {
     let room = Arc::new(Semaphore::new(READAHEAD_BYTES));
@@ -239,7 +239,7 @@ async fn read(
     loop {
         if tx.is_closed() {
             // The player let go.
-            let Some(park) = &park else { return };
+            let Some(park) = park.as_mut() else { return };
             let progress = Progress {
                 body: &mut body,
                 kept: &mut kept,
@@ -247,6 +247,9 @@ async fn read(
                 done: &mut done,
             };
             let Some((next, from)) = park.wait(span, &taken, progress).await else {
+                // The upstream connection goes before the `Park`, which tells
+                // a request that let this reader go (`Ticket::let_go`).
+                drop(body);
                 return;
             };
             // A continuation: what it may not have, then on from the upstream.
@@ -360,7 +363,10 @@ async fn read(
 
 #[cfg(test)]
 mod tests {
+    use super::super::park::{Park, ParkKey, Parking};
     use super::*;
+    use iptv_core::model::RequestHeaders;
+    use std::sync::atomic::AtomicBool;
 
     fn headers(pairs: &[(header::HeaderName, &str)]) -> HeaderMap {
         let mut h = HeaderMap::new();
@@ -431,5 +437,66 @@ mod tests {
         ]);
         assert_eq!(Span::of(StatusCode::PARTIAL_CONTENT, &wrong), None);
         assert_eq!(Span::of(StatusCode::NOT_MODIFIED, &full), None);
+    }
+
+    struct Dropped(Arc<AtomicBool>);
+
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// A request that lets a parked reader go waits until the reader has
+    /// dropped its upstream body, so the provider sees that connection close
+    /// before the request asks for a new one.
+    #[tokio::test]
+    async fn a_request_waits_until_the_reader_it_let_go_dropped_its_upstream() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Dropped(Arc::clone(&dropped));
+        let body = stream::iter([Ok::<_, reqwest::Error>(Bytes::from(vec![0u8; 100]))])
+            .chain(stream::pending())
+            .map(move |chunk| {
+                let _upstream = &guard;
+                chunk
+            })
+            .boxed();
+        let parking = Arc::new(Parking::default());
+        let key = |path: &str| {
+            let url = Url::parse(&format!("http://p/{path}")).unwrap();
+            ParkKey::new("source:x".to_owned(), &url, &RequestHeaders::default())
+        };
+        let (_, ticket) = parking.take(&key("a.ts"));
+        let span = Span {
+            start: 0,
+            end: 999,
+            total: Some(1000),
+        };
+        let park = Park::new(
+            Arc::clone(&parking),
+            key("a.ts"),
+            ticket.gen,
+            HeaderMap::new(),
+        );
+        let mut player = Box::pin(spawn(body, span, None, Some(park)));
+        assert_eq!(player.next().await.unwrap().unwrap().len(), 100);
+        drop(player);
+        for _ in 0..1000 {
+            if parking.parked() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(parking.parked(), 1);
+
+        // The next request for the source (a seek): the reader still holds
+        // the upstream until its task runs, which the wait lets it do.
+        let (slot, next) = parking.take(&key("b.ts"));
+        assert!(slot.is_none());
+        assert!(!dropped.load(Ordering::SeqCst));
+        let started = std::time::Instant::now();
+        next.let_go().await;
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(started.elapsed() < std::time::Duration::from_millis(250));
     }
 }

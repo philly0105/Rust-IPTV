@@ -330,7 +330,7 @@ async fn proxy(
     // Any request for the source lets go of what is parked for it; a reader
     // of this very URL is handed over, to continue below or be let go too.
     let key = park::ParkKey::new(scope, &url, &upstream.headers);
-    let parked = s.proxy.parking.take(&key);
+    let (parked, ticket) = s.proxy.parking.take(&key);
 
     // Playlists are rewritten whole; never ask for a slice of one.
     let path = url.path().to_ascii_lowercase();
@@ -354,11 +354,13 @@ async fn proxy(
     };
     if let Some(slot) = parked {
         if let Some(at) = continuation_start(&method, headers) {
-            if let Some((body, meta)) = slot.attach(at).await {
+            if let Some((body, meta)) = slot.attach(at, ticket.gen).await {
                 return Ok(continuation(&meta, at, body));
             }
         }
     }
+    // A one-connection account must see the old connection close first.
+    ticket.let_go().await;
 
     let (resp, current) = upstream
         .fetch(&method, url.clone(), headers, forward_range)
@@ -386,7 +388,7 @@ async fn proxy(
     let rewriter =
         hls::HlsRewriter::with_params(current.clone(), &params).at_path(&s.opts.proxy_path);
     let resume_from = Some((upstream.clone(), url));
-    let park_as = (method == Method::GET).then(|| (Arc::clone(&s.proxy.parking), key));
+    let park_as = (method == Method::GET).then(|| (Arc::clone(&s.proxy.parking), key, ticket.gen));
     if let Some(out) = respond(resp, current.clone(), rewriter, head, resume_from, park_as).await? {
         return Ok(out);
     }
@@ -570,7 +572,7 @@ async fn respond(
     rewriter: hls::HlsRewriter,
     head: bool,
     resume_from: Option<(Upstream, Url)>,
-    park_as: Option<(Arc<park::Parking>, park::ParkKey)>,
+    park_as: Option<(Arc<park::Parking>, park::ParkKey, u64)>,
 ) -> Result<Option<Response>, Fail> {
     let status = resp.status();
     let upstream = resp.headers().clone();
@@ -653,11 +655,7 @@ async fn respond(
             let input = stream::iter(prefix.into_iter().map(Ok)).chain(body).boxed();
             let park = park_as
                 .filter(|_| park::is_mpeg_ts(&ct, final_url.path()))
-                .map(|(parking, key)| park::Park {
-                    parking,
-                    key,
-                    headers: upstream.clone(),
-                });
+                .map(|(parking, key, gen)| park::Park::new(parking, key, gen, upstream.clone()));
             media_body(input, status_code, &upstream, resume_from, park)
         };
         builder.body(body)

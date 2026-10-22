@@ -706,7 +706,7 @@ async fn proxy_passes_a_drop_on_when_the_server_takes_no_ranges() {
     assert_eq!(ranges.lock().unwrap().len(), 1);
 }
 
-const LONG_TS: usize = 48 << 20;
+const LONG_TS: usize = 64 << 20;
 const LONG_TS_PATH: &str = "/timeshift/u/p/90/2026-10-22:18-00/10.ts";
 
 fn long_ts() -> bytes::Bytes {
@@ -720,10 +720,10 @@ fn long_ts() -> bytes::Bytes {
     .clone()
 }
 
-/// A catch-up programme's archive: 48 MB of MPEG-TS, served with Range in
-/// 64 KB chunks, the last 8 MB slowly (a chunk per 10 ms), so a parked reader
-/// that reads on can't reach the end during a test. Counts its requests and
-/// the bodies it is still sending.
+/// A catch-up programme's archive: 64 MB of MPEG-TS, served with Range in
+/// 64 KB chunks, the last 8 MB slowly (a chunk per 10 ms). A parked reader
+/// stops reading at 48 MB, so a body it holds stays open at the stub until
+/// the reader lets go. Counts its requests and the bodies it is still sending.
 struct LongTs {
     base: String,
     requests: Arc<std::sync::atomic::AtomicUsize>,
@@ -771,7 +771,7 @@ async fn spawn_long_ts() -> LongTs {
                 let body = futures::stream::iter(chunks).then(move |(a, chunk)| {
                     let _open = &guard;
                     async move {
-                        if a >= 40 << 20 {
+                        if a >= LONG_TS - (8 << 20) {
                             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                         }
                         Ok::<_, std::io::Error>(chunk)
@@ -944,6 +944,38 @@ async fn proxy_lets_a_parked_reader_go() {
     assert_eq!(ts.requests(), 4);
 }
 
+/// A seek whose request reached the proxy before it noticed the player let go
+/// of the old body: that body's reader must not park next to the new stream,
+/// which would hold a second connection to a one-connection account.
+#[tokio::test]
+async fn proxy_does_not_park_a_body_whose_next_request_came_first() {
+    let (ts, h, url) = long_ts_harness().await;
+    let mut old = h.http.get(&url).send().await.unwrap();
+    let mut got = 0;
+    while got < 1 << 20 {
+        got += old
+            .chunk()
+            .await
+            .unwrap()
+            .expect("the body ended early")
+            .len();
+    }
+    let mut seek = h
+        .http
+        .get(format!("{url}&from=1000000"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(seek.status(), 206);
+    assert!(seek.chunk().await.unwrap().is_some());
+    ts.wait_open(2).await;
+    // The player of the old body lets go only now.
+    drop(old);
+    ts.wait_open(1).await;
+    assert!(seek.chunk().await.unwrap().is_some());
+    assert_eq!(ts.requests(), 2);
+}
+
 /// A resume from a byte the parked reader has not read (a jump ahead) goes
 /// upstream, and the reader is let go.
 #[tokio::test]
@@ -951,7 +983,7 @@ async fn proxy_asks_upstream_for_a_byte_the_parked_reader_does_not_hold() {
     let (ts, h, url) = long_ts_harness().await;
     read_then_let_go(&h, &url, 0, 1 << 20).await;
     ts.wait_open(1).await;
-    // In the slow tail, which the parked reader needs over a second to reach.
+    // Past the 48 MB the parked reader stops at.
     let at = LONG_TS - (1 << 20);
     let r = h
         .http

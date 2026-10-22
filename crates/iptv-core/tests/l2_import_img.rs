@@ -3,6 +3,9 @@
 //! after its index row commits. Until the row lands, later requests (any
 //! source) read the file instead of fetching again; once it lands, the
 //! index, the byte total, eviction and clear agree with the files on disk.
+//!
+//! DB-1R: the writer's batches share `AppState::db_background`'s gate with
+//! download progress and recording byte counts; `images.stats` skips it.
 
 use axum::extract::{Path as AxPath, Query, State};
 use axum::http::header;
@@ -296,4 +299,66 @@ async fn rows_that_land_late_keep_eviction_and_clear_exact() {
             .hit
     );
     assert_eq!(stub.hits("e"), 2);
+}
+
+/// DB-1R: a batch that writes waits at the background gate; `images.stats`
+/// sends barriers alone, which only read the total, and skips it. Otherwise
+/// stats would wait behind a download's progress write that holds the gate
+/// while it waits for an import's write lock.
+#[tokio::test]
+async fn stats_skips_the_background_gate_and_index_writes_wait_at_it() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+
+    // An import holds the write lock, and a progress write holds the gate
+    // while it waits for that lock.
+    let lock = WriteLock::take(&state);
+    let progress = tokio::spawn({
+        let state = state.clone();
+        async move {
+            state
+                .db_background(|c| {
+                    c.execute("INSERT INTO app_state(key, value) VALUES ('p', 'x')", [])?;
+                    Ok(())
+                })
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!progress.is_finished(), "the write waits for the lock");
+    let started = Instant::now();
+    let stats = imagecache::stats(&state).await.unwrap();
+    let took = started.elapsed();
+    assert!(took < FAST, "images.stats took {took:?} behind the gate");
+    assert_eq!((stats.files, stats.bytes), (0, 0));
+    lock.release();
+    progress.await.unwrap().unwrap();
+
+    // No lock now, but another background write holds the gate: a stored
+    // poster answers from its file and its row waits for the gate.
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let holder = tokio::spawn({
+        let state = state.clone();
+        async move {
+            state
+                .db_background(move |_| {
+                    let _ = held.recv();
+                    Ok(())
+                })
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let url = stub.url("gated", 2000);
+    assert!(!imagecache::fetch(&state, &url, None).await.unwrap().hit);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!has_row(&state, &url).await, "the row waits at the gate");
+    assert!(imagecache::fetch(&state, &url, None).await.unwrap().hit);
+    drop(release);
+    holder.await.unwrap().unwrap();
+    let stats = imagecache::stats(&state).await.unwrap();
+    assert_eq!((stats.files, stats.bytes), (1, 2000));
+    assert!(has_row(&state, &url).await);
+    assert_eq!(stub.hits("gated"), 1);
 }

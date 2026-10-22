@@ -835,4 +835,50 @@ mod tests {
         let mut z = Pace::new(Some(0), 0);
         assert_eq!(z.delay(Some(0), 1 << 30, t0), None);
     }
+
+    /// DB-1R: the periodic progress write passes `AppState::db_background`'s
+    /// gate, so while another background write holds it (one parked on an
+    /// import's write lock) this one waits there instead of on a connection.
+    #[tokio::test]
+    async fn periodic_progress_waits_at_the_background_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            dir.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let id = state
+            .db_call(|c| {
+                c.execute(
+                    "INSERT INTO downloads (source_id, content_type, item_id, title, url)
+                     VALUES ('s1', 'movie', 'm1', 'M', 'http://127.0.0.1/m.mp4')",
+                    [],
+                )?;
+                Ok(c.last_insert_rowid())
+            })
+            .await
+            .unwrap();
+        let held = state.background_gate().acquire_owned().await.unwrap();
+        let mut p = Progress::new(0);
+        p.last_persist = Instant::now().checked_sub(PERSIST_INTERVAL).unwrap();
+        p.tick(&state, id, 5_000, None);
+        let write = p.persisting.take().expect("the write is due");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!write.is_finished(), "the write waits at the gate");
+        drop(held);
+        write.await.unwrap();
+        let saved: i64 = state
+            .db_call(move |c| {
+                Ok(c.query_row(
+                    "SELECT bytes_downloaded FROM downloads WHERE id = ?1",
+                    [id],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(saved, 5_000);
+    }
 }

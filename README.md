@@ -64,6 +64,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - When a channel stops working, the player switches to the same channel on another of your sources, with Undo.
 - Favorites and Recently watched sit at the top of each source's groups, in Live TV and Radio. Type a channel number in the guide to jump to its row.
 - Make your own channel lists across sources, or add a whole group at once, and rename or hide channels without changing the provider's data.
+- Hide channels below a picture quality, such as anything under 1080p, read from the provider's channel names.
 
 ![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png)
 

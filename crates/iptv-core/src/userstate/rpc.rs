@@ -128,8 +128,11 @@ pub fn register(r: &mut RpcRouter) {
     // favorites
     r.add("favorites.list", |state, a: SourceFilter| async move {
         let hide = crate::parental::hide_filter(&state).await?;
+        let quality = crate::catalog::rpc::quality_filter(&state);
         let v = state
-            .db_call(move |c| super::favorites_list_filtered(c, a.source_id.as_deref(), hide))
+            .db_call(move |c| {
+                super::favorites_list_filtered(c, a.source_id.as_deref(), hide, quality)
+            })
             .await?;
         Ok::<Vec<FavoriteEntry>, RpcError>(v)
     });
@@ -147,8 +150,11 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("favorites.reorder", |state, a: ReorderArgs| async move {
         let hide = crate::parental::hide_filter(&state).await?;
+        let quality = crate::catalog::rpc::quality_filter(&state);
         state
-            .db_write(move |c| super::favorites_reorder(c, a.source_id.as_deref(), &a.refs, hide))
+            .db_write(move |c| {
+                super::favorites_reorder(c, a.source_id.as_deref(), &a.refs, hide, quality)
+            })
             .await?;
         Ok::<(), RpcError>(())
     });
@@ -162,8 +168,11 @@ pub fn register(r: &mut RpcRouter) {
     // recent
     r.add("recent.list", |state, a: RecentListArgs| async move {
         let hide = crate::parental::hide_filter(&state).await?;
+        let quality = crate::catalog::rpc::quality_filter(&state);
         let v = state
-            .db_call(move |c| super::recent_list_filtered(c, a.source_id.as_deref(), a.limit, hide))
+            .db_call(move |c| {
+                super::recent_list_filtered(c, a.source_id.as_deref(), a.limit, hide, quality)
+            })
             .await?;
         Ok::<Vec<RecentEntry>, RpcError>(v)
     });

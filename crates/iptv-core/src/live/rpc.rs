@@ -13,9 +13,10 @@ pub const COMMANDS: &[&str] = &["live.alternates"];
 /// `live.alternates {ref}`: the same channel elsewhere, best first.
 pub async fn alternates(state: Arc<AppState>, a: RefArgs) -> Result<Alternates, RpcError> {
     let hide = crate::parental::hide_filter(&state).await?;
+    let quality = crate::catalog::rpc::quality_filter(&state);
     Ok(state
         .db_call(move |c| {
-            let mut alt = super::alternates(c, &a.item_ref)?;
+            let mut alt = super::alternates(c, &a.item_ref, quality)?;
             // parental: hide mode never offers a channel it hides as a fallback (C2).
             if let Some(h) = hide {
                 let mut kept = Vec::with_capacity(alt.alternates.len());

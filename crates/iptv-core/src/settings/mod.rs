@@ -265,8 +265,12 @@ async fn store(state: &AppState, next: Settings) -> CoreResult<Settings> {
     if !only_last_route_changed(&previous, &next) {
         state.emit("settings.changed", for_client(state, next.clone()));
     }
-    if previous.english_only != next.english_only {
-        // The phone remote's channel list follows English only.
+    if previous.english_only != next.english_only
+        || previous.live_min_quality != next.live_min_quality
+        || previous.live_hide_untagged != next.live_hide_untagged
+    {
+        // The phone remote's channel list follows English only and the
+        // Live TV quality filter.
         crate::remote::channels_may_have_changed(state, None);
     }
     Ok(next)

@@ -467,9 +467,10 @@ pub async fn publish_source(state: &Arc<AppState>, source_id: &str) -> CoreResul
 
 /// Fills the list from the catalog of the published source, read in the core
 /// (no round trip through the WebView): the live channels the app lists, with
-/// hidden groups and channels, parental hide mode and English only applied,
-/// custom names, at most [`MAX_CHANNELS`], keeping only the fields the remote
-/// shows. Without a published source the list is left alone (`Ok(0)`).
+/// hidden groups and channels, parental hide mode, English only and the Live
+/// TV quality filter applied, custom names, at most [`MAX_CHANNELS`], keeping
+/// only the fields the remote shows. Without a published source the list is
+/// left alone (`Ok(0)`).
 pub async fn refresh_channels(state: &Arc<AppState>) -> CoreResult<usize> {
     let hub = hub(state);
     let cached = hub.source.lock().clone();
@@ -498,11 +499,13 @@ pub async fn refresh_channels(state: &Arc<AppState>) -> CoreResult<usize> {
     };
     let _fill = hub.fill_lock.lock().await;
     let english = state.settings.read().english_only;
+    let quality = crate::catalog::rpc::quality_filter(state);
     let hide = crate::parental::hide_filter(state).await?;
     let sid = source_id.clone();
     let channels = state
         .db_call(move |c| {
-            let mut v: Vec<Channel> = crate::catalog::all_live_channels(c, &sid, english, hide)?
+            let found = crate::catalog::all_live_channels(c, &sid, english, quality, hide)?;
+            let mut v: Vec<Channel> = found
                 .into_iter()
                 .map(crate::catalog::NamedRow::into_channel)
                 .collect();
@@ -526,10 +529,10 @@ pub async fn refresh_channels(state: &Arc<AppState>) -> CoreResult<usize> {
 }
 
 /// Refills the list in the background when it may be stale: parental
-/// controls or the English only setting changed (`source_id` `None`), or the
-/// catalog, channel edits or hidden live groups of `source_id` changed. Only
-/// while the server runs and a source is published; does nothing outside a
-/// Tokio runtime.
+/// controls, the English only setting or the Live TV quality filter changed
+/// (`source_id` `None`), or the catalog, channel edits or hidden live groups
+/// of `source_id` changed. Only while the server runs and a source is
+/// published; does nothing outside a Tokio runtime.
 pub fn channels_may_have_changed(state: &AppState, source_id: Option<&str>) {
     let Some(hub) = state.ext::<RemoteHub>(EXT_KEY) else {
         return;

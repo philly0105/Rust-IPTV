@@ -81,6 +81,7 @@ fn non_defaults() -> Value {
         "streamFormat": "ts",
         "epgOffsetMinutes": 60,
         "vodMinRating": 6.5,
+        "liveMinQuality": "fhd",
         "sourceRefreshIntervalHours": 24,
         "accountExpiryWarnDays": 14,
         "recordingPaddingBeforeMinutes": 2,

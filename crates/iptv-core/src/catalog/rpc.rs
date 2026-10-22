@@ -1,5 +1,6 @@
 //! `catalog.*` RPC commands (SPEC C4).
 
+use super::quality::QualityFilter;
 use super::{CatalogQuery, NamedRow, VodFilter};
 use crate::error::RpcError;
 use crate::model::{Category, Channel, ContentType, ItemRef, Page, PageQuery, SeriesItem, VodItem};
@@ -192,6 +193,13 @@ fn english_only(state: &AppState) -> bool {
     state.settings_snapshot().english_only
 }
 
+/// The Live TV quality filter (`liveMinQuality`, `liveHideUntagged`), `None`
+/// while off: live readers drop channels whose name marks a lower quality
+/// (see [`super::quality`]).
+pub(crate) fn quality_filter(state: &AppState) -> Option<QualityFilter> {
+    QualityFilter::from_settings(&state.settings.read())
+}
+
 /// The parental hide-mode filter for this call (`None` unless a PIN is set,
 /// the mode is hide and no unlock is active).
 async fn hide(state: &AppState) -> Result<Option<crate::parental::Hide>, RpcError> {
@@ -211,6 +219,7 @@ pub async fn categories(
     a: CategoriesArgs,
 ) -> Result<Vec<Category>, RpcError> {
     let english = english_only(&state);
+    let quality = quality_filter(&state);
     let hide = if a.include_locked {
         None
     } else {
@@ -224,6 +233,7 @@ pub async fn categories(
                 a.content_type,
                 a.include_hidden,
                 english,
+                quality,
                 hide,
             )
         })
@@ -280,6 +290,12 @@ pub async fn channels(state: Arc<AppState>, a: ChannelsArgs) -> Result<Page<Chan
         include_hidden: a.include_hidden,
         min_rating: None,
         english_only: english_only(&state),
+        // Radio is never filtered by quality.
+        quality: if a.radio {
+            None
+        } else {
+            quality_filter(&state)
+        },
         vod: VodFilter::default(),
     };
     // guide: M3U catch-up overrides are applied on read.
@@ -306,6 +322,7 @@ pub async fn movies(state: Arc<AppState>, a: VodListArgs) -> Result<Page<VodItem
         include_hidden: false,
         min_rating: a.min_rating,
         english_only: english_only(&state),
+        quality: None,
         vod,
     };
     let page = state
@@ -325,6 +342,7 @@ pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesI
         include_hidden: false,
         min_rating: a.min_rating,
         english_only: english_only(&state),
+        quality: None,
         vod,
     };
     let page = state
@@ -385,11 +403,13 @@ pub async fn channel_by_number(
     state: Arc<AppState>,
     a: ChannelByNumberArgs,
 ) -> Result<Option<Channel>, RpcError> {
+    let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     let row = state
         .db_call(move |c| {
-            let mut ch = super::channel_by_number(c, &a.source_id, a.number, a.content_type, hide)?
-                .map(NamedRow::into_channel);
+            let mut ch =
+                super::channel_by_number(c, &a.source_id, a.number, a.content_type, quality, hide)?
+                    .map(NamedRow::into_channel);
             // guide: M3U catch-up overrides are applied on read.
             crate::catchup::m3u::apply_overrides(c, ch.as_mut_slice())?;
             crate::channeledit::apply_names(c, ch.as_mut_slice())?;
@@ -404,6 +424,7 @@ pub async fn neighbors(
     a: NeighborsArgs,
 ) -> Result<NeighborsResult, RpcError> {
     let english = english_only(&state);
+    let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     let (prev, next) = state
         .db_call(move |c| {
@@ -412,6 +433,7 @@ pub async fn neighbors(
                 &a.item_ref,
                 a.category_id.as_deref().filter(|s| !s.is_empty()),
                 english,
+                quality,
                 hide,
             )?;
             let mut prev = prev.map(NamedRow::into_channel);
@@ -434,6 +456,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
         .clamp(1, MAX_SEARCH_LIMIT);
     let wanted = a.content_types.unwrap_or_else(|| ContentType::ALL.to_vec());
     let english = english_only(&state);
+    let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     state
         .db_call(move |c| {
@@ -458,6 +481,7 @@ pub async fn search(state: Arc<AppState>, a: SearchArgs) -> Result<SearchResult,
                 &groups,
                 limit,
                 english,
+                quality,
                 hide,
             )?
             .into_iter();
@@ -514,13 +538,12 @@ pub async fn all_live_channels(
     a: SourceArgs,
 ) -> Result<Vec<Channel>, RpcError> {
     let english = english_only(&state);
+    let quality = quality_filter(&state);
     let hide = hide(&state).await?;
     let rows = state
         .db_call(move |c| {
-            let mut v: Vec<Channel> = super::all_live_channels(c, &a.source_id, english, hide)?
-                .into_iter()
-                .map(NamedRow::into_channel)
-                .collect();
+            let found = super::all_live_channels(c, &a.source_id, english, quality, hide)?;
+            let mut v: Vec<Channel> = found.into_iter().map(NamedRow::into_channel).collect();
             // guide: M3U catch-up overrides are applied on read.
             crate::catchup::m3u::apply_overrides(c, &mut v)?;
             crate::channeledit::apply_names(c, &mut v)?;

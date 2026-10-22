@@ -70,6 +70,7 @@ import { EpgRibbon } from './EpgRibbon';
 import { HiddenChannelsButton } from './HiddenChannelsButton';
 import { LiveStageColumn } from './LiveStageColumn';
 import { ManageCategoriesDialog } from './ManageCategoriesDialog';
+import { QualityEmptyState, QualityFilterButton, useLiveQuality } from './QualityFilterButton';
 import { StageIdle } from './StageIdle';
 
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
@@ -657,6 +658,10 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const parentalStatus = useParentalStatus().data;
   const parentalHiding = !!parentalStatus && hidesContent(parentalStatus);
   const sourceCount = source.data ? (isRadio ? (source.data.radioCount ?? 0) : source.data.channelCount) : 0;
+  // The quality filter (TV only) can empty a group, a pinned view or the whole list: say so, and
+  // offer every quality again, rather than "no channels" or "refresh the source".
+  const quality = useLiveQuality();
+  const qualityFiltering = !isRadio && quality.min !== null;
   const unlockParental = useCallback(() => {
     void requestPin({
       title: t('parentalUnlockTitle'),
@@ -765,6 +770,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         }
       />
     );
+  } else if (listEmpty && qualityFiltering && (liveView || categoryId || sourceCount > 0)) {
+    listBody = <QualityEmptyState hideUntagged={quality.hideUntagged} onChange={quality.update} />;
   } else if (listEmpty && liveView) {
     listBody = (
       <EmptyState
@@ -922,6 +929,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             placeholder={category ? t('searchInGroup', { group: category.name }) : t(isRadio ? 'searchStations' : 'searchChannels')}
             label={t(isRadio ? 'searchStations' : 'searchChannels')}
           />
+          {/* Radio has no picture: its stations are never filtered by quality. */}
+          {isRadio ? null : <QualityFilterButton min={quality.min} hideUntagged={quality.hideUntagged} onChange={quality.update} />}
         </div>
         {/* The count is in the header; screen readers hear it change as a search narrows the list. */}
         <p className="sr-only" aria-live="polite">

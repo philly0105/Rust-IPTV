@@ -127,6 +127,7 @@ fn q(source: &str, ct: ContentType, page: PageQuery) -> CatalogQuery {
         include_hidden: false,
         min_rating: None,
         english_only: false,
+        quality: None,
         vod: Default::default(),
     }
 }
@@ -749,4 +750,203 @@ async fn english_only_setting_filters_lists_counts_and_categories() {
         .await
         .unwrap();
     assert_eq!(page["total"], 6);
+}
+
+/// The Live TV quality filter (`liveMinQuality`, `liveHideUntagged`) at every
+/// minimum, with untagged channels kept and hidden: the live list, its total,
+/// a group page, in-list search, categories (counts filtered, groups left
+/// empty dropped), `catalog.search`, allLiveChannels, neighbors and
+/// channelByNumber leave out the live channels whose name marks a lower
+/// quality. Radio and movies are never filtered, and the untagged toggle does
+/// nothing without a minimum.
+#[tokio::test]
+async fn live_quality_filter_applies_to_every_live_reader() {
+    use iptv_core::catalog::quality::QualityFilter;
+    use iptv_core::live::matcher::{self, Quality};
+    use serde_json::Value;
+
+    // Item id (also number and position), group, title.
+    const CHANNELS: [(&str, &str, &str); 9] = [
+        ("1", "sd", "BBC One SD"),
+        ("2", "sd", "Channel 5 SD"),
+        ("3", "hd", "BBC Two HD"),
+        ("4", "hd", "ITV 720p"),
+        ("5", "fhd", "Sky Sports FHD"),
+        ("6", "fhd", "Eurosport 1080p"),
+        ("7", "uhd", "Sky Cinema 4K"),
+        ("8", "plain", "CNN"),
+        ("9", "plain", "Al Jazeera"),
+    ];
+    const GROUPS: [&str; 5] = ["sd", "hd", "fhd", "uhd", "plain"];
+    let env = env().await;
+    seed(&env).await;
+    bare_source(&env.state, "s3").await;
+    env.state
+        .db_call(|c| {
+            let groups: Vec<CategoryRow> = (0..).zip(GROUPS).map(|(i, g)| cat(g, g, i)).collect();
+            let mut items = (1..)
+                .zip(CHANNELS)
+                .map(|(n, (id, group, title))| live("s3", id, group, title, n));
+            catalog::replace_catalog(c, "s3", ContentType::Live, &groups, &mut items)?;
+            // Radio is never filtered; r1 shares its number with "BBC One SD".
+            let radio = |id: &str, title: &str, number: i64| ItemRow {
+                content_type: ContentType::Radio,
+                is_radio: true,
+                ..live("s3", id, "r", title, number)
+            };
+            let stations = [radio("r1", "Radio One SD", 1), radio("r2", "Jazz FM", 20)];
+            let radio_groups = [cat("r", "Radio", 0)];
+            let mut stations = stations.into_iter();
+            catalog::replace_catalog(c, "s3", ContentType::Radio, &radio_groups, &mut stations)
+        })
+        .await
+        .unwrap();
+    let mut r = router();
+    iptv_core::settings::rpc::register(&mut r);
+    let call = |method: &'static str, args: Value| {
+        let r = &r;
+        let state = env.state.clone();
+        async move {
+            r.dispatch(state, method, args)
+                .await
+                .unwrap_or_else(|e| panic!("{method}: {e:?}"))
+        }
+    };
+    let item_ids = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .unwrap_or_else(|| panic!("not an array: {v}"))
+            .iter()
+            .map(|c| c["ref"]["itemId"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // (liveMinQuality, liveHideUntagged, the ids of the live channels left)
+    let cases = [
+        (None, false, "123456789"),
+        (Some(Quality::Sd), false, "123456789"),
+        (Some(Quality::Sd), true, "1234567"),
+        (Some(Quality::Hd), false, "3456789"),
+        (Some(Quality::Hd), true, "34567"),
+        (Some(Quality::Fhd), false, "56789"),
+        (Some(Quality::Fhd), true, "567"),
+        (Some(Quality::Uhd), false, "789"),
+        (Some(Quality::Uhd), true, "7"),
+        // The toggle alone filters nothing.
+        (None, true, "123456789"),
+    ];
+    for (min, hide, left) in cases {
+        call(
+            "settings.update",
+            json!({"patch": {"liveMinQuality": min, "liveHideUntagged": hide}}),
+        )
+        .await;
+        let label = format!("liveMinQuality {min:?}, liveHideUntagged {hide}");
+        // The table follows the matcher's markers.
+        let filter = min.map(|min| QualityFilter {
+            min,
+            hide_untagged: hide,
+        });
+        let rule: String = CHANNELS
+            .iter()
+            .filter(|(_, _, title)| filter.is_none_or(|f| f.keeps(matcher::quality(title))))
+            .map(|(id, _, _)| *id)
+            .collect();
+        assert_eq!(rule, left, "{label}: the matcher's verdicts");
+        let kept = |ids: &[&str]| -> Vec<String> {
+            ids.iter()
+                .filter(|id| left.contains(**id))
+                .map(|id| id.to_string())
+                .collect()
+        };
+        let visible: Vec<String> = left.chars().map(String::from).collect();
+
+        // The list and its total, a group page and an in-list search.
+        let page = call("catalog.channels", json!({"sourceId": "s3"})).await;
+        assert_eq!(page["total"], visible.len(), "{label}");
+        assert_eq!(item_ids(&page["items"]), visible, "{label}");
+        let args = json!({"sourceId": "s3", "categoryId": "hd"});
+        let group = call("catalog.channels", args).await;
+        assert_eq!(item_ids(&group["items"]), kept(&["3", "4"]), "{label}");
+        assert_eq!(group["total"], kept(&["3", "4"]).len(), "{label}");
+        let args = json!({"sourceId": "s3", "query": {"search": "bbc"}});
+        let found = call("catalog.channels", args).await;
+        assert_eq!(item_ids(&found["items"]), kept(&["1", "3"]), "{label}");
+
+        // Categories: filtered counts, emptied groups dropped.
+        let args = json!({"sourceId": "s3", "contentType": "live"});
+        let cats = call("catalog.categories", args).await;
+        let cats: Vec<(String, i64)> = cats
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                (
+                    c["id"].as_str().unwrap().to_string(),
+                    c["itemCount"].as_i64().unwrap(),
+                )
+            })
+            .collect();
+        let want: Vec<(String, i64)> = GROUPS
+            .iter()
+            .map(|g| {
+                let n = CHANNELS
+                    .iter()
+                    .filter(|(id, group, _)| group == g && left.contains(id))
+                    .count();
+                (g.to_string(), n as i64)
+            })
+            .filter(|(_, n)| *n > 0)
+            .collect();
+        assert_eq!(cats, want, "{label}");
+
+        // Global search: live hits follow, radio hits stay.
+        let args = json!({"query": "sky", "sourceId": "s3"});
+        let hits = call("catalog.search", args).await;
+        let mut sky = item_ids(&hits["live"]);
+        sky.sort();
+        assert_eq!(sky, kept(&["5", "7"]), "{label}");
+        let args = json!({"query": "radio", "sourceId": "s3"});
+        let hits = call("catalog.search", args).await;
+        assert_eq!(item_ids(&hits["live"]), ["r1"], "{label}");
+
+        // The zap list, and zapping from channel 1 (which the filter may
+        // drop itself: its neighbours are the first and last channels left).
+        let all = call("catalog.allLiveChannels", json!({"sourceId": "s3"})).await;
+        assert_eq!(item_ids(&all), visible, "{label}");
+        let first = json!({"sourceId": "s3", "contentType": "live", "itemId": "1"});
+        let n = call("catalog.neighbors", json!({"ref": first})).await;
+        let others = kept(&["2", "3", "4", "5", "6", "7", "8", "9"]);
+        let next = n["next"]["ref"]["itemId"].as_str();
+        assert_eq!(next, others.first().map(String::as_str), "{label}");
+        let prev = n["prev"]["ref"]["itemId"].as_str();
+        assert_eq!(prev, others.last().map(String::as_str), "{label}");
+
+        // Number entry: a dropped live channel answers null, or the radio
+        // station with its number when the type is not given.
+        for (number, (id, _, title)) in (1..).zip(CHANNELS) {
+            let args = json!({"sourceId": "s3", "number": number});
+            let ch = call("catalog.channelByNumber", args).await;
+            let want = if left.contains(id) {
+                Some(title)
+            } else if number == 1 {
+                Some("Radio One SD")
+            } else {
+                None
+            };
+            assert_eq!(ch["name"].as_str(), want, "{label}: number {number}");
+        }
+        let args = json!({"sourceId": "s3", "number": 1, "contentType": "live"});
+        let ch = call("catalog.channelByNumber", args).await;
+        assert_eq!(ch.is_null(), !left.contains('1'), "{label}");
+
+        // Radio and movies ("Heat [4K]" among them) are never filtered.
+        let args = json!({"sourceId": "s3", "radio": true});
+        let radio = call("catalog.channels", args).await;
+        assert_eq!(item_ids(&radio["items"]), ["r1", "r2"], "{label}");
+        let args = json!({"sourceId": "s3", "contentType": "radio"});
+        let radio_groups = call("catalog.categories", args).await;
+        assert_eq!(radio_groups[0]["itemCount"], 2, "{label}");
+        let movies = call("catalog.movies", json!({"sourceId": "s1", "query": {}})).await;
+        assert_eq!(movies["total"], 3, "{label}");
+    }
 }

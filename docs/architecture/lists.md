@@ -37,9 +37,10 @@ Order: `position` ascending, with `rowid` breaking ties. New lists and new items
 It leaves out:
 
 - channels hidden by a channel edit (`channeledit::VISIBLE_PREDICATE`);
-- while parental hide mode is on, channels that are locked, in a locked category, or in an adult category (`parental::filter::by_ref`).
+- while parental hide mode is on, channels that are locked, in a locked category, or in an adult category (`parental::filter::by_ref`);
+- while the Live TV quality filter is on (`liveMinQuality`), live channels whose catalog row it hides (catalog.md). A channel the catalog no longer has stays, as unavailable.
 
-The rows stay stored, and they come back when the edit or lock goes. `itemCount` in `lists.list` counts what `lists.items` would return, unavailable channels included.
+The rows stay stored, and they come back when the edit, lock or filter goes. `itemCount` in `lists.list` counts what `lists.items` would return, unavailable channels included.
 
 ## Commands
 

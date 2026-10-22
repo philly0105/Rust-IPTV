@@ -47,6 +47,18 @@ export const EVENT_INVALIDATION: Record<string, string[]> = {
 };
 
 /**
+ * What the core filters by the live quality settings: catalog reads, favorites, recently
+ * watched, custom lists, guide search (exact, so the other `epg.` queries stay) and failover
+ * alternates.
+ */
+const LIVE_QUALITY_PREFIXES = ['catalog.', 'favorites.', 'recent.', 'lists.', 'epg.search', 'live.alternates'] as const;
+
+/** The live quality filter in effect ('' = off: the untagged toggle needs a minimum). */
+function liveQualityKey(s: Settings): string {
+  return s.liveMinQuality == null ? '' : `${s.liveMinQuality}|${s.liveHideUntagged === true}`;
+}
+
+/**
  * Maps an `iptv://` URL to an in-app path, or null when unsupported. Add links
  * (`iptv://add?url=...&kind=...`, `iptv://add/<url>`) go through the Sources
  * feature's parser, which keeps the kind and allows http(s) targets only.
@@ -281,29 +293,39 @@ export function useShellEvents(): void {
     offs.push(bindRailEmptySync(queryClient));
     offs.push(bindTmdbCacheSync(queryClient));
 
-    // englishOnly filters in the core, so catalog lists refetch when it flips; the
-    // refresh interval moves every next-refresh time on the Sources page. Both are
-    // tracked here, not read from the cache: the settings cache is updated
-    // optimistically, and bindEventInvalidation writes each settings.changed payload
-    // into it before this handler runs.
+    // englishOnly and the live quality filter apply in the core, so the lists they
+    // filter refetch when they change; the refresh interval moves every next-refresh
+    // time on the Sources page. All three are tracked here, not read from the cache:
+    // the settings cache is updated optimistically, and bindEventInvalidation writes
+    // each settings.changed payload into it before this handler runs.
     // Unknown until settings first load (the cache is usually still empty at mount):
     // the first value seen is the baseline, never a change, so the first settings write
     // after a cold start (lastRoute, 1.2 s in) does not refetch every catalog query.
     const cached = queryClient.getQueryData<Settings>(rpcKey('settings.get'));
     let englishOnly = cached?.englishOnly;
     let refreshHours = cached?.sourceRefreshIntervalHours;
+    // The live quality filter, as a key ('' = off); `undefined` until settings are first seen.
+    // Not `??=` on the raw field: its off value is null, so an optimistic write of a new
+    // minimum would become the baseline and the echo would refetch nothing.
+    let quality = cached ? liveQualityKey(cached) : undefined;
     offs.push(
       queryClient.getQueryCache().subscribe((event) => {
         if (event.type !== 'updated' || event.query.queryKey[0] !== 'settings.get') return;
         const data = event.query.state.data as Settings | undefined;
         englishOnly ??= data?.englishOnly;
         refreshHours ??= data?.sourceRefreshIntervalHours;
+        if (quality === undefined && data) quality = liveQualityKey(data);
       }),
     );
     offs.push(
       onAppEvent('settings.changed', (s: Settings) => {
         if (refreshHours !== undefined && s.sourceRefreshIntervalHours !== refreshHours) void invalidate('sources.schedule');
         refreshHours = s.sourceRefreshIntervalHours;
+        const nextQuality = liveQualityKey(s);
+        if (quality !== undefined && nextQuality !== quality) {
+          for (const p of LIVE_QUALITY_PREFIXES) void invalidate(p);
+        }
+        quality = nextQuality;
         if (englishOnly === undefined) {
           englishOnly = s.englishOnly;
           return;

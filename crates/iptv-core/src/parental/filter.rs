@@ -20,6 +20,7 @@
 //! function ([`super::register_sql`]).
 
 use super::Hide;
+use crate::catalog::quality::{self, QualityFilter};
 use crate::error::CoreResult;
 use crate::model::ContentType;
 use rusqlite::{params, Connection};
@@ -196,8 +197,9 @@ pub fn locked_categories(
 
 /// Locked items per category id for one source and content type, counting
 /// only items the catalog has (and, with `english_only`, only items the
-/// English-only filter keeps), so `catalog.categories` can take them out of
-/// `itemCount`.
+/// English-only filter keeps; with `quality`, which callers pass for live
+/// channels only, only channels the Live TV quality filter keeps), so
+/// `catalog.categories` can take them out of `itemCount`.
 ///
 /// `CROSS JOIN` keeps the locks as the outer loop (SQLite never reorders
 /// it): left to itself the planner walks every item of the source through
@@ -208,13 +210,16 @@ pub fn locked_item_counts(
     source_id: &str,
     content_type: ContentType,
     english_only: bool,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<HashMap<String, i64>> {
     let sql = if english_only {
-        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND non_english(i.title, c.name) = 0 GROUP BY i.category_id"
+        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND non_english(i.title, c.name) = 0"
     } else {
-        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' GROUP BY i.category_id"
+        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item'"
     };
-    let mut stmt = conn.prepare_cached(sql)?;
+    let quality_sql = quality::live_clause(quality, "i");
+    let sql = format!("{sql}{quality_sql} GROUP BY i.category_id");
+    let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params![source_id, content_type.as_str()], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
     })?;

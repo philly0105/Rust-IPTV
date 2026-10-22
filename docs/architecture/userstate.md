@@ -15,12 +15,12 @@ User state lives in the C3 tables `favorites`, `recent` and `playback_positions`
 
 | Command | Behaviour |
 | --- | --- |
-| `favorites.list {sourceId?}` | Ordered by `position`, then `added_at`. |
+| `favorites.list {sourceId?}` | Ordered by `position`, then `added_at`. While the Live TV quality filter is on, live favorites whose catalog row it hides are left out; one whose channel is gone from the catalog stays (catalog.md). |
 | `favorites.toggle {ref, snapshot}` | Adds at the end of the global order, or removes. Returns `{isFavorite}`. |
 | `favorites.contains {refs}` | The subset of `refs` that are favorites, deduplicated, in request order. |
-| `favorites.reorder {sourceId?, refs}` | One transaction. The listed refs take positions 0..n in that order. Favorites in scope that `favorites.list` shows but `refs` leaves out follow in their previous order. Favorites that `favorites.list` does not show (parental hide mode, a channel hidden by a channel edit) and `refs` leaves out keep their slots, so they come back in place when shown again. |
+| `favorites.reorder {sourceId?, refs}` | One transaction. The listed refs take positions 0..n in that order. Favorites in scope that `favorites.list` shows but `refs` leaves out follow in their previous order. Favorites that `favorites.list` does not show (parental hide mode, a channel hidden by a channel edit, the Live TV quality filter) and `refs` leaves out keep their slots, so they come back in place when shown again. |
 | `favorites.remove {ref}` | No-op when absent. |
-| `recent.list {sourceId?, limit?}` | Newest first. Default limit 100, max 1000. |
+| `recent.list {sourceId?, limit?}` | Newest first. Default limit 100, max 1000. Leaves out live channels the Live TV quality filter hides, as `favorites.list` does. |
 | `recent.add {ref, snapshot, viewedAt?}` | Upserts with `viewed_at = now`, then trims the source to 200 rows (oldest go first). With `viewedAt` (C7, RFC 3339 with an offset; Recent undo passes it) the entry gets that date back instead of now. |
 | `recent.remove {ref}`, `recent.clear {sourceId?}` | `clear` without a source clears everything. |
 | `positions.get {ref, episodeId?}` | `null` when absent. |

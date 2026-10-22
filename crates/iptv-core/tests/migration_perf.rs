@@ -201,7 +201,9 @@ fn a_database_that_already_ran_0007_keeps_its_guide() {
 /// Migration 0020 on a 220k-item library (95k channels on one source, 105k
 /// movies and 20k series on another, schema 19): it fills `items_rank` with
 /// one row per item, equal to the projection of `items`, at an upgrade cost
-/// of 0.1-0.2 s in release.
+/// of 0.1-0.2 s in release. The timed upgrade runs the later migrations too:
+/// 0022 adds `quality` to both tables (-1 until the boot backfill) and
+/// rebuilds four indexes.
 #[test]
 fn migration_0020_fills_items_rank_on_a_220k_library() {
     #[cfg(debug_assertions)]
@@ -276,7 +278,8 @@ fn migration_0020_fills_items_rank_on_a_220k_library() {
              (SELECT count(*) FROM items i LEFT JOIN items_rank r ON r.id = i.rowid \
               WHERE r.id IS NULL OR r.source_id IS NOT i.source_id OR r.content_type IS NOT i.content_type \
               OR r.category_id IS NOT i.category_id OR r.non_english IS NOT i.non_english \
-              OR r.title_len IS NOT length(i.title) OR r.position IS NOT i.position)",
+              OR r.title_len IS NOT length(i.title) OR r.position IS NOT i.position \
+              OR r.quality IS NOT i.quality)",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )

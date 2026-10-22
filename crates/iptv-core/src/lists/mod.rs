@@ -12,10 +12,13 @@
 //! items go at the end. Every write keeps positions distinct.
 //!
 //! What `lists.items` leaves out: channels hidden by a channel edit
-//! ([`crate::channeledit::VISIBLE_PREDICATE`]) and, while parental hide mode
-//! is on, channels that are locked, in a locked category or in an adult
-//! category. The rows stay stored; `itemCount` counts what `lists.items`
-//! returns, unavailable channels included. Custom names apply on read.
+//! ([`crate::channeledit::VISIBLE_PREDICATE`]); while parental hide mode is
+//! on, channels that are locked, in a locked category or in an adult
+//! category; while the Live TV quality filter is on, live channels whose
+//! catalog row it hides ([`crate::catalog::quality`]; a channel the catalog
+//! no longer has stays, as unavailable). The rows stay stored; `itemCount`
+//! counts what `lists.items` returns, unavailable channels included. Custom
+//! names apply on read.
 //!
 //! Limits: [`MAX_LISTS`] lists, [`MAX_ITEMS`] channels per list, names of
 //! 1..=[`MAX_NAME_CHARS`] characters with at least one visible, unique
@@ -32,6 +35,7 @@
 
 pub mod rpc;
 
+use crate::catalog::quality::QualityFilter;
 use crate::channeledit;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{Channel, ContentType, ItemRef, ItemSnapshot};
@@ -326,13 +330,19 @@ const LIST_ORDER: &str = "ORDER BY l.position ASC, l.created_at ASC, l.rowid ASC
 const ITEM_ORDER: &str = "ORDER BY i.position ASC, i.rowid ASC";
 
 /// Clauses (each starting with ` AND`) over `custom_list_items i` that keep
-/// only what `lists.items` shows: not hidden by a channel edit and, with
-/// `hide`, not parentally hidden.
-fn visible_clause(conn: &Connection, hide: Option<Hide>) -> CoreResult<String> {
+/// only what `lists.items` shows: not hidden by a channel edit, with `hide`
+/// not parentally hidden, and with `quality` not a live channel the quality
+/// filter hides ([`crate::userstate::quality_by_ref`]).
+fn visible_clause(
+    conn: &Connection,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+) -> CoreResult<String> {
     let mut sql = format!(" AND {}", channeledit::VISIBLE_PREDICATE);
     if let Some(h) = hide {
         sql.push_str(&crate::parental::filter::by_ref(conn, "i", h)?);
     }
+    sql.push_str(&crate::userstate::quality_by_ref(quality, "i"));
     Ok(sql)
 }
 
@@ -357,17 +367,27 @@ fn read_list(row: &Row<'_>) -> rusqlite::Result<CustomList> {
 }
 
 /// Every list in the user's order. `hide` is the parental hide filter
-/// ([`crate::parental::hide_filter`]); it only changes `itemCount`.
-pub fn list(conn: &Connection, hide: Option<Hide>) -> CoreResult<Vec<CustomList>> {
-    let visible = visible_clause(conn, hide)?;
+/// ([`crate::parental::hide_filter`]) and `quality` the Live TV quality
+/// filter (`catalog::rpc::quality_filter`); they only change `itemCount`.
+pub fn list(
+    conn: &Connection,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+) -> CoreResult<Vec<CustomList>> {
+    let visible = visible_clause(conn, hide, quality)?;
     let mut stmt = conn.prepare_cached(&select_lists(&visible, ""))?;
     let rows = stmt.query_map([], read_list)?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// One list; `not_found` when `id` is unknown.
-pub fn get(conn: &Connection, id: &str, hide: Option<Hide>) -> CoreResult<CustomList> {
-    let visible = visible_clause(conn, hide)?;
+pub fn get(
+    conn: &Connection,
+    id: &str,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+) -> CoreResult<CustomList> {
+    let visible = visible_clause(conn, hide, quality)?;
     let mut stmt = conn.prepare_cached(&select_lists(&visible, "WHERE l.id = ?1"))?;
     stmt.query_row([id], read_list)
         .optional()?
@@ -421,8 +441,9 @@ fn refs_with_visibility(
     conn: &Connection,
     id: &str,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<Vec<(ItemRef, bool)>> {
-    let visible = visible_clause(conn, hide)?;
+    let visible = visible_clause(conn, hide, quality)?;
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT i.source_id, i.content_type, i.item_id, (1{visible})
          FROM custom_list_items i WHERE i.list_id = ?1 {ITEM_ORDER}"
@@ -458,9 +479,14 @@ fn catalog_channels(conn: &Connection, refs: &[&ItemRef]) -> CoreResult<Vec<Opti
 
 /// The channels of a list in list order, without hidden ones (see the module
 /// docs). `not_found` when the list does not exist.
-pub fn items(conn: &Connection, id: &str, hide: Option<Hide>) -> CoreResult<Vec<CustomListEntry>> {
+pub fn items(
+    conn: &Connection,
+    id: &str,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+) -> CoreResult<Vec<CustomListEntry>> {
     require_list(conn, id)?;
-    let visible = visible_clause(conn, hide)?;
+    let visible = visible_clause(conn, hide, quality)?;
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT i.source_id, i.content_type, i.item_id, i.title, i.logo_url, i.position, i.added_at
          FROM custom_list_items i WHERE i.list_id = ?1{visible} {ITEM_ORDER}"
@@ -522,10 +548,11 @@ pub fn neighbors(
     id: &str,
     r: &ItemRef,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<(Option<Channel>, Option<Channel>)> {
     validate_ids(r, "ref")?;
     require_list(conn, id)?;
-    let rows = refs_with_visibility(conn, id, hide)?;
+    let rows = refs_with_visibility(conn, id, hide, quality)?;
     let Some(cur) = rows.iter().position(|(x, _)| x == r) else {
         return Err(CoreError::not_found(format!(
             "channel {} is not in list {id}",
@@ -672,6 +699,7 @@ pub fn create(
     name: &str,
     items: &[NewItem],
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<CustomList> {
     let name = clean_name(name)?;
     let items = clean_items(items)?;
@@ -686,7 +714,7 @@ pub fn create(
     let now = now_ts();
     insert_list(&tx, &id, &name, next_list_position(&tx)?, true, &now, &now)?;
     append_items(&tx, &id, &items)?;
-    let out = get(&tx, &id, hide)?;
+    let out = get(&tx, &id, hide, quality)?;
     tx.commit()?;
     Ok(out)
 }
@@ -702,10 +730,11 @@ pub fn update(
     name: Option<&str>,
     on_dashboard: Option<bool>,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<(CustomList, bool)> {
     let name = name.map(clean_name).transpose()?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let current = get(&tx, id, hide)?;
+    let current = get(&tx, id, hide, quality)?;
     let mut changed = false;
     if let Some(n) = name.filter(|n| *n != current.name) {
         if find_by_name(&tx, &n, Some(id))?.is_some() {
@@ -728,7 +757,7 @@ pub fn update(
         return Ok((current, false));
     }
     touch(&tx, id)?;
-    let out = get(&tx, id, hide)?;
+    let out = get(&tx, id, hide, quality)?;
     tx.commit()?;
     Ok((out, true))
 }
@@ -1119,40 +1148,40 @@ mod tests {
     #[test]
     fn names_are_trimmed_bounded_and_unique_without_case() {
         let mut c = conn();
-        let a = create(&mut c, "  Sports  ", &[], None).unwrap();
+        let a = create(&mut c, "  Sports  ", &[], None, None).unwrap();
         assert_eq!(a.name, "Sports");
         assert_eq!(a.position, 0);
         assert!(a.on_dashboard);
         assert_eq!(
-            code(create(&mut c, "sPoRtS", &[], None).unwrap_err()),
+            code(create(&mut c, "sPoRtS", &[], None, None).unwrap_err()),
             "conflict"
         );
         assert_eq!(
-            code(create(&mut c, "   ", &[], None).unwrap_err()),
+            code(create(&mut c, "   ", &[], None, None).unwrap_err()),
             "invalid"
         );
         assert_eq!(
-            code(create(&mut c, "a\nb", &[], None).unwrap_err()),
+            code(create(&mut c, "a\nb", &[], None, None).unwrap_err()),
             "invalid"
         );
         let long = "x".repeat(MAX_NAME_CHARS + 1);
         assert_eq!(
-            code(create(&mut c, &long, &[], None).unwrap_err()),
+            code(create(&mut c, &long, &[], None, None).unwrap_err()),
             "invalid"
         );
         let max = "é".repeat(MAX_NAME_CHARS);
-        assert_eq!(create(&mut c, &max, &[], None).unwrap().name, max);
+        assert_eq!(create(&mut c, &max, &[], None, None).unwrap().name, max);
         // Unicode case folding goes beyond the index's ASCII NOCASE.
-        create(&mut c, "Ñandú", &[], None).unwrap();
+        create(&mut c, "Ñandú", &[], None, None).unwrap();
         assert_eq!(
-            code(create(&mut c, "ñANDÚ", &[], None).unwrap_err()),
+            code(create(&mut c, "ñANDÚ", &[], None, None).unwrap_err()),
             "conflict"
         );
         // Case-only rename of the list itself is fine.
-        let (renamed, changed) = update(&mut c, &a.id, Some("SPORTS"), None, None).unwrap();
+        let (renamed, changed) = update(&mut c, &a.id, Some("SPORTS"), None, None, None).unwrap();
         assert!(changed);
         assert_eq!(renamed.name, "SPORTS");
-        let (_, changed) = update(&mut c, &a.id, Some("SPORTS"), Some(true), None).unwrap();
+        let (_, changed) = update(&mut c, &a.id, Some("SPORTS"), Some(true), None, None).unwrap();
         assert!(!changed, "setting the current values writes nothing");
     }
 
@@ -1161,23 +1190,23 @@ mod tests {
         let mut c = conn();
         for blank in ["\u{200B}", " \u{200F}\u{FEFF} ", "\u{2028}", "\u{3164}"] {
             assert_eq!(
-                code(create(&mut c, blank, &[], None).unwrap_err()),
+                code(create(&mut c, blank, &[], None, None).unwrap_err()),
                 "invalid",
                 "{blank:?}"
             );
         }
         for broken in ["a\u{2028}b", "a\u{2029}b"] {
             assert_eq!(
-                code(create(&mut c, broken, &[], None).unwrap_err()),
+                code(create(&mut c, broken, &[], None, None).unwrap_err()),
                 "invalid",
                 "{broken:?}"
             );
         }
         let kept = "\u{1F468}\u{200D}\u{1F373} Cooking";
-        assert_eq!(create(&mut c, kept, &[], None).unwrap().name, kept);
-        create(&mut c, "Straße", &[], None).unwrap();
+        assert_eq!(create(&mut c, kept, &[], None, None).unwrap().name, kept);
+        create(&mut c, "Straße", &[], None, None).unwrap();
         assert_eq!(
-            code(create(&mut c, "STRASSE", &[], None).unwrap_err()),
+            code(create(&mut c, "STRASSE", &[], None, None).unwrap_err()),
             "conflict"
         );
         assert_eq!(backup_name("\u{200B}\u{200D}"), None);
@@ -1187,7 +1216,14 @@ mod tests {
     #[test]
     fn items_append_dedupe_and_respect_the_limit() {
         let mut c = conn();
-        let l = create(&mut c, "Mix", &[item("s1", "1"), item("s1", "1")], None).unwrap();
+        let l = create(
+            &mut c,
+            "Mix",
+            &[item("s1", "1"), item("s1", "1")],
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(l.item_count, 1, "duplicates in one call collapse");
         let added = add_items(&mut c, &l.id, &[item("s1", "1"), item("s2", "9")]).unwrap();
         assert_eq!(added, 1, "already present is ignored");
@@ -1217,7 +1253,7 @@ mod tests {
             "invalid",
             "full list checked first"
         );
-        let other = create(&mut c, "Other", &[], None).unwrap();
+        let other = create(&mut c, "Other", &[], None, None).unwrap();
         assert_eq!(
             code(add_items(&mut c, &other.id, &[item("nope", "x")]).unwrap_err()),
             "not_found"
@@ -1231,9 +1267,16 @@ mod tests {
     #[test]
     fn backup_round_trip_remaps_sources_and_merges_by_name() {
         let mut c = conn();
-        let a = create(&mut c, "Mix", &[item("s1", "1"), item("s2", "2")], None).unwrap();
-        update(&mut c, &a.id, None, Some(false), None).unwrap();
-        create(&mut c, "Empty", &[], None).unwrap();
+        let a = create(
+            &mut c,
+            "Mix",
+            &[item("s1", "1"), item("s2", "2")],
+            None,
+            None,
+        )
+        .unwrap();
+        update(&mut c, &a.id, None, Some(false), None, None).unwrap();
+        create(&mut c, "Empty", &[], None, None).unwrap();
         let backup = export_lists(&c).unwrap();
         assert_eq!(backup.len(), 2);
         assert_eq!(backup[0].items.len(), 2);
@@ -1256,7 +1299,7 @@ mod tests {
             (out.written, out.items_dropped, out.lists_dropped),
             (2, 1, 0)
         );
-        let lists = list(&fresh, None).unwrap();
+        let lists = list(&fresh, None, None).unwrap();
         assert_eq!(lists[0].id, a.id, "the backup id is kept when free");
         assert!(!lists[0].on_dashboard);
         assert_eq!(
@@ -1269,12 +1312,12 @@ mod tests {
             (out.written, out.items_dropped, out.lists_dropped),
             (2, 1, 0)
         );
-        assert_eq!(list(&fresh, None).unwrap().len(), 2);
+        assert_eq!(list(&fresh, None, None).unwrap().len(), 2);
         // A same-name list (other case) merges instead of failing.
         let mut renamed = backup.clone();
         renamed[0].name = "MIX".into();
         renamed[0].id = "other".into();
         import_lists(&fresh, &renamed, &map, false).unwrap();
-        assert_eq!(list(&fresh, None).unwrap().len(), 2);
+        assert_eq!(list(&fresh, None, None).unwrap().len(), 2);
     }
 }

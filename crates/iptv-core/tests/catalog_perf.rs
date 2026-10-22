@@ -525,3 +525,287 @@ async fn english_only_queries_on_50k_channels_stay_fast() {
         assert!(took < QUERY_BUDGET, "{mode}: neighbors took {took:?}");
     }
 }
+
+/// Channel `i`'s title for the quality filter: SD, HD, Full HD or 4K as a
+/// word, a resolution or a group tag, or no marker. The style follows
+/// `i % 10`, so with 250 groups each group keeps one style throughout.
+fn quality_title(i: usize) -> String {
+    match i % 10 {
+        0 => format!("Channel {i} SD"),
+        1 => format!("Channel {i} HD"),
+        2 => format!("Channel {i} FHD"),
+        3 => format!("Channel {i} 4K"),
+        4 => format!("UK: Channel {i} 576p"),
+        5 => format!("Channel {i} 720p"),
+        6 => format!("Channel {i} 1080p"),
+        7 => format!("4K | Channel {i}"),
+        _ => format!("Channel {i}"),
+    }
+}
+
+fn gen_quality_m3u(n: usize, groups: usize) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::with_capacity(n * 160);
+    s.push_str("#EXTM3U\n");
+    for i in 0..n {
+        let _ = write!(
+            s,
+            "#EXTINF:-1 tvg-id=\"ch{i}.example\" tvg-logo=\"http://logo.example/{i}.png\" group-title=\"Group {}\",{}\nhttp://stream.example/live/{i}.ts\n",
+            i % groups,
+            quality_title(i)
+        );
+    }
+    s
+}
+
+/// The Live TV quality filter (`liveMinQuality`, `liveHideUntagged`) on 50k
+/// channels tagged SD, HD, Full HD, 4K or not at all: every whole-list call
+/// stays within the same budget as without it, alone and with parental hide
+/// mode, and the filtered count, page and group count read index entries
+/// only (migration 0022). Totals and category counts are checked against
+/// the matcher's rule.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quality_filter_queries_on_50k_channels_stay_fast() {
+    use iptv_core::catalog::quality::{live_clause, QualityFilter};
+    use iptv_core::live::matcher::{self, Quality};
+    use std::collections::HashSet;
+
+    let env = env().await;
+    let r = iptv_core::rpc::build_router();
+    let src = add_text(&env.state, "tagged", &gen_quality_m3u(CHANNELS, GROUPS)).await;
+    assert_eq!(src.channel_count, CHANNELS as i64);
+    let sid = src.id.clone();
+    let call = |method: &'static str, args: Value| {
+        let r = &r;
+        let state = env.state.clone();
+        async move {
+            r.dispatch(state, method, args)
+                .await
+                .unwrap_or_else(|e| panic!("{method}: {e:?}"))
+        }
+    };
+    // Category ids by name, and the channels to lock (the first channel of
+    // groups 20..220: channel k sits in group k % 250).
+    let cats = call(
+        "catalog.categories",
+        json!({"sourceId": sid, "contentType": "live", "includeHidden": true}),
+    )
+    .await;
+    assert_eq!(cats.as_array().unwrap().len(), GROUPS);
+    let cat_id = |name: &str| -> String {
+        cats.as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("{name} in {cats}"))["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let s2 = sid.clone();
+    let titles: Vec<String> = (20..220).map(quality_title).collect();
+    let item_locks: Vec<String> = env
+        .state
+        .db_call(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT item_id FROM items WHERE source_id = ?1 AND content_type = 'live' AND title = ?2",
+            )?;
+            titles
+                .iter()
+                .map(|t| stmt.query_row(rusqlite::params![s2, t], |r| r.get(0)))
+                .collect::<Result<Vec<String>, _>>()
+                .map_err(Into::into)
+        })
+        .await
+        .unwrap();
+    let locked_groups = [12usize, 13];
+
+    // What each mode must show, from the matcher's rule.
+    let expect = |filter: QualityFilter, hide: bool| -> (usize, usize) {
+        let mut groups_seen = HashSet::new();
+        let mut visible = 0;
+        for i in 0..CHANNELS {
+            let g = i % GROUPS;
+            if !filter.keeps(matcher::quality(&quality_title(i))) {
+                continue;
+            }
+            if hide && (locked_groups.contains(&g) || (20..220).contains(&i)) {
+                continue;
+            }
+            visible += 1;
+            groups_seen.insert(g);
+        }
+        (visible, groups_seen.len())
+    };
+
+    // (liveMinQuality, liveHideUntagged, parental hide mode)
+    let modes = [
+        (Quality::Fhd, false, false),
+        (Quality::Hd, true, false),
+        (Quality::Fhd, false, true),
+    ];
+    for (min, untagged, hide) in modes {
+        if hide {
+            for g in locked_groups {
+                let id = cat_id(&format!("Group {g}"));
+                call(
+                    "parental.setLocked",
+                    json!({"target": {"sourceId": sid, "contentType": "live", "kind": "category", "targetId": id, "name": "g"}, "locked": true}),
+                )
+                .await;
+            }
+            for id in &item_locks {
+                call(
+                    "parental.setLocked",
+                    json!({"target": {"sourceId": sid, "contentType": "live", "kind": "item", "targetId": id, "name": "c"}, "locked": true}),
+                )
+                .await;
+            }
+            call("parental.setPin", json!({"newPin": "2468"})).await;
+        }
+        let patch = json!({"patch": {"liveMinQuality": min, "liveHideUntagged": untagged}});
+        call("settings.update", patch).await;
+        let mode = format!("quality {min:?}, untagged hidden {untagged}, hide {hide}");
+        let filter = QualityFilter {
+            min,
+            hide_untagged: untagged,
+        };
+        let (visible, group_count) = expect(filter, hide);
+        assert!(visible > CHANNELS / 10 && visible < CHANNELS, "{visible}");
+        let open_group = cat_id(&format!("Group {}", GROUPS / 2 + 2));
+
+        // The filtered count, page and group count read index entries only.
+        let cond = live_clause(Some(filter), "i");
+        let scope =
+            format!("FROM items i WHERE i.source_id = ?1 AND i.content_type = 'live'{cond}");
+        let plan_sid = sid.clone();
+        let plans: Vec<String> = env
+            .state
+            .db_call(move |c| {
+                let mut out = Vec::new();
+                for sql in [
+                    format!("SELECT count(*) {scope}"),
+                    format!("SELECT i.rowid {scope} ORDER BY i.position LIMIT 100 OFFSET 20000"),
+                    format!("SELECT i.category_id, count(*) {scope} GROUP BY i.category_id"),
+                ] {
+                    let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                    let rows = stmt
+                        .query_map([&plan_sid], |r| r.get::<_, String>(3))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    out.push(rows.join(" | "));
+                }
+                Ok(out)
+            })
+            .await
+            .unwrap();
+        for p in &plans {
+            assert!(
+                p.contains("USING COVERING INDEX") && !p.contains("TEMP B-TREE"),
+                "{mode}: {p}"
+            );
+        }
+
+        type Check = Box<dyn Fn(&Value)>;
+        let calls: Vec<(&str, &'static str, Value, Check)> = vec![
+            (
+                "categories",
+                "catalog.categories",
+                json!({"sourceId": sid, "contentType": "live"}),
+                Box::new(move |v: &Value| {
+                    let groups = v.as_array().unwrap();
+                    assert_eq!(groups.len(), group_count);
+                    let sum: i64 = groups
+                        .iter()
+                        .map(|c| c["itemCount"].as_i64().unwrap())
+                        .sum();
+                    assert_eq!(sum, visible as i64);
+                }),
+            ),
+            (
+                "first page",
+                "catalog.channels",
+                json!({"sourceId": sid}),
+                Box::new(move |v: &Value| assert_eq!(v["total"], visible as i64)),
+            ),
+            (
+                "deep page",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"offset": visible - 100, "limit": 100}}),
+                Box::new(|v: &Value| assert_eq!(v["items"].as_array().unwrap().len(), 100)),
+            ),
+            (
+                "group page",
+                "catalog.channels",
+                json!({"sourceId": sid, "categoryId": open_group}),
+                Box::new(|v: &Value| assert!(v["total"].as_i64().unwrap() > 0, "{v}")),
+            ),
+            (
+                "sorted by name, descending",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"sort": "name", "dir": "desc"}}),
+                Box::new(move |v: &Value| assert_eq!(v["total"], visible as i64)),
+            ),
+            (
+                "in-list search",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"search": "Channel 99"}}),
+                Box::new(|v: &Value| assert!(v["total"].as_i64().unwrap() > 0, "{v}")),
+            ),
+            (
+                "in-list search, one letter",
+                "catalog.channels",
+                json!({"sourceId": sid, "query": {"search": "c"}}),
+                Box::new(|v: &Value| assert!(v["total"].as_i64().unwrap() > 0, "{v}")),
+            ),
+            (
+                "global search",
+                "catalog.search",
+                json!({"query": "Channel 1234"}),
+                Box::new(|v: &Value| assert!(v["live"].is_array(), "{v}")),
+            ),
+            (
+                "all live channels (zap list)",
+                "catalog.allLiveChannels",
+                json!({"sourceId": sid}),
+                Box::new(move |v: &Value| {
+                    assert_eq!(
+                        v.as_array().unwrap().len(),
+                        visible.min(iptv_core::catalog::ALL_LIVE_CAP)
+                    )
+                }),
+            ),
+        ];
+        for (label, method, args, check) in calls {
+            let first = call(method, args.clone()).await;
+            check(&first);
+            let started = Instant::now();
+            let v = call(method, args).await;
+            let took = started.elapsed();
+            check(&v);
+            eprintln!("catalog_perf: {mode}: {label} in {took:?}");
+            let budget = if method == "catalog.allLiveChannels" {
+                QUERY_BUDGET * 4
+            } else {
+                QUERY_BUDGET
+            };
+            assert!(
+                took < budget,
+                "{mode}: {label} took {took:?} (budget {budget:?})"
+            );
+        }
+
+        let mid = call(
+            "catalog.channels",
+            json!({"sourceId": sid, "query": {"offset": visible / 2, "limit": 1}}),
+        )
+        .await;
+        let reference = mid["items"][0]["ref"].clone();
+        let _ = call("catalog.neighbors", json!({"ref": reference})).await;
+        let started = Instant::now();
+        let n = call("catalog.neighbors", json!({"ref": reference})).await;
+        let took = started.elapsed();
+        eprintln!("catalog_perf: {mode}: neighbors in {took:?}");
+        assert!(n["next"].is_object() && n["prev"].is_object(), "{n}");
+        assert!(took < QUERY_BUDGET, "{mode}: neighbors took {took:?}");
+    }
+}

@@ -218,6 +218,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0021_epg_channel_shift",
         sql: include_str!("migrations/0021_epg_channel_shift.sql"),
     },
+    // catalog: stored live channel quality (the Live TV quality filter).
+    Migration {
+        version: 22,
+        name: "0022_channel_quality",
+        sql: include_str!("migrations/0022_channel_quality.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -965,17 +971,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 1);
-        let rank: (String, String, i64, i64) = conn
+        let rank: (String, String, i64, i64, i64) = conn
             .query_row(
-                "SELECT r.source_id, r.content_type, r.title_len, r.position FROM items_rank r JOIN items i ON i.rowid = r.id",
+                "SELECT r.source_id, r.content_type, r.title_len, r.position, r.quality FROM items_rank r JOIN items i ON i.rowid = r.id",
                 [],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .unwrap();
         assert_eq!(
             rank,
-            ("s".into(), "live".into(), 10, 0),
-            "items_rank follows an insert"
+            ("s".into(), "live".into(), 10, 0, -1),
+            "items_rank follows an insert (quality not computed yet)"
         );
         conn.execute("UPDATE items SET title = 'BBC One', position = 4", [])
             .unwrap();
@@ -985,6 +991,13 @@ mod tests {
             })
             .unwrap();
         assert_eq!(rank, (7, 4), "items_rank follows an update");
+        // The quality backfill writes the column alone (migration 0022).
+        conn.execute("UPDATE items SET quality = 2 WHERE item_id = '1'", [])
+            .unwrap();
+        let quality: i64 = conn
+            .query_row("SELECT quality FROM items_rank", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(quality, 2, "items_rank follows a quality update");
         conn.execute("DELETE FROM sources WHERE id = 's'", [])
             .unwrap();
         let n: i64 = conn
@@ -995,6 +1008,60 @@ mod tests {
             .query_row("SELECT count(*) FROM items_rank", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0, "and their items_rank rows");
+    }
+
+    /// 0022 appends `quality` to the live page, count and guide indexes and
+    /// leaves their other columns as they were; rows written before it read
+    /// -1 (not computed yet) in `items` and `items_rank`.
+    #[test]
+    fn channel_quality_migration_extends_the_live_indexes() {
+        const INDEXES: [&str; 4] = [
+            "idx_items_cat",
+            "idx_items_pos",
+            "idx_items_title",
+            "idx_items_guide",
+        ];
+        let mut conn = Connection::open_in_memory().unwrap();
+        for m in &MIGRATIONS[..21] {
+            conn.execute_batch(m.sql).unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                [m.version],
+            )
+            .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO sources(id, kind, name, config_json) VALUES ('s', 'm3u', 'S', '{}');
+             INSERT INTO items(source_id, content_type, item_id, category_id, title) VALUES ('s', 'live', '1', 'g', 'BBC One HD');",
+        )
+        .unwrap();
+        let index_sql = |conn: &Connection| -> Vec<String> {
+            INDEXES
+                .iter()
+                .map(|name| {
+                    conn.query_row(
+                        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                        [name],
+                        |r| r.get(0),
+                    )
+                    .unwrap()
+                })
+                .collect()
+        };
+        let before = index_sql(&conn);
+        // Unconfigured: the migration calls no app SQL function.
+        migrate(&mut conn).unwrap();
+        for (old, new) in before.iter().zip(&index_sql(&conn)) {
+            assert_eq!(*new, old.replacen(')', ", quality)", 1));
+        }
+        let stored: (i64, i64) = conn
+            .query_row(
+                "SELECT i.quality, r.quality FROM items i JOIN items_rank r ON r.id = i.rowid",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(stored, (-1, -1));
     }
 
     #[test]

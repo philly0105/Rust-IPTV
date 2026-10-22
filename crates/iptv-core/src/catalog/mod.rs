@@ -13,6 +13,8 @@
 //! `docs/architecture/catalog.md`.
 
 pub mod language;
+// Live TV quality filter: stored channel quality and its clauses.
+pub mod quality;
 pub mod rpc;
 mod title;
 // vod: year range and "Hide watched" filters (Run 2 C4).
@@ -288,6 +290,10 @@ pub struct CatalogQuery {
     /// Drop items that are clearly in another language (`englishOnly`, see
     /// [`language`]); `total` counts what is left.
     pub english_only: bool,
+    /// The Live TV quality filter ([`quality`]): drop live channels whose
+    /// name marks a lower quality; `total` counts what is left. Ignored for
+    /// every other type (`None` there).
+    pub quality: Option<quality::QualityFilter>,
     // vod:
     /// Year range and "Hide watched" of `catalog.movies` / `catalog.series`
     /// (Run 2 C4); empty (the default) for channels.
@@ -419,7 +425,7 @@ impl NamedRow {
 // Writer
 // ---------------------------------------------------------------------------
 
-const INSERT_ITEM_SQL: &str = "INSERT OR IGNORE INTO items (source_id, content_type, item_id, category_id, title, title_base, number, logo_url, poster_url, backdrop_url, rating, added, year, epg_channel_id, url, container_extension, is_radio, archive_hours, extra_json, position, non_english) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)";
+const INSERT_ITEM_SQL: &str = "INSERT OR IGNORE INTO items (source_id, content_type, item_id, category_id, title, title_base, number, logo_url, poster_url, backdrop_url, rating, added, year, epg_channel_id, url, container_extension, is_radio, archive_hours, extra_json, position, non_english, quality) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)";
 
 /// Rows inserted between progress callbacks / statement resets.
 pub const WRITE_BATCH: u64 = 1000;
@@ -460,6 +466,10 @@ fn stored_category_name(name: &str) -> &str {
 /// verdict on insert. Otherwise `insert` stores the title's guess, and
 /// `finish` corrects the rows whose category decides (an untagged title in a
 /// "FRANCE" group, a foreign-script title in an "UK | NEWS" one).
+///
+/// Live rows also get the quality code their name marks ([`quality::code`],
+/// 0 for every other type); it depends on the title alone, so it is final
+/// on insert.
 ///
 /// A large rewrite ([`BULK_MIN_ROWS`]) drops the secondary indexes of
 /// `items` and `finish` builds them again, inside the same transaction:
@@ -598,7 +608,9 @@ impl<'c> CatalogWriter<'c> {
     /// CREATE statements again. Sorting the rows once is several times
     /// cheaper than updating all eleven of them (as of migration 0019) per
     /// row. The primary key stays (duplicate detection and the per-source
-    /// deletes use it).
+    /// deletes use it). They are built again in the order they were created:
+    /// among covering indexes of the same cost SQLite takes the newest, and
+    /// migration 0022 orders them so counts read a narrow one.
     fn maybe_go_bulk(&mut self) -> CoreResult<()> {
         let touched = self.replaced + self.total + self.duplicates;
         if self.dropped_indexes.is_some() || touched < BULK_MIN_ROWS {
@@ -629,7 +641,7 @@ impl<'c> CatalogWriter<'c> {
         }
         let indexes = {
             let mut stmt = self.conn.prepare(
-                "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY name",
+                "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY rowid",
             )?;
             let rows =
                 stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
@@ -701,6 +713,11 @@ impl<'c> CatalogWriter<'c> {
             Some(c) => language::combine(verdict, c),
             None => language::title_guess(verdict),
         };
+        // Quality filter: read from the provider's name, live channels only.
+        let quality = match item.content_type {
+            ContentType::Live => quality::code(crate::live::matcher::quality(&item.title)),
+            _ => quality::UNTAGGED,
+        };
         let mut stmt = self.conn.prepare_cached(INSERT_ITEM_SQL)?;
         let n = stmt.execute(params![
             self.source_id,
@@ -724,6 +741,7 @@ impl<'c> CatalogWriter<'c> {
             extra,
             item.position,
             non_english,
+            quality,
         ])?;
         if (self.total + self.duplicates + 1).is_multiple_of(WRITE_BATCH) {
             check_cancel(self.cancel.as_ref())?;
@@ -862,14 +880,14 @@ impl<'c> CatalogWriter<'c> {
             recount_categories(self.conn, &self.source_id, *ct)?;
         }
         // The search index and the ranking rows of the rewritten types, after
-        // the verdict updates above (items_rank copies non_english).
+        // the verdict updates above (items_rank copies non_english and quality).
         for ct in &self.types {
             self.conn.execute(
                 "INSERT INTO items_fts (rowid, title) SELECT rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
                 params![self.source_id, ct.as_str()],
             )?;
             self.conn.execute(
-                "INSERT INTO items_rank (id, source_id, content_type, category_id, non_english, title_len, position) SELECT rowid, source_id, content_type, category_id, non_english, length(title), position FROM items WHERE source_id = ?1 AND content_type = ?2",
+                "INSERT INTO items_rank (id, source_id, content_type, category_id, non_english, title_len, position, quality) SELECT rowid, source_id, content_type, category_id, non_english, length(title), position, quality FROM items WHERE source_id = ?1 AND content_type = ?2",
                 params![self.source_id, ct.as_str()],
             )?;
         }
@@ -1074,16 +1092,20 @@ pub fn categories(
     Ok(all)
 }
 
-/// [`categories`] for the English-only mode. Where the items are stored,
-/// `item_count` counts only items that are not clearly in another language
-/// and categories left with none are dropped. Where they are not (Stalker
-/// VOD pages live from the portal), categories whose own name is clearly in
-/// another language are dropped and counts stay as they are.
-pub fn english_categories(
+/// [`categories`] under the English-only filter (`english_only`) and the
+/// Live TV quality filter (`quality`; the caller passes `None` for every
+/// type but live). Where the items are stored, `item_count` counts only the
+/// items the filters keep and categories left with none are dropped. Where
+/// they are not (Stalker VOD pages live from the portal), English-only drops
+/// the categories whose own name is clearly in another language and counts
+/// stay as they are.
+pub fn filtered_categories(
     conn: &Connection,
     source_id: &str,
     content_type: ContentType,
     include_hidden: bool,
+    english_only: bool,
+    quality: Option<quality::QualityFilter>,
 ) -> CoreResult<Vec<Category>> {
     let all = categories(conn, source_id, content_type, include_hidden)?;
     let stored: bool = conn
@@ -1094,17 +1116,19 @@ pub fn english_categories(
     if !stored {
         return Ok(all
             .into_iter()
-            .filter(|c| !language::is_non_english("", Some(&c.name)))
+            .filter(|c| !english_only || !language::is_non_english("", Some(&c.name)))
             .collect());
     }
     let mut counts: HashMap<String, i64> = HashMap::new();
     {
-        // An index-only walk of `idx_items_cat` with a rowid probe per row
-        // (two when channels are hidden, C2).
-        let hidden = english_scoped(conn, true, source_id, content_type)?;
+        // An index-only walk of `idx_items_cat` (it holds the verdict and,
+        // since migration 0022, the quality) with a rowid probe per row (two
+        // when channels are hidden, C2).
+        let hidden = english_scoped(conn, english_only, source_id, content_type)?;
+        let quality_sql = quality::live_clause(quality, "i");
         let edited = channeledit::scoped(conn, source_id, content_type, "?1", "?2")?;
         let mut stmt = conn.prepare_cached(&format!(
-            "SELECT i.category_id, count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2{hidden}{edited} GROUP BY i.category_id"
+            "SELECT i.category_id, count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2{hidden}{quality_sql}{edited} GROUP BY i.category_id"
         ))?;
         let rows = stmt.query_map(params![source_id, content_type.as_str()], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
@@ -1127,20 +1151,36 @@ pub fn english_categories(
         .collect())
 }
 
-/// The `catalog.categories` list: [`english_categories`] in English-only
-/// mode, else [`categories`]. In parental hide mode (`hide` set) locked
-/// categories and, with `autoAdult`, adult ones are dropped; locked items
-/// leave their category's `item_count`, and a category they empty is dropped.
+/// The `catalog.categories` list: [`filtered_categories`] while English-only
+/// or (for live channels) the quality filter is on, else [`categories`]. In
+/// parental hide mode (`hide` set) locked categories and, with `autoAdult`,
+/// adult ones are dropped; locked items leave their category's `item_count`,
+/// and a category they empty is dropped.
 pub fn visible_categories(
     conn: &Connection,
     source_id: &str,
     content_type: ContentType,
     include_hidden: bool,
     english_only: bool,
+    quality: Option<quality::QualityFilter>,
     hide: Option<Hide>,
 ) -> CoreResult<Vec<Category>> {
-    let mut all = if english_only {
-        english_categories(conn, source_id, content_type, include_hidden)?
+    // The quality filter counts for live channels only, and only when it
+    // drops something (a minimum of SD that keeps untagged channels does not).
+    let quality = if content_type == ContentType::Live {
+        quality.filter(|f| f.condition("i").is_some())
+    } else {
+        None
+    };
+    let mut all = if english_only || quality.is_some() {
+        filtered_categories(
+            conn,
+            source_id,
+            content_type,
+            include_hidden,
+            english_only,
+            quality,
+        )?
     } else {
         categories(conn, source_id, content_type, include_hidden)?
     };
@@ -1149,9 +1189,10 @@ pub fn visible_categories(
     };
     let locked = parental::filter::locked_categories(conn, source_id, content_type)?;
     let mut removed =
-        parental::filter::locked_item_counts(conn, source_id, content_type, english_only)?;
+        parental::filter::locked_item_counts(conn, source_id, content_type, english_only, quality)?;
     // C2: a locked channel that is also hidden has already left `item_count`.
-    for (category_id, n) in locked_hidden_counts(conn, source_id, content_type, english_only)? {
+    let both = locked_hidden_counts(conn, source_id, content_type, english_only, quality)?;
+    for (category_id, n) in both {
         if let Some(r) = removed.get_mut(&category_id) {
             *r = (*r - n).max(0);
         }
@@ -1172,23 +1213,26 @@ pub fn visible_categories(
 }
 
 /// Channels both item-locked (parental) and hidden by a channel edit, per
-/// category id, counted like `parental::filter::locked_item_counts` (empty
-/// when the source hides nothing of that type).
+/// category id, counted like `parental::filter::locked_item_counts`, with the
+/// same filters (empty when the source hides nothing of that type).
 fn locked_hidden_counts(
     conn: &Connection,
     source_id: &str,
     content_type: ContentType,
     english_only: bool,
+    quality: Option<quality::QualityFilter>,
 ) -> CoreResult<HashMap<String, i64>> {
     if !channeledit::has_hidden(conn, source_id, content_type)? {
         return Ok(HashMap::new());
     }
     let sql = if english_only {
-        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND non_english(i.title, c.name) = 0 AND EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = pl.source_id AND e.content_type = pl.content_type AND e.item_id = pl.target_id AND e.hidden = 1) GROUP BY i.category_id"
+        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND non_english(i.title, c.name) = 0 AND EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = pl.source_id AND e.content_type = pl.content_type AND e.item_id = pl.target_id AND e.hidden = 1)"
     } else {
-        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = pl.source_id AND e.content_type = pl.content_type AND e.item_id = pl.target_id AND e.hidden = 1) GROUP BY i.category_id"
+        "SELECT i.category_id, count(*) FROM parental_locks pl CROSS JOIN items i ON i.source_id = pl.source_id AND i.content_type = pl.content_type AND i.item_id = pl.target_id WHERE pl.source_id = ?1 AND pl.content_type = ?2 AND pl.kind = 'item' AND EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = pl.source_id AND e.content_type = pl.content_type AND e.item_id = pl.target_id AND e.hidden = 1)"
     };
-    let mut stmt = conn.prepare_cached(sql)?;
+    let quality_sql = quality::live_clause(quality, "i");
+    let sql = format!("{sql}{quality_sql} GROUP BY i.category_id");
+    let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params![source_id, content_type.as_str()], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
     })?;
@@ -1413,6 +1457,13 @@ pub fn query_named(
         None => String::new(),
     };
     let english = english_scoped(conn, q.english_only, &q.source_id, q.content_type)?;
+    // The quality filter: live channels only (the column is in every live
+    // page and count index, migration 0022).
+    let quality_sql = if q.content_type == ContentType::Live {
+        quality::live_clause(q.quality, "i")
+    } else {
+        String::new()
+    };
     // C2: hidden channels leave the page and the total (also with
     // `include_hidden`); custom names are searched too, when there are any.
     let edited = channeledit::scoped(conn, &q.source_id, q.content_type, "?1", "?2")?;
@@ -1471,6 +1522,7 @@ pub fn query_named(
         debug_assert_eq!(args, page_args);
         // The rest is shared.
         let mut where_sql = String::from(english);
+        where_sql.push_str(&quality_sql);
         if let Some(s) = search {
             match m {
                 Match::Fts => {
@@ -1659,11 +1711,17 @@ pub fn search_named(
     } else {
         types.to_vec()
     };
-    Ok(
-        search_groups(conn, query, source_id, &[&types], limit, english_only, hide)?
-            .pop()
-            .unwrap_or_default(),
-    )
+    let mut found = search_groups(
+        conn,
+        query,
+        source_id,
+        &[&types],
+        limit,
+        english_only,
+        None,
+        hide,
+    )?;
+    Ok(found.pop().unwrap_or_default())
 }
 
 /// [`search_named`] for several groups of content types at once (the
@@ -1675,7 +1733,9 @@ pub fn search_named(
 /// a substring match, again one statement for all of them, over the title
 /// index rather than the table (wide rows: URLs, JSON). A group with
 /// word-prefix hits answers exactly as a [`search_named`] call of its own
-/// would; a group without them is empty unless no group has any.
+/// would; a group without them is empty unless no group has any. `quality`
+/// (the Live TV quality filter) drops live channels only.
+#[allow(clippy::too_many_arguments)]
 pub fn search_groups(
     conn: &Connection,
     query: &str,
@@ -1683,6 +1743,7 @@ pub fn search_groups(
     groups: &[&[ContentType]],
     limit: usize,
     english_only: bool,
+    quality: Option<quality::QualityFilter>,
     hide: Option<Hide>,
 ) -> CoreResult<Vec<Vec<NamedRow>>> {
     let mut out: Vec<Vec<NamedRow>> = vec![Vec::new(); groups.len()];
@@ -1704,6 +1765,11 @@ pub fn search_groups(
     let english = english_clause(conn, english_only)?;
     let ranking_join = english == language::ENGLISH_ONLY_SQL;
     let mut filter = String::from(english);
+    // The quality filter tests live rows only (radio, movies and series
+    // share the statement); items_rank copies the column (migration 0022).
+    if types.contains(&ContentType::Live) {
+        filter.push_str(&quality::mixed_clause(quality, "i"));
+    }
     if let Some(h) = hide {
         filter.push_str(&parental::filter::item_set(conn, h)?);
     }
@@ -1796,7 +1862,7 @@ pub fn search_groups(
     // ROW_NUMBER() window that sorts every match: "th" on 215k items has 56k
     // matches. Ties end on the rowid. `filter` names only columns that
     // items_rank copies from items (rowid, source_id, content_type,
-    // category_id, non_english).
+    // category_id, non_english, quality).
     let ranked_fts = |body_filter: &str| -> String {
         let group = group_of(&|_| true);
         let (cols, join) = SELECT_NAMED
@@ -1967,13 +2033,15 @@ fn custom_name_matches(
 }
 
 /// First channel with `number` in playlist order, skipping hidden
-/// categories (and with `hide`, parentally locked channels). `content_type`
-/// restricts the lookup to live or radio; `None` searches both, live first.
+/// categories (with `quality`, live channels the quality filter drops; with
+/// `hide`, parentally locked channels). `content_type` restricts the lookup
+/// to live or radio; `None` searches both, live first.
 pub fn channel_by_number(
     conn: &Connection,
     source_id: &str,
     number: i64,
     content_type: Option<ContentType>,
+    quality: Option<quality::QualityFilter>,
     hide: Option<Hide>,
 ) -> CoreResult<Option<NamedRow>> {
     let types = match content_type {
@@ -1992,8 +2060,10 @@ pub fn channel_by_number(
     };
     // C2: a hidden channel answers null (a correlated probe per candidate).
     let edited = channeledit::item_row(conn, source_id)?;
+    // Radio is never filtered by quality.
+    let quality_sql = quality::mixed_clause(quality, "i");
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ({types}) AND COALESCE(c.hidden, 0) = 0{locked}{edited} ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.number = ?2 AND i.content_type IN ({types}) AND COALESCE(c.hidden, 0) = 0{quality_sql}{locked}{edited} ORDER BY CASE i.content_type WHEN 'live' THEN 0 ELSE 1 END, i.position LIMIT 1"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     Ok(stmt
@@ -2003,13 +2073,15 @@ pub fn channel_by_number(
 
 /// Previous and next channel around `r` in playlist order, inside `category_id`
 /// when given (else across visible categories). Wraps around at both ends.
-/// `english_only` skips channels that are clearly in another language, `hide`
-/// parentally locked ones.
+/// `english_only` skips channels that are clearly in another language,
+/// `quality` live channels the quality filter drops (`r` itself may be one),
+/// `hide` parentally locked ones.
 pub fn neighbors(
     conn: &Connection,
     r: &ItemRef,
     category_id: Option<&str>,
     english_only: bool,
+    quality: Option<quality::QualityFilter>,
     hide: Option<Hide>,
 ) -> CoreResult<(Option<NamedRow>, Option<NamedRow>)> {
     let Some(current) = get(conn, r)? else {
@@ -2033,6 +2105,9 @@ pub fn neighbors(
         &r.source_id,
         r.content_type,
     )?);
+    if r.content_type == ContentType::Live {
+        scope.push_str(&quality::live_clause(quality, "i"));
+    }
     if let Some(h) = hide {
         scope.push_str(&parental::filter::scoped(
             conn,
@@ -2147,12 +2222,13 @@ pub fn same_title(conn: &Connection, r: &ItemRef, hide: Option<Hide>) -> CoreRes
 }
 
 /// Every visible live channel of a source in playlist order (capped at 20 000).
-/// `english_only` drops channels that are clearly in another language, `hide`
-/// parentally locked ones.
+/// `english_only` drops channels that are clearly in another language,
+/// `quality` the ones the quality filter drops, `hide` parentally locked ones.
 pub fn all_live_channels(
     conn: &Connection,
     source_id: &str,
     english_only: bool,
+    quality: Option<quality::QualityFilter>,
     hide: Option<Hide>,
 ) -> CoreResult<Vec<NamedRow>> {
     let locked = match hide {
@@ -2161,8 +2237,9 @@ pub fn all_live_channels(
     };
     // C2: nothing at all while the source hides no channel.
     let edited = channeledit::scoped(conn, source_id, ContentType::Live, "?1", "'live'")?;
+    let quality_sql = quality::live_clause(quality, "i");
     let sql = format!(
-        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{}{locked}{edited} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
+        "{SELECT_NAMED} WHERE i.source_id = ?1 AND i.content_type = 'live' AND COALESCE(c.hidden, 0) = 0{}{quality_sql}{locked}{edited} ORDER BY i.position LIMIT {ALL_LIVE_CAP}",
         english_scoped(conn, english_only, source_id, ContentType::Live)?
     );
     let mut stmt = conn.prepare_cached(&sql)?;
@@ -2173,8 +2250,10 @@ pub fn all_live_channels(
 }
 
 /// Boot: stores the English-only verdicts of catalogs written before
-/// migration 0018, in the background (readers use the per-row rule for them
-/// until then; see [`language::backfill_pending`]).
+/// migration 0018, then the quality of live channels written before
+/// migration 0022, in the background (readers use the per-row rule for the
+/// verdicts and treat the channels as untagged until then; see
+/// [`language::backfill_pending`] and [`quality::backfill`]).
 pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
     tokio::spawn(async move {
         // Holds the write lock per catalog: other writes wait for it (DB-2).
@@ -2188,6 +2267,18 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
             Ok(0) => {}
             Ok(n) => tracing::info!(catalogs = n, "stored English-only verdicts"),
             Err(err) => tracing::warn!(%err, "could not store English-only verdicts"),
+        }
+        // Quality filter: one write transaction per batch of channels.
+        let done = state
+            .db_call(|c| {
+                let _long = crate::db::long_write();
+                quality::backfill(c)
+            })
+            .await;
+        match done {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(channels = n, "stored live channel qualities"),
+            Err(err) => tracing::warn!(%err, "could not store live channel qualities"),
         }
     });
     Ok(())

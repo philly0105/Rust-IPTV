@@ -735,3 +735,64 @@ async fn hidden_groups_and_english_only_refill_the_list() {
     wait_for_names(&f.http, &f.base, &["Alpha"]).await;
     remote::stop(f.state.clone()).await.unwrap();
 }
+
+/// The Live TV quality filter fills the published list again when either
+/// setting changes: a lower minimum, untagged channels hidden, then off.
+#[tokio::test]
+async fn the_quality_filter_refills_the_list() {
+    use iptv_core::model::{M3uOrigin, SourceKind};
+    use iptv_core::settings;
+    use iptv_core::sources::{AddSourceArgs, M3uAddInput};
+
+    let f = fixture().await;
+    iptv_core::m3u::init(f.state.clone()).await.unwrap();
+    let text = "#EXTM3U\n\
+        #EXTINF:-1,Alpha SD\nhttp://s.example/a.ts\n\
+        #EXTINF:-1,Beta HD\nhttp://s.example/b.ts\n\
+        #EXTINF:-1,Gamma FHD\nhttp://s.example/c.ts\n\
+        #EXTINF:-1,Delta\nhttp://s.example/d.ts\n";
+    let src = iptv_core::sources::add(
+        f.state.clone(),
+        AddSourceArgs {
+            kind: SourceKind::M3u,
+            name: "Pasted".into(),
+            auto_refresh: None,
+            m3u: Some(M3uAddInput {
+                origin: Some(M3uOrigin::Text),
+                text: Some(text.into()),
+                ..Default::default()
+            }),
+            xtream: None,
+            stalker: None,
+        },
+    )
+    .await
+    .map_err(|e| e.error)
+    .unwrap();
+    let mut router = RpcRouter::new();
+    remote::rpc::register(&mut router);
+    let publish = json!({ "sourceId": src.id });
+    router
+        .dispatch(f.state.clone(), "remote.publishSource", publish)
+        .await
+        .unwrap();
+    let all = ["Alpha SD", "Beta HD", "Gamma FHD", "Delta"];
+    assert_eq!(channel_names(&f.http, &f.base).await, all);
+
+    let fhd = json!({ "liveMinQuality": "fhd" });
+    settings::update(&f.state, fhd).await.unwrap();
+    wait_for_names(&f.http, &f.base, &["Gamma FHD", "Delta"]).await;
+
+    let hd = json!({ "liveMinQuality": "hd" });
+    settings::update(&f.state, hd).await.unwrap();
+    wait_for_names(&f.http, &f.base, &["Beta HD", "Gamma FHD", "Delta"]).await;
+
+    let untagged = json!({ "liveHideUntagged": true });
+    settings::update(&f.state, untagged).await.unwrap();
+    wait_for_names(&f.http, &f.base, &["Beta HD", "Gamma FHD"]).await;
+
+    let off = json!({ "liveMinQuality": null });
+    settings::update(&f.state, off).await.unwrap();
+    wait_for_names(&f.http, &f.base, &all).await;
+    remote::stop(f.state.clone()).await.unwrap();
+}

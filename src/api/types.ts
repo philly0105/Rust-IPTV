@@ -557,6 +557,13 @@ export interface Settings {
    * clearly marks another language; items without a clear language stay.
    */
   englishOnly: boolean;
+  /**
+   * Live channel lists, the guide, search and zapping hide channels whose
+   * provider name marks a lower quality. `null` = off. Radio is never filtered.
+   */
+  liveMinQuality: ChannelQuality | null;
+  /** With `liveMinQuality` set, also hide channels whose name carries no quality tag. */
+  liveHideUntagged: boolean;
   /** `null` = `<downloadsDir>/recordings`. Desktop only. */
   recordingsDir: string | null;
   // failover: smart reconnect and live failover.
@@ -672,6 +679,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showExternalBar: true,
   vodMinRating: 0,
   englishOnly: false,
+  liveMinQuality: null,
+  liveHideUntagged: false,
   recordingsDir: null,
   // failover: smart reconnect and live failover.
   liveFailover: true,

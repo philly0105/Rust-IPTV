@@ -10,6 +10,7 @@
 //! "Sky Sports 2", "Film4" and "Film4 +1", "Canal" and "Canal+" stay apart.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 /// Picture quality named in a channel name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -66,28 +67,29 @@ impl Signature {
 /// The signature of a channel name.
 pub fn signature(name: &str) -> Signature {
     let (rest, tag) = split_country_prefix(name);
-    let mut quality = None;
-    let mut region = None;
-    if let Some(tag) = tag {
-        let upper = tag.to_ascii_uppercase();
-        if let Some(q) = quality_of(&upper.to_lowercase()) {
-            quality = Some(q);
-        } else {
-            region = region_code(&upper);
-        }
-    }
+    let tag_q = tag.and_then(tag_quality);
+    // A tag that names a quality ("4K | Sky Cinema") is no region.
+    let region = match (tag, tag_q) {
+        (Some(tag), None) => region_code(&tag.to_ascii_uppercase()),
+        _ => None,
+    };
+    let lower = fold(&rest.to_lowercase());
+    let quality = words_quality(tag_q, &lower);
 
-    let folded = fold(&rest.to_lowercase())
-        .replace("h.265", "h265")
-        .replace("h.264", "h264");
+    let folded = lower.replace("h.265", "h265").replace("h.264", "h264");
     let raw = tokens(&folded);
     let mut kept: Vec<String> = Vec::with_capacity(raw.len());
     let mut timeshift = Vec::new();
     let mut i = 0;
     while i < raw.len() {
         let t = raw[i].as_str();
-        if let Some(q) = quality_of(t) {
-            quality = quality.max(Some(q));
+        // "Full HD", "Ultra HD": both words are the marker.
+        let next = raw.get(i + 1).map(String::as_str);
+        if pair_lead(t).is_some() && next.and_then(quality_of) == Some(Quality::Hd) {
+            i += 2;
+            continue;
+        }
+        if quality_of(t).is_some() {
             i += 1;
             continue;
         }
@@ -118,6 +120,52 @@ pub fn signature(name: &str) -> Signature {
         region,
         quality,
         timeshift,
+    }
+}
+
+/// The highest quality marker in a channel name, or a group tag that is one
+/// ("4K | Sky Cinema"): exactly [`signature`]`(name).quality`, without
+/// building the key. The Live TV quality filter stores it per channel
+/// (`catalog::quality`).
+pub fn quality(name: &str) -> Option<Quality> {
+    let (rest, tag) = split_country_prefix(name);
+    words_quality(tag.and_then(tag_quality), &fold(&rest.to_lowercase()))
+}
+
+/// The quality a stripped country or group tag names, when the whole tag is
+/// a marker.
+fn tag_quality(tag: &str) -> Option<Quality> {
+    quality_of(&tag.to_lowercase())
+}
+
+/// The highest of `tag` and the markers among the words of `folded` (the
+/// lowercased, folded rest of the name). [`signature`] and [`quality`] both
+/// read quality here, so the two never disagree. It reads the words before
+/// [`signature`]'s `h.265` rewrite, which changes no marker: it only joins
+/// `h` and `265` into one word, and no marker ends in `h`, starts with
+/// `264` or `265`, or contains `h26`.
+fn words_quality(tag: Option<Quality>, folded: &str) -> Option<Quality> {
+    let mut best = tag;
+    // What an HD marker right after the previous word names ("Full HD").
+    let mut lead = None;
+    each_token(folded, |t| {
+        let q = quality_of(t);
+        best = best.max(q);
+        if q == Some(Quality::Hd) {
+            best = best.max(lead);
+        }
+        lead = pair_lead(t);
+    });
+    best
+}
+
+/// The quality an HD marker names when this word comes just before it:
+/// "Full HD" is Full HD, "Ultra HD" is 4K.
+fn pair_lead(word: &str) -> Option<Quality> {
+    match word {
+        "full" => Some(Quality::Fhd),
+        "ultra" => Some(Quality::Uhd),
+        _ => None,
     }
 }
 
@@ -268,19 +316,31 @@ pub fn strip_country_prefix(name: &str) -> &str {
 /// joins the word before it ("Canal +" is "canal+").
 fn tokens(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    each_token(s, |t| out.push(t.to_string()));
+    out
+}
+
+/// Calls `f` with each of [`tokens`]' words in order, borrowed from `s`
+/// unless a lone `+` joined one.
+fn each_token(s: &str, mut f: impl FnMut(&str)) {
+    let mut pending: Option<Cow<'_, str>> = None;
     for raw in s.split(|c: char| !(c.is_alphanumeric() || c == '+')) {
         if raw.is_empty() {
             continue;
         }
         if raw.chars().all(|c| c == '+') {
-            if let Some(last) = out.last_mut() {
-                last.push_str(raw);
+            if let Some(last) = pending.as_mut() {
+                last.to_mut().push_str(raw);
             }
             continue;
         }
-        out.push(raw.to_string());
+        if let Some(last) = pending.replace(Cow::Borrowed(raw)) {
+            f(&last);
+        }
     }
-    out
+    if let Some(last) = pending {
+        f(&last);
+    }
 }
 
 fn quality_of(t: &str) -> Option<Quality> {
@@ -368,59 +428,63 @@ mod tests {
     }
 
     /// Mirrors the cases in src/features/live/test (stripCountryPrefix).
+    const STRIP_CASES: &[(&str, &str)] = &[
+        ("US | CNN", "CNN"),
+        ("FR|TF1", "TF1"),
+        ("|DE| ARD", "ARD"),
+        ("UK: BBC One", "BBC One"),
+        ("[UK] BBC One", "BBC One"),
+        ("4K-DE - Das Erste", "Das Erste"),
+        ("AR-SUBS - Movie", "Movie"),
+        ("UK - Sky News", "Sky News"),
+        ("Sky - Sports F1", "Sky - Sports F1"),
+        ("NCIS: LA", "NCIS: LA"),
+        ("DUNE - Part Two", "DUNE - Part Two"),
+        ("1917 - Something", "1917 - Something"),
+        ("uk: lower", "uk: lower"),
+        ("UK:", "UK:"),
+        ("  BBC Two  ", "BBC Two"),
+        ("", ""),
+    ];
+
     #[test]
     fn strips_country_prefixes_like_the_ui() {
-        let cases = [
-            ("US | CNN", "CNN"),
-            ("FR|TF1", "TF1"),
-            ("|DE| ARD", "ARD"),
-            ("UK: BBC One", "BBC One"),
-            ("[UK] BBC One", "BBC One"),
-            ("4K-DE - Das Erste", "Das Erste"),
-            ("AR-SUBS - Movie", "Movie"),
-            ("UK - Sky News", "Sky News"),
-            ("Sky - Sports F1", "Sky - Sports F1"),
-            ("NCIS: LA", "NCIS: LA"),
-            ("DUNE - Part Two", "DUNE - Part Two"),
-            ("1917 - Something", "1917 - Something"),
-            ("uk: lower", "uk: lower"),
-            ("UK:", "UK:"),
-            ("  BBC Two  ", "BBC Two"),
-            ("", ""),
-        ];
-        for (input, want) in cases {
+        for &(input, want) in STRIP_CASES {
             assert_eq!(strip_country_prefix(input), want, "{input:?}");
         }
     }
 
     /// Hand-written table: every pair here is the same channel.
+    const SAME_CHANNEL: &[(&str, &str)] = &[
+        ("Sky Sports 1", "UK: Sky Sports 1 HD"),
+        ("Sky Sports 1", "Sky Sports 1 FHD"),
+        ("Sky Sports 1", "SKY SPORTS 1 (backup)"),
+        ("Sky Sports 1", "[UK] Sky Sports 1 4K"),
+        ("Sky Sports 1", "Sky Sports 1 HEVC"),
+        ("Sky Sports 1", "Sky.Sports.1"),
+        ("Sky Sports 1", "Sky Sports 1 ᴴᴰ"),
+        ("Sky Sports 1", "Sky Sports 1 UHD 50fps"),
+        ("Sky Sports 1", "Sky Sports 1 [FHD] (BK 2)"),
+        ("Sky Sports 1", "Sky Sports 1 H.265"),
+        ("Sky Sports 1", "Sky Sports 1 Full HD"),
+        ("Sky Sports 1", "Sky Sports 1 Ultra HD"),
+        ("CNN", "US | CNN HD"),
+        ("CNN", "cnn"),
+        ("Canal+", "Canal +"),
+        ("Canal+ Sport", "FR: CANAL+ SPORT FHD"),
+        ("Film4 +1", "UK: Film4 +1 HD"),
+        ("TF1", "FR|TF1 1080p"),
+        ("Télé 5", "TELE 5"),
+        ("ProSieben", "DE: ProSieben HD backup2"),
+        ("BBC One", "GB: BBC One"),
+        ("BBC One", "UK: BBC One"),
+        ("Das Erste", "4K-DE - Das Erste"),
+        ("HD", "HD"),
+    ];
+
     #[test]
     fn matches_the_same_channel_through_provider_noise() {
-        let pairs = [
-            ("Sky Sports 1", "UK: Sky Sports 1 HD"),
-            ("Sky Sports 1", "Sky Sports 1 FHD"),
-            ("Sky Sports 1", "SKY SPORTS 1 (backup)"),
-            ("Sky Sports 1", "[UK] Sky Sports 1 4K"),
-            ("Sky Sports 1", "Sky Sports 1 HEVC"),
-            ("Sky Sports 1", "Sky.Sports.1"),
-            ("Sky Sports 1", "Sky Sports 1 ᴴᴰ"),
-            ("Sky Sports 1", "Sky Sports 1 UHD 50fps"),
-            ("Sky Sports 1", "Sky Sports 1 [FHD] (BK 2)"),
-            ("Sky Sports 1", "Sky Sports 1 H.265"),
-            ("CNN", "US | CNN HD"),
-            ("CNN", "cnn"),
-            ("Canal+", "Canal +"),
-            ("Canal+ Sport", "FR: CANAL+ SPORT FHD"),
-            ("Film4 +1", "UK: Film4 +1 HD"),
-            ("TF1", "FR|TF1 1080p"),
-            ("Télé 5", "TELE 5"),
-            ("ProSieben", "DE: ProSieben HD backup2"),
-            ("BBC One", "GB: BBC One"),
-            ("BBC One", "UK: BBC One"),
-            ("Das Erste", "4K-DE - Das Erste"),
-            ("HD", "HD"),
-        ];
-        for (a, b) in pairs {
+        for &(a, b) in SAME_CHANNEL {
             assert!(
                 same(a, b),
                 "{a:?} vs {b:?}: {:?} / {:?}",
@@ -432,28 +496,29 @@ mod tests {
     }
 
     /// Hand-written table: every pair here is two different channels.
+    const DISTINCT_CHANNELS: &[(&str, &str)] = &[
+        ("Sky Sports 1", "Sky Sports 2"),
+        ("Sky Sports 1", "Sky Sports 1 +1"),
+        ("Sky Sports", "Sky Sports 1"),
+        ("Sky Sports F1", "Sky Sports Main Event"),
+        ("Film4", "Film4 +1"),
+        ("Canal", "Canal+"),
+        ("Canal+", "Canal+ Sport"),
+        ("BBC One", "BBC Two"),
+        ("UK: Discovery", "DE: Discovery"),
+        ("UK | CNN", "US | CNN"),
+        ("ESPN", "ESPN 2"),
+        ("Discovery (UK)", "Discovery"),
+        ("Rai 1", "Rai 1 +24"),
+        ("Eurosport 1", "Eurosport 2"),
+        ("Nick Jr", "Nick"),
+        ("", ""),
+        ("!!!", "???"),
+    ];
+
     #[test]
     fn keeps_distinct_channels_apart() {
-        let pairs = [
-            ("Sky Sports 1", "Sky Sports 2"),
-            ("Sky Sports 1", "Sky Sports 1 +1"),
-            ("Sky Sports", "Sky Sports 1"),
-            ("Sky Sports F1", "Sky Sports Main Event"),
-            ("Film4", "Film4 +1"),
-            ("Canal", "Canal+"),
-            ("Canal+", "Canal+ Sport"),
-            ("BBC One", "BBC Two"),
-            ("UK: Discovery", "DE: Discovery"),
-            ("UK | CNN", "US | CNN"),
-            ("ESPN", "ESPN 2"),
-            ("Discovery (UK)", "Discovery"),
-            ("Rai 1", "Rai 1 +24"),
-            ("Eurosport 1", "Eurosport 2"),
-            ("Nick Jr", "Nick"),
-            ("", ""),
-            ("!!!", "???"),
-        ];
-        for (a, b) in pairs {
+        for &(a, b) in DISTINCT_CHANNELS {
             assert!(
                 !same(a, b),
                 "{a:?} vs {b:?} matched: {:?} / {:?}",
@@ -503,5 +568,65 @@ mod tests {
         );
         assert_eq!(signature("!!!").fts_phrase(), None);
         assert_eq!(key("A&E"), "a e");
+    }
+
+    /// `quality` (stored per live channel for the quality filter) is the
+    /// signature's quality for every name in the tables above and for the
+    /// marker edge cases here.
+    #[test]
+    fn quality_is_the_signature_quality() {
+        let edge_cases = [
+            "HD +",
+            "SD +",
+            "Sky HD ++",
+            "BBC One Full HD",
+            "UK HD | Sky",
+            "FHD | UK: Sky",
+            "|4K| Sky",
+            "UK: 4K",
+            "[FHD] Sky",
+            "Sky Sports 1 h.265 FHD",
+            "Sky h.2654k",
+            "Sky fh.265",
+            "Canal+ HD+",
+            "ʜᴅ",
+            "ARTE ᶠᴴᴰ",
+            "Télé ꜰʜᴅ",
+            "ITV 720",
+            "Rai 1 1080",
+            "UHD4K Demo",
+            "BBC One SD HD",
+            "DE: ProSieben HD backup 2",
+            "SKY SPORTS 1 (backup) 576i",
+            "Straße HQ",
+            "   ",
+        ];
+        let tables = STRIP_CASES
+            .iter()
+            .map(|c| c.0)
+            .chain(SAME_CHANNEL.iter().flat_map(|&(a, b)| [a, b]))
+            .chain(DISTINCT_CHANNELS.iter().flat_map(|&(a, b)| [a, b]));
+        for name in tables.chain(edge_cases) {
+            assert_eq!(quality(name), signature(name).quality, "{name:?}");
+        }
+        for (name, want) in [
+            ("UK: Sky Sports 1 FHD", Some(Quality::Fhd)),
+            ("4K | Sky Cinema", Some(Quality::Uhd)),
+            ("BBC One HD 4K", Some(Quality::Uhd)),
+            ("Channel 5 SD", Some(Quality::Sd)),
+            ("Das Erste 1080p", Some(Quality::Fhd)),
+            ("ZDF HD +", Some(Quality::Hd)),
+            ("BBC One Full HD", Some(Quality::Fhd)),
+            ("Sky Sports FULL HD+", Some(Quality::Fhd)),
+            ("Sky Cinema Ultra HD", Some(Quality::Uhd)),
+            ("Full Moon HD", Some(Quality::Hd)),
+            ("Full HD", Some(Quality::Fhd)),
+            ("Sky Sports 1 H.265", None),
+            ("Film4 +1", None),
+            ("BBC One", None),
+            ("", None),
+        ] {
+            assert_eq!(quality(name), want, "{name:?}");
+        }
     }
 }

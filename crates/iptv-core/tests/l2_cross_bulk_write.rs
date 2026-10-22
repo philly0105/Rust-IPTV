@@ -2,17 +2,21 @@
 //! `items` and builds them again before its commit (one sort instead of a
 //! b-tree update per row and index), and rows whose category is declared
 //! first get their final English-only verdict on insert. These tests pin the
-//! result: the same indexes, the same verdicts as the per-row rule, query
-//! plans still on the covering indexes, and a failed rewrite rolls the
-//! dropped indexes back with the rows.
+//! result: the same indexes, the same verdicts as the per-row rule, the
+//! same live channel quality codes as the matcher, query plans still on the
+//! covering indexes, and a failed rewrite rolls the dropped indexes back
+//! with the rows.
 
 #[path = "m3u_support.rs"]
 mod support;
 
 use iptv_core::catalog::language::is_non_english;
+use iptv_core::catalog::quality::code;
 use iptv_core::catalog::{self, CatalogWriter, CategoryRow, ItemRow, BULK_MIN_ROWS};
+use iptv_core::live::matcher;
 use iptv_core::model::ContentType;
 use rusqlite::Connection;
+use std::collections::BTreeSet;
 use support::*;
 
 /// More rows than the bulk threshold.
@@ -294,6 +298,120 @@ async fn a_failed_bulk_rewrite_rolls_back_rows_and_indexes() {
             assert_eq!(n as u64, N, "the previous catalog stays");
             assert_verdicts(c, "s1");
             assert_items_rank(c);
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// Live channels with every kind of quality marker, and none.
+fn channels(source: &str, salt: &str) -> Vec<ItemRow> {
+    (0..N)
+        .map(|i| {
+            let title = match i % 6 {
+                0 => format!("UK: Sports {salt}{i} FHD"),
+                1 => format!("News {salt}{i} HD"),
+                2 => format!("4K | Cinema {salt}{i}"),
+                3 => format!("Kids {salt}{i} SD"),
+                4 => format!("Music {salt}{i} 720p"),
+                _ => format!("Local {salt}{i}"),
+            };
+            ItemRow {
+                source_id: source.into(),
+                content_type: ContentType::Live,
+                item_id: format!("{salt}{i}"),
+                category_id: format!("c{}", i % 4),
+                title,
+                position: i as i64,
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+/// Every row of `source` stores the quality code of its name, and every
+/// code occurs.
+fn assert_qualities(c: &Connection, source: &str) {
+    let mut stmt = c
+        .prepare("SELECT title, quality FROM items WHERE source_id = ?1")
+        .unwrap();
+    let rows: Vec<(String, i64)> = stmt
+        .query_map([source], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows.len() as u64, N, "{source}: every row written");
+    let wrong: Vec<_> = rows
+        .iter()
+        .filter(|(t, q)| code(matcher::quality(t)) != *q)
+        .take(5)
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "{source}: stored qualities off the matcher: {wrong:?}"
+    );
+    let codes: BTreeSet<i64> = rows.iter().map(|r| r.1).collect();
+    assert_eq!(codes, BTreeSet::from([0, 1, 2, 3, 4]), "{source}");
+}
+
+/// Quality filter: a bulk rewrite of live channels stores each row's
+/// quality code as a row-by-row one does, the rebuilt indexes still end in
+/// `quality` (migration 0022), and a filtered live page and count stay on
+/// their covering indexes.
+#[tokio::test]
+async fn bulk_rewrites_store_live_channel_quality() {
+    let env = env().await;
+    bare_source(&env.state, "s1").await;
+    env.state
+        .db_call(|c| {
+            let before = item_indexes(c);
+            for name in [
+                "idx_items_cat",
+                "idx_items_pos",
+                "idx_items_title",
+                "idx_items_guide",
+            ] {
+                let sql = before
+                    .iter()
+                    .find(|(n, _)| n == name)
+                    .map(|(_, sql)| sql.as_str());
+                assert!(
+                    sql.is_some_and(|s| s.contains("quality")),
+                    "{name} holds the quality column: {sql:?}"
+                );
+            }
+            // A first import goes bulk once it passes BULK_MIN_ROWS; the
+            // refresh replaces enough rows to go bulk in begin.
+            for salt in ["a", "b"] {
+                let tx = c.transaction()?;
+                {
+                    let mut w = CatalogWriter::begin(&tx, "s1", &[ContentType::Live], None)?;
+                    for r in channels("s1", salt) {
+                        w.insert(&r)?;
+                    }
+                    assert!(item_indexes(&tx).is_empty(), "{salt}: bulk");
+                    w.finish(&[(ContentType::Live, Vec::new())])?;
+                }
+                tx.commit()?;
+                assert_eq!(item_indexes(c), before);
+                assert_qualities(c, "s1");
+                assert_items_rank(c);
+            }
+            let p = plan(
+                c,
+                "SELECT rowid FROM items WHERE source_id = 's1' AND content_type = 'live' AND quality >= 3 ORDER BY position LIMIT 60 OFFSET 20000",
+            );
+            assert!(
+                p.contains("COVERING INDEX idx_items_pos") && !p.contains("TEMP B-TREE"),
+                "{p}"
+            );
+            // The rebuilds keep the creation order 0022 chose, so a filtered
+            // count still reads the narrow category index, not the title one.
+            let p = plan(
+                c,
+                "SELECT count(*) FROM items WHERE source_id = 's1' AND content_type = 'live' AND non_english = 0 AND quality >= 3",
+            );
+            assert!(p.contains("COVERING INDEX idx_items_cat"), "{p}");
             Ok(())
         })
         .await

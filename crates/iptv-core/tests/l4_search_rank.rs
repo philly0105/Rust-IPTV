@@ -6,10 +6,11 @@
 //!   (a `ROW_NUMBER()` window over `items` joined to `items_fts`, kept here
 //!   as [`reference`]) answers with the rowid as its last tie key: the same
 //!   rows in the same order, per list, over queries, list layouts, source
-//!   scopes, limits, English-only (stored and pending) and parental hide
-//!   mode, before and after hidden categories, hidden channels, item and
-//!   category locks and adult category names are set. Two sources hold the
-//!   same channel list (same ids, titles and positions), so ties are real.
+//!   scopes, limits, English-only (stored and pending), the Live TV
+//!   quality filter and parental hide mode, before and after hidden
+//!   categories, hidden channels, item and category locks and adult
+//!   category names are set. Two sources hold the same channel list (same
+//!   ids, titles and positions), so ties are real.
 //! - The plan: the match set is materialized once, `items_fts` drives the
 //!   join and every row comes from `items_rank` and `items` by rowid.
 //! - `items_rank` equals `items` after each kind of write.
@@ -17,9 +18,11 @@
 #[path = "m3u_support.rs"]
 mod support;
 
+use iptv_core::catalog::quality::{self, QualityFilter};
 use iptv_core::catalog::{
     self, fts_query, language, replace_catalog, CatalogWriter, CategoryRow, ItemRow,
 };
+use iptv_core::live::matcher::Quality;
 use iptv_core::model::ContentType;
 use iptv_core::parental::Hide;
 use rusqlite::types::Value as SqlValue;
@@ -62,6 +65,19 @@ const WORDS: [&str; 12] = [
     "Frost", "River",
 ];
 const TAGS: [&str; 6] = ["EN", "FR", "DE", "UK", "", "IT"];
+/// Quality markers ending channel names, the empty one for untagged names.
+const MARKS: [&str; 6] = ["", "HD", "FHD", "SD", "4K", "720p"];
+
+/// Live TV quality filters for the matrix: HD and up with untagged channels
+/// kept (a `NOT BETWEEN` condition), Full HD and up with them hidden (`>=`).
+const HD_UP: Option<QualityFilter> = Some(QualityFilter {
+    min: Quality::Hd,
+    hide_untagged: false,
+});
+const FHD_TAGGED: Option<QualityFilter> = Some(QualityFilter {
+    min: Quality::Fhd,
+    hide_untagged: true,
+});
 
 fn cats(prefix: &str, names: &[&str]) -> Vec<CategoryRow> {
     names
@@ -93,11 +109,12 @@ fn vod_cats() -> Vec<CategoryRow> {
 fn channel(source: &str, i: usize) -> ItemRow {
     let tag = TAGS[(i / 7) % TAGS.len()];
     let name = CHANNEL_NAMES[i % CHANNEL_NAMES.len()];
+    let mark = MARKS[(i / 3) % MARKS.len()];
     let title = if i.is_multiple_of(3) {
         // Titles that repeat inside a list (different positions).
-        format!("{tag} {name}").trim().to_string()
+        format!("{tag} {name} {mark}").trim().to_string()
     } else {
-        format!("{tag} {name} {}", i % 40).trim().to_string()
+        format!("{tag} {name} {} {mark}", i % 40).trim().to_string()
     };
     ItemRow {
         source_id: source.into(),
@@ -209,13 +226,15 @@ type Key = (String, String, String);
 const SELECT_KEY: &str = "SELECT i.source_id, i.content_type, i.item_id";
 const CATEGORY_JOIN: &str = " LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id";
 
-/// The filters `search_groups` builds (English-only, hide mode, hidden
-/// channels, hidden categories) and the scope, with the arguments after `?1`.
+/// The filters `search_groups` builds (English-only, the Live TV quality
+/// filter, hide mode, hidden channels, hidden categories) and the scope,
+/// with the arguments after `?1`.
 fn filters(
     c: &Connection,
     source: Option<&str>,
     types: &[ContentType],
     english: bool,
+    quality: Option<QualityFilter>,
     hide: Option<Hide>,
 ) -> (String, String, Vec<SqlValue>, bool) {
     let english = if english {
@@ -225,6 +244,9 @@ fn filters(
     };
     let ranking_join = english == language::ENGLISH_ONLY_SQL;
     let mut filter = english.to_string();
+    if types.contains(&LIVE) {
+        filter.push_str(&quality::mixed_clause(quality, "i"));
+    }
     if let Some(h) = hide {
         filter.push_str(&iptv_core::parental::filter::item_set(c, h).unwrap());
     }
@@ -274,10 +296,11 @@ fn reference_sql(
     groups: &[&[ContentType]],
     limit: usize,
     english: bool,
+    quality: Option<QualityFilter>,
     hide: Option<Hide>,
 ) -> (String, Vec<SqlValue>) {
     let types: Vec<ContentType> = groups.iter().flat_map(|g| g.iter().copied()).collect();
-    let (scope, filter, args, ranking_join) = filters(c, source, &types, english, hide);
+    let (scope, filter, args, ranking_join) = filters(c, source, &types, english, quality, hide);
     let group = group_case(groups);
     let inner_join = if ranking_join { CATEGORY_JOIN } else { "" };
     let sql = format!(
@@ -294,7 +317,7 @@ fn new_sql(
     limit: usize,
 ) -> (String, Vec<SqlValue>) {
     let types: Vec<ContentType> = groups.iter().flat_map(|g| g.iter().copied()).collect();
-    let (scope, filter, args, _) = filters(c, source, &types, false, None);
+    let (scope, filter, args, _) = filters(c, source, &types, false, None, None);
     let group = group_case(groups);
     let tops: Vec<String> = groups
         .iter()
@@ -355,9 +378,14 @@ const QUERIES: [&str; 9] = [
     "zzzz",
 ];
 
-/// Compares `search_groups` with the reference over the whole matrix.
-/// Returns the number of compared calls and of tied neighbours seen.
-fn compare_all(c: &Connection, label: &str, english_modes: &[bool]) -> (usize, usize) {
+/// Compares `search_groups` with the reference over the whole matrix, under
+/// each of `modes` (English-only, the quality filter). Returns the number of
+/// compared calls and of tied neighbours seen.
+fn compare_all(
+    c: &Connection,
+    label: &str,
+    modes: &[(bool, Option<QualityFilter>)],
+) -> (usize, usize) {
     let layouts: [&[&[ContentType]]; 6] = [
         &[&[LIVE, RADIO], &[MOVIE], &[SERIES]],
         &[&[LIVE, RADIO]],
@@ -372,18 +400,18 @@ fn compare_all(c: &Connection, label: &str, english_modes: &[bool]) -> (usize, u
         for groups in layouts {
             for source in [None, Some("m1"), Some("m2"), Some("v")] {
                 for limit in [7, 61, 1001] {
-                    for &english in english_modes {
+                    for &(english, quality) in modes {
                         for hide in [None, Some(Hide { auto_adult: true })] {
-                            let got = keys(
-                                catalog::search_groups(c, q, source, groups, limit, english, hide)
-                                    .unwrap(),
+                            let got = catalog::search_groups(
+                                c, q, source, groups, limit, english, quality, hide,
                             );
+                            let got = keys(got.unwrap());
                             let (sql, args) =
-                                reference_sql(c, source, groups, limit, english, hide);
+                                reference_sql(c, source, groups, limit, english, quality, hide);
                             let want = rows(c, &sql, q, &args, groups.len());
                             assert_eq!(
                                 got, want,
-                                "{label}: {q:?} {groups:?} {source:?} limit {limit} english {english} hide {hide:?}"
+                                "{label}: {q:?} {groups:?} {source:?} limit {limit} english {english} quality {quality:?} hide {hide:?}"
                             );
                             // Ties: one channel from both M3U sources, side by side.
                             for list in &got {
@@ -415,22 +443,42 @@ async fn search_ranks_like_the_window_statement_with_every_filter() {
             write_fixture(c);
             assert_items_rank(c);
 
-            let (n, ties) = compare_all(c, "plain", &[false, true]);
+            let (n, ties) = compare_all(c, "plain", &[(false, None), (true, None)]);
             assert!(ties > 50, "the duplicate source gives tied rows ({ties})");
             eprintln!("l4_search_rank: plain: {n} calls equal, {ties} tied neighbours");
 
             set_filters(c);
-            let (n, ties) = compare_all(c, "filtered", &[false, true]);
+            let modes = [(false, None), (true, None), (false, HD_UP)];
+            let (n, ties) = compare_all(c, "filtered", &modes);
             eprintln!("l4_search_rank: filtered: {n} calls equal, {ties} tied neighbours");
+
+            // The quality filter drops live rows only: radio stations and
+            // movies match as before.
+            let groups: &[&[ContentType]] = &[&[LIVE, RADIO], &[MOVIE]];
+            let mut counts = Vec::new();
+            for quality in [None, FHD_TAGGED] {
+                let lists =
+                    catalog::search_groups(c, "sky", None, groups, 1001, false, quality, None)?;
+                let live = lists[0]
+                    .iter()
+                    .filter(|n| n.row.content_type == LIVE)
+                    .count();
+                counts.push((live, lists[0].len() - live, lists[1].len()));
+            }
+            let (all, tagged) = (counts[0], counts[1]);
+            assert!(tagged.0 < all.0, "live rows dropped: {counts:?}");
+            assert_eq!((tagged.1, tagged.2), (all.1, all.2), "radio and movies kept");
 
             // A catalog whose stored verdicts are pending: the per-row
             // English-only rule (it needs the category name) keeps the old
-            // statement shape, and still answers the same.
+            // statement shape, and still answers the same, with the quality
+            // filter too.
             c.execute(
                 "INSERT INTO english_pending (source_id, content_type) VALUES ('v', 'movie')",
                 [],
             )?;
-            let (n, _) = compare_all(c, "pending", &[true]);
+            let modes = [(true, None), (true, FHD_TAGGED)];
+            let (n, _) = compare_all(c, "pending", &modes);
             eprintln!("l4_search_rank: pending English-only: {n} calls equal");
             c.execute("DELETE FROM english_pending", [])?;
 
@@ -441,9 +489,8 @@ async fn search_ranks_like_the_window_statement_with_every_filter() {
                 let (sql, args) = new_sql(c, source, groups, 61);
                 let mut all: Vec<SqlValue> = vec![fts_query("th").unwrap().into()];
                 all.extend(args.iter().cloned());
-                let want = keys(catalog::search_groups(
-                    c, "th", source, groups, 61, false, None,
-                )?);
+                let got = catalog::search_groups(c, "th", source, groups, 61, false, None, None)?;
+                let want = keys(got);
                 assert_eq!(
                     rows(c, &sql, "th", &args, 3),
                     want,

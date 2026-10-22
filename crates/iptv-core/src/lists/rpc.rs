@@ -6,7 +6,8 @@
 //! that change nothing (removing an absent list or channel, adding only
 //! channels already there, an update to the current values) emit nothing.
 //! Readers and the writes that report counts apply the parental hide filter
-//! ([`crate::parental::hide_filter`]).
+//! ([`crate::parental::hide_filter`]) and the Live TV quality filter
+//! (`catalog::rpc::quality_filter`).
 
 use super::{CustomList, CustomListEntry, NewItem, CHANGED_EVENT};
 use crate::catalog::rpc::NeighborsResult;
@@ -117,22 +118,27 @@ fn changed(state: &AppState) {
 pub fn register(r: &mut RpcRouter) {
     r.add("lists.list", |s: S, _: ()| async move {
         let hide = crate::parental::hide_filter(&s).await?;
-        let v = s.db_call(move |c| super::list(c, hide)).await?;
+        let quality = crate::catalog::rpc::quality_filter(&s);
+        let v = s.db_call(move |c| super::list(c, hide, quality)).await?;
         Ok::<Vec<CustomList>, RpcError>(v)
     });
     r.add("lists.create", |s: S, a: CreateArgs| async move {
         let hide = crate::parental::hide_filter(&s).await?;
+        let quality = crate::catalog::rpc::quality_filter(&s);
         let items = a.items.unwrap_or_default();
         let v = s
-            .db_write(move |c| super::create(c, &a.name, &items, hide))
+            .db_write(move |c| super::create(c, &a.name, &items, hide, quality))
             .await?;
         changed(&s);
         Ok::<CustomList, RpcError>(v)
     });
     r.add("lists.update", |s: S, a: UpdateArgs| async move {
         let hide = crate::parental::hide_filter(&s).await?;
+        let quality = crate::catalog::rpc::quality_filter(&s);
         let (v, did) = s
-            .db_write(move |c| super::update(c, &a.id, a.name.as_deref(), a.on_dashboard, hide))
+            .db_write(move |c| {
+                super::update(c, &a.id, a.name.as_deref(), a.on_dashboard, hide, quality)
+            })
             .await?;
         if did {
             changed(&s);
@@ -152,7 +158,10 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("lists.items", |s: S, a: IdArgs| async move {
         let hide = crate::parental::hide_filter(&s).await?;
-        let v = s.db_call(move |c| super::items(c, &a.id, hide)).await?;
+        let quality = crate::catalog::rpc::quality_filter(&s);
+        let v = s
+            .db_call(move |c| super::items(c, &a.id, hide, quality))
+            .await?;
         Ok::<Vec<CustomListEntry>, RpcError>(v)
     });
     r.add("lists.addItems", |s: S, a: AddItemsArgs| async move {
@@ -187,8 +196,9 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("lists.neighbors", |s: S, a: NeighborsArgs| async move {
         let hide = crate::parental::hide_filter(&s).await?;
+        let quality = crate::catalog::rpc::quality_filter(&s);
         let (prev, next) = s
-            .db_call(move |c| super::neighbors(c, &a.id, &a.item_ref, hide))
+            .db_call(move |c| super::neighbors(c, &a.id, &a.item_ref, hide, quality))
             .await?;
         Ok::<_, RpcError>(NeighborsResult { prev, next })
     });

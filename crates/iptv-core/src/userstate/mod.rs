@@ -19,6 +19,7 @@ pub mod rpc;
 // vod: watched lookups for posters and "Hide watched" (Run 2 C4).
 pub mod watched;
 
+use crate::catalog::quality::QualityFilter;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
     ContentType, FavoriteEntry, ItemRef, ItemSnapshot, PlaybackPosition, RecentEntry,
@@ -176,6 +177,21 @@ fn map_fk(err: rusqlite::Error, source_id: &str) -> CoreError {
     CoreError::Db(err)
 }
 
+/// ` AND` clause over a ref alias `a` (favorites, recent, custom list
+/// items) that drops a live entry whose catalog channel the Live TV
+/// quality filter hides ([`crate::catalog::quality`]): one primary-key
+/// probe per live entry. An entry whose channel is gone from the catalog
+/// stays (it shows as unavailable), and radio entries are never filtered.
+/// Empty while the filter is off or keeps every channel.
+pub(crate) fn quality_by_ref(quality: Option<QualityFilter>, a: &str) -> String {
+    match quality.and_then(|f| f.condition("q")) {
+        Some(c) => format!(
+            " AND ({a}.content_type <> 'live' OR NOT EXISTS (SELECT 1 FROM items q WHERE q.source_id = {a}.source_id AND q.content_type = 'live' AND q.item_id = {a}.item_id AND NOT ({c})))"
+        ),
+        None => String::new(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Favorites
 // ---------------------------------------------------------------------------
@@ -186,24 +202,28 @@ pub fn favorites_list(
     conn: &Connection,
     source_id: Option<&str>,
 ) -> CoreResult<Vec<FavoriteEntry>> {
-    favorites_read(conn, source_id, None, false)
+    favorites_read(conn, source_id, None, None, false)
 }
 
 /// The `favorites.list` reader: [`favorites_list`] without the entries
-/// parental hide mode drops (`hide`) and without channels hidden by a
-/// channel edit, with custom channel names in the snapshot titles (C2).
+/// parental hide mode drops (`hide`), without channels hidden by a channel
+/// edit and without live channels the Live TV quality filter hides
+/// (`quality`, see [`quality_by_ref`]), with custom channel names in the
+/// snapshot titles (C2).
 pub fn favorites_list_filtered(
     conn: &Connection,
     source_id: Option<&str>,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<Vec<FavoriteEntry>> {
-    favorites_read(conn, source_id, hide, true)
+    favorites_read(conn, source_id, hide, quality, true)
 }
 
 fn favorites_read(
     conn: &Connection,
     source_id: Option<&str>,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
     edits: bool,
 ) -> CoreResult<Vec<FavoriteEntry>> {
     let locked = match hide {
@@ -215,9 +235,10 @@ fn favorites_read(
     } else {
         String::new()
     };
+    let shown = quality_by_ref(quality, "f");
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT f.source_id, f.content_type, f.item_id, f.added_at, f.position, f.snapshot_json
-         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){locked}{edited}
+         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){locked}{edited}{shown}
          ORDER BY f.position ASC, f.added_at ASC, f.rowid ASC"
     ))?;
     let rows = stmt.query_map(params![source_id], |row| {
@@ -362,15 +383,17 @@ pub fn favorites_contains(conn: &Connection, refs: &[ItemRef]) -> CoreResult<Vec
 
 /// Rewrites `position` so `refs` appear in the given order. With `source_id`,
 /// refs from other sources are ignored. Favorites `favorites.list` shows
-/// (under `hide`) but `refs` leaves out follow the listed ones in their
-/// previous order. Favorites it does not show (parental hide mode, a channel
-/// hidden by a channel edit) and `refs` leaves out keep their slots, as
-/// `lists.reorderItems` does, so they come back in place when shown again.
+/// (under `hide` and `quality`) but `refs` leaves out follow the listed ones
+/// in their previous order. Favorites it does not show (parental hide mode, a
+/// channel hidden by a channel edit, the Live TV quality filter) and `refs`
+/// leaves out keep their slots, as `lists.reorderItems` does, so they come
+/// back in place when shown again.
 pub fn favorites_reorder(
     conn: &mut Connection,
     source_id: Option<&str>,
     refs: &[ItemRef],
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<()> {
     use std::collections::HashSet;
     // IMMEDIATE: it reads before it writes, and a DEFERRED transaction
@@ -381,7 +404,7 @@ pub fn favorites_reorder(
             .into_iter()
             .map(|f| f.item_ref)
             .collect();
-        let shown: HashSet<ItemRef> = favorites_list_filtered(&tx, source_id, hide)?
+        let shown: HashSet<ItemRef> = favorites_list_filtered(&tx, source_id, hide, quality)?
             .into_iter()
             .map(|f| f.item_ref)
             .collect();
@@ -433,19 +456,22 @@ pub fn recent_list(
     source_id: Option<&str>,
     limit: Option<i64>,
 ) -> CoreResult<Vec<RecentEntry>> {
-    recent_read(conn, source_id, limit, None, false)
+    recent_read(conn, source_id, limit, None, None, false)
 }
 
 /// The `recent.list` reader: [`recent_list`] without the entries parental
-/// hide mode drops (`hide`) and without channels hidden by a channel edit,
-/// with custom channel names in the snapshot titles (C2).
+/// hide mode drops (`hide`), without channels hidden by a channel edit and
+/// without live channels the Live TV quality filter hides (`quality`, see
+/// [`quality_by_ref`]), with custom channel names in the snapshot titles
+/// (C2).
 pub fn recent_list_filtered(
     conn: &Connection,
     source_id: Option<&str>,
     limit: Option<i64>,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<Vec<RecentEntry>> {
-    recent_read(conn, source_id, limit, hide, true)
+    recent_read(conn, source_id, limit, hide, quality, true)
 }
 
 fn recent_read(
@@ -453,6 +479,7 @@ fn recent_read(
     source_id: Option<&str>,
     limit: Option<i64>,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
     edits: bool,
 ) -> CoreResult<Vec<RecentEntry>> {
     let limit = limit
@@ -467,9 +494,10 @@ fn recent_read(
     } else {
         String::new()
     };
+    let shown = quality_by_ref(quality, "r");
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT r.source_id, r.content_type, r.item_id, r.viewed_at, r.snapshot_json
-         FROM recent r WHERE (?1 IS NULL OR r.source_id = ?1){locked}{edited}
+         FROM recent r WHERE (?1 IS NULL OR r.source_id = ?1){locked}{edited}{shown}
          ORDER BY r.viewed_at DESC, r.rowid DESC LIMIT ?2"
     ))?;
     let rows = stmt.query_map(params![source_id, limit], |row| {
@@ -1007,7 +1035,14 @@ mod tests {
             .map(|f| f.item_ref.item_id)
             .collect();
         assert_eq!(ids, ["a", "b", "c"]);
-        favorites_reorder(&mut c, Some("s1"), &[r("s1", "c"), r("s1", "a")], None).unwrap();
+        favorites_reorder(
+            &mut c,
+            Some("s1"),
+            &[r("s1", "c"), r("s1", "a")],
+            None,
+            None,
+        )
+        .unwrap();
         let ids: Vec<_> = favorites_list(&c, Some("s1"))
             .unwrap()
             .into_iter()

@@ -15,8 +15,12 @@
 //!
 //! Channels in categories the user hid, and channels hidden with a channel
 //! edit (Run 2 C2), are never candidates, like every other catalog read.
-//! Matching uses provider names; the RPC shows custom names
-//! ([`rpc::alternates`]).
+//! While the Live TV quality filter is on, neither are the live channels it
+//! hides: [`QualityFilter::keeps`] on the candidate's signature quality,
+//! which is the [`matcher::quality`] the catalog stores
+//! ([`crate::catalog::quality`]). The channel itself may fail the filter;
+//! radio is never filtered. Matching uses provider names; the RPC shows
+//! custom names ([`rpc::alternates`]).
 //!
 //! Order: same quality tier as the channel first, then source order
 //! (`sources.position`), then playlist order.
@@ -24,6 +28,7 @@
 pub mod matcher;
 pub mod rpc;
 
+use crate::catalog::quality::QualityFilter;
 use crate::catalog::{read_named, NamedRow, SELECT_NAMED};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{Channel, ContentType, ItemRef, SourceKind};
@@ -76,8 +81,14 @@ struct SourceInfo {
     position: i64,
 }
 
-/// Alternates for a live or radio channel, best first.
-pub fn alternates(conn: &Connection, r: &ItemRef) -> CoreResult<Alternates> {
+/// Alternates for a live or radio channel, best first. `quality` is the Live
+/// TV quality filter (`catalog::rpc::quality_filter`); it drops the
+/// candidates of a live channel it hides, never the channel itself.
+pub fn alternates(
+    conn: &Connection,
+    r: &ItemRef,
+    quality: Option<QualityFilter>,
+) -> CoreResult<Alternates> {
     if !matches!(r.content_type, ContentType::Live | ContentType::Radio) {
         return Err(CoreError::Invalid(
             "live.alternates supports live and radio channels".into(),
@@ -135,14 +146,17 @@ pub fn alternates(conn: &Connection, r: &ItemRef) -> CoreResult<Alternates> {
     }
 
     let sources = source_infos(conn)?;
+    // Radio has no picture quality to filter on.
+    let quality = quality.filter(|_| r.content_type == ContentType::Live);
     let mut list: Vec<(NamedRow, Signature, MatchKind)> = found
         .into_values()
-        .filter(|(row, _, _)| {
+        .filter(|(row, cand, _)| {
             let n = &row.row;
             let itself = n.source_id == r.source_id && n.item_id == r.item_id;
             // The same URL again would fail the same way.
             let same_url = n.url.is_some() && n.url == original.url;
-            !itself && !same_url && sources.contains_key(&n.source_id)
+            let kept = quality.is_none_or(|f| f.keeps(cand.quality));
+            !itself && !same_url && kept && sources.contains_key(&n.source_id)
         })
         .collect();
     list.sort_by_key(|(row, cand, _)| {

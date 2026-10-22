@@ -36,6 +36,7 @@ use super::ingest::EpgRuntime;
 use super::resolve::{self, ChannelDirectory};
 use super::store::STAGING_ORIGIN;
 use super::{query, runtime};
+use crate::catalog::quality::QualityFilter;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgProgram, ItemRef};
 use crate::parental::Hide;
@@ -456,14 +457,16 @@ pub const CHANNELS_SQL: &str = "SELECT i.rowid, i.title, i.epg_channel_id, i.num
 /// manual mapping (`NULL` = none), then `items.epg_channel_id` (known to
 /// the guide, case-insensitive, or with programmes), then the exact
 /// normalized name. Channels hidden by a channel edit are left out, and so,
-/// while hide mode is on, are locked and adult channels: in SQL, so they
-/// never take a candidate slot from a visible channel.
+/// while hide mode is on, are locked and adult channels, and with `quality`
+/// the live channels the Live TV quality filter hides: in SQL, so they never
+/// take a candidate slot from a visible channel.
 fn source_channels(
     conn: &Connection,
     rt: &EpgRuntime,
     dir: &ChannelDirectory,
     source_id: &str,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
 ) -> CoreResult<SourceChannels> {
     let mut memo = SearchMemo::take(rt, dir.generation());
     let mut out = SourceChannels::default();
@@ -491,6 +494,11 @@ fn source_channels(
                 "?1",
                 "?2",
             )?);
+        }
+        // `quality` is the last column of idx_items_guide: the scan stays
+        // index-only. Radio is never filtered.
+        if content_type == ContentType::Live {
+            sql.push_str(&crate::catalog::quality::live_clause(quality, "i"));
         }
         let mut stmt = conn.prepare_cached(&sql)?;
         let mut rows = stmt.query(params![source_id, content_type.as_str()])?;
@@ -611,6 +619,7 @@ fn candidates(
     dir: &ChannelDirectory,
     q: &Query,
     hide: Option<Hide>,
+    quality: Option<QualityFilter>,
     source_secs: i64,
 ) -> CoreResult<(Vec<Candidate>, bool)> {
     let want = q.limit;
@@ -627,7 +636,7 @@ fn candidates(
             return Ok((Vec::new(), true));
         };
         let feeds = search_feeds(conn)?;
-        let channels = source_channels(conn, rt, dir, &q.source_id, hide)?;
+        let channels = source_channels(conn, rt, dir, &q.source_id, hide, quality)?;
         let hit = |r: &rusqlite::Row<'_>| -> CoreResult<Option<Hit>> {
             let feed: i64 = r.get(4)?;
             if !feeds.contains(&feed) {
@@ -650,7 +659,7 @@ fn candidates(
         }
         channels
     } else {
-        let channels = source_channels(conn, rt, dir, &q.source_id, hide)?;
+        let channels = source_channels(conn, rt, dir, &q.source_id, hide, quality)?;
         if channels.guides.is_empty() {
             return Ok((Vec::new(), false));
         }
@@ -848,8 +857,10 @@ fn ensure_source(conn: &Connection, source_id: &str) -> CoreResult<()> {
 /// channel number.
 pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<GuideSearchHit>> {
     let q = validate(req, chrono::Utc::now().timestamp())?;
-    // Hide mode drops locked and adult channels in the channel query itself.
+    // Hide mode drops locked and adult channels in the channel query itself,
+    // and the Live TV quality filter the live channels it hides.
     let hide = crate::parental::hide_filter(state).await?;
+    let quality = crate::catalog::rpc::quality_filter(state);
     let rt = runtime(state);
     let started = std::time::Instant::now();
     let (hits, used_index) = state
@@ -860,7 +871,7 @@ pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<Guid
             // statements cannot hand a hit's rowid to another programme.
             let tx = c.transaction()?;
             let source_secs = query::source_shift(&tx, &q.source_id)?;
-            let (found, used_index) = candidates(&tx, &rt, &dir, &q, hide, source_secs)?;
+            let (found, used_index) = candidates(&tx, &rt, &dir, &q, hide, quality, source_secs)?;
             let hits = finish(&tx, found)?;
             tx.commit()?;
             Ok((hits, used_index))

@@ -86,6 +86,7 @@ import { GuideUnavailableNotice } from './ChannelList';
 import { ContextMenu } from './ContextMenu';
 import { DigitOsd, type ZapFeedback } from './DigitOsd';
 import { ScopePicker, type PickerSection } from './ScopePicker';
+import { QualityEmptyState, useLiveQuality } from './QualityFilterButton';
 import { EpgMappingDialog } from './EpgMappingDialog';
 // recording:
 import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/features/recording';
@@ -458,6 +459,8 @@ export function EpgGridPage() {
   const viewPaged = useGuideViewChannels(view, sourceId);
   const paged = viewPaged ?? sourcePaged;
   const count = paged.total ?? 0;
+  // The Live TV quality filter applies here too; a guide it empties says so (Live sets it).
+  const quality = useLiveQuality();
 
   const shell = useShell();
   useEffect(() => {
@@ -1517,6 +1520,8 @@ export function EpgGridPage() {
             </div>
           ))}
         </div>
+      ) : count === 0 && quality.min !== null && source?.channelCount !== 0 ? (
+        <QualityEmptyState hideUntagged={quality.hideUntagged} onChange={quality.update} />
       ) : count === 0 && view ? (
         <EmptyState
           icon={<Tv className="size-8" />}

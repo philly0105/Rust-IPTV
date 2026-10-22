@@ -254,7 +254,8 @@ pub fn assert_items_rank(c: &rusqlite::Connection) {
              (SELECT count(*) FROM items i LEFT JOIN items_rank r ON r.id = i.rowid \
               WHERE r.id IS NULL OR r.source_id IS NOT i.source_id OR r.content_type IS NOT i.content_type \
               OR r.category_id IS NOT i.category_id OR r.non_english IS NOT i.non_english \
-              OR r.title_len IS NOT length(i.title) OR r.position IS NOT i.position)",
+              OR r.title_len IS NOT length(i.title) OR r.position IS NOT i.position \
+              OR r.quality IS NOT i.quality)",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )

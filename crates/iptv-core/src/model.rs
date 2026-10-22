@@ -5,6 +5,7 @@
 //! strings in UTC. This file is frozen after wave 0; additions go through the
 //! integration agent.
 
+use crate::live::matcher::Quality;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -1153,6 +1154,13 @@ pub struct Settings {
     /// whose title or category clearly marks another language. Items without
     /// a clear language stay (`catalog::language`).
     pub english_only: bool,
+    /// Live TV quality filter: live channels whose name marks a lower picture
+    /// quality leave every live list, count, search and zapping order
+    /// (`catalog::quality`); `null` = off. Radio is never filtered.
+    pub live_min_quality: Option<Quality>,
+    /// While `live_min_quality` is set, channels whose name carries no
+    /// quality tag are hidden too.
+    pub live_hide_untagged: bool,
     // failover:
     /// A live channel that fails switches to the same channel on another source.
     pub live_failover: bool,
@@ -1262,6 +1270,8 @@ impl Default for Settings {
             show_external_bar: true,
             vod_min_rating: 0.0,
             english_only: false,
+            live_min_quality: None,
+            live_hide_untagged: false,
             // failover:
             live_failover: true,
             stream_reconnect: true,
@@ -1965,6 +1975,38 @@ mod tests {
         }
     }
 
+    /// The Live TV quality filter: `liveMinQuality` is a lowercase quality or
+    /// `null` (off), always serialized so backups carry the off state too.
+    #[test]
+    fn live_quality_filter_wire_shape() {
+        let v = serde_json::to_value(Settings::default()).unwrap();
+        let min = v.get("liveMinQuality");
+        assert!(min.is_some_and(serde_json::Value::is_null), "{v}");
+        assert_eq!(v["liveHideUntagged"], false);
+        for (text, q) in [
+            ("sd", Quality::Sd),
+            ("hd", Quality::Hd),
+            ("fhd", Quality::Fhd),
+            ("uhd", Quality::Uhd),
+        ] {
+            let s: Settings =
+                serde_json::from_value(serde_json::json!({ "liveMinQuality": text })).unwrap();
+            assert_eq!(s.live_min_quality, Some(q));
+            let back = serde_json::to_value(&s).unwrap();
+            assert_eq!(back["liveMinQuality"], text);
+        }
+        for bad in [
+            serde_json::json!("8k"),
+            serde_json::json!("HD"),
+            serde_json::json!(3),
+            serde_json::json!(true),
+        ] {
+            let patch = serde_json::json!({ "liveMinQuality": bad });
+            let parsed = serde_json::from_value::<Settings>(patch);
+            assert!(parsed.is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn parental_and_watchlist_wire_shapes() {
         assert_eq!(
@@ -2268,6 +2310,12 @@ mod tests {
         assert_eq!(constant("UI_SCALE_MAX"), *range.end());
         assert_eq!(union("ParentalMode"), ["hide", "ask"]);
         assert_eq!(union("ParentalLockKind"), ["category", "item"]);
+        // Live TV quality filter: `liveMinQuality` is a `ChannelQuality`.
+        let qualities = [Quality::Sd, Quality::Hd, Quality::Fhd, Quality::Uhd];
+        assert_eq!(
+            serde_json::to_value(union("ChannelQuality")).unwrap(),
+            serde_json::to_value(qualities).unwrap()
+        );
         // subtitles:
         let names = |all: Vec<&str>| -> Vec<String> { all.into_iter().map(String::from).collect() };
         let sizes = names(SubtitleSize::ALL.iter().map(|v| v.as_str()).collect());

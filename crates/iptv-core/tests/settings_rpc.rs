@@ -146,6 +146,11 @@ async fn update_validates() {
         json!({"oledBlack": "yes"}),
         json!({"zapBanner": 0}),
         json!({"dashboardRails": {"myList": "no"}}),
+        // Live TV quality filter:
+        json!({"liveMinQuality": "8k"}),
+        json!({"liveMinQuality": "FHD"}),
+        json!({"liveMinQuality": 3}),
+        json!({"liveHideUntagged": "yes"}),
     ] {
         let err = call(&r, &s, "settings.update", json!({ "patch": patch.clone() }))
             .await
@@ -452,6 +457,79 @@ async fn appearance_fields_update_persist_and_reset() {
     assert_eq!(reset["accent"], "amber");
     assert_eq!(reset["uiScale"], 1.0);
     assert_eq!(reset["dashboardRails"]["myList"], true);
+}
+
+/// The Live TV quality filter (`liveMinQuality`, `liveHideUntagged`):
+/// defaults, update over RPC in server mode (the Live TV page sets it),
+/// `null` turns it off, persistence, older JSON and reset.
+#[tokio::test]
+async fn live_quality_filter_fields_update_persist_and_reset() {
+    use iptv_core::live::matcher::Quality;
+    let dir = tempfile::tempdir().unwrap();
+    let r = router();
+    {
+        let (s, mut rx) = app(dir.path()).await;
+        let got = call(&r, &s, "settings.get", Value::Null).await.unwrap();
+        assert!(
+            got.get("liveMinQuality").is_some_and(Value::is_null),
+            "{got}"
+        );
+        assert_eq!(got["liveHideUntagged"], false);
+
+        for q in ["sd", "hd", "fhd", "uhd"] {
+            let got = call(
+                &r,
+                &s,
+                "settings.update",
+                json!({"patch": {"liveMinQuality": q}}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(got["liveMinQuality"], q);
+        }
+        let got = call(
+            &r,
+            &s,
+            "settings.update",
+            json!({"patch": {"liveMinQuality": "fhd", "liveHideUntagged": true}}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(got["liveMinQuality"], "fhd");
+        assert_eq!(got["liveHideUntagged"], true);
+        let events = changed_events(&mut rx);
+        assert_eq!(events.len(), 5, "one settings.changed per change");
+        assert_eq!(events[4]["liveMinQuality"], "fhd");
+        assert_eq!(events[4]["liveHideUntagged"], true);
+    }
+    // Persisted across a restart.
+    let (s, mut rx) = app(dir.path()).await;
+    let snap = s.settings_snapshot();
+    assert_eq!(snap.live_min_quality, Some(Quality::Fhd));
+    assert!(snap.live_hide_untagged);
+
+    // `null` turns the filter off and keeps the toggle.
+    let got = call(
+        &r,
+        &s,
+        "settings.update",
+        json!({"patch": {"liveMinQuality": null}}),
+    )
+    .await
+    .unwrap();
+    assert!(got["liveMinQuality"].is_null(), "{got}");
+    assert_eq!(got["liveHideUntagged"], true);
+    assert_eq!(changed_events(&mut rx).len(), 1);
+
+    // Older stored JSON without the keys reads with the filter off.
+    let old: iptv_core::model::Settings =
+        serde_json::from_value(json!({"language": "de"})).unwrap();
+    assert_eq!(old.live_min_quality, None);
+    assert!(!old.live_hide_untagged);
+
+    let reset = call(&r, &s, "settings.reset", Value::Null).await.unwrap();
+    assert!(reset["liveMinQuality"].is_null(), "{reset}");
+    assert_eq!(reset["liveHideUntagged"], false);
 }
 
 #[tokio::test]

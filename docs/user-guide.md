@@ -73,6 +73,14 @@ Removing a source hides it and shows an Undo toast. The source is deleted 8 seco
 
 Right-click a live channel and choose "Rename…" (F2 on the focused channel) or "Hide channel" (Shift+Delete). A renamed channel shows its new name everywhere, and "Reset name" goes back to the provider's. A hidden channel leaves the channel list, search, the guide and zapping; "Hidden channels" under the group list shows them and brings them back, and its "Reset all edits" gives every channel of the source its provider's name back and unhides everything. The provider's catalog is never changed, so edits survive refreshes.
 
+### Filtering by quality
+
+The Channel quality button (an HD icon) at the end of the channel list's toolbar, after the search field, hides channels below a picture quality. Pick "Any quality" (the default), "HD (720p) and up", "Full HD (1080p) and up" or "4K only". The button is filled while a minimum is set.
+
+The quality comes from the channel name your provider gives: SD, 480p or 576p count as SD; HD or 720p as HD; FHD, Full HD or 1080p as Full HD; UHD, Ultra HD, 4K, 8K or 2160p as 4K. When a name has several, the highest counts. A name you gave a channel with Rename does not change its quality. Channels whose name has no quality tag still show. To hide them too, turn on "Hide channels with no quality tag" in the same panel; it works only while a minimum is set. Radio stations have no picture and are never filtered, so the Radio page has no quality button.
+
+The filter applies wherever live channels appear: the channel list and the group counts (a group it empties disappears from the group list), the TV guide, search (channels and the guide's programme search), Page Up and Page Down, typing a channel number, Favorites, Recently watched, custom lists, the phone remote, and the alternate sources the player switches to when a channel fails. Favorites and list entries it hides are not removed; they come back when you change the filter. When the filter leaves a list or the guide empty, it says so and offers "Show all qualities", and "Show untagged channels" while untagged channels are hidden.
+
 ## TV guide
 
 - The time window is part of the URL, so Back and Forward step through it and a link opens the same window. T, or the window label, jumps to a date and time.

@@ -15,6 +15,7 @@ Work after the 0.2.0 notes were written: the redesign, fixes that followed the O
 - A Docker Compose setup in `deploy/` that puts Caddy in front of the server for HTTPS and a password.
 - CI checks for dependency advisories and licences (cargo-deny), the minimum Rust version, the Docker image, the desktop release build, and the Playwright suite.
 - A user guide, a contributing guide and a security policy.
+- A quality filter for live TV: the button next to the channel search hides channels whose name marks a lower quality than the one you pick (HD, Full HD or 4K), and can hide channels with no quality in their name too. The guide, search, zapping, number entry, favorites, recently watched, custom lists and the phone remote follow it. Radio is never filtered.
 
 ### Changed
 

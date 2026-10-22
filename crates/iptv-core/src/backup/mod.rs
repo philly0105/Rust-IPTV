@@ -84,7 +84,7 @@ pub const EXT_PARENTAL_SETTINGS: &str = "tsrustParental";
 /// `epgUrls` (a Tsrust extension; IPTVnator ignores unknown keys). Every
 /// other settings field is in [`APP_SETTING_EXCLUDED`] with its reason; a
 /// test fails for a field in neither list.
-pub const APP_SETTING_KEYS: [&str; 39] = [
+pub const APP_SETTING_KEYS: [&str; 41] = [
     // general:
     "language",
     "theme",
@@ -108,6 +108,8 @@ pub const APP_SETTING_KEYS: [&str; 39] = [
     "showExternalBar",
     "vodMinRating",
     "englishOnly",
+    "liveMinQuality",
+    "liveHideUntagged",
     // account:
     "sourceRefreshIntervalHours",
     "accountExpiryWarnDays",

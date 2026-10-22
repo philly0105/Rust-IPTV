@@ -1392,6 +1392,7 @@ async fn parental_locks_and_english_only_count_a_hidden_channel_once() {
                     ContentType::Live,
                     false,
                     english,
+                    None,
                     hide,
                 )
             })
@@ -1412,6 +1413,97 @@ async fn parental_locks_and_english_only_count_a_hidden_channel_once() {
     assert_eq!(page["total"], 4);
     let v = a.call("catalog.search", json!({"query": "CNN"})).await;
     assert!(ids(&v["live"]).is_empty());
+}
+
+/// The Live TV quality filter with parental locks and hidden channels: a
+/// locked channel the filter already drops is not taken out of its group's
+/// count again, also when it is hidden too (`locked_item_counts` and
+/// `locked_hidden_counts` test the filter as well).
+#[tokio::test]
+async fn parental_locks_and_the_quality_filter_count_a_channel_once() {
+    use iptv_core::catalog::quality::QualityFilter;
+    use iptv_core::live::matcher::Quality;
+
+    let a = app().await;
+    // The fixture writes past the catalog writer, so the codes are stored
+    // here. News: 101 HD and locked, 102 SD, locked and hidden, 103 untagged
+    // (still -1, which readers take as untagged).
+    a.state
+        .db_call(|c| {
+            let rows = [("101", "BBC One HD", 2), ("102", "CNN SD", 1)];
+            for (id, title, code) in rows {
+                c.execute(
+                    "UPDATE items SET title = ?2, quality = ?3 WHERE source_id = 's1' AND content_type = 'live' AND item_id = ?1",
+                    params![id, title, code],
+                )?;
+                c.execute(
+                    "INSERT INTO parental_locks(source_id, content_type, kind, target_id, name, created_at)
+                     VALUES ('s1', 'live', 'item', ?1, ?2, CURRENT_TIMESTAMP)",
+                    params![id, title],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    a.call(
+        "channels.setHidden",
+        json!({"refs": [live("s1", "102")], "hidden": true}),
+    )
+    .await;
+    let hide = Some(iptv_core::parental::Hide { auto_adult: false });
+    let groups = |min: Quality, untagged: bool| {
+        let quality = Some(QualityFilter {
+            min,
+            hide_untagged: untagged,
+        });
+        let state = a.state.clone();
+        async move {
+            let all = state
+                .db_call(move |c| {
+                    iptv_core::catalog::visible_categories(
+                        c,
+                        "s1",
+                        ContentType::Live,
+                        false,
+                        false,
+                        quality,
+                        hide,
+                    )
+                })
+                .await
+                .unwrap();
+            all.into_iter()
+                .map(|c| (c.id, c.item_count))
+                .collect::<Vec<_>>()
+        }
+    };
+    // HD and up: News counts 103 only. 101 leaves through its lock; 102 is
+    // in neither the count nor the locks the filter keeps, so the hidden
+    // and locked overlap must not add it back.
+    assert_eq!(
+        groups(Quality::Hd, false).await,
+        counts(&[("news", 1), ("sport", 1), ("solo", 1)])
+    );
+    // Full HD and up: 101 and 102 are dropped by the filter, so neither
+    // lock takes anything out of News again.
+    assert_eq!(
+        groups(Quality::Fhd, false).await,
+        counts(&[("news", 1), ("sport", 1), ("solo", 1)])
+    );
+    // HD and up without untagged channels: the lock on 101 empties News, and
+    // the filter empties the other groups.
+    assert!(groups(Quality::Hd, true).await.is_empty());
+
+    // The rpc without hide mode: News keeps 101 and 103.
+    a.call("settings.update", json!({"patch": {"liveMinQuality": "hd"}}))
+        .await;
+    assert_eq!(
+        a.category_counts(false).await,
+        counts(&[("news", 2), ("sport", 1), ("solo", 1)])
+    );
+    let page = a.call("catalog.channels", json!({"sourceId": "s1"})).await;
+    assert_eq!(page["total"], 4);
 }
 
 // ---------------------------------------------------------------------------

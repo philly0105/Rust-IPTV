@@ -2,7 +2,7 @@ import { act, cleanup } from '@testing-library/react';
 import { Outlet } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { queryClient, rpcKey } from '@/api/query';
+import { queryClient, rpcKey, type RpcCommand } from '@/api/query';
 import type { AppEvent, Settings } from '@/api/types';
 import { useToastStore } from '@/ui';
 
@@ -109,6 +109,64 @@ describe('settings.changed: refresh interval', () => {
 
     emit('settings.changed', settings({ sourceRefreshIntervalHours: 0 }));
     expect(scheduleInvalidated()).toBe(true);
+  });
+});
+
+describe('settings.changed: live quality filter', () => {
+  const FILTERED = ['catalog.channels', 'favorites.list', 'recent.list', 'lists.items', 'epg.search', 'live.alternates'] as const;
+  const stale = (cmd: RpcCommand) => queryClient.getQueryState(rpcKey(cmd))?.isInvalidated ?? false;
+  const seed = () => {
+    for (const cmd of [...FILTERED, 'epg.grid'] as const) queryClient.setQueryData(rpcKey(cmd), {});
+  };
+
+  it('refetches every list the core filters when the minimum or the untagged toggle changes', async () => {
+    mount();
+    queryClient.setQueryData(rpcKey('settings.get'), settings());
+    seed();
+
+    emit('settings.changed', settings({ liveMinQuality: 'fhd' }));
+    for (const cmd of FILTERED) await vi.waitFor(() => expect(stale(cmd), cmd).toBe(true));
+    // epg.search is matched exactly: the guide windows stay.
+    expect(stale('epg.grid')).toBe(false);
+
+    seed();
+    emit('settings.changed', settings({ liveMinQuality: 'fhd', liveHideUntagged: true }));
+    await vi.waitFor(() => expect(stale('catalog.channels')).toBe(true));
+  });
+
+  it('still refetches after the optimistic cache write of the new value', async () => {
+    mount();
+    queryClient.setQueryData(rpcKey('settings.get'), settings());
+    seed();
+
+    // useUpdateSettings writes the cache first; the core's echo follows.
+    queryClient.setQueryData(rpcKey('settings.get'), settings({ liveMinQuality: 'hd' }));
+    emit('settings.changed', settings({ liveMinQuality: 'hd' }));
+    await vi.waitFor(() => expect(stale('catalog.channels')).toBe(true));
+
+    seed();
+    queryClient.setQueryData(rpcKey('settings.get'), settings({ liveMinQuality: null }));
+    emit('settings.changed', settings({ liveMinQuality: null }));
+    await vi.waitFor(() => expect(stale('favorites.list')).toBe(true));
+  });
+
+  it('takes the first value as the baseline and ignores a lastRoute write', () => {
+    mount();
+    seed();
+
+    // Before settings load: the first event is the baseline, even with a minimum set.
+    emit('settings.changed', settings({ liveMinQuality: 'uhd' }));
+    emit('settings.changed', settings({ liveMinQuality: 'uhd', lastRoute: '/live' }));
+    expect(FILTERED.filter(stale)).toEqual([]);
+  });
+
+  it('ignores the untagged toggle while no minimum is set', () => {
+    mount();
+    queryClient.setQueryData(rpcKey('settings.get'), settings());
+    seed();
+
+    emit('settings.changed', settings({ liveHideUntagged: true }));
+    expect(FILTERED.filter(stale)).toEqual([]);
   });
 });
 

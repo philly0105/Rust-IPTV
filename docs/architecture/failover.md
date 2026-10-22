@@ -70,7 +70,7 @@ Numbers stay in the key, so "Sky Sports 1" and "Sky Sports 2" (and "Sky Sports 1
 1. By guide id: the manual mapping in `epg_channel_map` if there is one, else the item's `epg_channel_id`, looked up through `idx_items_epg` (and the map). Placeholder ids (`none`, `0`, `-`) and ids shared by more than 200 channels are ignored. A guide-id match must still agree on timeshift and region.
 2. By name: an FTS5 phrase query on the key's words (`items_fts`), at most 2000 rows, each then compared by its full signature.
 
-The item itself, any copy with the very same URL and channels in hidden categories are dropped. Order: same quality tier as the playing copy first, then source order, then playlist order; at most 50. Live and radio only (Invalid otherwise; NotFound for an unknown item). No migration: the existing indexes are enough. Works in server mode (the server dispatches every router command).
+The item itself, any copy with the very same URL and channels in hidden categories are dropped. While the Live TV quality filter is on (`liveMinQuality`), so are live candidates whose quality it hides (`QualityFilter::keeps` on the signature's quality, the same rule the catalog stores; catalog.md). The playing channel may itself fail the filter; its alternates are still looked up. Radio is never filtered. Order: same quality tier as the playing copy first, then source order, then playlist order; at most 50. Live and radio only (Invalid otherwise; NotFound for an unknown item). No migration: the existing indexes are enough. Works in server mode (the server dispatches every router command).
 
 ## Tests
 

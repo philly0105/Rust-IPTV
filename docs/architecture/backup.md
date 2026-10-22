@@ -88,10 +88,10 @@ Without `path`, `backup.export` returns the manifest as `json` (serialized on th
 
 A UI that gets a non-empty `json` back (a core that predates `path`) falls back to the download.
 
-`settings` always carries `epgUrls` (possibly empty; IPTVnator reads it unconditionally), the 39 app-level preferences in `backup::APP_SETTING_KEYS`, and `tsrustParental` (above). The keys, in the groups the code lists them:
+`settings` always carries `epgUrls` (possibly empty; IPTVnator reads it unconditionally), the 41 app-level preferences in `backup::APP_SETTING_KEYS`, and `tsrustParental` (above). The keys, in the groups the code lists them:
 
 - general: `language`, `theme`, `showDashboard`, `dashboardRails`, `startupBehavior`, `openStreamOnDoubleClick`, `showCaptions`, `coverSize`, `epgViewMode`;
-- player: `streamFormat`, `playerAmbientMode`, `playerAutoplayNextEpisode`, `playerUpNextRail`, `fullscreenChannelPanel`, `vodAutoFailover`, `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`;
+- player: `streamFormat`, `playerAmbientMode`, `playerAutoplayNextEpisode`, `playerUpNextRail`, `fullscreenChannelPanel`, `vodAutoFailover`, `stripCountryPrefix`, `epgOffsetMinutes`, `playerReuseInstance`, `showExternalBar`, `vodMinRating`, `englishOnly`, `liveMinQuality`, `liveHideUntagged`;
 - account: `sourceRefreshIntervalHours`, `accountExpiryWarnDays`;
 - guide: `epgShortFallback`;
 - recording: `recordingPaddingBeforeMinutes`, `recordingPaddingAfterMinutes`, `remindersEnabled`, `reminderLeadMinutes`, `reminderAction`;

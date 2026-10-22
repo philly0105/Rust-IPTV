@@ -6,7 +6,7 @@ import { channelButton, gotoLive, openAllTitlesGrid, playerRegion } from './ui';
 
 /** Steps shared by the Xtream and Stalker flows (check 6). */
 
-/** Opens the live view, plays the first channel and waits for HLS playback. */
+/** Opens the live view, plays the first channel and waits for playback. */
 export async function playFirstLiveChannel(page: Page, sourceId: string, channel = 'BBC One'): Promise<void> {
   await gotoLive(page, sourceId);
   for (const g of ['News', 'Sports', 'Entertainment']) {

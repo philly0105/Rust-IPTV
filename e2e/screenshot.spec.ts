@@ -11,10 +11,11 @@ import { openMovieFromGrid, playFirstLiveChannel, playMovieOnDetail } from './he
 import { blurFocus, playerRegion } from './helpers/ui';
 
 // C6 in server mode: a screenshot of the built-in player downloads as a PNG named after what
-// plays, and the toast says "Saved to your downloads". Live HLS plays through hls.js (MSE), so
-// its frames can be copied; a direct MP4 from the mock's origin taints the canvas, and the
-// failure toast names CORS. The desktop save path (`screenshot.save`, `screenshot.mpv`) is
-// covered by crates/iptv-core/tests/screenshot.rs and the vitest suites.
+// plays, and the toast says "Saved to your downloads". Live TV plays through MSE (mpegts.js on
+// the Xtream `.ts` the Auto format picks, hls.js on HLS), so its frames can be copied; a direct
+// MP4 from the mock's origin taints the canvas, and the failure toast names CORS. The desktop
+// save path (`screenshot.save`, `screenshot.mpv`) is covered by
+// crates/iptv-core/tests/screenshot.rs and the vitest suites.
 
 const NAME = 'Screenshot Xtream';
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];

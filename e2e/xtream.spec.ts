@@ -2,6 +2,7 @@ import type { Source } from '../src/api/types';
 import { resetApp } from './helpers/api';
 import { MOCK_FACTS } from './helpers/env';
 import { expect, test } from './helpers/fixtures';
+import { resumeRecord } from './helpers/media';
 import { favoriteFromDetail, openCatchup, openMovieFromGrid, playFirstEpisode, playFirstLiveChannel, playMovieOnDetail, searchFindsMovie } from './helpers/portal';
 import { addXtream, expectCardStat } from './helpers/ui';
 
@@ -32,6 +33,8 @@ test.describe.serial('xtream flow', () => {
 
   test('live: browse groups and play a channel', async ({ page }) => {
     await playFirstLiveChannel(page, source.id);
+    // Auto, the default stream format, asks for the channel's MPEG-TS: this browser has MSE with H.264.
+    expect((await resumeRecord(page))?.source.url).toMatch(/\/xtream\/live\/demo\/secret\/101\.ts$/);
   });
 
   test('live: catch-up opens a timeshift source', async ({ page }) => {

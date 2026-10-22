@@ -22,8 +22,14 @@ import { toast, errorDescription } from '@/ui';
 /** Query key of `parental.status`. */
 export const STATUS_KEY = rpcKey('parental.status');
 
-/** How long a cached status is trusted without an event (events keep it current). */
-export const STATUS_STALE_MS = 30_000;
+/**
+ * How long a cached status is trusted without an event: always, like `settings.get`. The core
+ * sends `parental.changed` for every change, a timed unlock running out included (its timer, and
+ * the lazy check on every catalog call); the shell asks again at that deadline in case the event
+ * was missed, and a reconnect after the event stream dropped refetches every query. With 30 s,
+ * the player's lock checks (`currentStatus`) waited a round trip on the first zap after a pause.
+ */
+export const STATUS_STALE_MS = Infinity;
 
 /**
  * Reads the core filters in Hide mode (C2), refreshed when that filter

@@ -35,6 +35,7 @@ import type {
   RemoteStatus,
   RequestHeaders,
   RpcErrorCode,
+  RpcErrorPayload,
   SeriesDetail,
   SeriesItem,
   Settings,
@@ -136,6 +137,12 @@ export interface CatalogSearchResult {
   movies: VodItem[];
   series: SeriesItem[];
 }
+
+/**
+ * One answer of `catalog.items`, in the order of its refs: what `catalog.item` returns for the ref,
+ * or the error it fails with (`not_found`, with `details.parentalLocked` for an item Hide mode locks).
+ */
+export type CatalogItemAnswer = { item: Channel | VodItem | SeriesItem } | { error: RpcErrorPayload };
 
 export interface XtreamAccountInfo {
   status: string;
@@ -382,6 +389,8 @@ export interface RpcMap {
    * not_found with `details: { parentalLocked: true }` (still in the catalog; see `isParentalLocked`).
    */
   'catalog.item': Cmd<{ ref: ItemRef }, Channel | VodItem | SeriesItem>;
+  /** `catalog.item` for up to 500 refs in one call (more -> invalid): one answer per ref, in order. */
+  'catalog.items': Cmd<{ refs: ItemRef[] }, CatalogItemAnswer[]>;
   'catalog.channelByNumber': Cmd<{ sourceId: string; number: number; contentType?: 'live' | 'radio' }, Channel | null>;
   /** Channel up/down inside the current list. */
   'catalog.neighbors': Cmd<{ ref: ItemRef; categoryId?: string }, { prev?: Channel; next?: Channel }>;
@@ -785,6 +794,7 @@ export const RPC_COMMANDS = [
   'catalog.movies',
   'catalog.series',
   'catalog.item',
+  'catalog.items',
   'catalog.channelByNumber',
   'catalog.neighbors',
   'catalog.search',

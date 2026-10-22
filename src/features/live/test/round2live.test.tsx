@@ -64,7 +64,7 @@ afterEach(() => {
 const callsOf = (cmd: string) => rpcMock.calls.filter((c) => c.cmd === cmd).map((c) => c.args);
 
 describe('channel pickers in Favorites (useChannelBrowse)', () => {
-  it('asks the guide once for the page of favourites, however the catalog answers trickle in', async () => {
+  it('asks the guide once for the page of favourites, before their channels arrive, and the channels in one call', async () => {
     const favs: FavoriteEntry[] = Array.from({ length: 60 }, (_, i) => ({
       ref: makeChannel(i).ref,
       position: i,
@@ -72,12 +72,12 @@ describe('channel pickers in Favorites (useChannelBrowse)', () => {
       snapshot: { title: `Channel ${i}`, contentType: 'live' },
     })) as FavoriteEntry[];
     rpcMock.handlers['favorites.list'] = () => favs;
-    // catalog.item answers in ten waves of six.
+    // The channels' answer is held back until the guide has been asked.
     const waits: (() => void)[] = [];
-    rpcMock.handlers['catalog.item'] = (a) =>
+    rpcMock.handlers['catalog.items'] = (a) =>
       new Promise((resolve) => {
-        const ref = (a as { ref: ItemRef }).ref;
-        waits.push(() => resolve(makeChannel(Number(ref.itemId.slice(1)))));
+        const refs = (a as { refs: ItemRef[] }).refs;
+        waits.push(() => resolve(refs.map((ref) => ({ item: makeChannel(Number(ref.itemId.slice(1))) }))));
       });
     rpcMock.handlers['epg.nowNext'] = () => ({});
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -87,13 +87,12 @@ describe('channel pickers in Favorites (useChannelBrowse)', () => {
       </QueryClientProvider>
     );
     const { result } = renderHook(() => useChannelBrowse({ enabled: true, sourceId: 'src1', scope: SCOPE_FAVORITES, query: '', limit: 60 }), { wrapper });
-    await waitFor(() => expect(waits.length).toBe(60));
-    for (let wave = 0; wave < 10; wave++) {
-      await act(async () => {
-        for (const w of waits.splice(0, 6)) w();
-        await new Promise((r) => setTimeout(r, 10));
-      });
-    }
+    await waitFor(() => expect(callsOf('epg.nowNext')).toHaveLength(1));
+    // One catalog.items for the sixty rows, where each row used to send its own catalog.item.
+    expect(waits).toHaveLength(1);
+    expect((callsOf('catalog.items')[0] as { refs: ItemRef[] }).refs).toHaveLength(60);
+    expect(callsOf('catalog.item')).toHaveLength(0);
+    await act(async () => waits[0]!());
     await waitFor(() => expect(result.current.channels).toHaveLength(60));
     const asked = callsOf('epg.nowNext') as { refs: ItemRef[] }[];
     expect(asked).toHaveLength(1);

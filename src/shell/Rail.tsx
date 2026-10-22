@@ -11,6 +11,7 @@ import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/
 import { useOffline } from './connection';
 import { LIBRARY_LINKS, WATCH_LINKS, type NavLinkDef } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
+import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
@@ -45,9 +46,12 @@ function RailNavLink({
 }: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour'> & { collapsed: boolean; dim?: boolean; tour?: string }) {
   const { t } = useTranslation('shell');
   const label = t(labelKey);
+  // A rest on the link starts the page's code and first data.
+  const intent = useRouteIntent(to);
   return (
     <Tooltip content={collapsed ? label : null} side="inline-end" describe={false}>
       <NavLink
+        {...intent}
         to={to}
         end={end}
         data-tour={tour}
@@ -511,23 +515,34 @@ function SourceEntry({
             const current = railLinkCurrent(l, pathname);
             return (
               <li key={l.id}>
-                <Link
-                  to={l.to}
-                  aria-current={current ? 'page' : undefined}
-                  className={cn(
-                    'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-150',
-                    current ? 'tuning-tick bg-selected font-medium text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
-                  )}
-                >
+                <SourceLink to={l.to} current={current}>
                   <l.icon aria-hidden size={15} className={cn('shrink-0', current && 'text-accent')} />
                   <span className="truncate">{t(l.labelKey)}</span>
-                </Link>
+                </SourceLink>
               </li>
             );
           })}
         </ul>
       )}
     </li>
+  );
+}
+
+/** One of an open source's links (Live TV, Movies, …); a rest on it starts the page's code and first data. */
+function SourceLink({ to, current, children }: { to: string; current: boolean; children: ReactNode }) {
+  const intent = useRouteIntent(to);
+  return (
+    <Link
+      {...intent}
+      to={to}
+      aria-current={current ? 'page' : undefined}
+      className={cn(
+        'flex h-8 items-center gap-2.5 rounded-sm px-2.5 text-sm motion-safe:transition-colors motion-safe:duration-150',
+        current ? 'tuning-tick bg-selected font-medium text-fg active:bg-active' : 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
+      )}
+    >
+      {children}
+    </Link>
   );
 }
 

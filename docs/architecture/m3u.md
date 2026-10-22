@@ -75,7 +75,7 @@ The UI asks `m3u.seriesDetail` for an M3U series detail (`detailCommand` in `src
 
 ## Movies
 
-An M3U movie plays and downloads from the playlist's own link. `catalog.item` returns it on the `VodItem` of an M3U source: `url`, and `headers` when the entry has its own (`#EXTVLCOPT`, `url|User-Agent=`). The player (`resolveSource` in `src/features/player/store.ts`) and downloads (`streamSource` in `src/features/vod/hooks/usePlayback.ts`) merge the playlist's headers under them, as for channels. Only `catalog.item` sets these fields, after the parental hide-mode check, and only when the source's kind is `m3u` (`catalog::is_m3u_source`, `NamedRow::into_m3u_vod`). Movie lists, search and `sameTitle` stay without links, and an Xtream or Stalker movie never gets one: their links carry the account and come from `xtream.streamUrl` and `stalker.streamUrl` at play time.
+An M3U movie plays and downloads from the playlist's own link. `catalog.item` returns it on the `VodItem` of an M3U source: `url`, and `headers` when the entry has its own (`#EXTVLCOPT`, `url|User-Agent=`). The player (`resolveSource` in `src/features/player/store.ts`) and downloads (`streamSource` in `src/features/vod/hooks/usePlayback.ts`) merge the playlist's headers under them, as for channels. Only `catalog.item` and `catalog.items` (the same lookup for each of its refs) set these fields, after the parental hide-mode check, and only when the source's kind is `m3u` (`catalog::is_m3u_source`, `NamedRow::into_m3u_vod`). Movie lists, search and `sameTitle` stay without links, and an Xtream or Stalker movie never gets one: their links carry the account and come from `xtream.streamUrl` and `stalker.streamUrl` at play time.
 
 ## Performance (check 4)
 

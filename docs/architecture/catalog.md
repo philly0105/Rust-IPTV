@@ -91,7 +91,7 @@ All of it happens inside the import transaction: readers keep the previous catal
 | `durationSeconds` | number | `VodItem.durationSeconds` |
 | `tmdbId` | number | `tmdbId` |
 | `catchup` | object `{type, days?, source?}` | `Channel.catchup`; turns on `Channel.archive` when the type is usable (`catchup_usable`, case-insensitive: default, append, shift, xc and flussonic, plus the aliases in `CATCHUP_TYPES` in `catchup/m3u.rs`: timeshift is handled as shift; flussonic-hls, flussonic-ts and fs as flussonic), as does `archive_hours > 0` |
-| `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped), and `VodItem.headers` of an M3U movie in `catalog.item`; the player merges them over the source-level headers |
+| `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped), and `VodItem.headers` of an M3U movie in `catalog.item` and `catalog.items`; the player merges them over the source-level headers |
 
 The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`, and on the series rows it groups from playlist episodes `episodes`, the stored episode list that `m3u.seriesDetail` and `m3u.streamUrl` read (m3u.md, Series). Readers pass unknown keys through untouched.
 
@@ -108,7 +108,7 @@ The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`, a
   - The parental count corrections (`parental::filter::locked_item_counts`, `locked_hidden_counts`) test the same condition, so a locked or hidden channel the filter already removed is not subtracted twice.
   - Favorites, recently watched and custom lists (`favorites.list`, `recent.list`, the favorites order, `lists.items` and `itemCount`, `lists.neighbors`) drop a live entry whose catalog row exists and fails the filter (`NOT EXISTS (SELECT 1 FROM items q WHERE ... AND NOT (<condition on q>))`). An entry whose row is gone stays and shows as unavailable.
   - `live.alternates` drops the candidates `QualityFilter::keeps` rejects, never the channel being played (failover.md).
-  - Not filtered: `catalog.item`, `source_counts` and the stored `item_count`, `channels.edits`, continue watching, stats and recordings.
+  - Not filtered: `catalog.item` and `catalog.items`, `source_counts` and the stored `item_count`, `channels.edits`, continue watching, stats and recordings.
 
 ## Counts
 
@@ -137,6 +137,6 @@ Stalker sources are the exception: their VOD and series are not stored, so `upda
 
 ## rpc
 
-`catalog.categories` (`includeHidden?` for category management, `includeLocked?` for the parental Lock groups dialog, see parental.md), `setCategoryHidden` (NotFound for an unknown id), `setCategoriesHidden` (the list replaces the hidden set; for live groups both refill the phone remote's channel list, see remote-control.md), `channels` (`radio: true` lists radio), `movies`, `series`, `item` (shape follows the content type; an M3U movie also carries its stream `url` and own `headers`, see m3u.md, Movies), `channelByNumber` (`contentType?: 'live' | 'radio'`; null when none), `neighbors`, `search` (default 30 per type, max 1001 so the UI can probe its 1000-row step with one extra row; radio is returned in `live`), `recentlyAdded` (movie or series only), `sameTitle`, `allLiveChannels`.
+`catalog.categories` (`includeHidden?` for category management, `includeLocked?` for the parental Lock groups dialog, see parental.md), `setCategoryHidden` (NotFound for an unknown id), `setCategoriesHidden` (the list replaces the hidden set; for live groups both refill the phone remote's channel list, see remote-control.md), `channels` (`radio: true` lists radio), `movies`, `series`, `item` (shape follows the content type; an M3U movie also carries its stream `url` and own `headers`, see m3u.md, Movies), `items` (`{refs}`, at most 500, else invalid: one answer per ref in order, `{item}` with exactly what `item` returns or `{error}` with the error it fails with, `not_found` with `details.parentalLocked` included; every lookup runs in one `db_call`, so Live's Favorites and Recently watched, the guide's Favorites and the channel pickers ask for the rows on screen in one call instead of one per row), `channelByNumber` (`contentType?: 'live' | 'radio'`; null when none), `neighbors`, `search` (default 30 per type, max 1001 so the UI can probe its 1000-row step with one extra row; radio is returned in `live`), `recentlyAdded` (movie or series only), `sameTitle`, `allLiveChannels`.
 
 `live.alternates {ref}` (module `live`, failover slice) reads the catalog too: the same live or radio channel on other sources (and duplicates in the same one), found through `idx_items_epg`, `epg_channel_map` and `items_fts`. See `failover.md`.

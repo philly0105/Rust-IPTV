@@ -24,6 +24,7 @@ import { cn, Dialog, SourceMonogram } from '@/ui';
 
 import { isLiveRoute, LIBRARY_LINKS, liveTabTarget, readLastSource } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
+import { useRouteIntent } from './routeIntent';
 import { useVisibleSources } from './useVisibleSources';
 
 /** The bar's own height, in rem against the 15 px root: it follows the UI scale, not density. */
@@ -94,12 +95,9 @@ export const TabBar = memo(function TabBar() {
       className="shrink-0 border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]"
     >
       <ul className="grid grid-cols-5 px-1" style={{ height: TAB_BAR_HEIGHT }}>
-        {tabs.map(({ id, to, label, icon: Icon, active, tour }) => (
-          <li key={id} className="min-w-0">
-            <Link to={to} aria-current={active ? 'page' : undefined} data-tab={id} data-tour={tour} className={tabClass(active)}>
-              <Icon aria-hidden size={22} className={cn('shrink-0', active && 'text-accent')} />
-              <span className="max-w-full truncate">{label}</span>
-            </Link>
+        {tabs.map((tab) => (
+          <li key={tab.id} className="min-w-0">
+            <TabLink tab={tab} />
           </li>
         ))}
         <li className="min-w-0">
@@ -122,6 +120,20 @@ export const TabBar = memo(function TabBar() {
     </nav>
   );
 });
+
+/**
+ * One tab. On a phone (touch) intent prefetch is off; in a window narrowed below 640 px with a mouse,
+ * a rest on a tab starts the page's code and first data, as on the rail.
+ */
+function TabLink({ tab: { id, to, label, icon: Icon, active, tour } }: { tab: Tab }) {
+  const intent = useRouteIntent(to);
+  return (
+    <Link {...intent} to={to} aria-current={active ? 'page' : undefined} data-tab={id} data-tour={tour} className={tabClass(active)}>
+      <Icon aria-hidden size={22} className={cn('shrink-0', active && 'text-accent')} />
+      <span className="max-w-full truncate">{label}</span>
+    </Link>
+  );
+}
 
 const rowClass = (active: boolean) =>
   cn(

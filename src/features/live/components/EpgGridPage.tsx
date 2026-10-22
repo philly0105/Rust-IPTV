@@ -38,9 +38,10 @@ import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 
-import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
+import { guideCategoriesArgs, setGuideGridPrefetch } from '@/api/bootPrefetch';
+import { invalidate, queryClient as appQueryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
-import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Source, type SourceKind } from '@/api/types';
+import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Settings, type Source, type SourceKind } from '@/api/types';
 
 import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
@@ -50,7 +51,7 @@ import { usePlayerStore } from '@/features/player';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { useDigitEntry } from '../hooks/useDigitEntry';
-import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
+import { displayPrefsOf, useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -375,6 +376,25 @@ export function gridArgs(refs: ItemRef[], from: string, to: string) {
   return { refs, from, to, withDescription: false };
 }
 
+/** The length of the window the guide last laid out this session (0 until one was): it follows the page width. */
+let lastWindowMs = 0;
+
+/**
+ * The first chunk's `epg.grid` for a guide about to open at `params` on these rows (its first
+ * channel page), with the arguments the page will ask with once laid out, if it lays out as wide
+ * as last time. The boot and navigation prefetch call it (`setGuideGridPrefetch`), so on a return
+ * to the guide the grid loads with the channels instead of after the page has rendered and
+ * measured itself.
+ */
+function prefetchFirstChunk(refs: ItemRef[], params: URLSearchParams, settings: Settings | undefined): void {
+  if (lastWindowMs <= 0) return;
+  const start = parseWindowAt(params.get('at')) ?? defaultStart(Date.now());
+  const offsetMs = displayPrefsOf(settings).epgOffsetMinutes * MINUTE;
+  const args = gridArgs(refs.slice(0, GRID_CHUNK), new Date(start - offsetMs).toISOString(), new Date(start + lastWindowMs - offsetMs).toISOString());
+  void appQueryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS });
+}
+setGuideGridPrefetch(prefetchFirstChunk);
+
 /** A window `[from, to)` an answer of the grid is for. */
 type Span = readonly [number, number];
 
@@ -417,7 +437,7 @@ export function EpgGridPage() {
   const lists = useRpcQuery('lists.list', undefined, { staleTime: 60_000 });
   const source = sources.data?.find((s) => s.id === sourceId);
   const kind: SourceKind | undefined = source?.kind;
-  const categories = useRpcQuery('catalog.categories', { sourceId, contentType: 'live' }, { enabled: !!sourceId });
+  const categories = useRpcQuery('catalog.categories', guideCategoriesArgs(sourceId), { enabled: !!sourceId });
 
   // ---- the window ----------------------------------------------------------
   // The window start comes from the URL (`at`, epoch ms on a 30-minute slot), so back and forward
@@ -442,6 +462,9 @@ export function EpgGridPage() {
   // Measured pages get room to scroll past the page width, so horizontal scrolling can move the window on.
   const windowMs = gridWindowFor(pageWidth > 0 ? pageWidth + gridScrollRoomPx(pxPerMin) : 0, channelCol, slotPx);
   const end = start + windowMs;
+  useEffect(() => {
+    if (pageMeasured) lastWindowMs = windowMs;
+  }, [pageMeasured, windowMs]);
   // Rows lay their cells out from this fixed time; the window's offset from it is one CSS
   // variable on the grid, so a window move leaves every row's props alone (L3-perf-ui-4).
   const [origin] = useState(start);
@@ -488,9 +511,11 @@ export function EpgGridPage() {
       setGenreNote(tg('genreFilterOff'));
       return;
     }
+    // Only rows in memory can have programmes: walking every row of a 50k-channel guide probed
+    // the query cache for each one outside the loaded pages, about 150 ms inside the click.
     let matching = 0;
-    for (let row = 0; row < count; row++) {
-      for (const p of windowPrograms(row)) if (genreOf(p.category) === g) matching++;
+    for (const { index } of paged.loaded) {
+      for (const p of windowPrograms(index)) if (genreOf(p.category) === g) matching++;
     }
     setGenreNote(tg('genreFilterOn', { genre: tg(`genre_${g}`), count: matching }));
   });
@@ -540,11 +565,13 @@ export function EpgGridPage() {
   const fromIso = new Date(dataStart - offsetMs).toISOString();
   const toIso = new Date(dataEnd - offsetMs).toISOString();
 
+  // A view (favorites, a list) knows each row's ref before its channel arrives: its chunk is
+  // asked once with every ref, not again as each batch of `catalog.item` answers lands.
   const chunkRefs = (c: number) => {
     const refs = [];
     for (let i = c * GRID_CHUNK; i < Math.min(count, (c + 1) * GRID_CHUNK); i++) {
-      const ch = paged.getChannel(i);
-      if (ch) refs.push(ch.ref);
+      const ref = paged.refAt ? paged.refAt(i) : paged.getChannel(i)?.ref;
+      if (ref) refs.push(ref);
     }
     return refs;
   };

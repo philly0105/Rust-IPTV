@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { CHANNEL_PAGE_SIZE, channelPageArgs } from '@/api/bootPrefetch';
+import { CHANNEL_PAGE_SIZE, channelPageArgs, favoritesContainsArgs, nowNextArgs } from '@/api/bootPrefetch';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
 import { rpcRaw, type RpcArgs } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type Page } from '@/api/types';
@@ -12,7 +12,8 @@ import { needsFallback } from '../lib/shortEpg';
 import { useShortEpgPreviews } from './useShortEpg';
 import { useStalkerPreviews } from './useStalkerPreviews';
 
-// The page args and size live with the boot prefetch (L3-ui-data-x7), so it asks for the same first page.
+// The page args and size, and the now/next and favourite flag args, live with the boot prefetch
+// (L3-ui-data-x7), so it asks for the same first page and its extras.
 export { CHANNEL_PAGE_SIZE };
 
 export interface PagedChannelsArgs {
@@ -76,6 +77,11 @@ export interface PagedChannels {
    * in the list. `loaded` holds only the favorites near the rows on screen.
    */
   indexOf?(ref: ItemRef): number | undefined;
+  /**
+   * The ref of the row at `index` in such a list, before its channel has arrived: the guide asks
+   * a chunk's programmes once, with every ref, instead of again as each batch of channels lands.
+   */
+  refAt?(index: number): ItemRef | undefined;
 }
 
 type ChannelsArgs = RpcArgs<'catalog.channels'>;
@@ -93,15 +99,6 @@ function channelPageOptions(args: ChannelsArgs) {
   };
 }
 
-/**
- * `epg.nowNext` args for a page's refs, as {@link usePageExtras} asks them. The rows show titles
- * and times only (a play takes the title too), so the descriptions stay behind: about half the
- * bytes (L3-serve-ui-5).
- */
-function nowNextArgs(refs: ItemRef[], offsetMinutes: number): RpcArgs<'epg.nowNext'> {
-  return offsetMinutes ? { refs, offsetMinutes, withDescription: false } : { refs, withDescription: false };
-}
-
 /** How many pages to read at most while looking for an unloaded channel's row. */
 const LOCATE_MAX_READS = 12;
 
@@ -115,7 +112,7 @@ function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offset
   const refs = useMemo(() => page?.items.map((c) => c.ref) ?? [], [page]);
   const has = enabled && refs.length > 0;
   const nowNext = useRpcQuery('epg.nowNext', nowNextArgs(refs, offsetMinutes), { enabled: has, staleTime: NOW_NEXT_STALE_MS });
-  const favs = useRpcQuery('favorites.contains', { refs }, { enabled: has });
+  const favs = useRpcQuery('favorites.contains', favoritesContainsArgs(refs), { enabled: has });
   const favSet = useMemo(() => new Set<ItemKey>((favs.data ?? []).map(itemKey)), [favs.data]);
   return { nowNext: nowNext.data, favSet };
 }

@@ -12,9 +12,12 @@
 
 import { matchPath } from 'react-router';
 
+// A leaf module (no imports): the source the guide opens on when its URL names none.
+import { defaultGuideSource } from '@/features/live/guide/lastSource';
+
 import { queryClient, rpcKey, type RpcCommand } from './query';
 import { rpcRaw, type RpcArgs } from './transport';
-import type { ContentType, Settings, Source } from './types';
+import type { Channel, ContentType, ItemRef, Page, Settings, Source } from './types';
 
 /** Rows per `catalog.channels` page (usePagedChannels). */
 export const CHANNEL_PAGE_SIZE = 120;
@@ -42,6 +45,64 @@ export function channelPageArgs(list: ChannelListArgs, page: number, size: numbe
     radio: list.radio || undefined,
     query: { offset: page * size, limit: size, search: list.search || undefined },
   };
+}
+
+/**
+ * Live's pinned views, Favorites and Recently watched, by the ids the route has where a group id
+ * would be (`/s/:id/live/@favorites`, `?category=@recent` on Radio).
+ */
+export const LIVE_VIEW_ID = { favorites: '@favorites', recent: '@recent' } as const;
+
+/** Recently watched entries Live's view reads. */
+export const LIVE_RECENT_LIMIT = 100;
+
+/** `favorites.list` as Live's Favorites view (and the guide's) asks it: the source's favorites. */
+export function liveFavoritesArgs(sourceId: string): RpcArgs<'favorites.list'> {
+  return { sourceId };
+}
+
+/** `recent.list` as Live's Recently watched view asks it. */
+export function liveRecentArgs(sourceId: string): RpcArgs<'recent.list'> {
+  return { sourceId, limit: LIVE_RECENT_LIMIT };
+}
+
+/**
+ * `epg.nowNext` for a channel page's refs, as usePagedChannels asks it. The rows show titles and
+ * times only (a play takes the title too), so the descriptions stay behind: about half the bytes
+ * (L3-serve-ui-5).
+ */
+export function nowNextArgs(refs: ItemRef[], offsetMinutes: number): RpcArgs<'epg.nowNext'> {
+  return offsetMinutes ? { refs, offsetMinutes, withDescription: false } : { refs, withDescription: false };
+}
+
+/** `favorites.contains` for a channel page's refs, as usePagedChannels asks it. */
+export function favoritesContainsArgs(refs: ItemRef[]): RpcArgs<'favorites.contains'> {
+  return { refs };
+}
+
+/** `settings.epgOffsetMinutes` as the live views apply it: whole minutes, 0 when unset or unusable. */
+export function epgOffsetMinutesOf(settings: Settings | undefined): number {
+  const offset = Number((settings as { epgOffsetMinutes?: unknown } | undefined)?.epgOffsetMinutes ?? 0);
+  return Number.isFinite(offset) ? Math.trunc(offset) : 0;
+}
+
+/** `catalog.categories` as the guide's group picker asks it: the shown groups only. */
+export function guideCategoriesArgs(sourceId: string): RpcArgs<'catalog.categories'> {
+  return { sourceId, contentType: 'live' };
+}
+
+/** Asks for the guide's first grid chunk for these rows, as the guide page will (see {@link setGuideGridPrefetch}). */
+export type GuideGridPrefetch = (refs: ItemRef[], params: URLSearchParams, settings: Settings | undefined) => void;
+
+let guideGrid: GuideGridPrefetch | null = null;
+
+/**
+ * Set by the guide page's module as it loads. The grid's window follows the page's width, which
+ * only a guide laid out earlier in the session knows, and its arguments are the page's own; until
+ * then the function asks for nothing. Kept here as a hook, so no guide code joins the entry chunk.
+ */
+export function setGuideGridPrefetch(fn: GuideGridPrefetch | null): void {
+  guideGrid = fn;
 }
 
 /** `catalog.recentlyAdded` for the recently added rail of a source kept in SQLite (not Stalker). */
@@ -76,13 +137,31 @@ export function homeRecentlyAddedArgs(kind: 'movie' | 'series'): RpcArgs<'catalo
 }
 
 function prefetch<K extends RpcCommand>(cmd: K, args: RpcArgs<K>): void {
-  void queryClient.prefetchQuery({ queryKey: rpcKey(cmd, args), queryFn: () => rpcRaw(cmd, args) });
+  void fetched(cmd, args).catch(() => undefined);
+}
+
+/** The answer under the page's key: the cached one while fresh, else a request (or the one in flight). */
+function fetched<K extends RpcCommand>(cmd: K, args: RpcArgs<K>): Promise<unknown> {
+  return queryClient.fetchQuery({ queryKey: rpcKey(cmd, args), queryFn: () => rpcRaw(cmd, args) });
 }
 
 function prefetchChannelList(sourceId: string, categoryId: string | undefined, radio: boolean): void {
   prefetch('sources.get', { id: sourceId });
   prefetch('catalog.categories', categoriesArgs(sourceId, radio ? 'radio' : 'live'));
-  prefetch('catalog.channels', channelPageArgs({ sourceId, categoryId, radio }, 0));
+  // The pinned views list the user's entries, not a page of a group: no group has their ids.
+  if (categoryId === LIVE_VIEW_ID.favorites) return prefetch('favorites.list', liveFavoritesArgs(sourceId));
+  if (categoryId === LIVE_VIEW_ID.recent) return prefetch('recent.list', liveRecentArgs(sourceId));
+  // The rows' now/next and favourite flags follow page 0 here as well, under usePagedChannels'
+  // keys: the page asks for them only once page 0 has rendered, a second round trip after it.
+  void fetched('catalog.channels', channelPageArgs({ sourceId, categoryId, radio }, 0))
+    .then(async (page) => {
+      const refs = (page as Page<Channel> | undefined)?.items.map((c) => c.ref) ?? [];
+      if (refs.length === 0) return;
+      const settings = await queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpcRaw('settings.get') });
+      prefetch('epg.nowNext', nowNextArgs(refs, epgOffsetMinutesOf(settings as Settings | undefined)));
+      prefetch('favorites.contains', favoritesContainsArgs(refs));
+    })
+    .catch(() => undefined);
 }
 
 function prefetchVodLanding(sourceId: string, kind: 'movie' | 'series'): void {
@@ -94,6 +173,33 @@ function prefetchVodLanding(sourceId: string, kind: 'movie' | 'series'): void {
     .then((list) => {
       const source = (list as Source[] | undefined)?.find((s) => s.id === sourceId);
       if (source && source.kind !== 'stalker') prefetch('catalog.recentlyAdded', recentlyAddedArgs(sourceId, kind));
+    })
+    .catch(() => undefined);
+}
+
+/**
+ * The guide's first data, as EpgGridPage asks it: its source (the URL's, else the one browsed
+ * last, else the first with live channels), the source's groups, then the first channel page and,
+ * once a window has been laid out this session, the first grid chunk for it. A favorites or list
+ * view asks for its list instead; a `focus` link opens elsewhere in the list, so its first chunk
+ * is left to the page.
+ */
+function prefetchGuide(params: URLSearchParams): void {
+  void queryClient
+    .ensureQueryData({ queryKey: rpcKey('sources.list'), queryFn: () => rpcRaw('sources.list') })
+    .then(async (list) => {
+      const live = (list as Source[] | undefined)?.filter((s) => s.channelCount !== 0);
+      const sourceId = params.get('source') ?? defaultGuideSource(live);
+      if (!sourceId) return;
+      prefetch('catalog.categories', guideCategoriesArgs(sourceId));
+      const view = params.get('view');
+      if (view === 'favorites') return prefetch('favorites.list', liveFavoritesArgs(sourceId));
+      if (view?.startsWith('list:') && view.length > 5) return prefetch('lists.items', { id: view.slice(5) });
+      const page = await fetched('catalog.channels', channelPageArgs({ sourceId, categoryId: params.get('category') ?? undefined }, 0));
+      const refs = (page as Page<Channel> | undefined)?.items.map((c) => c.ref) ?? [];
+      if (refs.length === 0 || params.get('focus') || !guideGrid) return;
+      const settings = await queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpcRaw('settings.get') });
+      guideGrid(refs, params, settings as Settings | undefined);
     })
     .catch(() => undefined);
 }
@@ -129,18 +235,29 @@ function prefetchHome(): void {
 
 /**
  * Starts the first requests of the page at `path` (pathname and query), if it is a channel list
- * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`), a VOD landing page
- * (`/s/:id/movies`, `/s/:id/series`) or Home (`/dashboard`). Any other path asks for nothing.
+ * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`, Favorites and Recently watched
+ * included; a group's first page with its now/next and favourite flags), the TV guide (`/epg`),
+ * a VOD landing page (`/s/:id/movies`, `/s/:id/series`) or Home (`/dashboard`). Any other path
+ * asks for nothing.
  */
 export function prefetchScreenData(path: string): void {
   let url: URL;
+  let pathname: string;
   try {
     url = new URL(path, 'http://boot.invalid');
+    // Decoded a segment at a time, as the router matches it: links encode their ids (a pinned
+    // view is `/live/%40favorites`), and matchPath leaves them encoded. An encoded slash stays
+    // one, and matchPath turns it back into a slash inside its param.
+    pathname = url.pathname
+      .split('/')
+      .map((s) => decodeURIComponent(s).replace(/\//g, '%2F'))
+      .join('/');
   } catch {
     return;
   }
-  const at = (pattern: string) => matchPath(pattern, url.pathname)?.params;
+  const at = (pattern: string) => matchPath(pattern, pathname)?.params;
   if (at('/dashboard')) return prefetchHome();
+  if (at('/epg')) return prefetchGuide(url.searchParams);
   const live = at('/s/:sourceId/live/:categoryId') ?? at('/s/:sourceId/live');
   if (live?.sourceId) return prefetchChannelList(live.sourceId, live.categoryId, false);
   const radio = at('/s/:sourceId/radio');

@@ -5,7 +5,8 @@
  *
  * The route names them like a group (`/s/:id/live/@favorites`, `?category=@recent` on Radio).
  * Both come from the core as refs (`favorites.list` in the user's order, `recent.list` newest
- * first); the rows on screen ask `catalog.item` for their channels, and now/next follows the
+ * first); the rows near the screen ask for their channels in one `catalog.items` call (each under
+ * its own `catalog.item` key, lib/itemBatch.ts), and now/next follows the
  * visible rows in fixed chunks, keyed by the entries' refs so it does not wait on the channels.
  * Only XMLTV now/next: a Stalker portal's own guide and the short EPG stay with the groups.
  */
@@ -13,8 +14,9 @@
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
-import { rpcRaw, type RpcResult } from '@/api/transport';
+import { LIVE_VIEW_ID, liveFavoritesArgs, liveRecentArgs } from '@/api/bootPrefetch';
+import { batchedItemQuery, invalidate, rpcKey, useRpcQuery } from '@/api/query';
+import type { RpcResult } from '@/api/transport';
 import { itemKey, type Channel, type ContentType, type EpgNowNext, type FavoriteEntry, type ItemKey, type ItemRef, type RecentEntry } from '@/api/types';
 
 import { foldForFilter } from '../components/CategorySidebar';
@@ -23,8 +25,9 @@ import type { PagedChannels } from './usePagedChannels';
 
 export type LiveView = 'favorites' | 'recent';
 
-/** The pinned groups' ids in the route, where a group id would be. */
-export const LIVE_VIEW_ID: Record<LiveView, string> = { favorites: '@favorites', recent: '@recent' };
+// The pinned groups' ids in the route and their list args live with the boot prefetch, so it asks
+// for the same lists.
+export { LIVE_VIEW_ID };
 
 /** The view a route's group id names, if any. */
 export function liveViewOf(categoryId: string | undefined): LiveView | undefined {
@@ -33,8 +36,7 @@ export function liveViewOf(categoryId: string | undefined): LiveView | undefined
   return undefined;
 }
 
-/** Recently watched keeps this many channels; favorites past this many are left to their page. */
-const RECENT_LIMIT = 100;
+/** Favorites past this many are left to their page. */
 const VIEW_CAP = 1000;
 /** Rows fetched beyond the visible ones, so a short scroll finds them drawn. */
 const AROUND = 20;
@@ -68,8 +70,8 @@ export function useLiveViewChannels(view: LiveView | undefined, args: LiveViewAr
   const queryClient = useQueryClient();
   const { sourceId, contentType } = args;
   const offsetMinutes = args.epgOffsetMinutes ?? 0;
-  const favs = useRpcQuery('favorites.list', { sourceId }, { enabled: view === 'favorites' && !!sourceId });
-  const recents = useRpcQuery('recent.list', { sourceId, limit: RECENT_LIMIT }, { enabled: view === 'recent' && !!sourceId });
+  const favs = useRpcQuery('favorites.list', liveFavoritesArgs(sourceId), { enabled: view === 'favorites' && !!sourceId });
+  const recents = useRpcQuery('recent.list', liveRecentArgs(sourceId), { enabled: view === 'recent' && !!sourceId });
   const q = view === 'favorites' ? favs : recents;
 
   const search = foldForFilter(args.search?.trim() ?? '');
@@ -91,14 +93,9 @@ export function useLiveViewChannels(view: LiveView | undefined, args: LiveViewAr
   }, []);
   const nearFrom = Math.max(0, range.start - AROUND);
   const near = entries.slice(nearFrom, range.end + AROUND + 1);
-  const items = useQueries({
-    queries: near.map((e) => ({
-      queryKey: rpcKey('catalog.item', { ref: e.ref }),
-      queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('catalog.item', { ref: e.ref }, { signal })) as RpcResult<'catalog.item'>,
-      staleTime: CHANNEL_STALE_MS,
-      retry: false,
-    })),
-  });
+  // The rows asked for together go out as one `catalog.items` call: one call per row sent about 40
+  // on open and re-rendered the page once per answer.
+  const items = useQueries({ queries: near.map((e) => batchedItemQuery(e.ref, CHANNEL_STALE_MS)) });
   // A new function whenever a channel arrives, so the rows read it.
   const stamp = items.map((i) => `${i.dataUpdatedAt}:${i.errorUpdatedAt}`).join(',');
   const getChannel = useCallback(

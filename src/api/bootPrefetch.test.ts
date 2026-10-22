@@ -6,8 +6,9 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useLiveViewChannels } from '@/features/live/hooks/useLiveViewChannels';
 import { usePagedChannels } from '@/features/live/hooks/usePagedChannels';
 import { LIST_KEY } from '@/features/mylist/lib/cache';
 import { useRecentlyAdded, useSource } from '@/features/vod/hooks/queries';
@@ -19,23 +20,37 @@ import {
   homeContinueArgs,
   homeFavoritesArgs,
   homeRecentArgs,
+  favoritesContainsArgs,
+  guideCategoriesArgs,
   homeRecentlyAddedArgs,
+  liveFavoritesArgs,
+  liveRecentArgs,
+  nowNextArgs,
   prefetchScreenData,
   recentlyAddedArgs,
+  setGuideGridPrefetch,
 } from './bootPrefetch';
 import { queryClient, rpcKey } from './query';
 import { rpcRaw } from './transport';
 import type { Source } from './types';
 
-const sources = vi.hoisted(() => ({ list: [] as Array<{ id: string; kind: string }>, settings: {} as Record<string, unknown> }));
+const sources = vi.hoisted(() => ({
+  list: [] as Array<{ id: string; kind: string; channelCount?: number }>,
+  settings: {} as Record<string, unknown>,
+  /** The channels every `catalog.channels` page answers with. */
+  channels: [] as unknown[],
+}));
 
 vi.mock('./transport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./transport')>()),
   rpcRaw: vi.fn(async (cmd: string) => {
     if (cmd === 'sources.list') return sources.list;
     if (cmd === 'settings.get') return sources.settings;
-    if (cmd === 'catalog.channels') return { items: [], total: 0 };
+    if (cmd === 'catalog.channels') return { items: sources.channels, total: sources.channels.length, offset: 0, limit: CHANNEL_PAGE_SIZE };
+    if (cmd === 'epg.nowNext') return {};
+    if (cmd === 'favorites.contains') return [];
     if (cmd === 'catalog.categories' || cmd === 'catalog.recentlyAdded') return [];
+    if (cmd === 'favorites.list' || cmd === 'recent.list' || cmd === 'lists.items') return [];
     return {};
   }),
 }));
@@ -49,7 +64,11 @@ afterEach(() => {
   raw.mockClear();
   sources.list = [];
   sources.settings = {};
+  sources.channels = [];
 });
+
+const channel = (i: number) => ({ ref: { sourceId: 's1', contentType: 'live' as const, itemId: `c${i}` }, name: `Channel ${i}`, categoryId: 'c9', categoryName: 'News', isRadio: false });
+const refs = (n: number) => Array.from({ length: n }, (_, i) => channel(i).ref);
 
 describe('prefetchScreenData', () => {
   it('asks for a live list: the source, all its live groups and the first channel page', async () => {
@@ -63,11 +82,49 @@ describe('prefetchScreenData', () => {
     expect(queryClient.getQueryState(rpcKey('catalog.channels', channelPageArgs({ sourceId: 's1', categoryId: 'c9' }, 0)))).toBeDefined();
   });
 
+  it("chains the first page's now/next and favourite flags, under the page's arguments and the guide offset", async () => {
+    sources.channels = [channel(0), channel(1), channel(2)];
+    sources.settings = { epgOffsetMinutes: 90 };
+    prefetchScreenData('/s/s1/live/c9');
+    await waitFor(() => expect(calls('favorites.contains')).toHaveLength(1));
+    expect(calls('epg.nowNext')).toEqual([nowNextArgs(refs(3), 90)]);
+    expect(nowNextArgs(refs(3), 90)).toEqual({ refs: refs(3), offsetMinutes: 90, withDescription: false });
+    expect(calls('favorites.contains')).toEqual([favoritesContainsArgs(refs(3))]);
+  });
+
   it('reads the radio group from the query string', async () => {
     prefetchScreenData('/s/s1/radio?category=r2');
     await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
     expect(calls('catalog.categories')).toEqual([categoriesArgs('s1', 'radio')]);
     expect(calls('catalog.channels')).toEqual([channelPageArgs({ sourceId: 's1', categoryId: 'r2', radio: true }, 0)]);
+  });
+
+  it("asks for Live's Favorites and Recently watched by their lists, not as a group's channel page", async () => {
+    prefetchScreenData('/s/s1/live/@favorites');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('favorites.list')).toEqual([{ sourceId: 's1' }]);
+    expect(calls('catalog.channels')).toEqual([]);
+    expect(calls('sources.get')).toEqual([{ id: 's1' }]);
+    queryClient.clear();
+    raw.mockClear();
+    prefetchScreenData('/s/s1/radio?category=@recent');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('recent.list')).toEqual([{ sourceId: 's1', limit: 100 }]);
+    expect(calls('catalog.categories')).toEqual([categoriesArgs('s1', 'radio')]);
+    expect(calls('catalog.channels')).toEqual([]);
+  });
+
+  it('reads ids the way the router does: decoded, as the links encode them', async () => {
+    // The sidebar's links and the address bar encode the ids: `@` and spaces included.
+    prefetchScreenData('/s/s1/live/%40favorites');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('favorites.list')).toEqual([liveFavoritesArgs('s1')]);
+    expect(calls('catalog.channels')).toEqual([]);
+    queryClient.clear();
+    raw.mockClear();
+    prefetchScreenData('/s/s1/live/News%20%26%20Sport%2FUK');
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(3));
+    expect(calls('catalog.channels')).toEqual([channelPageArgs({ sourceId: 's1', categoryId: 'News & Sport/UK' }, 0)]);
   });
 
   it('asks for a VOD landing page: the groups and, for a SQLite source, the recently added rail', async () => {
@@ -92,6 +149,51 @@ describe('prefetchScreenData', () => {
   it.each(['/', '/sources', '/s/s1/guide', '/s/s1/movie/7', '/s/s1/movies/c/5', '/s/s1/series/42'])('asks for nothing on %s', (path) => {
     prefetchScreenData(path);
     expect(raw).not.toHaveBeenCalled();
+  });
+});
+
+describe('the TV guide', () => {
+  const grid = vi.fn();
+  beforeEach(() => setGuideGridPrefetch(grid));
+  afterEach(() => {
+    setGuideGridPrefetch(null);
+    grid.mockReset();
+  });
+
+  it("asks for the URL's source: its shown groups, the first channel page, then the first grid chunk", async () => {
+    sources.channels = [channel(0), channel(1)];
+    prefetchScreenData('/epg?source=s1&category=c9');
+    await waitFor(() => expect(grid).toHaveBeenCalledTimes(1));
+    expect(calls('catalog.categories')).toEqual([guideCategoriesArgs('s1')]);
+    expect(guideCategoriesArgs('s1')).toEqual({ sourceId: 's1', contentType: 'live' });
+    expect(calls('catalog.channels')).toEqual([channelPageArgs({ sourceId: 's1', categoryId: 'c9' }, 0)]);
+    expect(grid.mock.calls[0]![0]).toEqual(refs(2));
+    expect((grid.mock.calls[0]![1] as URLSearchParams).get('category')).toBe('c9');
+    // With the settings, for the guide offset.
+    expect(grid.mock.calls[0]![2]).toEqual(sources.settings);
+  });
+
+  it('without a source in the URL, opens on the first source with live channels', async () => {
+    sources.list = [
+      { id: 'vod', kind: 'xtream', channelCount: 0 },
+      { id: 's2', kind: 'm3u', channelCount: 40 },
+    ];
+    prefetchScreenData('/epg');
+    await waitFor(() => expect(calls('catalog.channels')).toHaveLength(1));
+    expect(calls('catalog.channels')).toEqual([channelPageArgs({ sourceId: 's2' }, 0)]);
+  });
+
+  it('a view asks for its list instead of a channel page, and a focus link leaves the grid to the page', async () => {
+    prefetchScreenData('/epg?source=s1&view=favorites');
+    await waitFor(() => expect(calls('favorites.list')).toEqual([liveFavoritesArgs('s1')]));
+    prefetchScreenData('/epg?source=s1&view=list:L7');
+    await waitFor(() => expect(calls('lists.items')).toEqual([{ id: 'L7' }]));
+    expect(calls('catalog.channels')).toEqual([]);
+    sources.channels = [channel(0)];
+    prefetchScreenData('/epg?source=s1&focus=c0');
+    await waitFor(() => expect(calls('catalog.channels')).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(grid).not.toHaveBeenCalled();
   });
 });
 
@@ -136,6 +238,29 @@ describe('the pages read what the boot prefetch asked for', () => {
     const { result } = renderHook(() => usePagedChannels({ sourceId: 's1', categoryId: 'c9' }), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(calls('catalog.channels')).toHaveLength(1);
+  });
+
+  it("usePagedChannels sends no second request for the first page's now/next and favourite flags", async () => {
+    sources.channels = [channel(0), channel(1)];
+    sources.settings = { epgOffsetMinutes: -30 };
+    prefetchScreenData('/s/s1/live/c9');
+    await waitFor(() => expect(calls('favorites.contains')).toHaveLength(1));
+    const { result } = renderHook(() => usePagedChannels({ sourceId: 's1', categoryId: 'c9', epgOffsetMinutes: -30 }), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls('catalog.channels')).toHaveLength(1);
+    expect(calls('epg.nowNext')).toHaveLength(1);
+    expect(calls('favorites.contains')).toHaveLength(1);
+  });
+
+  it.each([
+    ['favorites', '/s/s1/live/@favorites', 'favorites.list', liveFavoritesArgs('s1')],
+    ['recent', '/s/s1/live/@recent', 'recent.list', liveRecentArgs('s1')],
+  ] as const)("Live's %s view sends no second request for its list", async (view, path, cmd, args) => {
+    prefetchScreenData(path);
+    const { result } = renderHook(() => useLiveViewChannels(view, { sourceId: 's1', contentType: 'live' }), { wrapper });
+    await waitFor(() => expect(result.current?.total).toBe(0));
+    expect(calls(cmd)).toEqual([args]);
   });
 
   it('useRecentlyAdded sends no second request for the rail', async () => {

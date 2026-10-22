@@ -25,10 +25,10 @@ pub(super) async fn download(
     let head_timeout = head_timeout();
     let resp = match tokio::time::timeout(head_timeout, req.send()).await {
         Err(_) => {
-            return Err(ImageError::upstream(format!(
-                "{host} did not answer within {} s.",
-                head_timeout.as_secs()
-            )))
+            return Err(ImageError::new(
+                ImageErrorKind::NoAnswer,
+                format!("{host} did not answer within {} s.", head_timeout.as_secs()),
+            ))
         }
         Ok(Err(err)) => return Err(transport(host, err)),
         Ok(Ok(resp)) => resp,
@@ -83,12 +83,18 @@ pub(super) async fn download(
     Ok((content_type, body))
 }
 
-/// A transport failure: the guard's refusal is Forbidden, the rest Upstream.
+/// A transport failure before the head: the guard's refusal is Forbidden, a
+/// connect timeout NoAnswer, the rest Upstream.
 fn transport(host: &str, err: reqwest::Error) -> ImageError {
     if let Some(blocked) = http::find_blocked(&err) {
         return ImageError::new(ImageErrorKind::Forbidden, blocked.0);
     }
-    ImageError::upstream(core_message(http::transport_error(host, err)))
+    let kind = if err.is_timeout() {
+        ImageErrorKind::NoAnswer
+    } else {
+        ImageErrorKind::Upstream
+    };
+    ImageError::new(kind, core_message(http::transport_error(host, err)))
 }
 
 /// Reads the body, refusing it once it passes [`MAX_IMAGE_BYTES`].

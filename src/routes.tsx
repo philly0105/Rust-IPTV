@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createBrowserRouter, isRouteErrorResponse, Link, matchRoutes, Navigate, useParams, useRouteError, type RouteObject } from 'react-router';
 
+import { prefetchScreenData } from '@/api/bootPrefetch';
 import { getConnectionState, onConnectionState } from '@/api/events';
 import { useRpcQuery } from '@/api/query';
 import { isDesktop, RpcError } from '@/api/transport';
@@ -236,8 +237,31 @@ export function preloadRoute(path: string): void {
   }
 }
 
+/**
+ * Starts the first data of the screen a navigation is loading, while its page chunks download
+ * (NAV-1). The rail, the palette, keyboard shortcuts and Back otherwise asked for it only once the
+ * chunk had loaded and the page had rendered. Once per location: the state changes several times
+ * while one navigation loads. A navigation with nothing to load commits at once, and its page asks
+ * for itself.
+ */
+export function prefetchNavigations(router: Pick<ReturnType<typeof createBrowserRouter>, 'subscribe'>): () => void {
+  let started: string | null = null;
+  return router.subscribe((state) => {
+    const next = state.navigation.state === 'loading' ? state.navigation.location : undefined;
+    if (!next) {
+      started = null;
+      return;
+    }
+    const path = next.pathname + next.search;
+    if (path === started) return;
+    started = path;
+    prefetchScreenData(path);
+  });
+}
+
 export function createAppRouter() {
   const router = createBrowserRouter(routes);
+  prefetchNavigations(router);
   // After a failed page chunk, the next navigation (to anywhere else) is a full load, so every
   // chunk downloads afresh, but only while the server answers: offline it would leave the app.
   router.subscribe((state) => {

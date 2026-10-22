@@ -44,7 +44,7 @@ Eviction and Clear keep the file of a key whose fetch is still running, because 
 
 ## Request flow
 
-`imagecache::fetch(state, url, source_id)` returns a `CachedImage { path, content_type, bytes, hit }` or an `ImageError` with a kind. `imagecache::get` is the same with the error mapped onto `CoreError`.
+`imagecache::fetch(state, url, source_id)` returns a `CachedImage { path, content_type, bytes, hit }` or an `ImageError` with a kind. `imagecache::get` is the same with the error mapped onto `CoreError`. `fetch_sized` adds the width hint, and `fetch_sized_within` a limit on how long the caller waits for the upstream fetch after a miss: past it the caller gets `Pending`, and the fetch goes on in its own task and stores the image (or remembers its failure) for the next request. The guard check and the lookups are not limited, so a cached image is never refused that way.
 
 1. The URL is parsed and normalised. Anything that is not an absolute http(s) URL is `BadUrl`.
 2. The source, when `sourceId` names one, contributes its request headers (`config_json.headers`: User-Agent, Referer and the others a provider may need) and, in server mode, its own `host:port` as trusted by the SSRF guard. An unknown `sourceId` adds nothing; the image still loads without it.
@@ -103,10 +103,13 @@ Cache-route pictures load through the fetch gate (`src/ui/imageGate.ts`): it set
 | 415 | Not an image (`unsupported`) | JSON |
 | 502 | A body over 10 MB (`invalid`) | JSON |
 | 502 | Any other upstream failure: status, connection, timeout, empty body (`network`) | JSON |
+| 504 | A request with `w` whose upstream fetch did not finish within 4 s of the miss (`SIZED_MISS_WAIT`, `timeout`). The fetch goes on and stores the image. | JSON |
 | 500 | Local disk or database failure (`io`) | JSON |
 | 500 | A file that vanished twice while being read (`internal`) | JSON |
 
 The handler's errors carry `Cache-Control: no-store`, so the browser asks again after the failure memory expires.
+
+A request with `w` (a grid poster, a channel logo) waits at most 4 s for the upstream fetch once the cache missed (`SIZED_MISS_WAIT`). A host that never answers otherwise held the request until the fetch's own deadlines, and with it one of the browser's six connections to the image port, so pictures already on disk queued behind it. The 504 sends the UI to the original URL (`useImageChain`), which loads over the provider host's own connections; the cache URL is skipped for five minutes in that browser (`markImageFailed`), and the next view after that, or after a relaunch, finds the copy the fetch stored. A request without `w` (backdrops, detail posters, the hover prefetch) keeps waiting for the whole fetch: it loads the full original, which a cut-off wait would make the browser download a second time.
 
 Every response from the handler carries `harden()`: CSP `sandbox; default-src 'none'` and `X-Content-Type-Options: nosniff`. An SVG poster is served from the app's own origin, so it must never run as a document.
 

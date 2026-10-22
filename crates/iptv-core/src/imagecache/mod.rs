@@ -151,6 +151,11 @@ pub enum ImageErrorKind {
     TooLarge,
     /// Any other upstream failure: status, connection, timeout (502).
     Upstream,
+    /// The caller stopped waiting for the upstream fetch
+    /// ([`fetch_sized_within`]); the fetch goes on and stores the image
+    /// (504). It is the caller's limit, not the image's failure, so it is
+    /// never remembered.
+    Pending,
     /// Local disk or database failure (500); never remembered.
     Local,
 }
@@ -182,6 +187,13 @@ impl ImageError {
         Self::new(ImageErrorKind::NotImage, message)
     }
 
+    fn pending(host: &str) -> Self {
+        Self::new(
+            ImageErrorKind::Pending,
+            format!("{host} is slow to answer; the image is still being fetched."),
+        )
+    }
+
     fn too_large() -> Self {
         Self::new(
             ImageErrorKind::TooLarge,
@@ -204,6 +216,7 @@ impl ImageError {
             ImageErrorKind::NotFound => 404,
             ImageErrorKind::NotImage => 415,
             ImageErrorKind::TooLarge | ImageErrorKind::Upstream => 502,
+            ImageErrorKind::Pending => 504,
             ImageErrorKind::Local => 500,
         }
     }
@@ -219,7 +232,8 @@ impl std::error::Error for ImageError {}
 
 impl From<ImageError> for CoreError {
     /// The C2 mapping: non-image -> Unsupported, too large -> Invalid,
-    /// upstream 404 -> NotFound, other upstream failures -> Network.
+    /// upstream 404 -> NotFound, other upstream failures -> Network, a caller
+    /// that stopped waiting -> Timeout.
     fn from(e: ImageError) -> Self {
         match e.kind {
             ImageErrorKind::BadUrl | ImageErrorKind::Forbidden | ImageErrorKind::TooLarge => {
@@ -228,6 +242,7 @@ impl From<ImageError> for CoreError {
             ImageErrorKind::NotFound => CoreError::NotFound(e.message),
             ImageErrorKind::NotImage => CoreError::Unsupported(e.message),
             ImageErrorKind::Upstream => CoreError::Network(e.message),
+            ImageErrorKind::Pending => CoreError::Timeout(e.message),
             ImageErrorKind::Local => CoreError::Io(std::io::Error::other(e.message)),
         }
     }
@@ -1011,6 +1026,21 @@ pub async fn fetch_sized(
     source_id: Option<&str>,
     width: Option<u32>,
 ) -> Result<CachedImage, ImageError> {
+    fetch_sized_within(state, url, source_id, width, None).await
+}
+
+/// [`fetch_sized`] that waits at most `wait` for the upstream fetch once the
+/// cache missed, then answers [`ImageErrorKind::Pending`]. The fetch runs in
+/// its own task and goes on, so it still stores the image (or remembers its
+/// failure) for the next request. The guard check and the lookups are not
+/// limited: a cached image is never refused this way.
+pub async fn fetch_sized_within(
+    state: &Arc<AppState>,
+    url: &str,
+    source_id: Option<&str>,
+    width: Option<u32>,
+    wait: Option<Duration>,
+) -> Result<CachedImage, ImageError> {
     let url = normalize_url(url)?;
     let width = width.and_then(resize::bucket);
     let key = match width {
@@ -1052,6 +1082,7 @@ pub async fn fetch_sized(
         &source.headers,
     );
     let client = http::image_client(state, trusted);
+    let host = url.host_str().unwrap_or("the image server").to_owned();
     let job = Job {
         url,
         key,
@@ -1059,7 +1090,13 @@ pub async fn fetch_sized(
         headers: source.headers,
         client,
     };
-    cache.join_or_start(job, &scope).await
+    let flight = cache.join_or_start(job, &scope);
+    let Some(wait) = wait else {
+        return flight.await;
+    };
+    tokio::time::timeout(wait, flight)
+        .await
+        .unwrap_or_else(|_| Err(ImageError::pending(&host)))
 }
 
 /// Disk hit, or fetch, validate and store. Concurrent calls for one URL share
@@ -1182,6 +1219,7 @@ mod tests {
             (ImageErrorKind::NotImage, 415, RpcErrorCode::Unsupported),
             (ImageErrorKind::TooLarge, 502, RpcErrorCode::Invalid),
             (ImageErrorKind::Upstream, 502, RpcErrorCode::Network),
+            (ImageErrorKind::Pending, 504, RpcErrorCode::Timeout),
         ];
         for (kind, status, code) in cases {
             let err = ImageError::new(kind, "m");

@@ -1672,6 +1672,98 @@ async fn img_answers_400_404_415_and_502_with_json_errors() {
     assert_eq!(r.status(), 404);
 }
 
+/// How long the slow image host below takes to answer: past the route's
+/// wait for a sized miss, within the fetch's own head deadline.
+const SLOW_IMAGE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// An image host: `/hang/*` accepts the request and never answers, `/slow/*`
+/// sends a small PNG after [`SLOW_IMAGE`]. Also returns how many `/slow/*`
+/// requests it got.
+async fn spawn_slow_image_host() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let slow_hits = Arc::new(AtomicUsize::new(0));
+    let counter = slow_hits.clone();
+    let app = Router::new()
+        .route(
+            "/hang/{name}",
+            get(|| async {
+                futures::future::pending::<()>().await;
+                "never"
+            }),
+        )
+        .route(
+            "/slow/{name}",
+            get(move || async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(SLOW_IMAGE).await;
+                let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+                png.resize(900, 7);
+                ([(header::CONTENT_TYPE, "image/png")], png)
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), slow_hits)
+}
+
+#[tokio::test]
+async fn img_stops_waiting_for_a_sized_miss_and_the_fetch_still_stores_it() {
+    use iptv_server::img::SIZED_MISS_WAIT;
+    use std::time::{Duration, Instant};
+    let (host, slow_hits) = spawn_slow_image_host().await;
+    let h = start_with(|o| o.allow_private_targets = true).await;
+    let sized = |path: &str| format!("{}&w=192", h.img_url(&format!("{host}{path}"), None));
+    let timed = |url: String| {
+        let http = h.http.clone();
+        async move {
+            let started = Instant::now();
+            let r = http.get(url).send().await.unwrap();
+            (started.elapsed(), r)
+        }
+    };
+    let ((hang_took, hang), (slow_took, slow), (full_took, full)) = tokio::join!(
+        timed(sized("/hang/a.png")),
+        timed(sized("/slow/b.png")),
+        timed(h.img_url(&format!("{host}/slow/c.png"), None)),
+    );
+
+    // A poster or logo (with `w`) on a host that never answers, or answers
+    // late, gets 504 after the route's wait instead of holding the request
+    // until the fetch's deadlines.
+    for (r, took) in [(hang, hang_took), (slow, slow_took)] {
+        assert_eq!(r.status(), 504, "{}", r.url());
+        assert!(
+            took >= SIZED_MISS_WAIT && took < SIZED_MISS_WAIT + Duration::from_secs(2),
+            "{took:?}"
+        );
+        assert_sandboxed(&r);
+        assert_eq!(r.headers()[header::CACHE_CONTROL], "no-store");
+        let v: serde_json::Value = r.json().await.unwrap();
+        assert_eq!(v["code"], "timeout", "{v}");
+    }
+    // Without `w` (a backdrop, a detail poster) the route waits, as before.
+    assert_eq!(full.status(), 200);
+    assert_eq!(full.headers()["x-image-cache"], "miss");
+    assert!(full_took >= SLOW_IMAGE, "{full_took:?}");
+
+    // The slow fetch went on after the 504 and stored the picture: the next
+    // request joins it or reads it from disk, the one after that is a hit,
+    // and the host is not asked again.
+    let r = h.http.get(sized("/slow/b.png")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let r = h.http.get(sized("/slow/b.png")).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["x-image-cache"], "hit");
+    assert_eq!(
+        slow_hits.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "one fetch each for b.png and c.png"
+    );
+}
+
 #[tokio::test]
 async fn img_refuses_private_targets_unless_a_source_trusts_them() {
     let mock = iptv_fixtures::spawn_mock().await;

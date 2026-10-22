@@ -1031,12 +1031,13 @@ const TS_LEFTOVER_MIN_S = 0.25;
 /**
  * The proxy keeps the provider's connection for mpegts.js's next lazy-load resume (server.md):
  * a torn-down player tells it to let go, so a stop or an Open in MPV frees a one-connection account.
+ * `keepalive`: a teardown or a pagehide during a navigation still gets the request out.
  */
 function releaseParked(url: string): void {
   if (!proxyRoute(url)) return;
   const u = new URL(url, window.location.href);
   u.searchParams.set('release', '1');
-  void fetch(u.href, { cache: 'no-store' }).catch(() => undefined);
+  void fetch(u.href, { cache: 'no-store', keepalive: true }).catch(() => undefined);
 }
 
 async function mpegtsEngine(
@@ -1138,9 +1139,21 @@ async function mpegtsEngine(
     if (!destroyed) cb.onError(err);
   };
 
+  /**
+   * What mpegts.js loads: a non-live body through the proxy asks it to park for the lazy-load
+   * resume (`park=1`, server.md). Only this player resumes such a body and releases it, so the
+   * proxy parks nothing else (an HLS segment). The reason lookup and the seeker's probes go without.
+   */
+  const withPark = (from: string): string => {
+    if (isLive || !proxyRoute(from)) return from;
+    const u = new URL(from);
+    u.searchParams.set('park', '1');
+    return u.href;
+  };
+
   const start = (from = absolute): void => {
     loadComplete = false;
-    const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: from, cors: true }, config);
+    const p = mpegts.createPlayer({ type: 'mpegts', isLive, url: withPark(from), cors: true }, config);
     player = p;
     p.on(mpegts.Events.ERROR, (type: string, detail: string, info?: { code?: number; msg?: string }) => {
       if (player !== p || destroyed || handedOff) return;
@@ -1266,6 +1279,10 @@ async function mpegtsEngine(
   };
   el.addEventListener('ended', onEnded);
   el.addEventListener('waiting', onWaiting);
+  // React does not unmount on unload: a tab closed or reloaded mid-file would leave the parked
+  // connection held until the proxy gives up on it.
+  const onPageHide = (): void => releaseParked(absolute);
+  if (!isLive) window.addEventListener('pagehide', onPageHide);
   /** The new pipeline produced media: fix the offset so its clock continues from the anchor. */
   const rebase = (): void => {
     if (anchor === null || player === null || el.readyState < 1 || restartTimer) return;
@@ -1358,6 +1375,7 @@ async function mpegtsEngine(
       el.removeEventListener('loadedmetadata', rebase);
       el.removeEventListener('loadedmetadata', land);
       el.removeEventListener('loadeddata', onData);
+      window.removeEventListener('pagehide', onPageHide);
       if (player) teardown(player);
       player = null;
       el.removeAttribute('src');

@@ -22,6 +22,10 @@
 //! it asks upstream itself, and a body whose source had a later request never
 //! parks: its player let go after the next request came (a seek that reached
 //! the proxy before it noticed), and parking would keep a second connection.
+//!
+//! Only a request with `park=1` parks. mpegts.js's non-live loads send it;
+//! nothing else resumes a body or releases one, so a long HLS segment that
+//! hls.js drops at a stop or a zap must not park.
 
 use super::readahead::{self, Chunk, Span, READAHEAD_BYTES};
 use axum::http::header::HeaderMap;
@@ -39,7 +43,8 @@ use url::Url;
 /// How long a reader waits for the player's resume: mpegts.js asks again after
 /// 30 s of playback.
 pub(crate) const PARK_FOR: Duration = Duration::from_secs(45);
-/// Only bodies this long park: a programme or a movie, not an HLS segment.
+/// Only bodies this long park, of those asked for with `park=1`: a programme or
+/// a movie. A shorter file is not worth holding a connection for.
 pub(crate) const PARK_MIN_BYTES: u64 = 16 << 20;
 /// Kept behind what the player took: hyper, the socket buffers (several MB
 /// each way on a loopback) and the browser's stream queue hold bytes it took

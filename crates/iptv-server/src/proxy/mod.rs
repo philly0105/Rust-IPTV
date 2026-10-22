@@ -12,9 +12,10 @@
 //! headers (per-channel `#EXTVLCOPT` headers) and are carried into rewritten
 //! playlists. `from=<byte>` starts a media body at that byte, as on the file
 //! routes (`files::byte_start`); an upstream that answers such a request with
-//! the whole file is refused with 502. A long MPEG-TS body the player lets go
-//! of parks for its resume (park.rs); `release=1` lets go of what is parked
-//! for the source and answers 204.
+//! the whole file is refused with 502. A long MPEG-TS body asked for with
+//! `park=1` (mpegts.js's non-live loads) parks for its resume when the player
+//! lets go of it (park.rs); `release=1` lets go of what is parked for the
+//! source and answers 204.
 //!
 //! Responses are served from the app's origin, so upstream content must never
 //! run as a page: every response carries `Content-Security-Policy: sandbox;
@@ -117,6 +118,10 @@ pub struct ProxyQuery {
     /// Non-zero: the player was torn down, let go of what is parked for the
     /// source (park.rs). Nothing is fetched.
     pub release: Option<u8>,
+    /// Non-zero: park this body when the player lets go of it before its end
+    /// (park.rs). Only mpegts.js's non-live loads ask: that player resumes
+    /// such a body and releases it, while hls.js does neither.
+    pub park: Option<u8>,
 }
 
 /// Source headers with the non-empty query overrides applied.
@@ -430,6 +435,7 @@ async fn proxy(
         ));
     }
 
+    // `park` stays out: segments are hls.js's, which never releases one.
     let params = [
         ("sourceId", source_id.as_deref().unwrap_or("")),
         ("ua", q.ua.as_deref().unwrap_or("").trim()),
@@ -440,7 +446,8 @@ async fn proxy(
     let rewriter =
         hls::HlsRewriter::with_params(current.clone(), &params).at_path(&s.opts.proxy_path);
     let resume_from = Some((upstream.clone(), url));
-    let park_as = (method == Method::GET).then(|| (Arc::clone(&s.proxy.parking), key, ticket.gen));
+    let park_as = (method == Method::GET && q.park.is_some_and(|n| n > 0))
+        .then(|| (Arc::clone(&s.proxy.parking), key, ticket.gen));
     if let Some(out) = respond(resp, current.clone(), rewriter, head, resume_from, park_as).await? {
         return Ok(holding(out, hold));
     }
@@ -632,8 +639,8 @@ fn is_generic_type(ct: &str) -> bool {
 /// Builds the proxy response. `None` when the upstream answered 206 with a
 /// slice of a playlist: the caller refetches it whole. `resume_from` (the
 /// upstream and the URL the client asked for) lets a media body of known
-/// length resume a dropped connection, and `park_as` lets a long MPEG-TS one
-/// park when the client lets go of it (park.rs).
+/// length resume a dropped connection, and `park_as` (a GET with `park=1`)
+/// lets a long MPEG-TS one park when the client lets go of it (park.rs).
 async fn respond(
     resp: reqwest::Response,
     final_url: Url,

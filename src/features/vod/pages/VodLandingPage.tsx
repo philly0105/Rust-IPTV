@@ -285,6 +285,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               scrollRef={scrollRef}
               open={indexOpen}
               onOpenChange={setIndexOpen}
+              onShowIndex={showIndex}
               toggleRef={indexToggleRef}
               manageLabel={manageLabel}
               onManage={() => setManageOpen(true)}
@@ -393,6 +394,7 @@ function CategoryIndexSection({
   scrollRef,
   open,
   onOpenChange,
+  onShowIndex,
   toggleRef,
   manageLabel,
   onManage,
@@ -407,6 +409,8 @@ function CategoryIndexSection({
   scrollRef: RefObject<HTMLDivElement | null>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Opens the index and takes its heading to the top of the view (the All categories chip). */
+  onShowIndex: () => void;
   toggleRef: RefObject<HTMLButtonElement | null>;
   manageLabel: string;
   onManage: () => void;
@@ -457,7 +461,15 @@ function CategoryIndexSection({
             type="button"
             aria-expanded={open}
             aria-controls={indexId}
-            onClick={() => onOpenChange(!open)}
+            onClick={(e) => {
+              // At the bottom of the page, where scrolling down to it leaves the heading, the list
+              // would open under the fold: take the heading to the top, as All categories does
+              // (IDX-2). Higher up, and to close, the page stays where it is.
+              const scroller = scrollRef.current;
+              const lower = !!scroller && e.currentTarget.getBoundingClientRect().top > scroller.getBoundingClientRect().top + scroller.clientHeight / 2;
+              if (!open && lower) onShowIndex();
+              else onOpenChange(!open);
+            }}
             className="-ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
           >
             <ChevronRight aria-hidden size={18} className={cn('text-fg-muted motion-safe:transition-transform rtl:rotate-180', open && 'rotate-90 rtl:rotate-90')} />

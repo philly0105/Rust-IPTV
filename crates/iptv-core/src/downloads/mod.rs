@@ -6,6 +6,8 @@
 //! - [`transfer`]: streaming GET with source headers, Range resume validated
 //!   by ETag/Last-Modified (`resume_validator`), in-task retry with backoff,
 //!   throttled `downloads.progress` events.
+//! - [`segments`]: one file over several Range connections, with a ranges
+//!   sidecar next to the `.part`.
 //! - [`naming`]: Windows-safe names, atomic numbered `.part` reservation,
 //!   finalize without overwrite.
 //! - [`store`]: SQL for the `downloads` table.
@@ -13,6 +15,7 @@
 pub mod manager;
 pub mod naming;
 pub mod rpc;
+pub mod segments;
 pub mod store;
 pub mod transfer;
 
@@ -123,6 +126,7 @@ fn present(state: &AppState, mut d: Download) -> Download {
     if d.status == DownloadStatus::Queued {
         d.waiting = m.waiting(d.id);
     }
+    d.connections = m.connections(d.id);
     store::derive_availability(&mut d);
     d
 }
@@ -151,6 +155,7 @@ async fn present_all(
         if d.status == DownloadStatus::Queued {
             d.waiting = m.waiting(d.id);
         }
+        d.connections = m.connections(d.id);
     }
     Ok(list)
 }
@@ -264,7 +269,9 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                     }
                     if d.status != DownloadStatus::Completed {
                         if let Some(p) = d.file_path.as_deref() {
-                            naming::remove_regular_file(&naming::part_path(Path::new(p)))?;
+                            let part = naming::part_path(Path::new(p));
+                            segments::remove(&part);
+                            naming::remove_regular_file(&part)?;
                         }
                     }
                     store::reset(c, d.id, &new)?;
@@ -457,7 +464,9 @@ async fn cleanup_part(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
     };
     let id = d.id;
     let removed = tokio::task::spawn_blocking(move || {
-        naming::remove_regular_file(&naming::part_path(Path::new(&p)))
+        let part = naming::part_path(Path::new(&p));
+        segments::remove(&part);
+        naming::remove_regular_file(&part)
     })
     .await??;
     if removed {
@@ -487,7 +496,9 @@ pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreRe
     tokio::task::spawn_blocking(move || -> CoreResult<()> {
         if let Some(p) = path.as_deref().map(Path::new) {
             if delete_file || completed {
-                naming::remove_regular_file(&naming::part_path(p))?;
+                let part = naming::part_path(p);
+                segments::remove(&part);
+                naming::remove_regular_file(&part)?;
             }
             if completed && delete_file {
                 naming::remove_regular_file(p)?;

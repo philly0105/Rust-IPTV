@@ -163,6 +163,17 @@ describe('download rows', () => {
     expect(detail()).toMatch(/^Can't reach the provider\. Trying again at \S/);
   });
 
+  it('say how many connections a split transfer holds', async () => {
+    const { progressStore } = await import('../lib/progress');
+    progressStore.ingest({ id: 9, bytesDownloaded: 1000, totalBytes: 4000, bytesPerSecond: 500 });
+    row(makeDownload({ id: 9, status: 'downloading', bytesDownloaded: 1000, totalBytes: 4000, connections: 2 }), ['pause', 'cancel']);
+    expect(screen.getByTestId('download-detail').textContent).toContain('2 connections');
+    cleanup();
+    progressStore.ingest({ id: 10, bytesDownloaded: 1000, totalBytes: 4000, bytesPerSecond: 500 });
+    row(makeDownload({ id: 10, status: 'downloading', bytesDownloaded: 1000, totalBytes: 4000 }), ['pause', 'cancel']);
+    expect(screen.getByTestId('download-detail').textContent).not.toContain('connections');
+  });
+
   it('reserve the widest row\'s actions column on every row, so bars and badges end on one line', () => {
     row(makeDownload({ id: 3, status: 'paused' }), ['resume', 'remove']);
     expect(screen.getByTestId('download-actions').className).toContain('pointer-fine:w-[calc(3*2rem+2*0.125rem)]');

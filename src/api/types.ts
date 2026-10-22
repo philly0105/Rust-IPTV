@@ -394,6 +394,8 @@ export interface Download {
   positionSeconds: number;
   /** Why a queued row waits, when it is more than its turn (live, never stored). */
   waiting?: DownloadWait;
+  /** Connections a running transfer holds, when more than one (live). */
+  connections?: number;
 }
 
 /**
@@ -597,6 +599,8 @@ export interface Settings {
   // recording:
   /** Minutes a scheduled recording starts early (0..60). */
   recordingPaddingBeforeMinutes: number;
+  /** downloads: sources whose downloads use one connection per file ("Connections per download: 1"); the rest are Auto. */
+  downloadSingleConnection: string[];
   /** Minutes a scheduled recording runs past the programme end (0..120). */
   recordingPaddingAfterMinutes: number;
   /** Guide reminders fire while the app runs. */
@@ -706,6 +710,8 @@ export const DEFAULT_SETTINGS: Settings = {
   epgShortFallback: true,
   // recording:
   recordingPaddingBeforeMinutes: 1,
+  // downloads:
+  downloadSingleConnection: [],
   recordingPaddingAfterMinutes: 5,
   remindersEnabled: true,
   reminderLeadMinutes: 2,

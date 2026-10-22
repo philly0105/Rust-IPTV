@@ -55,6 +55,7 @@
   "waitingForConnection": "このソースの接続が空くまで待機中",
   "waitingForConnectionAt": "プロバイダーに空き接続がありません。{{time}}に再試行します",
   "waitingForProvider": "プロバイダーに接続できません。{{time}}に再試行します",
+  "connectionsInUse": "{{n}}接続",
   "pausedHint": "一時停止中です。途中までのファイルは保持されます。",
   "failedHint": "エラーによりダウンロードが停止しました",
   "canceledHint": "完了前にキャンセルされました",

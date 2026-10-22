@@ -9,6 +9,7 @@ import { Select, Slider } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import { clampRating, type SettingsPatch } from '../lib/patch';
+import { DownloadConnectionsRows } from './DownloadConnectionsRows';
 import { DownloadsFolderRow } from './DownloadsFolderRow';
 // account:
 import { SourceRefreshGroup } from './SourceRefreshGroup';
@@ -139,6 +140,7 @@ export function GeneralSection({ settings, update }: SectionProps) {
 
       <SettingsGroup title={t('downloads')} description={t('downloadsHint')}>
         <DownloadsFolderRow custom={Boolean(settings.downloadsDir?.trim())} />
+        <DownloadConnectionsRows settings={settings} update={update} />
       </SettingsGroup>
     </SettingsSection>
   );

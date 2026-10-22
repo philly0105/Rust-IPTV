@@ -19,7 +19,7 @@ Writers are serialized by a `tokio::sync::Mutex` stored in `state.extensions["se
 
 ## Normalization
 
-Strings are trimmed, and empty optional strings (`mpvPath`, `vlcPath`, `downloadsDir`, `recordingsDir`, `lastRoute`) become `None`. `language` is lowercased. `epgUrls` are trimmed, emptied entries dropped, and exact duplicates removed (first one wins).
+Strings are trimmed, and empty optional strings (`mpvPath`, `vlcPath`, `downloadsDir`, `recordingsDir`, `lastRoute`) become `None`. `language` is lowercased. `epgUrls` and `downloadSingleConnection` are trimmed, emptied entries dropped, and exact duplicates removed (first one wins).
 
 ## Validation (errors are `Invalid`)
 
@@ -83,6 +83,7 @@ Where rows live:
 | `remoteLanEnabled` | `false` | The remote control also listens on private network addresses for paired phones. Desktop only: the server ignores it. |
 | `epgShortFallback` | `true` | Xtream channels without XMLTV programmes use the panel's short EPG. |
 | `recordingPaddingBeforeMinutes` | `1` | Minutes a scheduled recording starts early. 0..60, else `Invalid`. |
+| `downloadSingleConnection` | `[]` | Source ids whose downloads use one connection per file ("Connections per download: 1", Settings > General > Downloads); every other source is Auto. Ids are trimmed, empty ones dropped, duplicates removed. See downloads.md. |
 | `recordingPaddingAfterMinutes` | `5` | Minutes a scheduled recording runs past the programme end. 0..120, else `Invalid`. |
 | `remindersEnabled` | `true` | Guide reminders fire while the app runs. |
 | `reminderLeadMinutes` | `2` | Minutes before the start a reminder fires. 0..60, else `Invalid`. |

@@ -79,6 +79,7 @@
   "waitingForConnection": "كيتسنى اتصال خاوي فهاد المصدر",
   "waitingForConnectionAt": "المزوّد ما عندوش اتصال خاوي. غادي نعاودو ف {{time}}",
   "waitingForProvider": "ما قدرناش نوصلو للمزوّد. غادي نعاودو ف {{time}}",
+  "connectionsInUse": "الاتصالات: {{n}}",
   "pausedHint": "موقوف مؤقتاً. الملف الناقص محفوظ.",
   "failedHint": "التحميل وقف بسبب خطأ",
   "canceledHint": "تلغى قبل ما يكمل",

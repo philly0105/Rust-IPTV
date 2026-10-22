@@ -352,6 +352,13 @@ pub fn normalize(mut s: Settings) -> Settings {
     s.tmdb.api_key = trim_opt(s.tmdb.api_key);
     s.tmdb.language = trim_opt(s.tmdb.language);
     let mut seen = std::collections::HashSet::new();
+    s.download_single_connection = s
+        .download_single_connection
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+        .collect();
+    seen.clear();
     s.epg_urls = s
         .epg_urls
         .into_iter()

@@ -55,6 +55,7 @@
   "waitingForConnection": "Waits for a free connection on this source",
   "waitingForConnectionAt": "The provider has no free connection. Trying again at {{time}}",
   "waitingForProvider": "Can't reach the provider. Trying again at {{time}}",
+  "connectionsInUse": "{{n}} connections",
   "pausedHint": "Paused. The partial file is kept.",
   "failedHint": "The download stopped with an error",
   "canceledHint": "Canceled before it finished",

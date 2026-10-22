@@ -147,7 +147,15 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
 
   let detail: string;
   if (d.status === 'downloading') {
-    detail = progress.bytesPerSecond ? [formatSpeed(progress.bytesPerSecond, lang), eta !== undefined ? t('etaLeft', { time: formatDuration(eta, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) }) : ''].filter(Boolean).join('   ') : t('stalled');
+    detail = progress.bytesPerSecond
+      ? [
+          formatSpeed(progress.bytesPerSecond, lang),
+          eta !== undefined ? t('etaLeft', { time: formatDuration(eta, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) }) : '',
+          d.connections ? t('connectionsInUse', { n: d.connections }) : '',
+        ]
+          .filter(Boolean)
+          .join('   ')
+      : t('stalled');
   } else if (d.status === 'queued') detail = waitingDetail(d, t, lang);
   else if (d.status === 'paused') detail = t('pausedHint');
   else if (d.status === 'failed') detail = d.errorMessage ?? t('failedHint');

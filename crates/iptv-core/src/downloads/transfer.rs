@@ -3,6 +3,7 @@
 
 use super::manager::{DownloadManager, StopReason, TaskCtl};
 use super::naming::{self, Reservation};
+use super::segments::{self, Ranges, SegEnd};
 use super::store::{self, DownloadRow};
 use crate::error::{CoreError, CoreResult};
 use crate::http::{apply_source_headers, backoff_delay};
@@ -31,7 +32,7 @@ const PERSIST_INTERVAL: Duration = Duration::from_secs(2);
 const WRITE_BUFFER: usize = 256 * 1024;
 /// Longest single throttle sleep, so a rate-limit change (or lifting it) is
 /// noticed quickly even when one chunk is worth seconds at the old rate.
-const THROTTLE_SLICE: Duration = Duration::from_millis(200);
+pub(super) const THROTTLE_SLICE: Duration = Duration::from_millis(200);
 
 /// How a run ended.
 #[derive(Debug, Clone)]
@@ -119,6 +120,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
     let mut rep = Representation {
         total: row.download.total_bytes,
         validator: row.resume_validator.clone(),
+        one_connection: false,
     };
     let mut failures = 0u32;
     // Highest offset this run has written. An attempt that restarted from
@@ -338,7 +340,7 @@ fn failed(message: String, bytes: i64, keep_part: bool, part: Option<PathBuf>) -
 
 /// A non-success answer to the file request, as an error whose kind picks
 /// the advice [`user_message`] adds.
-fn http_status_error(status: reqwest::StatusCode) -> CoreError {
+pub(super) fn http_status_error(status: reqwest::StatusCode) -> CoreError {
     let code = status.as_u16();
     match code {
         401 | 403 => CoreError::Auth(format!("The provider refused the request (HTTP {code})")),
@@ -390,6 +392,9 @@ fn user_message(err: &CoreError) -> String {
 struct Representation {
     total: Option<i64>,
     validator: Option<String>,
+    /// A segment answer did not match: the rest of this run uses one
+    /// connection.
+    one_connection: bool,
 }
 
 /// Reuses the row's retained `.part`, or reserves a fresh numbered one, and
@@ -419,6 +424,22 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                     if std::fs::rename(&part, &fresh.part_path).is_err() {
                         if let Err(e) = naming::remove_regular_file(&part) {
                             tracing::warn!(id, error = %e, "could not delete the old partial download");
+                        }
+                        segments::remove(&part);
+                    } else if segments::ranges_path(&part).is_file() {
+                        // A split partial needs its sidecar; without it the
+                        // moved one starts over.
+                        if std::fs::rename(
+                            segments::ranges_path(&part),
+                            segments::ranges_path(&fresh.part_path),
+                        )
+                        .is_err()
+                        {
+                            segments::remove(&part);
+                            std::fs::OpenOptions::new()
+                                .write(true)
+                                .truncate(true)
+                                .open(&fresh.part_path)?;
                         }
                     }
                     return Ok(fresh);
@@ -469,7 +490,7 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
 }
 
 /// `bytes 100-199/2000` -> (100, Some(2000)); `/*` -> None total.
-fn parse_content_range(v: &str) -> Option<(i64, Option<i64>)> {
+pub(super) fn parse_content_range(v: &str) -> Option<(i64, Option<i64>)> {
     let rest = v.trim().strip_prefix("bytes")?.trim();
     let (range, total) = rest.split_once('/')?;
     let (start, _end) = range.split_once('-')?;
@@ -513,6 +534,34 @@ async fn attempt(
         discard: false,
     };
 
+    // A sidecar means the `.part` was written in segments: its length says
+    // nothing, and each segment resumes where it got to.
+    let part = dest.part_path.clone();
+    let sidecar = tokio::task::spawn_blocking(move || segments::load(&part))
+        .await
+        .ok()
+        .flatten();
+    if let Some(ranges) = sidecar {
+        if Some(ranges.total) == rep.total && rep.validator.as_deref() == Some(&ranges.validator) {
+            return segmented(state, row, dest, ctl, mgr, rep, ranges, None).await;
+        }
+        // Not this file's layout: start over.
+        let part = dest.part_path.clone();
+        let cleared = tokio::task::spawn_blocking(move || {
+            segments::remove(&part);
+            std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(true)
+                .open(&part)
+                .map(|_| ())
+        })
+        .await;
+        if let Ok(Err(e)) | Err(e) = cleared.map_err(std::io::Error::other) {
+            return error(CoreError::Io(e), 0, 0);
+        }
+        rep.total = None;
+        rep.validator = None;
+    }
     let existing = match naming::regular_file_len(&dest.part_path) {
         Ok(len) => len.unwrap_or(0) as i64,
         Err(e) => return error(CoreError::Io(e), 0, 0),
@@ -534,11 +583,17 @@ async fn attempt(
     let client = crate::http::source_client(state, &row.download.item_ref.source_id, url).await;
     let mut req =
         apply_source_headers(client.get(url), &row.headers).header(ACCEPT_ENCODING, "identity");
+    // A file may go over several connections: a fresh start asks for a range
+    // too, since only a `206` with a total and a validator shows it can.
+    let splittable = may_split(state, row, mgr, rep);
+    let ranged = resume_from > 0 || splittable;
     if resume_from > 0 {
         req = req.header(RANGE, format!("bytes={resume_from}-"));
         if let Some(v) = &rep.validator {
             req = req.header(IF_RANGE, v.as_str());
         }
+    } else if splittable {
+        req = req.header(RANGE, "bytes=0-");
     }
     let host = url::Url::parse(url)
         .ok()
@@ -560,7 +615,7 @@ async fn attempt(
 
     let status = resp.status();
     let mut offset: i64;
-    if status == StatusCode::PARTIAL_CONTENT && resume_from > 0 {
+    if status == StatusCode::PARTIAL_CONTENT && ranged {
         let Some((start, total)) = header_str(&resp, CONTENT_RANGE)
             .as_deref()
             .and_then(parse_content_range)
@@ -581,6 +636,11 @@ async fn attempt(
                 bytes: resume_from,
                 discard: true,
             };
+        }
+        if resume_from == 0 {
+            // A fresh start: whatever the row knew described another answer.
+            rep.total = None;
+            rep.validator = None;
         }
         if let (Some(known), Some(t)) = (rep.total, total) {
             if known != t {
@@ -603,6 +663,8 @@ async fn attempt(
         offset = resume_from;
     } else if status == StatusCode::RANGE_NOT_SATISFIABLE && resume_from > 0 {
         // Our partial does not fit the remote file: restart from zero.
+        let part = dest.part_path.clone();
+        let _ = tokio::task::spawn_blocking(move || segments::remove(&part)).await;
         if let Err(e) = truncate(&dest.part_path).await {
             return error(CoreError::Io(e), resume_from, resume_from);
         }
@@ -635,6 +697,24 @@ async fn attempt(
         tracing::warn!(id, error = %e, "could not record download size");
     }
 
+    // Over several connections when the answer allows it and the source has
+    // spare ones now; otherwise a check every second hands this stream over
+    // when they free up (the rest of a season finished, playback stopped).
+    let split_total = rep
+        .total
+        .filter(|_| splittable && status == StatusCode::PARTIAL_CONTENT && rep.validator.is_some());
+    let worth_splitting =
+        |offset: i64| split_total.is_some_and(|t| t - offset >= 2 * segments::MIN_SEGMENT);
+    if worth_splitting(offset) && mgr.connection_allowance(ctl) >= 2 && sparse(dest).await {
+        let ranges = Ranges::new(
+            rep.total.unwrap_or(0),
+            rep.validator.clone().unwrap_or_default(),
+            offset,
+        );
+        let first = Some((resp.bytes_stream().boxed(), offset));
+        return segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+    }
+
     let file = tokio::fs::OpenOptions::new()
         .write(true)
         .append(offset > 0)
@@ -648,8 +728,10 @@ async fn attempt(
     let mut out = tokio::io::BufWriter::with_capacity(WRITE_BUFFER, file);
     let started_at = offset;
     let mut progress = Progress::new(offset);
-    let mut stream = resp.bytes_stream();
+    let mut stream = resp.bytes_stream().boxed();
     let mut pace = Pace::new(mgr.rate_limit(), offset);
+    let mut split_checked = Instant::now();
+    let mut hand_over = false;
 
     let end = loop {
         // The idle timer starts after throttle(), so a rate cap never trips it.
@@ -674,6 +756,13 @@ async fn attempt(
                 progress.tick(state, id, offset, rep.total);
                 if throttle(&mut pace, mgr, ctl, offset).await {
                     break None;
+                }
+                if worth_splitting(offset) && split_checked.elapsed() >= SPLIT_CHECK {
+                    split_checked = Instant::now();
+                    if mgr.connection_allowance(ctl) >= 2 {
+                        hand_over = true;
+                        break None;
+                    }
                 }
             }
             Some(Err(e)) => break Some(Err(CoreError::from(e))),
@@ -700,6 +789,34 @@ async fn attempt(
     if let Err(e) = flushed {
         return error(CoreError::Io(e), started_at, offset);
     }
+    if hand_over && sparse(dest).await {
+        let ranges = Ranges::new(
+            rep.total.unwrap_or(0),
+            rep.validator.clone().unwrap_or_default(),
+            offset,
+        );
+        return segmented(
+            state,
+            row,
+            dest,
+            ctl,
+            mgr,
+            rep,
+            ranges,
+            Some((stream, offset)),
+        )
+        .await;
+    }
+    if hand_over {
+        // The file system cannot leave holes: go on with one connection
+        // (the next attempt resumes this one with Range).
+        rep.one_connection = true;
+        return error(
+            CoreError::Network("continuing with one connection".into()),
+            started_at,
+            offset,
+        );
+    }
     match end {
         None => AttemptEnd::Stopped(offset),
         Some(Err(e)) => error(e, started_at, offset),
@@ -714,18 +831,132 @@ async fn attempt(
     }
 }
 
+/// How often a single-connection transfer checks whether it may split.
+const SPLIT_CHECK: Duration = Duration::from_secs(1);
+
+/// Whether this attempt may go over several connections: the source's
+/// "Connections per download" is Auto, no speed cap is set (it paces one
+/// stream), and no segment answer of this run failed to match.
+fn may_split(
+    state: &AppState,
+    row: &DownloadRow,
+    mgr: &DownloadManager,
+    rep: &Representation,
+) -> bool {
+    !rep.one_connection
+        && mgr.rate_limit().is_none()
+        && !state
+            .settings_snapshot()
+            .download_single_connection
+            .contains(&row.download.item_ref.source_id)
+}
+
+/// Lets the `.part` take writes far past its end without filling the gap
+/// first (see [`segments::make_sparse`]).
+async fn sparse(dest: &Dest) -> bool {
+    let part = dest.part_path.clone();
+    tokio::task::spawn_blocking(move || segments::make_sparse(&part))
+        .await
+        .unwrap_or(false)
+}
+
+/// Runs `ranges` over several connections and maps the end to the
+/// attempt's. `first` is the open answer of the attempt, if any.
+#[allow(clippy::too_many_arguments)]
+async fn segmented(
+    state: &Arc<AppState>,
+    row: &DownloadRow,
+    dest: &Dest,
+    ctl: &TaskCtl,
+    mgr: &DownloadManager,
+    rep: &mut Representation,
+    ranges: Ranges,
+    first: Option<(
+        futures::stream::BoxStream<'static, reqwest::Result<bytes::Bytes>>,
+        i64,
+    )>,
+) -> AttemptEnd {
+    let id = row.download.id;
+    let start = ranges.done();
+    let url = row.download.url.clone();
+    let host = url::Url::parse(&url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "the server".into());
+    let (head_limit, idle_limit) = mgr.idle_timeouts();
+    let job = segments::Job {
+        id,
+        client: crate::http::source_client(state, &row.download.item_ref.source_id, &url).await,
+        url,
+        headers: row.headers.clone(),
+        part: dest.part_path.clone(),
+        ctl,
+        mgr,
+        head_limit,
+        idle_limit,
+        host,
+        cap: if may_split(state, row, mgr, rep) {
+            segments::MAX_CONNECTIONS
+        } else {
+            1
+        },
+    };
+    let mut progress = Progress::new(start);
+    let end = segments::run(job, ranges, first, |done, total| {
+        progress.tick(state, id, done, Some(total))
+    })
+    .await;
+    // The last periodic write lands first, so it never overwrites this one.
+    if let Some(write) = progress.persisting.take() {
+        let _ = write.await;
+    }
+    let bytes = match &end {
+        SegEnd::Done(b) | SegEnd::Stopped(b) | SegEnd::Error { bytes: b, .. } => *b,
+        SegEnd::Changed => 0,
+    };
+    if let Err(e) = state
+        .db_call(move |c| store::set_progress(c, id, bytes))
+        .await
+    {
+        tracing::warn!(id, error = %e, "could not persist download progress");
+    }
+    match end {
+        SegEnd::Done(total) => AttemptEnd::Done(total),
+        SegEnd::Stopped(bytes) => AttemptEnd::Stopped(bytes),
+        SegEnd::Error { err, bytes } => AttemptEnd::Error {
+            err,
+            start,
+            bytes,
+            discard: false,
+        },
+        SegEnd::Changed => {
+            rep.total = None;
+            rep.validator = None;
+            rep.one_connection = true;
+            AttemptEnd::Error {
+                err: CoreError::Network(
+                    "The server stopped answering byte ranges of this file; it starts over with one connection.".into(),
+                ),
+                start,
+                bytes: 0,
+                discard: false,
+            }
+        }
+    }
+}
+
 /// Per-attempt speed pacing against the manager's live rate limit. The
 /// baseline restarts whenever the limit changes, so a new cap neither
 /// "repays" bytes sent at the old rate nor bursts to catch up.
 #[derive(Debug)]
-struct Pace {
+pub(super) struct Pace {
     limit: Option<u64>,
     base_bytes: i64,
     base_time: Instant,
 }
 
 impl Pace {
-    fn new(limit: Option<u64>, offset: i64) -> Self {
+    pub(super) fn new(limit: Option<u64>, offset: i64) -> Self {
         Self {
             limit,
             base_bytes: offset,
@@ -734,7 +965,12 @@ impl Pace {
     }
 
     /// How long to wait before reading past `offset` under `limit`.
-    fn delay(&mut self, limit: Option<u64>, offset: i64, now: Instant) -> Option<Duration> {
+    pub(super) fn delay(
+        &mut self,
+        limit: Option<u64>,
+        offset: i64,
+        now: Instant,
+    ) -> Option<Duration> {
         if limit != self.limit {
             *self = Self {
                 limit,

@@ -19,7 +19,8 @@
 //! - `/media/...`, `/img/...` sample media and generated artwork.
 //! - `/health`, `/echo/headers`, `/__mock/stats`, `/__mock/reset`,
 //!   `/__mock/limited-vod` (files of the `limit<N>` Xtream accounts),
-//!   `/__mock/outage?ms=N` (`/files/*` answers 503 for N ms).
+//!   `/__mock/outage?ms=N` (`/files/*` answers 503 for N ms),
+//!   `/__mock/etag-bump` (a new ETag for `video.bin?versioned=1`).
 //!
 //! Every response carries `Access-Control-Allow-Origin: *`.
 //!
@@ -71,6 +72,8 @@ pub struct MockState {
     pub(crate) limited_vod: Mutex<(u64, u64)>,
     /// `/files/*` answers 503 until then (`/__mock/outage`).
     pub(crate) outage_until: Mutex<Option<std::time::Instant>>,
+    /// Version in the ETag of `video.bin?versioned=1`.
+    pub(crate) etag_version: AtomicU32,
 }
 
 impl MockState {
@@ -83,6 +86,7 @@ impl MockState {
             open_streams: Mutex::new(HashMap::new()),
             limited_vod: Mutex::new((LIMITED_VOD_LEN, 0)),
             outage_until: Mutex::new(None),
+            etag_version: AtomicU32::new(1),
         }
     }
 }
@@ -176,6 +180,7 @@ pub fn router_with_base(base: String) -> Router {
             post(set_limited_vod).get(set_limited_vod),
         )
         .route("/__mock/outage", post(set_outage).get(set_outage))
+        .route("/__mock/etag-bump", post(etag_bump).get(etag_bump))
         .route("/img/{kind}/{file}", get(images::image))
         .route("/media/radio.mp3", get(radio))
         .route("/media/sample.mp4", get(sample_mp4))
@@ -269,6 +274,12 @@ async fn set_outage(State(state): State<Arc<MockState>>, Query(q): Query<Outage>
     *state.outage_until.lock() =
         Some(std::time::Instant::now() + std::time::Duration::from_millis(q.ms));
     Json(json!({ "ms": q.ms }))
+}
+
+/// `video.bin?versioned=1` gets a new ETag, as if the file changed.
+async fn etag_bump(State(state): State<Arc<MockState>>) -> Json<Value> {
+    let v = state.etag_version.fetch_add(1, Ordering::SeqCst) + 1;
+    Json(json!({ "version": v }))
 }
 
 async fn reset(State(state): State<Arc<MockState>>) -> Json<Value> {

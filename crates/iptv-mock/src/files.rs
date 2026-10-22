@@ -11,6 +11,8 @@
 //! - `size=<bytes>`: override the length (default 20 MiB; nolen 3 MiB).
 //! - `kbps=<KiB/s>`: throttle, so a test can pause mid-transfer.
 //! - `key=<name>` (flaky only): each distinct key fails once.
+//! - `versioned=1` (video only): the ETag changes with every
+//!   `/__mock/etag-bump`, a file the provider replaced.
 //! - `stall=1` (flaky only): the failing response stops sending after
 //!   [`FLAKY_DROP_AFTER`] bytes and holds the connection open instead of
 //!   dropping it.
@@ -73,6 +75,8 @@ pub struct FileOpts {
     pub kbps: Option<u64>,
     pub key: Option<String>,
     pub stall: Option<u8>,
+    /// `video.bin`: an ETag that changes with `/__mock/etag-bump`.
+    pub versioned: Option<u8>,
 }
 
 fn producer() -> Producer {
@@ -109,12 +113,12 @@ pub(crate) async fn video(
         return r;
     }
     let len = q.size.unwrap_or(VIDEO_BIN_LEN).min(MAX_SIZE);
-    serve_bytes(
-        &headers,
-        len,
-        producer(),
-        opts(len, q.kbps.unwrap_or(0), "video.bin"),
-    )
+    let mut o = opts(len, q.kbps.unwrap_or(0), "video.bin");
+    if q.versioned.unwrap_or(0) != 0 {
+        let v = state.etag_version.load(std::sync::atomic::Ordering::SeqCst);
+        o = o.etag(format!("\"iptv-mock-video-v{v}-{len:x}\""));
+    }
+    serve_bytes(&headers, len, producer(), o)
 }
 
 pub(crate) async fn flaky(

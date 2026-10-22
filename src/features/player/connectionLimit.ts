@@ -80,11 +80,11 @@ async function ownRecordings(sourceId: string): Promise<number> {
   }
 }
 
-/** Downloads this app is running from `sourceId` right now; 0 when the list is unavailable. */
+/** Connections this app's downloads hold on `sourceId` right now; 0 when the list is unavailable. */
 async function ownDownloads(sourceId: string): Promise<number> {
   try {
     const list = await rpc('downloads.list');
-    return list.filter((d) => d.status === 'downloading' && d.ref.sourceId === sourceId).length;
+    return list.filter((d) => d.status === 'downloading' && d.ref.sourceId === sourceId).reduce((n, d) => n + (d.connections ?? 1), 0);
   } catch {
     return 0;
   }

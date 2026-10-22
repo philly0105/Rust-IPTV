@@ -806,6 +806,9 @@ pub struct Download {
     /// stored).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting: Option<DownloadWait>,
+    /// Connections a running transfer holds, when more than one (live).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connections: Option<usize>,
 }
 
 /// Why a queued download waits (`Download.waiting`).
@@ -1208,6 +1211,10 @@ pub struct Settings {
     // recording:
     /// Minutes a scheduled recording starts before the programme (0..=60).
     pub recording_padding_before_minutes: u32,
+    // downloads:
+    /// Sources whose downloads use one connection per file ("Connections
+    /// per download: 1"); every other source is Auto.
+    pub download_single_connection: Vec<String>,
     /// Minutes a scheduled recording runs past the programme end (0..=120).
     pub recording_padding_after_minutes: u32,
     /// Guide reminders fire while the app runs.
@@ -1310,6 +1317,7 @@ impl Default for Settings {
             epg_short_fallback: true,
             // recording:
             recording_padding_before_minutes: 1,
+            download_single_connection: Vec::new(),
             recording_padding_after_minutes: 5,
             reminders_enabled: true,
             reminder_lead_minutes: 2,

@@ -82,8 +82,9 @@ pub struct TaskCtl {
     seq: u64,
     /// Source the transfer downloads from.
     pub source: String,
-    /// Connections the transfer holds open.
-    connections: AtomicUsize,
+    /// Connections the transfer holds open (more than one while it
+    /// downloads in segments).
+    pub(crate) connections: AtomicUsize,
 }
 
 impl TaskCtl {
@@ -248,7 +249,10 @@ impl Inner {
                 .values()
                 .filter(|c| c.source == source && !c.token.is_cancelled())
                 .collect();
-            let mut held: usize = running.iter().map(|c| c.connections()).sum();
+            // A transfer in segments gives its extra connections back on
+            // its own within a tick (`connection_allowance`), so only whole
+            // transfers over the budget yield.
+            let mut held = running.len();
             running.sort_by_key(|c| std::cmp::Reverse(c.seq));
             for ctl in running {
                 if held <= budget {
@@ -256,7 +260,7 @@ impl Inner {
                 }
                 tracing::info!(source, "download yields its connection to playback");
                 ctl.request_yield();
-                held = held.saturating_sub(ctl.connections());
+                held -= 1;
                 done.push(ctl.done.subscribe());
             }
         }
@@ -458,6 +462,56 @@ impl DownloadManager {
             reason,
             until: None,
         })
+    }
+
+    /// Connections a running transfer holds, when it holds more than one.
+    pub fn connections(&self, id: i64) -> Option<usize> {
+        self.inner
+            .lock()
+            .active
+            .get(&id)
+            .map(|c| c.connections())
+            .filter(|n| *n > 1)
+    }
+
+    /// How many connections the transfer `ctl` may hold now (at least 1):
+    /// what its source's budget leaves after the source's other transfers,
+    /// and 1 while anything plays from the source or another download of
+    /// it waits in the queue (that one gets the connection first).
+    pub fn connection_allowance(&self, ctl: &TaskCtl) -> usize {
+        let now = Instant::now();
+        let inner = self.inner.lock();
+        let source = ctl.source.as_str();
+        if inner.playing(source, now) > 0 {
+            return 1;
+        }
+        let queued = inner
+            .queue
+            .iter()
+            .any(|id| inner.queued_from.get(id).is_some_and(|s| s == source));
+        if queued {
+            return 1;
+        }
+        let Some(budget) = inner.budget(source, now) else {
+            return 1;
+        };
+        let others = inner.used(source).saturating_sub(ctl.connections());
+        budget.saturating_sub(others).max(1)
+    }
+
+    /// True while a transfer from `source` holds more connections than it
+    /// may now.
+    fn over_allowance(&self, source: &str) -> bool {
+        let ctls: Vec<Arc<TaskCtl>> = self
+            .inner
+            .lock()
+            .active
+            .values()
+            .filter(|c| c.source == source && !c.token.is_cancelled())
+            .cloned()
+            .collect();
+        ctls.iter()
+            .any(|c| c.connections() > self.connection_allowance(c))
     }
 
     /// Shortens the waits after a refusal or outage (the backoff base and
@@ -806,17 +860,29 @@ pub fn account_changed(state: &AppState, status: &crate::account::AccountStatus)
     kick(state);
 }
 
-/// Waits (up to [`MAKE_ROOM_WAIT`]) for transfers asked to yield to let go,
-/// plus [`YIELD_GRACE`].
-async fn wait_yielded(done: Vec<tokio::sync::watch::Receiver<bool>>) {
-    if done.is_empty() {
-        return;
-    }
+/// Waits (up to [`MAKE_ROOM_WAIT`]) for transfers asked to yield to let go
+/// and for split transfers from `source` to give back the connections they
+/// may no longer hold, plus [`YIELD_GRACE`] when anything had to.
+async fn wait_yielded(
+    mgr: &DownloadManager,
+    source: Option<&str>,
+    done: Vec<tokio::sync::watch::Receiver<bool>>,
+) {
+    let deadline = tokio::time::Instant::now() + MAKE_ROOM_WAIT;
+    let mut waited = !done.is_empty();
     let all = futures::future::join_all(done.into_iter().map(|mut rx| async move {
         let _ = rx.wait_for(|d| *d).await;
     }));
-    let _ = tokio::time::timeout(MAKE_ROOM_WAIT, all).await;
-    tokio::time::sleep(YIELD_GRACE).await;
+    let _ = tokio::time::timeout_at(deadline, all).await;
+    if let Some(source) = source {
+        while mgr.over_allowance(source) && tokio::time::Instant::now() < deadline {
+            waited = true;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    if waited {
+        tokio::time::sleep(YIELD_GRACE).await;
+    }
 }
 
 /// `downloads.playback`: the sources one player (`client`) is playing from
@@ -832,12 +898,21 @@ pub async fn set_playback(state: &Arc<AppState>, client: &str, sources: Vec<Stri
             inner.leases.remove(client);
         } else {
             let until = Instant::now() + mgr.playback_lease();
-            inner
-                .leases
-                .insert(client.to_string(), Lease { sources, until });
+            inner.leases.insert(
+                client.to_string(),
+                Lease {
+                    sources: sources.clone(),
+                    until,
+                },
+            );
         }
     }
-    wait_yielded(pump(state, &mgr)).await;
+    let done = pump(state, &mgr);
+    let first = sources.first().map(String::as_str);
+    wait_yielded(&mgr, first, done).await;
+    for source in sources.iter().skip(1) {
+        wait_yielded(&mgr, Some(source), Vec::new()).await;
+    }
 }
 
 /// A stream the media proxy has open from a source; it counts as playback
@@ -891,7 +966,8 @@ pub async fn open_stream(state: &Arc<AppState>, source: &str) -> StreamHold {
             .lingering
             .insert(source.to_string(), Instant::now() + STREAM_LINGER);
     }
-    wait_yielded(pump(state, &mgr)).await;
+    let done = pump(state, &mgr);
+    wait_yielded(&mgr, Some(source), done).await;
     StreamHold {
         state: Arc::downgrade(state),
         source: source.to_string(),
@@ -934,7 +1010,8 @@ pub async fn hold_recording(state: &Arc<AppState>, source: &str) -> RecordingHol
         .recordings
         .entry(source.to_string())
         .or_default() += 1;
-    wait_yielded(pump(state, &mgr)).await;
+    let done = pump(state, &mgr);
+    wait_yielded(&mgr, Some(source), done).await;
     RecordingHold {
         state: Arc::downgrade(state),
         source: source.to_string(),
@@ -1148,6 +1225,7 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
                     StopReason::Yield => store::requeue(c, id, bytes).map(|_| ()),
                     StopReason::Cancel => {
                         if let Some(part) = part {
+                            super::segments::remove(&part);
                             if let Err(e) = super::naming::remove_regular_file(&part) {
                                 // Keep the path so a later cancel/remove can retry the cleanup.
                                 tracing::warn!(id, error = %e, "could not delete .part on cancel");
@@ -1167,6 +1245,7 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
                     tracing::warn!(id, bytes, keep_part, message = %message, "download failed");
                     if !keep_part {
                         if let Some(part) = part {
+                            super::segments::remove(&part);
                             if super::naming::remove_regular_file(&part).is_ok() {
                                 store::clear_destination(c, id)?;
                                 return store::finish(

@@ -55,6 +55,7 @@
   "waitingForConnection": "Bu kaynakta boş bir bağlantı bekliyor",
   "waitingForConnectionAt": "Sağlayıcıda boş bağlantı yok. {{time}} saatinde yeniden denenecek",
   "waitingForProvider": "Sağlayıcıya ulaşılamıyor. {{time}} saatinde yeniden denenecek",
+  "connectionsInUse": "{{n}} bağlantı",
   "pausedHint": "Duraklatıldı. Yarım kalan dosya korunuyor.",
   "failedHint": "İndirme bir hatayla durdu",
   "canceledHint": "Bitmeden iptal edildi",

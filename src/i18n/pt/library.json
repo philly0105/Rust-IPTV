@@ -61,6 +61,7 @@
   "waitingForConnection": "Aguarda uma conexão livre nesta fonte",
   "waitingForConnectionAt": "O provedor não tem conexão livre. Nova tentativa às {{time}}",
   "waitingForProvider": "Não foi possível contactar o provedor. Nova tentativa às {{time}}",
+  "connectionsInUse": "{{n}} conexões",
   "pausedHint": "Pausado. O arquivo parcial é mantido.",
   "failedHint": "O download parou com um erro",
   "canceledHint": "Cancelado antes de terminar",

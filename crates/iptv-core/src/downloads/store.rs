@@ -56,6 +56,7 @@ fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
             file_available: None,
             position_seconds: r.get(17)?,
             waiting: None,
+            connections: None,
         },
         headers,
         resume_validator: r.get(15)?,

@@ -324,6 +324,153 @@ async fn hidden_categories_filter_and_survive_rebuild() {
     assert_eq!(err.code, iptv_core::RpcErrorCode::NotFound);
 }
 
+/// `n` movies or series of `source`, spread over `cats` in turn.
+fn vod_rows(source: &str, ct: ContentType, cats: &[&str], n: usize) -> Vec<ItemRow> {
+    (0..n)
+        .map(|i| ItemRow {
+            source_id: source.into(),
+            content_type: ct,
+            item_id: format!("{}{i}", ct.as_str()),
+            category_id: cats[i % cats.len()].into(),
+            title: format!("Title {i}"),
+            rating: (!i.is_multiple_of(3)).then(|| (i % 10) as f64),
+            position: i as i64,
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// All movies, All series and Top rated take their total from the stored
+/// category counts (CAT-2). It must equal a count of the titles the list
+/// shows, `COALESCE(c.hidden, 0) = 0` on the category join, through hidden
+/// categories, `include_hidden`, an undeclared category (stored as
+/// Uncategorized) and a re-import that shrinks the catalog.
+#[tokio::test]
+async fn unfiltered_vod_totals_match_a_count_of_their_titles() {
+    let env = env().await;
+    bare_source(&env.state, "s1").await;
+    bare_source(&env.state, "s2").await;
+    let r = router();
+    // Declared a, b, c; `x` is undeclared and becomes Uncategorized.
+    let write = |ct: ContentType, cats: &'static [&'static str], n: usize| {
+        env.state.db_call(move |c| {
+            catalog::replace_catalog(
+                c,
+                "s1",
+                ct,
+                &[
+                    cat("a", "Action", 0),
+                    cat("b", "Drama", 1),
+                    cat("c", "Kids", 2),
+                ],
+                &mut vod_rows("s1", ct, cats, n).into_iter(),
+            )
+        })
+    };
+    write(ContentType::Movie, &["a", "b", "c", "x"], 103)
+        .await
+        .unwrap();
+    write(ContentType::Series, &["a", "b", "x"], 41)
+        .await
+        .unwrap();
+    // Another source's titles never count.
+    env.state
+        .db_call(|c| {
+            catalog::replace_catalog(
+                c,
+                "s2",
+                ContentType::Movie,
+                &[cat("a", "Action", 0)],
+                &mut vod_rows("s2", ContentType::Movie, &["a"], 7).into_iter(),
+            )
+        })
+        .await
+        .unwrap();
+
+    // The count every case must match, independent of `query_named`.
+    let expected = |ct: ContentType, include_hidden: bool| {
+        env.state.db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT count(*) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE i.source_id = 's1' AND i.content_type = ?1 AND (?2 OR COALESCE(c.hidden, 0) = 0)",
+                rusqlite::params![ct.as_str(), include_hidden],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+    };
+    let check = |label: &'static str| {
+        let (r, env) = (&r, &env);
+        async move {
+            for (ct, method) in [
+                (ContentType::Movie, "catalog.movies"),
+                (ContentType::Series, "catalog.series"),
+            ] {
+                let want = expected(ct, false).await.unwrap();
+                for sort in ["added", "rating"] {
+                    let v = r
+                        .dispatch(
+                            env.state.clone(),
+                            method,
+                            json!({"sourceId": "s1", "query": {"sort": sort, "limit": 10}}),
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(v["total"], want, "{label}: {method} by {sort}");
+                }
+                let all = expected(ct, true).await.unwrap();
+                let page = env
+                    .state
+                    .db_call(move |c| {
+                        catalog::query(
+                            c,
+                            &CatalogQuery {
+                                include_hidden: true,
+                                ..q("s1", ct, PageQuery::default())
+                            },
+                        )
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(page.total, all, "{label}: {method}, include_hidden");
+            }
+        }
+    };
+    check("nothing hidden").await;
+    assert_eq!(expected(ContentType::Movie, false).await.unwrap(), 103);
+
+    for (ct, hidden) in [
+        (ContentType::Movie, json!(["b"])),
+        (ContentType::Series, json!(["a"])),
+    ] {
+        r.dispatch(
+            env.state.clone(),
+            "catalog.setCategoriesHidden",
+            json!({"sourceId": "s1", "contentType": ct, "hiddenIds": hidden}),
+        )
+        .await
+        .unwrap();
+    }
+    check("one category hidden").await;
+    // Uncategorized can be hidden like any other category.
+    r.dispatch(
+        env.state.clone(),
+        "catalog.setCategoriesHidden",
+        json!({"sourceId": "s1", "contentType": "movie", "hiddenIds": ["b", "x"]}),
+    )
+    .await
+    .unwrap();
+    check("Uncategorized hidden").await;
+    assert_eq!(expected(ContentType::Movie, false).await.unwrap(), 52);
+
+    // A re-import that shrinks the catalog and empties c; the hidden flags
+    // survive it.
+    write(ContentType::Movie, &["a", "b", "x"], 40)
+        .await
+        .unwrap();
+    write(ContentType::Series, &["b"], 9).await.unwrap();
+    check("after a smaller re-import").await;
+    assert_eq!(expected(ContentType::Movie, false).await.unwrap(), 14);
+}
+
 #[tokio::test]
 async fn number_neighbors_all_live() {
     let env = env().await;

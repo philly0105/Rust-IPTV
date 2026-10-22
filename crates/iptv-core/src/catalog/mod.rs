@@ -1498,6 +1498,23 @@ pub fn query_named(
         sql.push_str(&vodfilter::vod_filter_sql_on(&q.vod, year, args));
         sql
     };
+    // All movies, All series and Top rated (no category, search or filter):
+    // the stored per-category counts add up to the total, where the count
+    // walked every title of the source on every page (4-5 ms on 182k movies,
+    // about 20 ms with 60 categories hidden, as each title probes the hidden
+    // set). Every item has a category row (`CatalogWriter::finish` adds
+    // "Uncategorized" ones), and for movies and series `item_count` is the
+    // row count (channel edits apply to live and radio). Every other shape
+    // counts its rows.
+    let summed = matches!(q.content_type, ContentType::Movie | ContentType::Series)
+        && q.category_id.is_none()
+        && search.is_none()
+        && min_rating.is_none()
+        && q.vod.is_empty()
+        && english.is_empty()
+        && locked.is_empty()
+        && edited.is_empty()
+        && quality_sql.is_empty();
     for (i, m) in attempts.iter().enumerate() {
         // The scope of the count and of the page; both take the same `args`.
         let mut scope = String::from("i.source_id = ?1 AND i.content_type = ?2");
@@ -1561,10 +1578,13 @@ pub fn query_named(
         // No join: it only adds the category name, which cannot change the
         // count (categories' key is unique), and the English-only clause
         // reads categories through its own sets.
-        let count_sql = format!("SELECT count(*) FROM items i WHERE {count_where}{where_sql}");
-        let total: i64 = conn
-            .prepare_cached(&count_sql)?
-            .query_row(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?;
+        let total: i64 = if summed {
+            stored_total(conn, &q.source_id, q.content_type, q.include_hidden)?
+        } else {
+            let count_sql = format!("SELECT count(*) FROM items i WHERE {count_where}{where_sql}");
+            conn.prepare_cached(&count_sql)?
+                .query_row(rusqlite::params_from_iter(args.iter()), |r| r.get(0))?
+        };
         if total == 0 && i + 1 < attempts.len() {
             continue;
         }
@@ -1667,6 +1687,25 @@ fn sorted_read_index(q: &CatalogQuery, min_rating: bool, total: i64) -> Option<&
     } else {
         None
     }
+}
+
+/// Items of one source and type in its visible categories (in every one
+/// with `include_hidden`), from the stored `item_count`s: the total of an
+/// unfiltered list (see [`query_named`]).
+fn stored_total(
+    conn: &Connection,
+    source_id: &str,
+    content_type: ContentType,
+    include_hidden: bool,
+) -> CoreResult<i64> {
+    let sql = if include_hidden {
+        "SELECT coalesce(sum(item_count), 0) FROM categories WHERE source_id = ?1 AND content_type = ?2"
+    } else {
+        "SELECT coalesce(sum(item_count), 0) FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden = 0"
+    };
+    Ok(conn
+        .prepare_cached(sql)?
+        .query_row(params![source_id, content_type.as_str()], |r| r.get(0))?)
 }
 
 /// True when a category of `source_id` / `content_type` is hidden.

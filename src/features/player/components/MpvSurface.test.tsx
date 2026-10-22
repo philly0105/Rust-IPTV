@@ -413,6 +413,25 @@ describe('MpvSurface attach', () => {
     expect(usePlayerStore.getState()).toMatchObject({ volume: 0.5, muted: false });
   });
 
+  it("a step inside mpv's cache seeks at once; past it, held steps go out as one seek (PL-4)", async () => {
+    mpvState = { ...mpvState, loaded: true, duration: 3600, timePos: 100 };
+    render(surfaceTree);
+    await tick();
+    act(() => emitState({ ...mpvState, seekable: { start: 0, end: 120 } }));
+    const seeks = (): unknown[] => calls('mpv.command').map((c) => (c[1] as { cmd: unknown[] }).cmd).filter((cmd) => cmd[0] === 'seek');
+    act(() => usePlayerStore.getState().seekBy(10));
+    expect(seeks()).toEqual([['seek', 110, 'absolute']]);
+    act(() => {
+      for (let i = 0; i < 5; i++) usePlayerStore.getState().seekBy(10);
+    });
+    expect(seeks()).toHaveLength(1);
+    await tick(300);
+    expect(seeks()).toEqual([
+      ['seek', 110, 'absolute'],
+      ['seek', 160, 'absolute'],
+    ]);
+  });
+
   it('a click on the video toggles play and pause once attached', async () => {
     render(surfaceTree);
     await act(async () => {

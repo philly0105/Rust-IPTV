@@ -117,7 +117,7 @@ anything is subscribed:
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
 use it for container and Playwright readiness probes.
 
-### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=]`
+### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=&release=]`
 Used by the web UI (`proxiedUrl()` in `src/api/transport.ts`) when a stream
 needs source headers or would be mixed content.
 
@@ -137,7 +137,13 @@ needs source headers or would be mixed content.
    `referer` and `origin` query parameters override them, for per-channel
    `#EXTVLCOPT` headers; an override that is not a valid header value, such
    as one with CR/LF, is a 400) and the client's
-   `Range` / `If-Range` (not for `.m3u8`/`.m3u` paths). Redirects are followed by
+   `Range` / `If-Range` (not for `.m3u8`/`.m3u` paths). With `from=<byte>`
+   the body starts at that byte: no Range asks for `bytes=<from>-`, and the
+   client's `bytes=a-b` moves up by `from` (`files::shifted_range`), so the
+   built-in player can restart an MPEG-TS file mid-way and mpegts.js's later
+   Range requests still line up (players.md, Seeking in MPEG-TS). An upstream
+   that answers such a GET with 200, the whole file, is refused with 502
+   instead of being played from its start. Redirects are followed by
    hand, up to 5, and each hop is re-validated. Connect failures and timeouts
    are retried twice with the core's backoff. Response headers must arrive
    within 15 s.
@@ -171,6 +177,30 @@ needs source headers or would be mixed content.
    as the client lets go of the response, which frees the provider's
    connection. Bodies without a length (live MPEG-TS) pass through as they
    come.
+   The exception is a GET for MPEG-TS (`video/mp2t`, `application/x-mpegts`,
+   or an untyped `.ts` path) of 16 MiB or more (`src/proxy/park.rs`):
+   mpegts.js loads catch-up and TS movies lazily, lets go of the request once
+   it holds 60 s ahead and asks for the rest (`Range: bytes=<n>-`) after
+   30 s of playback, which used to close the provider's connection and open
+   a new one about twice a minute, and a panel that ignores Range answered
+   the resume from byte 0. When such a client lets go before the end, its
+   reader parks for 45 s: it keeps the connection and what it read from at
+   least 16 MiB behind what the client took (the socket and the browser
+   still hold some of that), and reads on until it holds 48 MiB. A GET for
+   the same URL, source and header overrides whose `bytes=<n>-` (after
+   `from`) starts at a byte it holds is answered 206 from it, with no new
+   upstream request. Any other request with the same `sourceId` (or for the
+   same host, without one) lets the parked reader go, and waits (at most
+   0.5 s) until the reader has dropped its upstream body before it asks
+   upstream itself, so a seek or the next item doesn't run two connections.
+   A body whose source had a later request never parks: a seek's request can
+   reach the proxy before it notices the old player went away, and that
+   request is the player now. A newer park on that source, the time running
+   out, and `release=1` let the reader go too; the built-in player sends that
+   when it tears an MPEG-TS player down (a stop, another item, Open in MPV):
+   it fetches nothing, answers 204, and keeps a reader of that source from
+   parking for the next 5 s, since it can land before the proxy noticed the
+   player let go. At most 4 readers are parked at once.
 7. HLS playlists are detected by content type (`*mpegurl*`) or, for untyped
    responses (`text/plain`, `application/octet-stream`, none), by sniffing
    `#EXTM3U` in the first bytes. They are rewritten line by line as chunks
@@ -229,7 +259,11 @@ Serves a completed download for the web player (`myvideos.playSource` returns
 never from the request. Not completed: 409. Missing row, missing file, or a
 path that is not a regular file (directories and symlinks are refused): 404.
 Range, `If-Range`, conditional GET and HEAD are handled by
-`tower_http::services::ServeFile`. `Content-Disposition: inline` (video,
+`tower_http::services::ServeFile`. `?from=<byte>` serves the file as if it
+began at that byte (`files::byte_start`): the request's Range is moved up by it
+before `ServeFile` reads it, and a request without one gets `bytes=<from>-`
+(206). The built-in player seeks in MPEG-TS downloads and recordings that way.
+`Content-Disposition: inline` (video,
 audio and image types) or `attachment` (anything else) with an RFC 5987
 filename, plus the sandbox CSP and `nosniff`. Downloads whose extension is not
 a media/subtitle type are saved as `.bin`.
@@ -238,8 +272,8 @@ a media/subtitle type are saved as `.bin`.
 Serves a recording file for the web player (`recordings.playSource` returns
 `/api/recordings/{id}` in server mode). `id` is a `recordings.library` entry id;
 the core resolves it to a path inside the recordings folder, never taking a
-path from the request. Unknown id or missing file: 404. Range handling and
-headers as for `/api/files`.
+path from the request. Unknown id or missing file: 404. Range handling,
+`?from=<byte>` and headers as for `/api/files`.
 
 ### Everything else: the UI
 `ServeDir` over `--static` (`precompressed_br`, `precompressed_gzip`). When

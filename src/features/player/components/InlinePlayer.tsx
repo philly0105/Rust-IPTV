@@ -10,6 +10,7 @@ import { QUARTER_BLUR, useImageChain } from '@/ui/image';
 import { useToast } from '@/ui/Toast';
 import { cn } from '../cn';
 import {
+  bufferedAt,
   createEngine,
   EMPTY_TRACKS,
   fetchFailureStatus,
@@ -30,6 +31,7 @@ import { noteEngineError, tryAnotherSource, useReconnectStore } from '../reconne
 import { needsSizeContainer, pictureStyle, usePictureStore } from '../picture';
 import { canShareSource } from '../shareable';
 import { setMediaCommands, useMediaStore, type TimeRange } from '../media';
+import { tsSeekerFor } from '../tsSeek';
 import {
   handleEnded,
   reportProgress,
@@ -231,8 +233,12 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
             if (!disposed) publishTracks(tracks);
           },
           onError: onFatal,
+          onWaiting: () => {
+            if (!disposed) useMediaStore.setState({ waiting: true });
+          },
         },
-        { captions: captionsDefault, signal: abort.signal, forceMpegts },
+        // MPEG-TS seeks past the buffer and resumes by restarting there (tsSeek.ts).
+        { captions: captionsDefault, signal: abort.signal, forceMpegts, seeker: tsSeekerFor(src, loadUrl) },
       );
     let cancelStart: () => void = () => undefined;
     void new Promise<Engine>((resolve, reject) => {
@@ -260,9 +266,10 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
       });
     });
 
-    // Direct/file resume: hls/dash take startPosition in the engine.
+    // Direct/file resume: hls/dash take startPosition in the engine, and so does MPEG-TS that restarts there.
     const onMeta = (): void => {
       const s = usePlayerStore.getState().source;
+      if (engineRef.current?.resumes) return;
       if (s && !s.isLive && s.resumeSeconds && (s.kind === 'direct' || s.kind === 'file')) {
         if (el.duration && s.resumeSeconds < el.duration - 2) el.currentTime = s.resumeSeconds;
       }
@@ -307,8 +314,10 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
     /** Non-zero after an mpegts.js live reconnect restarted the element clock. */
     const offset = (): number => engineRef.current?.timeOffset?.() ?? 0;
     const onTime = (): void => {
-      const dur = Number.isFinite(el.duration) && !isLive() ? el.duration : undefined;
       const off = offset();
+      // MPEG-TS through mpegts.js has no duration of its own; after a restart the element's covers the new stream only.
+      const own = Number.isFinite(el.duration) ? el.duration + off : undefined;
+      const dur = isLive() ? undefined : (engineRef.current?.duration?.() ?? own);
       reportProgress(el.currentTime + off, dur);
       const now = performance.now();
       if (now - lastBufferedAt > 1000) {
@@ -397,11 +406,21 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
     el.addEventListener('leavepictureinpicture', onLeavePip);
 
     const unController = setController({
-      play: () => void el.play().catch(() => undefined),
-      pause: () => el.pause(),
-      seekTo: (s) => {
-        if (Number.isFinite(s)) el.currentTime = Math.max(0, s - offset());
+      // Between two MPEG-TS pipelines the element fires nothing: the engine keeps the wish and
+      // the status follows it here.
+      play: () => {
+        if (engineRef.current?.setPaused?.(false)) reportStatus('playing');
+        else void el.play().catch(() => undefined);
       },
+      pause: () => {
+        if (engineRef.current?.setPaused?.(true)) reportStatus('paused');
+        else el.pause();
+      },
+      seekTo: (s) => {
+        if (!Number.isFinite(s) || engineRef.current?.seek?.(s)) return;
+        el.currentTime = Math.max(0, s - offset());
+      },
+      holds: (s) => bufferedAt(el, s - offset()),
       setVolume: (v) => {
         el.volume = v;
       },

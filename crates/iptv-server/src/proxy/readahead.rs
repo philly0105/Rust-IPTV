@@ -19,8 +19,11 @@
 //!
 //! The reader stops as soon as the player lets go of the response (a seek,
 //! another item), which frees the provider's connection at once: many IPTV
-//! accounts allow one connection at a time.
+//! accounts allow one connection at a time. A long MPEG-TS body is the
+//! exception: mpegts.js lets go of it on purpose and asks for the rest a
+//! moment later, so its reader parks instead (park.rs).
 
+use super::park::{Kept, Park, Progress, SLACK_BYTES};
 use super::{Fail, Upstream};
 use axum::http::header::{self, HeaderMap, HeaderValue};
 use axum::http::{Method, StatusCode};
@@ -28,6 +31,7 @@ use bytes::Bytes;
 use futures::stream::{self, BoxStream, Stream, StreamExt};
 use iptv_core::http::backoff_delay;
 use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use url::Url;
@@ -74,7 +78,7 @@ impl Span {
         }
     }
 
-    fn byte_count(&self) -> u64 {
+    pub(crate) fn byte_count(&self) -> u64 {
         self.end - self.start + 1
     }
 
@@ -175,22 +179,45 @@ impl Resume {
 }
 
 /// A chunk on its way to the player, holding its share of the read-ahead room.
-type Chunk = io::Result<(Bytes, OwnedSemaphorePermit)>;
+pub(crate) type Chunk = io::Result<(Bytes, OwnedSemaphorePermit)>;
 
 /// Streams `body` (the bytes `span` of the file) through a reader task that
 /// stays up to [`READAHEAD_BYTES`] ahead of the player and, given `resume`,
-/// picks a dropped connection up where it stopped.
+/// picks a dropped connection up where it stopped. Given `park`, it parks
+/// when the player lets go before the end (park.rs).
 pub(crate) fn spawn(
     body: BoxStream<'static, reqwest::Result<Bytes>>,
     span: Span,
     resume: Option<Resume>,
+    park: Option<Park>,
 ) -> impl Stream<Item = io::Result<Bytes>> + Send + 'static {
     let (tx, rx) = mpsc::unbounded_channel::<Chunk>();
-    tokio::spawn(read(body, span, resume, tx));
-    stream::unfold(rx, |mut rx| async move {
-        let item = rx.recv().await?;
+    let taken = Arc::new(AtomicU64::new(span.start));
+    tokio::spawn(read(body, span, resume, tx, park, Arc::clone(&taken)));
+    consumer(rx, taken, span.byte_count())
+}
+
+/// The player's side of a reader: `len` bytes of what it sends. `taken` counts
+/// the file offset the player has read up to, which a parked reader keeps from.
+/// It ends after `len` bytes, so a reader that parks can keep its sender.
+pub(crate) fn consumer(
+    rx: mpsc::UnboundedReceiver<Chunk>,
+    taken: Arc<AtomicU64>,
+    len: u64,
+) -> impl Stream<Item = io::Result<Bytes>> + Send + 'static {
+    stream::unfold((rx, taken, len), |(mut rx, taken, left)| async move {
+        if left == 0 {
+            return None;
+        }
         // The permit drops here, which makes room for the reader.
-        Some((item.map(|(bytes, _room)| bytes), rx))
+        match rx.recv().await? {
+            Ok((bytes, _room)) => {
+                let n = bytes.len() as u64;
+                taken.fetch_add(n, Ordering::Relaxed);
+                Some((Ok(bytes), (rx, taken, left.saturating_sub(n))))
+            }
+            Err(e) => Some((Err(e), (rx, taken, 0))),
+        }
     })
 }
 
@@ -198,14 +225,57 @@ async fn read(
     mut body: BoxStream<'static, reqwest::Result<Bytes>>,
     span: Span,
     resume: Option<Resume>,
-    tx: mpsc::UnboundedSender<Chunk>,
+    mut tx: mpsc::UnboundedSender<Chunk>,
+    mut park: Option<Park>,
+    taken: Arc<AtomicU64>,
 ) {
     let room = Arc::new(Semaphore::new(READAHEAD_BYTES));
     let mut sent: u64 = 0;
     let mut failures: u32 = 0;
+    // Parking: what was read, from a little behind the player, and whether
+    // the upstream body is complete.
+    let mut kept = Kept::new(span.start);
+    let mut done = false;
     loop {
+        if tx.is_closed() {
+            // The player let go.
+            let Some(park) = park.as_mut() else { return };
+            let progress = Progress {
+                body: &mut body,
+                kept: &mut kept,
+                sent: &mut sent,
+                done: &mut done,
+            };
+            let Some((next, from)) = park.wait(span, &taken, progress).await else {
+                // The upstream connection goes before the `Park`, which tells
+                // a request that let this reader go (`Ticket::let_go`).
+                drop(body);
+                return;
+            };
+            // A continuation: what it may not have, then on from the upstream.
+            tx = next;
+            for chunk in kept.from(from) {
+                let need = chunk.len().min(READAHEAD_BYTES) as u32;
+                let permit = tokio::select! {
+                    _ = tx.closed() => break,
+                    permit = Arc::clone(&room).acquire_many_owned(need) => match permit {
+                        Ok(p) => p,
+                        Err(_) => return,
+                    },
+                };
+                if tx.send(Ok((chunk, permit))).is_err() {
+                    break;
+                }
+            }
+            continue;
+        }
+        if done {
+            // All read and sent: wait until the player has it all or lets go.
+            tx.closed().await;
+            continue;
+        }
         let next = tokio::select! {
-            _ = tx.closed() => return,
+            _ = tx.closed() => continue,
             next = body.next() => next,
         };
         let failure = match next {
@@ -214,21 +284,30 @@ async fn read(
                     continue;
                 }
                 failures = 0;
+                sent += chunk.len() as u64;
+                if park.is_some() {
+                    let floor = taken.load(Ordering::Relaxed).saturating_sub(SLACK_BYTES);
+                    kept.push(chunk.clone(), floor);
+                }
                 let need = chunk.len().min(READAHEAD_BYTES) as u32;
+                // A player that lets go here gets this chunk from `kept` if it comes back.
                 let permit = tokio::select! {
-                    _ = tx.closed() => return,
+                    _ = tx.closed() => continue,
                     permit = Arc::clone(&room).acquire_many_owned(need) => match permit {
                         Ok(p) => p,
                         Err(_) => return,
                     },
                 };
-                sent += chunk.len() as u64;
-                if tx.send(Ok((chunk, permit))).is_err() {
-                    return;
-                }
+                let _ = tx.send(Ok((chunk, permit)));
                 continue;
             }
-            None if sent >= span.byte_count() => return,
+            None if sent >= span.byte_count() => {
+                if park.is_none() {
+                    return;
+                }
+                done = true;
+                continue;
+            }
             None => io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 "the stream server closed the connection early",
@@ -284,7 +363,10 @@ async fn read(
 
 #[cfg(test)]
 mod tests {
+    use super::super::park::{Park, ParkKey, Parking};
     use super::*;
+    use iptv_core::model::RequestHeaders;
+    use std::sync::atomic::AtomicBool;
 
     fn headers(pairs: &[(header::HeaderName, &str)]) -> HeaderMap {
         let mut h = HeaderMap::new();
@@ -355,5 +437,66 @@ mod tests {
         ]);
         assert_eq!(Span::of(StatusCode::PARTIAL_CONTENT, &wrong), None);
         assert_eq!(Span::of(StatusCode::NOT_MODIFIED, &full), None);
+    }
+
+    struct Dropped(Arc<AtomicBool>);
+
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// A request that lets a parked reader go waits until the reader has
+    /// dropped its upstream body, so the provider sees that connection close
+    /// before the request asks for a new one.
+    #[tokio::test]
+    async fn a_request_waits_until_the_reader_it_let_go_dropped_its_upstream() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = Dropped(Arc::clone(&dropped));
+        let body = stream::iter([Ok::<_, reqwest::Error>(Bytes::from(vec![0u8; 100]))])
+            .chain(stream::pending())
+            .map(move |chunk| {
+                let _upstream = &guard;
+                chunk
+            })
+            .boxed();
+        let parking = Arc::new(Parking::default());
+        let key = |path: &str| {
+            let url = Url::parse(&format!("http://p/{path}")).unwrap();
+            ParkKey::new("source:x".to_owned(), &url, &RequestHeaders::default())
+        };
+        let (_, ticket) = parking.take(&key("a.ts"));
+        let span = Span {
+            start: 0,
+            end: 999,
+            total: Some(1000),
+        };
+        let park = Park::new(
+            Arc::clone(&parking),
+            key("a.ts"),
+            ticket.gen,
+            HeaderMap::new(),
+        );
+        let mut player = Box::pin(spawn(body, span, None, Some(park)));
+        assert_eq!(player.next().await.unwrap().unwrap().len(), 100);
+        drop(player);
+        for _ in 0..1000 {
+            if parking.parked() == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(parking.parked(), 1);
+
+        // The next request for the source (a seek): the reader still holds
+        // the upstream until its task runs, which the wait lets it do.
+        let (slot, next) = parking.take(&key("b.ts"));
+        assert!(slot.is_none());
+        assert!(!dropped.load(Ordering::SeqCst));
+        let started = std::time::Instant::now();
+        next.let_go().await;
+        assert!(dropped.load(Ordering::SeqCst));
+        assert!(started.elapsed() < std::time::Duration::from_millis(250));
     }
 }

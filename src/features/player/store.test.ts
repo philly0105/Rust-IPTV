@@ -122,6 +122,8 @@ describe('store transitions', () => {
     usePlayerStore.getState().togglePlay();
     expect(ctl.pause).toHaveBeenCalled();
     usePlayerStore.getState().seekBy(500);
+    // A step goes out once the steps stop (PL-4).
+    store.commitPendingSeek();
     expect(ctl.seekTo).toHaveBeenLastCalledWith(100);
     usePlayerStore.getState().setVolume(1.7);
     expect(usePlayerStore.getState().volume).toBe(1);
@@ -1567,5 +1569,78 @@ describe('playGeneration: a new play of the same media loads it again', () => {
     expect(s.source?.url).toBe('http://x/movie/9.mkv');
     expect(s.playGeneration).toBe(playing + 1);
     expect(s.positionSeconds).toBe(0);
+  });
+});
+
+describe('step seeks (PL-4)', () => {
+  const surface = () => ({ play: vi.fn(), pause: vi.fn(), seekTo: vi.fn(), setVolume: vi.fn(), setMuted: vi.fn() });
+  async function playing(ctl: ReturnType<typeof surface> & { holds?: (s: number) => boolean }): Promise<void> {
+    store.setController(ctl);
+    await usePlayerStore.getState().play(vod('1'));
+    store.reportStatus('playing');
+    store.reportProgress(100, 3600);
+  }
+
+  it('a held arrow key sends one seek once the steps stop, and the position follows every step', async () => {
+    vi.useFakeTimers();
+    const ctl = surface();
+    await playing(ctl);
+    // Two seconds of key repeat: one keydown every 33 ms.
+    for (let i = 0; i < 60; i++) {
+      usePlayerStore.getState().seekBy(10);
+      // The element has not moved: its time must not pull the position back.
+      store.reportProgress(100 + i * 0.033, 3600);
+      expect(usePlayerStore.getState().positionSeconds).toBe(110 + i * 10);
+      await vi.advanceTimersByTimeAsync(33);
+    }
+    expect(ctl.seekTo).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().pendingSeek).toBe(700);
+    await vi.advanceTimersByTimeAsync(store.SEEK_SETTLE_MS);
+    // One seek instead of one per keydown (60 before).
+    expect(ctl.seekTo.mock.calls).toEqual([[700]]);
+    expect(usePlayerStore.getState().pendingSeek).toBeUndefined();
+    store.reportProgress(700.5, 3600);
+    expect(usePlayerStore.getState().positionSeconds).toBe(700.5);
+  });
+
+  it('the key coming up sends it at once', async () => {
+    vi.useFakeTimers();
+    const ctl = surface();
+    await playing(ctl);
+    usePlayerStore.getState().seekBy(-30);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft' }));
+    expect(ctl.seekTo.mock.calls).toEqual([[70]]);
+    await vi.advanceTimersByTimeAsync(store.SEEK_SETTLE_MS);
+    expect(ctl.seekTo).toHaveBeenCalledTimes(1);
+  });
+
+  it('a step the surface holds goes out at once, and a jump replaces a pending step', async () => {
+    vi.useFakeTimers();
+    const ctl = { ...surface(), holds: (s: number) => s < 200 };
+    await playing(ctl);
+    usePlayerStore.getState().seekBy(10);
+    expect(ctl.seekTo.mock.calls).toEqual([[110]]);
+    usePlayerStore.getState().seekBy(100);
+    expect(ctl.seekTo).toHaveBeenCalledTimes(1);
+    usePlayerStore.getState().seekTo(50);
+    expect(ctl.seekTo.mock.calls).toEqual([[110], [50]]);
+    expect(usePlayerStore.getState()).toMatchObject({ positionSeconds: 50, pendingSeek: undefined });
+    await vi.advanceTimersByTimeAsync(store.SEEK_SETTLE_MS);
+    expect(ctl.seekTo).toHaveBeenCalledTimes(2);
+  });
+
+  it('a stop or another play drops a pending step', async () => {
+    vi.useFakeTimers();
+    const ctl = surface();
+    await playing(ctl);
+    usePlayerStore.getState().seekBy(10);
+    usePlayerStore.getState().stop();
+    await playing(ctl);
+    usePlayerStore.getState().seekBy(10);
+    await usePlayerStore.getState().play(vod('2'));
+    await vi.advanceTimersByTimeAsync(store.SEEK_SETTLE_MS);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight' }));
+    expect(ctl.seekTo).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().pendingSeek).toBeUndefined();
   });
 });

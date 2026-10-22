@@ -10,7 +10,11 @@
 //!
 //! `ua`, `referer` and `origin` query parameters override the source's
 //! headers (per-channel `#EXTVLCOPT` headers) and are carried into rewritten
-//! playlists.
+//! playlists. `from=<byte>` starts a media body at that byte, as on the file
+//! routes (`files::byte_start`); an upstream that answers such a request with
+//! the whole file is refused with 502. A long MPEG-TS body the player lets go
+//! of parks for its resume (park.rs); `release=1` lets go of what is parked
+//! for the source and answers 204.
 //!
 //! Responses are served from the app's origin, so upstream content must never
 //! run as a page: every response carries `Content-Security-Policy: sandbox;
@@ -19,6 +23,7 @@
 //! with `Content-Disposition: attachment`.
 
 pub mod hls;
+mod park;
 mod readahead;
 pub mod target;
 
@@ -28,7 +33,7 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::header::{self, HeaderMap, HeaderName, HeaderValue};
 use axum::http::{Method, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures::stream::{self, BoxStream, StreamExt};
 use iptv_core::http::{
@@ -65,6 +70,7 @@ pub struct Proxy {
     guard: Arc<NetGuard>,
     /// Read-only connection for [`load_source`], opened on first use.
     sources_db: Arc<parking_lot::Mutex<Option<rusqlite::Connection>>>,
+    parking: Arc<park::Parking>,
 }
 
 impl Proxy {
@@ -88,6 +94,7 @@ impl Proxy {
             clients,
             guard,
             sources_db: Arc::default(),
+            parking: Arc::default(),
         }
     }
 }
@@ -104,6 +111,12 @@ pub struct ProxyQuery {
     pub referer: Option<String>,
     /// Origin override.
     pub origin: Option<String>,
+    /// The byte the body starts at (`files::byte_start`): the client's Range
+    /// counts from it. For media only; a playlist is always fetched whole.
+    pub from: Option<u64>,
+    /// Non-zero: the player was torn down, let go of what is parked for the
+    /// source (park.rs). Nothing is fetched.
+    pub release: Option<u8>,
 }
 
 /// Source headers with the non-empty query overrides applied.
@@ -340,6 +353,11 @@ async fn proxy(
         }
     }
     let source_id = q.source_id.clone().filter(|s| !s.trim().is_empty());
+    let scope = park::scope(source_id.as_deref(), &url);
+    if q.release.is_some_and(|n| n > 0) {
+        s.proxy.parking.release(&scope);
+        return Ok(StatusCode::NO_CONTENT.into_response());
+    }
 
     let access = match &source_id {
         Some(id) => load_source(&s.app, &s.proxy, id.clone())
@@ -355,16 +373,56 @@ async fn proxy(
         headers: merge_headers(&access.headers, &q),
         trusted: access.authority,
     };
+    // Any request for the source lets go of what is parked for it; a reader
+    // of this very URL is handed over, to continue below or be let go too.
+    let key = park::ParkKey::new(scope, &url, &upstream.headers);
+    let (parked, ticket) = s.proxy.parking.take(&key);
 
     // Playlists are rewritten whole; never ask for a slice of one.
     let path = url.path().to_ascii_lowercase();
     let forward_range = !(path.ends_with(".m3u8") || path.ends_with(".m3u"));
+    let from = q.from.filter(|&n| n > 0 && forward_range);
+    let shifted;
+    let headers = match from {
+        Some(n) => {
+            let mut h = headers.clone();
+            let range = crate::files::shifted_range(
+                headers.get(header::RANGE).and_then(|v| v.to_str().ok()),
+                n,
+            );
+            if let Ok(v) = HeaderValue::from_str(&range) {
+                h.insert(header::RANGE, v);
+            }
+            shifted = h;
+            &shifted
+        }
+        None => headers,
+    };
+    if let Some(slot) = parked {
+        if let Some(at) = continuation_start(&method, headers) {
+            if let Some((body, meta)) = slot.attach(at, ticket.gen).await {
+                return Ok(continuation(&meta, at, body));
+            }
+        }
+    }
+    // A one-connection account must see the old connection close first.
+    ticket.let_go().await;
 
     let (resp, current) = upstream
         .fetch(&method, url.clone(), headers, forward_range)
         .await?;
 
     check_upstream_status(resp.status())?;
+    // A server that ignores Range answers from byte 0: passed on, the player
+    // would show the time it asked for over the start of the file.
+    if from.is_some() && method == Method::GET && resp.status() == reqwest::StatusCode::OK {
+        return Err(Fail(
+            StatusCode::BAD_GATEWAY,
+            RpcError::network(
+                "The stream server does not take byte ranges, so playback cannot start in the middle of this file.",
+            ),
+        ));
+    }
 
     let params = [
         ("sourceId", source_id.as_deref().unwrap_or("")),
@@ -376,7 +434,8 @@ async fn proxy(
     let rewriter =
         hls::HlsRewriter::with_params(current.clone(), &params).at_path(&s.opts.proxy_path);
     let resume_from = Some((upstream.clone(), url));
-    if let Some(out) = respond(resp, current.clone(), rewriter, head, resume_from).await? {
+    let park_as = (method == Method::GET).then(|| (Arc::clone(&s.proxy.parking), key, ticket.gen));
+    if let Some(out) = respond(resp, current.clone(), rewriter, head, resume_from, park_as).await? {
         return Ok(out);
     }
     // The client asked for a byte range of what turned out to be a playlist.
@@ -394,7 +453,7 @@ async fn proxy(
     check_upstream_status(resp.status())?;
     let rewriter =
         hls::HlsRewriter::with_params(current.clone(), &params).at_path(&s.opts.proxy_path);
-    respond(resp, current, rewriter, head, None).await?.ok_or_else(|| {
+    respond(resp, current, rewriter, head, None, None).await?.ok_or_else(|| {
         Fail::coded(RpcError::network(
             "the stream server answered with part of a playlist although the whole one was requested",
         ))
@@ -551,13 +610,15 @@ fn is_generic_type(ct: &str) -> bool {
 /// Builds the proxy response. `None` when the upstream answered 206 with a
 /// slice of a playlist: the caller refetches it whole. `resume_from` (the
 /// upstream and the URL the client asked for) lets a media body of known
-/// length resume a dropped connection.
+/// length resume a dropped connection, and `park_as` lets a long MPEG-TS one
+/// park when the client lets go of it (park.rs).
 async fn respond(
     resp: reqwest::Response,
     final_url: Url,
     rewriter: hls::HlsRewriter,
     head: bool,
     resume_from: Option<(Upstream, Url)>,
+    park_as: Option<(Arc<park::Parking>, park::ParkKey, u64)>,
 ) -> Result<Option<Response>, Fail> {
     let status = resp.status();
     let upstream = resp.headers().clone();
@@ -638,7 +699,10 @@ async fn respond(
             Body::empty()
         } else {
             let input = stream::iter(prefix.into_iter().map(Ok)).chain(body).boxed();
-            media_body(input, status_code, &upstream, resume_from)
+            let park = park_as
+                .filter(|_| park::is_mpeg_ts(&ct, final_url.path()))
+                .map(|(parking, key, gen)| park::Park::new(parking, key, gen, upstream.clone()));
+            media_body(input, status_code, &upstream, resume_from, park)
         };
         builder.body(body)
     };
@@ -647,19 +711,73 @@ async fn respond(
 }
 
 /// A media body: through the read-ahead reader when its length is known (a
-/// movie, an episode, a segment), else as it comes (a live stream).
+/// movie, an episode, a segment), else as it comes (a live stream). `park`
+/// applies to a long one only.
 fn media_body(
     input: BoxStream<'static, reqwest::Result<Bytes>>,
     status: StatusCode,
     headers: &HeaderMap,
     resume_from: Option<(Upstream, Url)>,
+    park: Option<park::Park>,
 ) -> Body {
     let Some(span) = Span::of(status, headers) else {
         let pass = input.map(|r| r.map_err(|e| io::Error::other(e.without_url())));
         return Body::from_stream(pass);
     };
     let resume = resume_from.and_then(|(up, url)| Resume::new(up, url, status, headers));
-    Body::from_stream(readahead::spawn(input, span, resume))
+    let park = park.filter(|_| span.byte_count() >= park::PARK_MIN_BYTES);
+    Body::from_stream(readahead::spawn(input, span, resume, park))
+}
+
+/// The byte a GET's `Range: bytes=<n>-` asks the rest of a body from: what
+/// mpegts.js sends to resume after its lazy-load pause. `None` for anything
+/// else (a bounded range, `If-Range`).
+fn continuation_start(method: &Method, headers: &HeaderMap) -> Option<u64> {
+    if *method != Method::GET || headers.contains_key(header::IF_RANGE) {
+        return None;
+    }
+    let range = headers.get(header::RANGE)?.to_str().ok()?.trim();
+    let (start, end) = range.strip_prefix("bytes=")?.split_once('-')?;
+    if !end.trim().is_empty() {
+        return None;
+    }
+    start.trim().parse().ok()
+}
+
+/// A 206 with the rest of a parked body from byte `from`.
+fn continuation(
+    meta: &park::ParkMeta,
+    from: u64,
+    body: impl futures::Stream<Item = io::Result<Bytes>> + Send + 'static,
+) -> Response {
+    let span = meta.span;
+    let total = span.total.map_or_else(|| "*".to_owned(), |t| t.to_string());
+    let (ct, attachment) = safe_content_type(meta.headers.get(header::CONTENT_TYPE));
+    let mut builder = Response::builder()
+        .status(StatusCode::PARTIAL_CONTENT)
+        .header(header::CONTENT_TYPE, ct)
+        .header(header::CONTENT_LENGTH, span.end + 1 - from)
+        .header(
+            header::CONTENT_RANGE,
+            format!("bytes {from}-{}/{total}", span.end),
+        )
+        .header(header::ACCEPT_RANGES, "bytes");
+    if attachment {
+        builder = builder.header(header::CONTENT_DISPOSITION, "attachment");
+    }
+    for name in [
+        header::LAST_MODIFIED,
+        header::ETAG,
+        header::CACHE_CONTROL,
+        header::EXPIRES,
+    ] {
+        if let Some(v) = meta.headers.get(&name) {
+            builder = builder.header(name, v.clone());
+        }
+    }
+    builder
+        .body(Body::from_stream(body))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 fn rewrite_stream(

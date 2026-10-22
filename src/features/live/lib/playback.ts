@@ -99,17 +99,30 @@ export function m3uCatchupSource(channel: Channel, program: EpgProgram, now: num
   return out;
 }
 
-/** The archive source of a programme: the portal's timeshift link, or the M3U `catchup` URL. */
+/**
+ * The archive source of a programme: the portal's timeshift link, or the M3U `catchup` URL. An
+ * archive that ends with the programme carries its length for the seek bar, since the archive is
+ * MPEG-TS, which reports none in the built-in player; an Xtream one also the window to ask for
+ * again from a later minute. One that plays on into the following programmes ({@link
+ * m3uCatchupEnds}) has no length: a fixed one would read as its end and stop seeks there.
+ */
 export async function catchupSource(channel: Channel, kind: SourceKind, program: EpgProgram, now = Date.now()): Promise<PlayerSource> {
   const args = { ref: channel.ref, start: program.start, durationMinutes: durationMinutes(program) };
-  if (kind === 'xtream') return rpc('xtream.catchupUrl', args);
-  if (kind === 'stalker') return rpc('stalker.catchupUrl', args);
+  const length = Math.max(0, (ms(program.end) - ms(program.start)) / 1000);
+  const timed = (src: PlayerSource): PlayerSource => (length > 0 ? { ...src, durationSeconds: length } : src);
+  if (kind === 'xtream') {
+    const src = await rpc('xtream.catchupUrl', args);
+    // A seek past the buffer asks for the archive again from a later minute (tsSeek.ts).
+    return timed({ ...src, catchup: { start: program.start, durationMinutes: args.durationMinutes } });
+  }
+  if (kind === 'stalker') return timed(await rpc('stalker.catchupUrl', args));
   if (kind === 'm3u') {
     const [item, source] = await Promise.all([
       channel.url ? channel : (rpc('catalog.item', { ref: channel.ref }) as Promise<Channel>),
       rpc('sources.get', { id: channel.ref.sourceId }).catch(() => null),
     ]);
-    return m3uCatchupSource(item, program, now, source?.m3u?.headers);
+    const src = m3uCatchupSource(item, program, now, source?.m3u?.headers);
+    return m3uCatchupEnds(item as Channel & CatchupChannel) ? timed(src) : src;
   }
   throw new Error('Catch-up is not available for this source.');
 }

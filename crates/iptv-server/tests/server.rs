@@ -525,6 +525,62 @@ async fn proxy_passes_range_through() {
     assert_eq!(r.headers()[header::CONTENT_LENGTH], "1000");
 }
 
+/// `from` starts the body at that byte: the client's Range counts from it
+/// (the player's MPEG-TS restart, players.md), and an upstream that ignores
+/// Range is refused rather than played from its start.
+#[tokio::test]
+async fn proxy_starts_a_body_at_from() {
+    let stub = spawn_stub().await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": stub, "username": "u", "password": "p" }),
+    )
+    .await;
+    let url = format!(
+        "{}&from=100",
+        h.proxy_url(&format!("{stub}/bytes"), Some("x-1"))
+    );
+
+    let r = h.http.get(&url).send().await.unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 100-999/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[100..]);
+
+    // mpegts.js resuming after its lazy-load pause.
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, "bytes=850-")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[950..]);
+
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 110-119/1000");
+
+    let whole = format!(
+        "{}&from=5",
+        h.proxy_url(&format!("{stub}/headers.ts"), Some("x-1"))
+    );
+    let r = h.http.get(&whole).send().await.unwrap();
+    assert_eq!(r.status(), 502);
+    let v: serde_json::Value = r.json().await.unwrap();
+    assert!(
+        v["message"].as_str().unwrap().contains("byte ranges"),
+        "{v}"
+    );
+}
+
 /// The Range and If-Range headers of every request.
 type RangeLog = Arc<std::sync::Mutex<Vec<(Option<String>, Option<String>)>>>;
 
@@ -648,6 +704,298 @@ async fn proxy_passes_a_drop_on_when_the_server_takes_no_ranges() {
     assert_eq!(r.status(), 200);
     assert!(r.bytes().await.is_err());
     assert_eq!(ranges.lock().unwrap().len(), 1);
+}
+
+const LONG_TS: usize = 64 << 20;
+const LONG_TS_PATH: &str = "/timeshift/u/p/90/2026-10-22:18-00/10.ts";
+
+fn long_ts() -> bytes::Bytes {
+    static DATA: std::sync::OnceLock<bytes::Bytes> = std::sync::OnceLock::new();
+    DATA.get_or_init(|| {
+        (0..LONG_TS)
+            .map(|i| (i % 251) as u8)
+            .collect::<Vec<u8>>()
+            .into()
+    })
+    .clone()
+}
+
+/// A catch-up programme's archive: 64 MB of MPEG-TS, served with Range in
+/// 64 KB chunks, the last 8 MB slowly (a chunk per 10 ms). A parked reader
+/// stops reading at 48 MB, so a body it holds stays open at the stub until
+/// the reader lets go. Counts its requests and the bodies it is still sending.
+struct LongTs {
+    base: String,
+    requests: Arc<std::sync::atomic::AtomicUsize>,
+    open: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Counts a body as open until the stub stops sending it.
+struct Sending(Arc<std::sync::atomic::AtomicUsize>);
+
+impl Drop for Sending {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+async fn spawn_long_ts() -> LongTs {
+    use futures::StreamExt;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    let requests = Arc::new(AtomicUsize::new(0));
+    let open = Arc::new(AtomicUsize::new(0));
+    let (asked, sending) = (Arc::clone(&requests), Arc::clone(&open));
+    let app = Router::new().route(
+        LONG_TS_PATH,
+        get(move |h: HeaderMap| {
+            let (asked, sending) = (Arc::clone(&asked), Arc::clone(&sending));
+            async move {
+                asked.fetch_add(1, SeqCst);
+                let data = long_ts();
+                let range = h
+                    .get(header::RANGE)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("bytes="))
+                    .and_then(|v| v.split_once('-'))
+                    .map(|(a, b)| {
+                        let start: usize = a.parse().unwrap();
+                        let end = b.parse::<usize>().unwrap_or(LONG_TS - 1);
+                        (start, end.min(LONG_TS - 1))
+                    });
+                let (start, end) = range.unwrap_or((0, LONG_TS - 1));
+                sending.fetch_add(1, SeqCst);
+                let guard = Sending(sending);
+                let chunks = (start..=end)
+                    .step_by(64 << 10)
+                    .map(move |a| (a, data.slice(a..=(a + (64 << 10) - 1).min(end))));
+                let body = futures::stream::iter(chunks).then(move |(a, chunk)| {
+                    let _open = &guard;
+                    async move {
+                        if a >= LONG_TS - (8 << 20) {
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        }
+                        Ok::<_, std::io::Error>(chunk)
+                    }
+                });
+                let mut res = Response::builder()
+                    .header(header::CONTENT_TYPE, "video/mp2t")
+                    .header(header::ACCEPT_RANGES, "bytes")
+                    .header(header::CONTENT_LENGTH, end - start + 1);
+                if range.is_some() {
+                    res = res.status(StatusCode::PARTIAL_CONTENT).header(
+                        header::CONTENT_RANGE,
+                        format!("bytes {start}-{end}/{LONG_TS}"),
+                    );
+                }
+                res.body(axum::body::Body::from_stream(body)).unwrap()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    LongTs {
+        base,
+        requests,
+        open,
+    }
+}
+
+impl LongTs {
+    fn requests(&self) -> usize {
+        self.requests.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Waits until the stub sends `n` bodies.
+    async fn wait_open(&self, n: usize) {
+        for _ in 0..200 {
+            if self.open.load(std::sync::atomic::Ordering::SeqCst) == n {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!(
+            "{} bodies open, not {n}",
+            self.open.load(std::sync::atomic::Ordering::SeqCst)
+        );
+    }
+}
+
+/// Reads at least `min` bytes of `url` from byte `from`, then lets go, as
+/// mpegts.js does once it holds 60 s ahead. Returns the bytes it got, which
+/// its resume adds to `from`.
+async fn read_then_let_go(h: &Harness, url: &str, from: usize, min: usize) -> usize {
+    let mut req = h.http.get(url);
+    if from > 0 {
+        req = req.header(header::RANGE, format!("bytes={from}-"));
+    }
+    let mut r = req.send().await.unwrap();
+    assert!(r.status().is_success(), "{}", r.status());
+    let mut got = 0;
+    while got < min {
+        let chunk = r.chunk().await.unwrap().expect("the body ended early");
+        if from > 0 {
+            assert!(chunk == long_ts().slice(from + got..from + got + chunk.len()));
+        }
+        got += chunk.len();
+    }
+    drop(r);
+    // The proxy notices on its next write.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    got
+}
+
+async fn long_ts_harness() -> (LongTs, Harness, String) {
+    let ts = spawn_long_ts().await;
+    let h = start().await;
+    h.add_source(
+        "x-1",
+        "xtream",
+        serde_json::json!({ "serverUrl": ts.base, "username": "u", "password": "p" }),
+    )
+    .await;
+    let url = h.proxy_url(&format!("{}{LONG_TS_PATH}", ts.base), Some("x-1"));
+    (ts, h, url)
+}
+
+/// mpegts.js lets go of catch-up once it holds 60 s ahead and asks for the
+/// rest 30 s of playback later: the proxy keeps the provider's connection for
+/// it (park.rs), and the resume makes no new upstream request.
+#[tokio::test]
+async fn proxy_continues_a_parked_ts_body_without_asking_upstream_again() {
+    let (ts, h, url) = long_ts_harness().await;
+    // Three lazy-load pauses, each resumed where the player stopped: one
+    // upstream request where there were four.
+    let mut got = 0;
+    for _ in 0..3 {
+        got += read_then_let_go(&h, &url, got, 1 << 20).await;
+        ts.wait_open(1).await;
+    }
+
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, format!("bytes={got}-"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(
+        r.headers()[header::CONTENT_RANGE],
+        format!("bytes {got}-{}/{LONG_TS}", LONG_TS - 1)
+    );
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "video/mp2t");
+    let body = r.bytes().await.unwrap();
+    assert!(body == long_ts().slice(got..), "the rest, byte for byte");
+    assert_eq!(ts.requests(), 1);
+
+    // With `from` (a restarted stream) the resume counts from that byte.
+    let from = format!("{url}&from=1000000");
+    let got = read_then_let_go(&h, &from, 0, 1 << 20).await;
+    let r = h
+        .http
+        .get(&from)
+        .header(header::RANGE, format!("bytes={got}-"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    let body = r.bytes().await.unwrap();
+    assert!(body == long_ts().slice(1_000_000 + got..));
+    assert_eq!(ts.requests(), 2);
+}
+
+/// A parked reader holds the provider's connection: any other request for the
+/// source, `release=1` and a resume from a byte it no longer holds let it go.
+#[tokio::test]
+async fn proxy_lets_a_parked_reader_go() {
+    let (ts, h, url) = long_ts_harness().await;
+    read_then_let_go(&h, &url, 0, 1 << 20).await;
+    ts.wait_open(1).await;
+    // The MPEG-TS seeker's probe: a bounded range of the same file.
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, "bytes=0-99")
+        .send()
+        .await
+        .unwrap();
+    assert!(r.bytes().await.unwrap() == long_ts().slice(..100));
+    ts.wait_open(0).await;
+    assert_eq!(ts.requests(), 2);
+
+    // The player was torn down (a stop, another item).
+    let got = read_then_let_go(&h, &url, 0, 1 << 20).await;
+    ts.wait_open(1).await;
+    let r = h.http.get(format!("{url}&release=1")).send().await.unwrap();
+    assert_eq!(r.status(), 204);
+    ts.wait_open(0).await;
+    assert_eq!(ts.requests(), 3);
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, format!("bytes={got}-"))
+        .send()
+        .await
+        .unwrap();
+    assert!(r.bytes().await.unwrap() == long_ts().slice(got..));
+    assert_eq!(ts.requests(), 4);
+}
+
+/// A seek whose request reached the proxy before it noticed the player let go
+/// of the old body: that body's reader must not park next to the new stream,
+/// which would hold a second connection to a one-connection account.
+#[tokio::test]
+async fn proxy_does_not_park_a_body_whose_next_request_came_first() {
+    let (ts, h, url) = long_ts_harness().await;
+    let mut old = h.http.get(&url).send().await.unwrap();
+    let mut got = 0;
+    while got < 1 << 20 {
+        got += old
+            .chunk()
+            .await
+            .unwrap()
+            .expect("the body ended early")
+            .len();
+    }
+    let mut seek = h
+        .http
+        .get(format!("{url}&from=1000000"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(seek.status(), 206);
+    assert!(seek.chunk().await.unwrap().is_some());
+    ts.wait_open(2).await;
+    // The player of the old body lets go only now.
+    drop(old);
+    ts.wait_open(1).await;
+    assert!(seek.chunk().await.unwrap().is_some());
+    assert_eq!(ts.requests(), 2);
+}
+
+/// A resume from a byte the parked reader has not read (a jump ahead) goes
+/// upstream, and the reader is let go.
+#[tokio::test]
+async fn proxy_asks_upstream_for_a_byte_the_parked_reader_does_not_hold() {
+    let (ts, h, url) = long_ts_harness().await;
+    read_then_let_go(&h, &url, 0, 1 << 20).await;
+    ts.wait_open(1).await;
+    // Past the 48 MB the parked reader stops at.
+    let at = LONG_TS - (1 << 20);
+    let r = h
+        .http
+        .get(&url)
+        .header(header::RANGE, format!("bytes={at}-"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert!(r.bytes().await.unwrap() == long_ts().slice(at..));
+    assert_eq!(ts.requests(), 2);
+    ts.wait_open(0).await;
 }
 
 #[tokio::test]
@@ -804,6 +1152,33 @@ async fn files_serve_completed_downloads_with_range() {
     assert_eq!(r.headers()[header::ACCEPT_RANGES], "bytes");
     assert_eq!(r.bytes().await.unwrap().len(), 1000);
 
+    // `from`: the file as if it began at that byte.
+    let r = h
+        .http
+        .get(format!("{}/api/files/1?from=100", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 100-999/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[100..]);
+    let r = h
+        .http
+        .get(format!("{}/api/files/1?from=100", h.base))
+        .header(header::RANGE, "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 110-119/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[110..120]);
+    let r = h
+        .http
+        .get(format!("{}/api/files/1?from=1000", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 416);
+
     for (id, status) in [
         ("2", 409),
         ("3", 404),
@@ -819,6 +1194,40 @@ async fn files_serve_completed_downloads_with_range() {
             .unwrap();
         assert_eq!(r.status(), status, "download {id}");
     }
+}
+
+#[tokio::test]
+async fn recordings_start_a_file_at_from() {
+    let h = start().await;
+    let dir = h.server.app.downloads_dir().join("recordings");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("rec.ts"), bytes_1000()).unwrap();
+    let id = format!("f.{}", hex_name("rec.ts"));
+
+    let r = h
+        .http
+        .get(format!("{}/api/recordings/{id}?from=376", h.base))
+        .header(header::RANGE, "bytes=0-187")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 206);
+    assert_eq!(r.headers()[header::CONTENT_TYPE], "video/mp2t");
+    assert_eq!(r.headers()[header::CONTENT_RANGE], "bytes 376-563/1000");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), &bytes_1000()[376..564]);
+
+    let r = h
+        .http
+        .get(format!("{}/api/recordings/{id}", h.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.bytes().await.unwrap().len(), 1000);
+}
+
+fn hex_name(name: &str) -> String {
+    name.bytes().map(|b| format!("{b:02x}")).collect()
 }
 
 #[tokio::test]

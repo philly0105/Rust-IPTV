@@ -15,7 +15,8 @@ export interface SeekBarProps {
   live?: boolean;
   /** Seconds behind the live edge that still read as "Live" (see `LIVE_EDGE_SLACK`). */
   edgeSlack?: number;
-  onSeek(seconds: number): void;
+  /** `step`: an arrow or Page key, one of a run the store coalesces (`pendingSeek`). */
+  onSeek(seconds: number, step?: boolean): void;
   className?: string;
 }
 
@@ -92,7 +93,7 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
     if (next === null) return;
     e.preventDefault();
     e.stopPropagation();
-    onSeek(Math.min(max, Math.max(min, next)));
+    onSeek(Math.min(max, Math.max(min, next)), e.key !== 'Home' && e.key !== 'End');
   };
 
   const valueText = positionReadout(t, { position: shown, duration: max, liveEnd: live ? max : undefined, edgeSlack });

@@ -2,7 +2,8 @@
  * A zap between live channels keeps the last frame up until the next channel draws its own
  * (L3-player-ui-x4): no black flash between engines. A retry, a stop or a move to VOD does not.
  * Also: which element errors on an extensionless live channel get a retry through mpegts.js (PB-2),
- * and a new play of the same URL (Start over of the movie playing) builds the engine again.
+ * a new play of the same URL (Start over of the movie playing) builds the engine again, and the
+ * player leaves to an engine that restarts MPEG-TS what it does itself (PL-2).
  */
 
 import { act, cleanup, render } from '@testing-library/react';
@@ -182,5 +183,61 @@ describe('a new play of the media playing (Start over, a recovery that resolved 
     await vi.waitFor(() => expect(createEngine).toHaveBeenCalledTimes(2));
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(vi.mocked(createEngine).mock.calls[1]![2]).toBe(vod.url);
+  });
+});
+
+describe('MPEG-TS that the engine restarts (PL-2)', () => {
+  const recording: PlayerSource = { url: 'http://h/rec/1.ts', kind: 'file', title: 'Rec', isLive: false, isRadio: false, resumeSeconds: 600 };
+  /** Plays `recording` on an engine stub with `engine`'s members and waits until it is attached. */
+  const playOn = async (engine: Record<string, unknown>): Promise<{ el: HTMLVideoElement; writes: number[] }> => {
+    vi.mocked(createEngine).mockImplementation(async () => ({ kind: 'mpegts', destroy: vi.fn(), ...engine }) as never);
+    render(<InlinePlayer />);
+    await tune(recording);
+    await vi.waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
+    const el = video();
+    const writes: number[] = [];
+    Object.defineProperty(el, 'duration', { configurable: true, get: () => 700 });
+    Object.defineProperty(el, 'currentTime', { configurable: true, get: () => writes.at(-1) ?? 0, set: (v: number) => void writes.push(v) });
+    return { el, writes };
+  };
+
+  beforeEach(() => vi.mocked(createEngine).mockClear());
+  afterEach(() => vi.mocked(createEngine).mockImplementation(async () => ({ destroy: vi.fn() }) as never));
+
+  it("leaves the resume to an engine that started there, and shows the engine's length", async () => {
+    const { el, writes } = await playOn({ resumes: true, duration: () => 5400 });
+    act(() => void el.dispatchEvent(new Event('loadedmetadata')));
+    expect(writes).toEqual([]);
+    act(() => void el.dispatchEvent(new Event('timeupdate')));
+    // The element's own length covers only the stream since the restart.
+    expect(usePlayerStore.getState().durationSeconds).toBe(5400);
+  });
+
+  it('an engine that did not resume gets the element seek at loadedmetadata, and the element length', async () => {
+    const { el, writes } = await playOn({});
+    act(() => void el.dispatchEvent(new Event('loadedmetadata')));
+    expect(writes).toEqual([600]);
+    act(() => void el.dispatchEvent(new Event('timeupdate')));
+    expect(usePlayerStore.getState().durationSeconds).toBe(700);
+  });
+
+  it('a pause or play between two pipelines goes to the engine, and the status follows it', async () => {
+    let between = true;
+    const setPaused = vi.fn(() => between);
+    await playOn({ setPaused });
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    const plays = vi.mocked(HTMLMediaElement.prototype.play).mock.calls.length;
+    act(() => usePlayerStore.getState().togglePlay());
+    expect(setPaused).toHaveBeenLastCalledWith(true);
+    expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().status).toBe('paused');
+    act(() => usePlayerStore.getState().togglePlay());
+    expect(setPaused).toHaveBeenLastCalledWith(false);
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(plays);
+    expect(usePlayerStore.getState().status).toBe('playing');
+    // With the new pipeline attached the element pauses itself.
+    between = false;
+    act(() => usePlayerStore.getState().togglePlay());
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledTimes(1);
   });
 });

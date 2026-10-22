@@ -69,6 +69,11 @@ export interface PlayerState {
   muted: boolean;
   positionSeconds: number;
   durationSeconds?: number;
+  /**
+   * A step seek's target (keys, J/L, the skip buttons) not yet sent to the surface: repeated steps
+   * add up here and go out as one seek (`SEEK_SETTLE_MS`). The position shows it meanwhile.
+   */
+  pendingSeek?: number;
   queue: PlayerSource[];
   zapContext?: ZapContext;
   /**
@@ -90,7 +95,8 @@ export interface PlayerActions {
   stop(): void;
   togglePlay(): void;
   seekBy(seconds: number): void;
-  seekTo(seconds: number): void;
+  /** `step`: one of a run of steps, coalesced into one seek (`pendingSeek`). */
+  seekTo(seconds: number, opts?: { step?: boolean }): void;
   setVolume(v: number): void;
   adjustVolume(delta: number): void;
   toggleMute(): void;
@@ -107,6 +113,8 @@ export interface PlaybackController {
   seekTo(seconds: number): void;
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
+  /** The surface holds the media at `seconds` (shown time): a seek there asks the server for nothing. */
+  holds?(seconds: number): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +126,12 @@ export const RESUME_KEY = 'player.resume';
 export const SAVE_INTERVAL_MS = 5000;
 
 let controller: PlaybackController | null = null;
+/**
+ * Quiet after the last step before a pending step seek goes out. Each seek past what the surface
+ * holds costs a request to the provider, and a held arrow key repeats about 30 times a second.
+ */
+export const SEEK_SETTLE_MS = 250;
+let seekTimer: ReturnType<typeof setTimeout> | null = null;
 let stageCount = 0;
 let saveTimer: ReturnType<typeof setInterval> | null = null;
 /** Incremented per play(); play's own async steps check it to drop stale results. */
@@ -585,6 +599,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     const queue = opts?.queue ?? (get().queue.some((q) => sameSource(q, source)) ? get().queue : []);
 
     resetMedia();
+    dropPendingSeek();
     set({
       source,
       mode,
@@ -636,6 +651,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     stopSaver();
     clearResume();
     lastSavedPosition = -1;
+    dropPendingSeek();
     controller?.pause();
     resetMedia();
     if (get().mode === 'embedded-mpv') rpc('mpv.detach').catch(() => undefined);
@@ -674,11 +690,12 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   },
 
   seekBy(seconds) {
+    // A pending step is already the position: steps add up from it.
     const { positionSeconds } = get();
-    get().seekTo(positionSeconds + seconds);
+    get().seekTo(positionSeconds + seconds, { step: true });
   },
 
-  seekTo(seconds) {
+  seekTo(seconds, opts) {
     const { source, durationSeconds } = get();
     if (!source || get().mode === 'external') return;
     let target = Math.max(0, seconds);
@@ -691,6 +708,16 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
         upNextHandledFor = undefined;
       }
     }
+    // A step the surface can't serve from what it holds waits for the next one (or a key up):
+    // a held key would otherwise send a request to the provider per repeat.
+    if (opts?.step && controller && !controller.holds?.(target)) {
+      set({ positionSeconds: target, pendingSeek: target });
+      if (seekTimer) clearTimeout(seekTimer);
+      seekTimer = setTimeout(commitPendingSeek, SEEK_SETTLE_MS);
+      if (typeof window !== 'undefined') window.addEventListener('keyup', commitPendingSeek, true);
+      return;
+    }
+    dropPendingSeek();
     controller?.seekTo(target);
     set({ positionSeconds: target });
   },
@@ -761,14 +788,33 @@ export function setController(c: PlaybackController | null): () => void {
   };
 }
 
+/** Sends the pending step seek (`pendingSeek`) to the surface: the steps stopped, or the key came up. */
+export function commitPendingSeek(): void {
+  const target = usePlayerStore.getState().pendingSeek;
+  dropPendingSeek();
+  if (target === undefined) return;
+  controller?.seekTo(target);
+}
+
+/** Forgets the pending step seek: a seek that goes out now, or a play or stop, replaces it. */
+function dropPendingSeek(): void {
+  if (seekTimer) clearTimeout(seekTimer);
+  seekTimer = null;
+  if (typeof window !== 'undefined') window.removeEventListener('keyup', commitPendingSeek, true);
+  if (usePlayerStore.getState().pendingSeek !== undefined) usePlayerStore.setState({ pendingSeek: undefined });
+}
+
 export function reportProgress(positionSeconds: number, durationSeconds?: number): void {
-  const patch: Partial<PlayerState> = { positionSeconds };
+  // Until a pending step goes out the element has not moved: its time would snap the position
+  // back, and the next step would count from there.
+  const pending = usePlayerStore.getState().pendingSeek;
+  const patch: Partial<PlayerState> = { positionSeconds: pending ?? positionSeconds };
   if (durationSeconds !== undefined && Number.isFinite(durationSeconds) && durationSeconds > 0) {
     patch.durationSeconds = durationSeconds;
   }
   // The element's `progress` events, and mpv state events, repeat the last report: nothing to tell subscribers.
   const s = usePlayerStore.getState();
-  if (s.positionSeconds === positionSeconds && (patch.durationSeconds === undefined || patch.durationSeconds === s.durationSeconds)) return;
+  if (s.positionSeconds === patch.positionSeconds && (patch.durationSeconds === undefined || patch.durationSeconds === s.durationSeconds)) return;
   usePlayerStore.setState(patch);
 }
 
@@ -1050,6 +1096,7 @@ export function replay(): void {
     void s.play(fresh, { queue: s.queue, mode: s.mode });
     return;
   }
+  dropPendingSeek();
   controller.seekTo(0);
   controller.play();
   usePlayerStore.setState({ positionSeconds: 0, status: 'loading', error: undefined });
@@ -2274,6 +2321,7 @@ export function __resetPlayerForTests(): void {
   startOverKey = null;
   sourceKindCache.clear();
   stopSaver();
+  dropPendingSeek();
   if (upNextTimer) clearTimeout(upNextTimer);
   upNextTimer = null;
   upNextArmed = undefined;

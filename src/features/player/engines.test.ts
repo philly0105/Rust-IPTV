@@ -728,6 +728,205 @@ describe('mpegts.js engine recovery', () => {
   });
 });
 
+describe('MPEG-TS restarts at a seek or a resume (PL-2)', () => {
+  type Plan = { url: string; at: number } | null;
+  function seekerOf(plan: (t: number) => Plan | Promise<Plan>, duration = 1800) {
+    return { duration: () => duration, usable: () => true, startAt: vi.fn(async (t: number) => plan(t)) };
+  }
+  /** An element whose clock, readiness, play state and buffered ranges the test sets. */
+  function clockedVideo() {
+    const el = video();
+    const state = { t: 0, ready: 0, paused: false, ranges: [] as [number, number][] };
+    Object.defineProperty(el, 'currentTime', { get: () => state.t, set: (v: number) => (state.t = v), configurable: true });
+    Object.defineProperty(el, 'readyState', { get: () => state.ready, configurable: true });
+    Object.defineProperty(el, 'paused', { get: () => state.paused, configurable: true });
+    Object.defineProperty(el, 'buffered', {
+      get: () => ({ length: state.ranges.length, start: (i: number) => state.ranges[i]![0], end: (i: number) => state.ranges[i]![1] }),
+      configurable: true,
+    });
+    return { el, state };
+  }
+  const vodTs = (extra: Partial<PlayerSource> = {}) => src('http://h/v.ts', { isLive: false, ...extra });
+
+  it('a resume starts where the seeker says, and the rest is sought inside the new stream', async () => {
+    const { el, state } = clockedVideo();
+    const seeker = seekerOf((t) => ({ url: 'http://h/v.ts?from=188000', at: Math.floor(t / 60) * 60 }));
+    const engine = await createEngine(el, vodTs({ resumeSeconds: 1234 }), 'http://h/v.ts', cb(), { captions: false, seeker });
+    expect(engine.resumes).toBe(true);
+    expect(engine.duration?.()).toBe(1800);
+    expect(seeker.startAt).toHaveBeenCalledWith(1234, expect.any(AbortSignal));
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(1));
+    // Never a load from byte 0.
+    expect(FakeTsPlayer.created[0]!.source.url).toBe('http://h/v.ts?from=188000');
+    const shown = (): number => state.t + (engine.timeOffset?.() ?? 0);
+    expect(shown()).toBe(1234);
+
+    state.ready = 1;
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(state.t).toBe(34);
+    expect(shown()).toBe(1234);
+    state.t = 40;
+    expect(shown()).toBe(1240);
+  });
+
+  it('a seek past the buffer tears the pipeline down before asking where to start; one inside it is left to the element', async () => {
+    const { el, state } = clockedVideo();
+    const callbacks = cb();
+    const order: string[] = [];
+    const seeker = seekerOf((t) => {
+      order.push(`asked with the old pipeline ${FakeTsPlayer.created[0]!.destroyed ? 'gone' : 'open'}`);
+      return { url: `http://h/v.ts?from=${t * 1000}`, at: t };
+    });
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', { ...callbacks, onWaiting: vi.fn() }, { captions: false, seeker });
+    expect(engine.resumes).toBe(false);
+    expect(FakeTsPlayer.created[0]!.source.url).toBe('http://h/v.ts');
+    state.ranges = [[0, 40]];
+    expect(engine.seek?.(30)).toBe(false);
+    expect(seeker.startAt).not.toHaveBeenCalled();
+
+    expect(engine.seek?.(600)).toBe(true);
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(2));
+    expect(order).toEqual(['asked with the old pipeline gone']);
+    expect(FakeTsPlayer.created[1]!.source.url).toBe('http://h/v.ts?from=600000');
+    expect(el.play).toHaveBeenCalled();
+
+    // Inside the new stream the element seeks again; before its start is a restart.
+    state.ready = 1;
+    el.dispatchEvent(new Event('loadedmetadata'));
+    state.ranges = [[0, 30]];
+    expect(engine.seek?.(610)).toBe(false);
+    expect(engine.seek?.(590)).toBe(true);
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(3));
+  });
+
+  it('a seek while a restart resolves replaces it, and a paused player stays paused', async () => {
+    const { el, state } = clockedVideo();
+    state.paused = true;
+    let first!: (p: Plan) => void;
+    const seeker = seekerOf((t) => (t === 600 ? new Promise<Plan>((r) => (first = r)) : { url: `http://h/v.ts?from=${t}`, at: t }));
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', cb(), { captions: false, seeker });
+    engine.seek?.(600);
+    engine.seek?.(900);
+    first({ url: 'http://h/v.ts?from=600', at: 600 });
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(2));
+    await Promise.resolve();
+    expect(FakeTsPlayer.created.map((p) => p.source.url)).toEqual(['http://h/v.ts', 'http://h/v.ts?from=900']);
+    expect(el.play).not.toHaveBeenCalled();
+    expect(state.t + (engine.timeOffset?.() ?? 0)).toBe(900);
+  });
+
+  it('a pause while a restart resolves is kept: the new stream loads paused', async () => {
+    const { el, state } = clockedVideo();
+    let resolve!: (p: Plan) => void;
+    const seeker = seekerOf(() => new Promise<Plan>((r) => (resolve = r)));
+    const onWaiting = vi.fn();
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', { ...cb(), onWaiting }, { captions: false, seeker });
+    expect(engine.setPaused?.(true)).toBe(false);
+    engine.seek?.(600);
+    expect(onWaiting).toHaveBeenCalledTimes(1);
+    // The torn-down element reads as paused and fires no `pause`: the engine takes it.
+    state.paused = true;
+    expect(engine.setPaused?.(true)).toBe(true);
+    resolve({ url: 'http://h/v.ts?from=600', at: 600 });
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(2));
+    await Promise.resolve();
+    expect(el.play).not.toHaveBeenCalled();
+    // The new pipeline is attached: from here the element pauses and plays itself.
+    expect(engine.setPaused?.(false)).toBe(false);
+  });
+
+  it('a play while a paused restart resolves plays once the new stream is attached', async () => {
+    const { el, state } = clockedVideo();
+    state.paused = true;
+    let resolve!: (p: Plan) => void;
+    const seeker = seekerOf(() => new Promise<Plan>((r) => (resolve = r)));
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', cb(), { captions: false, seeker });
+    engine.seek?.(600);
+    expect(engine.setPaused?.(false)).toBe(true);
+    // A seek meanwhile keeps the play.
+    engine.seek?.(700);
+    resolve({ url: 'http://h/v.ts?from=700', at: 700 });
+    await vi.waitFor(() => expect(el.play).toHaveBeenCalledTimes(1));
+    expect(FakeTsPlayer.created.map((p) => p.source.url)).toEqual(['http://h/v.ts', 'http://h/v.ts?from=700']);
+  });
+
+  it('without a start from the seeker it loads from 0 and seeks there; a failed lookup is a network error', async () => {
+    const { el, state } = clockedVideo();
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', cb(), { captions: false, seeker: seekerOf(() => null) });
+    engine.seek?.(300);
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(2));
+    expect(FakeTsPlayer.created[1]!.source.url).toBe('http://h/v.ts');
+    state.ready = 1;
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(state.t).toBe(300);
+
+    const callbacks = cb();
+    const failing = seekerOf(() => Promise.reject(new Error('panel down')));
+    await createEngine(clockedVideo().el, vodTs({ resumeSeconds: 900 }), 'http://h/v.ts', callbacks, { captions: false, seeker: failing });
+    await vi.waitFor(() => expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'panel down', kind: 'network' })));
+  });
+
+  it('a dropped connection comes back where it was, not at the start', async () => {
+    vi.useFakeTimers();
+    const { el, state } = clockedVideo();
+    const seeker = seekerOf((t) => ({ url: `http://h/v.ts?from=${t}`, at: t }));
+    const engine = await createEngine(el, vodTs(), 'http://h/v.ts', cb(), { captions: false, seeker });
+    el.dispatchEvent(new Event('loadeddata'));
+    state.t = 754;
+    FakeTsPlayer.created[0]!.emit('error', 'NetworkError', 'Exception', { code: -1 });
+    await vi.advanceTimersByTimeAsync(tsRestartDelay(1));
+    expect(seeker.startAt).toHaveBeenCalledWith(754, expect.any(AbortSignal));
+    await vi.waitFor(() => expect(FakeTsPlayer.created).toHaveLength(2));
+    expect(FakeTsPlayer.created[1]!.source.url).toBe('http://h/v.ts?from=754');
+    // The new pipeline's clock starts at 0; the shown position stays.
+    state.t = 0;
+    expect(state.t + (engine.timeOffset?.() ?? 0)).toBe(754);
+    state.ready = 1;
+    el.dispatchEvent(new Event('loadedmetadata'));
+    state.t = 2;
+    expect(state.t + (engine.timeOffset?.() ?? 0)).toBe(756);
+  });
+
+  it('a torn-down player asks the proxy to let go of the connection it keeps for a resume (PL-M1)', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const proxied = '/api/proxy?url=http%3A%2F%2Fh%2Fv.ts&sourceId=s1';
+      (await createEngine(video(), vodTs(), proxied, cb(), { captions: false })).destroy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const asked = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]));
+      expect(asked.pathname).toBe('/api/proxy');
+      expect(Object.fromEntries(asked.searchParams)).toEqual({ url: 'http://h/v.ts', sourceId: 's1', release: '1' });
+      // Live is never parked, and a URL off the proxy has nothing to release.
+      (await createEngine(video(), src('http://h/a.ts'), '/api/proxy?url=http%3A%2F%2Fh%2Fa.ts&sourceId=s1', cb(), { captions: false })).destroy();
+      (await createEngine(video(), vodTs(), 'http://h/v.ts', cb(), { captions: false })).destroy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('bufferedAt: inside a range, not at its end', () => {
+    const { el, state } = clockedVideo();
+    state.ranges = [
+      [0, 40],
+      [100, 130],
+    ];
+    expect([0, 39.9, 40, 99, 100, 129.9, 130].map((t) => engines.bufferedAt(el, t))).toEqual([true, true, false, false, true, true, false]);
+  });
+
+  it('live streams and other engines ignore the seeker', async () => {
+    const seeker = seekerOf(() => ({ url: 'x', at: 1 }));
+    const live = await createEngine(video(), src('http://h/a.ts', { resumeSeconds: 50 }), 'http://h/a.ts', cb(), { captions: false, seeker });
+    expect(live.resumes).toBe(false);
+    expect(live.seek?.(100)).toBe(false);
+    expect(live.duration?.()).toBeUndefined();
+    const mp4 = await createEngine(video(), src('http://h/m.mp4', { isLive: false, resumeSeconds: 50 }), 'http://h/m.mp4', cb(), { captions: false, seeker });
+    expect(mp4.seek).toBeUndefined();
+    expect(seeker.startAt).not.toHaveBeenCalled();
+  });
+});
+
 describe('server refusal reasons', () => {
   const { isOwnServerUrl, reasonFromBody, withReason, fetchFailureReason } = engines;
 

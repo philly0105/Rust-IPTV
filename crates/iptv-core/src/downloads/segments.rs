@@ -206,6 +206,19 @@ pub fn load(part: &Path) -> Sidecar {
     Sidecar::Valid(ranges)
 }
 
+/// [`save`] once the `.part` is on disk. A segment's `pos` is recorded once
+/// its bytes reach the OS, and the sidecar can reach the disk before those
+/// pages do: after an OS crash or a power cut it would mark bytes as written
+/// that never were, and the finished file would have zeroed gaps. `ranges`
+/// is a snapshot taken before the call, so the sync covers all it records.
+pub fn save_synced(part: &Path, ranges: &Ranges) -> io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(part)?
+        .sync_data()?;
+    save(part, ranges)
+}
+
 /// Replaces the sidecar of `part` (written beside it, then renamed over it).
 pub fn save(part: &Path, ranges: &Ranges) -> io::Result<()> {
     let path = ranges_path(part);
@@ -461,6 +474,11 @@ pub async fn run(
     let mut saved_plan = 0;
 
     let mut last_save = Instant::now();
+    // The periodic save in flight. Its sync can take a while on a slow disk,
+    // and the workers only run while this loop polls them, so it is not
+    // waited for; the next one is skipped meanwhile, and every other save
+    // waits for it (two would share the temporary file).
+    let mut saving: Option<tokio::task::JoinHandle<io::Result<()>>> = None;
     let began = plan.lock().ranges.done();
     let mut reported = false;
     let mut failure: Option<WorkerError> = None;
@@ -515,8 +533,10 @@ pub async fn run(
             let segments = plan.lock().ranges.segments.len();
             if !starting.is_empty() && segments != saved_plan {
                 saved_plan = segments;
+                settle_save(job.id, saving.take()).await;
                 let (part, snapshot) = (job.part.clone(), plan.lock().ranges.clone());
-                let saved = tokio::task::spawn_blocking(move || save(&part, &snapshot)).await;
+                let saved =
+                    tokio::task::spawn_blocking(move || save_synced(&part, &snapshot)).await;
                 if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
                     // Without the sidecar a split `.part` could not resume:
                     // end the attempt before anything writes.
@@ -602,19 +622,22 @@ pub async fn run(
         job.ctl.bytes.store(done, Ordering::Relaxed);
         progress(done, total);
         reported |= done > began;
-        if last_save.elapsed() >= SAVE_EVERY {
+        if last_save.elapsed() >= SAVE_EVERY && saving.as_ref().is_none_or(|s| s.is_finished()) {
             last_save = Instant::now();
+            settle_save(job.id, saving.take()).await;
             let part = job.part.clone();
-            let saved = tokio::task::spawn_blocking(move || save(&part, &snapshot)).await;
-            if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
-                tracing::warn!(id = job.id, error = %e, "could not save download ranges");
-            }
+            saving = Some(tokio::task::spawn_blocking(move || {
+                save_synced(&part, &snapshot)
+            }));
         }
         if stopping && workers.is_empty() {
             break;
         }
     }
     job.ctl.connections.store(1, Ordering::Relaxed);
+    // Before the sidecar is removed or saved for the last time, so an older
+    // snapshot never lands after it.
+    settle_save(job.id, saving.take()).await;
 
     let ranges = plan.lock().ranges.clone();
     let done = ranges.done();
@@ -641,7 +664,7 @@ pub async fn run(
         let _ = tokio::task::spawn_blocking(move || remove(&part)).await;
         return SegEnd::Done(total);
     }
-    let saved = tokio::task::spawn_blocking(move || save(&part, &ranges)).await;
+    let saved = tokio::task::spawn_blocking(move || save_synced(&part, &ranges)).await;
     if let Ok(Err(e)) | Err(e) = saved.map_err(io::Error::other) {
         tracing::warn!(id = job.id, error = %e, "could not save download ranges");
     }
@@ -650,6 +673,14 @@ pub async fn run(
             SegEnd::Error { err, bytes: done }
         }
         _ => SegEnd::Stopped(done),
+    }
+}
+
+/// Waits for a periodic save in flight, if any, and logs its failure.
+async fn settle_save(id: i64, saving: Option<tokio::task::JoinHandle<io::Result<()>>>) {
+    let Some(saving) = saving else { return };
+    if let Ok(Err(e)) | Err(e) = saving.await.map_err(io::Error::other) {
+        tracing::warn!(id, error = %e, "could not save download ranges");
     }
 }
 
@@ -1006,6 +1037,20 @@ mod tests {
         remove(&part);
         assert_eq!(load(&part), Sidecar::None);
         remove(&part);
+    }
+
+    #[test]
+    fn a_synced_save_goes_through_the_part() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("Movie.mp4.part");
+        let r = Ranges::new(20 * MIB, "\"e\"".into(), 0);
+        // The `.part` is synced before the sidecar records its bytes: with
+        // no `.part` to sync, no sidecar is written.
+        assert!(save_synced(&part, &r).is_err());
+        assert!(!ranges_path(&part).exists());
+        std::fs::write(&part, b"").unwrap();
+        save_synced(&part, &r).unwrap();
+        assert_eq!(load(&part), Sidecar::Valid(r));
     }
 
     #[test]

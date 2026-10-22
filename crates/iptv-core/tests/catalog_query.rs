@@ -333,7 +333,7 @@ fn vod_rows(source: &str, ct: ContentType, cats: &[&str], n: usize) -> Vec<ItemR
             item_id: format!("{}{i}", ct.as_str()),
             category_id: cats[i % cats.len()].into(),
             title: format!("Title {i}"),
-            rating: (!i.is_multiple_of(3)).then(|| (i % 10) as f64),
+            rating: (!i.is_multiple_of(3)).then_some((i % 10) as f64),
             position: i as i64,
             ..Default::default()
         })

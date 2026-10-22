@@ -123,6 +123,7 @@ function defaultHandlers(): Record<string, Handler> {
     'catalog.item': (a) => channel(Number(String((a['ref'] as { itemId: string }).itemId).slice(1)), (a['ref'] as { sourceId: string }).sourceId),
     'catalog.search': () => ({ live: [], movies: [], series: [] }),
     'recordings.list': () => [],
+    'downloads.playback': () => undefined,
   };
 }
 

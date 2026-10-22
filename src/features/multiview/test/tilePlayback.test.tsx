@@ -26,6 +26,8 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
+  // The wall's playback report (wallReport.test.tsx).
+  rpc: () => Promise.resolve(undefined),
   proxiedUrl: (s: PlayerSource) => `/api/proxy?url=${encodeURIComponent(s.url)}`,
 }));
 

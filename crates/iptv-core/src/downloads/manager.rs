@@ -1188,10 +1188,12 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
         Ok(false) => tracing::debug!(id, "download no longer queued; skipping"),
         Err(err) => {
             // The row is still `queued` in the database: dropping the id
-            // would leave it waiting with no task until the next launch.
+            // would leave it waiting with no task until the next launch. A
+            // yield asked for meanwhile does not change that; a user's stop
+            // does, and the RPC that asked for it saves it.
             let delay = mgr.claim_retry();
             tracing::error!(id, error = %err, ?delay, "could not claim download; queueing it again later");
-            retry_later = !ctl.token.is_cancelled();
+            retry_later = matches!(*ctl.reason.lock(), None | Some(StopReason::Yield));
         }
     }
     // A row that yielded goes back to the front of the queue, and one that

@@ -606,3 +606,43 @@ async fn a_row_that_yielded_after_new_bytes_starts_its_wait_over() {
         .await;
     assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
 }
+
+/// Starts a download whose three claims fail (the database busy), so it
+/// sits in the claim's backoff for about a second.
+async fn in_claim_backoff(c: &Ctx) -> (String, Download) {
+    c.files(1024 * 1024, 1024).await;
+    let sid = c.source("limit1").await;
+    iptv_core::downloads::fail_next_claims(&c.state, 3, Duration::from_millis(300));
+    let d = c.start(&sid, "limit1", 101).await;
+    (sid, d)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_download_yielding_while_its_claim_is_retried_comes_back() {
+    let c = ctx().await;
+    let (sid, d) = in_claim_backoff(&c).await;
+    c.playback("player-1", &[&sid]).await;
+    c.playback("player-1", &[]).await;
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_download_paused_or_canceled_while_its_claim_is_retried_stays_so() {
+    let c = ctx().await;
+    let (_, d) = in_claim_backoff(&c).await;
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(c.get(d.id).await.status, DownloadStatus::Paused);
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    c.wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+
+    let c = ctx().await;
+    let (_, d) = in_claim_backoff(&c).await;
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let canceled = c.get(d.id).await;
+    assert_eq!(canceled.status, DownloadStatus::Canceled);
+    assert_eq!(canceled.file_path, None, "its .part is gone");
+}

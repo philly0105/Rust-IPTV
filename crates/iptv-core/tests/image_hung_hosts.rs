@@ -27,6 +27,8 @@ use tokio::sync::Semaphore;
 const HEAD: Duration = Duration::from_millis(500);
 /// How long a tripped breaker stays open in these tests.
 const OPEN: Duration = Duration::from_millis(1000);
+/// The User-Agent the upstream's `/agent/*` images answer.
+const AGENT: &str = "SourceAgent/2.0";
 
 type Hits = Arc<Mutex<HashMap<String, usize>>>;
 
@@ -38,8 +40,9 @@ fn png() -> Response {
 }
 
 /// A local image host: `/hang/*` accepts the request and never answers,
-/// `/ok/*` sends a small PNG and `/held/*` sends it once the test adds a
-/// permit to `release`.
+/// `/ok/*` sends a small PNG, `/held/*` sends it once the test adds a permit
+/// to `release`, and `/agent/*` sends it to a request with [`AGENT`] only and
+/// never answers the others.
 struct Upstream {
     base: String,
     hits: Hits,
@@ -83,6 +86,16 @@ async fn spawn_upstream() -> Upstream {
             }),
         )
         .route("/ok/{name}", get(|| async { png() }))
+        .route(
+            "/agent/{name}",
+            get(|headers: axum::http::HeaderMap| async move {
+                if headers.get(header::USER_AGENT).is_some_and(|v| v == AGENT) {
+                    png()
+                } else {
+                    futures::future::pending::<Response>().await
+                }
+            }),
+        )
         .route(
             "/held/{name}",
             get(move || async move {
@@ -218,6 +231,44 @@ async fn posters_that_stall_while_their_host_answers_others_do_not_skip_it() {
     // the host is still asked.
     poster(&state, &up, "/ok/d.png").await.unwrap();
     assert_eq!(up.hits("/ok/d.png"), 1);
+}
+
+#[tokio::test]
+async fn a_host_skipped_for_requests_without_the_source_still_gets_the_sources_own() {
+    let up = spawn_upstream().await;
+    let (_dir, state) = new_state().await;
+    let config = serde_json::json!({
+        "url": up.url("/list.m3u"),
+        "headers": {"userAgent": AGENT}
+    })
+    .to_string();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources(id, kind, name, config_json) VALUES ('s1', 'm3u', 'S', ?1)",
+                [config],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // Two logos asked without the source (a recording card's) never get an
+    // answer, and the host is skipped for such requests.
+    let (a, b) = tokio::join!(
+        poster(&state, &up, "/agent/a.png"),
+        poster(&state, &up, "/agent/b.png")
+    );
+    for r in [a, b] {
+        assert_eq!(r.unwrap_err().kind, ImageErrorKind::NoAnswer);
+    }
+    let err = poster(&state, &up, "/agent/c.png").await.unwrap_err();
+    assert_eq!(err.kind, ImageErrorKind::HostDown, "{err:?}");
+    // The source's own request (a Live TV logo) sends its User-Agent: it is
+    // not refused, and it gets the logo.
+    imagecache::fetch_sized(&state, &up.url("/agent/c.png"), Some("s1"), Some(192))
+        .await
+        .unwrap();
+    assert_eq!(up.hits("/agent/c.png"), 1);
 }
 
 #[tokio::test]

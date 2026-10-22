@@ -29,7 +29,7 @@
 //!    and the writer keeps it from eviction and clear. Failures are
 //!    remembered per URL and scope for [`FAILURE_TTL`], so a broken poster
 //!    wall does not refetch on every scroll. A host that stops answering
-//!    altogether is skipped for a while ([`breaker`]).
+//!    altogether is skipped for a while, per scope too ([`breaker`]).
 //!
 //! Width hints (`fetch_sized`, `/api/img?...&w=<px>`): a request with a
 //! hint gets a copy no wider than the hint's bucket ([`resize::bucket`]),
@@ -401,8 +401,9 @@ async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess,
     })
 }
 
-/// The scope of a fetch: callers in different scopes never share a flight or
-/// a remembered failure (the disk entry is shared: it is keyed by URL only).
+/// The scope of a fetch: callers in different scopes never share a flight, a
+/// remembered failure or a host breaker (the disk entry is shared: it is
+/// keyed by URL only).
 /// Two things split it:
 /// - with the server-mode guard active (`guarded`), the source's trusted
 ///   authority, since it changes what may be fetched;
@@ -470,6 +471,9 @@ struct Job {
     key: String,
     /// `Some(bucket)` for a variant: `key` is its variant key.
     width: Option<u32>,
+    /// [`flight_scope`]: splits the flights, the failure memory and the
+    /// host breakers.
+    scope: String,
     headers: RequestHeaders,
     client: reqwest::Client,
 }
@@ -717,12 +721,8 @@ impl ImageCache {
     }
 
     /// Joins the flight for `job` (same URL and scope) or starts one.
-    async fn join_or_start(
-        self: &Arc<Self>,
-        job: Job,
-        scope: &str,
-    ) -> Result<CachedImage, ImageError> {
-        let flight_key = format!("{}|{scope}", job.key);
+    async fn join_or_start(self: &Arc<Self>, job: Job) -> Result<CachedImage, ImageError> {
+        let flight_key = format!("{}|{}", job.key, job.scope);
         let (fut, resolved) = {
             let mut flights = self.flights.lock();
             match flights.get(&flight_key) {
@@ -844,11 +844,11 @@ impl ImageCache {
         let host = job.url.host_str().unwrap_or("the image server").to_owned();
         // Asked only now, so disk hits and variants made from a cached
         // original never wait on a host's breaker.
-        let authority = Authority::of(&job.url);
+        let host_key = Authority::of(&job.url).map(|a| (a, job.scope.clone()));
         let started = Instant::now();
-        let admitted = authority
+        let admitted = host_key
             .as_ref()
-            .map(|a| self.breakers.lock().admit(a, started));
+            .map(|k| self.breakers.lock().admit(k, started));
         if admitted == Some(Admit::Refuse) {
             return Err(ImageError::host_down(&host));
         }
@@ -863,9 +863,9 @@ impl ImageCache {
                 FETCH_DEADLINE.as_secs()
             )))
         });
-        if let (Some(authority), Some(admitted)) = (&authority, admitted) {
+        if let (Some(host_key), Some(admitted)) = (&host_key, admitted) {
             self.note_host(
-                authority,
+                host_key,
                 &job.url,
                 admitted,
                 started,
@@ -901,7 +901,7 @@ impl ImageCache {
     /// ended, and logs once when that trips it.
     fn note_host(
         &self,
-        host: &Authority,
+        host: &breaker::HostKey,
         url: &Url,
         admitted: Admit,
         started: Instant,
@@ -918,7 +918,7 @@ impl ImageCache {
         );
         if tripped {
             tracing::info!(
-                %host,
+                host = %host.0,
                 skip_secs = breaker::open_for().as_secs(),
                 "an image host stopped answering; its images fail at once for a while"
             );
@@ -1173,10 +1173,11 @@ pub async fn fetch_sized_within(
         url,
         key,
         width,
+        scope,
         headers: source.headers,
         client,
     };
-    let flight = cache.join_or_start(job, &scope);
+    let flight = cache.join_or_start(job);
     let Some(wait) = wait else {
         return flight.await;
     };

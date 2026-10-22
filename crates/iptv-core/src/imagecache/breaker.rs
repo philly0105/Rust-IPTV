@@ -6,6 +6,10 @@
 //! their connections. After that, one fetch at a time tries the host again.
 //! Any answer from the host, even an error status, closes the breaker;
 //! another timeout opens it again.
+//!
+//! A breaker covers a host as one flight scope (`flight_scope`) asks it,
+//! like the fetches and the failure memory: a host that never answers
+//! requests without the source's User-Agent may answer the source's own.
 
 use crate::http::Authority;
 use std::collections::HashMap;
@@ -56,16 +60,20 @@ struct Host {
     probing: bool,
 }
 
-/// Breakers by `host:port`. Only hosts that answered or timed out have an
+/// What one breaker covers: an image host's `host:port` and the flight
+/// scope asking it.
+pub(super) type HostKey = (Authority, String);
+
+/// Breakers by host and scope. Only hosts that answered or timed out have an
 /// entry.
 #[derive(Debug, Default)]
 pub(super) struct Breakers {
-    hosts: HashMap<Authority, Host>,
+    hosts: HashMap<HostKey, Host>,
 }
 
 impl Breakers {
     /// Whether a fetch from `host` may go out now.
-    pub(super) fn admit(&mut self, host: &Authority, now: Instant) -> Admit {
+    pub(super) fn admit(&mut self, host: &HostKey, now: Instant) -> Admit {
         let Some(h) = self.hosts.get_mut(host) else {
             return Admit::Go;
         };
@@ -85,7 +93,7 @@ impl Breakers {
     /// breaker.
     pub(super) fn record(
         &mut self,
-        host: &Authority,
+        host: &HostKey,
         image: &str,
         admitted: Admit,
         started: Instant,
@@ -147,17 +155,23 @@ impl Breakers {
 mod tests {
     use super::*;
 
-    fn host(name: &str) -> Authority {
-        Authority {
+    /// `name`, asked without a source's headers.
+    fn host(name: &str) -> HostKey {
+        scoped(name, "")
+    }
+
+    fn scoped(name: &str, scope: &str) -> HostKey {
+        let authority = Authority {
             host: name.to_owned(),
             port: 80,
-        }
+        };
+        (authority, scope.to_owned())
     }
 
     const SECOND: Duration = Duration::from_secs(1);
 
     /// Two timeouts on different images trip the breaker.
-    fn tripped(b: &mut Breakers, h: &Authority, t0: Instant) {
+    fn tripped(b: &mut Breakers, h: &HostKey, t0: Instant) {
         assert!(!b.record(h, "http://h/a.jpg", Admit::Go, t0, true, t0));
         assert_eq!(b.admit(h, t0), Admit::Go, "one timeout is not enough");
         assert!(b.record(h, "http://h/b.jpg", Admit::Go, t0, true, t0 + SECOND));
@@ -182,6 +196,20 @@ mod tests {
             t0 + SECOND * 2
         ));
         assert_eq!(b.admit(&dead, t0 + SECOND + OPEN_FOR), Admit::Probe);
+    }
+
+    #[test]
+    fn a_breaker_covers_its_host_for_one_scope_only() {
+        let mut b = Breakers::default();
+        // Logos asked without the source's User-Agent never answer.
+        let (bare, with_agent) = (
+            scoped("logos.example", ""),
+            scoped("logos.example", "#h=1f"),
+        );
+        let t0 = Instant::now();
+        tripped(&mut b, &bare, t0);
+        assert_eq!(b.admit(&bare, t0 + SECOND), Admit::Refuse);
+        assert_eq!(b.admit(&with_agent, t0 + SECOND), Admit::Go);
     }
 
     #[test]

@@ -125,7 +125,13 @@ needs source headers or would be mixed content.
    exist (404).
 2. Load the source's `RequestHeaders` from `sources.config_json` (m3u and
    stalker carry `headers`; xtream has none) and its own host (m3u `url`,
-   xtream `serverUrl`, stalker `portalUrl`).
+   xtream `serverUrl`, stalker `portalUrl`). The row is read per request on
+   the proxy's own read-only SQLite connection (`load_source`, opened on
+   first use), not the shared pool: during an import's save, waiting writers
+   (EPG refreshes, download progress, the image index) can hold every pooled
+   connection, and a segment request then waited 15 s and failed with 500. A
+   WAL reader never waits for the write lock. When that connection can't be
+   opened or its query fails, the lookup uses the pool.
 3. Address policy (below). Refusals are 403 with an `RpcError` body.
 4. Fetch with the source's User-Agent / Referer / Origin (non-empty `ua`,
    `referer` and `origin` query parameters override them, for per-channel

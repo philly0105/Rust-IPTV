@@ -32,6 +32,7 @@ reqwest = { workspace = true }
 url = { workspace = true }
 percent-encoding = { workspace = true }
 rusqlite = { workspace = true }
+parking_lot = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

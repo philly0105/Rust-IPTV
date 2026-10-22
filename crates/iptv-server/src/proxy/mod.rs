@@ -37,7 +37,7 @@ use iptv_core::http::{
 use iptv_core::model::RequestHeaders;
 use iptv_core::{AppState, CoreResult, RpcError};
 use readahead::{Resume, Span};
-use rusqlite::OptionalExtension;
+use rusqlite::{OpenFlags, OptionalExtension};
 use serde::Deserialize;
 use std::io;
 use std::sync::Arc;
@@ -53,6 +53,9 @@ pub const MAX_REDIRECTS: usize = 5;
 pub const ATTEMPTS: u32 = 3;
 /// Bytes read before deciding whether an untyped response is a playlist.
 const SNIFF_BYTES: usize = 16;
+/// Wait of [`load_source`]'s own connection on a busy database (a WAL reader
+/// rarely is) before it asks the pool instead.
+const SOURCE_DB_BUSY: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Proxy clients and the guard policy (shared with the core's guarded
 /// clients). Each client trusts only the requesting source's own authority
@@ -60,6 +63,8 @@ const SNIFF_BYTES: usize = 16;
 pub struct Proxy {
     clients: GuardedClients,
     guard: Arc<NetGuard>,
+    /// Read-only connection for [`load_source`], opened on first use.
+    sources_db: Arc<parking_lot::Mutex<Option<rusqlite::Connection>>>,
 }
 
 impl Proxy {
@@ -79,7 +84,11 @@ impl Proxy {
                 .build()
                 .expect("proxy HTTP client builds with static configuration")
         });
-        Self { clients, guard }
+        Self {
+            clients,
+            guard,
+            sources_db: Arc::default(),
+        }
     }
 }
 
@@ -134,18 +143,58 @@ pub fn source_access(kind: &str, config_json: &str) -> SourceAccess {
     }
 }
 
-async fn load_source(app: &AppState, id: String) -> CoreResult<Option<SourceAccess>> {
-    app.db_call(move |conn| {
-        Ok(conn
-            .query_row(
-                "SELECT kind, config_json FROM sources WHERE id = ?1",
-                [&id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-            )
-            .optional()?
-            .map(|(kind, json)| source_access(&kind, &json)))
+fn query_source(conn: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<SourceAccess>> {
+    Ok(conn
+        .prepare_cached("SELECT kind, config_json FROM sources WHERE id = ?1")?
+        .query_row([id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .optional()?
+        .map(|(kind, json)| source_access(&kind, &json)))
+}
+
+/// The source row of a request, read on the proxy's own read-only connection
+/// (STR-2). Every playlist and segment request of a playing stream asks, and
+/// on the shared pool it queued behind writers: while an import's save holds
+/// the write lock, EPG refreshes, download progress and the image index each
+/// park a pooled connection, and with all of them parked a segment waited
+/// 15 s and failed with 500. A WAL reader never waits for the write lock, and
+/// the row is still read per request, so a removed source is a 404 at once.
+/// Falls back to the pool when the connection can't be opened or the query
+/// fails (the connection is then opened again next time).
+async fn load_source(
+    app: &AppState,
+    proxy: &Proxy,
+    id: String,
+) -> CoreResult<Option<SourceAccess>> {
+    let db = Arc::clone(&proxy.sources_db);
+    let path = app.db_path();
+    let key = id.clone();
+    let own = tokio::task::spawn_blocking(move || {
+        let mut slot = db.lock();
+        if slot.is_none() {
+            let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+            match rusqlite::Connection::open_with_flags(&path, flags)
+                .and_then(|c| c.busy_timeout(SOURCE_DB_BUSY).map(|()| c))
+            {
+                Ok(conn) => *slot = Some(conn),
+                Err(err) => tracing::debug!(%err, "proxy source lookup uses the pool"),
+            }
+        }
+        let found = query_source(slot.as_ref()?, &key);
+        if let Err(err) = &found {
+            tracing::debug!(%err, "proxy source lookup failed on its own connection");
+            *slot = None;
+        }
+        found.ok()
     })
     .await
+    .ok()
+    .flatten();
+    if let Some(found) = own {
+        return Ok(found);
+    }
+    app.db_call(move |conn| Ok(query_source(conn, &id)?)).await
 }
 
 /// A request's way to the stream server: the clients, the guard, the source
@@ -293,7 +342,7 @@ async fn proxy(
     let source_id = q.source_id.clone().filter(|s| !s.trim().is_empty());
 
     let access = match &source_id {
-        Some(id) => load_source(&s.app, id.clone())
+        Some(id) => load_source(&s.app, &s.proxy, id.clone())
             .await
             .map_err(|e| Fail::coded(e.into()))?
             .ok_or_else(|| Fail::coded(RpcError::not_found(format!("source {id} not found"))))?,

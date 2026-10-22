@@ -4,6 +4,7 @@
 //! (`GET /api/health`) and exits 0 when it is healthy; the Docker
 //! HEALTHCHECK uses it because the runtime image has no curl.
 
+use axum::serve::ListenerExt;
 use clap::Parser;
 use iptv_core::events::{AppEvent, BroadcastSink};
 use iptv_core::rpc::{build_router, init_all};
@@ -191,6 +192,14 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(%addr, static_dir = %static_dir.display(), version = AppState::version(), "iptv-server listening on http://{addr}");
 
     let on_signal = server.clone();
+    // TCP_NODELAY on every connection: without it a file body (a cached poster, a recording)
+    // that follows its header in a second write waited for the client's delayed ACK, about
+    // 40 ms per request on a kept-alive connection.
+    let listener = listener.tap_io(|tcp| {
+        if let Err(err) = tcp.set_nodelay(true) {
+            tracing::trace!(%err, "set_nodelay failed");
+        }
+    });
     let serve = axum::serve(listener, iptv_server::router(server.clone())).with_graceful_shutdown(
         async move {
             shutdown_signal().await;

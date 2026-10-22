@@ -50,6 +50,7 @@ use axum::http::{Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use axum::serve::ListenerExt;
 use axum::Router;
 use iptv_core::rpc::RpcRouter;
 use iptv_core::AppState;
@@ -214,6 +215,14 @@ fn serve(listener: std::net::TcpListener, app: Router) {
                 return;
             }
         };
+        // TCP_NODELAY: a file body (a cached poster, a recording) leaves after its header in a
+        // second small write, and with Nagle on it waited for the WebView's delayed ACK, about
+        // 40 ms on Linux and up to 200 ms on Windows, on every request of a kept-alive connection.
+        let listener = listener.tap_io(|tcp| {
+            if let Err(err) = tcp.set_nodelay(true) {
+                tracing::trace!(%err, "set_nodelay failed");
+            }
+        });
         if let Err(err) = axum::serve(listener, app).await {
             tracing::error!(%err, "loopback proxy stopped");
         }

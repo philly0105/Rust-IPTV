@@ -31,6 +31,7 @@ mod server;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{Channel, RemoteControlSettings, RemoteStatus};
 use crate::state::AppState;
+use axum::serve::ListenerExt;
 use lan::LanAddr;
 use pairing::{DeviceInfo, PairLimiter, Pairing, QrSvg, Sessions};
 use parking_lot::{Mutex, RwLock};
@@ -391,6 +392,13 @@ pub async fn start_on(state: Arc<AppState>, port: u16) -> CoreResult<ServerInfo>
             .into_make_service_with_connect_info::<SocketAddr>();
         tasks.push(tokio::spawn(async move {
             let addr = l.local_addr().ok();
+            // TCP_NODELAY, as on the app's other listeners: a body written after its header
+            // otherwise waits for the phone's delayed ACK.
+            let l = l.tap_io(|tcp| {
+                if let Err(err) = tcp.set_nodelay(true) {
+                    tracing::trace!(%err, "set_nodelay failed");
+                }
+            });
             let serve = axum::serve(l, svc).with_graceful_shutdown(async move {
                 let _ = rx.wait_for(|stop| *stop).await;
             });

@@ -19,19 +19,36 @@ export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
   return width;
 }
 
-/** Offset of `el` from the top of the scroll content of `scroller` (for virtualizer scrollMargin). */
+/**
+ * Offset of `el` from the top of the scroll content of `scroller` (for virtualizer scrollMargin).
+ *
+ * A list that mounts in the same commit as its page (the page opened with its data cached, or
+ * Back) runs this layout effect before React attaches the page's ref to the scroller, so the
+ * scroller can still be null here. It is looked up again once the commit is done; before, the
+ * margin stayed 0 for good and the virtualizer rendered rows thousands of pixels away from the
+ * ones on screen (the VOD landing's category index showed blank).
+ */
 export function useScrollMargin(el: RefObject<HTMLElement | null>, scroller: RefObject<HTMLElement | null>, deps: readonly unknown[]): number {
   const [margin, setMargin] = useState(0);
   useLayoutEffect(() => {
-    const a = el.current;
-    const s = scroller.current;
-    if (!a || !s) return;
-    const measure = () => setMargin(a.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop);
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(s.firstElementChild ?? s);
-    return () => ro.disconnect();
+    let ro: ResizeObserver | undefined;
+    let cancelled = false;
+    const start = () => {
+      const a = el.current;
+      const s = scroller.current;
+      if (cancelled || !a || !s) return;
+      const measure = () => setMargin(a.getBoundingClientRect().top - s.getBoundingClientRect().top + s.scrollTop);
+      measure();
+      if (typeof ResizeObserver === 'undefined') return;
+      ro = new ResizeObserver(measure);
+      ro.observe(s.firstElementChild ?? s);
+    };
+    if (el.current && scroller.current) start();
+    else queueMicrotask(start);
+    return () => {
+      cancelled = true;
+      ro?.disconnect();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return margin;

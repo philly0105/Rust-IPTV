@@ -6,9 +6,10 @@
 //!   `epgShortFallback` setting is off or the source is not Xtream. Like
 //!   `catchup.programs`, moved by the channel's guide shift
 //!   ([`crate::epg::channel_shift`]) after the cache.
-//! - `catchup.programs`: an Xtream channel's archive table
-//!   (`get_simple_data_table`) for a time range, for the archive browser
-//!   when XMLTV has nothing for that day.
+//! - `catchup.table`: an Xtream channel's full archive table
+//!   (`get_simple_data_table`), for reuse across the guide timeline.
+//! - `catchup.programs`: the same table filtered to a time range, for the
+//!   archive browser when XMLTV has nothing for that day.
 //! - [`m3u`]: the per-source M3U catch-up override and URL builder.
 
 pub mod cache;
@@ -127,20 +128,9 @@ fn not_ended(list: &[EpgProgram], now: i64, offset_minutes: i64, limit: usize) -
         .collect()
 }
 
-/// The panel's archive programmes of an Xtream live channel overlapping
-/// `[from, to)`. Empty for other source kinds.
-pub async fn programs(
-    state: &Arc<AppState>,
-    r: &ItemRef,
-    from: &str,
-    to: &str,
-) -> CoreResult<Vec<EpgProgram>> {
-    let (Some(from), Some(to)) = (secs(from), secs(to)) else {
-        return Err(CoreError::invalid("from and to must be ISO dates"));
-    };
-    if to <= from {
-        return Err(CoreError::invalid("to must be after from"));
-    }
+/// The panel's complete archive table for an Xtream live channel, with its
+/// channel guide shift applied. Empty for other source kinds.
+pub async fn table(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<Vec<EpgProgram>> {
     if r.content_type != ContentType::Live
         || source_kind(state, &r.source_id).await? != Some(SourceKind::Xtream)
     {
@@ -157,6 +147,26 @@ pub async fn programs(
         .iter()
         .cloned()
         .map(|p| crate::epg::shifted(p, shift))
+        .collect())
+}
+
+/// The panel's archive programmes of an Xtream live channel overlapping
+/// `[from, to)`. Empty for other source kinds.
+pub async fn programs(
+    state: &Arc<AppState>,
+    r: &ItemRef,
+    from: &str,
+    to: &str,
+) -> CoreResult<Vec<EpgProgram>> {
+    let (Some(from), Some(to)) = (secs(from), secs(to)) else {
+        return Err(CoreError::invalid("from and to must be ISO dates"));
+    };
+    if to <= from {
+        return Err(CoreError::invalid("to must be after from"));
+    }
+    Ok(table(state, r)
+        .await?
+        .into_iter()
         .filter(
             |p| matches!((secs(&p.start), secs(&p.end)), (Some(s), Some(e)) if e > from && s < to),
         )

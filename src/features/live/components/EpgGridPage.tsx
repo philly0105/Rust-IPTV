@@ -55,9 +55,11 @@ import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
+import { useXtreamGridPrograms } from '../hooks/useXtreamGridPrograms';
 import { useShortEpgEnabled, useShortEpgPreviews } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
+import { hasGuideGap } from '../lib/guideCoverage';
 import { markFromProvider } from '../lib/shortEpg';
 import {
   HOUR,
@@ -723,8 +725,8 @@ export function EpgGridPage() {
     return () => window.clearTimeout(id);
   }, [atRest, gridsLoaded, chunkA, chunkB, fromIso, toIso, prefetchChunk]);
 
-  // The rows the portal and the short guide are asked for follow the visible rows once they hold
-  // still: a fling would otherwise queue a portal call for rows it has already passed (LV-4).
+  // Per-channel provider requests follow the visible rows once they hold still: a fling would
+  // otherwise queue calls for rows it has already passed (LV-4).
   const rowsShown = vItems.length > 0;
   const [shortRows, setShortRows] = useState({ first, last, shown: rowsShown });
   useEffect(() => {
@@ -805,27 +807,57 @@ export function EpgGridPage() {
   }, [shortEpgOn, shortRows, getChannel, gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData, start, end]); // eslint-disable-line react-hooks/exhaustive-deps
   const shortFor = useShortEpgPreviews(sourceId, shortEpgOn, shortRefs, now);
   const hasShortData = shortRefs.some((r) => (shortFor(r)?.length ?? 0) > 0);
+  // Xtream's simple data table can reach days before the bulk XMLTV download. Ask only for
+  // settled, visible rows with an XMLTV gap in or just beside the viewport. Clearing the wanted
+  // set as soon as a vertical fling starts drops queued offscreen calls; at most two are in flight.
+  const xtreamOn = kind === 'xtream';
+  const xtreamRefs = useMemo(() => {
+    const out: ItemRef[] = [];
+    if (!xtreamOn || !pageMeasured || dataStart !== start || dataEnd !== end ||
+        shortRows.first !== first || shortRows.last !== last) return out;
+    const probeStart = Math.max(start, shownTime[0] - 30 * MINUTE) - offsetMs;
+    const probeEnd = Math.min(end, shownTime[1] + 30 * MINUTE) - offsetMs;
+    // This endpoint is the archive table; a future-only window gains nothing from it.
+    if (probeStart >= now) return out;
+    for (let i = shortRows.first; i <= shortRows.last; i++) {
+      const ch = getChannel(i);
+      if (!ch) continue;
+      const entry = gridEntry(itemKey(ch.ref));
+      if (entry.fresh && hasGuideGap(entry.list ?? NO_PROGRAMS, probeStart, probeEnd)) out.push(ch.ref);
+    }
+    return out;
+    // gridEntry reads the two grid answers and their windows.
+  }, [xtreamOn, pageMeasured, dataStart, dataEnd, start, end, shortRows, first, last, shownTime, offsetMs, now, getChannel,
+    gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData]); // eslint-disable-line react-hooks/exhaustive-deps
+  const xtreamFor = useXtreamGridPrograms(sourceId, xtreamOn, xtreamRefs, now);
+  const hasXtreamData = xtreamRefs.some((ref) => xtreamFor(ref)?.some((p) => ms(p.end) > shownTime[0] - offsetMs && ms(p.start) < shownTime[1] - offsetMs));
   // Each row's display list is kept while its sources are the same objects, so a memoised row
   // sees the same array from render to render (L2-perf-ui-1).
-  const programsCache = useRef(new Map<ItemKey, { list?: EpgProgram[]; portal?: EpgProgram[]; short?: readonly EpgProgram[]; offset: number; out: EpgProgram[] | undefined }>());
+  const programsCache = useRef(new Map<ItemKey, { list?: EpgProgram[]; portal?: EpgProgram[]; xtream?: EpgProgram[]; short?: readonly EpgProgram[]; offset: number; start: number; end: number; out: EpgProgram[] | undefined }>());
   const programsFor = (ch: Channel | undefined): EpgProgram[] | undefined => {
     if (!ch) return undefined;
     const k = itemKey(ch.ref);
     const list = gridList(k);
     const portal = isStalker ? (ch.archive?.enabled ? archivePortal : plainPortal).get(ch.ref) : undefined;
+    const xtream = xtreamFor(ch.ref);
     // guide: an empty XMLTV row takes the provider's short guide.
     const short = !(portal && portal.length > 0) && shortEpgOn && list?.length === 0 ? shortFor(ch.ref) : undefined;
     const offset = prefs.epgOffsetMinutes;
     const cache = programsCache.current;
     const hit = cache.get(k);
-    if (hit && hit.list === list && hit.portal === portal && hit.short === short && hit.offset === offset) return hit.out;
+    if (hit && hit.list === list && hit.portal === portal && hit.xtream === xtream && hit.short === short && hit.offset === offset && hit.start === start && hit.end === end) return hit.out;
     let out: EpgProgram[] | undefined;
     // The portal's programmes are the provider's guide (no series rules, no guide search).
     if (portal && portal.length > 0) out = shiftPrograms(mergePrograms(markFromProvider(portal), list ?? []), offset);
+    else if (xtream && xtream.length > 0) {
+      // The table may contain weeks of listings. Only lay out the buffered guide window.
+      const provider = markFromProvider(xtream.filter((p) => ms(p.end) > start - offsetMs && ms(p.start) < end - offsetMs));
+      out = shiftPrograms(mergePrograms(list ?? [], short?.length ? mergePrograms(provider, short) : provider), offset);
+    }
     else if (short && short.length > 0) out = shiftPrograms([...short], offset);
     else if (list) out = list.length === 0 ? NO_PROGRAMS : shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), offset);
     if (cache.size >= PROGRAMS_CACHE_MAX) cache.clear();
-    cache.set(k, { list, portal, short, offset, out });
+    cache.set(k, { list, portal, xtream, short, offset, start, end, out });
     return out;
   };
   const gridError = gridA.error ?? gridB.error;
@@ -833,9 +865,24 @@ export function EpgGridPage() {
   // channel to its guide channel, not adding another XMLTV address.
   const guides = useRpcQuery('epg.sources', undefined, { staleTime: 60_000 });
   const guidesLoaded = !!guides.data?.some((g) => g.enabled && g.programCount > 0);
+  // A moved window can briefly hold the previous empty XMLTV answer while its new one loads.
+  // Xtream also has per-channel table/short-guide work in flight. Neither is proof that the
+  // visible time is empty until every row and requested provider answer has settled.
+  const xtreamGuideSettled = !xtreamOn || (
+    pageMeasured && dataStart === start && dataEnd === end &&
+    shortRows.first === first && shortRows.last === last &&
+    vItems.every((v) => {
+      const ch = getChannel(v.index);
+      return !!ch && gridEntry(itemKey(ch.ref)).fresh;
+    }) &&
+    xtreamRefs.every((ref) => xtreamFor(ref) !== undefined) &&
+    shortRefs.every((ref) => shortFor(ref) !== undefined)
+  );
   const noEpgAnywhere =
     !isStalker &&
+    xtreamGuideSettled &&
     !hasShortData && // guide
+    !hasXtreamData &&
     !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0));
 
   // ---- navigation ---------------------------------------------------------

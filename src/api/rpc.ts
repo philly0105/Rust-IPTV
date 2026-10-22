@@ -642,6 +642,8 @@ export interface RpcMap {
   'epg.shortEpg': Cmd<{ ref: ItemRef; limit?: number }, EpgProgram[]>;
   /** Xtream archive table (`get_simple_data_table`) overlapping [from, to); [] for other kinds. */
   'catchup.programs': Cmd<{ ref: ItemRef; from: string; to: string }, EpgProgram[]>;
+  /** The complete Xtream archive table of one live channel; [] for other kinds. */
+  'catchup.table': Cmd<{ ref: ItemRef }, EpgProgram[]>;
 
   // recording:
   'reminders.list': Cmd<void, Reminder[]>;
@@ -928,6 +930,7 @@ export const RPC_COMMANDS = [
   'sources.schedule',
   'epg.shortEpg',
   'catchup.programs',
+  'catchup.table',
   'reminders.list',
   'reminders.add',
   'reminders.remove',

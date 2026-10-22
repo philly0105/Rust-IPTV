@@ -1,6 +1,6 @@
 //! Read side: programmes of a channel in a time range, now/next, grid rows,
-//! channel search. Only urls that are enabled contribute, and one channel's
-//! programmes come from one url. A channel's guide shift ([`item_shift`]:
+//! channel search. Enabled urls contribute in priority order; other feeds
+//! fill gaps without replacing overlapping programmes. A channel's guide shift ([`item_shift`]:
 //! its own shift or its `tvg-shift`, plus its source's) moves its programmes.
 
 use super::store::STAGING_ORIGIN;
@@ -174,8 +174,8 @@ fn tvg_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
     Ok(shift.unwrap_or(0))
 }
 
-/// The feed a channel's programmes come from: the first enabled url (by
-/// rowid) with a programme of channel `?1` that starts in `[?2, ?3)` (the
+/// Candidate feeds in priority order (by rowid), with a programme of
+/// channel `?1` that starts in `[?2, ?3)` (the
 /// range plus the lookback before it) and still runs after `?4` (the range
 /// start). The urls are tried in rowid order, each with one probe of the
 /// `(epg_url, channel_id, start)` index read backwards from the range end:
@@ -189,7 +189,7 @@ pub const FEED_SQL: &str = "SELECT s.url FROM epg_sources s
              WHERE p.epg_url = s.url AND p.channel_id = ?1 AND p.start >= ?2 AND p.start < ?3
                AND +p.stop > ?4 AND p.stop > p.start
              ORDER BY p.start DESC LIMIT 1) IS NOT NULL
-     ORDER BY s.rowid LIMIT 1";
+     ORDER BY s.rowid";
 /// The last programme of the feed starting in the lookback (zero-length rows
 /// are skipped here as [`tidy`] skips them: they clip nothing).
 pub const BEFORE_SQL: &str =
@@ -217,9 +217,11 @@ pub const INSIDE_BRIEF_SQL: &str =
 /// `limit`, moved by `shift` seconds (the channel's `tvg-shift`): the range
 /// is in channel time, the guide is read at `[from - shift, to - shift)`.
 ///
-/// Every row comes from one feed ([`FEED_SQL`]): two guide urls covering
-/// the same channel cut the schedule differently, and tidying their rows
-/// against each other left sliver programmes.
+/// Each feed is tidied separately. Earlier feeds win overlaps; subsequent
+/// feeds supply whole programmes in the gaps. Selecting just one feed for
+/// the entire range hid available history when a wide grid query reached
+/// the first programme of a newer feed. Tidying feeds against each other
+/// would instead clip the preferred schedule into sliver programmes.
 ///
 /// After [`tidy`], a programme that starts before `from` can only still be
 /// running at `from` when it is the LAST one to start before `from` (any
@@ -240,22 +242,17 @@ fn rows(
     with_description: bool,
 ) -> CoreResult<Vec<Row>> {
     let (from, to) = (from - shift, to - shift);
-    let feed: Option<String> = conn
-        .prepare_cached(FEED_SQL)?
-        .query_row(
-            params![
-                channel_id,
-                from - MAX_PROGRAMME_SECS,
-                to,
-                from,
-                STAGING_ORIGIN
-            ],
-            |r| r.get(0),
-        )
-        .optional()?;
-    let Some(feed) = feed else {
-        return Ok(Vec::new());
-    };
+    let mut feeds = conn.prepare_cached(FEED_SQL)?;
+    let feeds = feeds.query_map(
+        params![
+            channel_id,
+            from - MAX_PROGRAMME_SECS,
+            to,
+            from,
+            STAGING_ORIGIN
+        ],
+        |r| r.get::<_, String>(0),
+    )?;
     let map = |r: &rusqlite::Row<'_>| {
         Ok(Row {
             start: r.get(0)?,
@@ -272,25 +269,62 @@ fn rows(
         (BEFORE_BRIEF_SQL, INSIDE_BRIEF_SQL)
     };
     let mut before = conn.prepare_cached(before_sql)?;
-    let mut list: Vec<Row> = before
-        .query_map(
-            params![feed, channel_id, from - MAX_PROGRAMME_SECS, from],
-            map,
-        )?
-        .collect::<Result<_, _>>()?;
     let mut inside = conn.prepare_cached(inside_sql)?;
-    for r in inside.query_map(params![feed, channel_id, from, to, limit], map)? {
-        list.push(r?);
+    let mut out = Vec::new();
+    for feed in feeds {
+        let feed = feed?;
+        let mut list: Vec<Row> = before
+            .query_map(
+                params![feed, channel_id, from - MAX_PROGRAMME_SECS, from],
+                map,
+            )?
+            .collect::<Result<_, _>>()?;
+        for r in inside.query_map(params![feed, channel_id, from, to, limit], map)? {
+            list.push(r?);
+        }
+        let mut list = tidy(list);
+        // A clipped programme may now end before the range.
+        list.retain(|r| r.stop > from);
+        fill_feed_gaps(&mut out, list);
+        // Most channels have complete coverage in their first feed. Do not read
+        // duplicate schedules once there are no gaps left in the requested range.
+        let mut covered_to = from;
+        for r in &out {
+            if r.start > covered_to {
+                break;
+            }
+            covered_to = covered_to.max(r.stop);
+        }
+        if covered_to >= to {
+            break;
+        }
     }
-    let mut out = tidy(list);
-    // A clipped programme may now end before the range.
-    out.retain(|r| r.stop > from);
     out.truncate(limit.max(0) as usize);
     for r in &mut out {
         r.start += shift;
         r.stop += shift;
     }
     Ok(out)
+}
+
+/// Add only whole, non-overlapping programmes from a lower-priority feed.
+/// Keep original times for catch-up and recording; slightly different feed
+/// timings must not create duplicate fragments at a preferred programme's edges.
+fn fill_feed_gaps(preferred: &mut Vec<Row>, fallback: Vec<Row>) {
+    let mut cursor = 0;
+    let mut extra = Vec::new();
+    for row in fallback {
+        while cursor < preferred.len() && preferred[cursor].stop <= row.start {
+            cursor += 1;
+        }
+        if cursor == preferred.len() || preferred[cursor].start >= row.stop {
+            extra.push(row);
+        }
+    }
+    if !extra.is_empty() {
+        preferred.extend(extra);
+        preferred.sort_by_key(|r| r.start);
+    }
 }
 
 /// Makes a sorted list safe to lay out: duplicates with the same start (two
@@ -490,6 +524,66 @@ mod tests {
             .map(|r| (r.title.as_str(), r.start, r.stop))
             .collect();
         assert_eq!(t, vec![("a", 0, 50), ("b", 50, 150), ("c", 150, 200)]);
+    }
+
+    #[test]
+    fn fallback_fills_history_internal_gaps_and_future_without_clipping() {
+        let mut preferred = vec![row(100, 200, "first"), row(300, 400, "last")];
+        fill_feed_gaps(
+            &mut preferred,
+            vec![
+                row(0, 100, "history"),
+                row(100, 190, "duplicate"),
+                row(190, 210, "overlapping edge"),
+                row(210, 300, "gap"),
+                row(300, 401, "duplicate with tail"),
+                row(401, 500, "future"),
+            ],
+        );
+        let actual: Vec<_> = preferred
+            .iter()
+            .map(|r| (r.title.as_str(), r.start, r.stop))
+            .collect();
+        assert_eq!(
+            actual,
+            vec![
+                ("history", 0, 100),
+                ("first", 100, 200),
+                ("gap", 210, 300),
+                ("last", 300, 400),
+                ("future", 401, 500),
+            ]
+        );
+    }
+
+    #[test]
+    fn now_next_uses_another_feeds_current_programme_before_preferred_feed_begins() {
+        let now = 1_800_000_000;
+        let h = 3600;
+        let conn = guide(&[(now + 10 * h, now + 11 * h, "tomorrow")]);
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('archive')", [])
+            .unwrap();
+        for (start, stop, title) in [(now - h, now + h, "on"), (now + h, now + 2 * h, "next")] {
+            conn.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('archive', 'c', ?1, ?2, ?3)",
+                params![start, stop, title],
+            ).unwrap();
+        }
+        let nn = now_next(&conn, "c", now, 0).unwrap();
+        assert_eq!(nn.now.unwrap().title, "on");
+        assert_eq!(nn.next.unwrap().title, "next");
+        conn.execute(
+            "UPDATE epg_sources SET enabled = 0 WHERE url = 'archive'",
+            [],
+        )
+        .unwrap();
+        assert!(now_next(&conn, "c", now, 0).unwrap().now.is_none());
+        conn.execute(
+            "UPDATE epg_sources SET enabled = 1, origin = ?1 WHERE url = 'archive'",
+            [STAGING_ORIGIN],
+        )
+        .unwrap();
+        assert!(now_next(&conn, "c", now, 0).unwrap().now.is_none());
     }
 
     fn guide(progs: &[(i64, i64, &str)]) -> Connection {

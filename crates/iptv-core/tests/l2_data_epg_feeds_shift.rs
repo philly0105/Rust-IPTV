@@ -1,7 +1,6 @@
 //! Loop 2 (core-data, EPG):
-//! - L1-core-10: two guide urls covering one channel are never mixed (their
-//!   rows tidied against each other left sliver programmes); the first
-//!   enabled url with programmes in the range wins.
+//! - L1-core-10: overlapping guide feeds preserve the first feed's schedule
+//!   without creating sliver programmes. Other feeds can fill uncovered hours.
 //! - L1-core-11: a channel's `tvg-shift` moves its programmes in
 //!   `epg.grid`, `epg.nowNext` and `epg.programs`.
 //! - L1-core-12: fuzzy name matching keeps sibling channels apart.
@@ -146,6 +145,55 @@ fn slots(list: &Value) -> Vec<(String, String, String)> {
 
 fn slot(title: &str, start: i64, end: i64) -> (String, String, String) {
     (title.to_string(), ts(start), ts(end))
+}
+
+#[tokio::test]
+async fn rolling_grid_windows_keep_programmes_when_feeds_cover_different_days() {
+    let env = setup().await;
+    let day = epg::query::parse_time("2026-10-23T00:00:00Z", "day").unwrap();
+    env.state.db_call(move |c| {
+        c.execute("DELETE FROM epg_programs", [])?;
+        // The first feed starts tomorrow morning. The other feed has tonight's guide.
+        // Moving the wide query six hours used to switch feeds and erase all evening tiles.
+        for (url, start, stop, title) in [
+            (FULL, day + 32 * H, day + 33 * H, "Tomorrow"),
+            (FEED_B, day + 18 * H, day + 19 * H, "Evening news"),
+            (FEED_B, day + 19 * H, day + 21 * H, "Evening film"),
+        ] {
+            c.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, 'cnn.us', ?2, ?3, ?4)",
+                params![url, start, stop, title],
+            )?;
+        }
+        Ok(())
+    }).await.unwrap();
+    let want = vec![
+        slot("Evening news", day + 18 * H, day + 19 * H),
+        slot("Evening film", day + 19 * H, day + 21 * H),
+    ];
+    // Both rolling 24-hour windows, the small visible query, and a return to the first window.
+    for (from, to) in [(6, 30), (12, 36), (15, 24), (6, 30)] {
+        let grid = env
+            .call(
+                "epg.grid",
+                json!({
+                    "refs": [item("1"), item("2")],
+                    "from": ts(day + from * H), "to": ts(day + to * H),
+                    "withDescription": false,
+                }),
+            )
+            .await;
+        let evening: Vec<_> = slots(&grid["s|live|1"])
+            .into_iter()
+            .filter(|(_, start, end)| start < &ts(day + 21 * H) && end > &ts(day + 18 * H))
+            .collect();
+        assert_eq!(evening, want, "query hours {from}..{to}");
+        assert!(slots(&grid["s|live|2"]).contains(&slot(
+            "Evening news",
+            day + 19 * H,
+            day + 20 * H
+        )));
+    }
 }
 
 #[tokio::test]

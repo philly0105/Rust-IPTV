@@ -1,4 +1,4 @@
-//! `epg.shortEpg` and `catchup.programs` (guide slice).
+//! `epg.shortEpg`, `catchup.table` and `catchup.programs` (guide slice).
 
 use crate::error::RpcError;
 use crate::model::ItemRef;
@@ -6,7 +6,7 @@ use crate::rpc::RpcRouter;
 use serde::Deserialize;
 
 /// Commands this module registers.
-pub const COMMANDS: &[&str] = &["epg.shortEpg", "catchup.programs"];
+pub const COMMANDS: &[&str] = &["epg.shortEpg", "catchup.table", "catchup.programs"];
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,11 +26,20 @@ struct ProgramsArgs {
     to: String,
 }
 
+#[derive(Deserialize)]
+struct TableArgs {
+    #[serde(rename = "ref")]
+    item_ref: ItemRef,
+}
+
 pub fn register(r: &mut RpcRouter) {
     r.add("epg.shortEpg", |s, a: ShortEpgArgs| async move {
         super::short_epg(&s, &a.item_ref, a.limit)
             .await
             .map_err(RpcError::from)
+    });
+    r.add("catchup.table", |s, a: TableArgs| async move {
+        super::table(&s, &a.item_ref).await.map_err(RpcError::from)
     });
     r.add("catchup.programs", |s, a: ProgramsArgs| async move {
         super::programs(&s, &a.item_ref, &a.from, &a.to)

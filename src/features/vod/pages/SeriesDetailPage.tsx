@@ -72,6 +72,9 @@ export function SeriesDetailPage() {
   const twin = useTwinProbe(source.data, ref, probeTwin);
   const keyMissing = useTmdbKeyMissing(settings);
   const item = detail.data?.item;
+  // An Xtream series opened from a list shows that list's catalog row until the provider answers
+  // (VOD-DETAIL-PLACEHOLDER): the hero at once; Play and the episodes come with the seasons.
+  const placeholder = detail.isPlaceholderData;
   // C2: in Ask mode a locked series shows nothing until the PIN is entered. Stalker titles are not
   // in the local catalog, so the core learns their group only from the details: wait for them.
   const stalkerSource = source.data?.kind === 'stalker';
@@ -79,13 +82,14 @@ export function SeriesDetailPage() {
     categoryId: stalkerSource ? item?.categoryId : undefined,
     waitForCategory: source.isPending || (stalkerSource && detail.isPending),
   });
-  const tmdb = useTmdbTv(item, tmdbOn);
+  // After the provider's answer, which may bring the tmdbId: a lookup from the row would be a second one.
+  const tmdb = useTmdbTv(placeholder ? undefined : item, tmdbOn);
   // A disabled query still returns what it cached while TMDB was on: merge it only while TMDB is on.
   const model = useMemo(
     () => (detail.data ? mergeSeriesDetail(detail.data, tmdbOn ? tmdb.data : undefined, i18n.language) : undefined),
     [detail.data, tmdb.data, tmdbOn, i18n.language],
   );
-  const similarFallback = useTmdbSimilar('tv', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
+  const similarFallback = useTmdbSimilar('tv', model?.tmdbId, tmdbOn && !!model && !placeholder && model.similar.length === 0 && !tmdb.isPending);
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
 
   // Panels often name episodes "Show - S01E02 - Title"; the list already shows the code, so keep only the title.
@@ -187,11 +191,12 @@ export function SeriesDetailPage() {
   const goBack = useGoBack(seriesHref);
   // Back from an actor or a similar title: the page opens where you left it.
   const { pathname } = useLocation();
-  useScrollMemory({ key: pathname, getScroller: () => scrollRef.current, ready: !!model && !!item });
-  // L2-vod-9: opened from a grid or a rail, focus lands on Play (or Resume), or on the title when nothing plays.
+  useScrollMemory({ key: pathname, getScroller: () => scrollRef.current, ready: !!model && !!item && !placeholder });
+  // L2-vod-9: opened from a grid or a rail, focus lands on Play (or Resume), or on the title when
+  // nothing plays; so it waits for the seasons, which decide which.
   const playRef = useRef<HTMLButtonElement>(null);
   useFocusOnOpen(
-    gate.state === 'open' && !!model && !!item && !watch.active,
+    gate.state === 'open' && !!model && !!item && !placeholder && !watch.active,
     () => playRef.current ?? scrollRef.current?.querySelector<HTMLElement>('#vod-detail-title'),
   );
 
@@ -379,7 +384,12 @@ export function SeriesDetailPage() {
   );
   const heroActions = (
     <HeroActionGroup className="max-sm:w-full">
-      {start && (
+      {placeholder ? (
+        // Which episode Play starts depends on the seasons: the button holds its place until they come.
+        <Button size="lg" variant="primary" icon={<Play aria-hidden size={18} className="fill-current" />} disabled className="max-sm:flex-1">
+          {t('play')}
+        </Button>
+      ) : start ? (
         <Button
           ref={playRef}
           size="lg"
@@ -391,13 +401,13 @@ export function SeriesDetailPage() {
         >
           {t(start.resume ? 'resumeEpisode' : 'playEpisode', { code: startCode })}
         </Button>
-      )}
+      ) : null}
       {trailer ? (
         <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
           {t('trailer')}
         </Button>
-      ) : tmdbOn && tmdb.isLoading ? (
-        // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
+      ) : placeholder || (tmdbOn && tmdb.isLoading) ? (
+        // VD-8: the provider's or TMDB's answer may bring a trailer; its place is held so the buttons after it do not jump.
         <span data-testid="vod-trailer-slot" className="inline-flex">
           <Skeleton className="h-12 w-32 rounded-md" />
         </span>
@@ -445,6 +455,7 @@ export function SeriesDetailPage() {
           castLinks={tmdbOn}
           chips={model.status ? [<span key="status">{model.status}</span>] : undefined}
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
+          pending={placeholder}
           progress={progress}
           actions={heroActions}
           icons={iconActions(moreItems)}
@@ -528,7 +539,15 @@ export function SeriesDetailPage() {
               </div>
             )}
           </div>
-          {seasons.length === 0 ? (
+          {placeholder ? (
+            // Rows of the episode list's height (112 px each with the gap) until the seasons come.
+            <div role="status" aria-busy="true" className="flex flex-col gap-2">
+              <span className="sr-only">{t('loading')}</span>
+              {Array.from({ length: 4 }, (_, i) => (
+                <Skeleton key={i} className="h-26 rounded-lg" />
+              ))}
+            </div>
+          ) : seasons.length === 0 ? (
             <EmptyState
               size="inline"
               icon={<ListVideo size={20} />}

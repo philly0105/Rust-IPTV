@@ -78,6 +78,9 @@ export function MovieDetailPage() {
   const twin = useTwinProbe(source.data, ref, probeTwin);
   const keyMissing = useTmdbKeyMissing(settings);
   const item = detail.data?.item;
+  // An Xtream title opened from a list shows that list's catalog row until the provider answers
+  // (VOD-DETAIL-PLACEHOLDER): the hero and Play at once, the rest of the details after.
+  const placeholder = detail.isPlaceholderData;
   // C2: in Ask mode a locked movie shows nothing until the PIN is entered. Stalker titles are not
   // in the local catalog, so the core learns their group only from the details: wait for them.
   const stalkerSource = source.data?.kind === 'stalker';
@@ -85,13 +88,14 @@ export function MovieDetailPage() {
     categoryId: stalkerSource ? item?.categoryId : undefined,
     waitForCategory: source.isPending || (stalkerSource && detail.isPending),
   });
-  const tmdb = useTmdbMovie(item, tmdbOn);
+  // After the provider's answer, which may bring the tmdbId: a lookup from the row would be a second one.
+  const tmdb = useTmdbMovie(placeholder ? undefined : item, tmdbOn);
   // A disabled query still returns what it cached while TMDB was on: merge it only while TMDB is on.
   const model = useMemo(
     () => (detail.data ? mergeMovieDetail(detail.data, tmdbOn ? tmdb.data : undefined) : undefined),
     [detail.data, tmdb.data, tmdbOn],
   );
-  const similarFallback = useTmdbSimilar('movie', model?.tmdbId, tmdbOn && !!model && model.similar.length === 0 && !tmdb.isPending);
+  const similarFallback = useTmdbSimilar('movie', model?.tmdbId, tmdbOn && !!model && !placeholder && model.similar.length === 0 && !tmdb.isPending);
   const similar = model && model.similar.length > 0 ? model.similar : (similarFallback.data ?? []);
 
   const position = useRpcQuery('positions.get', { ref }, { staleTime: 5_000 });
@@ -132,7 +136,7 @@ export function MovieDetailPage() {
   const goBack = useGoBack(moviesHref);
   // Back from an actor or a similar title: the page opens where you left it.
   const { pathname } = useLocation();
-  useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item });
+  useScrollMemory({ key: pathname, getScroller: () => detailScrollRef.current, ready: !!model && !!item && !placeholder });
   // L2-vod-9: opened from a grid or a rail, focus lands on Play (or Resume).
   const playRef = useRef<HTMLButtonElement>(null);
   useFocusOnOpen(gate.state === 'open' && !!model && !!item && !watching, () => playRef.current);
@@ -318,8 +322,8 @@ export function MovieDetailPage() {
         <Button size="lg" variant="secondary" icon={<MonitorPlay aria-hidden size={18} />} onClick={() => setTrailerOpen(true)}>
           {t('trailer')}
         </Button>
-      ) : tmdbOn && tmdb.isLoading ? (
-        // VD-8: the TMDB answer may bring a trailer; its place is held so the buttons after it do not jump.
+      ) : placeholder || (tmdbOn && tmdb.isLoading) ? (
+        // VD-8: the provider's or TMDB's answer may bring a trailer; its place is held so the buttons after it do not jump.
         <span data-testid="vod-trailer-slot" className="inline-flex">
           <Skeleton className="h-12 w-32 rounded-md" />
         </span>
@@ -380,6 +384,7 @@ export function MovieDetailPage() {
           ]}
           note={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : undefined}
           notice={detail.data?.providerDetailsUnavailable ? t('providerDetailsUnavailable') : undefined}
+          pending={placeholder}
           progress={progress}
           actions={heroActions}
           icons={iconActions}

@@ -122,12 +122,16 @@ interface Cached {
 interface Prepared {
   channels: readonly IndexedChannel[];
   programs: ReadonlyMap<ItemKey, EpgProgram[]>;
+  /** Whether the index and the guide had both answered in full, for the games' window [`from`, `to`). */
+  complete: boolean;
+  from: number;
+  to: number;
 }
 
 /**
  * Matched streams per `game.key` for `games`, which should be the games on screen: the fallback searches run
  * for them. `loading` while the index, the guide window or a fallback search is still on its first answer,
- * or while the latest index and guide are being prepared for matching.
+ * or while the latest index and guide are being prepared for matching, unless they only refresh the last ones.
  */
 export function useGameStreams(
   games: readonly Game[],
@@ -146,26 +150,30 @@ export function useGameStreams(
   // stay matched.
   const { channels } = index;
   const { programs } = guide;
+  const complete = !index.loading && !guide.loading;
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   useEffect(() => {
     if (!on) return;
     const ctrl = new AbortController();
     void prepareMatch(channels, programs, ctrl.signal).then((done) => {
-      if (done && !ctrl.signal.aborted) setPrepared({ channels, programs });
+      if (done && !ctrl.signal.aborted) setPrepared({ channels, programs, complete, from, to });
     });
     return () => ctrl.abort();
-  }, [on, channels, programs]);
+  }, [on, channels, programs, complete, from, to]);
   const ready = prepared?.channels === channels && prepared.programs === programs;
+  // While a guide refresh or an index edit is prepared, the last pair stays current if it held complete
+  // answers for the same games' window: the matches, their fallback hits and `loading` stay as they were.
+  // Partial answers (the index before its guide) or another window (another day) never stand in, or the
+  // fallback would search for games the new guide matches.
+  const current = ready || (prepared !== null && prepared.complete && prepared.from === from && prepared.to === to);
 
   // A new cache whenever the prepared index or guide changes; between those, a game object a poll left as it
   // was keeps its matches, and the minute tick re-matches only a game that stopped or started being current.
+  const preparedChannels = prepared?.channels ?? NO_CHANNELS;
+  const preparedPrograms = prepared?.programs ?? NO_PROGRAMS;
   const inputs = useMemo(
-    () => ({
-      channels: prepared?.channels ?? NO_CHANNELS,
-      programs: prepared?.programs ?? NO_PROGRAMS,
-      byGame: new WeakMap<Game, Cached>(),
-    }),
-    [prepared],
+    () => ({ channels: preparedChannels, programs: preparedPrograms, byGame: new WeakMap<Game, Cached>() }),
+    [preparedChannels, preparedPrograms],
   );
   const matched = useMemo(() => {
     const out = new Map<string, StreamMatch[]>();
@@ -181,7 +189,7 @@ export function useGameStreams(
     return out;
   }, [games, inputs, now]);
 
-  const settled = on && !index.loading && !guide.loading && ready;
+  const settled = on && complete && current;
   const wanted = useMemo(
     () => (settled ? games.filter((g) => wantsFallback(g, now) && (matched.get(g.key)?.length ?? 0) === 0) : []),
     [settled, games, matched, now],
@@ -211,5 +219,5 @@ export function useGameStreams(
     return out;
   }, [wanted, matched, queries, searches.hits, sources, now]);
 
-  return { streams, loading: on && (index.loading || guide.loading || !ready || searches.pending) };
+  return { streams, loading: on && (!complete || !current || searches.pending) };
 }

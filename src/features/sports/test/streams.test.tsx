@@ -557,6 +557,112 @@ describe('useGameStreams', () => {
     ]);
   });
 
+  it('keeps the matches and their fallback hits on screen while a guide refresh or an index edit is prepared', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    const nfl = game('nfl', STEELERS, BUCS, now + 26 * HOUR);
+    const slot = ch('s1', 'st3', 'NFL Sunday Ticket 3');
+    let guide: Record<string, EpgProgram[]> = {};
+    serve([slot], {
+      guide: () => guide,
+      // Only the search finds the game's event channel: its group's name doesn't look like sports.
+      search: () => [ch('s1', 'ev', 'NBA 05: Knicks @ Celtics', { categoryName: 'Events' })],
+    });
+    const games = [live, nfl];
+    const seen: { hits: number; loading: boolean }[] = [];
+    const { result } = renderHook(
+      () => {
+        const r = useGameStreams(games);
+        seen.push({ hits: r.streams.get(live.key)?.length ?? 0, loading: r.loading });
+        return r;
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.streams.get(live.key)!.map((m) => [m.channel.name, m.reason])).toEqual([['NBA 05: Knicks @ Celtics', 'event']]);
+    seen.length = 0;
+    // A guide refresh with a new answer for the same window...
+    guide = {
+      [itemKey(slot.ref)]: [
+        { channelId: 'st3', title: 'NFL Football', start: new Date(nfl.startMs).toISOString(), end: new Date(nfl.startMs + 3 * HOUR).toISOString(), description: 'Steelers at Buccaneers.' },
+      ],
+    };
+    await invalidate('epg.');
+    await waitFor(() => expect(result.current.streams.get(nfl.key)?.map((m) => m.reason)).toEqual(['guide']));
+    // ...and an edit that renames a channel.
+    handlers['catalog.channels'] = pages({ 's1/c1': [{ ...slot, name: 'NFL Sunday Ticket 3 HD' }] });
+    await invalidate('catalog.');
+    await waitFor(() => expect(result.current.streams.get(nfl.key)?.map((m) => m.channel.name)).toEqual(['NFL Sunday Ticket 3 HD']));
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.filter((s) => s.hits !== 1 || s.loading)).toEqual([]);
+  });
+
+  it('searches for a game only after matching it against the whole guide', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    const slot = ch('s1', 'p1', 'US| SPORTS 1');
+    serve([slot], { search: () => [] });
+    let release!: () => void;
+    const late = new Promise<void>((r) => (release = r));
+    handlers['epg.grid'] = async () => {
+      await late;
+      return {
+        [itemKey(slot.ref)]: [
+          { channelId: 'p1', title: 'NBA Basketball: Knicks at Celtics', start: new Date(live.startMs).toISOString(), end: new Date(live.startMs + 3 * HOUR).toISOString() },
+        ],
+      };
+    };
+    const games = [live];
+    const seen: { hits: number; loading: boolean }[] = [];
+    const { result } = renderHook(
+      () => {
+        const r = useGameStreams(games);
+        seen.push({ hits: r.streams.get(live.key)?.length ?? 0, loading: r.loading });
+        return r;
+      },
+      { wrapper },
+    );
+    // The index is matched before the guide answers.
+    await waitFor(() => expect(callsOf('epg.grid')).toHaveLength(1));
+    await tick(20);
+    release();
+    await waitFor(() => expect(result.current.streams.get(live.key)?.map((m) => m.reason)).toEqual(['guide']));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await tick(20);
+    expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toEqual([]);
+    expect(seen.filter((s) => s.hits === 0 && !s.loading)).toEqual([]);
+  });
+
+  it('never stands in the guide of other games while the games on screen are prepared', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    const nfl = game('nfl', STEELERS, BUCS, now + 26 * HOUR);
+    const slot = ch('s1', 'p1', 'US| SPORTS 1');
+    const start = new Date(live.startMs).toISOString();
+    const end = new Date(live.startMs + 3 * HOUR).toISOString();
+    serve([slot], {
+      // Only what overlaps the asked window, as the core answers.
+      guide: (a) =>
+        a.from < end && start < a.to ? { [itemKey(slot.ref)]: [{ channelId: 'p1', title: 'NBA Basketball: Knicks at Celtics', start, end }] } : {},
+      search: () => [],
+    });
+    let games = [live];
+    const { result, rerender } = renderHook(() => useGameStreams(games), { wrapper });
+    await waitFor(() => expect(result.current.streams.get(live.key)?.map((m) => m.reason)).toEqual(['guide']));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // Another day, then back: the live game's guide answer is cached and comes back at once.
+    games = [nfl];
+    rerender();
+    await waitFor(() => expect(callsOf('epg.grid')).toHaveLength(2));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    games = [live];
+    rerender();
+    await waitFor(() => expect(result.current.streams.get(live.key)?.map((m) => m.reason)).toEqual(['guide']));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await tick(20);
+    expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toEqual([]);
+  });
+
   it(`runs at most ${FALLBACK_CONCURRENCY} fallback searches at once`, async () => {
     const now = Date.now();
     const teams = ['Hawks', 'Bulls', 'Nets', 'Suns', 'Kings', 'Magic'].map((n, i) => team(`T${i}`, `City${i}`, n));

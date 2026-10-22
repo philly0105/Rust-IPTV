@@ -388,11 +388,12 @@ export function useIsFavorite(ref: ItemRef): boolean {
 }
 
 /**
- * Downloads list kept fresh by `downloads.update` / `downloads.progress` events. With `tracked`,
- * progress refetches only for the ids it holds (the page's own rows, VD-3): a transfer of some
- * other title does not refetch the whole list twice a second.
+ * Downloads list kept fresh by `downloads.update` events (a new row, a status change). Progress
+ * does not refetch it (DL-7): the controls that show a transfer's bytes read its live
+ * `downloads.progress` samples (`useLiveProgress`), so a running download no longer refetches the
+ * whole list twice a second.
  */
-export function useDownloads(enabled = true, tracked?: { readonly current: ReadonlySet<number> }) {
+export function useDownloads(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -403,16 +404,12 @@ export function useDownloads(enabled = true, tracked?: { readonly current: Reado
         void invalidate('downloads.list');
       }, 500);
     };
-    const off1 = onAppEvent('downloads.update', bump);
-    const off2 = onAppEvent('downloads.progress', (e) => {
-      if (!tracked || (e && tracked.current.has(e.id))) bump();
-    });
+    const off = onAppEvent('downloads.update', bump);
     return () => {
-      off1();
-      off2();
+      off();
       if (timer) clearTimeout(timer);
     };
-  }, [enabled, tracked]);
+  }, [enabled]);
   return useRpcQuery('downloads.list', undefined, { enabled, staleTime: 10_000 });
 }
 

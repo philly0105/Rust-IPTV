@@ -266,12 +266,21 @@ pub fn finalize(part: &Path, final_path: &Path) -> io::Result<PathBuf> {
 
 /// Renames without replacing an existing destination.
 ///
-/// `std::fs::rename` replaces on every platform, so the primary path is a hard
-/// link (fails atomically with `AlreadyExists`) followed by removing the
-/// source. File systems without hard links (FAT/exFAT, some network shares)
-/// fall back to [`copy_no_replace`], which is just as atomic about the
-/// destination at the cost of one extra pass over the data.
+/// `std::fs::rename` replaces on every platform, so the primary path is the
+/// platform's no-replace rename ([`rename_no_replace`]): it fails atomically
+/// with `AlreadyExists` and works on file systems without hard links
+/// (FAT/exFAT, many network shares), where the copy below would rewrite the
+/// whole file and need its size again in free space. Where that call is
+/// unsupported, a hard link (also atomic) is followed by removing the source,
+/// and file systems without either fall back to [`copy_no_replace`], which is
+/// just as atomic about the destination at the cost of one extra pass over
+/// the data.
 fn move_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    match rename_no_replace(from, to) {
+        Ok(()) => return Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(e),
+        Err(e) => tracing::debug!(error = %e, "no-replace rename unavailable; trying a hard link"),
+    }
     match fs::hard_link(from, to) {
         Ok(()) => {
             if let Err(e) = fs::remove_file(from) {
@@ -285,6 +294,73 @@ fn move_no_replace(from: &Path, to: &Path) -> io::Result<()> {
             copy_no_replace(from, to)
         }
     }
+}
+
+/// Renames `from` to `to` in one step, failing with `AlreadyExists` when `to`
+/// exists: `renameat2(RENAME_NOREPLACE)` on Linux, `renamex_np(RENAME_EXCL)`
+/// on macOS, `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` on Windows.
+/// Any other error (an old kernel, a file system or share that rejects the
+/// flag) means "use another way".
+#[cfg(target_os = "linux")]
+fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let from = std::ffi::CString::new(from.as_os_str().as_bytes())?;
+    let to = std::ffi::CString::new(to.as_os_str().as_bytes())?;
+    // The raw syscall: glibc only gained a renameat2 wrapper in 2.28.
+    // SAFETY: both paths are NUL-terminated and outlive the call.
+    let r = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let from = std::ffi::CString::new(from.as_os_str().as_bytes())?;
+    let to = std::ffi::CString::new(to.as_os_str().as_bytes())?;
+    // SAFETY: both paths are NUL-terminated and outlive the call.
+    if unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MoveFileExW(existing: *const u16, new: *const u16, flags: u32) -> i32;
+    }
+    let wide = |p: &Path| p.as_os_str().encode_wide().chain([0]).collect::<Vec<u16>>();
+    let (from, to) = (wide(from), wide(to));
+    // Without MOVEFILE_REPLACE_EXISTING (flags 0) an existing target fails
+    // with ERROR_ALREADY_EXISTS or ERROR_FILE_EXISTS, which std maps to
+    // `AlreadyExists`.
+    // SAFETY: both buffers are NUL-terminated UTF-16 and outlive the call.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn rename_no_replace(_from: &Path, _to: &Path) -> io::Result<()> {
+    Err(io::ErrorKind::Unsupported.into())
 }
 
 /// Copies `from` into a destination created with `create_new` (so an
@@ -438,6 +514,57 @@ mod tests {
         copy_no_replace(&part, &free).unwrap();
         assert_eq!(fs::read(&free).unwrap(), b"payload");
         assert!(!occupied(&part));
+    }
+
+    #[test]
+    fn no_replace_rename_moves_and_never_replaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("a.part");
+        let taken = dir.path().join("taken.mp4");
+        let free = dir.path().join("free.mp4");
+        fs::write(&part, b"payload").unwrap();
+        fs::write(&taken, b"user").unwrap();
+        let err = rename_no_replace(&part, &taken).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&taken).unwrap(), b"user");
+        assert!(part.is_file(), "source kept when the rename is refused");
+        rename_no_replace(&part, &free).unwrap();
+        assert_eq!(fs::read(&free).unwrap(), b"payload");
+        assert!(!occupied(&part), "a rename leaves no .part behind");
+    }
+
+    /// DL-4 measurement on a file system without hard links. Mount an exFAT
+    /// image and point `IPTV_EXFAT_DIR` at it, then run
+    /// `cargo test -p iptv-core --lib finalize_on_exfat -- --ignored --nocapture`.
+    /// Prints how long finalizing a 1 GiB `.part` takes, and checks that it
+    /// succeeds with less free space left than the file's size.
+    #[test]
+    #[ignore = "needs an exFAT mount in IPTV_EXFAT_DIR"]
+    fn finalize_on_exfat() {
+        let Ok(dir) = std::env::var("IPTV_EXFAT_DIR") else {
+            return;
+        };
+        let dir = Path::new(&dir);
+        let part = dir.join("big.mp4.part");
+        let final_path = dir.join("big.mp4");
+        let _ = fs::remove_file(&final_path);
+        {
+            use std::io::Write;
+            let mut f = fs::File::create(&part).unwrap();
+            let chunk = vec![7u8; 1 << 20];
+            for _ in 0..1024 {
+                f.write_all(&chunk).unwrap();
+            }
+            f.sync_all().unwrap();
+        }
+        let started = std::time::Instant::now();
+        let done = finalize(&part, &final_path);
+        let took = started.elapsed();
+        eprintln!("DL-4 finalize of 1 GiB on exFAT: {took:?}, result {done:?}");
+        let done = done.expect("finalize succeeds with less free space than the file");
+        assert_eq!(fs::metadata(&done).unwrap().len(), 1 << 30);
+        assert!(!occupied(&part));
+        fs::remove_file(&done).unwrap();
     }
 
     #[test]

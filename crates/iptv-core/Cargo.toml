@@ -52,6 +52,10 @@ strsim = { workspace = true }
 if-addrs = { workspace = true }
 qrcodegen = { workspace = true }
 
+# downloads: the no-replace rename (renameat2 / renamex_np) in naming.rs.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 memory-stats = { workspace = true }

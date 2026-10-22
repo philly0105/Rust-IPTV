@@ -216,3 +216,30 @@ async fn the_one_connection_setting_keeps_a_file_on_one_connection() {
     }
     assert_eq!(c.requests("/files/video.bin").await, 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_queued_download_gets_the_connection_a_split_one_gives_back() {
+    let c = ctx().await;
+    let path = |n: &str| format!("/files/video.bin?size={}&kbps=1024&n={n}", 24 * MIB);
+    let first = c.start("src", "1", &path("1")).await;
+    c.wait_until(first.id, "used two connections", |d| {
+        d.connections == Some(2)
+    })
+    .await;
+    // The source's two connections are both held: the next download waits
+    // only until the split one gives one back (within a tick).
+    let second = c.start("src", "2", &path("2")).await;
+    let started = Instant::now();
+    c.wait_until(second.id, "started", |d| {
+        d.status == DownloadStatus::Downloading
+    })
+    .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "waited {:?}",
+        started.elapsed()
+    );
+    assert_eq!(c.get(first.id).await.connections, None, "back to one");
+    c.ok("downloads.cancel", json!({"id": first.id})).await;
+    c.ok("downloads.cancel", json!({"id": second.id})).await;
+}

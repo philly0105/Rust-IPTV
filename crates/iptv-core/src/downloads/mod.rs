@@ -1,8 +1,8 @@
 //! Download manager and My Videos (SPEC C4 `downloads.*` / `myvideos.*`, C3
 //! `downloads` table). Design notes: `docs/architecture/downloads.md`.
 //!
-//! - [`manager`]: FIFO queue runtime in `state.extensions["downloads"]`, at
-//!   most two concurrent transfers, per-task stop tokens.
+//! - [`manager`]: FIFO queue runtime in `state.extensions["downloads"]`,
+//!   per-source connection budgets, per-task stop tokens.
 //! - [`transfer`]: streaming GET with source headers, Range resume validated
 //!   by ETag/Last-Modified (`resume_validator`), in-task retry with backoff,
 //!   throttled `downloads.progress` events.

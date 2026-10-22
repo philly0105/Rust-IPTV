@@ -499,6 +499,15 @@ impl DownloadManager {
         budget.saturating_sub(others).max(1)
     }
 
+    /// A split transfer gave a connection back: a queued download of its
+    /// source may start now.
+    pub fn released(&self) {
+        if let Some(state) = self.state.get().and_then(Weak::upgrade) {
+            let mgr = manager(&state);
+            pump(&state, &mgr);
+        }
+    }
+
     /// True while a transfer from `source` holds more connections than it
     /// may now.
     fn over_allowance(&self, source: &str) -> bool {

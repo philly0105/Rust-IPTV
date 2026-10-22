@@ -388,9 +388,11 @@ pub async fn run(
                 let (_, retire) = running.pop().expect("more running than allowed");
                 retire.cancel();
             }
-            job.ctl
-                .connections
-                .store(running.len().max(1), Ordering::Relaxed);
+            let held = running.len().max(1);
+            if job.ctl.connections.swap(held, Ordering::Relaxed) > held {
+                // Another download of the source may be waiting for it.
+                job.mgr.released();
+            }
         }
 
         tokio::select! {

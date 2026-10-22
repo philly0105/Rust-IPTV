@@ -13,6 +13,7 @@ import { lockNow, useParentalEvents, useParentalStatus } from '..';
 import {
   afterLockChange,
   catalogAffected,
+  currentStatus,
   EVENT_COALESCE_MS,
   FILTERED_PREFIXES,
   hidesContent,
@@ -284,6 +285,19 @@ describe('useParentalEvents', () => {
     });
     expect(core.callsOf('parental.status').length).toBeGreaterThan(before);
     expect(result.current.data?.unlocked).toBe(false);
+  });
+});
+
+describe('currentStatus', () => {
+  it('answers from the cache however old the status is: parental.changed keeps it current', async () => {
+    // Cached ten minutes ago, as by the boot read or the last event.
+    queryClient.setQueryData(STATUS_KEY, s({ unlocked: true }), { updatedAt: Date.now() - 10 * 60_000 });
+    core.calls.length = 0;
+    // The player's lock checks ask before every zap; past the old 30 s they waited on the core.
+    expect(await currentStatus()).toMatchObject({ unlocked: true });
+    const { result } = renderHook(() => useParentalStatus(), { wrapper });
+    expect(result.current.isStale).toBe(false);
+    expect(core.callsOf('parental.status')).toHaveLength(0);
   });
 });
 

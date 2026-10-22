@@ -488,9 +488,11 @@ export function EpgGridPage() {
       setGenreNote(tg('genreFilterOff'));
       return;
     }
+    // Only rows in memory can have programmes: walking every row of a 50k-channel guide probed
+    // the query cache for each one outside the loaded pages, about 150 ms inside the click.
     let matching = 0;
-    for (let row = 0; row < count; row++) {
-      for (const p of windowPrograms(row)) if (genreOf(p.category) === g) matching++;
+    for (const { index } of paged.loaded) {
+      for (const p of windowPrograms(index)) if (genreOf(p.category) === g) matching++;
     }
     setGenreNote(tg('genreFilterOn', { genre: tg(`genre_${g}`), count: matching }));
   });

@@ -14,7 +14,7 @@ import { matchPath } from 'react-router';
 
 import { queryClient, rpcKey, type RpcCommand } from './query';
 import { rpcRaw, type RpcArgs } from './transport';
-import type { ContentType, Settings, Source } from './types';
+import type { Channel, ContentType, ItemRef, Page, Settings, Source } from './types';
 
 /** Rows per `catalog.channels` page (usePagedChannels). */
 export const CHANNEL_PAGE_SIZE = 120;
@@ -63,6 +63,26 @@ export function liveRecentArgs(sourceId: string): RpcArgs<'recent.list'> {
   return { sourceId, limit: LIVE_RECENT_LIMIT };
 }
 
+/**
+ * `epg.nowNext` for a channel page's refs, as usePagedChannels asks it. The rows show titles and
+ * times only (a play takes the title too), so the descriptions stay behind: about half the bytes
+ * (L3-serve-ui-5).
+ */
+export function nowNextArgs(refs: ItemRef[], offsetMinutes: number): RpcArgs<'epg.nowNext'> {
+  return offsetMinutes ? { refs, offsetMinutes, withDescription: false } : { refs, withDescription: false };
+}
+
+/** `favorites.contains` for a channel page's refs, as usePagedChannels asks it. */
+export function favoritesContainsArgs(refs: ItemRef[]): RpcArgs<'favorites.contains'> {
+  return { refs };
+}
+
+/** `settings.epgOffsetMinutes` as the live views apply it: whole minutes, 0 when unset or unusable. */
+export function epgOffsetMinutesOf(settings: Settings | undefined): number {
+  const offset = Number((settings as { epgOffsetMinutes?: unknown } | undefined)?.epgOffsetMinutes ?? 0);
+  return Number.isFinite(offset) ? Math.trunc(offset) : 0;
+}
+
 /** `catalog.recentlyAdded` for the recently added rail of a source kept in SQLite (not Stalker). */
 export function recentlyAddedArgs(sourceId: string, kind: 'movie' | 'series', limit: number = RECENTLY_ADDED_LIMIT): RpcArgs<'catalog.recentlyAdded'> {
   return { sourceId, contentType: kind, limit };
@@ -95,7 +115,12 @@ export function homeRecentlyAddedArgs(kind: 'movie' | 'series'): RpcArgs<'catalo
 }
 
 function prefetch<K extends RpcCommand>(cmd: K, args: RpcArgs<K>): void {
-  void queryClient.prefetchQuery({ queryKey: rpcKey(cmd, args), queryFn: () => rpcRaw(cmd, args) });
+  void fetched(cmd, args).catch(() => undefined);
+}
+
+/** The answer under the page's key: the cached one while fresh, else a request (or the one in flight). */
+function fetched<K extends RpcCommand>(cmd: K, args: RpcArgs<K>): Promise<unknown> {
+  return queryClient.fetchQuery({ queryKey: rpcKey(cmd, args), queryFn: () => rpcRaw(cmd, args) });
 }
 
 function prefetchChannelList(sourceId: string, categoryId: string | undefined, radio: boolean): void {
@@ -104,7 +129,17 @@ function prefetchChannelList(sourceId: string, categoryId: string | undefined, r
   // The pinned views list the user's entries, not a page of a group: no group has their ids.
   if (categoryId === LIVE_VIEW_ID.favorites) return prefetch('favorites.list', liveFavoritesArgs(sourceId));
   if (categoryId === LIVE_VIEW_ID.recent) return prefetch('recent.list', liveRecentArgs(sourceId));
-  prefetch('catalog.channels', channelPageArgs({ sourceId, categoryId, radio }, 0));
+  // The rows' now/next and favourite flags follow page 0 here as well, under usePagedChannels'
+  // keys: the page asks for them only once page 0 has rendered, a second round trip after it.
+  void fetched('catalog.channels', channelPageArgs({ sourceId, categoryId, radio }, 0))
+    .then(async (page) => {
+      const refs = (page as Page<Channel> | undefined)?.items.map((c) => c.ref) ?? [];
+      if (refs.length === 0) return;
+      const settings = await queryClient.ensureQueryData({ queryKey: rpcKey('settings.get'), queryFn: () => rpcRaw('settings.get') });
+      prefetch('epg.nowNext', nowNextArgs(refs, epgOffsetMinutesOf(settings as Settings | undefined)));
+      prefetch('favorites.contains', favoritesContainsArgs(refs));
+    })
+    .catch(() => undefined);
 }
 
 function prefetchVodLanding(sourceId: string, kind: 'movie' | 'series'): void {
@@ -152,7 +187,7 @@ function prefetchHome(): void {
 /**
  * Starts the first requests of the page at `path` (pathname and query), if it is a channel list
  * (`/s/:id/live[/:categoryId]`, `/s/:id/radio[?category=]`, Favorites and Recently watched
- * included), a VOD landing page
+ * included; a group's first page with its now/next and favourite flags), a VOD landing page
  * (`/s/:id/movies`, `/s/:id/series`) or Home (`/dashboard`). Any other path asks for nothing.
  */
 export function prefetchScreenData(path: string): void {

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 
+import { epgOffsetMinutesOf } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
 import type { Settings } from '@/api/types';
 
@@ -12,10 +13,10 @@ export interface DisplayPrefs {
 /** `stripCountryPrefix` / `epgOffsetMinutes` are B2-fix1's `Settings` fields; read them defensively until they land. */
 export function displayPrefsOf(settings: Settings | undefined): DisplayPrefs {
   const s = settings as (Settings & Partial<DisplayPrefs>) | undefined;
-  const offset = Number(s?.epgOffsetMinutes ?? 0);
   return {
     stripCountryPrefix: s?.stripCountryPrefix === true,
-    epgOffsetMinutes: Number.isFinite(offset) ? Math.trunc(offset) : 0,
+    // The boot prefetch reads the offset the same way, for the now/next it asks ahead.
+    epgOffsetMinutes: epgOffsetMinutesOf(settings),
   };
 }
 

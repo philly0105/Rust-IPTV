@@ -20,9 +20,11 @@ import {
   homeContinueArgs,
   homeFavoritesArgs,
   homeRecentArgs,
+  favoritesContainsArgs,
   homeRecentlyAddedArgs,
   liveFavoritesArgs,
   liveRecentArgs,
+  nowNextArgs,
   prefetchScreenData,
   recentlyAddedArgs,
 } from './bootPrefetch';
@@ -30,14 +32,21 @@ import { queryClient, rpcKey } from './query';
 import { rpcRaw } from './transport';
 import type { Source } from './types';
 
-const sources = vi.hoisted(() => ({ list: [] as Array<{ id: string; kind: string }>, settings: {} as Record<string, unknown> }));
+const sources = vi.hoisted(() => ({
+  list: [] as Array<{ id: string; kind: string }>,
+  settings: {} as Record<string, unknown>,
+  /** The channels every `catalog.channels` page answers with. */
+  channels: [] as unknown[],
+}));
 
 vi.mock('./transport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./transport')>()),
   rpcRaw: vi.fn(async (cmd: string) => {
     if (cmd === 'sources.list') return sources.list;
     if (cmd === 'settings.get') return sources.settings;
-    if (cmd === 'catalog.channels') return { items: [], total: 0 };
+    if (cmd === 'catalog.channels') return { items: sources.channels, total: sources.channels.length, offset: 0, limit: CHANNEL_PAGE_SIZE };
+    if (cmd === 'epg.nowNext') return {};
+    if (cmd === 'favorites.contains') return [];
     if (cmd === 'catalog.categories' || cmd === 'catalog.recentlyAdded') return [];
     if (cmd === 'favorites.list' || cmd === 'recent.list') return [];
     return {};
@@ -53,7 +62,11 @@ afterEach(() => {
   raw.mockClear();
   sources.list = [];
   sources.settings = {};
+  sources.channels = [];
 });
+
+const channel = (i: number) => ({ ref: { sourceId: 's1', contentType: 'live', itemId: `c${i}` }, name: `Channel ${i}`, categoryId: 'c9', categoryName: 'News', isRadio: false });
+const refs = (n: number) => Array.from({ length: n }, (_, i) => channel(i).ref);
 
 describe('prefetchScreenData', () => {
   it('asks for a live list: the source, all its live groups and the first channel page', async () => {
@@ -65,6 +78,16 @@ describe('prefetchScreenData', () => {
       { sourceId: 's1', categoryId: 'c9', radio: undefined, query: { offset: 0, limit: CHANNEL_PAGE_SIZE, search: undefined } },
     ]);
     expect(queryClient.getQueryState(rpcKey('catalog.channels', channelPageArgs({ sourceId: 's1', categoryId: 'c9' }, 0)))).toBeDefined();
+  });
+
+  it("chains the first page's now/next and favourite flags, under the page's arguments and the guide offset", async () => {
+    sources.channels = [channel(0), channel(1), channel(2)];
+    sources.settings = { epgOffsetMinutes: 90 };
+    prefetchScreenData('/s/s1/live/c9');
+    await waitFor(() => expect(calls('favorites.contains')).toHaveLength(1));
+    expect(calls('epg.nowNext')).toEqual([nowNextArgs(refs(3), 90)]);
+    expect(nowNextArgs(refs(3), 90)).toEqual({ refs: refs(3), offsetMinutes: 90, withDescription: false });
+    expect(calls('favorites.contains')).toEqual([favoritesContainsArgs(refs(3))]);
   });
 
   it('reads the radio group from the query string', async () => {
@@ -155,6 +178,19 @@ describe('the pages read what the boot prefetch asked for', () => {
     const { result } = renderHook(() => usePagedChannels({ sourceId: 's1', categoryId: 'c9' }), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(calls('catalog.channels')).toHaveLength(1);
+  });
+
+  it("usePagedChannels sends no second request for the first page's now/next and favourite flags", async () => {
+    sources.channels = [channel(0), channel(1)];
+    sources.settings = { epgOffsetMinutes: -30 };
+    prefetchScreenData('/s/s1/live/c9');
+    await waitFor(() => expect(calls('favorites.contains')).toHaveLength(1));
+    const { result } = renderHook(() => usePagedChannels({ sourceId: 's1', categoryId: 'c9', epgOffsetMinutes: -30 }), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls('catalog.channels')).toHaveLength(1);
+    expect(calls('epg.nowNext')).toHaveLength(1);
+    expect(calls('favorites.contains')).toHaveLength(1);
   });
 
   it.each([

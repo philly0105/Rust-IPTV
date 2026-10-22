@@ -78,7 +78,7 @@ The desktop loopback proxy mounts the same handler, so `w` works there too.
 
 ## Loading in the UI
 
-Cache-route pictures load through the fetch gate (`src/ui/imageGate.ts`): it sets `src` itself, newest pictures first, holds them while the page scrolls, and keeps only a few in flight. The cap (`maxActive`) is 4 in server mode, where `/api/img` shares the browser's six HTTP/1.1 connections per host and port with `/api/rpc`, so two stay free for RPCs. On desktop it is 6: RPCs go over Tauri IPC and the image listener carries nothing but artwork. A picture gives its slot back after 3 s without an answer (`SLOT_TIMEOUT_MS`), or when it turns out to be out of view after it started; its request stays open (parked).
+Cache-route pictures load through the fetch gate (`src/ui/imageGate.ts`): it sets `src` itself, newest pictures first, holds them while the page scrolls, and keeps only a few in flight. The cap (`maxActive`) is 4 in server mode, where `/api/img` shares the browser's six HTTP/1.1 connections per host and port with `/api/rpc`, so two stay free for RPCs. On desktop it is 6: RPCs go over Tauri IPC and the image listener carries nothing but artwork. A picture gives its slot back after 3 s without an answer (`SLOT_TIMEOUT_MS`), or when it turns out to be out of view after it started; its request stays open (parked). When its row unmounts, a picture still loading, parked or not, loses its `src`, which ends the request, so a row that scrolled away or a page that closed does not hold a connection.
 
 ## Commands (C2)
 

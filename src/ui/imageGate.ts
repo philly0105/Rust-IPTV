@@ -21,7 +21,9 @@
  *   if it turns out to be out of view after it started (a lazy <img> the browser parks);
  * - a picture that already loaded in this session, and any URL that is not a cache-route URL
  *   (an original provider URL, data:, blob:), starts at once without a slot;
- * - a slot is freed on load, error, unmount, or after {@link SLOT_TIMEOUT_MS}.
+ * - a slot is freed on load, error, unmount, or after {@link SLOT_TIMEOUT_MS};
+ * - on unmount a picture still loading loses its `src`, also one that gave its slot back, so a
+ *   row that scrolled away or a page that closed does not keep holding a connection.
  *
  * Without IntersectionObserver (jsdom, very old engines) every picture starts at once, as it
  * did before the gate.
@@ -228,8 +230,9 @@ function pump(): void {
 
 /**
  * Loads `url` into `el` through the gate. Returns the cancel function to call when the element
- * goes (a React ref cleanup): a waiting picture leaves the queue, a running one frees its slot
- * and drops its request. `immediate` (a priority or eager picture) sets `src` at once.
+ * goes (a React ref cleanup): a waiting picture leaves the queue, a running one frees its slot,
+ * and one still loading drops its request, parked or not. `immediate` (a priority or eager
+ * picture) sets `src` at once.
  */
 export function gateImage(el: HTMLImageElement, url: string, immediate = false): () => void {
   const io = immediate ? null : visibilityObserver();
@@ -254,12 +257,13 @@ export function gateImage(el: HTMLImageElement, url: string, immediate = false):
       const i = pending.indexOf(t);
       if (i >= 0) pending.splice(i, 1);
     }
-    const running = t.state === 'active' && !el.complete;
+    // A parked picture (slot timed out, or out of view) still has its request open.
+    const loading = (t.state === 'active' || t.state === 'parked') && !el.complete;
     free(t, 'done');
     io.unobserve(el);
     tickets.delete(el);
     // A request for a row that scrolled away is dropped, so it does not hold a connection.
-    if (running) el.removeAttribute('src');
+    if (loading) el.removeAttribute('src');
     pump();
   };
 }

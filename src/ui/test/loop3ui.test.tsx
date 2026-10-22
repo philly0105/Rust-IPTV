@@ -29,6 +29,7 @@ import {
   pageIsScrolling,
   resetImageGate,
   SETTLE_MS,
+  SLOT_TIMEOUT_MS,
 } from '../imageGate';
 import { comboKeys, Kbd, LivePill } from '../Misc';
 import { Poster, PosterWidthContext } from '../Poster';
@@ -383,6 +384,40 @@ describe('artwork fetch gate (L3-live-1)', () => {
     cancels[1]!();
     expect(els[1]!.hasAttribute('src')).toBe(false);
     expect(els[4]!.hasAttribute('src')).toBe(true);
+  });
+
+  it('cancelling a picture whose slot timed out drops its request too', () => {
+    vi.useFakeTimers();
+    const els = imgs(5);
+    const cancels = els.map((el, i) => gateImage(el, cacheUrl(i)));
+    vi.advanceTimersByTime(SLOT_TIMEOUT_MS);
+    // Parked: its slot went to the next picture, and its request is still open.
+    expect(els[4]!.hasAttribute('src')).toBe(true);
+    expect(els[0]!.getAttribute('src')).toBe(cacheUrl(0));
+    cancels[0]!();
+    expect(els[0]!.hasAttribute('src')).toBe(false);
+  });
+
+  it('cancelling a picture parked out of view drops its request too', () => {
+    let report: IntersectionObserverCallback = () => undefined;
+    class ReportingIO {
+      constructor(cb: IntersectionObserverCallback) {
+        report = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('IntersectionObserver', ReportingIO);
+    resetImageGate();
+    const [el] = imgs(1);
+    const cancel = gateImage(el!, cacheUrl(1));
+    expect(imageGateStats().active).toBe(1);
+    report([{ target: el!, isIntersecting: false } as unknown as IntersectionObserverEntry], {} as IntersectionObserver);
+    expect(imageGateStats().active).toBe(0);
+    expect(el!.hasAttribute('src')).toBe(true);
+    cancel();
+    expect(el!.hasAttribute('src')).toBe(false);
   });
 
   it('newer pictures (what the user scrolled to) go first', async () => {

@@ -835,9 +835,12 @@ async fn worker(
     outcome
 }
 
-/// Writes `buf` at `pos` and records the new position in the plan.
-async fn write_at(
-    file: &mut tokio::fs::File,
+/// Writes `buf` at `pos` and records the new position in the plan. A write
+/// that fails drops `buf`: it may have stored part of it and moved the
+/// file's position past `pos`, so writing it again would land it shifted.
+/// None of it was recorded, so the next attempt fetches it again.
+async fn write_at<W: tokio::io::AsyncWrite + Unpin>(
+    file: &mut W,
     buf: &mut Vec<u8>,
     pos: &mut i64,
     plan: &Mutex<Plan>,
@@ -846,13 +849,18 @@ async fn write_at(
     if buf.is_empty() {
         return Ok(());
     }
-    file.write_all(buf).await?;
     // tokio hands the write to a blocking thread; flushing waits for it, so
     // the position recorded below is on disk (in the OS's cache) when the
     // sidecar says so.
-    file.flush().await?;
-    *pos += buf.len() as i64;
+    let written = async {
+        file.write_all(buf).await?;
+        file.flush().await
+    }
+    .await;
+    let len = buf.len() as i64;
     buf.clear();
+    written?;
+    *pos += len;
     plan.lock().ranges.segments[seg].pos = *pos;
     Ok(())
 }
@@ -1037,6 +1045,82 @@ mod tests {
         remove(&part);
         assert_eq!(load(&part), Sidecar::None);
         remove(&part);
+    }
+
+    /// A file that stores `short` bytes of the first write and then fails,
+    /// the way write(2) does on a disk that fills up mid-call, and takes
+    /// every write after that. Records where each byte landed.
+    struct ShortThenOk {
+        short: usize,
+        failed: bool,
+        at: usize,
+        data: Vec<u8>,
+    }
+
+    impl tokio::io::AsyncWrite for ShortThenOk {
+        fn poll_write(
+            mut self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<io::Result<usize>> {
+            let n = if self.failed {
+                buf.len()
+            } else if self.at < self.short {
+                buf.len().min(self.short - self.at)
+            } else {
+                self.failed = true;
+                return std::task::Poll::Ready(Err(io::ErrorKind::StorageFull.into()));
+            };
+            let at = self.at;
+            if self.data.len() < at + n {
+                self.data.resize(at + n, 0);
+            }
+            self.data[at..at + n].copy_from_slice(&buf[..n]);
+            self.at += n;
+            std::task::Poll::Ready(Ok(n))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_write_that_failed_part_way_is_not_written_again_shifted() {
+        let ranges = Ranges::new(1024, "\"e\"".into(), 0);
+        let plan = Mutex::new(Plan {
+            taken: vec![true],
+            ranges,
+        });
+        let mut file = ShortThenOk {
+            short: 100,
+            failed: false,
+            at: 0,
+            data: Vec::new(),
+        };
+        let mut buf: Vec<u8> = (0..=255).collect();
+        let mut pos = 0;
+        assert!(write_at(&mut file, &mut buf, &mut pos, &plan, 0)
+            .await
+            .is_err());
+        // The worker's last write after the loop, with whatever is left in
+        // its buffer: nothing, since none of it was recorded.
+        write_at(&mut file, &mut buf, &mut pos, &plan, 0)
+            .await
+            .unwrap();
+        assert_eq!(pos, 0);
+        assert_eq!(plan.lock().ranges.segments[0].pos, 0, "nothing recorded");
+        assert_eq!(file.data.len(), 100, "nothing written past the short write");
     }
 
     #[test]

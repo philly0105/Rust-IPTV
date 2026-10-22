@@ -705,13 +705,18 @@ async fn attempt(
         return error(http_status_error(status), resume_from, resume_from);
     }
 
+    // Written in its own task and waited for only once the stream is gone:
+    // an import can hold the write lock for seconds, and a transfer asked to
+    // yield must let its connection go before playback stops waiting for it.
     let (total, validator) = (rep.total, rep.validator.clone());
-    if let Err(e) = state
-        .db_call(move |c| store::set_representation(c, id, total, validator.as_deref()))
-        .await
-    {
-        tracing::warn!(id, error = %e, "could not record download size");
-    }
+    let recorded = {
+        let state = Arc::clone(state);
+        tokio::spawn(async move {
+            state
+                .db_call(move |c| store::set_representation(c, id, total, validator.as_deref()))
+                .await
+        })
+    };
 
     // Over several connections when the answer allows it and the source has
     // spare ones now; otherwise a check every second hands this stream over
@@ -729,7 +734,9 @@ async fn attempt(
                 offset,
             );
             let first = Some((resp.bytes_stream().boxed(), offset));
-            return segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+            let end = segmented(state, row, dest, ctl, mgr, rep, ranges, first).await;
+            settle_recorded(id, recorded).await;
+            return end;
         }
         // The file system cannot leave holes: the rest of the run keeps
         // one connection and stops asking.
@@ -744,7 +751,11 @@ async fn attempt(
         .await;
     let file = match file {
         Ok(f) => f,
-        Err(e) => return error(CoreError::Io(e), offset, offset),
+        Err(e) => {
+            drop(resp);
+            settle_recorded(id, recorded).await;
+            return error(CoreError::Io(e), offset, offset);
+        }
     };
     let mut out = tokio::io::BufWriter::with_capacity(WRITE_BUFFER, file);
     let started_at = offset;
@@ -802,7 +813,7 @@ async fn attempt(
     // handed over: the flush, the sync and the progress write can take
     // seconds (an import holding the write lock), and playback waiting for
     // this connection gives up after two.
-    let stream = if hand_over {
+    let mut stream = if hand_over {
         Some(stream)
     } else {
         drop(stream);
@@ -814,15 +825,33 @@ async fn attempt(
     }
     .await;
     drop(out);
-    // The last periodic write lands first, so it never overwrites this one.
-    if let Some(write) = progress.persisting.take() {
-        let _ = write.await;
-    }
-    let persist = state
-        .db_call(move |c| store::set_progress(c, id, offset))
-        .await;
-    if let Err(e) = persist {
-        tracing::warn!(id, error = %e, "could not persist download progress");
+    let writes = async {
+        settle_recorded(id, recorded).await;
+        // The last periodic write lands first, so it never overwrites this one.
+        if let Some(write) = progress.persisting.take() {
+            let _ = write.await;
+        }
+        let persist = state
+            .db_call(move |c| store::set_progress(c, id, offset))
+            .await;
+        if let Err(e) = persist {
+            tracing::warn!(id, error = %e, "could not persist download progress");
+        }
+    };
+    tokio::pin!(writes);
+    if stream.is_some() {
+        // A stream kept for the hand-over is let go if the transfer is asked
+        // to stop while these writes wait for the database.
+        tokio::select! {
+            biased;
+            _ = ctl.token.cancelled() => {
+                stream = None;
+                writes.await;
+            }
+            _ = &mut writes => {}
+        }
+    } else {
+        writes.await;
     }
     if let Err(e) = flushed {
         return error(CoreError::Io(e), started_at, offset);
@@ -856,6 +885,13 @@ async fn attempt(
             ),
             _ => AttemptEnd::Done(offset),
         },
+    }
+}
+
+/// Waits for an attempt's representation write and logs its failure.
+async fn settle_recorded(id: i64, recorded: tokio::task::JoinHandle<CoreResult<()>>) {
+    if let Ok(Err(e)) = recorded.await {
+        tracing::warn!(id, error = %e, "could not record download size");
     }
 }
 

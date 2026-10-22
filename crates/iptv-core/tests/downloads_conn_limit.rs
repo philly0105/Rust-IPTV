@@ -1,6 +1,9 @@
 //! DL-1: downloads follow the source account's connection limit. Against the
 //! mock's `limit<N>` Xtream accounts, which refuse a file beyond N open
-//! bodies with `403 Max connections reached`, the way panels do.
+//! bodies with `403 Max connections reached`, the way panels do, and
+//! `dl_panel` where a test needs to hold a response head back.
+
+mod dl_panel;
 
 use iptv_core::model::{Download, DownloadStatus, WaitReason};
 use iptv_core::rpc::RpcRouter;
@@ -91,17 +94,41 @@ impl Ctx {
     }
 
     async fn start(&self, sid: &str, user: &str, item: u32) -> Download {
+        self.start_url(sid, item, &self.movie_url(user, item)).await
+    }
+
+    async fn start_url(&self, sid: &str, item: u32, url: &str) -> Download {
         let v = self
             .ok(
                 "downloads.start",
                 json!({
                     "ref": {"sourceId": sid, "contentType": "movie", "itemId": item.to_string()},
                     "title": format!("Movie {item}"),
-                    "url": self.movie_url(user, item),
+                    "url": url,
                 }),
             )
             .await;
         serde_json::from_value(v).unwrap()
+    }
+
+    /// Caches an account status allowing `n` connections for a source with
+    /// no row of its own (a download from `dl_panel`).
+    async fn limit(&self, source: &str, n: i64) {
+        iptv_core::account::record(
+            &self.state,
+            iptv_core::account::AccountStatus {
+                source_id: source.into(),
+                kind: iptv_core::model::SourceKind::Xtream,
+                status: None,
+                exp_date: None,
+                is_trial: false,
+                active_cons: Some(0),
+                max_connections: Some(n),
+                checked_at: "2026-10-22T00:00:00Z".into(),
+                error: None,
+            },
+        )
+        .await;
     }
 
     async fn get(&self, id: i64) -> Download {
@@ -410,4 +437,72 @@ async fn a_refusal_with_working_credentials_waits_for_a_free_connection() {
         .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
         .await;
     assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_download_asked_to_yield_while_its_size_waits_for_the_database_lets_go() {
+    let c = ctx().await;
+    c.limit("src", 1).await;
+    let panel = dl_panel::Panel::spawn(3).await;
+    panel.file(1, 8 * 1024 * 1024, 1024);
+    let head = panel.hold_next_head();
+    let d = c.start_url("src", 1, &panel.url(1)).await;
+    head.held().await;
+    // An import takes the write lock just before the answer arrives, so the
+    // download waits to record the file's size with the answer in hand.
+    let lock = hold_write_lock(&c.state, Duration::from_secs(4));
+    head.release();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(panel.open(), 1);
+    let asked = Instant::now();
+    c.playback("player-1", &["src"]).await;
+    // The player connects now: the account's one connection must be free.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        panel.open(),
+        0,
+        "the download still held its connection {:?} after playback asked for it",
+        asked.elapsed()
+    );
+    lock.join().unwrap();
+    c.playback("player-1", &[]).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| d.status == DownloadStatus::Completed)
+        .await;
+    dl_panel::is_exact(1, 8 * 1024 * 1024, Path::new(&done.file_path.unwrap())).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stream_kept_for_a_split_is_let_go_when_playback_asks_meanwhile() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    let panel = dl_panel::Panel::spawn(4).await;
+    panel.file(1, 64 * 1024 * 1024, 4096);
+    // Playback on the source keeps the file on one connection until its
+    // report lapses, half a second in.
+    iptv_core::downloads::set_playback_lease(&c.state, Duration::from_millis(500));
+    c.playback("player-1", &["src"]).await;
+    let d = c.start_url("src", 1, &panel.url(1)).await;
+    c.wait_until(d.id, "made progress", |d| {
+        d.status == DownloadStatus::Downloading && d.bytes_downloaded > 512 * 1024
+    })
+    .await;
+    let lock = hold_write_lock(&c.state, Duration::from_secs(8));
+    // Within a second of the lapse the stream is kept for the split while
+    // the attempt's progress waits for the database.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(panel.open(), 1, "still on its one stream");
+    assert_eq!(panel.log().len(), 1, "no segment asked for yet");
+    // Three players on the account: downloads get none of its connections.
+    let asked = Instant::now();
+    c.playback("player-1", &["src", "src", "src"]).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        panel.open(),
+        0,
+        "the download still held its connection {:?} after playback asked for it",
+        asked.elapsed()
+    );
+    lock.join().unwrap();
+    c.ok("downloads.cancel", json!({"id": d.id})).await;
 }

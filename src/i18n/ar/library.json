@@ -78,6 +78,7 @@
   "waitingForPlayback": "ينتظر حتى يتوقف التشغيل من هذا المصدر",
   "waitingForConnection": "ينتظر اتصالًا شاغرًا على هذا المصدر",
   "waitingForConnectionAt": "لا يوجد اتصال شاغر لدى المزوّد. محاولة جديدة عند {{time}}",
+  "waitingForProvider": "تعذّر الوصول إلى المزوّد. محاولة جديدة عند {{time}}",
   "pausedHint": "متوقف مؤقتًا. يُحتفظ بالملف الجزئي.",
   "failedHint": "توقف التنزيل بسبب خطأ",
   "canceledHint": "أُلغي قبل اكتماله",

@@ -78,6 +78,7 @@
   "waitingForPlayback": "كيتسنى حتى يحبس التشغيل من هاد المصدر",
   "waitingForConnection": "كيتسنى اتصال خاوي فهاد المصدر",
   "waitingForConnectionAt": "المزوّد ما عندوش اتصال خاوي. غادي نعاودو ف {{time}}",
+  "waitingForProvider": "ما قدرناش نوصلو للمزوّد. غادي نعاودو ف {{time}}",
   "pausedHint": "موقوف مؤقتاً. الملف الناقص محفوظ.",
   "failedHint": "التحميل وقف بسبب خطأ",
   "canceledHint": "تلغى قبل ما يكمل",

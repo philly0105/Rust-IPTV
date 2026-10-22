@@ -256,12 +256,18 @@ async fn refresh_url(state: &Arc<AppState>, row: &mut DownloadRow) -> Option<Sou
 }
 
 /// Whether a run that ended on `err` should wait for its source instead of
-/// failing. An Xtream panel answers 401/403 both for wrong credentials and
+/// failing. An unreachable or failing provider (network errors, refused
+/// connections and unknown hosts included, timeouts, 429 and 5xx) is an
+/// outage, not a broken file: the row waits and its source is tried again
+/// later, so an outage costs one probe per step instead of failing the whole
+/// queue. An Xtream panel answers 401/403 both for wrong credentials and
 /// when every connection is in use, so a refusal there asks the panel for
 /// the account (at most once per [`crate::account::FORCE_MIN_AGE`] per
 /// source): when the credentials work it was the connection limit, and the
-/// row waits for a free connection; otherwise it fails with the credentials
-/// advice as before.
+/// row waits for a free connection; when the panel rejects them it fails
+/// with the credentials advice as before; when the panel cannot be asked it
+/// is an outage. Everything else (404/410, a disk error, a certificate that
+/// is not valid, a Content-Range mismatch) fails as before.
 async fn wait_reason(
     state: &Arc<AppState>,
     mgr: &DownloadManager,
@@ -271,10 +277,15 @@ async fn wait_reason(
 ) -> Option<WaitReason> {
     match err {
         CoreError::Auth(_) if kind == Some(SourceKind::Xtream) => {
-            credentials_work(state, mgr, source)
-                .await
-                .unwrap_or(false)
-                .then_some(WaitReason::Connection)
+            match credentials_work(state, mgr, source).await {
+                Some(true) => Some(WaitReason::Connection),
+                Some(false) => None,
+                None => Some(WaitReason::Provider),
+            }
+        }
+        CoreError::Network(m) if crate::http::is_certificate_failure(m) => None,
+        CoreError::Network(_) | CoreError::Timeout(_) | CoreError::Server(_) => {
+            Some(WaitReason::Provider)
         }
         _ => None,
     }

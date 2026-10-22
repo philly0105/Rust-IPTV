@@ -158,6 +158,9 @@ describe('download rows', () => {
     cleanup();
     row(makeDownload({ id: 7, status: 'queued', waiting: { reason: 'connection', until: '2026-10-22T14:05:00Z' } }), ['pause', 'cancel', 'next']);
     expect(detail()).toMatch(/^The provider has no free connection\. Trying again at \S/);
+    cleanup();
+    row(makeDownload({ id: 8, status: 'queued', waiting: { reason: 'provider', until: '2026-10-22T14:05:00Z' } }), ['pause', 'cancel', 'next']);
+    expect(detail()).toMatch(/^Can't reach the provider\. Trying again at \S/);
   });
 
   it('reserve the widest row\'s actions column on every row, so bars and badges end on one line', () => {

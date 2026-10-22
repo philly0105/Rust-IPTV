@@ -66,6 +66,7 @@
   "waitingForPlayback": "Czeka, aż skończy się odtwarzanie z tego źródła",
   "waitingForConnection": "Czeka na wolne połączenie z tym źródłem",
   "waitingForConnectionAt": "Dostawca nie ma wolnego połączenia. Kolejna próba o {{time}}",
+  "waitingForProvider": "Brak połączenia z dostawcą. Kolejna próba o {{time}}",
   "pausedHint": "Wstrzymano. Częściowy plik zostaje zachowany.",
   "failedHint": "Pobieranie zatrzymało się z powodu błędu",
   "canceledHint": "Anulowano przed zakończeniem",

@@ -253,3 +253,48 @@ async fn measure_one_connection_season() {
         play.status().as_u16()
     );
 }
+
+/// DL-M1: eight 4 MiB downloads at 1 MiB/s (two at a time), and after 5 s
+/// the file server answers 503 for 30 s. Shipped timings throughout. Prints
+/// how many complete and fail, and the wall time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "measurement"]
+async fn measure_outage_mid_queue() {
+    let c = ctx().await;
+    let started = Instant::now();
+    let mut ids = Vec::new();
+    for i in 0..8 {
+        let d = c
+            .start(
+                &format!("o{i}"),
+                &format!("/files/video.bin?size=4194304&kbps=1024&n={i}"),
+            )
+            .await;
+        ids.push(d.id);
+    }
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    reqwest::get(c.srv.url("/__mock/outage?ms=30000"))
+        .await
+        .unwrap();
+    let (mut completed, mut failed);
+    loop {
+        (completed, failed) = (0, 0);
+        for id in &ids {
+            let d: Download =
+                serde_json::from_value(c.ok("downloads.get", json!({"id": id})).await).unwrap();
+            match d.status {
+                DownloadStatus::Completed => completed += 1,
+                DownloadStatus::Failed => failed += 1,
+                _ => {}
+            }
+        }
+        if completed + failed == ids.len() || started.elapsed() > Duration::from_secs(200) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    eprintln!(
+        "DL-M1 30 s outage in a queue of 8: {completed} completed, {failed} failed, {:.1} s",
+        started.elapsed().as_secs_f64()
+    );
+}

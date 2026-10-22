@@ -54,6 +54,7 @@
   "waitingForPlayback": "Wartet, bis die Wiedergabe aus dieser Quelle endet",
   "waitingForConnection": "Wartet auf eine freie Verbindung zu dieser Quelle",
   "waitingForConnectionAt": "Beim Anbieter ist keine Verbindung frei. Neuer Versuch um {{time}}",
+  "waitingForProvider": "Der Anbieter ist nicht erreichbar. Neuer Versuch um {{time}}",
   "pausedHint": "Pausiert. Die unvollständige Datei bleibt erhalten.",
   "failedHint": "Der Download wurde mit einem Fehler beendet",
   "canceledHint": "Vor dem Abschluss abgebrochen",

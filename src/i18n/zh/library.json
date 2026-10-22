@@ -54,6 +54,7 @@
   "waitingForPlayback": "等待此来源的播放停止",
   "waitingForConnection": "等待此来源有空闲连接",
   "waitingForConnectionAt": "提供商没有空闲连接，将于 {{time}} 重试",
+  "waitingForProvider": "无法连接提供商，将于 {{time}} 重试",
   "pausedHint": "已暂停。已下载的部分文件会保留。",
   "failedHint": "下载因错误而停止",
   "canceledHint": "下载完成前已取消",

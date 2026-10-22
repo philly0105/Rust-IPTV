@@ -408,11 +408,13 @@ async fn requeue(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
 }
 
 /// Moves a queued download to the front of the queue ("Download next"), so
-/// it takes the next free slot. Running rows are left alone.
+/// it takes the next free slot. A row waiting for its source after an
+/// outage or a refusal is tried again now. Running rows are left alone.
 pub async fn prioritize(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
     let d = get(state, id).await?;
     match d.status {
         DownloadStatus::Queued => {
+            manager::manager(state).unblock(&d.item_ref.source_id);
             manager::enqueue_front(state, id, &d.item_ref.source_id);
             Ok(())
         }

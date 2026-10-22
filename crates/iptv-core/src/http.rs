@@ -302,6 +302,13 @@ pub fn permanent_transport_hint(message: &str) -> Option<&'static str> {
     .find(|hint| message.contains(hint))
 }
 
+/// True when a `Network` message from [`transport_error`] is an invalid
+/// certificate: unlike a refused connection or an unknown host during an
+/// outage, waiting never fixes it.
+pub fn is_certificate_failure(message: &str) -> bool {
+    message.contains(CERTIFICATE_HINT)
+}
+
 /// A connect failure a retry cannot fix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConnectFailure {

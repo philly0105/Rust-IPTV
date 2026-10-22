@@ -114,7 +114,7 @@ export function DialProgress({
   );
 }
 
-/** What a queued row waits for: its turn, or playback or a free connection on its source. */
+/** What a queued row waits for: its turn, playback or a free connection on its source, or the provider. */
 function waitingDetail(d: Download, t: TFunction<'library'>, lang: string): string {
   const w = d.waiting;
   const at = w?.until ? Date.parse(w.until) : NaN;
@@ -124,6 +124,8 @@ function waitingDetail(d: Download, t: TFunction<'library'>, lang: string): stri
       return t('waitingForPlayback');
     case 'connection':
       return time ? t('waitingForConnectionAt', { time }) : t('waitingForConnection');
+    case 'provider':
+      return time ? t('waitingForProvider', { time }) : t('waitingForSlot');
     default:
       return t('waitingForSlot');
   }

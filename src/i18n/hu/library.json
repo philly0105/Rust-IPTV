@@ -54,6 +54,7 @@
   "waitingForPlayback": "Megvárja, amíg leáll a lejátszás ebből a forrásból",
   "waitingForConnection": "Szabad kapcsolatra vár ennél a forrásnál",
   "waitingForConnectionAt": "A szolgáltatónál nincs szabad kapcsolat. Újrapróbálás: {{time}}",
+  "waitingForProvider": "A szolgáltató nem érhető el. Újrapróbálás: {{time}}",
   "pausedHint": "Szüneteltetve. A részleges fájl megmarad.",
   "failedHint": "A letöltés hibával leállt",
   "canceledHint": "Befejezés előtt megszakítva",

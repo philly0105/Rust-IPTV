@@ -18,7 +18,8 @@
 //!   See [`files`].
 //! - `/media/...`, `/img/...` sample media and generated artwork.
 //! - `/health`, `/echo/headers`, `/__mock/stats`, `/__mock/reset`,
-//!   `/__mock/limited-vod` (files of the `limit<N>` Xtream accounts).
+//!   `/__mock/limited-vod` (files of the `limit<N>` Xtream accounts),
+//!   `/__mock/outage?ms=N` (`/files/*` answers 503 for N ms).
 //!
 //! Every response carries `Access-Control-Allow-Origin: *`.
 //!
@@ -68,6 +69,8 @@ pub struct MockState {
     pub(crate) open_streams: Mutex<HashMap<String, u32>>,
     /// Size and KiB/s of a `limit<N>` account's files.
     pub(crate) limited_vod: Mutex<(u64, u64)>,
+    /// `/files/*` answers 503 until then (`/__mock/outage`).
+    pub(crate) outage_until: Mutex<Option<std::time::Instant>>,
 }
 
 impl MockState {
@@ -79,6 +82,7 @@ impl MockState {
             stats: Mutex::new(BTreeMap::new()),
             open_streams: Mutex::new(HashMap::new()),
             limited_vod: Mutex::new((LIMITED_VOD_LEN, 0)),
+            outage_until: Mutex::new(None),
         }
     }
 }
@@ -171,6 +175,7 @@ pub fn router_with_base(base: String) -> Router {
             "/__mock/limited-vod",
             post(set_limited_vod).get(set_limited_vod),
         )
+        .route("/__mock/outage", post(set_outage).get(set_outage))
         .route("/img/{kind}/{file}", get(images::image))
         .route("/media/radio.mp3", get(radio))
         .route("/media/sample.mp4", get(sample_mp4))
@@ -251,6 +256,19 @@ async fn set_limited_vod(
         q.kbps.unwrap_or(0),
     );
     Json(json!({ "size": vod.0, "kbps": vod.1 }))
+}
+
+#[derive(serde::Deserialize)]
+struct Outage {
+    ms: u64,
+}
+
+/// `/files/*` answers `503 Service Unavailable` for the next `ms`
+/// milliseconds, a provider outage.
+async fn set_outage(State(state): State<Arc<MockState>>, Query(q): Query<Outage>) -> Json<Value> {
+    *state.outage_until.lock() =
+        Some(std::time::Instant::now() + std::time::Duration::from_millis(q.ms));
+    Json(json!({ "ms": q.ms }))
 }
 
 async fn reset(State(state): State<Arc<MockState>>) -> Json<Value> {

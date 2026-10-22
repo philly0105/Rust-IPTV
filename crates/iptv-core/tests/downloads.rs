@@ -335,14 +335,50 @@ async fn stalled_body_reconnects_after_the_idle_limit() {
 async fn a_server_that_sends_a_few_bytes_then_stalls_is_not_retried_forever() {
     let c = ctx().await;
     iptv_core::downloads::set_idle_timeout(&c.state, Some(Duration::from_millis(300)));
+    // A timeout is an outage: after its run the row waits for its source
+    // (long here, so the test can look at it).
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(60),
+        Duration::from_secs(3600),
+    );
     // `stall.m3u` sends 8 bytes with no length and then hangs, so every
     // attempt restarts from zero and re-reads the same 8 bytes: that is not
-    // progress.
+    // progress, and the run ends after 5 attempts.
     let d = c.start("1", "stall", "/fail/stall.m3u").await;
-    let failed = c.wait_status(d.id, DownloadStatus::Failed).await;
+    let deadline = Instant::now() + WAIT;
+    let waiting = loop {
+        let d = c.get(d.id).await;
+        if d.waiting.is_some() {
+            break d;
+        }
+        assert!(Instant::now() < deadline, "never waited: {:?}", d.status);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert_eq!(waiting.status, DownloadStatus::Queued);
+    let wait = waiting.waiting.unwrap();
+    assert_eq!(wait.reason, iptv_core::model::WaitReason::Provider);
+    assert!(wait.until.is_some());
     assert_eq!(
         c.requests("/fail/stall.m3u").await,
         u64::from(iptv_core::downloads::transfer::MAX_ATTEMPTS)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_row_that_waits_too_long_for_its_source_fails_with_the_reason() {
+    let c = ctx().await;
+    iptv_core::downloads::set_idle_timeout(&c.state, Some(Duration::from_millis(200)));
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_millis(100),
+        Duration::from_millis(1500),
+    );
+    let d = c.start("1", "stall", "/fail/stall.m3u").await;
+    let failed = c.wait_status(d.id, DownloadStatus::Failed).await;
+    assert!(
+        c.requests("/fail/stall.m3u").await
+            > u64::from(iptv_core::downloads::transfer::MAX_ATTEMPTS)
     );
     assert!(
         failed
@@ -418,6 +454,56 @@ async fn download_next_takes_the_next_free_slot_and_keeps_its_place() {
         .await
         .unwrap_err();
     assert_eq!(err.code, RpcErrorCode::Conflict);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_provider_outage_requeues_rows_and_the_queue_completes_after_it() {
+    let c = ctx().await;
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_secs(1),
+        Duration::from_secs(3600),
+    );
+    let mut ids = Vec::new();
+    for i in 0..6 {
+        let path = format!("/files/video.bin?size=1048576&kbps=1024&n={i}");
+        ids.push(c.start(&i.to_string(), "outage", &path).await.id);
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Longer than a run's in-task retries (about 4.5 s).
+    reqwest::get(c.srv.url("/__mock/outage?ms=6000"))
+        .await
+        .unwrap();
+    let deadline = Instant::now() + WAIT;
+    let mut waited = false;
+    loop {
+        let list: Vec<Download> =
+            serde_json::from_value(c.ok("downloads.list", Value::Null).await).unwrap();
+        assert!(
+            list.iter().all(|d| d.status != DownloadStatus::Failed),
+            "{:?}",
+            list.iter().map(|d| &d.error_message).collect::<Vec<_>>()
+        );
+        waited |= list.iter().any(|d| {
+            d.waiting
+                .as_ref()
+                .is_some_and(|w| w.reason == iptv_core::model::WaitReason::Provider)
+        });
+        if list.iter().all(|d| d.status == DownloadStatus::Completed) {
+            break;
+        }
+        assert!(Instant::now() < deadline, "queue never finished");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(waited, "rows said they wait for the provider");
+    for id in ids {
+        assert!(is_mock_content(Path::new(
+            &c.get(id).await.file_path.unwrap()
+        )));
+    }
+    // A missing file still fails at once: only the source waits.
+    let missing = c.start("missing", "missing", "/fail/404.m3u").await;
+    c.wait_status(missing.id, DownloadStatus::Failed).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

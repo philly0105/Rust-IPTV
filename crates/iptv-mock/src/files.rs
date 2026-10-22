@@ -5,6 +5,8 @@
 //! so a test can verify a resumed download byte for byte with
 //! [`video_bytes`] instead of keeping a copy.
 //!
+//! While `/__mock/outage` is on, `video.bin` answers `503`.
+//!
 //! Query options (all optional, all routes):
 //! - `size=<bytes>`: override the length (default 20 MiB; nolen 3 MiB).
 //! - `kbps=<KiB/s>`: throttle, so a test can pause mid-transfer.
@@ -16,8 +18,8 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use serde::Deserialize;
 
@@ -84,7 +86,28 @@ fn opts(len: u64, kbps: u64, filename: &str) -> ServeOpts {
     o
 }
 
-pub(crate) async fn video(headers: HeaderMap, Query(q): Query<FileOpts>) -> Response {
+/// A `503` while `/__mock/outage` is on.
+fn outage(state: &MockState) -> Option<Response> {
+    state
+        .outage_until
+        .lock()
+        .is_some_and(|until| std::time::Instant::now() < until)
+        .then(|| {
+            let mut r = (StatusCode::SERVICE_UNAVAILABLE, "provider outage").into_response();
+            r.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+            r
+        })
+}
+
+pub(crate) async fn video(
+    State(state): State<Arc<MockState>>,
+    headers: HeaderMap,
+    Query(q): Query<FileOpts>,
+) -> Response {
+    if let Some(r) = outage(&state) {
+        return r;
+    }
     let len = q.size.unwrap_or(VIDEO_BIN_LEN).min(MAX_SIZE);
     serve_bytes(
         &headers,

@@ -60,6 +60,7 @@
   "waitingForPlayback": "Espera a que termine la reproducción de esta fuente",
   "waitingForConnection": "Espera una conexión libre en esta fuente",
   "waitingForConnectionAt": "El proveedor no tiene conexiones libres. Se reintentará a las {{time}}",
+  "waitingForProvider": "No se puede contactar con el proveedor. Se reintentará a las {{time}}",
   "pausedHint": "En pausa. Se conserva el archivo parcial.",
   "failedHint": "La descarga se detuvo por un error",
   "canceledHint": "Se canceló antes de terminar",

@@ -54,6 +54,7 @@
   "waitingForPlayback": "Wacht tot het afspelen van deze bron stopt",
   "waitingForConnection": "Wacht op een vrije verbinding met deze bron",
   "waitingForConnectionAt": "De aanbieder heeft geen vrije verbinding. Nieuwe poging om {{time}}",
+  "waitingForProvider": "De aanbieder is niet bereikbaar. Nieuwe poging om {{time}}",
   "pausedHint": "Gepauzeerd. Het gedeeltelijke bestand blijft bewaard.",
   "failedHint": "De download is gestopt met een fout",
   "canceledHint": "Geannuleerd voordat hij klaar was",

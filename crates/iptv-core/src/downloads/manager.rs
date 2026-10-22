@@ -561,6 +561,12 @@ impl DownloadManager {
         }
     }
 
+    /// Lets downloads from `source` try again now instead of waiting out
+    /// the backoff (the user asked for one with Download next).
+    pub fn unblock(&self, source: &str) {
+        self.inner.lock().blocked.remove(source);
+    }
+
     /// The last account check of `source` when it is younger than
     /// [`crate::account::FORCE_MIN_AGE`]: whether its credentials worked.
     pub fn recent_check(&self, source: &str) -> Option<bool> {

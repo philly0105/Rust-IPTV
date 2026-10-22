@@ -274,7 +274,8 @@ export function useListActions(): ListActions {
 
   const reorderEntries = useCallback(
     (listId: string, next: readonly CustomListEntry[]) => {
-      const previous = patchItems(listId, () => next.map((e, position) => ({ ...e, position })));
+      // Entries that kept their place keep their object, so their memoized rows do not re-render.
+      const previous = patchItems(listId, () => next.map((e, position) => (e.position === position ? e : { ...e, position })));
       const refs = next.map((e) => e.ref);
       itemOrderQueue(
         () => saveEntryOrder(listId, refs),

@@ -5,7 +5,7 @@
  */
 
 import { ArrowLeft, ListOrdered, X } from 'lucide-react';
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type CustomListEntry } from '@/api/types';
@@ -32,7 +32,8 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
   const focusAfter = useRef<string | null | undefined>(undefined);
 
   const entries = items.data ?? [];
-  const nameOf = (e: CustomListEntry) => displayChannelName(e.channel?.name ?? e.snapshot.title, prefs.stripCountryPrefix);
+  const strip = prefs.stripCountryPrefix;
+  const nameOf = useCallback((e: CustomListEntry) => displayChannelName(e.channel?.name ?? e.snapshot.title, strip), [strip]);
 
   useLayoutEffect(() => {
     if (focusAfter.current === undefined || !bodyRef.current) return;
@@ -48,6 +49,31 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
     focusAfter.current = next ? itemKey(next.ref) : null;
     actions.removeEntries(list, [entry], nameOf(entry));
   };
+  // SortableList's rows are memoized: they get callbacks that stay the same while the entries
+  // change and read the latest ones, so a move re-renders the two rows it swaps, not up to 2,000.
+  const latest = useRef({ removeOne, entries, list });
+  latest.current = { removeOne, entries, list };
+  const onRemove = useCallback((entry: CustomListEntry, index: number) => latest.current.removeOne(entry, index), []);
+  const onMove = useCallback(
+    (from: number, to: number) => {
+      const { list: l, entries: all } = latest.current;
+      if (l) actions.reorderEntries(l.id, move(all, from, to));
+    },
+    [actions],
+  );
+  const renderRow = useCallback(
+    (entry: CustomListEntry, index: number) => (
+      <EditItemRow
+        entry={entry}
+        index={index}
+        name={nameOf(entry)}
+        source={entry.available ? (sourceName.get(entry.ref.sourceId) ?? t('unknownSource')) : t('unavailableHeading')}
+        removeLabel={t('removeNamed', { name: nameOf(entry) })}
+        onRemove={onRemove}
+      />
+    ),
+    [nameOf, sourceName, t, onRemove],
+  );
 
   let body;
   const error = items.error ?? lists.error;
@@ -90,38 +116,11 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
           items={entries}
           label={list.name}
           testId="edit-list-items"
-          getKey={(e) => itemKey(e.ref)}
+          getKey={entryKey}
           getLabel={nameOf}
-          onMove={(from, to) => actions.reorderEntries(list.id, move(entries, from, to))}
-          rowClassName={(e) => (e.available ? undefined : 'text-fg-subtle')}
-          renderRow={(entry, index) => {
-            const name = nameOf(entry);
-            const logo = entry.channel?.logoUrl ?? entry.snapshot.posterUrl;
-            return (
-              <>
-                <span className={cn('flex min-w-0 flex-1 items-center gap-3 px-1', !entry.available && 'opacity-60 grayscale')}>
-                  <ChannelLogo src={logo} name={name} size={32} sourceId={entry.ref.sourceId} />
-                  <span className="min-w-0">
-                    <span dir="auto" className="block truncate text-sm font-medium text-fg">
-                      {name}
-                    </span>
-                    <span dir="auto" className="block truncate text-xs text-fg-subtle">
-                      {entry.available ? (sourceName.get(entry.ref.sourceId) ?? t('unknownSource')) : t('unavailableHeading')}
-                    </span>
-                  </span>
-                </span>
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  data-sort-part="remove"
-                  label={t('removeNamed', { name })}
-                  icon={<X className="size-4" />}
-                  className="hover:text-danger"
-                  onClick={() => removeOne(entry, index)}
-                />
-              </>
-            );
-          }}
+          onMove={onMove}
+          rowClassName={unavailableClass}
+          renderRow={renderRow}
         />
       </div>
     );
@@ -152,5 +151,50 @@ export function EditItemsDialog({ listId, fromManage, onClose }: { listId: strin
     >
       <div ref={bodyRef}>{body}</div>
     </Dialog>
+  );
+}
+
+const entryKey = (e: CustomListEntry) => itemKey(e.ref);
+const unavailableClass = (e: CustomListEntry) => (e.available ? undefined : 'text-fg-subtle');
+
+/** One channel's row after the grip: its logo, name and source, and Remove. */
+function EditItemRow({
+  entry,
+  index,
+  name,
+  source,
+  removeLabel,
+  onRemove,
+}: {
+  entry: CustomListEntry;
+  index: number;
+  name: string;
+  source: string;
+  removeLabel: string;
+  onRemove(entry: CustomListEntry, index: number): void;
+}) {
+  return (
+    <>
+      <span className={cn('flex min-w-0 flex-1 items-center gap-3 px-1', !entry.available && 'opacity-60 grayscale')}>
+        <ChannelLogo src={entry.channel?.logoUrl ?? entry.snapshot.posterUrl} name={name} size={32} sourceId={entry.ref.sourceId} />
+        <span className="min-w-0">
+          <span dir="auto" className="block truncate text-sm font-medium text-fg">
+            {name}
+          </span>
+          <span dir="auto" className="block truncate text-xs text-fg-subtle">
+            {source}
+          </span>
+        </span>
+      </span>
+      <IconButton
+        size="sm"
+        variant="ghost"
+        data-sort-part="remove"
+        label={removeLabel}
+        icon={<X className="size-4" />}
+        className="hover:text-danger"
+        onClick={() => onRemove(entry, index)}
+      />
+    </>
   );
 }

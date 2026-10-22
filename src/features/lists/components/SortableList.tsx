@@ -132,7 +132,7 @@ export function SortableList<T>(props: SortableListProps<T>) {
               key={key}
               item={item}
               index={index}
-              count={items.length}
+              last={index === items.length - 1}
               rowKey={key}
               name={getLabel(item)}
               isLocked={locked?.(item) ?? false}
@@ -165,7 +165,8 @@ interface RowHandlers {
 interface SortableRowProps<T> {
   item: T;
   index: number;
-  count: number;
+  /** The last row: no border under it, and no Move down. Not the count, which every row would re-render for. */
+  last: boolean;
   rowKey: string;
   name: string;
   isLocked: boolean;
@@ -179,7 +180,7 @@ interface SortableRowProps<T> {
   t: TFunction;
 }
 
-const SortableRow = memo(function SortableRow<T>({ item, index, count, rowKey: key, name, isLocked, over, dragging, className, renderRow, handlers, t }: SortableRowProps<T>) {
+const SortableRow = memo(function SortableRow<T>({ item, index, last, rowKey: key, name, isLocked, over, dragging, className, renderRow, handlers, t }: SortableRowProps<T>) {
   return (
     <li
       data-sort-key={key}
@@ -187,7 +188,8 @@ const SortableRow = memo(function SortableRow<T>({ item, index, count, rowKey: k
       onDragOver={(e) => handlers.dragOver(e, key)}
       onDrop={handlers.drop}
       className={cn(
-        'relative flex min-h-12 items-center gap-1 border-b border-divider py-1.5 pe-1 ps-0.5 last:border-b-0',
+        'relative flex min-h-12 items-center gap-1 border-divider py-1.5 pe-1 ps-0.5',
+        !last && 'border-b',
         dragging && 'opacity-50',
         className,
       )}
@@ -237,7 +239,7 @@ const SortableRow = memo(function SortableRow<T>({ item, index, count, rowKey: k
           variant="ghost"
           label={t('moveDown', { name })}
           icon={<ArrowDown className="size-4" />}
-          disabled={isLocked || index === count - 1}
+          disabled={isLocked || last}
           data-sort-part="down"
           onClick={() => handlers.moveBy(index, 1, 'down')}
         />

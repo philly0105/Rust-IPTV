@@ -13,11 +13,11 @@ import { useMemo } from 'react';
 import { categoriesArgs } from '@/api/bootPrefetch';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
-import { rpcRaw } from '@/api/transport';
 import { itemKey, type Category, type Channel, type ItemKey, type Page, type Source, type SourceKind } from '@/api/types';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import { NETWORKS, foreignFeed, hasMatchup, isSportsGroup, nameTokens, networkIdForChannel, textTokens } from '../lib/names';
+import { sportsRead } from './sportsRead';
 
 export interface IndexedChannel {
   channel: Channel;
@@ -43,7 +43,7 @@ export const INDEX_PAGE_LIMIT = 1000;
 const GROUP_CONCURRENCY = 4;
 /** Hits asked of each network search. */
 export const NETWORK_SEARCH_LIMIT = 200;
-/** Network searches in flight at once: the core has 8 database connections, and pages keep reading. */
+/** Network searches in flight at once, so the group pages keep part of the page's read limit (sportsRead.ts). */
 const NETWORK_CONCURRENCY = 3;
 /** Event channels are renamed on a provider refresh, which invalidates 'catalog.' keys anyway. */
 const INDEX_STALE_MS = 10 * 60_000;
@@ -100,7 +100,7 @@ async function loadSportsGroups(client: QueryClient, sourceId: string, signal: A
   const args = categoriesArgs(sourceId, 'live');
   const categories = await client.fetchQuery({
     queryKey: rpcKey('catalog.categories', args),
-    queryFn: async ({ signal: s }) => (await rpcRaw('catalog.categories', args, { signal: s })) as Category[],
+    queryFn: async ({ signal: s }) => (await sportsRead('catalog.categories', args, s)) as Category[],
   });
   const groups = categories.filter((g) => !g.hidden && g.itemCount !== 0 && isSportsGroup(g.name));
   const lists: Channel[][] = [];
@@ -112,7 +112,7 @@ async function loadSportsGroups(client: QueryClient, sourceId: string, signal: A
       const rows: Channel[] = [];
       for (let offset = 0; ; ) {
         const query = { offset, limit: INDEX_PAGE_LIMIT };
-        const page = (await rpcRaw('catalog.channels', { sourceId, categoryId: groups[i]!.id, query }, { signal })) as Page<Channel>;
+        const page = (await sportsRead('catalog.channels', { sourceId, categoryId: groups[i]!.id, query }, signal)) as Page<Channel>;
         if (failed) return;
         rows.push(...page.items);
         offset += page.items.length;
@@ -149,7 +149,7 @@ async function loadNetworkChannels(signal: AbortSignal): Promise<Channel[]> {
       const i = next++;
       const args = { query: queries[i]!, contentTypes: ['live'], limit: NETWORK_SEARCH_LIMIT };
       try {
-        const res = (await rpcRaw('catalog.search', args, { signal })) as CatalogSearchResult;
+        const res = (await sportsRead('catalog.search', args, signal)) as CatalogSearchResult;
         answers[i] = res.live.filter((ch) => {
           const d = describe(ch);
           return !ch.isRadio && (d.network !== null || hasMatchup(d.tokens));

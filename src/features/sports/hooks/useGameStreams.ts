@@ -10,7 +10,6 @@ import { useMemo } from 'react';
 
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
-import { rpcRaw } from '@/api/transport';
 import type { Channel, ContentType, EpgProgram, ItemKey, Source } from '@/api/types';
 import { useNow } from '@/features/parental/time';
 import { useVisibleSources } from '@/shell/useVisibleSources';
@@ -18,6 +17,7 @@ import { useVisibleSources } from '@/shell/useVisibleSources';
 import { gameWindow } from '../lib/espn';
 import { isCurrentGame, isEventChannel, matchGame, type StreamMatch } from '../lib/match';
 import type { Game, GameTeam, League } from '../lib/types';
+import { sportsRead } from './sportsRead';
 import { toIndexed, useChannelIndex, type IndexedChannel } from './useChannelIndex';
 import { useGuideWindow } from './useGuideWindow';
 
@@ -166,7 +166,7 @@ export function useGameStreams(
       return {
         queryKey: rpcKey('catalog.search', args),
         queryFn: ({ signal }: { signal: AbortSignal }) =>
-          limited(async () => (await rpcRaw('catalog.search', args, { signal })) as CatalogSearchResult),
+          limited(async () => (await sportsRead('catalog.search', args, signal)) as CatalogSearchResult),
         staleTime: FALLBACK_STALE_MS,
       };
     }),

@@ -24,6 +24,7 @@ const { itemKey } = await import('@/api/types');
 const { matchGame } = await import('../lib/match');
 const { useGameStreams } = await import('../hooks/useGameStreams');
 const { NETWORK_SEARCH_LIMIT } = await import('../hooks/useChannelIndex');
+const { PAGE_READS } = await import('../hooks/sportsRead');
 const { NETWORKS } = await import('../lib/names');
 const slate = await import('./slate');
 
@@ -214,5 +215,6 @@ describe('the page’s reads on a big account', () => {
         `longest main-thread block ${ms(longest)}; ${matched}/${games.length} games with streams`,
     );
     expect(matched).toBeGreaterThan(0);
+    expect(stats.peak).toBeLessThanOrEqual(PAGE_READS);
   }, 180_000);
 });

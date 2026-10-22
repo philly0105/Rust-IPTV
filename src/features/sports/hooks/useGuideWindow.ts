@@ -9,11 +9,11 @@ import { hashKey, useQueries, type QueryKey, type UseQueryResult } from '@tansta
 import { useMemo } from 'react';
 
 import { rpcKey } from '@/api/query';
-import { rpcRaw } from '@/api/transport';
 import type { EpgProgram, ItemKey, ItemRef, Settings } from '@/api/types';
 import { DAY, MINUTE, shiftPrograms } from '@/features/live/lib/epgTime';
 import { useSettingsValue } from '@/shell/useSettings';
 
+import { sportsRead } from './sportsRead';
 import type { IndexedChannel } from './useChannelIndex';
 
 /** Refs per `epg.grid` call (the core takes up to 2000; smaller answers parse without a long task). */
@@ -76,7 +76,8 @@ const NO_PROGRAMS = new Map<ItemKey, EpgProgram[]>();
  * Programmes per channel overlapping [`from`, `to`) in display time (`settings.epgOffsetMinutes` applied, as
  * the guide shows them). The request window is the display window moved back by the offset, as the guide
  * asks; channels without a guide are left out of the map. The map stays empty until every chunk has
- * answered, so the games are matched against the guide once rather than once per chunk.
+ * answered, so the games are matched against the guide once rather than once per chunk. The chunks wait
+ * their turn in the page's read limit (sportsRead.ts), first chunk first.
  */
 export function useGuideWindow(
   channels: readonly IndexedChannel[],
@@ -99,7 +100,7 @@ export function useGuideWindow(
       return {
         queryKey: rpcKey('epg.grid', args),
         queryKeyHashFn: gridKeyHash,
-        queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('epg.grid', args, { signal })) as Grid,
+        queryFn: async ({ signal }: { signal: AbortSignal }) => (await sportsRead('epg.grid', args, signal)) as Grid,
         enabled: on,
       };
     }),

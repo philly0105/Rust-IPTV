@@ -26,6 +26,7 @@ const { etDate } = await import('../lib/espn');
 const { toIndexed, useChannelIndex, INDEX_PAGE_LIMIT, NETWORK_SEARCH_LIMIT } = await import('../hooks/useChannelIndex');
 const { useGuideWindow, GRID_CHUNK } = await import('../hooks/useGuideWindow');
 const { useGameStreams, fallbackQuery, FALLBACK_CONCURRENCY, FALLBACK_LIMIT } = await import('../hooks/useGameStreams');
+const { PAGE_READS } = await import('../hooks/sportsRead');
 
 // ---------------------------------------------------------------------------
 // rpc recorder
@@ -423,6 +424,29 @@ describe('useGuideWindow', () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it('sends no chunk still waiting for its turn once the page has gone', async () => {
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    handlers['epg.grid'] = async () => {
+      await held;
+      return {};
+    };
+    const big = Array.from({ length: 3500 }, (_, i) => toIndexed(ch('s1', `b${i}`, `Channel ${i}`), source, true));
+    const { unmount } = renderHook(() => useGuideWindow(big, Date.parse('2026-10-23T22:30Z'), Date.parse('2026-10-24T03:30Z'), true), {
+      wrapper,
+    });
+    await waitFor(() => expect(callsOf('epg.grid')).toHaveLength(PAGE_READS));
+    await tick(20);
+    expect(callsOf('epg.grid')).toHaveLength(PAGE_READS);
+    unmount();
+    release();
+    await tick(20);
+    // The two chunks still in line went with the page. On desktop a sent call runs to its end, so a visit
+    // leaves at most PAGE_READS of them behind.
+    expect(callsOf('epg.grid')).toHaveLength(PAGE_READS);
+  });
+
   it('asks nothing while disabled', async () => {
     handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
     renderHook(() => useGuideWindow(index, Date.now(), Date.now() + HOUR, false), { wrapper });
@@ -552,6 +576,39 @@ describe('useGameStreams', () => {
     await waitFor(() => expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toHaveLength(6));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(peak).toBe(FALLBACK_CONCURRENCY);
+  });
+
+  it(`keeps every read of the page within ${PAGE_READS} in flight, and asks the guide chunks in order`, async () => {
+    const now = Date.now();
+    // No channel names the game, so it also gets the fallback searches.
+    const games = [game('nba', KNICKS, CELTICS, now + HOUR)];
+    const groups = Object.fromEntries(
+      Array.from({ length: 8 }, (_, g) => [`s1/c${g}`, Array.from({ length: 400 }, (_, i) => ch('s1', `c${g}-${i}`, `US| SPORTS ${g}-${i}`))]),
+    );
+    handlers['sources.list'] = () => [SOURCES[0]];
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    handlers['catalog.categories'] = () => Array.from({ length: 8 }, (_, g) => cat(`c${g}`, `SPORTS ${g}`, 400));
+    let inFlight = 0;
+    let peak = 0;
+    const timed =
+      <A,>(answer: (a: A) => unknown) =>
+      async (a: A) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await tick(3);
+        inFlight -= 1;
+        return answer(a);
+      };
+    handlers['catalog.channels'] = timed(pages(groups));
+    handlers['catalog.search'] = timed(() => ({ live: [], movies: [], series: [] }));
+    handlers['epg.grid'] = timed(() => ({}));
+    const { result } = renderHook(() => useGameStreams(games), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(callsOf<SearchArgs>('catalog.search').filter((s) => s.limit === FALLBACK_LIMIT)).toHaveLength(2));
+    // Four group workers and three network searches wanted seven at once.
+    expect(peak).toBe(PAGE_READS);
+    // 3,200 channels in seven chunks, first chunk first.
+    expect(callsOf<GridArgs>('epg.grid').map((a) => a.refs[0]!.itemId)).toEqual(['c0-0', 'c1-100', 'c2-200', 'c3-300', 'c5-0', 'c6-100', 'c7-200']);
   });
 
   it('asks nothing for no games or while disabled', async () => {

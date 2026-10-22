@@ -98,7 +98,7 @@ Order: guide, then event, then network; inside each, non-regional first, then fe
 
 ## The guide window: `useGuideWindow`
 
-`useGameStreams(games)` asks `useGuideWindow` for the programmes of every indexed channel over the union of the games' windows: `epg.grid` with `withDescription: true`, at most 500 refs a call. The query window is the display window minus `epgOffsetMinutes`, and the answers are shifted back to display time with Live's helper, so they compare with ESPN's times. The keys are `rpcKey('epg.grid', …)`, so a guide refresh refetches them.
+`useGameStreams(games)` asks `useGuideWindow` for the programmes of every indexed channel over the union of the games' windows: `epg.grid` with `withDescription: true`, at most 500 refs a call, the calls taking their turn in the page's read limit (below). The query window is the display window minus `epgOffsetMinutes`, and the answers are shifted back to display time with Live's helper, so they compare with ESPN's times. The keys are `rpcKey('epg.grid', …)`, so a guide refresh refetches them.
 
 A game keeps its matches until the index or the guide changes. `now` comes from a one-minute clock, and a game is matched again only when it moves into or out of the window for undated event names.
 
@@ -107,6 +107,10 @@ It uses `epg.grid` rather than `epg.search` because search reads titles only and
 ## Fallback search
 
 A game that is live or starts within 3 hours and has no stream after the index and the guide gets one more try: one `catalog.search` per team name (live only, up to 30 hits). This finds event channels in groups whose names don't look like sports. A hit counts only after the same checks as an event channel, both teams included. At most 2 of these searches run at once, and only for games on screen: each search ranks every match in the core before the limit applies, and the core has 8 database connections that every other page reads through.
+
+## The page's reads
+
+Every read the page sends to the core goes through `sportsRead` (`hooks/sportsRead.ts`): the groups list, the group pages, the network searches, the guide chunks and the fallback searches. At most 5 are in flight at once (`PAGE_READS`), and the rest wait their turn in the order they were asked, so the first guide chunk goes first. On a big account the page would otherwise take all 8 of the core's database connections (dozens of group pages, about 60 network searches, a guide chunk per 500 channels) and every other page would queue behind it; with the limit at least 3 stay free. A read whose signal aborts while it waits is never sent: leaving the page cancels its queries, so on desktop, where a sent call runs to its end, a visit leaves at most 5 calls behind. The cost shows on an idle core with cores to spare: the guide chunks of a big index no longer all run at once. In `test/perf.test.tsx` (16 chunks at a fixed 150 ms each, a core with 8 connections and no CPU limit), the guide took about 615 ms instead of 340 ms, and a read another page made meanwhile waited 0 ms instead of 287 ms.
 
 ## Actions
 

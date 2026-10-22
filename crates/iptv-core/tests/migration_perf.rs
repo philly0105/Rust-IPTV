@@ -203,11 +203,12 @@ fn a_database_that_already_ran_0007_keeps_its_guide() {
 /// one row per item, equal to the projection of `items`. The timed upgrade
 /// runs the later migrations too, and is mostly 0022's: it adds `quality` to
 /// both tables (-1 until the boot backfill) and rebuilds four indexes, about
-/// 0.7-0.9 s in release on an N150, where 0020 takes about 0.1 s.
+/// 0.7-0.9 s in release on an N150, where 0020 takes about 0.1 s. A debug
+/// build on CI's Windows runner took 12.6 s.
 #[test]
 fn migration_0020_fills_items_rank_on_a_220k_library() {
     #[cfg(debug_assertions)]
-    const BUDGET: Duration = Duration::from_secs(6);
+    const BUDGET: Duration = Duration::from_secs(30);
     #[cfg(not(debug_assertions))]
     const BUDGET: Duration = Duration::from_secs(2);
     let dir = tempfile::tempdir().unwrap();

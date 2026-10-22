@@ -239,6 +239,64 @@ describe('useChannelIndex', () => {
     expect(result.current.error).toBeNull();
   });
 
+  describe('a source with many sports groups', () => {
+    // Sizes in rows: 2500 is three pages, 0 is skipped.
+    const sizes = [2500, 3, 1200, 0, 5, 7, 1, 2, 4];
+    const groups = Object.fromEntries(
+      sizes.map((n, g) => [`s1/c${g}`, Array.from({ length: n }, (_, i) => ch('s1', `c${g}-${i}`, `US| SPORTS ${g}-${i}`))]),
+    );
+
+    function serveMany(fail?: string) {
+      handlers['sources.list'] = () => [SOURCES[0]];
+      handlers['catalog.categories'] = () => sizes.map((n, g) => cat(`c${g}`, `SPORTS ${g}`, n));
+      handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+      const serveGroup = pages(groups);
+      const open = new Map<string, number>();
+      const stats = { inFlight: 0, peak: 0, overlap: false };
+      handlers['catalog.channels'] = async (a: ChannelsArgs) => {
+        if (a.categoryId === fail) throw new Error('db');
+        stats.inFlight += 1;
+        stats.peak = Math.max(stats.peak, stats.inFlight);
+        // A group's pages are never in flight together.
+        if (open.get(a.categoryId)) stats.overlap = true;
+        open.set(a.categoryId, 1);
+        await tick(5);
+        open.set(a.categoryId, 0);
+        stats.inFlight -= 1;
+        return serveGroup(a);
+      };
+      return stats;
+    }
+
+    it('reads four groups at once, each group’s pages in order, and lists the rows in the groups’ order', async () => {
+      const stats = serveMany();
+      const { result } = renderHook(() => useChannelIndex(), { wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(stats.peak).toBe(4);
+      expect(stats.overlap).toBe(false);
+      const asked = callsOf<ChannelsArgs>('catalog.channels');
+      for (const [g, n] of sizes.entries()) {
+        const offsets = asked.filter((a) => a.categoryId === `c${g}`).map((a) => a.query.offset);
+        expect(offsets, `c${g}`).toEqual(n === 0 ? [] : Array.from({ length: Math.ceil(n / INDEX_PAGE_LIMIT) }, (_, p) => p * INDEX_PAGE_LIMIT));
+      }
+      const names = result.current.channels.map((r) => r.channel.name);
+      expect(names).toEqual(sizes.flatMap((_, g) => groups[`s1/c${g}`]!.map((c) => c.name)));
+    });
+
+    it('stops reading the source’s other groups after a failed page', async () => {
+      serveMany('c1');
+      const { result } = renderHook(() => useChannelIndex(), { wrapper });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.error).toBeInstanceOf(Error);
+      await tick(30);
+      // c0, c1, c2 and c4 started (c3 is empty); once c1 failed, no group after them and no further page of
+      // c0 was asked.
+      const asked = callsOf<ChannelsArgs>('catalog.channels');
+      expect([...new Set(asked.map((a) => a.categoryId))].sort()).toEqual(['c0', 'c1', 'c2', 'c4']);
+      expect(asked.filter((a) => a.categoryId === 'c0').map((a) => a.query.offset)).toEqual([0]);
+    });
+  });
+
   it('searches each network once, keeps real network channels and lists every channel once', async () => {
     const peak = serve();
     const { result } = renderHook(() => useChannelIndex(), { wrapper });

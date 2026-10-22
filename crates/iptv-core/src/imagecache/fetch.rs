@@ -1,8 +1,8 @@
 //! One upstream image fetch: status, type and size checks, body read with a
 //! cap. Nothing here touches the disk or the index.
 
-use super::{core_message, ImageError, ImageErrorKind, MAX_IMAGE_BYTES};
-use crate::http::{self, BODY_IDLE_TIMEOUT, HEADER_TIMEOUT};
+use super::{core_message, head_timeout, ImageError, ImageErrorKind, MAX_IMAGE_BYTES};
+use crate::http::{self, BODY_IDLE_TIMEOUT};
 use crate::model::RequestHeaders;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::StatusCode;
@@ -22,11 +22,12 @@ pub(super) async fn download(
         client.get(url.clone()).header(ACCEPT, ACCEPT_IMAGES),
         headers,
     );
-    let resp = match tokio::time::timeout(HEADER_TIMEOUT, req.send()).await {
+    let head_timeout = head_timeout();
+    let resp = match tokio::time::timeout(head_timeout, req.send()).await {
         Err(_) => {
             return Err(ImageError::upstream(format!(
                 "{host} did not answer within {} s.",
-                HEADER_TIMEOUT.as_secs()
+                head_timeout.as_secs()
             )))
         }
         Ok(Err(err)) => return Err(transport(host, err)),

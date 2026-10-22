@@ -973,6 +973,17 @@ pub fn guarded_client(state: &AppState, trusted: Option<&Authority>) -> reqwest:
     }
 }
 
+/// Client for an artwork fetch (the image cache): [`guarded_client`]'s
+/// short-connect twin, as inside [`interactive`], since someone is looking at
+/// the empty frame. A poster host that does not take the connection gives up
+/// after [`INTERACTIVE_CONNECT_TIMEOUT`] instead of [`CONNECT_TIMEOUT`].
+pub fn image_client(state: &AppState, trusted: Option<&Authority>) -> reqwest::Client {
+    match server_mode(state) {
+        Some(mode) => mode.interactive.get(trusted),
+        None => interactive_client(state),
+    }
+}
+
 /// [`guarded_client`] with [`LONG_READ_TIMEOUT`], for a request that may
 /// wait up to 120 s for its response head (a big playlist or provider list).
 /// Read its body with an idle limit of its own.

@@ -90,6 +90,14 @@ pub const EVICT_TARGET_PERCENT: u64 = 90;
 pub const MAX_URL_LEN: usize = 8 * 1024;
 /// Deadline for one upstream fetch, response head and body together.
 pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
+/// Deadline for an upstream image's response head, connecting included (the
+/// image client gives up connecting after 3 s, [`http::image_client`]).
+/// Shorter than [`http::HEADER_TIMEOUT`]: a poster host that accepts the
+/// connection and never answers held the picture, and the request waiting on
+/// it, for 15 s.
+pub const HEAD_TIMEOUT: Duration = Duration::from_secs(8);
+/// [`set_head_timeout_for_tests`]'s value in ms; 0 means [`HEAD_TIMEOUT`].
+static HEAD_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
 /// Remembered failures kept at most (expired ones are pruned first).
 const MAX_FAILURES: usize = 4096;
 /// Variant keys remembered as "serve the original" at most.
@@ -962,6 +970,23 @@ impl ImageCache {
     }
 }
 
+/// Shortens [`HEAD_TIMEOUT`] for the whole process. Test hook for integration
+/// tests with an image host that never answers; the app never calls it.
+#[doc(hidden)]
+pub fn set_head_timeout_for_tests(timeout: Duration) {
+    let ms = u64::try_from(timeout.as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    HEAD_TIMEOUT_MS.store(ms, Ordering::Relaxed);
+}
+
+fn head_timeout() -> Duration {
+    match HEAD_TIMEOUT_MS.load(Ordering::Relaxed) {
+        0 => HEAD_TIMEOUT,
+        ms => Duration::from_millis(ms),
+    }
+}
+
 /// The first 64 bits of a cache key (the in-memory "kept" set).
 fn short_key(key: &str) -> Option<u64> {
     u64::from_str_radix(key.get(..16)?, 16).ok()
@@ -1026,7 +1051,7 @@ pub async fn fetch_sized(
         trusted,
         &source.headers,
     );
-    let client = http::guarded_client(state, trusted);
+    let client = http::image_client(state, trusted);
     let job = Job {
         url,
         key,
@@ -1039,8 +1064,9 @@ pub async fn fetch_sized(
 
 /// Disk hit, or fetch, validate and store. Concurrent calls for one URL share
 /// one fetch (single flight).
-/// Desktop: `state.http`. Server mode: the guarded client, trusting the
-/// source's `host:port` only for an image on exactly it.
+/// Fetched with [`http::image_client`]: on desktop `state.http` with a 3 s
+/// connect timeout; in server mode the guarded client with the same, trusting
+/// the source's `host:port` only for an image on exactly it.
 /// Non-image content type -> Unsupported; body over [`MAX_IMAGE_BYTES`] ->
 /// Invalid; upstream 404 -> NotFound; other failures -> Network.
 /// Failures are remembered in memory for 10 min (no refetch storm).

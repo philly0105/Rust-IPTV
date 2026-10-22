@@ -500,6 +500,50 @@ async fn a_segment_refused_as_the_open_stream_reaches_it_is_not_written_shifted(
     dl_panel::is_exact(1, size, Path::new(&file_path)).unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_paused_rows_name_is_not_handed_out_while_its_part_is_gone() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    let panel = dl_panel::Panel::spawn(2).await;
+    let (a_size, b_size) = (24 * MIB, 32 * MIB);
+    panel.file(1, a_size, 2048);
+    panel.file(2, b_size, 2048);
+    let a = c.start_titled("src", "1", "Movie", &panel.url(1)).await;
+    c.wait_until(a.id, "used two connections", |d| {
+        d.connections == Some(2) && d.bytes_downloaded > (4 * MIB) as i64
+    })
+    .await;
+    c.ok("downloads.pause", json!({"id": a.id})).await;
+    let a_path = c.get(a.id).await.file_path.unwrap();
+    // The user frees space by deleting the paused partial by hand.
+    std::fs::remove_file(format!("{a_path}.part")).unwrap();
+    // Another movie with the same title.
+    let b = c.start_titled("src", "2", "Movie", &panel.url(2)).await;
+    let b_path = b.file_path.clone().unwrap();
+    assert_ne!(b_path, a_path, "the paused row keeps its name");
+    c.wait_until(b.id, "made progress", |d| {
+        d.bytes_downloaded > (2 * MIB) as i64
+    })
+    .await;
+    c.ok("downloads.resume", json!({"id": a.id})).await;
+    let b_done = c
+        .wait_until(b.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    let a_done = c
+        .wait_until(a.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    let (a_file, b_file) = (a_done.file_path.unwrap(), b_done.file_path.unwrap());
+    assert_ne!(a_file, b_file);
+    dl_panel::is_exact(1, a_size, Path::new(&a_file)).unwrap();
+    dl_panel::is_exact(2, b_size, Path::new(&b_file)).unwrap();
+}
+
 /// Splits a 24 MiB file over two connections and pauses it; returns its
 /// row and final path.
 async fn paused_split(c: &Ctx) -> (Download, String) {

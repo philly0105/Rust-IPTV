@@ -191,13 +191,15 @@ pub struct Reservation {
 }
 
 /// Reserves the first free `name`, `name (1)`, ... in `dir`: the final path must
-/// be absent and the `.part` is created with `create_new`, so two concurrent
-/// reservations can never share a name.
-pub fn reserve(dir: &Path, name: &str) -> io::Result<Reservation> {
+/// be absent and not `held` by another unfinished download (one whose `.part`
+/// was deleted while it was paused gets that name back when it resumes), and
+/// the `.part` is created with `create_new`, so two concurrent reservations
+/// can never share a name.
+pub fn reserve(dir: &Path, name: &str, held: impl Fn(&Path) -> bool) -> io::Result<Reservation> {
     for suffix in 0..=MAX_SUFFIX {
         let file_name = numbered(name, suffix);
         let final_path = dir.join(&file_name);
-        if occupied(&final_path) {
+        if occupied(&final_path) || held(&final_path) {
             continue;
         }
         let part = part_path(&final_path);
@@ -480,11 +482,12 @@ mod tests {
     #[test]
     fn reserves_numbered_parts_and_finalizes_without_overwrite() {
         let dir = tempfile::tempdir().unwrap();
-        let a = reserve(dir.path(), "Movie.mp4").unwrap();
+        let free = |_: &Path| false;
+        let a = reserve(dir.path(), "Movie.mp4", free).unwrap();
         assert_eq!(a.file_name, "Movie.mp4");
         assert!(a.part_path.ends_with("Movie.mp4.part"));
         assert!(!occupied(&a.final_path));
-        let b = reserve(dir.path(), "Movie.mp4").unwrap();
+        let b = reserve(dir.path(), "Movie.mp4", free).unwrap();
         assert_eq!(b.file_name, "Movie (1).mp4");
 
         // A user file occupies the final path of `a` while it downloads.
@@ -497,9 +500,22 @@ mod tests {
         assert_eq!(fs::read(&done).unwrap(), b"data");
         assert!(!occupied(&a.part_path));
 
-        let c = reserve(dir.path(), "Movie.mp4").unwrap();
+        let c = reserve(dir.path(), "Movie.mp4", free).unwrap();
         assert_eq!(c.file_name, "Movie (3).mp4");
         assert_eq!(numbered("noext", 2), "noext (2)");
+    }
+
+    #[test]
+    fn a_name_another_download_holds_is_skipped_while_its_part_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        // A paused download recorded Movie.mp4; its .part was deleted.
+        let paused = dir.path().join("Movie.mp4");
+        let held = |p: &Path| p == paused;
+        let next = reserve(dir.path(), "Movie.mp4", held).unwrap();
+        assert_eq!(next.file_name, "Movie (1).mp4");
+        // The paused one gets its own name back when it resumes.
+        let back = reserve(dir.path(), "Movie.mp4", |p: &Path| p == next.final_path).unwrap();
+        assert_eq!(back.final_path, paused);
     }
 
     #[test]

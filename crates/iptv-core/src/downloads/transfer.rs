@@ -409,11 +409,18 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
         .clone()
         .unwrap_or_else(|| naming::build_file_name(&d.title, d.subtitle.as_deref(), &d.url, None));
     let id = d.id;
+    // Names other unfinished rows record are never handed out again.
+    let others = state.db_call(move |c| store::held_paths(c, id)).await?;
     let reservation = tokio::task::spawn_blocking(move || -> CoreResult<Reservation> {
+        let held = |p: &Path| others.contains(&*p.to_string_lossy());
         if let Some(final_path) = retained {
             let part = naming::part_path(&final_path);
+            // Another unfinished row records this path too (both reserved it
+            // before reservations checked the rows): the `.part` there is
+            // that row's, never adopted or moved.
+            let ours = !held(&final_path);
             let moved_folder = final_path.parent() != Some(default_dir.as_path());
-            if moved_folder {
+            if moved_folder && ours {
                 if let Ok(Some(_)) = naming::regular_file_len(&part) {
                     // The user chose another downloads folder (the advice for
                     // a full disk): continue there. The partial moves along
@@ -421,7 +428,7 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                     // transfer restarts there and the old partial is deleted
                     // so it stops taking space on the full disk.
                     std::fs::create_dir_all(&default_dir)?;
-                    let fresh = naming::reserve(&default_dir, &requested)?;
+                    let fresh = naming::reserve(&default_dir, &requested, held)?;
                     if std::fs::rename(&part, &fresh.part_path).is_err() {
                         if let Err(e) = segments::remove_part(&part) {
                             tracing::warn!(id, error = %e, "could not delete the old partial download");
@@ -445,7 +452,7 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                     return Ok(fresh);
                 }
             }
-            if let Ok(Some(_)) = naming::regular_file_len(&part) {
+            if ours && matches!(naming::regular_file_len(&part), Ok(Some(_))) {
                 let file_name = final_path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -457,16 +464,17 @@ async fn prepare_destination(state: &Arc<AppState>, row: &DownloadRow) -> CoreRe
                 });
             }
             // The retained partial is gone (or replaced by something that is
-            // not ours): reserve again in the same folder, never touching it.
+            // not ours, or another row's): reserve again in the same folder,
+            // never touching it.
             let dir = final_path
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or(default_dir);
             std::fs::create_dir_all(&dir)?;
-            return Ok(naming::reserve(&dir, &requested)?);
+            return Ok(naming::reserve(&dir, &requested, held)?);
         }
         std::fs::create_dir_all(&default_dir)?;
-        Ok(naming::reserve(&default_dir, &requested)?)
+        Ok(naming::reserve(&default_dir, &requested, held)?)
     })
     .await??;
     let (name, path) = (

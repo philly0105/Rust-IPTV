@@ -196,11 +196,14 @@ needs source headers or would be mixed content.
    A body whose source had a later request never parks: a seek's request can
    reach the proxy before it notices the old player went away, and that
    request is the player now. A newer park on that source, the time running
-   out, and `release=1` let the reader go too; the built-in player sends that
-   when it tears an MPEG-TS player down (a stop, another item, Open in MPV):
-   it fetches nothing, answers 204, and keeps a reader of that source from
-   parking for the next 5 s, since it can land before the proxy noticed the
-   player let go. At most 4 readers are parked at once.
+   out, and `release=1` let the reader go too. `release=1` fetches nothing,
+   answers 204, and keeps a reader of that source from parking for the next
+   5 s, since it can land before the proxy noticed the player let go. The
+   built-in player sends it when it tears an MPEG-TS player down (a stop,
+   another item, Open in MPV) and when the page goes away while one plays
+   (`pagehide`: a closed tab or a reload, where React unmounts nothing), with
+   `keepalive` so the navigation does not cancel it. At most 4 readers are
+   parked at once.
 7. HLS playlists are detected by content type (`*mpegurl*`) or, for untyped
    responses (`text/plain`, `application/octet-stream`, none), by sniffing
    `#EXTM3U` in the first bytes. They are rewritten line by line as chunks

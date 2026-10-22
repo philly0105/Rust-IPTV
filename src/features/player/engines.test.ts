@@ -906,6 +906,29 @@ describe('MPEG-TS restarts at a seek or a resume (PL-2)', () => {
     }
   });
 
+  it('a page that goes away (tab closed, reload) lets go of that connection too: React does not unmount on unload (seam-2)', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const vod = await createEngine(video(), vodTs(), '/api/proxy?url=http%3A%2F%2Fh%2Fv.ts&sourceId=s1', cb(), { captions: false });
+      const live = await createEngine(video(), src('http://h/a.ts'), '/api/proxy?url=http%3A%2F%2Fh%2Fa.ts&sourceId=s2', cb(), { captions: false });
+      window.dispatchEvent(new Event('pagehide'));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [asked, init] = fetchMock.mock.calls[0]!;
+      expect(Object.fromEntries(new URL(asked).searchParams)).toEqual({ url: 'http://h/v.ts', sourceId: 's1', release: '1' });
+      // Sent while the page unloads: the navigation must not cancel it.
+      expect(init).toMatchObject({ keepalive: true, cache: 'no-store' });
+
+      vod.destroy();
+      live.destroy();
+      fetchMock.mockClear();
+      window.dispatchEvent(new Event('pagehide'));
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('bufferedAt: inside a range, not at its end', () => {
     const { el, state } = clockedVideo();
     state.ranges = [

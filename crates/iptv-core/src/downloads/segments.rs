@@ -12,7 +12,8 @@
 //! transfer resumes every segment where it was; while it exists, the
 //! `.part`'s length means nothing. Any answer that is not the exact range
 //! asked for (the file changed, ranges no longer work) drops the partial and
-//! restarts the file with one connection.
+//! restarts the file with one connection. A segment request the provider
+//! refuses while another connection works drops the transfer to one.
 
 use super::manager::{DownloadManager, TaskCtl};
 use crate::error::CoreError;
@@ -25,7 +26,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
@@ -47,6 +48,10 @@ const TICK: Duration = Duration::from_millis(250);
 /// first chunk, they show at once where the transfer starts.
 const FIRST_TICK: Duration = Duration::from_millis(20);
 const SAVE_EVERY: Duration = Duration::from_secs(2);
+/// How long a segment's request waits after another connection of the
+/// transfer closed: a panel counts a closed connection a moment longer, and
+/// a request sooner can be refused.
+const CLOSE_GRACE: Duration = Duration::from_millis(300);
 
 /// One segment: bytes `start..end` of the file, written up to `pos`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,6 +243,9 @@ pub struct Job<'a> {
     /// Most connections the source's setting allows (1 for "1", resuming
     /// a split file one segment after another).
     pub cap: usize,
+    /// The rest of the run uses one connection: set here when the provider
+    /// refuses an extra segment, read back by the transfer.
+    pub one_connection: &'a AtomicBool,
 }
 
 /// How a segmented attempt ended.
@@ -269,6 +277,9 @@ enum WorkerEnd {
 
 enum WorkerError {
     Failed(CoreError),
+    /// The request for the segment got no body: a refusal, a server error,
+    /// no connection.
+    Refused(CoreError),
     /// The answer was not the range asked for.
     Changed(String),
 }
@@ -294,13 +305,14 @@ pub async fn run(
 
     let spawn = |seg: usize,
                  stream: Option<BoxStream<'static, reqwest::Result<Bytes>>>,
+                 wait: Duration,
                  running: &mut Vec<(usize, CancellationToken)>| {
         let retire = all.child_token();
         running.push((seg, retire.clone()));
         let plan = Arc::clone(&plan);
         let validator = validator.clone();
         async move {
-            let end = worker(job, &plan, seg, total, &validator, stream, &retire).await;
+            let end = worker(job, &plan, seg, total, &validator, stream, wait, &retire).await;
             plan.lock().taken[seg] = false;
             (seg, end)
         }
@@ -316,6 +328,11 @@ pub async fn run(
         p.taken[i] = true;
         Some((i, stream))
     });
+    // The segment the attempt's open answer serves: it reads on past its
+    // end when the segment after it is given back.
+    let mut open_ended = first.as_ref().map(|(i, _)| *i);
+    // When a connection of the transfer last closed.
+    let mut closed_at: Option<Instant> = None;
     // The plan is on disk before any segment writes past what the `.part`
     // already holds: a `.part` with holes and no sidecar would resume from
     // its length.
@@ -332,11 +349,12 @@ pub async fn run(
             // segments (splitting the largest when none is free), or retire
             // the newest workers.
             // A speed cap paces one stream: a capped transfer keeps one.
-            let cap = if job.mgr.rate_limit().is_some() {
-                1
-            } else {
-                job.cap
-            };
+            let cap =
+                if job.mgr.rate_limit().is_some() || job.one_connection.load(Ordering::Relaxed) {
+                    1
+                } else {
+                    job.cap
+                };
             let allowed = job
                 .mgr
                 .connection_allowance(job.ctl)
@@ -386,8 +404,10 @@ pub async fn run(
                     starting.clear();
                 }
             }
+            let wait =
+                closed_at.map_or(Duration::ZERO, |t| CLOSE_GRACE.saturating_sub(t.elapsed()));
             for (seg, stream) in starting {
-                workers.push(spawn(seg, stream, &mut running));
+                workers.push(spawn(seg, stream, wait, &mut running));
             }
             while running.len() > allowed {
                 let (_, retire) = running.pop().expect("more running than allowed");
@@ -409,8 +429,31 @@ pub async fn run(
             ended = workers.next() => match ended {
                 Some((seg, end)) => {
                     running.retain(|(s, _)| *s != seg);
+                    closed_at = Some(Instant::now());
+                    if open_ended == Some(seg) {
+                        open_ended = None;
+                    }
                     match end {
                         Ok(WorkerEnd::Finished | WorkerEnd::Retired) => {}
+                        Err(WorkerError::Refused(err)) if !running.is_empty() => {
+                            // The account has fewer free connections than
+                            // its limit says (another device holds one):
+                            // the rest goes over one connection. A refused
+                            // segment that follows the open answer's goes
+                            // back to it, so that stream reads on and no
+                            // new request is needed.
+                            tracing::info!(id = job.id, error = %err, "the provider refused another connection; going on with one");
+                            job.one_connection.store(true, Ordering::Relaxed);
+                            let mut p = plan.lock();
+                            let refused = p.ranges.segments[seg];
+                            if let Some(o) = open_ended.filter(|o| {
+                                refused.pos == refused.start
+                                    && p.ranges.segments[*o].end == refused.start
+                            }) {
+                                p.ranges.segments[o].end = refused.end;
+                                p.ranges.segments[seg].end = refused.start;
+                            }
+                        }
                         Err(e) => {
                             if failure.is_none() {
                                 failure = Some(e);
@@ -478,13 +521,17 @@ pub async fn run(
         tracing::warn!(id = job.id, error = %e, "could not save download ranges");
     }
     match failure {
-        Some(WorkerError::Failed(err)) => SegEnd::Error { err, bytes: done },
+        Some(WorkerError::Failed(err) | WorkerError::Refused(err)) => {
+            SegEnd::Error { err, bytes: done }
+        }
         _ => SegEnd::Stopped(done),
     }
 }
 
 /// Fetches segment `seg` (from `stream` when given, else with its own
-/// request) until it is written, the worker is retired, or it fails.
+/// request, sent after `wait`) until it is written, the worker is retired,
+/// or it fails.
+#[allow(clippy::too_many_arguments)]
 async fn worker(
     job: &Job<'_>,
     plan: &Mutex<Plan>,
@@ -492,6 +539,7 @@ async fn worker(
     total: i64,
     validator: &str,
     stream: Option<BoxStream<'static, reqwest::Result<Bytes>>>,
+    wait: Duration,
     retire: &CancellationToken,
 ) -> Result<WorkerEnd, WorkerError> {
     let (mut pos, end) = {
@@ -505,13 +553,19 @@ async fn worker(
     let mut stream = match stream {
         Some(s) => s,
         None => {
+            if !wait.is_zero() {
+                tokio::select! {
+                    _ = retire.cancelled() => return Ok(WorkerEnd::Retired),
+                    _ = tokio::time::sleep(wait) => {}
+                }
+            }
             let req = crate::http::apply_source_headers(job.client.get(&job.url), &job.headers)
                 .header(ACCEPT_ENCODING, "identity")
                 .header(RANGE, format!("bytes={pos}-{}", end - 1))
                 .header(IF_RANGE, validator);
             let resp = tokio::select! {
                 _ = retire.cancelled() => return Ok(WorkerEnd::Retired),
-                r = crate::http::send_within(req, job.head_limit) => r.map_err(WorkerError::Failed)?,
+                r = crate::http::send_within(req, job.head_limit) => r.map_err(WorkerError::Refused)?,
             };
             check_range(&resp, pos, total)?;
             resp.bytes_stream().boxed()
@@ -661,7 +715,7 @@ fn check_range(resp: &reqwest::Response, pos: i64, total: i64) -> Result<(), Wor
             "answered {status} to a range"
         )));
     }
-    Err(WorkerError::Failed(super::transfer::http_status_error(
+    Err(WorkerError::Refused(super::transfer::http_status_error(
         status,
     )))
 }

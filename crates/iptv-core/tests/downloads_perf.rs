@@ -301,9 +301,9 @@ async fn measure_outage_mid_queue() {
 
 /// DL-2: one 64 MiB file from a server that caps every connection at
 /// 2 MiB/s (the mock throttles each response on its own), over 1, 2 and 4
-/// connections: "Connections per download: 1", a source with no account
-/// limit (two connections), and an account allowing 5 (four for downloads).
-/// Prints the wall time of each and checks the bytes.
+/// connections: "Connections per download: 1", an account allowing 3 (two
+/// for downloads), and one allowing 5 (four for downloads). Prints the wall
+/// time of each and checks the bytes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "measurement"]
 async fn measure_segments() {
@@ -313,24 +313,26 @@ async fn measure_segments() {
     iptv_core::settings::save(&c.state, next).await.unwrap();
     c.state
         .db_call(|conn| {
-            conn.execute(
-                "INSERT INTO sources (id, kind, name, config_json) VALUES ('five', 'm3u', 'five', '{}')",
-                [],
-            )?;
-            iptv_core::account::save(
-                conn,
-                &iptv_core::account::AccountStatus {
-                    source_id: "five".into(),
-                    kind: iptv_core::model::SourceKind::Xtream,
-                    status: None,
-                    exp_date: None,
-                    is_trial: false,
-                    active_cons: Some(0),
-                    max_connections: Some(5),
-                    checked_at: "2026-10-22T00:00:00Z".into(),
-                    error: None,
-                },
-            )?;
+            for (id, limit) in [("two", 3), ("five", 5)] {
+                conn.execute(
+                    "INSERT INTO sources (id, kind, name, config_json) VALUES (?1, 'm3u', ?1, '{}')",
+                    [id],
+                )?;
+                iptv_core::account::save(
+                    conn,
+                    &iptv_core::account::AccountStatus {
+                        source_id: id.into(),
+                        kind: iptv_core::model::SourceKind::Xtream,
+                        status: None,
+                        exp_date: None,
+                        is_trial: false,
+                        active_cons: Some(0),
+                        max_connections: Some(limit),
+                        checked_at: "2026-10-22T00:00:00Z".into(),
+                        error: None,
+                    },
+                )?;
+            }
             Ok(())
         })
         .await

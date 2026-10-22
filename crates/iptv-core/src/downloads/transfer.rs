@@ -17,7 +17,7 @@ use reqwest::StatusCode;
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
@@ -392,8 +392,8 @@ fn user_message(err: &CoreError) -> String {
 struct Representation {
     total: Option<i64>,
     validator: Option<String>,
-    /// A segment answer did not match: the rest of this run uses one
-    /// connection.
+    /// A segment answer did not match, or the provider refused an extra
+    /// connection: the rest of this run uses one connection.
     one_connection: bool,
 }
 
@@ -884,6 +884,7 @@ async fn segmented(
         .and_then(|u| u.host_str().map(str::to_owned))
         .unwrap_or_else(|| "the server".into());
     let (head_limit, idle_limit) = mgr.idle_timeouts();
+    let one_connection = AtomicBool::new(rep.one_connection);
     let job = segments::Job {
         id,
         client: crate::http::source_client(state, &row.download.item_ref.source_id, &url).await,
@@ -900,12 +901,14 @@ async fn segmented(
         } else {
             1
         },
+        one_connection: &one_connection,
     };
     let mut progress = Progress::new(start);
     let end = segments::run(job, ranges, first, |done, total| {
         progress.tick(state, id, done, Some(total))
     })
     .await;
+    rep.one_connection = one_connection.load(Ordering::Relaxed);
     // The last periodic write lands first, so it never overwrites this one.
     if let Some(write) = progress.persisting.take() {
         let _ = write.await;

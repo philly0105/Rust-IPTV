@@ -1,7 +1,8 @@
 //! DL-2: one file over several Range connections ("Connections per
 //! download: Auto"), against the mock's `/files/video.bin`, which throttles
 //! each response on its own (`kbps`), the way a provider that caps every
-//! connection does.
+//! connection does, and its `limit<N>` Xtream accounts, which refuse a file
+//! beyond N open bodies.
 
 use iptv_core::model::{Download, DownloadStatus};
 use iptv_core::rpc::RpcRouter;
@@ -91,6 +92,53 @@ impl Ctx {
             .unwrap();
         v["requests"][path].as_u64().unwrap_or(0)
     }
+
+    /// Caches an account status allowing `n` connections for `source`, the
+    /// way every Xtream sync does.
+    async fn limit(&self, source: &str, n: i64) {
+        iptv_core::account::record(
+            &self.state,
+            iptv_core::account::AccountStatus {
+                source_id: source.into(),
+                kind: iptv_core::model::SourceKind::Xtream,
+                status: None,
+                exp_date: None,
+                is_trial: false,
+                active_cons: Some(0),
+                max_connections: Some(n),
+                checked_at: "2026-10-22T00:00:00Z".into(),
+                error: None,
+            },
+        )
+        .await;
+    }
+
+    /// Size and speed of every file the mock's `limit<N>` accounts serve.
+    async fn limited_files(&self, size: u64, kbps: u64) {
+        reqwest::get(
+            self.srv
+                .url(&format!("/__mock/limited-vod?size={size}&kbps={kbps}")),
+        )
+        .await
+        .unwrap();
+    }
+
+    /// A movie of the mock's `limit1` Xtream account, which refuses a
+    /// second open body.
+    fn one_connection_movie(&self, item: u32) -> String {
+        let pass = iptv_fixtures::XTREAM_PASSWORD;
+        format!("/xtream/movie/limit1/{pass}/{item}.mp4")
+    }
+
+    async fn refused(&self) -> u64 {
+        let v: Value = reqwest::get(self.srv.url("/__mock/stats"))
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        v["requests"]["refused_streams"].as_u64().unwrap_or(0)
+    }
 }
 
 fn is_mock_content(p: &Path) -> bool {
@@ -105,10 +153,11 @@ fn ranges_of(file_path: &str) -> PathBuf {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn auto_splits_a_file_over_free_connections_and_resumes_every_segment() {
     let c = ctx().await;
+    c.limit("src", 3).await;
     let size = 24 * MIB;
     let path = format!("/files/video.bin?size={size}&kbps=2048");
     let d = c.start("src", "1", &path).await;
-    // A source with no account limit has two connections; nothing else is
+    // An account allowing three leaves downloads two; nothing else is
     // queued or playing, so the file takes both.
     let split = c
         .wait_until(d.id, "used two connections", |d| {
@@ -141,6 +190,7 @@ async fn auto_splits_a_file_over_free_connections_and_resumes_every_segment() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_changed_file_restarts_with_one_connection_and_stays_byte_exact() {
     let c = ctx().await;
+    c.limit("src", 3).await;
     let size = 24 * MIB;
     let path = format!("/files/video.bin?size={size}&kbps=2048&versioned=1");
     let d = c.start("src", "1", &path).await;
@@ -165,6 +215,7 @@ async fn a_changed_file_restarts_with_one_connection_and_stays_byte_exact() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn playback_on_the_source_drops_a_split_download_to_one_connection() {
     let c = ctx().await;
+    c.limit("src", 3).await;
     let path = format!("/files/video.bin?size={}&kbps=1024", 24 * MIB);
     let d = c.start("src", "1", &path).await;
     c.wait_until(d.id, "used two connections", |d| d.connections == Some(2))
@@ -198,6 +249,7 @@ async fn playback_on_the_source_drops_a_split_download_to_one_connection() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_one_connection_setting_keeps_a_file_on_one_connection() {
     let c = ctx().await;
+    c.limit("src", 3).await;
     let mut next = c.state.settings_snapshot();
     next.download_single_connection = vec!["src".into()];
     iptv_core::settings::save(&c.state, next).await.unwrap();
@@ -220,6 +272,7 @@ async fn the_one_connection_setting_keeps_a_file_on_one_connection() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_queued_download_gets_the_connection_a_split_one_gives_back() {
     let c = ctx().await;
+    c.limit("src", 3).await;
     let path = |n: &str| format!("/files/video.bin?size={}&kbps=1024&n={n}", 24 * MIB);
     let first = c.start("src", "1", &path("1")).await;
     c.wait_until(first.id, "used two connections", |d| {
@@ -242,4 +295,48 @@ async fn a_queued_download_gets_the_connection_a_split_one_gives_back() {
     assert_eq!(c.get(first.id).await.connections, None, "back to one");
     c.ok("downloads.cancel", json!({"id": first.id})).await;
     c.ok("downloads.cancel", json!({"id": second.id})).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_source_that_reports_no_limit_keeps_one_connection_per_file() {
+    let c = ctx().await;
+    // An M3U playlist (no account status) whose provider allows one
+    // connection, as many Xtream-backed playlists and Stalker portals do.
+    c.limited_files(16 * MIB, 4096).await;
+    let d = c.start("m3u", "1", &c.one_connection_movie(101)).await;
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let d = c.get(d.id).await;
+        assert_eq!(d.connections, None, "one connection");
+        assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+        if d.status == DownloadStatus::Completed {
+            assert!(is_mock_content(Path::new(&d.file_path.unwrap())));
+            break;
+        }
+        assert!(Instant::now() < deadline, "never completed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(c.refused().await, 0, "no second connection was tried");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_refused_extra_connection_drops_the_file_to_one_and_it_completes() {
+    let c = ctx().await;
+    // The account says three (two for downloads), but the panel lets this
+    // app open one (another device holds the rest): the extra segment is
+    // refused.
+    c.limit("xt", 3).await;
+    c.limited_files(16 * MIB, 4096).await;
+    let d = c.start("xt", "1", &c.one_connection_movie(101)).await;
+    let done = c
+        .wait_until(d.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    let file_path = done.file_path.unwrap();
+    assert_eq!(std::fs::metadata(&file_path).unwrap().len(), 16 * MIB);
+    assert!(is_mock_content(Path::new(&file_path)), "byte-exact");
+    assert!(!ranges_of(&file_path).exists());
+    assert_eq!(c.refused().await, 1, "one refusal, then one connection");
 }

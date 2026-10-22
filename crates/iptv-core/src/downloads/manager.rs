@@ -476,12 +476,19 @@ impl DownloadManager {
 
     /// How many connections the transfer `ctl` may hold now (at least 1):
     /// what its source's budget leaves after the source's other transfers,
-    /// and 1 while anything plays from the source or another download of
-    /// it waits in the queue (that one gets the connection first).
+    /// and 1 while anything plays from the source, another download of it
+    /// waits in the queue (that one gets the connection first), or its
+    /// account reports no limit.
     pub fn connection_allowance(&self, ctl: &TaskCtl) -> usize {
         let now = Instant::now();
         let inner = self.inner.lock();
         let source = ctl.source.as_str();
+        // A file splits only into connections the account is known to have
+        // spare: an M3U playlist or a Stalker portal that reports no limit
+        // often allows one (Stalker: one per MAC).
+        if !matches!(inner.limits.get(source), Some(Limit::Known(Some(_)))) {
+            return 1;
+        }
         if inner.playing(source, now) > 0 {
             return 1;
         }

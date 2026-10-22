@@ -43,6 +43,9 @@ const WRITE_CHUNK: usize = 256 * 1024;
 /// How often the coordinator saves the sidecar, reports progress and
 /// re-reads how many connections it may hold.
 const TICK: Duration = Duration::from_millis(250);
+/// The tick until the first new bytes are reported: like a single stream's
+/// first chunk, they show at once where the transfer starts.
+const FIRST_TICK: Duration = Duration::from_millis(20);
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 
 /// One segment: bytes `start..end` of the file, written up to `pos`.
@@ -319,6 +322,8 @@ pub async fn run(
     let mut saved_plan = 0;
 
     let mut last_save = Instant::now();
+    let began = plan.lock().ranges.done();
+    let mut reported = false;
     let mut failure: Option<WorkerError> = None;
     let mut stopping = false;
     loop {
@@ -421,7 +426,7 @@ pub async fn run(
                     }
                 }
             },
-            _ = tokio::time::sleep(TICK) => {}
+            _ = tokio::time::sleep(if reported { TICK } else { FIRST_TICK }) => {}
         }
 
         let (done, snapshot) = {
@@ -430,6 +435,7 @@ pub async fn run(
         };
         job.ctl.bytes.store(done, Ordering::Relaxed);
         progress(done, total);
+        reported |= done > began;
         if last_save.elapsed() >= SAVE_EVERY {
             last_save = Instant::now();
             let part = job.part.clone();

@@ -11,8 +11,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
 import { useToastStore } from '@/ui';
 
-import { defaultStart, EpgGridPage, extendDirection, GRID_EXTEND_EDGE_PX, GRID_SLOT_PX, nowScroll, rulerLabelCovered } from '../../components/EpgGridPage';
-import { HOUR, MINUTE } from '../../lib/epgTime';
+import { defaultStart, EpgGridPage, extendDirection, GRID_EXTEND_EDGE_PX, GRID_SLOT_PX, nowScroll, rulerLabelCovered, visibleGuideTime } from '../../components/EpgGridPage';
+import { formatClockBare, formatDay, HOUR, MINUTE } from '../../lib/epgTime';
 import { __resetGuideSourceForTests, rememberGuideSource } from '../lastSource';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
@@ -98,6 +98,14 @@ const focusedLabel = () => (document.activeElement as HTMLElement | null)?.getAt
 const atParam = () => Number(new URLSearchParams(router.location?.search).get('at'));
 
 describe('helpers', () => {
+  it('labels the viewport rather than the buffered guide window', () => {
+    const start = new Date(2026, 9, 22, 8).getTime();
+    const end = start + 6 * HOUR;
+    expect(visibleGuideTime(start, 0, 820, 220, 5, end)).toEqual([start, start + 2 * HOUR]);
+    expect(visibleGuideTime(start, 127, 820, 220, 5, end)).toEqual([start + 25 * MINUTE, start + 2 * HOUR + 30 * MINUTE]);
+    expect(visibleGuideTime(start, 0, 0, 220, 5, end)).toEqual([start, end]);
+  });
+
   it('nowScroll starts the visible track on the half hour now is in, so rows open on whole cells', () => {
     const px = GRID_SLOT_PX / 30;
     const slot = new Date(2026, 9, 20, 17, 30).getTime();
@@ -174,6 +182,8 @@ describe('horizontal scrolling past the window (L1-guide-library-16)', () => {
     const grid = screen.getByTestId('epg-grid');
     Object.defineProperty(grid, 'scrollWidth', { configurable: true, value: 2000 });
     Object.defineProperty(grid, 'clientWidth', { configurable: true, value: 800 });
+    const label = () => screen.getByTestId('guide-window').textContent ?? '';
+    const showsTime = (time: number) => expect(label()).toContain(`${formatDay(time, 'en')} ${formatClockBare(time, 'en')}`);
     const nextFrom = new Date(at + 3 * HOUR).toISOString();
     const asked = () => (rpc.of('epg.grid') as { from: string }[]).some((a) => a.from === nextFrom);
 
@@ -182,18 +192,21 @@ describe('horizontal scrolling past the window (L1-guide-library-16)', () => {
     fireEvent.scroll(grid);
     await waitFor(() => expect(asked()).toBe(true));
     expect(atParam()).toBe(at);
+    showsTime(at + 80 * MINUTE);
 
     // Near the end, scrolling on: the window moves 3 h later and the scroll moves back by 3 h of px.
     grid.scrollLeft = 1100;
     fireEvent.scroll(grid);
     await waitFor(() => expect(atParam()).toBe(at + 3 * HOUR));
     await waitFor(() => expect(grid.scrollLeft).toBe(1100 - 900));
+    showsTime(at + 3 * HOUR + 40 * MINUTE);
 
     // Near the start, scrolling back: the window moves 3 h earlier, the scroll forward by as much.
     grid.scrollLeft = 100;
     fireEvent.scroll(grid);
     await waitFor(() => expect(atParam()).toBe(at));
     await waitFor(() => expect(grid.scrollLeft).toBe(100 + 900));
+    showsTime(at + 3 * HOUR + 20 * MINUTE);
   });
 });
 

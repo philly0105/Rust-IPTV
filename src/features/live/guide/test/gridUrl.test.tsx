@@ -91,6 +91,24 @@ const atOf = () => {
 };
 
 describe('the window in the URL', () => {
+  it('stays three hours earlier when moving back from the live window', async () => {
+    const live = defaultStart(Date.now());
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByText('Channel 0');
+    showsWindow(live);
+    const grid = screen.getByTestId('epg-grid');
+
+    fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
+    expect(atOf()).toBe(live - 3 * HOUR);
+    await waitFor(() => showsWindow(live - 3 * HOUR));
+    expect(grid.scrollLeft).toBe(0);
+    await waitFor(() => expect(gridFroms()).toContain(live - 3 * HOUR));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+    showsWindow(live - 3 * HOUR);
+    expect(atOf()).toBe(live - 3 * HOUR);
+    expect(grid.scrollLeft).toBe(0);
+  });
+
   it('opens at `at`, and back/forward restore each move of the chevrons and day buttons', async () => {
     const base = defaultStart(Date.now()) + 6 * HOUR;
     renderGuide({ path: `/epg?source=src1&at=${base}`, routes: GRID });

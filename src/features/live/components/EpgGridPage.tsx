@@ -193,6 +193,15 @@ export function nowScroll(now: number, start: number, pxPerMin: number, view: nu
   return nowRestLeft(now, start, pxPerMin, view, NOW_PILL_LEAD_PX);
 }
 
+/** The times under the visible track, rounded outward to five minutes for a steady toolbar label. */
+export function visibleGuideTime(start: number, scroll: number, width: number, channelCol: number, pxPerMin: number, end: number): Span {
+  if (width <= channelCol) return [start, end];
+  const step = 5 * MINUTE;
+  const first = start + (Math.max(0, scroll) / pxPerMin) * MINUTE;
+  const last = Math.min(end, first + ((width - channelCol) / pxPerMin) * MINUTE);
+  return [Math.floor(first / step) * step, Math.min(end, Math.ceil(last / step) * step)];
+}
+
 /** Portal programmes per row for a window: 12 for 6 h, more for a longer window. */
 export function stalkerGridLimit(windowMs: number): number {
   return Math.max(STALKER_GRID_LIMIT, Math.ceil((STALKER_GRID_LIMIT * windowMs) / GRID_WINDOW));
@@ -517,6 +526,7 @@ export function EpgGridPage() {
   useEffect(() => {
     if (pageMeasured) lastWindowMs = windowMs;
   }, [pageMeasured, windowMs]);
+  const [shownTime, setShownTime] = useState<Span>([start, end]);
   // Rows lay their cells out from this fixed time; the window's offset from it is one CSS
   // variable on the grid, so a window move leaves every row's props alone (L3-perf-ui-4).
   const [origin] = useState(start);
@@ -950,13 +960,15 @@ export function EpgGridPage() {
     return scroller.current?.querySelector<HTMLElement>(sel) ?? null;
   };
 
-  // When the window moves (or the grid first mounts after loading), put the scroll at the track's
-  // inline-start edge, or just before now. A move that keeps the view (a scroll or a key that ran
-  // into the window's edge) moves the scroll by the same px instead, so the screen stays put.
+  // An explicit window opens at its inline-start edge, even when it still contains now. The live
+  // window opens just before now. A move that keeps the view (a scroll or a key that ran into the
+  // window's edge) moves the scroll by the same px instead, so the screen stays put.
   // RTL scrollers count scrollLeft down from 0. Declared before the focus effect, which then only
   // has to bring the cursor cell into view.
   const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
   const laidStart = useRef(start);
+  const laidWinAt = useRef(winAt);
+  const laidGrid = useRef(false);
   /** The scroll's distance from the inline start, at the last scroll event or scroll write. */
   const scrollX = useRef(0);
   /** The scroller's clientWidth at the last scroll event or scroll write (read with the scroll, never after a write). */
@@ -964,25 +976,37 @@ export function EpgGridPage() {
   // A new zoom step keeps the time at the track's visible start where it was (worked out from the
   // last scroll position: reading the scroll now would give one the narrower track has clamped).
   const laidPx = useRef(pxPerMin);
+  const showViewportTime = (el: HTMLElement, scroll: number, at: number) => {
+    const next = visibleGuideTime(at, scroll, el.clientWidth || pageWidth, channelCol, pxPerMin, at + windowMs);
+    setShownTime((prev) => (prev[0] === next[0] && prev[1] === next[1] ? prev : next));
+  };
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (!el) return;
+    if (!el) {
+      laidGrid.current = false;
+      return;
+    }
+    const firstMount = !laidGrid.current;
+    laidGrid.current = true;
     const moved = start - laidStart.current;
     laidStart.current = start;
+    const modeChanged = winAt !== laidWinAt.current;
+    laidWinAt.current = winAt;
     const zoomedFrom = laidPx.current;
     laidPx.current = pxPerMin;
     if (keepView.current) {
       keepView.current = false;
       el.scrollLeft = scrollLeftFor(Math.max(0, scrollStart(el) - (moved / MINUTE) * pxPerMin), rtl);
-    } else if (moved === 0 && zoomedFrom !== pxPerMin) {
+    } else if (firstMount || moved !== 0 || modeChanged) {
+      el.scrollLeft = scrollLeftFor(winAt === null && now > start && now < end ? nowScroll(now, start, pxPerMin, el.clientWidth - channelCol) : 0, rtl);
+    } else if (zoomedFrom !== pxPerMin) {
       el.scrollLeft = scrollLeftFor((scrollX.current * pxPerMin) / zoomedFrom, rtl);
-    } else {
-      el.scrollLeft = scrollLeftFor(now > start && now < end ? nowScroll(now, start, pxPerMin, el.clientWidth - channelCol) : 0, rtl);
     }
     scrollX.current = scrollStart(el);
     viewWidth.current = el.clientWidth;
     fitCellText(el, scrollX.current, shiftPx.current); // before first paint: cells already clipped by the edge fit their text
-  }, [start, rtl, gridMounted, pxPerMin]);
+    showViewportTime(el, scrollX.current, start);
+  }, [start, winAt, rtl, gridMounted, pxPerMin, pageWidth, channelCol, windowMs]);
 
   // ---- zoom -----------------------------------------------------------------
   const zoomRef = useRef(zoom);
@@ -1223,10 +1247,11 @@ export function EpgGridPage() {
       // the now line and the track's shift: the rows keep their props (cells sit from a fixed
       // origin, and the guide for the new window renders deferred), L3-perf-ui-4.
       flushSync(() => drift(dir * GRID_EXTEND));
-    } else if (dx > 0 && x >= max - GRID_EXTEND_EDGE_PX - el.clientWidth) {
-      prefetchWindow(GRID_EXTEND);
-    } else if (dx < 0 && x <= GRID_EXTEND_EDGE_PX + el.clientWidth) {
-      prefetchWindow(-GRID_EXTEND);
+      // The layout effect publishes the new window and compensated scroll together.
+    } else {
+      showViewportTime(el, x, start);
+      if (dx > 0 && x >= max - GRID_EXTEND_EDGE_PX - el.clientWidth) prefetchWindow(GRID_EXTEND);
+      else if (dx < 0 && x <= GRID_EXTEND_EDGE_PX + el.clientWidth) prefetchWindow(-GRID_EXTEND);
     }
   };
 
@@ -1576,9 +1601,9 @@ export function EpgGridPage() {
         view={view}
         lists={lists.data}
         bar={bar}
-        start={start}
-        end={end}
-        nowInWindow={nowInWindow}
+        start={shownTime[0]}
+        end={shownTime[1]}
+        nowInWindow={now >= shownTime[0] && now < shownTime[1]}
         now={now}
         onQuery={setQuery}
         onShift={shift}
@@ -2109,7 +2134,7 @@ const GuideToolbar = memo(function GuideToolbar({
           goes to them, so the picker stays at its name's width), and a row of their own when they
           wrap under a long group name. */}
       <div
-        className={oneRow ? 'flex min-w-0 grow-[999] items-center gap-1' : stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'}
+        className={oneRow ? 'flex min-w-0 grow-[999] items-center gap-1' : stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex max-w-full items-center gap-1'}
         role="group"
         aria-label={t('guideTime')}
         data-testid="guide-time"
@@ -2131,11 +2156,11 @@ const GuideToolbar = memo(function GuideToolbar({
               data-testid="guide-window"
               className={cn(
                 'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-                stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+                stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
               )}
             >
               {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-              <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
+              <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
                 <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
                 <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
               </span>

@@ -507,6 +507,37 @@ async fn a_provider_outage_requeues_rows_and_the_queue_completes_after_it() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_file_that_keeps_failing_does_not_hold_up_its_source() {
+    let c = ctx().await;
+    // Long enough that the failing rows wait for the whole test.
+    iptv_core::downloads::set_wait_timing(
+        &c.state,
+        Duration::from_millis(200),
+        Duration::from_secs(3600),
+    );
+    // Two broken files take both of the source's slots and answer 503
+    // every time; a good one is queued behind them.
+    let mut bad = Vec::new();
+    for i in 0..2 {
+        bad.push(c.start(&format!("bad{i}"), "bad", "/fail/503.m3u").await.id);
+    }
+    let good = c
+        .start("good", "good", "/files/video.bin?size=1048576")
+        .await;
+    let started = Instant::now();
+    let done = c.wait_status(good.id, DownloadStatus::Completed).await;
+    let took = started.elapsed();
+    eprintln!("good file behind two failing ones completed after {took:?}");
+    assert!(took < Duration::from_secs(20), "waited {took:?}");
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+    // The broken ones still wait for their source (or try it again); they
+    // fail only after the wait limit.
+    for id in bad {
+        assert_ne!(c.get(id).await.status, DownloadStatus::Failed);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn existing_destination_is_never_overwritten() {
     let mut c = ctx().await;
     let dir = c.downloads_dir();

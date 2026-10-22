@@ -1095,8 +1095,9 @@ async fn claim(state: &Arc<AppState>, mgr: &DownloadManager, id: i64) -> CoreRes
 
 async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl: Arc<TaskCtl>) {
     let mut retry_later = false;
-    // Bytes and `.part` of a run that goes back to the queue.
-    let mut back: Option<(i64, Option<std::path::PathBuf>)> = None;
+    // Bytes and `.part` of a run that goes back to the queue, and whether
+    // it waits for its source (else it yielded).
+    let mut back: Option<(i64, Option<std::path::PathBuf>, bool)> = None;
     match claim(&state, &mgr, id).await {
         Ok(true) => {
             state.emit("downloads.update", serde_json::json!({}));
@@ -1129,8 +1130,8 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
                     reason: StopReason::Yield,
                     bytes,
                     part,
-                }
-                | Outcome::Requeue { bytes, part, .. } => Some((*bytes, part.clone())),
+                } => Some((*bytes, part.clone(), false)),
+                Outcome::Requeue { bytes, part, .. } => Some((*bytes, part.clone(), true)),
                 _ => None,
             };
             persist_outcome(&state, id, outcome).await;
@@ -1144,18 +1145,30 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
             retry_later = !ctl.token.is_cancelled();
         }
     }
-    // A row that yielded or waits for its source goes back to the front of
-    // the queue, unless the user stopped it meanwhile: their pause, cancel
-    // or remove wins, and is saved before they hear back.
+    // A row that yielded goes back to the front of the queue, and one that
+    // waits for its source behind the source's other queued rows: a file
+    // that keeps failing (one broken file answering 5xx) must not take the
+    // source's connection first each time the wait ends while good files
+    // wait behind it. Unless the user stopped it meanwhile: their pause,
+    // cancel or remove wins, and is saved before they hear back.
     let mut overruled = None;
     {
         let mut inner = mgr.inner.lock();
         inner.active.remove(&id);
-        if let Some(stopped) = back.take() {
+        if let Some((bytes, part, waits)) = back.take() {
             match *ctl.reason.lock() {
-                Some(r) if r != StopReason::Yield => overruled = Some((r, stopped)),
+                Some(r) if r != StopReason::Yield => overruled = Some((r, (bytes, part))),
                 _ => {
-                    inner.queue.push_front(id);
+                    let at = if waits {
+                        inner
+                            .queue
+                            .iter()
+                            .rposition(|q| inner.queued_from.get(q) == Some(&ctl.source))
+                            .map_or(0, |i| i + 1)
+                    } else {
+                        0
+                    };
+                    inner.queue.insert(at, id);
                     inner.queued_from.insert(id, ctl.source.clone());
                 }
             }

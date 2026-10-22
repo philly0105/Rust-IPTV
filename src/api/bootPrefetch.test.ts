@@ -35,7 +35,7 @@ import { rpcRaw } from './transport';
 import type { Source } from './types';
 
 const sources = vi.hoisted(() => ({
-  list: [] as Array<{ id: string; kind: string }>,
+  list: [] as Array<{ id: string; kind: string; channelCount?: number }>,
   settings: {} as Record<string, unknown>,
   /** The channels every `catalog.channels` page answers with. */
   channels: [] as unknown[],
@@ -67,7 +67,7 @@ afterEach(() => {
   sources.channels = [];
 });
 
-const channel = (i: number) => ({ ref: { sourceId: 's1', contentType: 'live', itemId: `c${i}` }, name: `Channel ${i}`, categoryId: 'c9', categoryName: 'News', isRadio: false });
+const channel = (i: number) => ({ ref: { sourceId: 's1', contentType: 'live' as const, itemId: `c${i}` }, name: `Channel ${i}`, categoryId: 'c9', categoryName: 'News', isRadio: false });
 const refs = (n: number) => Array.from({ length: n }, (_, i) => channel(i).ref);
 
 describe('prefetchScreenData', () => {
@@ -177,7 +177,7 @@ describe('the TV guide', () => {
     sources.list = [
       { id: 'vod', kind: 'xtream', channelCount: 0 },
       { id: 's2', kind: 'm3u', channelCount: 40 },
-    ] as Array<{ id: string; kind: string }>;
+    ];
     prefetchScreenData('/epg');
     await waitFor(() => expect(calls('catalog.channels')).toHaveLength(1));
     expect(calls('catalog.channels')).toEqual([channelPageArgs({ sourceId: 's2' }, 0)]);

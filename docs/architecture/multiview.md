@@ -73,6 +73,8 @@ A tile's first start waits `slot × TILE_START_STAGGER_MS` (32 ms), so tiles tha
 
 A stream the server refuses fails at once with the reason. The media element hides the HTTP status and reports a refusal (a 503, a 404) as a network or unsupported error. An extensionless stream the element rejects as unsupported goes straight to its single retry through mpegts.js, with no request first: mpegts.js sees a refusal's status and asks the app's own server for the reason itself. That retry is skipped when the element only took over because mpegts.js had found no MPEG-TS. Any other element error makes the tile ask the app's own server why (`fetchFailureReason`, one GET), and an answer with a reason fails the tile with it. A tile on mpegts.js fails at once on an HTTP status too, since the player's mpegts.js engine no longer restarts on one ([failover.md](failover.md#starting-a-stream)).
 
+A live stream that ends fails the tile, unless it plays in mpegts.js. Under Auto that is every Xtream channel in a browser with MSE (the panel's `.ts` URL). When the panel closes a live MPEG-TS connection, mpegts.js ends the MediaSource and the element fires `ended`; the engine reconnects it (up to `TS_MAX_RESTARTS` times, [players.md](players.md#built-in-engines-ui)) and reports through its error callback once they run out, which fails the tile. Before, the tile failed on `ended` itself, which destroyed the engine before its reconnect ran, so the tile sat in its error panel until Retry.
+
 The player's `classifyStreamError` classifies failures. The copy is the wall's own (`errors.ts`). When an account has more tiles than connections, failures of classes `auth`, `server`, `network`, `timeout`, `generic` and `notFound` on that account's tiles read as "Connection limit reached".
 
 Sound:
@@ -168,6 +170,7 @@ All copy is in the `multiview` namespace, in all 19 locales. The shared Close, C
   - staggered tile starts and the quick-picks skeleton;
   - the picker add flow.
 - `tilePlayback.test.tsx` covers a server-refused stream failing at once with its reason, the mpegts.js retry without a request first, no retry after an mpegts.js fallback, the tile buffer profile, and the start delay (none for the first slot, none for a retry).
+- `tileReconnect.test.tsx` runs a tile on the player's real engines with mpegts.js faked: a live MPEG-TS stream that ends is reconnected and fails the tile only once the restarts run out, and a live stream on the element that ends fails it at once.
 - `addChannel.test.tsx` covers the gate, duplicates and a full wall after the gate, replace, and `useMultiviewMenuItem`: disabled states, navigation, toasts and a cancelled PIN.
 - `e2e/multiview.spec.ts` (check 4) seeds the wall in localStorage against the mock portal and checks:
   - four tiles all advance `currentTime` and exactly one video is unmuted, after a click and after a number key;

@@ -188,7 +188,12 @@ export function useTilePlayback(ch: MultiviewChannelInput, opts: TilePlaybackOpt
       clearTimeout(stallTimer);
       setState((s) => (s.buffering ? { ...s, buffering: false } : s));
     };
-    const onEnded = (): void => fail({ kind: 'network', message: 'The stream ended' });
+    const onEnded = (): void => {
+      // A live MPEG-TS connection the panel closes ends the element: mpegts.js reconnects it, and
+      // reports through onError once its restarts run out. Failing here would destroy it first.
+      if (source?.isLive && engineRef.current?.kind === 'mpegts') return;
+      fail({ kind: 'network', message: 'The stream ended' });
+    };
     const onError = (): void => {
       // Native element errors only: hls.js, shaka and mpegts.js report through onError.
       const s = source;

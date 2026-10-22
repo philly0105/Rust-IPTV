@@ -2,10 +2,11 @@
 
 use super::quality::QualityFilter;
 use super::{CatalogQuery, NamedRow, VodFilter};
-use crate::error::RpcError;
+use crate::error::{CoreResult, RpcError};
 use crate::model::{Category, Channel, ContentType, ItemRef, Page, PageQuery, SeriesItem, VodItem};
 use crate::rpc::RpcRouter;
 use crate::state::AppState;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -351,52 +352,116 @@ pub async fn series(state: Arc<AppState>, a: VodListArgs) -> Result<Page<SeriesI
     Ok(page.map(NamedRow::into_series))
 }
 
+/// Why `catalog.item` has no row for a ref.
+enum Gone {
+    Missing,
+    /// Parental hide mode keeps the item in the database but out of reach.
+    Locked,
+}
+
+/// The `catalog.item` read of `r` on an open connection, so `catalog.items`
+/// runs it for each of its refs inside one `db_call`.
+fn lookup(
+    c: &Connection,
+    r: &ItemRef,
+    hide: Option<crate::parental::Hide>,
+) -> CoreResult<Result<AnyItem, Gone>> {
+    let Some(named) = super::get_named(c, r)? else {
+        return Ok(Err(Gone::Missing));
+    };
+    // parental: hide mode keeps a locked item in the database.
+    if let Some(h) = hide {
+        if !super::is_visible(c, r, h)? {
+            return Ok(Err(Gone::Locked));
+        }
+    }
+    // An M3U movie plays and downloads from the playlist's own link;
+    // Xtream and Stalker movies get theirs from their streamUrl.
+    let mut item =
+        if named.row.content_type == ContentType::Movie && super::is_m3u_source(c, &r.source_id)? {
+            AnyItem::Vod(named.into_m3u_vod())
+        } else {
+            to_any(named)
+        };
+    // guide: M3U catch-up overrides are applied on read.
+    if let AnyItem::Channel(ch) = &mut item {
+        crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;
+        // C2: a hidden channel is still returned (the hidden-channels
+        // dialog and the player open it), with its custom name.
+        crate::channeledit::apply_names(c, std::slice::from_mut(ch))?;
+    }
+    Ok(Ok(item))
+}
+
+/// `catalog.item`'s answer for a lookup of the item `id`.
+fn item_answer(id: &str, found: Result<AnyItem, Gone>) -> Result<AnyItem, RpcError> {
+    found.map_err(|gone| match gone {
+        // The code stays not_found for older callers; `details.parentalLocked`
+        // lets the UI tell a locked item from one the provider dropped.
+        Gone::Locked => RpcError::not_found(format!(
+            "catalog item {id} is locked by parental controls; unlock them to open it"
+        ))
+        .with_details(serde_json::json!({ "parentalLocked": true })),
+        Gone::Missing => {
+            RpcError::not_found(format!("catalog item {id} not found; refresh the source"))
+        }
+    })
+}
+
 pub async fn item(state: Arc<AppState>, a: RefArgs) -> Result<AnyItem, RpcError> {
     let r = a.item_ref;
     let id = r.item_id.clone();
     let hide = hide(&state).await?;
-    // (item, hidden by parental hide mode)
-    let (row, hidden) = state
+    let found = state.db_call(move |c| lookup(c, &r, hide)).await?;
+    item_answer(&id, found)
+}
+
+/// Most refs one `catalog.items` call takes.
+pub const MAX_ITEMS_REFS: usize = 500;
+
+#[derive(Debug, Deserialize)]
+pub struct RefsArgs {
+    pub refs: Vec<ItemRef>,
+}
+
+/// One answer of `catalog.items`: what `catalog.item` returns for the ref,
+/// or the error it fails with.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum ItemAnswer {
+    Item { item: Box<AnyItem> },
+    Error { error: RpcError },
+}
+
+/// `catalog.items`: `catalog.item` for many refs in one call and one
+/// `db_call`, one answer per ref in their order. The favourites and recently
+/// watched views and the channel pickers ask for the channels of 20 to 60
+/// rows at once; one request each queued them on the pool (and in server mode
+/// on the browser's six connections), and every answer re-rendered the page.
+pub async fn items(state: Arc<AppState>, a: RefsArgs) -> Result<Vec<ItemAnswer>, RpcError> {
+    if a.refs.len() > MAX_ITEMS_REFS {
+        return Err(RpcError::invalid(format!(
+            "catalog.items takes at most {MAX_ITEMS_REFS} refs"
+        )));
+    }
+    let hide = hide(&state).await?;
+    let found = state
         .db_call(move |c| {
-            let Some(named) = super::get_named(c, &r)? else {
-                return Ok((None, false));
-            };
-            // parental: hide mode keeps a locked item in the database.
-            if let Some(h) = hide {
-                if !super::is_visible(c, &r, h)? {
-                    return Ok((None, true));
-                }
-            }
-            // An M3U movie plays and downloads from the playlist's own link;
-            // Xtream and Stalker movies get theirs from their streamUrl.
-            let mut item = if named.row.content_type == ContentType::Movie
-                && super::is_m3u_source(c, &r.source_id)?
-            {
-                AnyItem::Vod(named.into_m3u_vod())
-            } else {
-                to_any(named)
-            };
-            // guide: M3U catch-up overrides are applied on read.
-            if let AnyItem::Channel(ch) = &mut item {
-                crate::catchup::m3u::apply_overrides(c, std::slice::from_mut(ch))?;
-                // C2: a hidden channel is still returned (the hidden-channels
-                // dialog and the player open it), with its custom name.
-                crate::channeledit::apply_names(c, std::slice::from_mut(ch))?;
-            }
-            Ok((Some(item), false))
+            a.refs
+                .into_iter()
+                .map(|r| Ok((lookup(c, &r, hide)?, r.item_id)))
+                .collect::<CoreResult<Vec<_>>>()
         })
         .await?;
-    if hidden {
-        // The code stays not_found for older callers; `details.parentalLocked`
-        // lets the UI tell a locked item from one the provider dropped.
-        return Err(RpcError::not_found(format!(
-            "catalog item {id} is locked by parental controls; unlock them to open it"
-        ))
-        .with_details(serde_json::json!({ "parentalLocked": true })));
-    }
-    row.ok_or_else(|| {
-        RpcError::not_found(format!("catalog item {id} not found; refresh the source"))
-    })
+    Ok(found
+        .into_iter()
+        .map(|(l, id)| match item_answer(&id, l) {
+            Ok(item) => ItemAnswer::Item {
+                item: Box::new(item),
+            },
+            Err(error) => ItemAnswer::Error { error },
+        })
+        .collect())
 }
 
 pub async fn channel_by_number(
@@ -562,6 +627,7 @@ pub fn register(r: &mut RpcRouter) {
     r.add("catalog.movies", movies);
     r.add("catalog.series", series);
     r.add("catalog.item", item);
+    r.add("catalog.items", items);
     r.add("catalog.channelByNumber", channel_by_number);
     r.add("catalog.neighbors", neighbors);
     r.add("catalog.search", search);

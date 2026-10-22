@@ -1,10 +1,11 @@
 //! Per-host breaker for upstream image fetches. A poster host that stops
 //! answering (connect or response-head timeouts on two different images
-//! within [`WINDOW`]) is not asked again for [`OPEN_FOR`]: its other images
-//! fail at once instead of each waiting out the deadlines, and the requests
-//! waiting on them let go of their connections. After that, one fetch at a
-//! time tries the host again. Any answer from the host, even an error
-//! status, closes the breaker; another timeout opens it again.
+//! within [`WINDOW`], and no answer from it since those fetches went out) is
+//! not asked again for [`OPEN_FOR`]: its other images fail at once instead of
+//! each waiting out the deadlines, and the requests waiting on them let go of
+//! their connections. After that, one fetch at a time tries the host again.
+//! Any answer from the host, even an error status, closes the breaker;
+//! another timeout opens it again.
 
 use crate::http::Authority;
 use std::collections::HashMap;
@@ -45,6 +46,8 @@ pub(super) enum Admit {
 
 #[derive(Debug, Default)]
 struct Host {
+    /// When the host last answered a fetch (an error status counts).
+    answered: Option<Instant>,
     /// The last timeout that did not trip the breaker: when, and the image.
     strike: Option<(Instant, String)>,
     /// Set while the breaker is open: new fetches are refused until then.
@@ -53,7 +56,8 @@ struct Host {
     probing: bool,
 }
 
-/// Breakers by `host:port`. Only hosts that timed out have an entry.
+/// Breakers by `host:port`. Only hosts that answered or timed out have an
+/// entry.
 #[derive(Debug, Default)]
 pub(super) struct Breakers {
     hosts: HashMap<Authority, Host>,
@@ -75,22 +79,19 @@ impl Breakers {
         }
     }
 
-    /// Records how a fetch of `image` that [`Self::admit`] let through
-    /// ended: `timed_out` when `host` did not take the connection or send a
-    /// response head in time. Returns true when this trips the breaker.
+    /// Records how a fetch of `image` that [`Self::admit`] let through at
+    /// `started` ended: `timed_out` when `host` did not take the connection
+    /// or send a response head in time. Returns true when this trips the
+    /// breaker.
     pub(super) fn record(
         &mut self,
         host: &Authority,
         image: &str,
         admitted: Admit,
+        started: Instant,
         timed_out: bool,
         now: Instant,
     ) -> bool {
-        if !timed_out {
-            // The host answered (an error status counts): it is there.
-            self.hosts.remove(host);
-            return false;
-        }
         if self.hosts.len() >= MAX_HOSTS && !self.hosts.contains_key(host) {
             self.hosts.retain(|_, h| h.open_until.is_some());
             if self.hosts.len() >= MAX_HOSTS {
@@ -98,6 +99,15 @@ impl Breakers {
             }
         }
         let h = self.hosts.entry(host.clone()).or_default();
+        if !timed_out {
+            // The host answered (an error status counts): it is there. The
+            // time stays, for the fetches still waiting on it.
+            *h = Host {
+                answered: Some(now),
+                ..Host::default()
+            };
+            return false;
+        }
         if admitted == Admit::Probe && h.probing {
             // Still no answer: refuse the host for another while.
             h.probing = false;
@@ -106,6 +116,12 @@ impl Breakers {
         }
         if h.open_until.is_some() {
             // A fetch that went out before the breaker opened.
+            return false;
+        }
+        if h.answered.is_some_and(|at| at >= started) {
+            // The host answered another fetch while this one waited: it is
+            // there, and only this image stalls (a thumbnail script stuck on
+            // one broken source, say).
             return false;
         }
         match &h.strike {
@@ -142,9 +158,9 @@ mod tests {
 
     /// Two timeouts on different images trip the breaker.
     fn tripped(b: &mut Breakers, h: &Authority, t0: Instant) {
-        assert!(!b.record(h, "http://h/a.jpg", Admit::Go, true, t0));
+        assert!(!b.record(h, "http://h/a.jpg", Admit::Go, t0, true, t0));
         assert_eq!(b.admit(h, t0), Admit::Go, "one timeout is not enough");
-        assert!(b.record(h, "http://h/b.jpg", Admit::Go, true, t0 + SECOND));
+        assert!(b.record(h, "http://h/b.jpg", Admit::Go, t0, true, t0 + SECOND));
     }
 
     #[test]
@@ -157,7 +173,14 @@ mod tests {
         assert_eq!(b.admit(&dead, t0 + OPEN_FOR), Admit::Refuse);
         assert_eq!(b.admit(&other, t0 + SECOND), Admit::Go);
         // Fetches that went out before it opened neither trip nor extend it.
-        assert!(!b.record(&dead, "http://h/c.jpg", Admit::Go, true, t0 + SECOND * 2));
+        assert!(!b.record(
+            &dead,
+            "http://h/c.jpg",
+            Admit::Go,
+            t0,
+            true,
+            t0 + SECOND * 2
+        ));
         assert_eq!(b.admit(&dead, t0 + SECOND + OPEN_FOR), Admit::Probe);
     }
 
@@ -167,16 +190,50 @@ mod tests {
         let h = host("slow.example");
         let t0 = Instant::now();
         // The same image twice (two widths of one poster).
-        assert!(!b.record(&h, "http://h/a.jpg", Admit::Go, true, t0));
-        assert!(!b.record(&h, "http://h/a.jpg", Admit::Go, true, t0 + SECOND));
+        assert!(!b.record(&h, "http://h/a.jpg", Admit::Go, t0, true, t0));
+        assert!(!b.record(&h, "http://h/a.jpg", Admit::Go, t0, true, t0 + SECOND));
         assert_eq!(b.admit(&h, t0 + SECOND), Admit::Go);
         // Two images, but further apart than the window.
-        assert!(!b.record(&h, "http://h/b.jpg", Admit::Go, true, t0 + SECOND + WINDOW));
-        assert_eq!(b.admit(&h, t0 + SECOND + WINDOW), Admit::Go);
-        // An answer in between wipes the earlier timeout.
-        assert!(!b.record(&h, "http://h/c.jpg", Admit::Go, false, t0 + WINDOW * 2));
-        assert!(!b.record(&h, "http://h/d.jpg", Admit::Go, true, t0 + WINDOW * 2));
+        let b_at = t0 + SECOND + WINDOW;
+        assert!(!b.record(&h, "http://h/b.jpg", Admit::Go, t0, true, b_at));
+        assert_eq!(b.admit(&h, b_at), Admit::Go);
+        // An answer in between wipes the earlier timeout, also for a fetch
+        // that went out after the answer.
+        let answer = t0 + WINDOW * 2 - SECOND;
+        assert!(!b.record(&h, "http://h/c.jpg", Admit::Go, answer, false, answer));
+        let d_started = answer + SECOND / 2;
+        assert!(!b.record(
+            &h,
+            "http://h/d.jpg",
+            Admit::Go,
+            d_started,
+            true,
+            t0 + WINDOW * 2
+        ));
         assert_eq!(b.admit(&h, t0 + WINDOW * 2), Admit::Go);
+    }
+
+    #[test]
+    fn timeouts_of_fetches_the_host_answered_others_around_do_not_trip_it() {
+        let mut b = Breakers::default();
+        let h = host("thumbs.example");
+        let ms = Duration::from_millis(1);
+        let t0 = Instant::now();
+        // A grid commit sends six posters at t0. Four answer at once; two
+        // stall (a thumbnail script stuck on two broken sources) and time
+        // out together 8 s later.
+        for _ in 0..4 {
+            assert!(!b.record(&h, "http://h/ok.jpg", Admit::Go, t0, false, t0 + ms * 50));
+        }
+        let late = t0 + SECOND * 8;
+        assert!(!b.record(&h, "http://h/a.jpg", Admit::Go, t0, true, late));
+        assert!(!b.record(&h, "http://h/b.jpg", Admit::Go, t0, true, late + ms * 2));
+        assert_eq!(b.admit(&h, late + ms * 2), Admit::Go);
+        // Fetches that went out after its last answer still count.
+        let t1 = late + SECOND;
+        assert!(!b.record(&h, "http://h/c.jpg", Admit::Go, t1, true, t1 + SECOND * 8));
+        assert!(b.record(&h, "http://h/d.jpg", Admit::Go, t1, true, t1 + SECOND * 8));
+        assert_eq!(b.admit(&h, t1 + SECOND * 8), Admit::Refuse);
     }
 
     #[test]
@@ -189,12 +246,26 @@ mod tests {
         assert_eq!(b.admit(&h, later), Admit::Probe);
         assert_eq!(b.admit(&h, later), Admit::Refuse, "one probe at a time");
         // The probe times out: open for another while.
-        assert!(!b.record(&h, "http://h/e.jpg", Admit::Probe, true, later + SECOND));
+        assert!(!b.record(
+            &h,
+            "http://h/e.jpg",
+            Admit::Probe,
+            later,
+            true,
+            later + SECOND
+        ));
         assert_eq!(b.admit(&h, later + SECOND * 2), Admit::Refuse);
         let again = later + SECOND + OPEN_FOR;
         assert_eq!(b.admit(&h, again), Admit::Probe);
         // The probe gets an answer: closed, and everything goes again.
-        assert!(!b.record(&h, "http://h/f.jpg", Admit::Probe, false, again + SECOND));
+        assert!(!b.record(
+            &h,
+            "http://h/f.jpg",
+            Admit::Probe,
+            again,
+            false,
+            again + SECOND
+        ));
         assert_eq!(b.admit(&h, again + SECOND), Admit::Go);
         assert_eq!(b.admit(&h, again + SECOND), Admit::Go);
     }

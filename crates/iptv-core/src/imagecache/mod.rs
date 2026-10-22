@@ -845,9 +845,10 @@ impl ImageCache {
         // Asked only now, so disk hits and variants made from a cached
         // original never wait on a host's breaker.
         let authority = Authority::of(&job.url);
+        let started = Instant::now();
         let admitted = authority
             .as_ref()
-            .map(|a| self.breakers.lock().admit(a, Instant::now()));
+            .map(|a| self.breakers.lock().admit(a, started));
         if admitted == Some(Admit::Refuse) {
             return Err(ImageError::host_down(&host));
         }
@@ -863,7 +864,13 @@ impl ImageCache {
             )))
         });
         if let (Some(authority), Some(admitted)) = (&authority, admitted) {
-            self.note_host(authority, &job.url, admitted, fetched.as_ref().err());
+            self.note_host(
+                authority,
+                &job.url,
+                admitted,
+                started,
+                fetched.as_ref().err(),
+            );
         }
         let (content_type, body) = fetched?;
         let label = job.url.to_string();
@@ -890,14 +897,25 @@ impl ImageCache {
         }
     }
 
-    /// Tells the breaker of `host` how a fetch it let through ended, and logs
-    /// once when that trips it.
-    fn note_host(&self, host: &Authority, url: &Url, admitted: Admit, err: Option<&ImageError>) {
+    /// Tells the breaker of `host` how a fetch it let through at `started`
+    /// ended, and logs once when that trips it.
+    fn note_host(
+        &self,
+        host: &Authority,
+        url: &Url,
+        admitted: Admit,
+        started: Instant,
+        err: Option<&ImageError>,
+    ) {
         let timed_out = err.is_some_and(|e| e.kind == ImageErrorKind::NoAnswer);
-        let tripped =
-            self.breakers
-                .lock()
-                .record(host, url.as_str(), admitted, timed_out, Instant::now());
+        let tripped = self.breakers.lock().record(
+            host,
+            url.as_str(),
+            admitted,
+            started,
+            timed_out,
+            Instant::now(),
+        );
         if tripped {
             tracing::info!(
                 %host,

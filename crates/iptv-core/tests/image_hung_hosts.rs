@@ -196,6 +196,31 @@ async fn a_host_that_stopped_answering_is_skipped_until_a_probe_gets_an_answer()
 }
 
 #[tokio::test]
+async fn posters_that_stall_while_their_host_answers_others_do_not_skip_it() {
+    let up = spawn_upstream().await;
+    let (_dir, state) = new_state().await;
+    // Two posters stall on the host; another of its posters gets an answer
+    // while they wait.
+    let (a, b, answered) = tokio::join!(
+        poster(&state, &up, "/hang/a.png"),
+        poster(&state, &up, "/hang/b.png"),
+        async {
+            up.reached("/hang/a.png").await;
+            up.reached("/hang/b.png").await;
+            poster(&state, &up, "/ok/c.png").await
+        }
+    );
+    answered.unwrap();
+    for r in [a, b] {
+        assert_eq!(r.unwrap_err().kind, ImageErrorKind::NoAnswer);
+    }
+    // Both timeouts came from fetches that went out before that answer, so
+    // the host is still asked.
+    poster(&state, &up, "/ok/d.png").await.unwrap();
+    assert_eq!(up.hits("/ok/d.png"), 1);
+}
+
+#[tokio::test]
 async fn clearing_the_cache_asks_a_skipped_host_again() {
     let up = spawn_upstream().await;
     let (_dir, state) = new_state().await;

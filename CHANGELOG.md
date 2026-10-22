@@ -37,6 +37,7 @@ Work after the 0.2.0 notes were written: the redesign, fixes that followed the O
 - In the desktop app the window's title bar follows the app's theme.
 - Rust 1.90 is the minimum version (`rust-version` in Cargo.toml). The locked Tauri 2.12 crates need it.
 - The installer no longer names a licence in its copyright line; the project licence is not chosen yet.
+- Xtream live channels start faster in the built-in player: the stream format has a new Auto setting, now the default, that plays them as MPEG-TS where the player can and as HLS in mpv, VLC and browsers that can't. Installs still on the old HLS default move to Auto; pick HLS in Settings > Playback to keep it.
 
 ### Fixed
 

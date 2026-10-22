@@ -224,6 +224,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0022_channel_quality",
         sql: include_str!("migrations/0022_channel_quality.sql"),
     },
+    // settings: the stored old default stream format becomes "auto".
+    Migration {
+        version: 23,
+        name: "0023_stream_format_auto",
+        sql: include_str!("migrations/0023_stream_format_auto.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -1062,6 +1068,60 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, (-1, -1));
+    }
+
+    /// 0023 moves a stored "m3u8" (the old default) to "auto" once; any other
+    /// value, a document without the field, and an HLS pick made after the
+    /// upgrade stay as they are.
+    #[test]
+    fn stream_format_migration_moves_the_old_default_to_auto_once() {
+        let stored_after_upgrade = |json: &str| -> String {
+            let mut conn = Connection::open_in_memory().unwrap();
+            configure(&mut conn).unwrap();
+            for m in &MIGRATIONS[..22] {
+                conn.execute_batch(m.sql).unwrap();
+                conn.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                    [m.version],
+                )
+                .unwrap();
+            }
+            conn.execute("INSERT INTO settings(id, json) VALUES (1, ?1)", [json])
+                .unwrap();
+            migrate(&mut conn).unwrap();
+            conn.query_row("SELECT json FROM settings WHERE id = 1", [], |r| r.get(0))
+                .unwrap()
+        };
+        let format = |json: &str| -> Option<String> {
+            serde_json::from_str::<serde_json::Value>(json).unwrap()["streamFormat"]
+                .as_str()
+                .map(str::to_string)
+        };
+        let moved = stored_after_upgrade(r#"{"streamFormat":"m3u8","theme":"dark"}"#);
+        assert_eq!(format(&moved).as_deref(), Some("auto"));
+        assert!(
+            moved.contains(r#""theme":"dark""#),
+            "other fields stay: {moved}"
+        );
+        let ts = stored_after_upgrade(r#"{"streamFormat":"ts"}"#);
+        assert_eq!(format(&ts).as_deref(), Some("ts"));
+        assert_eq!(format(&stored_after_upgrade(r#"{"theme":"dark"}"#)), None);
+        assert_eq!(stored_after_upgrade("not json"), "not json");
+
+        // Migrated once: HLS picked afterwards survives the next start.
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&mut conn).unwrap();
+        migrate(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO settings(id, json) VALUES (1, '{\"streamFormat\":\"m3u8\"}')",
+            [],
+        )
+        .unwrap();
+        migrate(&mut conn).unwrap();
+        let kept: String = conn
+            .query_row("SELECT json FROM settings WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(format(&kept).as_deref(), Some("m3u8"));
     }
 
     #[test]

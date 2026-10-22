@@ -4,8 +4,8 @@ use super::service::{self, ConnectionTestResult, XtreamAccountInfo};
 use super::sync::{load_source, sync_source, SyncPlan};
 use crate::error::RpcError;
 use crate::model::{
-    ContentType, EpgProgram, ImportSummary, ItemRef, PlayerSource, SeriesDetail, VodDetail,
-    XtreamSourceConfig,
+    ContentType, EpgProgram, ImportSummary, ItemRef, PlayerSource, SeriesDetail, StreamFormat,
+    VodDetail, XtreamSourceConfig,
 };
 use crate::rpc::RpcRouter;
 use crate::sources;
@@ -46,6 +46,9 @@ pub struct StreamUrlArgs {
     pub item_ref: ItemRef,
     #[serde(default)]
     pub episode_id: Option<String>,
+    /// What `streamFormat: auto` means for the caller's player (live only).
+    #[serde(default)]
+    pub auto_format: Option<StreamFormat>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,7 +100,8 @@ pub fn register(r: &mut RpcRouter) {
     r.add("xtream.streamUrl", |s, a: StreamUrlArgs| async move {
         crate::parental::refuse_hidden(&s, &a.item_ref).await?;
         Ok::<PlayerSource, RpcError>(
-            service::stream_url(&s, &a.item_ref, a.episode_id.as_deref()).await?,
+            service::stream_url_for(&s, &a.item_ref, a.episode_id.as_deref(), a.auto_format)
+                .await?,
         )
     });
     r.add("xtream.catchupUrl", |s, a: CatchupArgs| async move {

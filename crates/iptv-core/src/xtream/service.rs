@@ -471,12 +471,28 @@ pub fn build_series_detail(
 // Playback
 // ---------------------------------------------------------------------------
 
-/// Live extension: `settings.streamFormat` when the panel's
-/// `allowed_output_formats` lists it or lists nothing (unknown); otherwise the
-/// first allowed format in the order `m3u8` > `ts` > whatever the panel lists
-/// first (`allowed` is lowercased by [`ServerMeta::from_account`]).
+/// The live format to ask the panel for: `settings.streamFormat`, except that
+/// `auto` takes the caller's `auto_format` and is m3u8 for a caller without one
+/// (recordings, an older UI, mpv and VLC). An `auto_format` never overrides a
+/// format the user picked.
+pub fn preferred_live_format(
+    setting: StreamFormat,
+    auto_format: Option<StreamFormat>,
+) -> StreamFormat {
+    match (setting, auto_format) {
+        (StreamFormat::Auto, Some(StreamFormat::Ts)) => StreamFormat::Ts,
+        (StreamFormat::Auto, _) => StreamFormat::M3u8,
+        (picked, _) => picked,
+    }
+}
+
+/// Live extension: the preferred format ([`preferred_live_format`]) when the
+/// panel's `allowed_output_formats` lists it or lists nothing (unknown);
+/// otherwise the first allowed format in the order `m3u8` > `ts` > whatever
+/// the panel lists first (`allowed` is lowercased by
+/// [`ServerMeta::from_account`]).
 pub fn live_extension(pref: StreamFormat, allowed: &[String]) -> String {
-    let want = pref.as_str();
+    let want = preferred_live_format(pref, None).as_str();
     let has = |f: &str| allowed.iter().any(|a| a == f);
     if allowed.is_empty() || has(want) {
         return want.to_string();
@@ -501,6 +517,17 @@ pub async fn stream_url(
     r: &ItemRef,
     episode_id: Option<&str>,
 ) -> CoreResult<PlayerSource> {
+    stream_url_for(state, r, episode_id, None).await
+}
+
+/// [`stream_url`] for a caller that says what `streamFormat: auto` means for
+/// its player (`xtream.streamUrl`'s `autoFormat`).
+pub async fn stream_url_for(
+    state: &Arc<AppState>,
+    r: &ItemRef,
+    episode_id: Option<&str>,
+    auto_format: Option<StreamFormat>,
+) -> CoreResult<PlayerSource> {
     let cx = ctx(state, r).await?;
     let headers = stream_headers(&cx.source.config);
     let (server, user, pass) = (&cx.client.server, &cx.client.username, cx.client.password());
@@ -513,7 +540,8 @@ pub async fn stream_url(
                 .as_ref()
                 .map(|m| m.allowed_output_formats.clone())
                 .unwrap_or_default();
-            let ext = live_extension(state.settings.read().stream_format, &allowed);
+            let pref = preferred_live_format(state.settings.read().stream_format, auto_format);
+            let ext = live_extension(pref, &allowed);
             Ok(PlayerSource {
                 url: live_url(server, user, pass, &r.item_id, &ext),
                 kind: kind_for_ext(&ext),
@@ -1231,6 +1259,22 @@ mod tests {
             "ts"
         );
         assert_eq!(live_extension(StreamFormat::M3u8, &["rtmp".into()]), "rtmp");
+        // Auto never reaches a URL as `.auto`.
+        assert_eq!(live_extension(StreamFormat::Auto, &[]), "m3u8");
+        assert_eq!(live_extension(StreamFormat::Auto, &["ts".into()]), "ts");
+    }
+
+    #[test]
+    fn auto_takes_the_callers_format_and_a_pick_stays() {
+        use StreamFormat::{Auto, M3u8, Ts};
+        assert_eq!(preferred_live_format(Auto, Some(Ts)), Ts);
+        assert_eq!(preferred_live_format(Auto, Some(M3u8)), M3u8);
+        assert_eq!(preferred_live_format(Auto, Some(Auto)), M3u8);
+        // No hint (recordings, mpv and VLC, an older UI): HLS, as before Auto existed.
+        assert_eq!(preferred_live_format(Auto, None), M3u8);
+        // A format the user picked wins over the hint.
+        assert_eq!(preferred_live_format(M3u8, Some(Ts)), M3u8);
+        assert_eq!(preferred_live_format(Ts, Some(M3u8)), Ts);
     }
 
     #[test]

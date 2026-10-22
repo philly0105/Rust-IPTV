@@ -11,7 +11,8 @@
 -- release). This index holds the category's titles in that order, with the
 -- verdict, the rating and the year, so English-only, a rating floor and a
 -- decade (written `+i.rating` / `+i.year`) stay index-only. A category's
--- count with a rating floor reads it too (catalog::query_named).
+-- count with a rating floor reads it too, and a small category sorted by
+-- rating or year reads its range here and sorts it (catalog::query_named).
 CREATE INDEX idx_items_cat_added ON items(source_id, content_type, category_id, added DESC, position, non_english, rating, year);
 
 -- Without statistics SQLite counts through the covering index created last

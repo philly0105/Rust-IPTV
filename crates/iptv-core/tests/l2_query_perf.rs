@@ -863,6 +863,7 @@ enum By {
     Added,
     Rating,
     Name,
+    Year,
 }
 
 impl By {
@@ -871,6 +872,7 @@ impl By {
             By::Added => "added",
             By::Rating => "rating",
             By::Name => "name",
+            By::Year => "year",
         }
     }
     fn dir(self) -> &'static str {
@@ -905,6 +907,7 @@ fn expected_page(
         let first = match by {
             By::Added => desc_nulls_last(&a.added, &b.added),
             By::Rating => desc_nulls_last(&a.rating, &b.rating),
+            By::Year => desc_nulls_last(&a.year, &b.year),
             By::Name => a
                 .title
                 .to_ascii_lowercase()
@@ -1032,6 +1035,15 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
             }
         }
     }
+    // The year sort, on a short category.
+    probes.push(Probe {
+        label: "cat 199 by year @0".into(),
+        args: page(Some(MID), By::Year, 0, None, json!({})),
+        keep: in_cat(MID),
+        by: By::Year,
+        offset: 0,
+        budget: RPC_BUDGET,
+    });
     // A category narrowed by a rating floor or a decade.
     for (name, k) in [("199", MID), ("8,883", BIG)] {
         probes.push(Probe {
@@ -1067,6 +1079,17 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
             keep: Box::new(|m: &BlockMovie| m.year.is_some_and(|y| (1920..=1929).contains(&y))),
             by,
             offset: 0,
+            budget: RPC_BUDGET,
+        });
+    }
+    // A rating floor that keeps about 1,700 titles, first and last page.
+    for offset in [0, 1_620] {
+        probes.push(Probe {
+            label: format!("all, minRating 9.9 by added @{offset}"),
+            args: page(None, By::Added, offset, None, json!({"minRating": 9.9})),
+            keep: Box::new(|m: &BlockMovie| m.rating.is_some_and(|r| r >= 9.9)),
+            by: By::Added,
+            offset,
             budget: RPC_BUDGET,
         });
     }
@@ -1195,7 +1218,8 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
     // `catalog.movies` writes them. A category page on the default sort
     // reads its category's range in order, also with a rating floor; the
     // category's count with a rating floor or a decade stays on the
-    // category; a plain count keeps the narrow idx_items_cat, created last.
+    // category; a plain count keeps the narrow idx_items_cat, created last;
+    // a sparse decade on All reads the decade's range.
     let by_added = "ORDER BY i.added DESC NULLS LAST, i.position LIMIT 60 OFFSET 0";
     let in_category = "SEARCH i USING COVERING INDEX idx_items_cat_added (source_id=? AND content_type=? AND category_id=?)";
     for (what, sql, want) in [
@@ -1223,6 +1247,11 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
             "category count",
             "SELECT count(*) FROM items i WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.category_id = ?2".into(),
             "SEARCH i USING COVERING INDEX idx_items_cat (source_id=? AND content_type=? AND category_id=?)",
+        ),
+        (
+            "all, sparse decade",
+            format!("SELECT i.rowid FROM items i INDEXED BY idx_items_year WHERE i.source_id = ?1 AND i.content_type = 'movie' AND i.year >= 1920 AND i.year <= 1929 {by_added}"),
+            "SEARCH i USING INDEX idx_items_year (source_id=? AND content_type=? AND year>? AND year<?)",
         ),
     ] {
         let s = sid.clone();

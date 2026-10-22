@@ -1481,53 +1481,43 @@ pub fn query_named(
     // on 182k movies, 0.2 ms now), and the category's own indexes hold both
     // columns (0018, 0024).
     let sort = q.page.sort;
-    let page_rating = if sort == Some(SortKey::Rating) {
-        "i.rating"
-    } else {
-        "+i.rating"
-    };
-    let page_year = if sort == Some(SortKey::Year) {
-        "i.year"
-    } else {
-        "+i.year"
-    };
+    let min_rating = q.min_rating.filter(|r| r.is_finite() && *r > 0.0);
     let (count_rating, count_year) = if q.category_id.is_some() {
         ("+i.rating", "+i.year")
     } else {
         ("i.rating", "i.year")
     };
+    // The rating floor and the vod filters (year range and "Hide watched",
+    // C4; nothing for channels), comparing the given columns.
+    let filters = |rating: &str, year: &str, args: &mut Vec<SqlValue>| {
+        let mut sql = String::new();
+        if let Some(min) = min_rating {
+            args.push(min.into());
+            sql.push_str(&format!(" AND {rating} >= ?{}", args.len()));
+        }
+        sql.push_str(&vodfilter::vod_filter_sql_on(&q.vod, year, args));
+        sql
+    };
     for (i, m) in attempts.iter().enumerate() {
-        // The WHERE of the count and of the page; both take the same `args`.
-        let mut count_where = String::from("i.source_id = ?1 AND i.content_type = ?2");
+        // The scope of the count and of the page; both take the same `args`.
+        let mut scope = String::from("i.source_id = ?1 AND i.content_type = ?2");
         let mut args: Vec<SqlValue> = vec![
             q.source_id.clone().into(),
             q.content_type.as_str().to_string().into(),
         ];
         if let Some(cat) = &q.category_id {
             args.push(cat.clone().into());
-            count_where.push_str(&format!(" AND i.category_id = ?{}", args.len()));
+            scope.push_str(&format!(" AND i.category_id = ?{}", args.len()));
         } else if filter_hidden {
             // Same rows as `COALESCE(c.hidden, 0) = 0` on the join (an item
             // whose category is missing stays visible), without a join per row.
-            count_where.push_str(
+            scope.push_str(
                 " AND i.category_id NOT IN (SELECT category_id FROM categories WHERE source_id = ?1 AND content_type = ?2 AND hidden <> 0)",
             );
         }
-        let mut page_where = count_where.clone();
-        if let Some(min) = q.min_rating.filter(|r| r.is_finite() && *r > 0.0) {
-            args.push(min.into());
-            count_where.push_str(&format!(" AND {count_rating} >= ?{}", args.len()));
-            page_where.push_str(&format!(" AND {page_rating} >= ?{}", args.len()));
-        }
-        // vod: year range and "Hide watched" (C4; nothing for channels).
+        // The page's filter columns depend on the total (below).
         let mut page_args = args.clone();
-        count_where.push_str(&vodfilter::vod_filter_sql_on(&q.vod, count_year, &mut args));
-        page_where.push_str(&vodfilter::vod_filter_sql_on(
-            &q.vod,
-            page_year,
-            &mut page_args,
-        ));
-        debug_assert_eq!(args, page_args);
+        let count_where = format!("{scope}{}", filters(count_rating, count_year, &mut args));
         // The rest is shared.
         let mut where_sql = String::from(english);
         where_sql.push_str(&quality_sql);
@@ -1588,6 +1578,23 @@ pub fn query_named(
                 limit,
             });
         }
+        // A short list spread through the source: read it from an index of
+        // its category or filter and sort it, rather than walk the sort's
+        // index to its end for a few rows.
+        let index = sorted_read_index(q, min_rating.is_some(), total);
+        let page_rating = if sort == Some(SortKey::Rating) || index == Some("idx_items_rating") {
+            "i.rating"
+        } else {
+            "+i.rating"
+        };
+        let page_year = if sort == Some(SortKey::Year) || index == Some("idx_items_year") {
+            "i.year"
+        } else {
+            "+i.year"
+        };
+        let page_where = format!("{scope}{}", filters(page_rating, page_year, &mut page_args));
+        debug_assert_eq!(args[..page_args.len()], page_args[..]);
+        let indexed = index.map_or(String::new(), |name| format!(" INDEXED BY {name}"));
         // The page's rowids first, from the sort's index (migration 0018
         // puts the category and English-only columns in it), then the full
         // rows of just those: OFFSET no longer reads and joins every skipped
@@ -1598,7 +1605,7 @@ pub fn query_named(
         let order = order_clause(&q.page);
         args.push(offset.into());
         let sql = format!(
-            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i WHERE {page_where}{where_sql} ORDER BY {order} LIMIT {limit} OFFSET ?{}) ORDER BY {order}",
+            "{SELECT_NAMED} WHERE i.rowid IN (SELECT i.rowid FROM items i{indexed} WHERE {page_where}{where_sql} ORDER BY {order} LIMIT {limit} OFFSET ?{}) ORDER BY {order}",
             args.len()
         );
         let mut stmt = conn.prepare_cached(&sql)?;
@@ -1613,6 +1620,53 @@ pub fn query_named(
         });
     }
     Ok(Page::empty(offset, limit))
+}
+
+/// Lists of at most this many rows may be read from the index of their
+/// category or filter and sorted ([`sorted_read_index`]). Spread evenly
+/// through a source of N titles, a list of T finds a page's rows after about
+/// `60 * N / T` entries of the sort's index, more than T itself below about
+/// `sqrt(60 * N)`: 3,300 at 182k titles.
+const SORTED_READ_MAX: i64 = 3_000;
+
+/// The index the page statement of `q` reads (`INDEXED BY`) when its list of
+/// `total` rows is short, or `None` to walk the sort's index. A category page
+/// sorted by rating, year or name, and an All page narrowed by a decade or a
+/// rating floor on another key, walk the sort's index for the whole source
+/// and test each entry: a list shorter than a page, or its last page, reads
+/// every entry (8-11 ms at 182k movies). Read from the category's or the
+/// filter's range and sorted, it costs well under 1 ms. A filter on the sort
+/// key bounds the walk already, and a category page by date added or
+/// position reads its category's range in order (idx_items_cat_added,
+/// idx_items_cat). When hidden categories or English-only leave a short list
+/// in a long range, the range is read whole, which is still no more than the
+/// walk reads for a last page. `INDEXED BY` fixes the plan, where a unary `+`
+/// only tips a cost tie. The total is the count of the same list, so every
+/// page of one list takes the same plan.
+fn sorted_read_index(q: &CatalogQuery, min_rating: bool, total: i64) -> Option<&'static str> {
+    if total > SORTED_READ_MAX {
+        return None;
+    }
+    let sort = q.page.sort;
+    if q.category_id.is_some() {
+        return match sort {
+            // Both columns are in the index: the sort reads no table row.
+            Some(SortKey::Rating | SortKey::Year) => Some("idx_items_cat_added"),
+            // One table row per title of the category, for the title.
+            Some(SortKey::Name) => Some("idx_items_cat"),
+            _ => None,
+        };
+    }
+    let years = q.vod.year_from.is_some() || q.vod.year_to.is_some();
+    if (years && sort == Some(SortKey::Year)) || (min_rating && sort == Some(SortKey::Rating)) {
+        None
+    } else if years {
+        Some("idx_items_year")
+    } else if min_rating {
+        Some("idx_items_rating")
+    } else {
+        None
+    }
 }
 
 /// True when a category of `source_id` / `content_type` is hidden.

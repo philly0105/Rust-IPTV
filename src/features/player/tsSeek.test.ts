@@ -8,7 +8,7 @@ vi.mock('@/api/transport', () => ({
   proxiedUrl: (s: PlayerSource) => `/api/proxy?url=${encodeURIComponent(s.url)}`,
 }));
 
-const { LOCAL_PROBES, PROBE_BYTES, REMOTE_PROBES, pesStarts, tsGrid, tsSeekerFor, withByteStart } = await import('./tsSeek');
+const { GROW_CHECK_MS, LOCAL_PROBES, PROBE_BYTES, REMOTE_PROBES, pesStarts, tsGrid, tsSeekerFor, withByteStart } = await import('./tsSeek');
 
 // ---------------------------------------------------------------------------
 // MPEG-TS bytes
@@ -118,8 +118,11 @@ interface Served {
   bytes: number;
 }
 
-/** Serves the virtual file with Range. `noSize`: Content-Range gives `*` for the size; `pts`: the frames' PTS. */
-function serveRanges(opts: { ranges?: boolean; noSize?: boolean; pts?: PtsOf } = {}): Served {
+/**
+ * Serves the virtual file with Range. `size`: how much of it exists now (a recording being
+ * written); `noSize`: Content-Range gives `*` for the size; `pts`: the frames' PTS.
+ */
+function serveRanges(opts: { ranges?: boolean; size?: () => number; noSize?: boolean; pts?: PtsOf } = {}): Served {
   const served: Served = { requests: [], bytes: 0 };
   vi.stubGlobal(
     'fetch',
@@ -128,10 +131,11 @@ function serveRanges(opts: { ranges?: boolean; noSize?: boolean; pts?: PtsOf } =
       served.requests.push(range);
       const m = /^bytes=(\d+)-(\d+)$/.exec(range);
       if (!m || opts.ranges === false) return new Response(new Uint8Array(16), { status: 200 });
+      const size = opts.size?.() ?? TOTAL;
       const from = Number(m[1]);
-      const to = Math.min(Number(m[2]), TOTAL - 1);
+      const to = Math.min(Number(m[2]), size - 1);
       served.bytes += to - from + 1;
-      const range206 = `bytes ${from}-${to}/${opts.noSize ? '*' : TOTAL}`;
+      const range206 = `bytes ${from}-${to}/${opts.noSize ? '*' : size}`;
       return new Response(fileBytes(from, to, opts.pts), { status: 206, headers: { 'Content-Range': range206 } });
     }),
   );
@@ -211,6 +215,49 @@ describe('seeking a local recording or download by byte (PL-2)', () => {
     refuse = false;
     const plan = (await seeker.startAt(600, signal))!;
     expect(600 - plan.at).toBeLessThan(1);
+  });
+
+  it('a recording still being written: the length follows the file, and seeks reach past where it was', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-22T20:00:00Z'));
+    let size = byteOfTime(600);
+    const served = serveRanges({ size: () => size });
+    const seeker = tsSeekerFor(vod(LOCAL), LOCAL)!;
+    await seeker.prepare?.();
+    expect(seeker.duration()).toBeCloseTo(599.96, 2);
+
+    // Four minutes later the file holds 14.
+    size = byteOfTime(840);
+    const checked = Date.parse('2026-10-22T20:04:00Z');
+    vi.setSystemTime(checked);
+    seeker.duration();
+    // (vi.waitFor moves the fake clock on.)
+    await vi.waitFor(() => expect(seeker.duration()).toBeCloseTo(839.96, 2));
+    const plan = (await seeker.startAt(800, signal))!;
+    expect(800 - plan.at).toBeLessThan(1);
+    expect(Number(new URL(plan.url).searchParams.get('from'))).toBe(byteOfTime(plan.at));
+
+    // Looked at once per GROW_CHECK_MS, one byte each time it didn't grow.
+    served.requests.length = 0;
+    vi.setSystemTime(checked + GROW_CHECK_MS - 1);
+    seeker.duration();
+    expect(served.requests).toEqual([]);
+    vi.setSystemTime(checked + GROW_CHECK_MS);
+    seeker.duration();
+    await vi.waitFor(() => expect(served.requests).toEqual(['bytes=0-0']));
+  });
+
+  it('a download is complete: its size is never looked at again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const served = serveRanges();
+    const download = 'http://127.0.0.1:5555/tok/api/files/12/media.ts';
+    const seeker = tsSeekerFor(vod(download), download)!;
+    await seeker.prepare?.();
+    served.requests.length = 0;
+    vi.setSystemTime(Date.now() + 10 * GROW_CHECK_MS);
+    seeker.duration();
+    await Promise.resolve();
+    expect(served.requests).toEqual([]);
   });
 
   it('a reconnect part whose clock restarted: no length, and the element seeks itself', async () => {

@@ -23,7 +23,10 @@ export interface TsStart {
 }
 
 export interface TsSeeker {
-  /** The item's length in seconds, once known: the stream itself never says. */
+  /**
+   * The item's length in seconds, once known: the stream itself never says. For a recording it
+   * follows the file while it is being written (`GROW_CHECK_MS`).
+   */
   duration(): number | undefined;
   /** False once it is known that this media can only start at its beginning. */
   usable(): boolean;
@@ -42,8 +45,9 @@ export function tsSeekerFor(source: PlayerSource, loadUrl: string): TsSeeker | u
   if (source.isLive) return undefined;
   const { ref, catchup } = source;
   if (catchup && ref) return catchupSeeker(source, ref, catchup, loadUrl);
-  if (isFileRoute(loadUrl)) return byteSeeker(loadUrl, source.durationSeconds, true);
-  if (proxyRoute(loadUrl)) return byteSeeker(loadUrl, source.durationSeconds, false);
+  const route = fileRoute(loadUrl);
+  if (route) return byteSeeker(loadUrl, source.durationSeconds, true, route === 'recordings');
+  if (proxyRoute(loadUrl)) return byteSeeker(loadUrl, source.durationSeconds, false, false);
   return undefined;
 }
 
@@ -85,18 +89,25 @@ export const PROBE_BYTES = 128 * 1024;
  */
 export const LOCAL_PROBES = 12;
 export const REMOTE_PROBES = 3;
+/**
+ * A recording can be played while it is still being written: its size is looked at again at most
+ * this often, when the length is read or a seek needs it, and its end read again when it grew.
+ */
+export const GROW_CHECK_MS = 10_000;
 const TS_CLOCK = 90_000;
 const PTS_WRAP = 2 ** 33;
 
 /** The app's own file routes: `/api/files/{id}`, `/api/recordings/{id}`, the loopback `/<token>/api/.../{id}/{name}`. */
 const FILE_ROUTE = /\/api\/(files|recordings)\/[^/]+(\/[^/]+)?$/;
 
-function isFileRoute(url: string): boolean {
+/** Which of the app's file routes `url` is; null for anything else. */
+function fileRoute(url: string): 'files' | 'recordings' | null {
   try {
     const u = new URL(url, window.location.href);
-    return FILE_ROUTE.test(u.pathname) && (u.origin === window.location.origin || u.hostname === '127.0.0.1');
+    if (u.origin !== window.location.origin && u.hostname !== '127.0.0.1') return null;
+    return (FILE_ROUTE.exec(u.pathname)?.[1] as 'files' | 'recordings' | undefined) ?? null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -234,23 +245,29 @@ async function readLayout(url: string, wantEnd: boolean, checkMiddle: boolean): 
 /**
  * Seeks by byte offset in a file served with Range: `known` is the item's length when its source
  * says (catch-up), else the file's own (its last PTS). `local` files are probed up front and
- * searched to within a second; remote ones only when a seek needs it.
+ * searched to within a second; remote ones only when a seek needs it. A file that `grows` (a
+ * recording, which may still be being written) is looked at again now and then.
  */
-function byteSeeker(loadUrl: string, known: number | undefined, local: boolean): TsSeeker {
+function byteSeeker(loadUrl: string, known: number | undefined, local: boolean, grows: boolean): TsSeeker {
   const budget = local ? LOCAL_PROBES : REMOTE_PROBES;
   const close = local ? 1 : 3;
   let layout: Layout | null = null;
   /** The file takes no byte ranges, is not MPEG-TS or has no length: it only starts at its beginning. */
   let failed = false;
   let learning: Promise<Layout | null> | null = null;
+  const read = (): Promise<Layout | null> => readLayout(loadUrl, known === undefined, local);
+  /** When the size was last looked at (`grows`). */
+  let sized = 0;
+  let growing: Promise<void> | null = null;
   /** Throws when asking failed in a way the next seek may get past. */
   const learn = (): Promise<Layout | null> => {
     if (layout || failed) return Promise.resolve(layout);
-    learning ??= readLayout(loadUrl, known === undefined, local).then(
+    learning ??= read().then(
       (l) => {
         learning = null;
         layout = l;
         failed = !l;
+        sized = Date.now();
         return l;
       },
       (err: unknown) => {
@@ -260,6 +277,29 @@ function byteSeeker(loadUrl: string, known: number | undefined, local: boolean):
     );
     return learning;
   };
+  /**
+   * A recording being written: its length when it was learnt would soon read as its end while
+   * playback goes on past it (mpegts.js's later Range requests get the grown file), and a seek
+   * past it would be held there. So its size is looked at again (one byte; the size is in
+   * Content-Range) and, when it grew, its layout read again. Never throws.
+   */
+  const regrow = (): Promise<void> => {
+    if (grows && layout && !growing && Date.now() - sized >= GROW_CHECK_MS) {
+      sized = Date.now();
+      growing = (async () => {
+        const now = await probe(loadUrl, 0, 1);
+        if (!now || !layout || now.total <= layout.total) return;
+        // A grown part whose clock restarted fails the check: the length from before stays.
+        const l = await read();
+        if (l) layout = l;
+      })()
+        .catch(() => undefined)
+        .finally(() => {
+          growing = null;
+        });
+    }
+    return growing ?? Promise.resolve();
+  };
   const length = (): number | undefined => known ?? layout?.duration;
   /** The first PES at or after `byte` (on the time PID if it has one there); null when it can't tell. */
   const pointAt = async (l: Layout, byte: number, signal: AbortSignal): Promise<Point | null> => {
@@ -267,11 +307,16 @@ function byteSeeker(loadUrl: string, known: number | undefined, local: boolean):
     return chunk && pointIn(l, byte, chunk.bytes);
   };
   return {
-    duration: length,
+    duration() {
+      void regrow();
+      return length();
+    },
     usable: () => !failed,
     prepare: local ? () => learn().then(() => undefined, () => undefined) : undefined,
     async startAt(seconds, signal) {
-      const l = await learn();
+      await learn();
+      await regrow();
+      const l = layout;
       const end = length();
       if (!l || !end || end <= 0) return null;
       if (seconds < close) return { url: loadUrl, at: 0 };

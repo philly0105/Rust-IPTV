@@ -270,6 +270,41 @@ async fn the_one_connection_setting_keeps_a_file_on_one_connection() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn switching_a_source_to_one_connection_reaches_a_split_transfer() {
+    let c = ctx().await;
+    c.limit("src", 3).await;
+    let path = format!("/files/video.bin?size={}&kbps=2048", 24 * MIB);
+    let d = c.start("src", "1", &path).await;
+    c.wait_until(d.id, "used two connections", |d| d.connections == Some(2))
+        .await;
+    // The provider objects to parallel downloads: the user picks 1.
+    let mut next = c.state.settings_snapshot();
+    next.download_single_connection = vec!["src".into()];
+    iptv_core::settings::save(&c.state, next).await.unwrap();
+    let switched = Instant::now();
+    let one = c
+        .wait_until(d.id, "dropped to one connection", |d| {
+            d.connections.is_none()
+        })
+        .await;
+    let took = switched.elapsed();
+    eprintln!("dropped to one connection {took:?} after the setting changed");
+    assert!(took < Duration::from_secs(1), "took {took:?}");
+    assert_eq!(one.status, DownloadStatus::Downloading, "it keeps going");
+    let deadline = Instant::now() + WAIT;
+    let done = loop {
+        let d = c.get(d.id).await;
+        assert_eq!(d.connections, None, "stays on one");
+        if d.status == DownloadStatus::Completed {
+            break d;
+        }
+        assert!(Instant::now() < deadline, "never completed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert!(is_mock_content(Path::new(&done.file_path.unwrap())));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_queued_download_gets_the_connection_a_split_one_gives_back() {
     let c = ctx().await;
     c.limit("src", 3).await;

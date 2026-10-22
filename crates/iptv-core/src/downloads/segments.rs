@@ -18,6 +18,7 @@
 use super::manager::{DownloadManager, TaskCtl};
 use crate::error::CoreError;
 use crate::model::RequestHeaders;
+use crate::state::AppState;
 use bytes::Bytes;
 use futures::stream::{BoxStream, FuturesUnordered, StreamExt};
 use parking_lot::Mutex;
@@ -287,9 +288,8 @@ pub struct Job<'a> {
     pub head_limit: Duration,
     pub idle_limit: Duration,
     pub host: String,
-    /// Most connections the source's setting allows (1 for "1", resuming
-    /// a split file one segment after another).
-    pub cap: usize,
+    /// Its settings ("Connections per download"), read every tick.
+    pub state: &'a AppState,
     /// The rest of the run uses one connection: set here when the provider
     /// refuses an extra segment, read back by the transfer.
     pub one_connection: &'a AtomicBool,
@@ -394,14 +394,15 @@ pub async fn run(
         if !stopping {
             // As many connections as the transfer may hold: start free
             // segments (splitting the largest when none is free), or retire
-            // the newest workers.
-            // A speed cap paces one stream: a capped transfer keeps one.
-            let cap =
-                if job.mgr.rate_limit().is_some() || job.one_connection.load(Ordering::Relaxed) {
-                    1
-                } else {
-                    job.cap
-                };
+            // the newest workers. "Connections per download: 1", a speed cap
+            // and a refused segment keep one (resuming a split file one
+            // segment after another).
+            let one = job.one_connection.load(Ordering::Relaxed);
+            let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.mgr, one) {
+                MAX_CONNECTIONS
+            } else {
+                1
+            };
             let allowed = job
                 .mgr
                 .connection_allowance(job.ctl)

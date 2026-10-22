@@ -591,7 +591,8 @@ async fn attempt(
         apply_source_headers(client.get(url), &row.headers).header(ACCEPT_ENCODING, "identity");
     // A file may go over several connections: a fresh start asks for a range
     // too, since only a `206` with a total and a validator shows it can.
-    let splittable = may_split(state, row, mgr, rep);
+    let source = row.download.item_ref.source_id.as_str();
+    let splittable = may_split(state, source, mgr, rep.one_connection);
     let ranged = resume_from > 0 || splittable;
     if resume_from > 0 {
         req = req.header(RANGE, format!("bytes={resume_from}-"));
@@ -765,7 +766,9 @@ async fn attempt(
                 }
                 if worth_splitting(offset) && split_checked.elapsed() >= SPLIT_CHECK {
                     split_checked = Instant::now();
-                    if mgr.connection_allowance(ctl) >= 2 {
+                    if may_split(state, source, mgr, rep.one_connection)
+                        && mgr.connection_allowance(ctl) >= 2
+                    {
                         hand_over = true;
                         break None;
                     }
@@ -852,21 +855,26 @@ async fn attempt(
 /// How often a single-connection transfer checks whether it may split.
 const SPLIT_CHECK: Duration = Duration::from_secs(1);
 
-/// Whether this attempt may go over several connections: the source's
-/// "Connections per download" is Auto, no speed cap is set (it paces one
-/// stream), and no segment answer of this run failed to match.
-fn may_split(
+/// Whether a transfer from `source` may go over several connections now:
+/// the source's "Connections per download" is Auto, no speed cap is set (it
+/// paces one stream), and nothing in this run asked for one connection
+/// (`one_connection`: a segment answer that did not match, a refused extra
+/// connection). Read again while the transfer runs, so a change applies to
+/// a transfer already split.
+pub(super) fn may_split(
     state: &AppState,
-    row: &DownloadRow,
+    source: &str,
     mgr: &DownloadManager,
-    rep: &Representation,
+    one_connection: bool,
 ) -> bool {
-    !rep.one_connection
+    !one_connection
         && mgr.rate_limit().is_none()
         && !state
-            .settings_snapshot()
+            .settings
+            .read()
             .download_single_connection
-            .contains(&row.download.item_ref.source_id)
+            .iter()
+            .any(|s| s == source)
 }
 
 /// Lets the `.part` take writes far past its end without filling the gap
@@ -914,11 +922,7 @@ async fn segmented(
         head_limit,
         idle_limit,
         host,
-        cap: if may_split(state, row, mgr, rep) {
-            segments::MAX_CONNECTIONS
-        } else {
-            1
-        },
+        state,
         one_connection: &one_connection,
     };
     let mut progress = Progress::new(start);

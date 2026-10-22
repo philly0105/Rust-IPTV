@@ -110,9 +110,16 @@ impl Ranges {
     }
 
     /// Covers `0..total` without gaps or overlaps, every `pos` in its
-    /// segment: a sidecar that is not is ignored.
+    /// segment: a sidecar that is not is ignored. An emptied segment (a
+    /// refused one handed back to the segment before it) covers nothing and
+    /// stays in the plan, since workers address segments by index.
     pub fn is_consistent(&self) -> bool {
-        let mut segs = self.segments.clone();
+        let mut segs: Vec<Seg> = self
+            .segments
+            .iter()
+            .filter(|s| !(s.start == s.end && s.pos == s.start))
+            .copied()
+            .collect();
         segs.sort_by_key(|s| s.start);
         let mut at = 0;
         for s in &segs {
@@ -916,6 +923,29 @@ mod tests {
             }],
         };
         assert!(!r.is_consistent(), "pos past the end");
+    }
+
+    #[test]
+    fn a_plan_with_a_refused_segment_handed_back_stays_consistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("Movie.mp4.part");
+        let mut r = Ranges::new(32 * MIB, "\"e\"".into(), 0);
+        let tail = r.split().unwrap();
+        // The tail was refused untouched: the open answer's segment takes
+        // its range and the tail is left empty at its old start.
+        r.segments[0].end = r.segments[tail].end;
+        r.segments[tail].end = r.segments[tail].start;
+        r.segments[0].pos = 5 * MIB;
+        assert!(r.is_consistent());
+        save(&part, &r).unwrap();
+        std::fs::File::create(&part)
+            .unwrap()
+            .set_len(5 * MIB as u64)
+            .unwrap();
+        assert_eq!(load(&part), Sidecar::Valid(r.clone()), "resumes at 5 MiB");
+        // An empty segment never hides a gap.
+        r.segments[0].end = 30 * MIB;
+        assert!(!r.is_consistent());
     }
 
     #[test]

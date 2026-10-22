@@ -20,11 +20,12 @@ struct Ctx {
     state: Arc<AppState>,
     router: RpcRouter,
     srv: iptv_fixtures::MockHandle,
+    events: parking_lot::Mutex<tokio::sync::broadcast::Receiver<iptv_core::AppEvent>>,
 }
 
 async fn ctx() -> Ctx {
     let tmp = tempfile::tempdir().unwrap();
-    let (sink, _events) = BroadcastSink::channel(65_536);
+    let (sink, events) = BroadcastSink::channel(65_536);
     let state = AppState::new(tmp.path().join("data"), Arc::new(sink), false)
         .await
         .unwrap();
@@ -36,6 +37,7 @@ async fn ctx() -> Ctx {
         state,
         router,
         srv: iptv_fixtures::spawn_mock().await,
+        events: parking_lot::Mutex::new(events),
     }
 }
 
@@ -80,6 +82,32 @@ impl Ctx {
                 d.error_message
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Forgets the events received so far.
+    fn drain_events(&self) {
+        let mut events = self.events.lock();
+        while matches!(
+            events.try_recv(),
+            Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_))
+        ) {}
+    }
+
+    /// Bytes of the next `downloads.progress` event of `id`: where a resumed
+    /// transfer starts.
+    async fn next_progress(&self, id: i64) -> i64 {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            assert!(Instant::now() < deadline, "no progress for {id}");
+            let got = self.events.lock().try_recv();
+            match got {
+                Ok(ev) if ev.kind == "downloads.progress" && ev.payload["id"] == id => {
+                    return ev.payload["bytesDownloaded"].as_i64().unwrap();
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {}
+                Err(_) => tokio::time::sleep(Duration::from_millis(5)).await,
+            }
         }
     }
 
@@ -398,6 +426,49 @@ async fn a_refused_extra_connection_drops_the_file_to_one_and_it_completes() {
     assert!(is_mock_content(Path::new(&file_path)), "byte-exact");
     assert!(!ranges_of(&file_path).exists());
     assert_eq!(c.refused().await, 1, "one refusal, then one connection");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_file_dropped_to_one_after_a_refusal_resumes_where_it_paused() {
+    let c = ctx().await;
+    c.limit("xt", 3).await;
+    c.limited_files(16 * MIB, 2048).await;
+    let d = c.start("xt", "1", &c.one_connection_movie(101)).await;
+    let deadline = Instant::now() + WAIT;
+    while c.refused().await == 0 || c.get(d.id).await.bytes_downloaded < (2 * MIB) as i64 {
+        assert!(Instant::now() < deadline, "never refused and went on");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    let paused = c.get(d.id).await;
+    let part = PathBuf::from(format!("{}.part", paused.file_path.clone().unwrap()));
+    // The refused segment was handed back to the open answer's: the plan
+    // that records it must still be one a resume trusts.
+    assert!(
+        matches!(
+            iptv_core::downloads::segments::load(&part),
+            iptv_core::downloads::segments::Sidecar::Valid(_)
+        ),
+        "the sidecar after the refusal is valid"
+    );
+    c.drain_events();
+    c.ok("downloads.resume", json!({"id": d.id})).await;
+    let first = c.next_progress(d.id).await;
+    assert!(
+        first >= paused.bytes_downloaded,
+        "the resume started over: {first} after pausing at {}",
+        paused.bytes_downloaded
+    );
+    let done = c
+        .wait_until(d.id, "completed", |d| {
+            assert_ne!(d.status, DownloadStatus::Failed, "{:?}", d.error_message);
+            d.status == DownloadStatus::Completed
+        })
+        .await;
+    let file_path = done.file_path.unwrap();
+    assert!(is_mock_content(Path::new(&file_path)), "byte-exact");
+    // One refusal per run: the resumed run tries a second connection again.
+    assert!(c.refused().await <= 2);
 }
 
 /// Splits a 24 MiB file over two connections and pauses it; returns its

@@ -73,6 +73,7 @@ beforeEach(() => {
   rpcMock.handlers['catalog.channels'] = channelsPage;
   rpcMock.handlers['catalog.search'] = () => ({ live: ALL.slice(0, 5), movies: [], series: [] });
   rpcMock.handlers['catalog.item'] = (a) => ALL[Number((a as { ref: ItemRef }).ref.itemId.slice(1))];
+  rpcMock.handlers['catalog.items'] = (a) => (a as { refs: ItemRef[] }).refs.map((r) => ({ item: ALL[Number(r.itemId.slice(1))] }));
   rpcMock.handlers['epg.nowNext'] = () => ({});
 });
 afterEach(cleanup);
@@ -105,7 +106,9 @@ describe('a query searches the scope picked', () => {
     await waitFor(() => expect(result.current.channels.map((c) => c.name)).toEqual(['Sports 2', 'Sports 4']));
     expect(result.current.total).toBe(2);
     expect(callsOf('catalog.search')).toHaveLength(0);
-    expect(callsOf('catalog.item')).toHaveLength(2);
+    // The two rows' channels in one call.
+    expect(callsOf('catalog.items')).toEqual([{ refs: [channel(2).ref, channel(4).ref] }]);
+    expect(callsOf('catalog.item')).toHaveLength(0);
     expect((callsOf('epg.nowNext').at(-1) as { refs: ItemRef[] }).refs).toEqual([channel(2).ref, channel(4).ref]);
   });
 

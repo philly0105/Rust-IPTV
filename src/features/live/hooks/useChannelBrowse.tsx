@@ -16,6 +16,7 @@ import { rpcRaw, type RpcArgs, type RpcResult } from '@/api/transport';
 import { itemKey, type Channel, type EpgNowNext, type FavoriteEntry, type ItemKey, type ItemRef, type RecentEntry } from '@/api/types';
 
 import { foldForFilter } from '../components/CategorySidebar';
+import { batchedItemQuery } from '../lib/itemBatch';
 import type { PickerSection } from '../components/ScopePicker';
 
 /** `''` all channels, `@favorites`, `@recent`, `@list:<id>`, else a group id. */
@@ -71,7 +72,7 @@ function snapshotChannel(e: FavoriteEntry | RecentEntry): Channel {
   return { ref: e.ref, name: e.snapshot.title, logoUrl: e.snapshot.posterUrl, categoryId: '', categoryName: e.snapshot.subtitle ?? '', isRadio: false };
 }
 
-const queryOf = <K extends 'catalog.channels' | 'catalog.item' | 'epg.nowNext'>(cmd: K, args: RpcArgs<K>, staleTime?: number) => ({
+const queryOf = <K extends 'catalog.channels' | 'epg.nowNext'>(cmd: K, args: RpcArgs<K>, staleTime?: number) => ({
   queryKey: rpcKey(cmd, args),
   queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw(cmd, args, { signal })) as RpcResult<K>,
   ...(staleTime !== undefined ? { staleTime } : {}),
@@ -122,7 +123,8 @@ export function useChannelBrowse({ enabled, sourceId, scope, query, limit }: Cha
     } else if (recent) rows = (recents.data ?? []).filter((e) => e.ref.contentType === 'live');
     return folded ? rows.filter((e) => foldForFilter(e.snapshot.title).includes(folded)) : rows;
   }, [favorites, recent, favs.data, recents.data, folded]);
-  const items = useQueries({ queries: refEntries.slice(0, limit).map((e) => ({ ...queryOf('catalog.item', { ref: e.ref }, 5 * 60_000), retry: false })) });
+  // One `catalog.items` call for the rows asked for together, not one call per row.
+  const items = useQueries({ queries: refEntries.slice(0, limit).map((e) => batchedItemQuery(e.ref, 5 * 60_000)) });
 
   const view = favorites ? favs : recent ? recents : listId ? list : pagedOn || !searching ? first : search;
   const { channels, total } = useMemo((): { channels: Channel[]; total: number } => {

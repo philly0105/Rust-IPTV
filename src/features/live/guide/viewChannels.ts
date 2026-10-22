@@ -10,10 +10,11 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { liveFavoritesArgs } from '@/api/bootPrefetch';
 import { rpcKey, useRpcQuery } from '@/api/query';
-import { rpcRaw, type RpcResult } from '@/api/transport';
+import type { RpcResult } from '@/api/transport';
 import { sameRef, type Channel, type FavoriteEntry, type ItemRef } from '@/api/types';
 
 import type { PagedChannels } from '../hooks/usePagedChannels';
+import { batchedItemQuery } from '../lib/itemBatch';
 
 export type GuideView = { kind: 'favorites' } | { kind: 'list'; id: string };
 
@@ -42,7 +43,8 @@ function snapshotChannel(e: FavoriteEntry): Channel {
 /**
  * The channels of `view` for the source `sourceId`, as `PagedChannels`; null without a view.
  * A list loads whole (`lists.items`, at most 2000 entries, its channels included). Favorites come
- * as refs (`favorites.list`), and the rows on screen ask `catalog.item` for their channels.
+ * as refs (`favorites.list`), and the rows on screen ask for their channels in one `catalog.items`
+ * call (lib/itemBatch.ts).
  * Only live channels: the guide has no radio rows.
  */
 export function useGuideViewChannels(view: GuideView | undefined, sourceId: string): PagedChannels | null {
@@ -74,14 +76,8 @@ export function useGuideViewChannels(view: GuideView | undefined, sourceId: stri
     setRange((r) => (r.start === start && r.end === end ? r : { start, end }));
   }, []);
   const near = favorites.slice(Math.max(0, range.start - AROUND), range.end + AROUND + 1);
-  const items = useQueries({
-    queries: near.map((e) => ({
-      queryKey: rpcKey('catalog.item', { ref: e.ref }),
-      queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('catalog.item', { ref: e.ref }, { signal })) as RpcResult<'catalog.item'>,
-      staleTime: CHANNEL_STALE_MS,
-      retry: false,
-    })),
-  });
+  // One `catalog.items` call for the rows asked for together, each under its own `catalog.item` key.
+  const items = useQueries({ queries: near.map((e) => batchedItemQuery(e.ref, CHANNEL_STALE_MS)) });
   // A new function whenever a favorite's channel arrives, so the rows read it.
   const stamp = items.map((q) => `${q.dataUpdatedAt}:${q.errorUpdatedAt}`).join(',');
   const favoriteChannel = useCallback(

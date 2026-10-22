@@ -176,7 +176,7 @@ describe('favorites and list views (F-GUIDE-CONVENIENCES)', () => {
 
   it('the group select shows the source’s favorites in favorites order', async () => {
     rpc.handlers['favorites.list'] = () => [fav(CHANNELS[5]!, 1), fav(CHANNELS[7]!, 0), { ...fav(CHANNELS[9]!, 2), ref: { sourceId: 'src1', contentType: 'radio', itemId: 'r9' } }];
-    rpc.handlers['catalog.item'] = (a) => CHANNELS.find((c) => c.ref.itemId === (a as { ref: ItemRef }).ref.itemId)!;
+    rpc.handlers['catalog.items'] = (a) => (a as { refs: ItemRef[] }).refs.map((r) => ({ item: CHANNELS.find((c) => c.ref.itemId === r.itemId)! }));
     await openGuide();
     // All channels, then the views (favorites, each list) under their heading, then the groups.
     fireEvent.click(group());

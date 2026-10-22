@@ -5,7 +5,8 @@
  *
  * The route names them like a group (`/s/:id/live/@favorites`, `?category=@recent` on Radio).
  * Both come from the core as refs (`favorites.list` in the user's order, `recent.list` newest
- * first); the rows on screen ask `catalog.item` for their channels, and now/next follows the
+ * first); the rows near the screen ask for their channels in one `catalog.items` call (each under
+ * its own `catalog.item` key, lib/itemBatch.ts), and now/next follows the
  * visible rows in fixed chunks, keyed by the entries' refs so it does not wait on the channels.
  * Only XMLTV now/next: a Stalker portal's own guide and the short EPG stay with the groups.
  */
@@ -15,10 +16,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { LIVE_VIEW_ID, liveFavoritesArgs, liveRecentArgs } from '@/api/bootPrefetch';
 import { invalidate, rpcKey, useRpcQuery } from '@/api/query';
-import { rpcRaw, type RpcResult } from '@/api/transport';
+import type { RpcResult } from '@/api/transport';
 import { itemKey, type Channel, type ContentType, type EpgNowNext, type FavoriteEntry, type ItemKey, type ItemRef, type RecentEntry } from '@/api/types';
 
 import { foldForFilter } from '../components/CategorySidebar';
+import { batchedItemQuery } from '../lib/itemBatch';
 import { MINUTE, ms } from '../lib/epgTime';
 import type { PagedChannels } from './usePagedChannels';
 
@@ -92,14 +94,9 @@ export function useLiveViewChannels(view: LiveView | undefined, args: LiveViewAr
   }, []);
   const nearFrom = Math.max(0, range.start - AROUND);
   const near = entries.slice(nearFrom, range.end + AROUND + 1);
-  const items = useQueries({
-    queries: near.map((e) => ({
-      queryKey: rpcKey('catalog.item', { ref: e.ref }),
-      queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('catalog.item', { ref: e.ref }, { signal })) as RpcResult<'catalog.item'>,
-      staleTime: CHANNEL_STALE_MS,
-      retry: false,
-    })),
-  });
+  // The rows asked for together go out as one `catalog.items` call: one call per row sent about 40
+  // on open and re-rendered the page once per answer.
+  const items = useQueries({ queries: near.map((e) => batchedItemQuery(e.ref, CHANNEL_STALE_MS)) });
   // A new function whenever a channel arrives, so the rows read it.
   const stamp = items.map((i) => `${i.dataUpdatedAt}:${i.errorUpdatedAt}`).join(',');
   const getChannel = useCallback(

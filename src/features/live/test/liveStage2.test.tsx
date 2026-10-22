@@ -85,6 +85,7 @@ beforeEach(() => {
   h['recent.list'] = () => [];
   h['remote.status'] = () => ({ running: false, port: 7310 });
   h['catalog.item'] = (a) => makeChannel(Number((a as { ref: { itemId: string } }).ref.itemId.slice(1)));
+  h['catalog.items'] = (a) => (a as { refs: Channel['ref'][] }).refs.map((r) => ({ item: makeChannel(Number(r.itemId.slice(1))) }));
   resetChannelListMemory();
   fakes.usePlayerStore.setState({ source: undefined } as never);
   useListsDialogs.setState({ dialog: null });

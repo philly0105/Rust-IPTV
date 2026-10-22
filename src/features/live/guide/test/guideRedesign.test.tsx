@@ -88,6 +88,7 @@ beforeEach(() => {
     return { items: CHANNELS.slice(q.offset, q.offset + q.limit), total: CHANNELS.length, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
   };
   h['catalog.item'] = (a) => makeChannel(Number((a as { ref: { itemId: string } }).ref.itemId.slice(1)));
+  h['catalog.items'] = (a) => (a as { refs: Channel['ref'][] }).refs.map((r) => ({ item: makeChannel(Number(r.itemId.slice(1))) }));
   h['epg.grid'] = hourly(defaultStart(Date.now()));
   h['epg.programs'] = () => [];
   h['epg.sources'] = () => [{ url: 'http://x/epg.xml', status: 'ok', programCount: 100, channelCount: 10, enabled: true, origin: 'settings' }];

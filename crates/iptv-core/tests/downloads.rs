@@ -470,13 +470,14 @@ async fn a_provider_outage_requeues_rows_and_the_queue_completes_after_it() {
         ids.push(c.start(&i.to_string(), "outage", &path).await.id);
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
-    // Longer than a run's in-task retries (about 4.5 s).
-    reqwest::get(c.srv.url("/__mock/outage?ms=6000"))
+    // The outage lasts until a row says it waits for the provider, however long a
+    // run's in-task retries take there (about 4.5 s of backoff plus each request; a
+    // fixed 6 s outage ended before them on CI's Windows runner), then it is over.
+    reqwest::get(c.srv.url("/__mock/outage?ms=600000"))
         .await
         .unwrap();
-    let deadline = Instant::now() + WAIT;
-    let mut waited = false;
-    loop {
+    /// The rows, none of them failed.
+    async fn list(c: &Ctx) -> Vec<Download> {
         let list: Vec<Download> =
             serde_json::from_value(c.ok("downloads.list", Value::Null).await).unwrap();
         assert!(
@@ -484,18 +485,39 @@ async fn a_provider_outage_requeues_rows_and_the_queue_completes_after_it() {
             "{:?}",
             list.iter().map(|d| &d.error_message).collect::<Vec<_>>()
         );
-        waited |= list.iter().any(|d| {
+        list
+    }
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let waiting = list(&c).await.iter().any(|d| {
             d.waiting
                 .as_ref()
                 .is_some_and(|w| w.reason == iptv_core::model::WaitReason::Provider)
         });
-        if list.iter().all(|d| d.status == DownloadStatus::Completed) {
+        if waiting {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no row said it waits for the provider"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    reqwest::get(c.srv.url("/__mock/outage?ms=0"))
+        .await
+        .unwrap();
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if list(&c)
+            .await
+            .iter()
+            .all(|d| d.status == DownloadStatus::Completed)
+        {
             break;
         }
         assert!(Instant::now() < deadline, "queue never finished");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(waited, "rows said they wait for the provider");
     for id in ids {
         assert!(is_mock_content(Path::new(
             &c.get(id).await.file_path.unwrap()

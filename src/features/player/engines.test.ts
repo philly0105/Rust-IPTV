@@ -784,6 +784,25 @@ describe('MPEG-TS restarts at a seek or a resume (PL-2)', () => {
     expect(state.t + (engine.timeOffset?.() ?? 0)).toBe(756);
   });
 
+  it('a torn-down player asks the proxy to let go of the connection it keeps for a resume (PL-M1)', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const proxied = '/api/proxy?url=http%3A%2F%2Fh%2Fv.ts&sourceId=s1';
+      (await createEngine(video(), vodTs(), proxied, cb(), { captions: false })).destroy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const asked = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]));
+      expect(asked.pathname).toBe('/api/proxy');
+      expect(Object.fromEntries(asked.searchParams)).toEqual({ url: 'http://h/v.ts', sourceId: 's1', release: '1' });
+      // Live is never parked, and a URL off the proxy has nothing to release.
+      (await createEngine(video(), src('http://h/a.ts'), '/api/proxy?url=http%3A%2F%2Fh%2Fa.ts&sourceId=s1', cb(), { captions: false })).destroy();
+      (await createEngine(video(), vodTs(), 'http://h/v.ts', cb(), { captions: false })).destroy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('bufferedAt: inside a range, not at its end', () => {
     const { el, state } = clockedVideo();
     state.ranges = [

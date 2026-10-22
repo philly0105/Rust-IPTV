@@ -980,6 +980,17 @@ const CLOSED_LIVE: EngineError = { message: 'The live stream closed the connecti
 /** A restart that lands this close before its target plays on from there instead of seeking again. */
 const TS_LEFTOVER_MIN_S = 0.25;
 
+/**
+ * The proxy keeps the provider's connection for mpegts.js's next lazy-load resume (server.md):
+ * a torn-down player tells it to let go, so a stop or an Open in MPV frees a one-connection account.
+ */
+function releaseParked(url: string): void {
+  if (!proxyRoute(url)) return;
+  const u = new URL(url, window.location.href);
+  u.searchParams.set('release', '1');
+  void fetch(u.href, { cache: 'no-store' }).catch(() => undefined);
+}
+
 async function mpegtsEngine(
   el: HTMLMediaElement,
   source: PlayerSource,
@@ -1292,6 +1303,7 @@ async function mpegtsEngine(
       if (player) teardown(player);
       player = null;
       el.removeAttribute('src');
+      if (!isLive) releaseParked(absolute);
     },
   };
 }

@@ -117,7 +117,7 @@ anything is subscribed:
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
 use it for container and Playwright readiness probes.
 
-### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=]`
+### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=&release=]`
 Used by the web UI (`proxiedUrl()` in `src/api/transport.ts`) when a stream
 needs source headers or would be mixed content.
 
@@ -171,6 +171,26 @@ needs source headers or would be mixed content.
    as the client lets go of the response, which frees the provider's
    connection. Bodies without a length (live MPEG-TS) pass through as they
    come.
+   The exception is a GET for MPEG-TS (`video/mp2t`, `application/x-mpegts`,
+   or an untyped `.ts` path) of 16 MiB or more (`src/proxy/park.rs`):
+   mpegts.js loads catch-up and TS movies lazily, lets go of the request once
+   it holds 60 s ahead and asks for the rest (`Range: bytes=<n>-`) after
+   30 s of playback, which used to close the provider's connection and open
+   a new one about twice a minute, and a panel that ignores Range answered
+   the resume from byte 0. When such a client lets go before the end, its
+   reader parks for 45 s: it keeps the connection and what it read from at
+   least 16 MiB behind what the client took (the socket and the browser
+   still hold some of that), and reads on until it holds 48 MiB. A GET for
+   the same URL, source and header overrides whose `bytes=<n>-` (after
+   `from`) starts at a byte it holds is answered 206 from it, with no new
+   upstream request. Any other request with the same `sourceId` (or for the
+   same host, without one) lets the parked reader go first, so a seek or the
+   next item never runs two connections; so does a newer park on that source,
+   the time running out, and `release=1`, which the built-in player sends
+   when it tears an MPEG-TS player down (a stop, another item, Open in MPV):
+   it fetches nothing, answers 204, and keeps a reader of that source from
+   parking for the next 5 s, since it can land before the proxy noticed the
+   player let go. At most 4 readers are parked at once.
 7. HLS playlists are detected by content type (`*mpegurl*`) or, for untyped
    responses (`text/plain`, `application/octet-stream`, none), by sniffing
    `#EXTM3U` in the first bytes. They are rewritten line by line as chunks

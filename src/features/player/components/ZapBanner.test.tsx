@@ -207,9 +207,12 @@ describe('what the banner shows', () => {
     tune(news);
     render(<ZapBanner />);
     await advance(0);
-    // The cache URL fails: the logo's own URL once, then the icon.
+    // The cache URL fails: the logo's own URL once, the cache URL once more, then the icon.
+    const cached = screen.getByTestId('zap-logo').getAttribute('src');
     fireEvent.error(screen.getByTestId('zap-logo'));
     expect(screen.getByTestId('zap-logo').getAttribute('src')).toBe('http://h/logo/101.png');
+    fireEvent.error(screen.getByTestId('zap-logo'));
+    expect(screen.getByTestId('zap-logo').getAttribute('src')).toBe(`${cached}&retry=1`);
     fireEvent.error(screen.getByTestId('zap-logo'));
     expect(screen.getByTestId('zap-logo-fallback')).toBeTruthy();
   });

@@ -493,21 +493,27 @@ describe('HeroCarousel', () => {
     expect(next.getAttribute('data-active')).toBeNull();
   });
 
-  it('retries a broken backdrop directly, then falls back to the poster (also retried), then to the tint', () => {
+  it('retries a broken backdrop directly and through the cache again, then falls back to the poster (also retried), then to the tint', () => {
     const { hero } = renderHero([slide('a', { backdropUrl: 'https://img.test/broken.jpg', posterUrl: 'https://img.test/a.jpg' })]);
     const layer = hero.querySelector('[data-hero-backdrop]')!;
     const src = () => layer.querySelector('img')?.getAttribute('src');
-    expect(src()).toBe(`/api/img?${new URLSearchParams({ url: 'https://img.test/broken.jpg', sourceId: 's1' })}`);
+    const cachedBackdrop = `/api/img?${new URLSearchParams({ url: 'https://img.test/broken.jpg', sourceId: 's1' })}`;
+    const cachedPoster = `/api/img?${new URLSearchParams({ url: 'https://img.test/a.jpg', sourceId: 's1' })}`;
+    expect(src()).toBe(cachedBackdrop);
     fireEvent.error(layer.querySelector('img')!);
     expect(src()).toBe('https://img.test/broken.jpg');
     fireEvent.error(layer.querySelector('img')!);
-    expect(src()).toBe(`/api/img?${new URLSearchParams({ url: 'https://img.test/a.jpg', sourceId: 's1' })}`);
+    expect(src()).toBe(`${cachedBackdrop}&retry=1`);
+    fireEvent.error(layer.querySelector('img')!);
+    expect(src()).toBe(cachedPoster);
     // A poster standing in for the backdrop is the cheap quarter-size blur, never a full-size one.
     expect(layer.querySelector('img')!.getAttribute('data-hero-image')).toBe('poster');
     expect(layer.querySelector('img')!.className).toContain('scale-[4.4]');
     expect(layer.querySelector('img')!.className).not.toMatch(/blur-(2xl|3xl|xl|lg)/);
     fireEvent.error(layer.querySelector('img')!);
     expect(src()).toBe('https://img.test/a.jpg');
+    fireEvent.error(layer.querySelector('img')!);
+    expect(src()).toBe(`${cachedPoster}&retry=1`);
     fireEvent.error(layer.querySelector('img')!);
     expect(layer.querySelector('img')).toBeNull();
   });

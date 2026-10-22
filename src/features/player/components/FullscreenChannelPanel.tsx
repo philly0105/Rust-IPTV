@@ -19,12 +19,14 @@ import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
 import { locateChannel } from './channelPanelLocate';
 
 /**
- * A row's channel logo through the image cache (C3), then its own URL once, then a blank tile.
- * Fetched through the shared image gate (ui/imageGate.ts), as ChannelLogo's: at most four at once,
- * the rows in view first, and a row that leaves before its turn asks nothing. `defer` (the list
- * is scrolling) is RowLogo's own latch on top of the gate: `allowed` holds the last address let
- * through, so a logo not showing yet waits for the scroll to rest before it reaches the gate, and
- * one already showing stays, since its <img> is kept while the address is the same.
+ * A row's channel logo through the image cache (C3), then its own URL once and the cache again,
+ * then a blank tile.
+ * Fetched through the shared image gate (ui/imageGate.ts), as ChannelLogo's: at most `maxActive()`
+ * at once (4 in server mode, 6 on desktop), the rows in view first, and a row that leaves before
+ * its turn asks nothing. `defer` (the list is scrolling) is RowLogo's own latch on top of the gate:
+ * `allowed` holds the last address let through, so a logo not showing yet waits for the scroll to
+ * rest before it reaches the gate, and one already showing stays, since its <img> is kept while the
+ * address is the same.
  */
 function RowLogo({ url, sourceId, defer = false }: { url?: string | null; sourceId: string; defer?: boolean }) {
   const image = useImageChain([safeImageUrl(url ?? undefined)], sourceId, 32);

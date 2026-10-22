@@ -31,9 +31,9 @@ describe('imageUrl in server (web) mode', () => {
     expect(imageUrl(once, 'x1')).toBe(once);
   });
 
-  it('gives the prefetch the URL the poster tries first, then the original as the fallback', () => {
+  it('gives the prefetch the URL the poster tries first, then the original and the cache again as fallbacks', () => {
     const poster = 'http://cdn.example/poster.jpg';
-    expect(imageCandidates([poster], 'x1')).toEqual([imageUrl(poster, 'x1'), poster]);
+    expect(imageCandidates([poster], 'x1')).toEqual([imageUrl(poster, 'x1'), poster, `${imageUrl(poster, 'x1')}&retry=1`]);
   });
 });
 

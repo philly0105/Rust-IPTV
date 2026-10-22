@@ -20,7 +20,9 @@
 //!   `Last-Modified`/`If-Modified-Since` (304) and Range work too.
 //! - 400 bad URL, 403 refused by the SSRF guard, 404 upstream 404, 415 not an
 //!   image, 502 a body over 10 MB (code `invalid`) or any other upstream
-//!   failure (`network`), 500 a local disk or database failure (`io`) or a
+//!   failure (`network`), 504 a request with `w` whose upstream fetch did not
+//!   finish within [`SIZED_MISS_WAIT`] (`timeout`; the fetch goes on and
+//!   stores the image), 500 a local disk or database failure (`io`) or a
 //!   file that vanished twice while being read (`internal`). Errors are the
 //!   usual JSON `RpcError` with `Cache-Control: no-store`.
 //!
@@ -41,6 +43,7 @@ use axum::response::Response;
 use iptv_core::imagecache::{self, CachedImage, ImageError};
 use iptv_core::logging::redact_url;
 use iptv_core::RpcError;
+use std::time::Duration;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -48,6 +51,15 @@ use tower_http::services::ServeFile;
 pub const CACHE_CONTROL: &str = "private, max-age=604800";
 /// Header that says whether the bytes came from disk (`hit`) or upstream (`miss`).
 pub const X_IMAGE_CACHE: HeaderName = HeaderName::from_static("x-image-cache");
+/// How long a request with a width hint (a grid poster, a logo) waits for the
+/// upstream fetch once the cache missed. A host that never answers held the
+/// request until the fetch's own deadlines, and with it one of the browser's
+/// six connections to this port, so pictures already on disk queued behind
+/// it. After this the route answers 504 and the UI tries the original URL,
+/// while the fetch goes on and stores the copy for the next view. Requests
+/// without a hint (backdrops, detail posters) fetch larger originals, which a
+/// cut-off wait would download twice, so they keep waiting.
+pub const SIZED_MISS_WAIT: Duration = Duration::from_secs(4);
 
 /// The route's query (first value of each parameter wins).
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -114,7 +126,9 @@ async fn serve(
 ) -> Response {
     let mut retried = false;
     loop {
-        let image = match imagecache::fetch_sized(&s.app, url, source_id, width).await {
+        let wait = width.map(|_| SIZED_MISS_WAIT);
+        let image = match imagecache::fetch_sized_within(&s.app, url, source_id, width, wait).await
+        {
             Ok(image) => image,
             Err(err) => return image_error(url, err),
         };
@@ -253,11 +267,13 @@ mod tests {
 
     #[test]
     fn unknown_parameters_such_as_the_clients_gen_are_ignored() {
-        // The client adds `gen=<n>` after Clear to skip the browser's copies;
-        // it must not change what the route reads.
+        // The client adds `gen=<n>` after Clear to skip the browser's copies,
+        // and `retry=1` to its second try of a cache URL after the original
+        // failed; neither may change what the route reads.
         let plain = parse_query(Some("url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1"));
         for query in [
             "url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1&gen=3",
+            "url=http%3A%2F%2Fa.example%2Fp.png&sourceId=s1&retry=1",
             "gen=3&url=http%3A%2F%2Fa.example%2Fp.png&x=&sourceId=s1",
         ] {
             assert_eq!(parse_query(Some(query)), plain, "{query}");

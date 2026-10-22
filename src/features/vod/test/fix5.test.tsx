@@ -48,7 +48,7 @@ describe('F1: poster fallback tiles differ per title', () => {
       </MemoryRouter>,
     );
     expect(container.querySelector('img')!.getAttribute('alt')).toBe('');
-    // Run 3 C3: the cache URL fails, then the original; only then do the initials show.
+    // Run 3 C3: the cache URL fails, then the original and the cache URL again; only then do the initials show.
     for (let attempt = 0; attempt < 4; attempt++) {
       const img = container.querySelector('img');
       if (!img) break;

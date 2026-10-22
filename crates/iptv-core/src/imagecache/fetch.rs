@@ -1,8 +1,8 @@
 //! One upstream image fetch: status, type and size checks, body read with a
 //! cap. Nothing here touches the disk or the index.
 
-use super::{core_message, ImageError, ImageErrorKind, MAX_IMAGE_BYTES};
-use crate::http::{self, BODY_IDLE_TIMEOUT, HEADER_TIMEOUT};
+use super::{core_message, head_timeout, ImageError, ImageErrorKind, MAX_IMAGE_BYTES};
+use crate::http::{self, BODY_IDLE_TIMEOUT};
 use crate::model::RequestHeaders;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::StatusCode;
@@ -22,12 +22,13 @@ pub(super) async fn download(
         client.get(url.clone()).header(ACCEPT, ACCEPT_IMAGES),
         headers,
     );
-    let resp = match tokio::time::timeout(HEADER_TIMEOUT, req.send()).await {
+    let head_timeout = head_timeout();
+    let resp = match tokio::time::timeout(head_timeout, req.send()).await {
         Err(_) => {
-            return Err(ImageError::upstream(format!(
-                "{host} did not answer within {} s.",
-                HEADER_TIMEOUT.as_secs()
-            )))
+            return Err(ImageError::new(
+                ImageErrorKind::NoAnswer,
+                format!("{host} did not answer within {} s.", head_timeout.as_secs()),
+            ))
         }
         Ok(Err(err)) => return Err(transport(host, err)),
         Ok(Ok(resp)) => resp,
@@ -82,12 +83,18 @@ pub(super) async fn download(
     Ok((content_type, body))
 }
 
-/// A transport failure: the guard's refusal is Forbidden, the rest Upstream.
+/// A transport failure before the head: the guard's refusal is Forbidden, a
+/// connect timeout NoAnswer, the rest Upstream.
 fn transport(host: &str, err: reqwest::Error) -> ImageError {
     if let Some(blocked) = http::find_blocked(&err) {
         return ImageError::new(ImageErrorKind::Forbidden, blocked.0);
     }
-    ImageError::upstream(core_message(http::transport_error(host, err)))
+    let kind = if err.is_timeout() {
+        ImageErrorKind::NoAnswer
+    } else {
+        ImageErrorKind::Upstream
+    };
+    ImageError::new(kind, core_message(http::transport_error(host, err)))
 }
 
 /// Reads the body, refusing it once it passes [`MAX_IMAGE_BYTES`].
@@ -255,5 +262,40 @@ mod tests {
         assert!(looks_like_html(b"<HTML><body>404</body></HTML>"));
         assert!(!looks_like_html(b"<svg/>"));
         assert!(!looks_like_html(b"\x89PNG\r\n\x1a\n"));
+    }
+
+    /// A connect timeout counts as no answer, toward the host's breaker. The
+    /// image head deadline usually ends a connect first; this one comes
+    /// sooner when hyper-util splits the connect timeout over a host's
+    /// addresses. Linux only: there a listener whose full accept queue is
+    /// never drained drops further SYNs, like a firewalled host.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_connect_timeout_is_no_answer() {
+        use std::time::Duration;
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let listener = socket.listen(0).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut queued = Vec::new();
+        while queued.len() < 16 {
+            let connect = tokio::net::TcpStream::connect(addr);
+            match tokio::time::timeout(Duration::from_millis(200), connect).await {
+                Ok(Ok(stream)) => queued.push(stream),
+                _ => break,
+            }
+        }
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(300))
+            .build()
+            .unwrap();
+        let err = client
+            .get(format!("http://{addr}/a.png"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(err.is_connect(), "{err:?}");
+        assert_eq!(transport("127.0.0.1", err).kind, ImageErrorKind::NoAnswer);
+        drop((listener, queued));
     }
 }

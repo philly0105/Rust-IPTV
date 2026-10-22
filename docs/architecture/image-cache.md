@@ -1,6 +1,6 @@
 # Image cache
 
-Code: `crates/iptv-core/src/imagecache/` (core: `mod.rs` request flow, `fetch.rs` upstream fetch and type checks, `store.rs` index writer, eviction and reconcile, `resize.rs` width variants, `rpc.rs` commands) and `crates/iptv-server/src/img.rs` (the HTTP route). Tests: `crates/iptv-core/tests/image_cache.rs`, `l2_import_img.rs` (posters answered while the write lock is held), `l3_serve_image_variants.rs` (width variants), the `img_*` cases in `crates/iptv-server/tests/server.rs`, `image_route_caches_behind_the_token_and_exposes_the_cache_header` and `cross_site_webview_requests_are_served_but_server_mode_refuses_them` in `crates/iptv-tauri/src/proxy.rs`, and unit tests in each core file.
+Code: `crates/iptv-core/src/imagecache/` (core: `mod.rs` request flow, `fetch.rs` upstream fetch and type checks, `store.rs` index writer, eviction and reconcile, `resize.rs` width variants, `breaker.rs` hosts that stop answering, `rpc.rs` commands) and `crates/iptv-server/src/img.rs` (the HTTP route). Tests: `crates/iptv-core/tests/image_cache.rs`, `image_hung_hosts.rs` (hosts that never answer: the head deadline and the breaker), `image_connect.rs` (Linux only: a host slow to take the connection, and one that never takes it, under the real deadlines), `l2_import_img.rs` (posters answered while the write lock is held), `l3_serve_image_variants.rs` (width variants), the `img_*` cases in `crates/iptv-server/tests/server.rs`, `image_route_caches_behind_the_token_and_exposes_the_cache_header` and `cross_site_webview_requests_are_served_but_server_mode_refuses_them` in `crates/iptv-tauri/src/proxy.rs`, and unit tests in each core file.
 
 Posters, channel logos and backdrops are cached on disk, so a poster wall that was seen once loads from the device on the next visit and offline (Run 3 contract C2). The UI sends every http(s) image through `<base>/img?url=<absolute url>&sourceId=<id?>&w=<px?>` (C3, `src/api/images.ts`); `w` asks for a smaller copy ([Width hints](#width-hints)). The first request fetches the image upstream; later requests read it from disk. The cache has a size cap from `settings.imageCacheMaxMb` (default 500, 50 to 5000) and drops the least recently used images when it goes over.
 
@@ -44,18 +44,22 @@ Eviction and Clear keep the file of a key whose fetch is still running, because 
 
 ## Request flow
 
-`imagecache::fetch(state, url, source_id)` returns a `CachedImage { path, content_type, bytes, hit }` or an `ImageError` with a kind. `imagecache::get` is the same with the error mapped onto `CoreError`.
+`imagecache::fetch(state, url, source_id)` returns a `CachedImage { path, content_type, bytes, hit }` or an `ImageError` with a kind. `imagecache::get` is the same with the error mapped onto `CoreError`. `fetch_sized` adds the width hint, and `fetch_sized_within` a limit on how long the caller waits for the upstream fetch after a miss: past it the caller gets `Pending`, and the fetch goes on in its own task and stores the image (or remembers its failure) for the next request. The guard check and the lookups are not limited, so a cached image is never refused that way.
 
 1. The URL is parsed and normalised. Anything that is not an absolute http(s) URL is `BadUrl`.
 2. The source, when `sourceId` names one, contributes its request headers (`config_json.headers`: User-Agent, Referer and the others a provider may need) and, in server mode, its own `host:port` as trusted by the SSRF guard. An unknown `sourceId` adds nothing; the image still loads without it.
 3. In server mode the guard checks the URL before the cache is read. This check does not resolve names: it refuses private and loopback IP literals and `localhost` names, and those stay refused even when the cache already holds the image. A host name that resolves to a private address is refused when it is fetched (see [Server mode and trust](#server-mode-and-trust)).
 4. A pending entry or a row whose file is on disk with the recorded size is a hit.
 5. Otherwise the request joins or starts the single fetch for that key and scope (`flight_scope`). The scope holds the source's trusted `host:port` while the guard is active, and a hash of the source's request headers as they are sent (trimmed, blank ones dropped). An image host that wants the provider's User-Agent or Referer refuses a request without them. A request without the source therefore never joins the source's fetch or inherits its refusal, and the reverse holds too. The stored file is keyed by URL (and width bucket) alone, so once one request has stored the image, every request for it hits it. The fetch runs as its own task, so a client that disconnects does not cancel it for the others. Concurrent requests share its result and all report `miss`. A request that joins a fetch that has already answered reports `hit`, as does a fetch that found the image already stored by an earlier one.
-6. The fetch sends an image `Accept` header with a 15 s limit for the response head, a 20 s idle limit between body chunks and a 60 s limit overall.
-7. The response is checked. 404 and 410 become `NotFound`; any other non-2xx status or transport error becomes `Upstream`. An `image/*` type is accepted, unless the body is really HTML. A generic type (`application/octet-stream`, `binary/octet-stream`, `text/plain` and similar) or a missing one is sniffed (PNG, JPEG, GIF, WebP, AVIF, ICO, BMP, SVG) and stored as the type found. Anything else is `NotImage`. A body over 10 MB (`MAX_IMAGE_BYTES`) is `TooLarge`, and an empty body is `Upstream`.
+6. The fetch sends an image `Accept` header with an 8 s limit for the response head, connecting included (`HEAD_TIMEOUT`, not the 15 s other requests get), a 20 s idle limit between body chunks and a 60 s limit overall. A poster host that accepts the connection and never answers therefore fails after 8 s, and so does one that does not take the connection. The client keeps its 10 s connect timeout (`http::CONNECT_TIMEOUT`): reqwest counts the DNS lookup as part of connecting, so a shorter one would fail every image while the resolver is slow (a first nameserver that does not answer costs 5 s with glibc's defaults).
+7. The response is checked. A connect timeout or a head that did not come in time is `NoAnswer`. 404 and 410 become `NotFound`; any other non-2xx status or transport error becomes `Upstream`. An `image/*` type is accepted, unless the body is really HTML. A generic type (`application/octet-stream`, `binary/octet-stream`, `text/plain` and similar) or a missing one is sniffed (PNG, JPEG, GIF, WebP, AVIF, ICO, BMP, SVG) and stored as the type found. Anything else is `NotImage`. A body over 10 MB (`MAX_IMAGE_BYTES`) is `TooLarge`, and an empty body is `Upstream`.
 8. The file is written and renamed, a pending entry is added, and the insert is queued for the writer. The answer goes out without waiting for the row (see [Writer](#writer)), and the fetch ends. A request that follows before the row commits finds the pending entry and is a hit, so a busy database (a catalog import, say) never makes a poster wait or fetch twice.
 
 A failed fetch is remembered for 10 minutes (`FAILURE_TTL`, at most 4096 entries) per key and scope, so a broken poster wall does not refetch on every scroll. A local disk or database error is not remembered. `images.clear` forgets every failure.
+
+### Hosts that stop answering
+
+Failure memory is per URL, so each new poster on a host that accepts connections and never answers would wait out the deadlines again. A breaker per `host:port` (`breaker.rs`) stops that. Like the fetches and the failure memory, the breakers are kept per scope (step 5): a host that never answers requests without the source's User-Agent says nothing about the source's own requests, so a recording's logo asked without the source does not shut out the Live TV logo that sends it. After `NoAnswer` on two different images of one host within 60 s (`WINDOW`; two widths of one poster count once), it opens for 2 minutes (`OPEN_FOR`) and logs it once at info. While it is open, a fetch for that host fails at once with `HostDown` (502, `network`), without a request. The check comes right before the upstream request, so disk hits and variants made from a cached original are not affected. After the open time, one fetch at a time tries the host again (the others are still refused while it runs): another timeout opens the breaker for another 2 minutes, and any answer, an error status included, closes it. Any answer from the host also wipes an earlier timeout, so one blip on a busy CDN between successful fetches never trips it, and a timeout does not count at all when the host answered another fetch after this one went out: a host that answers most of a grid while two of its posters stall (a thumbnail script stuck on two broken sources) is still there. `HostDown` is not remembered per URL, so a refused picture is fetched normally once the host is back. `images.clear` closes every breaker. The breakers live in memory and start closed at launch.
 
 ## Width hints
 
@@ -76,12 +80,16 @@ In the UI, `imageUrl(src, sourceId, width)` and the helpers built on it (`imageA
 
 The desktop loopback proxy mounts the same handler, so `w` works there too.
 
+## Loading in the UI
+
+Cache-route pictures load through the fetch gate (`src/ui/imageGate.ts`): it sets `src` itself, newest pictures first, holds them while the page scrolls, and keeps only a few in flight. The cap (`maxActive`) is 4 in server mode, where `/api/img` shares the browser's six HTTP/1.1 connections per host and port with `/api/rpc`, so two stay free for RPCs. On desktop it is 6: RPCs go over Tauri IPC and the image listener carries nothing but artwork. A picture gives its slot back after 3 s without an answer (`SLOT_TIMEOUT_MS`), or when it turns out to be out of view after it started; its request stays open (parked). When its row unmounts, a picture still loading, parked or not, loses its `src`, which ends the request, so a row that scrolled away or a page that closed does not hold a connection.
+
 ## Commands (C2)
 
 | Command | Behaviour |
 | --- | --- |
 | `images.stats` | `{bytes, files, maxBytes}`. Evicts down to the cap first, so it also applies a lowered `imageCacheMaxMb`. |
-| `images.clear` | Deletes every file and row, forgets failures, and returns the empty stats. |
+| `images.clear` | Deletes every file and row, forgets failures, closes the host breakers, and returns the empty stats. |
 
 ## HTTP route
 
@@ -98,11 +106,14 @@ The desktop loopback proxy mounts the same handler, so `w` works there too.
 | 404 | Upstream 404 or 410 (`not_found`) | JSON |
 | 415 | Not an image (`unsupported`) | JSON |
 | 502 | A body over 10 MB (`invalid`) | JSON |
-| 502 | Any other upstream failure: status, connection, timeout, empty body (`network`) | JSON |
+| 502 | Any other upstream failure: status, connection, timeout, empty body, or a host skipped by its breaker (`network`) | JSON |
+| 504 | A request with `w` whose upstream fetch did not finish within 4 s of the miss (`SIZED_MISS_WAIT`, `timeout`). The fetch goes on and stores the image. | JSON |
 | 500 | Local disk or database failure (`io`) | JSON |
 | 500 | A file that vanished twice while being read (`internal`) | JSON |
 
 The handler's errors carry `Cache-Control: no-store`, so the browser asks again after the failure memory expires.
+
+A request with `w` (a grid poster, a channel logo) waits at most 4 s for the upstream fetch once the cache missed (`SIZED_MISS_WAIT`). A host that never answers otherwise held the request until the fetch's own deadlines, and with it one of the browser's six connections to the image port, so pictures already on disk queued behind it. The 504 sends the UI to the original URL (`useImageChain`), which loads over the provider host's own connections. The original can fail where the cache would not: an http logo on a page served over https is mixed content, and a host that wants the source's User-Agent or Referer refuses the browser. So when the original fails too, the UI asks the cache once more, at the same URL plus `retry=1` (the route ignores it): by then the fetch has often stored the picture, or the request joins it and waits up to another 4 s. The first cache URL is skipped for five minutes in that browser (`markImageFailed`), and so is the retry when it fails; a remounted picture whose retry loaded starts at the retry's URL. A request without `w` (backdrops, detail posters, the hover prefetch) keeps waiting for the whole fetch: it loads the full original, which a cut-off wait would make the browser download a second time.
 
 Every response from the handler carries `harden()`: CSP `sandbox; default-src 'none'` and `X-Content-Type-Options: nosniff`. An SVG poster is served from the app's own origin, so it must never run as a document.
 
@@ -123,7 +134,7 @@ The route must keep ignoring `gen` and any other parameter it does not know (`pa
 
 ## Server mode and trust
 
-With the guard active (`allow_private` off), a private or loopback target is refused unless the request names a source whose own `host:port` is that target. Flights and remembered failures are kept per scope, so an untrusted request never shares a fetch or a failure with a trusted one. The guard check comes before the cache lookup, so an image cached through a trusted source is still refused when it is asked for by IP literal or `localhost` name without the source. A host name that resolves to a private address is checked by the guarded client's resolver when it is fetched, not when a cached copy is served: a copy cached through the source is served to a request without it. That is not a hole, because any caller may name any `sourceId`. Resolving every name before each hit would cost a DNS lookup per cached image and break offline use.
+With the guard active (`allow_private` off), a private or loopback target is refused unless the request names a source whose own `host:port` is that target. Flights, remembered failures and host breakers are kept per scope, so an untrusted request never shares a fetch or a failure with a trusted one. The guard check comes before the cache lookup, so an image cached through a trusted source is still refused when it is asked for by IP literal or `localhost` name without the source. A host name that resolves to a private address is checked by the guarded client's resolver when it is fetched, not when a cached copy is served: a copy cached through the source is served to a request without it. That is not a hole, because any caller may name any `sourceId`. Resolving every name before each hit would cost a DNS lookup per cached image and break offline use.
 
 ## Desktop
 

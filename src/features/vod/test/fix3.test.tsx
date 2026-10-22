@@ -231,12 +231,15 @@ describe('U4-fix3: detail hero', () => {
     // The TMDB stand-in joins the chain once TMDB answers; fail the provider only after that.
     await screen.findByTestId('tmdb-attribution');
     const img = () => within(frame).getByRole('img');
-    // Run 3 C3: each picture is tried through the image cache, then directly, before the next one.
-    const [cachedProvider, provider, cachedTmdb] = imageCandidates(['http://provider/bad.jpg', 'http://tmdb/poster.jpg'], 'src1');
+    // Run 3 C3: each picture is tried through the image cache, then directly, then through the cache
+    // once more, before the next one.
+    const [cachedProvider, provider, providerAgain, cachedTmdb] = imageCandidates(['http://provider/bad.jpg', 'http://tmdb/poster.jpg'], 'src1');
     expect(provider).toBe('http://provider/bad.jpg');
     await waitFor(() => expect(img().getAttribute('src')).toBe(cachedProvider));
     fireEvent.error(img());
     await waitFor(() => expect(img().getAttribute('src')).toBe(provider));
+    fireEvent.error(img());
+    await waitFor(() => expect(img().getAttribute('src')).toBe(providerAgain));
     fireEvent.error(img());
     await waitFor(() => expect(img().getAttribute('src')).toBe(cachedTmdb));
     expect(cachedTmdb).toContain(encodeURIComponent('http://tmdb/poster.jpg'));

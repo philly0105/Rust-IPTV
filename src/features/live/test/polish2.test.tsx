@@ -358,7 +358,9 @@ describe('groups drawer below 1024 px', () => {
 describe('channel logos in reused rows', () => {
   it('a broken logo does not stick to the slot when the row shows another channel', () => {
     const { rerender, container } = render(<ChannelLogo src="https://x/broken.png" name="Alpha One" />);
-    // Run 3 C3: the cache route fails first, then the original address is tried once.
+    // Run 3 C3: the cache route fails first, then the original address is tried once, then the
+    // cache route again.
+    fireEvent.error(container.querySelector('img')!);
     fireEvent.error(container.querySelector('img')!);
     fireEvent.error(container.querySelector('img')!);
     expect(container.querySelector('img')).toBeNull();

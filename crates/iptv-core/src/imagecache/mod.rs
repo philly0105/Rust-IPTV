@@ -28,7 +28,8 @@
 //!    Until the row commits, lookups serve the file from its pending entry
 //!    and the writer keeps it from eviction and clear. Failures are
 //!    remembered per URL and scope for [`FAILURE_TTL`], so a broken poster
-//!    wall does not refetch on every scroll.
+//!    wall does not refetch on every scroll. A host that stops answering
+//!    altogether is skipped for a while, per scope too ([`breaker`]).
 //!
 //! Width hints (`fetch_sized`, `/api/img?...&w=<px>`): a request with a
 //! hint gets a copy no wider than the hint's bucket ([`resize::bucket`]),
@@ -51,6 +52,7 @@
 
 pub mod rpc;
 
+mod breaker;
 mod fetch;
 pub mod resize;
 mod store;
@@ -61,6 +63,7 @@ use crate::http::{self, Authority, TargetError};
 use crate::logging::redact_url;
 use crate::model::{RequestHeaders, Settings};
 use crate::state::AppState;
+use breaker::{Admit, Breakers};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, OptionalExtension};
@@ -90,6 +93,16 @@ pub const EVICT_TARGET_PERCENT: u64 = 90;
 pub const MAX_URL_LEN: usize = 8 * 1024;
 /// Deadline for one upstream fetch, response head and body together.
 pub const FETCH_DEADLINE: Duration = Duration::from_secs(60);
+/// Deadline for an upstream image's response head, connecting included.
+/// Shorter than [`http::HEADER_TIMEOUT`]: a poster host that accepts the
+/// connection and never answers held the picture, and the request waiting on
+/// it, for 15 s. It also ends a host that does not take the connection: the
+/// client's own [`http::CONNECT_TIMEOUT`] is longer. A shorter connect
+/// timeout would cut the DNS lookup too (reqwest counts it as connecting), so
+/// a resolver that takes 5 s would fail every image.
+pub const HEAD_TIMEOUT: Duration = Duration::from_secs(8);
+/// [`set_head_timeout_for_tests`]'s value in ms; 0 means [`HEAD_TIMEOUT`].
+static HEAD_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
 /// Remembered failures kept at most (expired ones are pruned first).
 const MAX_FAILURES: usize = 4096;
 /// Variant keys remembered as "serve the original" at most.
@@ -141,8 +154,20 @@ pub enum ImageErrorKind {
     NotImage,
     /// The body is larger than [`MAX_IMAGE_BYTES`] (502).
     TooLarge,
-    /// Any other upstream failure: status, connection, timeout (502).
+    /// Any other upstream failure: status, connection, a stalled body (502).
     Upstream,
+    /// The host did not take the connection or send a response head in time
+    /// (502). Counts toward its host's breaker (`breaker.rs`).
+    NoAnswer,
+    /// Not fetched: the host's breaker is open after it stopped
+    /// answering (502). It says nothing about this image, so it is not
+    /// remembered.
+    HostDown,
+    /// The caller stopped waiting for the upstream fetch
+    /// ([`fetch_sized_within`]); the fetch goes on and stores the image
+    /// (504). It is the caller's limit, not the image's failure, so it is
+    /// never remembered.
+    Pending,
     /// Local disk or database failure (500); never remembered.
     Local,
 }
@@ -174,6 +199,20 @@ impl ImageError {
         Self::new(ImageErrorKind::NotImage, message)
     }
 
+    fn host_down(host: &str) -> Self {
+        Self::new(
+            ImageErrorKind::HostDown,
+            format!("{host} stopped answering, so its images are skipped for a few minutes."),
+        )
+    }
+
+    fn pending(host: &str) -> Self {
+        Self::new(
+            ImageErrorKind::Pending,
+            format!("{host} is slow to answer; the image is still being fetched."),
+        )
+    }
+
     fn too_large() -> Self {
         Self::new(
             ImageErrorKind::TooLarge,
@@ -195,7 +234,11 @@ impl ImageError {
             ImageErrorKind::Forbidden => 403,
             ImageErrorKind::NotFound => 404,
             ImageErrorKind::NotImage => 415,
-            ImageErrorKind::TooLarge | ImageErrorKind::Upstream => 502,
+            ImageErrorKind::TooLarge
+            | ImageErrorKind::Upstream
+            | ImageErrorKind::NoAnswer
+            | ImageErrorKind::HostDown => 502,
+            ImageErrorKind::Pending => 504,
             ImageErrorKind::Local => 500,
         }
     }
@@ -211,7 +254,8 @@ impl std::error::Error for ImageError {}
 
 impl From<ImageError> for CoreError {
     /// The C2 mapping: non-image -> Unsupported, too large -> Invalid,
-    /// upstream 404 -> NotFound, other upstream failures -> Network.
+    /// upstream 404 -> NotFound, other upstream failures -> Network, a caller
+    /// that stopped waiting -> Timeout.
     fn from(e: ImageError) -> Self {
         match e.kind {
             ImageErrorKind::BadUrl | ImageErrorKind::Forbidden | ImageErrorKind::TooLarge => {
@@ -219,7 +263,10 @@ impl From<ImageError> for CoreError {
             }
             ImageErrorKind::NotFound => CoreError::NotFound(e.message),
             ImageErrorKind::NotImage => CoreError::Unsupported(e.message),
-            ImageErrorKind::Upstream => CoreError::Network(e.message),
+            ImageErrorKind::Upstream | ImageErrorKind::NoAnswer | ImageErrorKind::HostDown => {
+                CoreError::Network(e.message)
+            }
+            ImageErrorKind::Pending => CoreError::Timeout(e.message),
             ImageErrorKind::Local => CoreError::Io(std::io::Error::other(e.message)),
         }
     }
@@ -356,8 +403,9 @@ async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess,
     })
 }
 
-/// The scope of a fetch: callers in different scopes never share a flight or
-/// a remembered failure (the disk entry is shared: it is keyed by URL only).
+/// The scope of a fetch: callers in different scopes never share a flight, a
+/// remembered failure or a host breaker (the disk entry is shared: it is
+/// keyed by URL only).
 /// Two things split it:
 /// - with the server-mode guard active (`guarded`), the source's trusted
 ///   authority, since it changes what may be fetched;
@@ -425,6 +473,9 @@ struct Job {
     key: String,
     /// `Some(bucket)` for a variant: `key` is its variant key.
     width: Option<u32>,
+    /// [`flight_scope`]: splits the flights, the failure memory and the
+    /// host breakers.
+    scope: String,
     headers: RequestHeaders,
     client: reqwest::Client,
 }
@@ -453,6 +504,8 @@ struct ImageCache {
     /// Resizes running at once ([`resize_slots`]): a poster wall's first
     /// view queued one per poster, all decoding at the same time.
     resizes: Semaphore,
+    /// Image hosts that stopped answering.
+    breakers: Mutex<Breakers>,
 }
 
 /// Resizes at once: every core but one, so a poster wall's first view leaves
@@ -483,6 +536,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
             kept: Mutex::default(),
             next_flight: AtomicU64::new(1),
             resizes: Semaphore::new(resize_slots()),
+            breakers: Mutex::default(),
         })
     })
 }
@@ -669,12 +723,8 @@ impl ImageCache {
     }
 
     /// Joins the flight for `job` (same URL and scope) or starts one.
-    async fn join_or_start(
-        self: &Arc<Self>,
-        job: Job,
-        scope: &str,
-    ) -> Result<CachedImage, ImageError> {
-        let flight_key = format!("{}|{scope}", job.key);
+    async fn join_or_start(self: &Arc<Self>, job: Job) -> Result<CachedImage, ImageError> {
+        let flight_key = format!("{}|{}", job.key, job.scope);
         let (fut, resolved) = {
             let mut flights = self.flights.lock();
             match flights.get(&flight_key) {
@@ -746,11 +796,14 @@ impl ImageCache {
         }
     }
 
-    /// Removes the flight (and remembers its failure) under the flights
-    /// lock, so a new caller sees either the flight or the failure.
+    /// Removes the flight (and remembers its failure, unless it was local or
+    /// a breaker's refusal) under the flights lock, so a new caller sees
+    /// either the flight or the failure.
     fn end_flight(&self, flight_key: &str, id: u64, failure: Option<&ImageError>) {
         let mut flights = self.flights.lock();
-        if let Some(err) = failure.filter(|e| e.kind != ImageErrorKind::Local) {
+        if let Some(err) =
+            failure.filter(|e| !matches!(e.kind, ImageErrorKind::Local | ImageErrorKind::HostDown))
+        {
             self.remember(flight_key, err);
         }
         if flights.get(flight_key).is_some_and(|f| f.id == id) {
@@ -791,17 +844,37 @@ impl ImageCache {
             }
         }
         let host = job.url.host_str().unwrap_or("the image server").to_owned();
-        let (content_type, body) = tokio::time::timeout(
+        // Asked only now, so disk hits and variants made from a cached
+        // original never wait on a host's breaker.
+        let host_key = Authority::of(&job.url).map(|a| (a, job.scope.clone()));
+        let started = Instant::now();
+        let admitted = host_key
+            .as_ref()
+            .map(|k| self.breakers.lock().admit(k, started));
+        if admitted == Some(Admit::Refuse) {
+            return Err(ImageError::host_down(&host));
+        }
+        let fetched = tokio::time::timeout(
             FETCH_DEADLINE,
             fetch::download(&job.client, &job.url, &job.headers, &host),
         )
         .await
-        .map_err(|_| {
-            ImageError::upstream(format!(
+        .unwrap_or_else(|_| {
+            Err(ImageError::upstream(format!(
                 "{host} took longer than {} s to send the image.",
                 FETCH_DEADLINE.as_secs()
-            ))
-        })??;
+            )))
+        });
+        if let (Some(host_key), Some(admitted)) = (&host_key, admitted) {
+            self.note_host(
+                host_key,
+                &job.url,
+                admitted,
+                started,
+                fetched.as_ref().err(),
+            );
+        }
+        let (content_type, body) = fetched?;
         let label = job.url.to_string();
         let Some(width) = job.width else {
             return self.store(&job.key, &label, id, content_type, body).await;
@@ -823,6 +896,34 @@ impl ImageCache {
                 self.keep(&job.key);
                 self.store(&base_key, &label, id, content_type, body).await
             }
+        }
+    }
+
+    /// Tells the breaker of `host` how a fetch it let through at `started`
+    /// ended, and logs once when that trips it.
+    fn note_host(
+        &self,
+        host: &breaker::HostKey,
+        url: &Url,
+        admitted: Admit,
+        started: Instant,
+        err: Option<&ImageError>,
+    ) {
+        let timed_out = err.is_some_and(|e| e.kind == ImageErrorKind::NoAnswer);
+        let tripped = self.breakers.lock().record(
+            host,
+            url.as_str(),
+            admitted,
+            started,
+            timed_out,
+            Instant::now(),
+        );
+        if tripped {
+            tracing::info!(
+                host = %host.0,
+                skip_secs = breaker::open_for().as_secs(),
+                "an image host stopped answering; its images fail at once for a while"
+            );
         }
     }
 
@@ -962,6 +1063,33 @@ impl ImageCache {
     }
 }
 
+/// Shortens [`HEAD_TIMEOUT`] for the whole process. Test hook for integration
+/// tests with an image host that never answers; the app never calls it.
+#[doc(hidden)]
+pub fn set_head_timeout_for_tests(timeout: Duration) {
+    let ms = u64::try_from(timeout.as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    HEAD_TIMEOUT_MS.store(ms, Ordering::Relaxed);
+}
+
+/// Shortens how long a host's breaker stays open (`breaker::OPEN_FOR`) for
+/// the whole process. Test hook, like [`set_head_timeout_for_tests`].
+#[doc(hidden)]
+pub fn set_breaker_open_for_tests(open_for: Duration) {
+    let ms = u64::try_from(open_for.as_millis())
+        .unwrap_or(u64::MAX)
+        .max(1);
+    breaker::OPEN_FOR_MS.store(ms, Ordering::Relaxed);
+}
+
+fn head_timeout() -> Duration {
+    match HEAD_TIMEOUT_MS.load(Ordering::Relaxed) {
+        0 => HEAD_TIMEOUT,
+        ms => Duration::from_millis(ms),
+    }
+}
+
 /// The first 64 bits of a cache key (the in-memory "kept" set).
 fn short_key(key: &str) -> Option<u64> {
     u64::from_str_radix(key.get(..16)?, 16).ok()
@@ -985,6 +1113,21 @@ pub async fn fetch_sized(
     url: &str,
     source_id: Option<&str>,
     width: Option<u32>,
+) -> Result<CachedImage, ImageError> {
+    fetch_sized_within(state, url, source_id, width, None).await
+}
+
+/// [`fetch_sized`] that waits at most `wait` for the upstream fetch once the
+/// cache missed, then answers [`ImageErrorKind::Pending`]. The fetch runs in
+/// its own task and goes on, so it still stores the image (or remembers its
+/// failure) for the next request. The guard check and the lookups are not
+/// limited: a cached image is never refused this way.
+pub async fn fetch_sized_within(
+    state: &Arc<AppState>,
+    url: &str,
+    source_id: Option<&str>,
+    width: Option<u32>,
+    wait: Option<Duration>,
 ) -> Result<CachedImage, ImageError> {
     let url = normalize_url(url)?;
     let width = width.and_then(resize::bucket);
@@ -1027,14 +1170,22 @@ pub async fn fetch_sized(
         &source.headers,
     );
     let client = http::guarded_client(state, trusted);
+    let host = url.host_str().unwrap_or("the image server").to_owned();
     let job = Job {
         url,
         key,
         width,
+        scope,
         headers: source.headers,
         client,
     };
-    cache.join_or_start(job, &scope).await
+    let flight = cache.join_or_start(job);
+    let Some(wait) = wait else {
+        return flight.await;
+    };
+    tokio::time::timeout(wait, flight)
+        .await
+        .unwrap_or_else(|_| Err(ImageError::pending(&host)))
 }
 
 /// Disk hit, or fetch, validate and store. Concurrent calls for one URL share
@@ -1061,11 +1212,13 @@ pub async fn stats(state: &Arc<AppState>) -> CoreResult<ImageCacheStats> {
 }
 
 /// Deletes every cached file and index row; returns the (empty) stats.
-/// Remembered failures are forgotten too, so Clear also means "try again".
+/// Remembered failures and open host breakers are forgotten too, so Clear
+/// also means "try again".
 pub async fn clear(state: &Arc<AppState>) -> CoreResult<ImageCacheStats> {
     let cache = cache(state);
     cache.ready().await?;
     cache.failures.lock().clear();
+    cache.breakers.lock().clear();
     cache.touched.lock().clear();
     cache.kept.lock().clear();
     cache.round_trip(|ack| Op::Clear { ack }).await?;
@@ -1156,6 +1309,9 @@ mod tests {
             (ImageErrorKind::NotImage, 415, RpcErrorCode::Unsupported),
             (ImageErrorKind::TooLarge, 502, RpcErrorCode::Invalid),
             (ImageErrorKind::Upstream, 502, RpcErrorCode::Network),
+            (ImageErrorKind::NoAnswer, 502, RpcErrorCode::Network),
+            (ImageErrorKind::HostDown, 502, RpcErrorCode::Network),
+            (ImageErrorKind::Pending, 504, RpcErrorCode::Timeout),
         ];
         for (kind, status, code) in cases {
             let err = ImageError::new(kind, "m");

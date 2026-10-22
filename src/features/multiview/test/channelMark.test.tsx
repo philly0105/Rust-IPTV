@@ -14,16 +14,20 @@ afterEach(cleanup);
 const img = (c: HTMLElement) => c.querySelector('img');
 
 describe('ChannelMark', () => {
-  it('asks the cache with the channel source, falls back to the original once, then shows initials', () => {
+  it('asks the cache with the channel source, falls back to the original once and the cache again, then shows initials', () => {
     const logo = 'http://logos.example.test/bbc-one.png';
     const { container } = render(<ChannelMark src={logo} sourceId="portal-a" name="BBC One" />);
-    const first = new URL(img(container)!.getAttribute('src')!, 'http://app.test');
+    const firstSrc = img(container)!.getAttribute('src')!;
+    const first = new URL(firstSrc, 'http://app.test');
     expect(first.pathname).toBe('/api/img');
     expect(first.searchParams.get('url')).toBe(logo);
     expect(first.searchParams.get('sourceId')).toBe('portal-a');
 
     fireEvent.error(img(container)!);
     expect(img(container)!.getAttribute('src')).toBe(logo);
+
+    fireEvent.error(img(container)!);
+    expect(img(container)!.getAttribute('src')).toBe(`${firstSrc}&retry=1`);
 
     fireEvent.error(img(container)!);
     expect(img(container)).toBeNull();
@@ -34,6 +38,7 @@ describe('ChannelMark', () => {
     const broken = 'http://logos.example.test/broken.png';
     const good = 'http://logos.example.test/good.png';
     const { container, rerender } = render(<ChannelMark src={broken} sourceId="portal-a" name="Old Channel" />);
+    fireEvent.error(img(container)!);
     fireEvent.error(img(container)!);
     fireEvent.error(img(container)!);
     expect(img(container)).toBeNull();

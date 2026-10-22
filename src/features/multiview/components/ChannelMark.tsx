@@ -5,7 +5,7 @@ import { cn, useImageChain } from '../deps';
 /**
  * A channel's logo on a plate (transparent PNGs read on any frame), or its coloured monogram when
  * it has none or the image fails: the same tile as in Live and the guide (LG-14). Decorative: the channel's name is always spelled out beside it.
- * Remote logos load through the image cache, then the original URL once, before the initials
+ * Remote logos load through the image cache, then the original URL once and the cache again, before the initials
  * show (C3). Pass `sourceId` so the cache applies that source's network rules.
  */
 export function ChannelMark({ src, name, sourceId, className }: { src?: string; name: string; sourceId?: string; className?: string }) {

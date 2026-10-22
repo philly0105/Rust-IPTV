@@ -2,13 +2,16 @@
  * Artwork fetch gate (L3-live-1, L3-perf-desktop-3).
  *
  * Posters and logos load from the app's own image cache route: `/api/img` on the same origin
- * as `/api/rpc` in server mode, the loopback proxy (shared with stream segments) on desktop.
- * A browser opens about six HTTP/1.1 connections per host, so a fast scroll through artwork
- * that is not cached yet queued 290-370 image requests ahead of the page RPCs: channel pages
- * that the server answered in 6-10 ms reached the page after 1-1.7 s, and the rows stayed blank.
+ * as `/api/rpc` in server mode; on desktop, the loopback proxy's image listener, a port that
+ * carries nothing but artwork (RPCs go over Tauri IPC, streams to the proxy's other port).
+ * A browser opens about six HTTP/1.1 connections per host and port, so a fast scroll through
+ * artwork that is not cached yet queued 290-370 image requests ahead of the page RPCs: channel
+ * pages that the server answered in 6-10 ms reached the page after 1-1.7 s, and the rows stayed
+ * blank.
  *
- * The gate sets `src` on a cache-route <img> itself, and keeps at most {@link MAX_ACTIVE}
- * such fetches in flight, so RPCs always find a free connection:
+ * The gate sets `src` on a cache-route <img> itself, and keeps at most {@link maxActive} such
+ * fetches in flight: {@link MAX_ACTIVE} in server mode, so RPCs always find a free connection,
+ * and {@link DESKTOP_MAX_ACTIVE} on desktop, where no RPC needs that port:
  * - the newest pictures go first (what the user scrolled to), in DOM order within one commit;
  * - while anything on the page scrolls (the virtual lists and grids, a rail), nothing starts
  *   until the scrolling has stopped for {@link SETTLE_MS}, so cards flung past never ask (nor
@@ -18,7 +21,9 @@
  *   if it turns out to be out of view after it started (a lazy <img> the browser parks);
  * - a picture that already loaded in this session, and any URL that is not a cache-route URL
  *   (an original provider URL, data:, blob:), starts at once without a slot;
- * - a slot is freed on load, error, unmount, or after {@link SLOT_TIMEOUT_MS}.
+ * - a slot is freed on load, error, unmount, or after {@link SLOT_TIMEOUT_MS};
+ * - on unmount a picture still loading loses its `src`, also one that gave its slot back, so a
+ *   row that scrolled away or a page that closed does not keep holding a connection.
  *
  * Without IntersectionObserver (jsdom, very old engines) every picture starts at once, as it
  * did before the gate.
@@ -26,8 +31,19 @@
 
 import { isImageCacheUrl } from '@/api/images';
 
-/** Cache-route fetches in flight at once; the rest of the browser's six connections stay free for RPCs. */
+/** Server mode: cache-route fetches in flight at once; the rest of the browser's six connections stay free for RPCs. */
 export const MAX_ACTIVE = 4;
+/** Desktop: the image listener serves artwork only, so the gate may use all six of the webview's connections to it. */
+export const DESKTOP_MAX_ACTIVE = 6;
+
+/**
+ * The cap for this window. It checks the Tauri global, as `isDesktop` in transport.ts does, but
+ * when the gate pumps rather than at import, so a test can stand in for the desktop.
+ */
+export function maxActive(): number {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window ? DESKTOP_MAX_ACTIVE : MAX_ACTIVE;
+}
+
 /** How long the page must stay still after a scroll before waiting pictures start. */
 export const SETTLE_MS = 120;
 /** During a continuous scroll, a picture that has been in view this long starts anyway. */
@@ -190,7 +206,8 @@ function pump(): void {
   const t0 = now();
   const scrolling = t0 - lastScrollAt < SETTLE_MS;
   let wake = Number.POSITIVE_INFINITY;
-  while (active < MAX_ACTIVE) {
+  const cap = maxActive();
+  while (active < cap) {
     let best = -1;
     for (let i = 0; i < pending.length; i++) {
       const t = pending[i]!;
@@ -213,8 +230,9 @@ function pump(): void {
 
 /**
  * Loads `url` into `el` through the gate. Returns the cancel function to call when the element
- * goes (a React ref cleanup): a waiting picture leaves the queue, a running one frees its slot
- * and drops its request. `immediate` (a priority or eager picture) sets `src` at once.
+ * goes (a React ref cleanup): a waiting picture leaves the queue, a running one frees its slot,
+ * and one still loading drops its request, parked or not. `immediate` (a priority or eager
+ * picture) sets `src` at once.
  */
 export function gateImage(el: HTMLImageElement, url: string, immediate = false): () => void {
   const io = immediate ? null : visibilityObserver();
@@ -239,12 +257,13 @@ export function gateImage(el: HTMLImageElement, url: string, immediate = false):
       const i = pending.indexOf(t);
       if (i >= 0) pending.splice(i, 1);
     }
-    const running = t.state === 'active' && !el.complete;
+    // A parked picture (slot timed out, or out of view) still has its request open.
+    const loading = (t.state === 'active' || t.state === 'parked') && !el.complete;
     free(t, 'done');
     io.unobserve(el);
     tickets.delete(el);
     // A request for a row that scrolled away is dropped, so it does not hold a connection.
-    if (running) el.removeAttribute('src');
+    if (loading) el.removeAttribute('src');
     pump();
   };
 }

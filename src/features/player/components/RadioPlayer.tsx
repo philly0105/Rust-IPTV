@@ -54,7 +54,7 @@ export function RadioPlayer({ variant = 'stage', className }: RadioPlayerProps) 
   const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const waiting = useMediaStore((s) => s.waiting);
-  // Station art through the image cache (C3), then its own URL once, then the radio icon.
+  // Station art through the image cache (C3), then its own URL once and the cache again, then the radio icon.
   const art = useImageChain([safeImageUrl(source?.posterUrl)], source?.ref?.sourceId);
   const [root, setRoot] = useState<HTMLElement | null>(null);
   // A short stage (a phone's, above the station list) has no height for the column: the art and

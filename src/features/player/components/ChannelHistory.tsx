@@ -47,7 +47,7 @@ function useNowPlaying(entries: readonly HistoryEntry[]): Record<string, string>
 }
 
 function Logo({ entry }: { entry: HistoryEntry }) {
-  // Through the image cache (C3), then the logo's own URL once, then the icon.
+  // Through the image cache (C3), then the logo's own URL once and the cache again, then the icon.
   const logo = useImageChain([safeImageUrl(entry.posterUrl)], entry.ref.sourceId);
   if (!logo.url) {
     const Icon = entry.isRadio ? Radio : Tv;

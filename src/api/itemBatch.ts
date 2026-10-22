@@ -1,10 +1,11 @@
 /**
  * `catalog.item` for many rows at once. Live's Favorites and Recently watched, the guide's
- * Favorites and the channel pickers hold refs and ask for the channels of the 20 to 60 rows near
- * the screen. Each row keeps its own `['catalog.item', { ref }]` cache entry, which the player and
- * the other readers share, but the refs asked for in the same tick go out as one `catalog.items`
- * call; each entry then gets its own row, or the error `catalog.item` would have given. One call
- * per row queued 40 or more requests on open and re-rendered the page once per answer.
+ * Favorites and the channel pickers hold refs and ask for the channels of their rows: the 20 to 60
+ * near the screen, in a picker the 60 it lists and 60 more per Show more. Each row keeps its own
+ * `['catalog.item', { ref }]` cache entry, which the player and the other readers share, but the
+ * refs asked for in the same tick go out as one `catalog.items` call; each entry then gets its own
+ * row, or the error `catalog.item` would have given. One call per row queued 40 or more requests
+ * on open and re-rendered the page once per answer.
  *
  * A sent batch is never aborted: the queries do not hand it their signal, so a row that scrolls
  * away does not cancel the rows still on screen, and its answer is cached like any other.

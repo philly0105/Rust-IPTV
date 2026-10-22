@@ -91,7 +91,7 @@ All of it happens inside the import transaction: readers keep the previous catal
 | `durationSeconds` | number | `VodItem.durationSeconds` |
 | `tmdbId` | number | `tmdbId` |
 | `catchup` | object `{type, days?, source?}` | `Channel.catchup`; turns on `Channel.archive` when the type is usable (`catchup_usable`, case-insensitive: default, append, shift, xc and flussonic, plus the aliases in `CATCHUP_TYPES` in `catchup/m3u.rs`: timeshift is handled as shift; flussonic-hls, flussonic-ts and fs as flussonic), as does `archive_hours > 0` |
-| `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped), and `VodItem.headers` of an M3U movie in `catalog.item`; the player merges them over the source-level headers |
+| `headers` | object `{userAgent?, referrer?, origin?}` | `Channel.headers` (blank values dropped), and `VodItem.headers` of an M3U movie in `catalog.item` and `catalog.items`; the player merges them over the source-level headers |
 
 The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`, and on the series rows it groups from playlist episodes `episodes`, the stored episode list that `m3u.seriesDetail` and `m3u.streamUrl` read (m3u.md, Series). Readers pass unknown keys through untouched.
 
@@ -108,7 +108,7 @@ The m3u importer also stores `tvgName`, `tvgShift`, `vlcOpts` and `kodiProps`, a
   - The parental count corrections (`parental::filter::locked_item_counts`, `locked_hidden_counts`) test the same condition, so a locked or hidden channel the filter already removed is not subtracted twice.
   - Favorites, recently watched and custom lists (`favorites.list`, `recent.list`, the favorites order, `lists.items` and `itemCount`, `lists.neighbors`) drop a live entry whose catalog row exists and fails the filter (`NOT EXISTS (SELECT 1 FROM items q WHERE ... AND NOT (<condition on q>))`). An entry whose row is gone stays and shows as unavailable.
   - `live.alternates` drops the candidates `QualityFilter::keeps` rejects, never the channel being played (failover.md).
-  - Not filtered: `catalog.item`, `source_counts` and the stored `item_count`, `channels.edits`, continue watching, stats and recordings.
+  - Not filtered: `catalog.item` and `catalog.items`, `source_counts` and the stored `item_count`, `channels.edits`, continue watching, stats and recordings.
 
 ## Counts
 

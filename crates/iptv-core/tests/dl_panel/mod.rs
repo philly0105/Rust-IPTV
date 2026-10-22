@@ -468,12 +468,21 @@ struct Slot {
 impl Slot {
     fn take(s: &Shared) -> Option<Slot> {
         let max = s.enforced.load(Ordering::SeqCst);
-        let taken = s
-            .open
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                (max == 0 || n < max).then_some(n + 1)
-            })
-            .ok()?;
+        // A compare-exchange loop: newer Rust deprecates fetch_update, and its
+        // replacement try_update is missing in the MSRV.
+        let mut taken = s.open.load(Ordering::SeqCst);
+        loop {
+            if max != 0 && taken >= max {
+                return None;
+            }
+            match s
+                .open
+                .compare_exchange_weak(taken, taken + 1, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => break,
+                Err(now) => taken = now,
+            }
+        }
         s.peak.fetch_max(taken + 1, Ordering::SeqCst);
         Some(Slot {
             open: Arc::clone(&s.open),

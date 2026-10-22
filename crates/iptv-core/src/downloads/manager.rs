@@ -1164,15 +1164,26 @@ pub async fn wait_stopped(
     }
 }
 
+/// Takes one from `n` when it is above zero. A compare-exchange loop rather
+/// than `fetch_update`, which newer Rust deprecates for `try_update`, a name
+/// the MSRV (1.90) does not have.
+fn take_one(n: &AtomicU32) -> bool {
+    let mut cur = n.load(Ordering::Relaxed);
+    while cur > 0 {
+        match n.compare_exchange_weak(cur, cur - 1, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(now) => cur = now,
+        }
+    }
+    false
+}
+
 /// The conditional `queued -> downloading` claim, retried with backoff a
 /// few times when the database is busy or briefly unavailable.
 async fn claim(state: &Arc<AppState>, mgr: &DownloadManager, id: i64) -> CoreResult<bool> {
     let mut attempt = 0;
     loop {
-        let simulated = mgr
-            .failing_claims
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
-            .is_ok();
+        let simulated = take_one(&mgr.failing_claims);
         let claimed = if simulated {
             Err(CoreError::Timeout("simulated claim failure".into()))
         } else {

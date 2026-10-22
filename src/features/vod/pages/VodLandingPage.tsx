@@ -1,11 +1,11 @@
 import { ChevronRight, Clapperboard, ListFilter, Lock, SearchX, Tv } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 
 import { categoriesArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
-import { itemKey, type ItemSnapshot, type PlaybackPosition, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
+import { itemKey, type Category, type ItemSnapshot, type PlaybackPosition, type SeriesItem, type SourceKind, type VodItem } from '@/api/types';
 // The module itself, not the player barrel: small, no imports, already in the player core chunk.
 import { preloadEngines } from '@/features/player/enginePreload';
 import { snapshotTitle } from '@/lib/title';
@@ -22,7 +22,7 @@ import { useEdgeFades } from '../hooks/useEdgeFades';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
-import { useVodLocks } from '../hooks/useVodLocks';
+import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
 import { loadSearchPage } from '../routes';
 import { ALL_CATEGORIES, effectiveMinRating, type GridQueryInput, type VodKind } from '../lib/paging';
 import { detailHref } from '../lib/search';
@@ -59,15 +59,12 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   const { t, i18n } = useTranslation('vod');
   const { sourceId = '' } = useParams();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const indexRef = useRef<HTMLDivElement>(null);
   const [manageOpen, setManageOpen] = useState(false);
-  const [filter, setFilter] = useState('');
   const [indexOpen, setIndexOpenState] = useState(readIndexOpen);
   const setIndexOpen = (open: boolean) => {
     writeIndexOpen(open);
     setIndexOpenState(open);
   };
-  const indexId = useId();
   // "All categories" in the chip row opens the index under the rails and takes you there.
   const indexToggleRef = useRef<HTMLButtonElement>(null);
   const [indexVisits, setIndexVisits] = useState(0);
@@ -148,18 +145,6 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   );
   const hiddenCount = (allCats.data ?? []).filter((c) => c.hidden).length;
 
-  const entries = useMemo<CategoryEntry[]>(() => {
-    const list = categoryEntries(shownCats ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));
-    if (filter.trim()) return list;
-    const all: CategoryEntry = {
-      id: ALL_CATEGORIES,
-      name: kind === 'movie' ? t('allMovies') : t('allSeries'),
-      emphasis: true,
-    };
-    if (visibleCount) all.count = visibleCount;
-    return [all, ...list];
-  }, [shownCats, filter, kind, visibleCount, t, locks]);
-
   const hrefFor = (id: string) => `/s/${encodeURIComponent(sourceId)}/${section}/c/${encodeURIComponent(id)}`;
 
   // The rails ask for each grid's first page with the grid's own arguments (sort, the minimum
@@ -226,26 +211,6 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     ),
     [resume, locks, sourceKind],
   );
-
-  // Back from a category: same scroll offset, focus on the category you opened. The index's own
-  // positions only (the rails above hold grid indices of their own).
-  const { pathname } = useLocation();
-  useScrollMemory({
-    key: pathname,
-    getScroller: () => scrollRef.current,
-    ready: !!shownCats && !filter.trim(),
-    onRestored: (spot) => {
-      if (spot.index === undefined) return;
-      indexRef.current?.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
-    },
-  });
-  // Enter on a focused link also fires click, so this covers the keyboard too.
-  const rememberCategory = (e: MouseEvent<HTMLElement>) => {
-    const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
-    const index = Number(cell?.dataset['gridIndex']);
-    // Indices shift while the filter is on, so only unfiltered positions are kept.
-    if (cell && Number.isFinite(index) && !filter.trim()) rememberSpot(pathname, { scrollTop: scrollRef.current?.scrollTop ?? 0, index });
-  };
 
   if (source.isError) {
     return (
@@ -325,64 +290,151 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
             ))}
 
             {/* The full index: providers with hundreds of groups need it, so it stays one click away (VL-landing-index). */}
-            <section aria-labelledby="vod-categories-heading" className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <h2 id="vod-categories-heading" className="text-title-sm text-fg">
-                  <button
-                    ref={indexToggleRef}
-                    type="button"
-                    aria-expanded={indexOpen}
-                    aria-controls={indexId}
-                    onClick={() => setIndexOpen(!indexOpen)}
-                    className="-ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
-                  >
-                    <ChevronRight aria-hidden size={18} className={cn('text-fg-muted motion-safe:transition-transform rtl:rotate-180', indexOpen && 'rotate-90 rtl:rotate-90')} />
-                    {t('browseAllCategories')}
-                  </button>
-                </h2>
-                {shownCats && <span className="tabular text-sm text-fg-subtle">{t('categoryCount', { count: shownCats.length })}</span>}
-                <div className="ms-auto flex flex-wrap items-center gap-2">
-                  {indexOpen && (
-                    <SearchInput value={filter} onChange={setFilter} size="sm" placeholder={t('filterCategories')} className="w-56 max-sm:w-full" />
-                  )}
-                  <Button size="sm" variant="ghost" icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)}>
-                    {manageLabel}
-                  </Button>
-                </div>
-              </div>
-              <div id={indexId} hidden={!indexOpen}>
-                {!indexOpen ? null : allCats.isError ? (
-                  <ErrorState error={allCats.error} onRetry={() => void allCats.refetch()} />
-                ) : allCats.isPending ? (
-                  <div role="status" aria-busy="true" className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-                    <span className="sr-only">{t('loading')}</span>
-                    {Array.from({ length: 12 }, (_, i) => (
-                      <Skeleton key={i} className="h-11 rounded-md" />
-                    ))}
-                  </div>
-                ) : entries.length === 0 ? (
-                  <EmptyState
-                    size="inline"
-                    icon={<SearchX size={20} />}
-                    title={t('noCategoryMatch')}
-                    action={
-                      <Button size="sm" variant="secondary" onClick={() => setFilter('')}>
-                        {t('clearFilter')}
-                      </Button>
-                    }
-                  />
-                ) : (
-                  <div ref={indexRef} onClickCapture={rememberCategory}>
-                    <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} lockedLabel={t('locked')} />
-                  </div>
-                )}
-              </div>
-            </section>
+            <CategoryIndexSection
+              kind={kind}
+              cats={allCats}
+              shownCats={shownCats}
+              visibleCount={visibleCount}
+              locks={locks}
+              hrefFor={hrefFor}
+              scrollRef={scrollRef}
+              open={indexOpen}
+              onOpenChange={setIndexOpen}
+              toggleRef={indexToggleRef}
+              manageLabel={manageLabel}
+              onManage={() => setManageOpen(true)}
+            />
           </>
         )}
       </Page>
       <HiddenCategoriesDialog open={manageOpen} onClose={() => setManageOpen(false)} sourceId={sourceId} contentType={contentType} />
     </div>
+  );
+}
+
+/**
+ * "Browse all categories": the heading that opens the index, its filter and the index itself. The
+ * filter is this section's own state, so a keystroke re-renders the index, not the page and its
+ * rails (VOD-LANDING-RENDERS). The landing's scroll memory lives here too: it keeps the index's
+ * unfiltered positions only.
+ */
+function CategoryIndexSection({
+  kind,
+  cats,
+  shownCats,
+  visibleCount,
+  locks,
+  hrefFor,
+  scrollRef,
+  open,
+  onOpenChange,
+  toggleRef,
+  manageLabel,
+  onManage,
+}: {
+  kind: VodKind;
+  /** The categories query, for its loading and error states. */
+  cats: { isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
+  shownCats: Category[] | undefined;
+  visibleCount: number | undefined;
+  locks: VodLocks;
+  hrefFor: (id: string) => string;
+  scrollRef: RefObject<HTMLDivElement | null>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  toggleRef: RefObject<HTMLButtonElement | null>;
+  manageLabel: string;
+  onManage: () => void;
+}) {
+  const { t } = useTranslation('vod');
+  const indexId = useId();
+  const indexRef = useRef<HTMLDivElement>(null);
+  const [filter, setFilter] = useState('');
+
+  const entries = useMemo<CategoryEntry[]>(() => {
+    const list = categoryEntries(shownCats ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));
+    if (filter.trim()) return list;
+    const all: CategoryEntry = {
+      id: ALL_CATEGORIES,
+      name: kind === 'movie' ? t('allMovies') : t('allSeries'),
+      emphasis: true,
+    };
+    if (visibleCount) all.count = visibleCount;
+    return [all, ...list];
+  }, [shownCats, filter, kind, visibleCount, t, locks]);
+
+  // Back from a category: same scroll offset, focus on the category you opened. The index's own
+  // positions only (the rails above hold grid indices of their own).
+  const { pathname } = useLocation();
+  useScrollMemory({
+    key: pathname,
+    getScroller: () => scrollRef.current,
+    ready: !!shownCats && !filter.trim(),
+    onRestored: (spot) => {
+      if (spot.index === undefined) return;
+      indexRef.current?.querySelector<HTMLElement>(`[data-grid-index="${spot.index}"]`)?.focus({ preventScroll: true });
+    },
+  });
+  // Enter on a focused link also fires click, so this covers the keyboard too.
+  const rememberCategory = (e: MouseEvent<HTMLElement>) => {
+    const cell = e.target instanceof Element ? e.target.closest<HTMLElement>('[data-grid-index]') : null;
+    const index = Number(cell?.dataset['gridIndex']);
+    // Indices shift while the filter is on, so only unfiltered positions are kept.
+    if (cell && Number.isFinite(index) && !filter.trim()) rememberSpot(pathname, { scrollTop: scrollRef.current?.scrollTop ?? 0, index });
+  };
+
+  return (
+    <section aria-labelledby="vod-categories-heading" className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h2 id="vod-categories-heading" className="text-title-sm text-fg">
+          <button
+            ref={toggleRef}
+            type="button"
+            aria-expanded={open}
+            aria-controls={indexId}
+            onClick={() => onOpenChange(!open)}
+            className="-ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-hover active:bg-active"
+          >
+            <ChevronRight aria-hidden size={18} className={cn('text-fg-muted motion-safe:transition-transform rtl:rotate-180', open && 'rotate-90 rtl:rotate-90')} />
+            {t('browseAllCategories')}
+          </button>
+        </h2>
+        {shownCats && <span className="tabular text-sm text-fg-subtle">{t('categoryCount', { count: shownCats.length })}</span>}
+        <div className="ms-auto flex flex-wrap items-center gap-2">
+          {open && <SearchInput value={filter} onChange={setFilter} size="sm" placeholder={t('filterCategories')} className="w-56 max-sm:w-full" />}
+          <Button size="sm" variant="ghost" icon={<ListFilter aria-hidden size={16} />} onClick={onManage}>
+            {manageLabel}
+          </Button>
+        </div>
+      </div>
+      <div id={indexId} hidden={!open}>
+        {!open ? null : cats.isError ? (
+          <ErrorState error={cats.error} onRetry={() => void cats.refetch()} />
+        ) : cats.isPending ? (
+          <div role="status" aria-busy="true" className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+            <span className="sr-only">{t('loading')}</span>
+            {Array.from({ length: 12 }, (_, i) => (
+              <Skeleton key={i} className="h-11 rounded-md" />
+            ))}
+          </div>
+        ) : entries.length === 0 ? (
+          <EmptyState
+            size="inline"
+            icon={<SearchX size={20} />}
+            title={t('noCategoryMatch')}
+            action={
+              <Button size="sm" variant="secondary" onClick={() => setFilter('')}>
+                {t('clearFilter')}
+              </Button>
+            }
+          />
+        ) : (
+          <div ref={indexRef} onClickCapture={rememberCategory}>
+            <CategoryIndex entries={entries} hrefFor={hrefFor} scrollRef={scrollRef} label={t('categories')} lockedLabel={t('locked')} />
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

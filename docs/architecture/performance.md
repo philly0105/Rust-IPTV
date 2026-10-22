@@ -165,6 +165,12 @@ Fixes from the 2026-10-19 performance audit (SH-5, VD-1, VD-2, LV-1 to LV-8):
 - Category grid cells (VD-9): `CategoryGridPage` hands VirtualGrid stable cell renderers (`useCallback`), so `GridSlot`'s memo holds while the page re-renders, and only the cursor's cell gets `gridFocused`, so focusing the grid re-renders that one poster. A Stalker grid that filters on the client filters each loaded page once per rating, year and English-only setting (`filteredPage`, a WeakMap per page object) instead of every loaded page again when the next one arrives; watched titles come out after that, since their lookup moves as pages arrive.
 - Lists: the list page reads the focused row when F2 or Shift+Delete is pressed instead of keeping it in state, so an arrow key no longer re-renders the page and its ribbon. The Manage lists and Edit channels rows are memoized with stable handlers, so a drag-over re-renders the rows whose drop marker changes, not all 2,000. A list write's own refresh joins the event burst (`invalidateWithEvents`), so the write and its `lists.changed` refetch `lists.*` once.
 
+## VOD landing and detail pages
+
+Fixes from the 2026-10-22 speed pass:
+
+- The category filter (VOD-LANDING-RENDERS): the filter field, its text, the filtered entries and the index live in `CategoryIndexSection` (`VodLandingPage.tsx`), so a keystroke re-renders the index and not the page above it. Before, every keystroke re-rendered every mounted rail card: typing "netflix" with the 12 category rails mounted drew 2,023 cards (`landingRenders.test.tsx`), now none.
+
 ## Progress, clocks and formatters
 
 Fixes from the 2026-10-19 performance audit (VD-3 to VD-7, VD-9):

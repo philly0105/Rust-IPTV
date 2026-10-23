@@ -224,6 +224,13 @@ impl Capture {
             return;
         }
         let max = self.field.max_chars();
+        // Nearly every node fits whole (a char is at least one byte): one
+        // copy instead of a push per char (P2-EPGRS-2).
+        if self.chars + s.len() <= max {
+            self.text.push_str(s);
+            self.chars += s.chars().count();
+            return;
+        }
         for ch in s.chars() {
             if self.chars >= max {
                 self.full = true;
@@ -467,6 +474,18 @@ impl Parser<'_> {
     /// The trimmed, unescaped value of attribute `key`: `Ok(None)` when it is
     /// missing or blank, `Err(())` when it is longer than `max` bytes.
     fn attr(&self, e: &BytesStart<'_>, key: &[u8], max: usize) -> Result<Option<String>, ()> {
+        self.attr_with(e, key, max, str::to_string)
+    }
+
+    /// [`Self::attr`] with the value passed to `f` instead of copied (a
+    /// programme's times are parsed in place, P2-EPGRS-2).
+    fn attr_with<T>(
+        &self,
+        e: &BytesStart<'_>,
+        key: &[u8],
+        max: usize,
+        f: impl FnOnce(&str) -> T,
+    ) -> Result<Option<T>, ()> {
         for a in e.attributes().with_checks(false).flatten() {
             if a.key.local_name().as_ref() == key {
                 let v = decode(&a.value, self.latin1);
@@ -477,11 +496,20 @@ impl Parser<'_> {
                 } else if v.len() > max {
                     Err(())
                 } else {
-                    Ok(Some(v.to_string()))
+                    Ok(Some(f(v)))
                 };
             }
         }
         Ok(None)
+    }
+
+    /// A programme time attribute: `None` when it is missing, blank, over
+    /// [`MAX_ID_BYTES`] or unreadable.
+    fn time_attr(&self, e: &BytesStart<'_>, key: &[u8]) -> Option<i64> {
+        self.attr_with(e, key, MAX_ID_BYTES, parse_xmltv_date)
+            .ok()
+            .flatten()
+            .flatten()
     }
 
     /// [`Self::attr`] with an over-long value treated as missing.
@@ -517,14 +545,8 @@ impl Parser<'_> {
                     channel: self
                         .attr_or_none(e, b"channel", MAX_ID_BYTES)
                         .unwrap_or_default(),
-                    start: self
-                        .attr_or_none(e, b"start", MAX_ID_BYTES)
-                        .as_deref()
-                        .and_then(parse_xmltv_date),
-                    stop: self
-                        .attr_or_none(e, b"stop", MAX_ID_BYTES)
-                        .as_deref()
-                        .and_then(parse_xmltv_date),
+                    start: self.time_attr(e, b"start"),
+                    stop: self.time_attr(e, b"stop"),
                     ..Default::default()
                 };
                 self.ctx = Ctx::Programme(pb);
@@ -570,7 +592,7 @@ impl Parser<'_> {
         if let Some(cap) = &self.capture {
             if cap.field.tag() == name {
                 let cap = self.capture.take().expect("checked above");
-                let value = collapse(&cap.text);
+                let value = collapse(cap.text);
                 if !value.is_empty() {
                     match (&mut self.ctx, cap.field) {
                         (Ctx::Channel(c), Field::DisplayName) => c.display_name = Some(value),
@@ -1014,10 +1036,11 @@ impl<R: BufRead> Read for Guard<R> {
 }
 
 /// Trims and collapses internal runs of whitespace (newlines, tabs) to one space.
-fn collapse(s: &str) -> String {
+fn collapse(s: String) -> String {
     let t = s.trim();
     if !t.contains(|c: char| c.is_whitespace() && c != ' ') && !t.contains("  ") {
-        return t.to_string();
+        // Already tidy, as nearly every title is: keep the buffer.
+        return if t.len() == s.len() { s } else { t.to_string() };
     }
     let mut out = String::with_capacity(t.len());
     let mut space = false;

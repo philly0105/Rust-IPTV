@@ -594,18 +594,30 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
     };
     // Once per route, so a refetch never undoes the user's own scrolling of the rail. The route
     // only counts as handled once its link was found: the source links arrive with the sources.
-    const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"], [data-rail-current]');
-    if (active) {
+    const reveal = () => {
+      const active = scrolledFor.current === scrollKey ? null : el.querySelector<HTMLElement>('[aria-current="page"], [data-rail-current]');
+      if (!active) return;
       scrolledFor.current = scrollKey;
       el.scrollTop += railRevealDelta(el.getBoundingClientRect(), active.getBoundingClientRect());
-    }
-    update();
+    };
     el.addEventListener('scroll', update, { passive: true });
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    // P2-RAILS-2: the reveal and the first fade reading wait for the observer's first callback.
+    // This effect runs right after a route's page committed, so reading here forced that page's
+    // layout (31 ms at a 4x slowdown on a cold Movies landing); the callback comes after the
+    // browser's own layout and before paint, so the link is in view in the first frame all the same.
+    let revealPending = true;
+    const measure = () => {
+      if (revealPending) {
+        revealPending = false;
+        reveal();
+      }
+      update();
+    };
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
     if (ro) {
       ro.observe(el);
       for (const child of el.children) ro.observe(child);
-    }
+    } else measure();
     return () => {
       el.removeEventListener('scroll', update);
       ro?.disconnect();

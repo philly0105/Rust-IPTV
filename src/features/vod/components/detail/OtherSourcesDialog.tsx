@@ -7,7 +7,7 @@ import type { ItemRef, Source, VodItem } from '@/api/types';
 import { formatRating } from '../../lib/format';
 import { isPinned, type SourcePin } from '../../lib/pins';
 import { detailHref } from '../../lib/search';
-import { Button, Dialog, IconButton, Poster, buttonClass, cn } from '@/ui';
+import { Button, Dialog, IconButton, Poster, buttonClass, cn, useScaledPx } from '@/ui';
 
 export interface OtherSourcesDialogProps {
   open: boolean;
@@ -48,12 +48,17 @@ export type OtherSourcesListProps = Omit<OtherSourcesDialogProps, 'open' | 'onCl
   onOpen?: () => void;
 };
 
+/** A copy's thumbnail, `w-10`: ten spacing steps of 3.75 px at 100 % scale. */
+const THUMB_PX = 37.5;
+
 /**
  * The copies of one title, one row each: the source, the copy's year, rating and container, and
  * Pin, Open details and Play. The dialog and the detail page's "Other sources" section share it.
  */
 export function OtherSourcesList({ current, currentSourceName, others, sources, pin, onPin, onPlay, onOpen }: OtherSourcesListProps) {
   const { t, i18n } = useTranslation('vod');
+  // P2-POSTERS-2: the thumbnails' width is known (`w-10`), so they do not read their frames as they mount.
+  const thumbWidth = useScaledPx(THUMB_PX, true);
   const rows: { item: VodItem; sourceName: string; isCurrent: boolean }[] = [
     { item: current, sourceName: currentSourceName, isCurrent: true },
     ...others.map((item) => ({ item, sourceName: sources.get(item.ref.sourceId)?.name ?? item.ref.sourceId, isCurrent: false })),
@@ -66,7 +71,7 @@ export function OtherSourcesList({ current, currentSourceName, others, sources, 
         return (
           <li key={`${item.ref.sourceId}|${item.ref.itemId}`} className={cn('flex items-center gap-3 py-3', pinned && 'tuning-tick ps-3')}>
             <div className="w-10 shrink-0 overflow-hidden rounded-sm">
-              <Poster src={item.posterUrl} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" />
+              <Poster src={item.posterUrl} sourceId={item.ref.sourceId} width={thumbWidth} alt="" label={item.title} aspect="poster" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-fg">{sourceName}</div>

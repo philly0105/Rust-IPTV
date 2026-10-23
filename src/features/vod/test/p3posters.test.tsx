@@ -2,16 +2,23 @@
  * Third performance pass, posters lane. P2-POSTERS-1: search's tab grids mount their cells at the
  * width they read before having any, hand their posters the column width, and measure their rows
  * in an observer's callback, after the browser's layout, instead of each poster and row reading
- * its box as it mounts.
+ * its box as it mounts. P2-POSTERS-2: the detail pages' episode, Up next and other-source
+ * thumbnails load at the width their boxes are given.
  */
-import { cleanup, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { I18nextProvider } from 'react-i18next';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { VodItem } from '@/api/types';
+import type { Episode, VodItem } from '@/api/types';
 
+import { EpisodeList } from '../components/detail/EpisodeList';
+import { OtherSourcesList } from '../components/detail/OtherSourcesDialog';
+import { UpNextRail } from '../components/detail/UpNext';
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { SearchPage } from '../pages/SearchPage';
-import { actEnvironment, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { actEnvironment, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -173,3 +180,88 @@ describe('P2-POSTERS-1: search tab grids', { timeout: 20_000 }, () => {
   });
 });
 
+const episode = (n: number): Episode => ({
+  id: `e${n}`,
+  seriesRef: { sourceId: 's1', contentType: 'series', itemId: 'show' },
+  season: 1,
+  episode: n,
+  title: `Episode ${n}`,
+  posterUrl: `http://cdn.example/e${n}.jpg`,
+});
+
+function Episodes() {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // The scroll box's ref attaches after the list's layout effects; one more render lets the virtualizer find it.
+  const [, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  return (
+    <div ref={scrollRef}>
+      <EpisodeList
+        episodes={[episode(1), episode(2), episode(3)]}
+        positions={new Map()}
+        downloads={new Map()}
+        onPlay={() => undefined}
+        canDownload={false}
+        pendingDownload={null}
+        onDownload={() => undefined}
+        scrollRef={scrollRef}
+      />
+    </div>
+  );
+}
+
+const renderIn = (ui: ReactNode) =>
+  render(
+    <I18nextProvider i18n={i18n}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </I18nextProvider>,
+  );
+
+/** Every picture's cache width, once the pictures are in the page. */
+async function widths(): Promise<(string | undefined)[]> {
+  await waitFor(() => expect(document.querySelectorAll('img').length).toBeGreaterThan(0));
+  return [...document.querySelectorAll('img')].map(sizeOf);
+}
+const pictureReads = () => reads.filter((r) => r.el instanceof HTMLImageElement);
+
+describe('P2-POSTERS-2: thumbnails with a known box', () => {
+  it("loads an episode's thumbnail at its w-28 width below sm, and at w-40 from sm up, without reading it", async () => {
+    const view = renderIn(<Episodes />);
+    // 105 px at 100 %: the 128 px copy, as the measured frame asked for.
+    expect(await widths()).toEqual(['128', '128', '128']);
+    view.unmount();
+
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) => ({ matches: query === '(min-width: 40rem)', media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList,
+    );
+    renderIn(<Episodes />);
+    // 150 px from sm up: the 192 px copy.
+    expect(await widths()).toEqual(['192', '192', '192']);
+    expect(pictureReads()).toEqual([]);
+  });
+
+  it("loads Up next's thumbnails at their w-28 width without reading them", async () => {
+    renderIn(<UpNextRail episodes={[episode(4), episode(5)]} positions={new Map()} onPlay={() => undefined} />);
+    expect(await widths()).toEqual(['128', '128']);
+    expect(pictureReads()).toEqual([]);
+  });
+
+  it("loads the other sources' thumbnails at their w-10 width without reading them", async () => {
+    const copy = (sourceId: string): VodItem => ({ ...film(1), ref: { sourceId, contentType: 'movie', itemId: 'f1' } });
+    renderIn(
+      <OtherSourcesList
+        current={copy('src1')}
+        currentSourceName="Alpha IPTV"
+        others={[copy('src2')]}
+        sources={new Map()}
+        pin={undefined}
+        onPin={() => undefined}
+        onPlay={() => undefined}
+        onOpen={() => undefined}
+      />,
+    );
+    // 37.5 px at 100 %: the 64 px copy.
+    expect(await widths()).toEqual(['64', '64']);
+    expect(pictureReads()).toEqual([]);
+  });
+});

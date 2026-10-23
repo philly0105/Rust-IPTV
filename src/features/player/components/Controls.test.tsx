@@ -512,6 +512,53 @@ describe('Controls in a narrow player', () => {
     })();
   });
 
+  it("measures the room in the row's ResizeObserver, after layout, not in a frame of its own (P2-PLAYER-1)", async () => {
+    /** Calls back only when the test says layout happened. */
+    class LayoutObserver {
+      static all: LayoutObserver[] = [];
+      targets = new Set<Element>();
+      constructor(private readonly cb: ResizeObserverCallback) {
+        LayoutObserver.all.push(this);
+      }
+      observe(el: Element): void {
+        this.targets.add(el);
+      }
+      unobserve(el: Element): void {
+        this.targets.delete(el);
+      }
+      disconnect(): void {
+        this.targets.clear();
+      }
+      static layout(): void {
+        for (const o of LayoutObserver.all) {
+          if (o.targets.size) o.cb([...o.targets].map((target) => ({ target }) as ResizeObserverEntry), o as unknown as ResizeObserver);
+        }
+      }
+    }
+    vi.stubGlobal('ResizeObserver', LayoutObserver);
+    const reads = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(330);
+    const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
+    try {
+      render(<Controls variant="overlay" visible />);
+      // The bar's size comes in: a narrow player.
+      act(() => LayoutObserver.layout());
+      expect(screen.queryByRole('button', { name: 'Back 10 seconds' })).toBeNull();
+      await frame();
+      reads.mockClear();
+      // A render that changes what the row holds (a caption track) reads nothing itself...
+      act(() => useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: false }] } }));
+      await frame();
+      await frame();
+      expect(reads).not.toHaveBeenCalled();
+      // ...the row's observer measures once layout is done.
+      act(() => LayoutObserver.layout());
+      expect(reads).toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('a wide player keeps the full row and a menu without moved controls', () => {
     restore();
     render(<Controls variant="overlay" visible />);

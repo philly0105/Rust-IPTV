@@ -1204,9 +1204,10 @@ export function keepSpares<S extends string>(groups: readonly (readonly [S, numb
 /**
  * How many spare buttons fit in a narrow row: the spacer's width, the readout's beyond what it
  * keeps, and the spares shown now, less any overflow. That sum does not depend on how many spares
- * show, so it settles in one pass. Read after layout (the row's ResizeObserver, or the next frame
- * after a render), never during one. Not measured while the volume slider is out: the row lends it
- * room then (the spares step aside), and it is measured again when the pointer or focus leaves.
+ * show, so it settles in one pass. Read in the row's ResizeObserver callback, after layout (where
+ * there is none, in the next frame), never during a render. Not measured while the volume slider is
+ * out: the row lends it room then (the spares step aside), and it is measured again when the
+ * pointer or focus leaves.
  */
 function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: number; showing: { current: number } } {
   const [slots, setSlots] = useState(0);
@@ -1226,13 +1227,21 @@ function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: numbe
     setSlots((s) => (s === next ? s : next));
   };
   const frame = useRef(0);
+  const observer = useRef<{ ro: ResizeObserver; row: HTMLElement } | null>(null);
+  /**
+   * Measures after the next layout. The row observed anew makes its ResizeObserver call back
+   * then, with layout done. A read in the next frame's callback instead forced that layout itself,
+   * ahead of the browser's own, after every render of a narrow bar (P2-PLAYER-1).
+   */
   const later = useRef((): void => {
+    const o = observer.current;
+    if (o) {
+      o.ro.unobserve(o.row);
+      o.ro.observe(o.row);
+      return;
+    }
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => measure.current());
-  });
-  // What the row holds changes with the render (a badge, Retry, a caption track).
-  useEffect(() => {
-    if (active) later.current();
   });
   useEffect(() => {
     if (!row) return;
@@ -1241,13 +1250,20 @@ function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: numbe
     row.addEventListener('focusout', again);
     const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => measure.current());
     ro?.observe(row);
+    observer.current = ro ? { ro, row } : null;
     return () => {
       cancelAnimationFrame(frame.current);
       row.removeEventListener('pointerout', again);
       row.removeEventListener('focusout', again);
       ro?.disconnect();
+      observer.current = null;
     };
   }, [row]);
+  // What the row holds changes with the render (a badge, Retry, a caption track). After the
+  // effect above, so the first render already has the row's observer.
+  useEffect(() => {
+    if (active) later.current();
+  });
   return { slots: active ? slots : 0, showing };
 }
 

@@ -1,10 +1,11 @@
 /**
  * Second performance pass on Live's cold open (P2-LIVE-3, P2-LIVE-4): what a screen of channel
- * rows and the page cost before the user does anything.
+ * rows and the page cost before the user does anything. And what the list still shows the same
+ * way (P2-LIVE-5).
  */
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -156,5 +157,72 @@ describe('Live page dialogs (P2-LIVE-4)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     // Kept for its exit and the next opening.
     expect(groupsQuery()?.getObserversCount()).toBe(2);
+  });
+});
+
+describe('opening on the playing channel (P2-LIVE-5)', () => {
+  it('the list is on the playing row, within its own height, when the mount commit ends', () => {
+    const height = 600;
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(height);
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(height);
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(100_000);
+    const scrolls: number[] = [];
+    vi.spyOn(Element.prototype, 'scrollTo').mockImplementation(((arg?: ScrollToOptions) => {
+      if (typeof arg === 'object') scrolls.push(arg.top ?? Number.NaN);
+    }) as never);
+    // A window taller than the list, whose size stands in for the list's until it is laid out.
+    const own = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    Object.defineProperty(window, 'innerHeight', { configurable: true, writable: true, value: 1080 });
+    try {
+      let atCommit: number[] = [];
+      // Its layout effects run after the list's, in the commit that mounts both: what the first
+      // paint shows.
+      function AfterList() {
+        useLayoutEffect(() => {
+          atCommit = [...scrolls];
+        }, []);
+        return null;
+      }
+      const paged: PagedChannels = {
+        total: TOTAL,
+        getChannel: (i) => (i >= 0 && i < TOTAL ? makeChannel(i) : undefined),
+        getNowNext: () => undefined,
+        isFavorite: () => false,
+        setVisibleRange: () => undefined,
+        isLoading: false,
+        refreshing: false,
+        error: null,
+        retry: () => undefined,
+        loaded: Array.from({ length: 120 }, (_, i) => ({ index: i, channel: makeChannel(i) })),
+        pageSize: 120,
+        guideUnavailable: false,
+        retryGuide: () => undefined,
+      };
+      render(
+        wrap(
+          <>
+            <ChannelList
+              paged={paged}
+              resetKey="opening"
+              playingRef={makeChannel(15).ref}
+              openOnDoubleClick={false}
+              now={Date.now()}
+              onPlay={() => undefined}
+              onToggleFavorite={() => undefined}
+              onContextMenu={() => undefined}
+            />
+            <AfterList />
+          </>,
+        ),
+      );
+      const row = parseFloat(screen.getAllByRole('listitem')[0]!.style.height);
+      // Row 15's bottom on the list's bottom edge. Aligned against the window's 1080 px, the row
+      // sat 480 px under it; from a passive effect, the list painted its top first.
+      const target = 16 * row - height;
+      expect(atCommit).toEqual([target]);
+      expect(scrolls[scrolls.length - 1]).toBe(target);
+    } finally {
+      if (own) Object.defineProperty(window, 'innerHeight', own);
+    }
   });
 });

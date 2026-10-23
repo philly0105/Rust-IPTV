@@ -200,20 +200,28 @@ export function ChannelList(props: ChannelListProps) {
   const seenPlayingKey = useRef(playingKey);
   /** `playingKey|number|list` of the lookup under way for a channel outside the loaded pages. */
   const locating = useRef('');
+  const follow = (index: number, align: 'auto' | 'center') => {
+    followKey.current = '';
+    if (index === activeRef.current) return;
+    setActive(index);
+    virtualizer.scrollToIndex(index, { align });
+    // Keep keyboard focus on the list when it was there.
+    if (scrollRef.current?.contains(document.activeElement)) focusPending.current = index;
+  };
+  // A list that opens with the playing channel's row loaded is on that row when it first paints
+  // (P2-LIVE-5). The mount commit no longer renders twice (P2-LIVE-1), so the effect below can run
+  // after the paint: from there the list painted its top, then jumped to the row.
+  useLayoutEffect(() => {
+    if (!followKey.current || !playingRef) return;
+    const hit = paged.loaded.find((l) => sameRef(l.channel.ref, playingRef));
+    if (hit) follow(hit.index, 'auto');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (seenPlayingKey.current !== playingKey) {
       seenPlayingKey.current = playingKey;
       followKey.current = playingKey;
     }
     if (!followKey.current || !playingRef) return;
-    const follow = (index: number, align: 'auto' | 'center') => {
-      followKey.current = '';
-      if (index === activeRef.current) return;
-      setActive(index);
-      virtualizer.scrollToIndex(index, { align });
-      // Keep keyboard focus on the list when it was there.
-      if (scrollRef.current?.contains(document.activeElement)) focusPending.current = index;
-    };
     const hit = paged.loaded.find((l) => sameRef(l.channel.ref, playingRef));
     if (hit) {
       follow(hit.index, 'auto');

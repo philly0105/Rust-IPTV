@@ -95,7 +95,7 @@ interface RowLanguage {
 /**
  * What every row says alike, read once per `t` (P2-LIVE-3): each row of a screen made six to nine
  * i18next calls, and again on every re-render (the guide's now/next landing, the favourite flags).
- * A new language or a namespace loaded is a new `t`, so these never outlive the text they hold.
+ * react-i18next makes a new `t` when the language changes, so these never outlive their language.
  */
 interface RowText {
   favorite: string;

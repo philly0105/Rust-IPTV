@@ -239,6 +239,10 @@ if (!i18next.isInitialized) {
     ns: [...NAMESPACES],
     defaultNS: 'common',
     fallbackNS: 'common',
+    // P2-BOOT-3: i18next's default, named so it skips its natural-language test on every t()
+    // call (whether a key with spaces or `?!,;` around the `:` is a sentence, not `ns:key`). The
+    // keys here are identifiers, so the test only ever cost a regex run per string drawn.
+    nsSeparator: ':',
     interpolation: { escapeValue: false },
     returnNull: false,
     initAsync: false,

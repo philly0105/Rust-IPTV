@@ -552,14 +552,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, 3);
-        let title: String = conn
-            .query_row(
-                "SELECT title FROM epg_programs WHERE epg_url = ?1 AND channel_id = 'a' AND start = 1000",
-                [url],
+        let title = |start: i64| -> String {
+            conn.query_row(
+                "SELECT title FROM epg_programs WHERE epg_url = ?1 AND channel_id = 'a' AND start = ?2",
+                params![url, start],
                 |r| r.get(0),
             )
-            .unwrap();
-        assert_eq!(title, "First");
+            .unwrap()
+        };
+        assert_eq!(title(1000), "First");
+        assert_eq!(title(2800), "Next");
     }
 
     /// Migration 0007 drops the cached guide (which may hold duplicates from

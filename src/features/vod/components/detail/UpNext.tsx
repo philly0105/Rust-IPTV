@@ -7,7 +7,7 @@ import type { Episode, PlaybackPosition } from '@/api/types';
 import { useEdgeFades } from '../../hooks/useEdgeFades';
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, progressFraction } from '../../lib/format';
-import { Button, IconButton, Poster, ProgressBar, cn, useScaledPx } from '@/ui';
+import { Button, IconButton, Poster, PosterCellWidthContext, ProgressBar, cn, usePosterWidthBox, useScaledPx } from '@/ui';
 
 /** The thumbnail's box, `w-28`: 28 spacing steps of 3.75 px at 100 % scale. */
 const THUMB_PX = 105;
@@ -50,7 +50,7 @@ export function UpNextRail({
   // and a vertical wheel moves it; at xl it is a column and nothing is hidden sideways.
   const fades = useEdgeFades(episodes.map((e) => e.id).join(','));
   // P2-POSTERS-2: the thumbnails' width is known, so they do not read their frames as they mount.
-  const thumbWidth = useScaledPx(THUMB_PX, true);
+  const thumbWidth = usePosterWidthBox(useScaledPx(THUMB_PX, true));
   if (episodes.length === 0) return null;
   return (
     <aside aria-label={t('upNext')} className="flex min-w-0 flex-col gap-2 xl:w-[340px] xl:shrink-0">
@@ -71,15 +71,16 @@ export function UpNextRail({
                 className="group flex w-full items-center gap-3 rounded-md p-1.5 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <div className="relative w-28 shrink-0">
-                  <Poster
-                    src={ep.posterUrl}
-                    sourceId={ep.seriesRef.sourceId}
-                    width={thumbWidth}
-                    alt=""
-                    label={ep.title.trim() || episodeCode(ep.season, ep.episode)}
-                    aspect="wide"
-                    rounded="sm"
-                  />
+                  <PosterCellWidthContext.Provider value={thumbWidth}>
+                    <Poster
+                      src={ep.posterUrl}
+                      sourceId={ep.seriesRef.sourceId}
+                      alt=""
+                      label={ep.title.trim() || episodeCode(ep.season, ep.episode)}
+                      aspect="wide"
+                      rounded="sm"
+                    />
+                  </PosterCellWidthContext.Provider>
                   {fraction > 0 && (
                     <div className="pointer-events-none absolute inset-x-1 bottom-1">
                       <ProgressBar value={fraction} max={1} size="xs" tone="glass" decorative />

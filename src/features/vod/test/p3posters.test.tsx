@@ -4,9 +4,10 @@
  * in an observer's callback, after the browser's layout, instead of each poster and row reading
  * its box as it mounts. P2-POSTERS-2: the detail pages' episode, Up next and other-source
  * thumbnails load at the width their boxes are given. P2-POSTERS-5: a row commit that would start
- * or stop the page scrolling waits for the next task.
+ * or stop the page scrolling waits for the next task. P2-POSTERS-6: a thumbnail keeps the width it
+ * mounted with.
  */
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter } from 'react-router';
@@ -209,7 +210,7 @@ const episode = (n: number): Episode => ({
   posterUrl: `http://cdn.example/e${n}.jpg`,
 });
 
-function Episodes() {
+function Episodes({ count = 3 }: { count?: number }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // The scroll box's ref attaches after the list's layout effects; one more render lets the virtualizer find it.
   const [, setMounted] = useState(false);
@@ -217,7 +218,7 @@ function Episodes() {
   return (
     <div ref={scrollRef}>
       <EpisodeList
-        episodes={[episode(1), episode(2), episode(3)]}
+        episodes={Array.from({ length: count }, (_, i) => episode(i + 1))}
         positions={new Map()}
         downloads={new Map()}
         onPlay={() => undefined}
@@ -230,12 +231,12 @@ function Episodes() {
   );
 }
 
-const renderIn = (ui: ReactNode) =>
-  render(
-    <I18nextProvider i18n={i18n}>
-      <MemoryRouter>{ui}</MemoryRouter>
-    </I18nextProvider>,
-  );
+const inApp = (ui: ReactNode) => (
+  <I18nextProvider i18n={i18n}>
+    <MemoryRouter>{ui}</MemoryRouter>
+  </I18nextProvider>
+);
+const renderIn = (ui: ReactNode) => render(inApp(ui));
 
 /** Every picture's cache width, once the pictures are in the page. */
 async function widths(): Promise<(string | undefined)[]> {
@@ -258,6 +259,36 @@ describe('P2-POSTERS-2: thumbnails with a known box', () => {
     // 150 px from sm up: the 192 px copy.
     expect(await widths()).toEqual(['192', '192', '192']);
     expect(pictureReads()).toEqual([]);
+  });
+
+  it("keeps an episode's thumbnail when the breakpoint moves, and loads one mounted later at the new width", async () => {
+    let wide = false;
+    const changes = new Set<() => void>();
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          get matches() {
+            return wide && query === '(min-width: 40rem)';
+          },
+          media: query,
+          addEventListener: (_: string, cb: () => void) => changes.add(cb),
+          removeEventListener: (_: string, cb: () => void) => changes.delete(cb),
+        }) as unknown as MediaQueryList,
+    );
+    const view = renderIn(<Episodes />);
+    expect(await widths()).toEqual(['128', '128', '128']);
+    const shown = [...document.querySelectorAll('img')];
+    // A phone turned sideways: the boxes grow past a size bucket. The pictures on screen stay (a
+    // new `width` loaded each again, through the shimmer), as a measured picture kept its width.
+    wide = true;
+    act(() => {
+      for (const change of changes) change();
+    });
+    expect([...document.querySelectorAll('img')]).toEqual(shown);
+    expect(shown.map(sizeOf)).toEqual(['128', '128', '128']);
+    view.rerender(inApp(<Episodes count={4} />));
+    await waitFor(() => expect(document.querySelectorAll('img')).toHaveLength(4));
+    expect(await widths()).toEqual(['128', '128', '128', '192']);
   });
 
   it("loads Up next's thumbnails at their w-28 width without reading them", async () => {

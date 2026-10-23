@@ -17,7 +17,7 @@ import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
-import { IconButton, Poster, ProgressBar, useScaledPx } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, ProgressBar, usePosterWidthBox, useScaledPx } from '../deps';
 import type { NowOn } from '../hooks/useNowOn';
 import { ContentIcon, SourceBadge } from './bits';
 
@@ -70,7 +70,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   const title = snapshotTitle(entryRef, snapshot.title).title;
   const minutesLeft = now ? Math.max(1, Math.round(now.leftSeconds / 60)) : 0;
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
-  const artWidth = useScaledPx(square ? ART_SQUARE_PX : ART_PX, true);
+  const artWidth = usePosterWidthBox(useScaledPx(square ? ART_SQUARE_PX : ART_PX, true));
   return (
     <div
       className={cn(
@@ -96,7 +96,9 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         onClick={onOpen}
         className={cn('shrink-0 cursor-pointer overflow-hidden rounded-md ring-1 ring-edge', square ? 'w-11' : 'w-8')}
       >
-        <Poster src={snapshot.posterUrl} sourceId={entryRef.sourceId} width={artWidth} alt="" label={title} aspect={square ? 'square' : 'poster'} />
+        <PosterCellWidthContext.Provider value={artWidth}>
+          <Poster src={snapshot.posterUrl} sourceId={entryRef.sourceId} alt="" label={title} aspect={square ? 'square' : 'poster'} />
+        </PosterCellWidthContext.Provider>
       </div>
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-start">
         <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg">

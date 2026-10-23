@@ -18,7 +18,7 @@ import { useCatalogMatches } from '../hooks/useCatalogMatches';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { detailHref } from '../lib/search';
-import { EmptyState, Page, Poster, Skeleton, TEXT_LINK, buttonClass, cn, useScaledPx } from '@/ui';
+import { EmptyState, Page, Poster, PosterCellWidthContext, Skeleton, TEXT_LINK, buttonClass, cn, usePosterWidthBox, useScaledPx } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 const BIO_CLAMP = 600;
@@ -50,7 +50,7 @@ export function ActorPage() {
   const person = useRpcQuery('tmdb.person', { personId: id }, { enabled: settings.tmdb.enabled && valid, staleTime: Infinity });
   const [expanded, setExpanded] = useState(false);
   // P2-POSTERS-4: the portrait's width is known (w-40, sm:w-52), so it does not read its frame as it mounts.
-  const portraitWidth = useScaledPx(useMediaQuery(SM_QUERY) ? PORTRAIT_SM_PX : PORTRAIT_PX, true);
+  const portraitWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? PORTRAIT_SM_PX : PORTRAIT_PX, true));
 
   // Mirrors the branch below that renders the visible h1 (the person's name).
   const loaded = settings.tmdb.enabled && valid && !person.isError && !!person.data;
@@ -111,7 +111,9 @@ export function ActorPage() {
       <>
         <section aria-labelledby="vod-actor-name" className="flex flex-col gap-6 sm:flex-row sm:items-start">
           <div className="w-40 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:w-52">
-            <Poster src={p.profileUrl} width={portraitWidth} alt={p.name} aspect="poster" eager />
+            <PosterCellWidthContext.Provider value={portraitWidth}>
+              <Poster src={p.profileUrl} alt={p.name} aspect="poster" eager />
+            </PosterCellWidthContext.Provider>
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
             <h1 ref={nameRef} id="vod-actor-name" className="text-display text-fg">

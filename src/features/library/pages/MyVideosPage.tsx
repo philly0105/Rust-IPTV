@@ -11,7 +11,7 @@ import { buttonClass } from '@/ui/Button';
 
 import { CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
-import { PosterWidthContext } from '@/ui/Poster';
+import { PosterCellWidthContext, usePosterWidthBox } from '@/ui/Poster';
 
 import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades, useMediaQuery, useScaledPx, type TabsProps } from '../deps';
 import { moveInRail } from '../components/ContinueRail';
@@ -334,7 +334,7 @@ function RecordingsRail({
   const { t } = useTranslation('library');
   // P2-POSTERS-4: the cards' width is known (17rem, 14rem below sm), so their logos load at it
   // instead of each reading its frame as it mounts.
-  const cardWidth = useScaledPx(useMediaQuery(SM_QUERY) ? RECORDING_CARD_PX : RECORDING_CARD_NARROW_PX);
+  const cardWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? RECORDING_CARD_PX : RECORDING_CARD_NARROW_PX));
   return (
     <section aria-labelledby="my-videos-recordings" className="flex flex-col gap-3" data-testid="my-videos-recordings">
       <div className="flex items-baseline gap-3">
@@ -357,9 +357,9 @@ function RecordingsRail({
               }}
               className={cn(CARD_ROOT, 'block w-full cursor-pointer text-start')}
             >
-              <PosterWidthContext.Provider value={cardWidth}>
+              <PosterCellWidthContext.Provider value={cardWidth}>
                 <RecordingCard entry={e} />
-              </PosterWidthContext.Provider>
+              </PosterCellWidthContext.Provider>
             </button>
           </li>
         ))}

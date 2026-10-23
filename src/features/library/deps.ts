@@ -14,6 +14,7 @@ export {
   Kbd,
   Page,
   Poster,
+  PosterCellWidthContext,
   ProgressBar,
   SearchInput,
   SectionHeader,
@@ -23,6 +24,7 @@ export {
   Tabs,
   Toggle,
   errorDescription,
+  usePosterWidthBox,
   useScaledPx,
   useToast,
 } from '@/ui';

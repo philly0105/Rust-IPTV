@@ -10,7 +10,7 @@ import type { Download, Source } from '@/api/types';
 import { cn } from '@/ui/cn';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 
-import { IconButton, Poster, useMediaQuery, useScaledPx } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
 import { etaSeconds, formatBytes, formatDuration, formatSpeed, percentOf } from '../lib/format';
 import { useLiveProgress } from '../lib/progress';
 import type { QueueAction } from '../lib/queue';
@@ -151,7 +151,7 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
       : '';
   const tone = isActive ? 'accent' : d.status === 'failed' ? 'danger' : 'muted';
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
-  const artWidth = useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true);
+  const artWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true));
 
   let detail: string;
   if (d.status === 'downloading') {
@@ -180,7 +180,9 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
       data-status={d.status}
     >
       <div className="w-10 shrink-0 overflow-hidden rounded-sm ring-1 ring-edge sm:w-12">
-        <Poster src={d.posterUrl} sourceId={d.ref.sourceId} width={artWidth} alt="" label={d.title} aspect="poster" />
+        <PosterCellWidthContext.Provider value={artWidth}>
+          <Poster src={d.posterUrl} sourceId={d.ref.sourceId} alt="" label={d.title} aspect="poster" />
+        </PosterCellWidthContext.Provider>
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2">

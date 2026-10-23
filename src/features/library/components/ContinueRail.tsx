@@ -9,7 +9,7 @@ import { snapshotTitle } from '@/lib/title';
 import { CARD_ART, CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
 
-import { IconButton, Poster, ProgressBar, useEdgeFades, useMediaQuery, useScaledPx } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, ProgressBar, useEdgeFades, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
 import { formatClock } from '../lib/format';
 import { watchedFraction } from '../lib/recent';
 
@@ -66,7 +66,7 @@ export function ContinueRail({
   const fades = useEdgeFades(String(positions.length));
   // P2-POSTERS-4: the cards' width is known (10rem, 7.2rem below sm), so their posters load at it
   // instead of each reading its frame as it mounts.
-  const cardWidth = useScaledPx(useMediaQuery(SM_QUERY) ? CARD_PX : CARD_NARROW_PX);
+  const cardWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? CARD_PX : CARD_NARROW_PX));
   return (
     // pb-2: with the day heading's own top space, the gap above it matches the one between day groups.
     <section aria-labelledby="continue-heading" className="flex flex-col gap-3 px-2 pb-2">
@@ -107,7 +107,9 @@ export function ContinueRail({
                 aria-label={t('continueTitle', { title, time: formatClock(p.positionSeconds) })}
               >
                 <div className={cn(CARD_ART, 'relative')}>
-                  <Poster src={p.snapshot?.posterUrl} sourceId={p.ref.sourceId} width={cardWidth} alt="" label={title} aspect="poster" />
+                  <PosterCellWidthContext.Provider value={cardWidth}>
+                    <Poster src={p.snapshot?.posterUrl} sourceId={p.ref.sourceId} alt="" label={title} aspect="poster" />
+                  </PosterCellWidthContext.Provider>
                   {/* On the artwork, as the VOD rails draw it: a glass track along the bottom edge. */}
                   {fraction !== undefined && (
                     <ProgressBar

@@ -1,5 +1,5 @@
 import { Clapperboard, Radio, Tv } from 'lucide-react';
-import { createContext, useCallback, useContext, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useRef, type ReactNode } from 'react';
 
 import { sizedImageUrl } from '@/api/images';
 
@@ -92,6 +92,18 @@ export const PosterWidthContext = createContext<number | undefined>(undefined);
  * either.
  */
 export const PosterCellWidthContext = createContext<{ readonly current: number } | undefined>(undefined);
+
+/**
+ * A {@link PosterCellWidthContext} box holding `px`, for pictures in a box whose width is known
+ * (P2-POSTERS-6). Like the measured width, each picture takes it as it mounts and keeps it: a new
+ * width (UI scale, density, a breakpoint) starts no picture on screen again, where a changed
+ * `width` loads every picture again, and a picture mounted later loads at the new width.
+ */
+export function usePosterWidthBox(px: number): { readonly current: number } {
+  const box = useRef(px);
+  box.current = px;
+  return box;
+}
 
 /** A load this soon after the picture mounted came from a cache: it shows at once, without the fade. */
 export const INSTANT_REVEAL_MS = 120;

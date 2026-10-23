@@ -324,12 +324,17 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
     const isLive = (): boolean => !!usePlayerStore.getState().source?.isLive;
     /** Non-zero after an mpegts.js live reconnect restarted the element clock. */
     const offset = (): number => engineRef.current?.timeOffset?.() ?? 0;
-    const onTime = (): void => {
+    const onTime = (e: Event): void => {
       const off = offset();
-      // MPEG-TS through mpegts.js has no duration of its own; after a restart the element's covers the new stream only.
-      const own = Number.isFinite(el.duration) ? el.duration + off : undefined;
-      const dur = isLive() ? undefined : (engineRef.current?.duration?.() ?? own);
-      reportProgress(el.currentTime + off, dur);
+      // `progress` (data came in, every 350 ms or so while it loads) refreshes the buffer only: the
+      // position follows `timeupdate`. Reported on `progress` as well, it ran every store subscriber
+      // again for a time the next `timeupdate` brings anyway (P2-PLAYER-2).
+      if (e.type !== 'progress') {
+        // MPEG-TS through mpegts.js has no duration of its own; after a restart the element's covers the new stream only.
+        const own = Number.isFinite(el.duration) ? el.duration + off : undefined;
+        const dur = isLive() ? undefined : (engineRef.current?.duration?.() ?? own);
+        reportProgress(el.currentTime + off, dur);
+      }
       const now = performance.now();
       if (now - lastBufferedAt > 1000) {
         lastBufferedAt = now;

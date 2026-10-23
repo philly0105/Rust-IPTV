@@ -820,7 +820,7 @@ export function reportProgress(positionSeconds: number, durationSeconds?: number
   if (durationSeconds !== undefined && Number.isFinite(durationSeconds) && durationSeconds > 0) {
     patch.durationSeconds = durationSeconds;
   }
-  // The element's `progress` events, and mpv state events, repeat the last report: nothing to tell subscribers.
+  // mpv state events, and the element's `timeupdate` at a pause, repeat the last report: nothing to tell subscribers.
   const s = usePlayerStore.getState();
   if (s.positionSeconds === patch.positionSeconds && (patch.durationSeconds === undefined || patch.durationSeconds === s.durationSeconds)) return;
   usePlayerStore.setState(patch);

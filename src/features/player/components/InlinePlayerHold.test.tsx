@@ -269,3 +269,28 @@ describe('a stream the browser loads from the provider directly (downloads)', ()
     }
   });
 });
+
+describe('playback progress (P2-PLAYER-2)', () => {
+  it('moves the position on timeupdate; progress, which only brings data, tells the store nothing', async () => {
+    render(<InlinePlayer />);
+    await tune(vod);
+    const el = video();
+    let at = 12;
+    Object.defineProperty(el, 'currentTime', { configurable: true, get: () => at });
+    Object.defineProperty(el, 'duration', { configurable: true, get: () => 600 });
+    act(() => void el.dispatchEvent(new Event('timeupdate')));
+    expect(usePlayerStore.getState().positionSeconds).toBe(12);
+    const listener = vi.fn();
+    const stop = usePlayerStore.subscribe(listener);
+    try {
+      at = 12.3;
+      act(() => void el.dispatchEvent(new Event('progress')));
+      expect(listener).not.toHaveBeenCalled();
+      act(() => void el.dispatchEvent(new Event('timeupdate')));
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(usePlayerStore.getState().positionSeconds).toBe(12.3);
+    } finally {
+      stop();
+    }
+  });
+});

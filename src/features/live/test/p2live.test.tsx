@@ -1,7 +1,7 @@
 /**
  * Second performance pass on Live's cold open (P2-LIVE-3, P2-LIVE-4): what a screen of channel
- * rows and the page cost before the user does anything. And what the list still shows the same
- * way (P2-LIVE-5).
+ * rows and the page cost before the user does anything. And what the list and its logos still
+ * show the same way (P2-LIVE-5, P2-LIVE-6).
  */
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -15,6 +15,7 @@ import { queryClient, rpcKey } from '@/api/query';
 import type { Channel, EpgNowNext, Page, PageQuery } from '@/api/types';
 
 import { ChannelList, resetChannelListMemory } from '../components/ChannelList';
+import { ChannelLogo } from '../components/ChannelLogo';
 import { LivePage } from '../components/LivePage';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { MINUTE } from '../lib/epgTime';
@@ -224,5 +225,32 @@ describe('opening on the playing channel (P2-LIVE-5)', () => {
     } finally {
       if (own) Object.defineProperty(window, 'innerHeight', own);
     }
+  });
+});
+
+describe('logos sharing an address (P2-LIVE-6)', () => {
+  it('every tile of one address takes the plate its pixels need', () => {
+    // Half see-through, in black ink: a wordmark that needs the light plate.
+    const data = new Uint8ClampedArray(16 * 16 * 4);
+    for (let i = 0; i < data.length; i += 8) data.set([0, 0, 0, 255], i);
+    const ctx = { clearRect() {}, drawImage() {}, getImageData: () => ({ data }) };
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ctx as never);
+    // The HD and SD versions of one channel, often given one logo by a playlist.
+    const view = render(
+      <>
+        <ChannelLogo src="http://logo/shared.png" name="One HD" />
+        <ChannelLogo src="http://logo/shared.png" name="One SD" />
+      </>,
+    );
+    const images = [...view.container.querySelectorAll('img')];
+    expect(images).toHaveLength(2);
+    for (const img of images) {
+      Object.defineProperty(img, 'naturalWidth', { value: 64 });
+      fireEvent.load(img);
+    }
+    // The second tile found the first one's reading and, memoized, kept the dark plate it drew
+    // before it.
+    const plates = [...view.container.querySelectorAll<HTMLElement>('[data-plate]')].map((p) => p.dataset['plate']);
+    expect(plates).toEqual(['light', 'light']);
   });
 });

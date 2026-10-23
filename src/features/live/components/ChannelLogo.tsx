@@ -136,8 +136,10 @@ export const ChannelLogo = memo(function ChannelLogo({
     if (!reading) {
       reading = measureLogo(e.currentTarget);
       readings.set(url, reading);
-      if (reading.plate) setMeasured((n) => n + 1);
     }
+    // Also when another tile of this address measured it after this one rendered: memoized, this
+    // tile gets no parent render to pick up the plate (P2-LIVE-6).
+    if (reading.plate !== (plate ?? null)) setMeasured((n) => n + 1);
     onHue?.(reading.hue);
   };
   // The monogram's hue is known from the name; a logo's once it has loaded (onLoad, or an

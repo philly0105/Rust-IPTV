@@ -201,6 +201,9 @@ function normalize(code: string | undefined | null): string {
 /** Latest requested language; an older, slower load never overrides a newer choice. */
 let requested = DEFAULT_LANGUAGE;
 
+/** The language `activate` last put on screen (strings and `<html lang/dir>`); English from init. */
+let applied = DEFAULT_LANGUAGE;
+
 async function activate(code: string): Promise<void> {
   requested = code;
   try {
@@ -214,6 +217,16 @@ async function activate(code: string): Promise<void> {
   const lng = i18nextLng(code);
   if (i18next.language !== lng) await i18next.changeLanguage(lng);
   syncDocument(code);
+  applied = code;
+}
+
+/**
+ * True when `code` (settings.language) is already on screen, strings and `<html lang/dir>`, so
+ * applying it changes nothing: on a fresh profile, English, which i18next starts in.
+ */
+export function languageActive(code: string): boolean {
+  const next = normalize(code);
+  return next === applied && i18next.language === i18nextLng(next);
 }
 
 let ready: Promise<void> = Promise.resolve();

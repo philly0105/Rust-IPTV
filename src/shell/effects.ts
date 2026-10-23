@@ -17,7 +17,7 @@ import type { ImportProgressEvent, Settings, Source, SourceKind, WindowState } f
 import { progressStore } from '@/features/library/lib/progress';
 import { importErrorClaimed, importSummaryKey } from '@/features/sources/lib/errors';
 import { addSourcePathFromDeepLink } from '@/features/sources/lib/links';
-import { applyLanguage, languageUnresolved } from '@/i18n';
+import { applyLanguage, languageActive, languageUnresolved } from '@/i18n';
 import { liveQualityKey } from '@/lib/liveQuality';
 // Not sources/lib/files or format: those whole modules would land in the entry chunk.
 import { formatCount, formatFileSize } from '@/lib/numbers';
@@ -466,7 +466,13 @@ export const LANGUAGE_HOLD_MAX_MS = 4000;
  * leaves the shell blank. It never goes back to false.
  */
 export function useLanguageSync(language: string | undefined, settingsFailed = false): boolean {
-  const [settled, setSettled] = useState(() => !languageUnresolved());
+  // P2-BOOT-1: settings that name the language already on screen (a fresh profile in English,
+  // which i18next starts in) settle in the render that has them, from the first one when the boot
+  // prefetch is in. Waiting for applyLanguage cost the cold start a skeleton commit, a frame and
+  // a second render of the whole shell, and there is no other language to wait for.
+  const active = !!language && languageActive(language);
+  const [settled, setSettled] = useState(() => active || !languageUnresolved());
+  if (active && !settled) setSettled(true);
 
   useEffect(() => {
     if (!language) return;

@@ -14,6 +14,8 @@
  * until `settings.get` answers. `languageUnresolved()` reports that window;
  * the shell shows a text-free skeleton until the first `applyLanguage`
  * resolves, so a German user never sees an English first frame either.
+ * Settings that name the language already on screen (`languageActive`,
+ * English on a fresh profile) end the wait at once (P2-BOOT-1).
  */
 
 import i18next, { type Resource } from 'i18next';
@@ -201,6 +203,9 @@ function normalize(code: string | undefined | null): string {
 /** Latest requested language; an older, slower load never overrides a newer choice. */
 let requested = DEFAULT_LANGUAGE;
 
+/** The language `activate` last put on screen (strings and `<html lang/dir>`); English from init. */
+let applied = DEFAULT_LANGUAGE;
+
 async function activate(code: string): Promise<void> {
   requested = code;
   try {
@@ -214,6 +219,16 @@ async function activate(code: string): Promise<void> {
   const lng = i18nextLng(code);
   if (i18next.language !== lng) await i18next.changeLanguage(lng);
   syncDocument(code);
+  applied = code;
+}
+
+/**
+ * True when `code` (settings.language) is already on screen, strings and `<html lang/dir>`, so
+ * applying it changes nothing: on a fresh profile, English, which i18next starts in.
+ */
+export function languageActive(code: string): boolean {
+  const next = normalize(code);
+  return next === applied && i18next.language === i18nextLng(next);
 }
 
 let ready: Promise<void> = Promise.resolve();
@@ -226,6 +241,10 @@ if (!i18next.isInitialized) {
     ns: [...NAMESPACES],
     defaultNS: 'common',
     fallbackNS: 'common',
+    // P2-BOOT-3: i18next's default, named so it skips its natural-language test on every t()
+    // call (whether a key with spaces or `?!,;` around the `:` is a sentence, not `ns:key`). The
+    // keys here are identifiers, so the test only ever cost a regex run per string drawn.
+    nsSeparator: ':',
     interpolation: { escapeValue: false },
     returnNull: false,
     initAsync: false,

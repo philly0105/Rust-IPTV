@@ -99,4 +99,13 @@ describe('i18n language keys', () => {
     // Not the English fallback.
     expect(t('recentCount', { count: 3 })).not.toBe(i18n.getFixedT('en', 'library')('recentCount', { count: 3 }));
   });
+
+  // P2-BOOT-3: with the separator left implicit, every t() call ran a regex over its key to tell
+  // a sentence from `ns:key`.
+  it('reads `ns:key` without testing the key for natural language on each call', () => {
+    const t = i18n.getFixedT('en', 'common');
+    const test = vi.spyOn(RegExp.prototype, 'test');
+    for (let i = 0; i < 5; i++) expect(t('shell:navDashboard')).toBe('Home');
+    expect(test.mock.calls.filter(([s]) => s === 'shell:navDashboard')).toEqual([]);
+  });
 });

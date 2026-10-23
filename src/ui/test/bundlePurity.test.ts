@@ -94,6 +94,12 @@ describe('bundle shape', () => {
     expect(chunk!('/app/src/ui/VirtualGrid.tsx')).toBeUndefined();
   });
 
+  // P2-BOOT-2: every boot loads `locale-en`; a const per key made it 3,140 statements for V8 to
+  // compile, where one string per file is only scanned.
+  it('turns each locale JSON file into one JSON.parse, not a const per key', () => {
+    expect((viteConfig as { json?: unknown }).json).toEqual({ namedExports: false, stringify: true });
+  });
+
   it('builds against react-router\'s production files, not the dev build with ENABLE_DEV_WARNINGS', () => {
     const router = aliases(viteConfig).find(ROUTER);
     expect(router?.replacement.replace(/\\/g, '/')).toMatch(/node_modules\/react-router\/dist\/production\/index\.mjs$/);

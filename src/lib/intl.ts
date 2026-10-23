@@ -21,6 +21,11 @@ const INTL_TAGS: Readonly<Record<string, string>> = { ary: 'ar', by: 'be', zhtw:
 
 const resolved = new Map<string, string>();
 
+// The process's first supportedLocalesOf takes about 8 ms (32 ms in a 4x-slowed profile), but that
+// is V8 building NumberFormat's set of available locales, which the first `new Intl.NumberFormat`
+// builds as well: in Node 24 a first NumberFormat took 37 ms on its own and 0.3 ms after the check.
+// Every screen formats a number, so skipping the check for the LANGUAGES tags would move the cost,
+// not save it (P2-BOOT-5).
 function resolve(lang: string): string {
   const tag = INTL_TAGS[lang] ?? LANGUAGES.find((l) => l.code === lang)?.bcp47 ?? lang;
   for (const c of [tag, tag.split('-')[0]]) {

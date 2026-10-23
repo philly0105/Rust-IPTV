@@ -32,8 +32,12 @@ export function useClientHeight(ref: RefObject<HTMLElement | null>): number {
     const start = () => {
       const el = ref.current;
       if (cancelled || !el) return;
-      setHeight(el.clientHeight);
-      if (typeof ResizeObserver === 'undefined') return;
+      // P2-RAILS-4: the first reading comes from the observer too, after the browser's own layout.
+      // Read here, right after the landing committed, it forced the page's layout.
+      if (typeof ResizeObserver === 'undefined') {
+        setHeight(el.clientHeight);
+        return;
+      }
       ro = new ResizeObserver(() => setHeight(el.clientHeight));
       ro.observe(el);
     };

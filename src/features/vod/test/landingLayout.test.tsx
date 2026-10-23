@@ -1,7 +1,8 @@
 /**
  * P2-RAILS-4: the Movies landing mounts its chips and rails without reading layout. Its viewport
- * height (the open category index's floor, IDX-3) was read right after the commit; it now comes from
- * a ResizeObserver, whose callback follows the browser's layout. With the rails' edges (P2-RAILS-1)
+ * height (the open category index's floor, IDX-3) was read right after the commit; with the index
+ * folded (the default, as here) it now comes from a ResizeObserver, whose callback follows the
+ * browser's layout. With the rails' edges (P2-RAILS-1)
  * and the chips' fades (P2-RAILS-3) read the same way, nothing on the landing forces a layout before
  * the browser's own: the first read in the commit used to pay for the whole new page.
  *

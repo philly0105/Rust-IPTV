@@ -15,7 +15,8 @@
  * jsdom has no layout: the tests place the heading with getBoundingClientRect and give the
  * scroller a height, and stand in for the scroll with the scrollIntoView calls. The landing reads
  * that height from a ResizeObserver after the browser's layout (P2-RAILS-4), so IDX-3 calls the
- * observers back where the browser would have laid the page out.
+ * observers back where the browser would have laid the page out; with the index open at mount it
+ * reads the height at once.
  */
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useNavigate } from 'react-router';
@@ -154,6 +155,15 @@ describe('IDX-3: the open index keeps a screen of height', () => {
     fireEvent.click(toggle);
     expect(body(toggle).hidden).toBe(true);
     expect(body(toggle).style.minHeight).toBe('');
+  });
+
+  it('remembered open, the floor is there as the landing mounts, without waiting for its layout', async () => {
+    // Back puts the landing's offset back in the commit and once more in the next frame, both
+    // before the observers are called back: an offset that needs the floor must find it there.
+    localStorage.setItem(CATEGORY_INDEX_KEY, '1');
+    landing();
+    const toggle = await heading();
+    await waitFor(() => expect(body(toggle).style.minHeight).toBe(`${VIEWPORT}px`));
   });
 
   it('opened from the chip, it gets the same floor', async () => {

@@ -1,14 +1,16 @@
 /**
  * Second performance pass, grid lane. P2-GRID-1: the movie grid's posters load at the grid's
- * column width without reading their frames as they mount.
+ * column width without reading their frames as they mount. P2-GRID-2: so do the channel logos of
+ * a search.
  */
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Category, ItemRef, Page, PageQuery, VodItem } from '@/api/types';
+import type { Category, Channel, ItemRef, Page, PageQuery, VodItem } from '@/api/types';
 
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { CategoryGridPage } from '../pages/CategoryGridPage';
+import { SearchPage } from '../pages/SearchPage';
 import { installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
@@ -54,6 +56,7 @@ beforeEach(() => {
   for (const k of Object.keys(h)) delete h[k];
   rpcMock.calls.length = 0;
   h['sources.get'] = () => makeSource('src1', 'xtream', 'Alpha IPTV');
+  h['sources.list'] = () => [makeSource('src1', 'xtream', 'Alpha IPTV')];
   h['settings.get'] = () => settings();
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['catalog.categories'] = () => cats;
@@ -64,6 +67,7 @@ beforeEach(() => {
     const q = (a as { query: PageQuery }).query;
     return { items: ALL.slice(q.offset, q.offset + q.limit), total: ALL.length, offset: q.offset, limit: q.limit } satisfies Page<VodItem>;
   };
+  h['stalker.search'] = () => ({ items: [], total: 0, offset: 0, limit: 14 });
 
   pictureReads = [];
   const onPicture = (el: Element) => {
@@ -106,6 +110,18 @@ describe('P2-GRID-1: the movie grid', () => {
     // jsdom lays nothing out, so the grid keeps its 960 px guess: five 164 px (medium) columns
     // with 16 px gaps are 179.2 px wide, which the cache serves from its 192 px copy.
     expect(imgs.map(sizeOf)).toEqual(imgs.map(() => '192'));
+    expect(pictureReads).toEqual([]);
+  });
+});
+
+describe('P2-GRID-2: search', () => {
+  it("loads the channel logos at the logo's width without reading their boxes", async () => {
+    const channel = { ref: { sourceId: 'src1', contentType: 'live', itemId: 'c1' }, name: 'Film News', categoryId: 'g', isRadio: false, logoUrl: 'http://cdn.example/news.png' } as Channel;
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel], movies: [film(0)], series: [] });
+    renderAt('/search?q=film', [{ path: '/search', element: <SearchPage /> }]);
+    const logo = await screen.findByRole('img', { name: 'Film News' });
+    // w-12 is 45 px at 100 %: the 64 px copy, as the measured frame asked for.
+    expect(sizeOf(logo as HTMLImageElement)).toBe('64');
     expect(pictureReads).toEqual([]);
   });
 });

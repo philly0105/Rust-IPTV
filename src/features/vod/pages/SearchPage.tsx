@@ -1046,6 +1046,9 @@ const ChannelGrid = memo(function ChannelGrid({
   );
 });
 
+/** The channel logo's box, `w-12`: twelve spacing steps of 3.75 px at 100 % scale. */
+const CHANNEL_LOGO_PX = 45;
+
 /** One channel hit; choosing it plays the channel. The source is quiet text, not an outlined chip. */
 function ChannelHitButton({
   hit: h,
@@ -1059,6 +1062,8 @@ function ChannelHitButton({
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
   const c = h.item as Channel;
+  // The logo's width is known, so it does not read its frame as it mounts (P2-GRID-2).
+  const logoWidth = useScaledPx(CHANNEL_LOGO_PX, true);
   return (
     <button
       type="button"
@@ -1068,7 +1073,7 @@ function ChannelHitButton({
     >
       <div className="w-12 shrink-0">
         {/* The channel's source: the image cache fetches a LAN logo with that source's trust and headers (C2). */}
-        <Poster src={h.imageUrl} sourceId={c.ref.sourceId} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
+        <Poster src={h.imageUrl} sourceId={c.ref.sourceId} width={logoWidth} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
       </div>
       <div className="min-w-0 flex-1">
         <div dir="auto" className="truncate text-body-sm font-medium text-fg text-match-parent">

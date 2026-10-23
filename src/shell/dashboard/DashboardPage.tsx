@@ -25,7 +25,7 @@ import {
 } from '@/api/types';
 import { useLists } from '@/features/lists/hooks/useLists';
 import { CustomListRails } from '@/features/lists/rails';
-import { MyListRail } from '@/features/mylist/components/MyListRail';
+import { MyListRail, type MyListRailProps } from '@/features/mylist/components/MyListRail';
 import { useInMyList, useMyList } from '@/features/mylist/hooks/useMyList';
 import { usePendingRemovals } from '@/features/sources/lib/pendingRemoval';
 import { formatRating } from '@/features/vod/lib/rating';
@@ -41,7 +41,7 @@ import { useVisibleSources } from '../useVisibleSources';
 import { useSettings } from '../useSettings';
 // account:
 import { AccountAlerts } from './AccountAlerts';
-import { ChannelCard, ContinueCard, OnNowCard, PosterCard, SourceCard, SourceKindContext, itemPath, joinList, type CardMenuItem } from './cards';
+import { ChannelCard, ContinueCard, OnNowCard, PosterCard, RailMyListProvider, SourceCard, SourceKindContext, itemPath, joinList, type CardMenuItem } from './cards';
 import { ChannelMenuHost, snapshotChannel } from './ChannelCardMenu';
 import { DashboardRail, type RailCardProps } from './DashboardRail';
 import { HeroCarousel } from './HeroCarousel';
@@ -58,8 +58,14 @@ const Welcome = lazy(() => import('./Welcome').then((m) => ({ default: m.Welcome
 const RAIL_LIMIT = HOME_RAIL_LIMIT;
 
 // The rails that read their own queries, memoized here (SH-4): Home's re-renders for other rails'
-// answers pass them by.
-const HomeMyListRail = memo(MyListRail);
+// answers pass them by. My List's posters share one read of the list (P2-HOME-4).
+const HomeMyListRail = memo(function HomeMyListRail(props: MyListRailProps) {
+  return (
+    <RailMyListProvider>
+      <MyListRail {...props} />
+    </RailMyListProvider>
+  );
+});
 const HomeCustomListRails = memo(CustomListRails);
 
 export { minutesLeft, watchedFraction } from './progress';
@@ -1054,39 +1060,41 @@ const RecentLiveRail = memo(function RecentLiveRail({
 const FavoriteVodRail = memo(function FavoriteVodRail({ items, loading, loaded, error, refetch }: RailQueryProps & { items: readonly FavoriteEntry[] }) {
   const { t, i18n } = useTranslation('shell');
   return (
-    <DashboardRail<FavoriteEntry>
-      id="favorite-vod"
-      title={t('railFavoriteVod')}
-      items={items}
-      loading={loading}
-      loaded={loaded}
-      error={error}
-      errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
-      onRetry={() => void refetch()}
-      seeAll={{ to: '/favorites' }}
-      getKey={refKey}
-      cardWidth={168}
-      skeletonAspect={2 / 3}
-      renderCard={(f, rail) => {
-        // L2-visual-3: the base title, as on the detail page; a year stripped from it becomes the subtitle.
-        const base = snapshotTitle(f.ref, f.snapshot.title);
-        const year = f.snapshot.subtitle || (base.year ? String(base.year) : undefined);
-        // A year the title still ends with ("Summer Static (2025)") is not repeated under it.
-        const own = year && !titleEndsWithYear(base.title, year) ? year : undefined;
-        const subtitle = own ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
-        return (
-          <PosterCard
-            rail={rail}
-            title={base.title}
-            subtitle={subtitle}
-            posterUrl={f.snapshot.posterUrl}
-            to={itemPath(f.ref)}
-            ariaLabel={joinList([base.title, subtitle], i18n.language)}
-            myList={{ itemRef: f.ref, snapshot: { ...f.snapshot, title: base.title, ...(year ? { subtitle: year } : {}) } }}
-          />
-        );
-      }}
-    />
+    <RailMyListProvider>
+      <DashboardRail<FavoriteEntry>
+        id="favorite-vod"
+        title={t('railFavoriteVod')}
+        items={items}
+        loading={loading}
+        loaded={loaded}
+        error={error}
+        errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
+        onRetry={() => void refetch()}
+        seeAll={{ to: '/favorites' }}
+        getKey={refKey}
+        cardWidth={168}
+        skeletonAspect={2 / 3}
+        renderCard={(f, rail) => {
+          // L2-visual-3: the base title, as on the detail page; a year stripped from it becomes the subtitle.
+          const base = snapshotTitle(f.ref, f.snapshot.title);
+          const year = f.snapshot.subtitle || (base.year ? String(base.year) : undefined);
+          // A year the title still ends with ("Summer Static (2025)") is not repeated under it.
+          const own = year && !titleEndsWithYear(base.title, year) ? year : undefined;
+          const subtitle = own ?? (f.ref.contentType === 'series' ? t('series') : t('movie'));
+          return (
+            <PosterCard
+              rail={rail}
+              title={base.title}
+              subtitle={subtitle}
+              posterUrl={f.snapshot.posterUrl}
+              to={itemPath(f.ref)}
+              ariaLabel={joinList([base.title, subtitle], i18n.language)}
+              myList={{ itemRef: f.ref, snapshot: { ...f.snapshot, title: base.title, ...(year ? { subtitle: year } : {}) } }}
+            />
+          );
+        }}
+      />
+    </RailMyListProvider>
   );
 });
 
@@ -1117,39 +1125,41 @@ const RecentlyAddedRail = memo(function RecentlyAddedRail({
 }: RailQueryProps & { items: readonly (VodItem | SeriesItem)[]; sourceById: ReadonlyMap<string, Source> }) {
   const { t, i18n } = useTranslation('shell');
   return (
-    <DashboardRail<VodItem | SeriesItem>
-      id="recently-added"
-      title={t('railRecentlyAdded')}
-      items={items}
-      loading={loading}
-      loaded={loaded}
-      error={error}
-      errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
-      onRetry={() => void refetch()}
-      getKey={refKey}
-      cardWidth={168}
-      skeletonAspect={2 / 3}
-      renderCard={(v, rail) => {
-        // Intl, like the hero: de reads "7,5" on both.
-        const rating = formatRating(v.rating, i18n.language);
-        // The title the detail page and the hero show: no trailing year or provider tag.
-        const title = v.titleBase || v.title;
-        return (
-          <PosterCard
-            rail={rail}
-            title={title}
-            subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, !titleEndsWithYear(title, v.year) && v.year], i18n.language)}
-            posterUrl={v.posterUrl}
-            backdropUrl={v.backdropUrl}
-            badge={rating ? <Badge variant="neutral" className="bg-glass-strong text-on-glass">{rating}</Badge> : undefined}
-            to={itemPath(v.ref)}
-            // Name first: the rating badge sits before the caption in the DOM.
-            ariaLabel={joinList([title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })], i18n.language)}
-            myList={myListTarget(v)}
-          />
-        );
-      }}
-    />
+    <RailMyListProvider>
+      <DashboardRail<VodItem | SeriesItem>
+        id="recently-added"
+        title={t('railRecentlyAdded')}
+        items={items}
+        loading={loading}
+        loaded={loaded}
+        error={error}
+        errorHint={t(isDesktop ? 'dashboardLocalDataHint' : 'dashboardServerDataHint')}
+        onRetry={() => void refetch()}
+        getKey={refKey}
+        cardWidth={168}
+        skeletonAspect={2 / 3}
+        renderCard={(v, rail) => {
+          // Intl, like the hero: de reads "7,5" on both.
+          const rating = formatRating(v.rating, i18n.language);
+          // The title the detail page and the hero show: no trailing year or provider tag.
+          const title = v.titleBase || v.title;
+          return (
+            <PosterCard
+              rail={rail}
+              title={title}
+              subtitle={joinList([sourceById.get(v.ref.sourceId)?.name, !titleEndsWithYear(title, v.year) && v.year], i18n.language)}
+              posterUrl={v.posterUrl}
+              backdropUrl={v.backdropUrl}
+              badge={rating ? <Badge variant="neutral" className="bg-glass-strong text-on-glass">{rating}</Badge> : undefined}
+              to={itemPath(v.ref)}
+              // Name first: the rating badge sits before the caption in the DOM.
+              ariaLabel={joinList([title, sourceById.get(v.ref.sourceId)?.name, v.year, rating && t('ratedLabel', { rating })], i18n.language)}
+              myList={myListTarget(v)}
+            />
+          );
+        }}
+      />
+    </RailMyListProvider>
   );
 });
 
@@ -1242,18 +1252,20 @@ const TrendingRail = memo(function TrendingRail({
   const [ready, setReady] = useState(false);
   useEffect(() => whenIdle(() => setReady(true)), []);
   return (
-    <DashboardRail<TmdbBrief>
-      id="tmdb-trending"
-      title={t('railTrending')}
-      items={items}
-      loading={loading}
-      loaded={loaded}
-      error={error}
-      onRetry={() => void refetch()}
-      getKey={trendingKey}
-      cardWidth={168}
-      skeletonAspect={2 / 3}
-      renderCard={(b, rail) => <TrendingCard b={b} rail={rail} sourceById={sourceById} ready={ready} />}
-    />
+    <RailMyListProvider>
+      <DashboardRail<TmdbBrief>
+        id="tmdb-trending"
+        title={t('railTrending')}
+        items={items}
+        loading={loading}
+        loaded={loaded}
+        error={error}
+        onRetry={() => void refetch()}
+        getKey={trendingKey}
+        cardWidth={168}
+        skeletonAspect={2 / 3}
+        renderCard={(b, rail) => <TrendingCard b={b} rail={rail} sourceById={sourceById} ready={ready} />}
+      />
+    </RailMyListProvider>
   );
 });

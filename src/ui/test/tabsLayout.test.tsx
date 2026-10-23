@@ -31,9 +31,15 @@ beforeEach(() => {
   } as unknown as typeof ResizeObserver;
 });
 afterEach(() => {
+  actEnvironment(true);
   cleanup();
   globalThis.ResizeObserver = original;
 });
+
+/** Sets whether React treats this as a test's act() environment (off: updates schedule as in the app). */
+function actEnvironment(on: boolean) {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = on;
+}
 
 /** Calls back every observer still watching something, as the browser does after its layout. */
 function layOut() {
@@ -67,6 +73,18 @@ describe('P2-RAILS-5: Tabs measure after layout', () => {
     // The selected tab ends 24 px clear of the right edge's fade; both edges now hide tabs.
     expect(left).toBe(460 - (300 - 24));
     expect(list.style.maskImage).toContain('transparent 0');
+    expect(list.style.maskImage).toContain('transparent 100%');
+  });
+
+  it("puts the fade on screen in the observer's callback, so the row never shows without it", () => {
+    render(<Tabs items={items} value="top" onChange={() => {}} label="Kind" />);
+    const list = screen.getByRole('tablist');
+    Object.defineProperty(list, 'scrollWidth', { configurable: true, value: 500 });
+    Object.defineProperty(list, 'clientWidth', { configurable: true, value: 300 });
+    // The callback runs after layout and before paint: the fade is in the DOM when it returns, not
+    // in a render a frame after the row first showed.
+    actEnvironment(false);
+    layOut();
     expect(list.style.maskImage).toContain('transparent 100%');
   });
 });

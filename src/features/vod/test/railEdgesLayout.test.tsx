@@ -13,12 +13,7 @@ import { I18nextProvider } from 'react-i18next';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PosterRail } from '../components/PosterRail';
-import { fakeResizeObservers, i18n, installDomStubs, layOutBox, QueryWrapper, spyLayoutReads } from './harness';
-
-/** Sets whether React treats this as a test's act() environment (off: updates schedule as in the app). */
-function actEnvironment(on: boolean) {
-  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = on;
-}
+import { actEnvironment, fakeResizeObservers, i18n, installDomStubs, layOutBox, QueryWrapper, spyLayoutReads } from './harness';
 
 const next = () => screen.queryByRole('button', { name: 'Scroll forward' }) as HTMLButtonElement | null;
 const back = () => screen.queryByRole('button', { name: 'Scroll back' }) as HTMLButtonElement | null;

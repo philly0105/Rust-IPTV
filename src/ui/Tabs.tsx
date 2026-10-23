@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 
 import { cn } from './cn';
 import { SEGMENT_TRACK, segmentClass } from './Segmented';
@@ -65,7 +66,8 @@ function useOverflowFade(list: HTMLDivElement | null, enabled: boolean): CSSProp
     list.addEventListener('scroll', measure, { passive: true });
     // P2-RAILS-5: the first reading comes from the observer too, after the browser's own layout.
     // Read here, right after the page committed (search opening on its tabs), it forced that layout.
-    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
+    // The callback comes before paint, and flushSync puts the fade on screen in that frame.
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => flushSync(measure));
     if (ro) ro.observe(list);
     else measure();
     return () => {

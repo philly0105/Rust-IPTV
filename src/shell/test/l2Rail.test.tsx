@@ -99,6 +99,25 @@ describe('rail scroll (L2-shell-1)', () => {
     }
   });
 
+  it("fades the sources' hidden end in the observer's callback, so the rail never shows without it", async () => {
+    const observers = fakeResizeObservers();
+    try {
+      renderRoutes(routes(false), '/dashboard');
+      await screen.findByText('Source s3');
+      const { box } = layOutRail();
+      Object.defineProperty(box, 'clientHeight', { configurable: true, value: 608 });
+      Object.defineProperty(box, 'scrollHeight', { configurable: true, value: 900 });
+      // The callback runs after layout and before paint: the fade is in the DOM when it returns,
+      // not in a render a frame after the rail showed (act off: updates schedule as in the app).
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+      observers.layOut();
+      expect(box.getAttribute('data-fade-bottom')).toBe('true');
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      observers.restore();
+    }
+  });
+
   it('expanding a source by hand below the fold scrolls its links into view', async () => {
     renderRoutes(routes(false), '/dashboard');
     const btn = await screen.findByRole('button', { name: /Source s3/ });

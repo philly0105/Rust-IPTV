@@ -9,7 +9,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { useEdgeFades } from '../hooks/useEdgeFades';
-import { fakeResizeObservers, layOutBox, spyLayoutReads } from './harness';
+import { actEnvironment, fakeResizeObservers, layOutBox, spyLayoutReads } from './harness';
 
 function Row({ content }: { content: string }) {
   const fades = useEdgeFades(content);
@@ -25,6 +25,7 @@ beforeEach(() => {
   observers = fakeResizeObservers();
 });
 afterEach(() => {
+  actEnvironment(true);
   cleanup();
   observers.restore();
 });
@@ -44,5 +45,16 @@ describe('P2-RAILS-3: edge fades measure after layout', () => {
     layOutBox(row, { clientWidth: 300, scrollWidth: 300 });
     act(() => observers.layOut());
     expect(row.style.maskImage).toBe('');
+  });
+
+  it("puts the first reading on screen in the observer's callback, so the row never shows without its fade", () => {
+    render(<Row content="a" />);
+    const row = screen.getByTestId('row');
+    layOutBox(row, { clientWidth: 300, scrollWidth: 500 });
+    // The callback runs after layout and before paint: the fade is in the DOM when it returns, not
+    // in a render a frame after the row first showed.
+    actEnvironment(false);
+    observers.layOut();
+    expect(row.style.maskImage).toContain('transparent 100%');
   });
 });

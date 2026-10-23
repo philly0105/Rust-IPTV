@@ -604,7 +604,8 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
     // P2-RAILS-2: the reveal and the first fade reading wait for the observer's first callback.
     // This effect runs right after a route's page committed, so reading here forced that page's
     // layout (31 ms at a 4x slowdown on a cold Movies landing); the callback comes after the
-    // browser's own layout and before paint, so the link is in view in the first frame all the same.
+    // browser's own layout and before paint, so the link is in view in the first frame all the same,
+    // and flushSync puts a fade that changed on screen in that frame too.
     let revealPending = true;
     const measure = () => {
       if (revealPending) {
@@ -613,7 +614,7 @@ function useRailScroll(ref: RefObject<HTMLDivElement | null>, scrollKey: string,
       }
       update();
     };
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => flushSync(measure));
     if (ro) {
       ro.observe(el);
       for (const child of el.children) ro.observe(child);

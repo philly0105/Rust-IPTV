@@ -136,6 +136,14 @@ export function fakeResizeObservers(): { layOut: () => void; restore: () => void
   };
 }
 
+/**
+ * Sets whether React treats this as a test's act() environment. Off, updates schedule as in the
+ * app, so a test can tell a change flushed in an observer's callback from one rendered later.
+ */
+export function actEnvironment(on: boolean): void {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = on;
+}
+
 /** Spies on the layout reads a commit could force: scroll and client boxes, offsets and rects. */
 export function spyLayoutReads(): { count: () => number } {
   const props = ['clientWidth', 'clientHeight', 'scrollWidth', 'scrollHeight', 'scrollLeft', 'scrollTop'] as const;

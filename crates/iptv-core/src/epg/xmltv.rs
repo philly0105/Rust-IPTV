@@ -1036,11 +1036,19 @@ impl<R: BufRead> Read for Guard<R> {
 }
 
 /// Trims and collapses internal runs of whitespace (newlines, tabs) to one space.
-fn collapse(s: String) -> String {
+fn collapse(mut s: String) -> String {
     let t = s.trim();
     if !t.contains(|c: char| c.is_whitespace() && c != ' ') && !t.contains("  ") {
-        // Already tidy, as nearly every title is: keep the buffer.
-        return if t.len() == s.len() { s } else { t.to_string() };
+        if t.len() != s.len() {
+            return t.to_string();
+        }
+        // Already tidy, as nearly every title is: keep the buffer, minus any
+        // spare room. Text read in several nodes (a comment or CDATA in
+        // between) or past its cap grew by doubling, up to twice its length,
+        // and held programmes are counted by length (`MAX_PENDING_BYTES`).
+        // Text read in one node is already at its size (P2-EPGRS-2).
+        s.shrink_to_fit();
+        return s;
     }
     let mut out = String::with_capacity(t.len());
     let mut space = false;
@@ -1583,6 +1591,27 @@ mod tests {
         let two = progs.iter().find(|p| p.title == "Two").unwrap();
         assert_eq!(two.stop - two.start, DEFAULT_DURATION_SECS);
         assert!(progs.iter().any(|p| p.title == "B"));
+    }
+
+    /// Text read in several nodes is joined, cut at its cap across them, and
+    /// kept at its length: held programmes are counted by length, and a
+    /// buffer grown by doubling held up to twice that (P2-EPGRS-2).
+    #[test]
+    fn text_in_several_nodes_is_capped_and_kept_at_its_length() {
+        let (a, b) = ("a".repeat(500), "b".repeat(20));
+        let desc = "d".repeat(4096);
+        let xml = format!(
+            r#"<tv><programme start="20240101120000 +0000" stop="20240101130000 +0000" channel="c"><title>{a}<!---->{b}</title><desc>{desc}<![CDATA[e]]></desc></programme></tv>"#
+        );
+        let (items, _) = collect(&xml);
+        let XmltvItem::Programme(p) = &items[0] else {
+            panic!()
+        };
+        assert_eq!(p.title, format!("{a}{}", "b".repeat(MAX_TITLE_CHARS - 500)));
+        assert_eq!(p.title.capacity(), p.title.len());
+        let d = p.description.as_ref().unwrap();
+        assert_eq!(*d, format!("{desc}e"));
+        assert_eq!(d.capacity(), d.len());
     }
 
     fn collect_limited(xml: &[u8], max_doc: u64, max_node: usize) -> CoreResult<Vec<XmltvItem>> {

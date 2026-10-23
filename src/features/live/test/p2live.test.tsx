@@ -47,6 +47,8 @@ vi.mock('@/features/player/remote', async () => await import('./fakes'));
 
 const TOTAL = 200;
 
+// The Live page's first mount takes 4 to 6 s of jsdom on a loaded 2-CPU runner.
+vi.setConfig({ testTimeout: 20_000 });
 beforeAll(installDomStubs);
 beforeEach(() => {
   const h = rpcMock.handlers;

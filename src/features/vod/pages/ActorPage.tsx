@@ -31,16 +31,16 @@ function formatDate(iso: string | undefined, locale?: string): string | undefine
 
 const NO_BRIEFS: TmdbBrief[] = [];
 
-/**
- * TMDB person: portrait, facts, biography, and a "Known for" rail of the person's titles that this
- * source has, each opening its own detail page (VL-tmdb-deadend).
- */
 /** The portrait's box, `w-40 sm:w-52`: spacing steps of 3.75 px at 100 % scale. */
 const PORTRAIT_PX = 150;
 const PORTRAIT_SM_PX = 195;
 /** Tailwind's `sm` breakpoint. */
 const SM_QUERY = '(min-width: 40rem)';
 
+/**
+ * TMDB person: portrait, facts, biography, and a "Known for" rail of the person's titles that this
+ * source has, each opening its own detail page (VL-tmdb-deadend).
+ */
 export function ActorPage() {
   const { t, i18n } = useTranslation('vod');
   const { sourceId = '', personId = '' } = useParams();

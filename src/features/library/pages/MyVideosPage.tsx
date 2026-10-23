@@ -312,16 +312,16 @@ function FadingTabs({ items, ...props }: Pick<TabsProps, 'items' | 'value' | 'on
   );
 }
 
-/**
- * The recordings in All (and Missing): a sideways rail of wide cards with its own heading. Each
- * card is a button; arrows walk the rail, as on Recently watched's Continue rail.
- */
 /** A recording card's width, `w-[17rem] max-sm:w-[14rem]`, in px at 100 % (the root font is 15 px). */
 const RECORDING_CARD_PX = 255;
 const RECORDING_CARD_NARROW_PX = 210;
 /** Tailwind's `sm` breakpoint. */
 const SM_QUERY = '(min-width: 40rem)';
 
+/**
+ * The recordings in All (and Missing): a sideways rail of wide cards with its own heading. Each
+ * card is a button; arrows walk the rail, as on Recently watched's Continue rail.
+ */
 function RecordingsRail({
   entries,
   cardLabel,

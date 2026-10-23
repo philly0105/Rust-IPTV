@@ -10,7 +10,7 @@ import type { Download, Source } from '@/api/types';
 import { cn } from '@/ui/cn';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 
-import { IconButton, Poster } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, useMediaQuery, usePosterWidthBox, useScaledPx } from '../deps';
 import { etaSeconds, formatBytes, formatDuration, formatSpeed, percentOf } from '../lib/format';
 import { useLiveProgress } from '../lib/progress';
 import type { QueueAction } from '../lib/queue';
@@ -131,6 +131,12 @@ function waitingDetail(d: Download, t: TFunction<'library'>, lang: string): stri
   }
 }
 
+/** The artwork's box, `w-10 sm:w-12`: spacing steps of 3.75 px at 100 % scale. */
+const ART_PX = 37.5;
+const ART_SM_PX = 45;
+/** Tailwind's `sm` breakpoint. */
+const SM_QUERY = '(min-width: 40rem)';
+
 function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
@@ -144,6 +150,8 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
       ? formatBytes(progress.bytesDownloaded, lang)
       : '';
   const tone = isActive ? 'accent' : d.status === 'failed' ? 'danger' : 'muted';
+  // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
+  const artWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true));
 
   let detail: string;
   if (d.status === 'downloading') {
@@ -172,7 +180,9 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
       data-status={d.status}
     >
       <div className="w-10 shrink-0 overflow-hidden rounded-sm ring-1 ring-edge sm:w-12">
-        <Poster src={d.posterUrl} sourceId={d.ref.sourceId} alt="" label={d.title} aspect="poster" />
+        <PosterCellWidthContext.Provider value={artWidth}>
+          <Poster src={d.posterUrl} sourceId={d.ref.sourceId} alt="" label={d.title} aspect="poster" />
+        </PosterCellWidthContext.Provider>
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2">

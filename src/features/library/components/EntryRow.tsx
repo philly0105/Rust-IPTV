@@ -17,7 +17,7 @@ import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
-import { IconButton, Poster, ProgressBar } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, ProgressBar, usePosterWidthBox, useScaledPx } from '../deps';
 import type { NowOn } from '../hooks/useNowOn';
 import { ContentIcon, SourceBadge } from './bits';
 
@@ -57,6 +57,10 @@ export interface EntryRowProps {
 export const REVEAL_ON_FINE =
   'pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:in-focus-visible:opacity-100 pointer-fine:focus-within:opacity-100 motion-safe:transition-opacity';
 
+/** The artwork's box, `w-8` (a poster) or `w-11` (a channel's square): spacing steps of 3.75 px at 100 % scale. */
+const ART_PX = 30;
+const ART_SQUARE_PX = 41.25;
+
 function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, busy, now, onOpen, onRemove, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
@@ -65,6 +69,8 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   // Older movie and series snapshots hold the provider's raw name ("EN - Heat (1995)"); show what the VOD cards show.
   const title = snapshotTitle(entryRef, snapshot.title).title;
   const minutesLeft = now ? Math.max(1, Math.round(now.leftSeconds / 60)) : 0;
+  // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
+  const artWidth = usePosterWidthBox(useScaledPx(square ? ART_SQUARE_PX : ART_PX, true));
   return (
     <div
       className={cn(
@@ -90,7 +96,9 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         onClick={onOpen}
         className={cn('shrink-0 cursor-pointer overflow-hidden rounded-md ring-1 ring-edge', square ? 'w-11' : 'w-8')}
       >
-        <Poster src={snapshot.posterUrl} sourceId={entryRef.sourceId} alt="" label={title} aspect={square ? 'square' : 'poster'} />
+        <PosterCellWidthContext.Provider value={artWidth}>
+          <Poster src={snapshot.posterUrl} sourceId={entryRef.sourceId} alt="" label={title} aspect={square ? 'square' : 'poster'} />
+        </PosterCellWidthContext.Provider>
       </div>
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-start">
         <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg">

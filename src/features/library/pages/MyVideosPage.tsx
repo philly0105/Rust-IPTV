@@ -11,8 +11,9 @@ import { buttonClass } from '@/ui/Button';
 
 import { CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
+import { PosterCellWidthContext, usePosterWidthBox } from '@/ui/Poster';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades, type TabsProps } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades, useMediaQuery, useScaledPx, type TabsProps } from '../deps';
 import { moveInRail } from '../components/ContinueRail';
 import { CARD_CAPTION_HEIGHT, LibraryCard } from '../components/LibraryCard';
 import { RecordingCard } from '../components/RecordingCard';
@@ -247,6 +248,7 @@ export function MyVideosPage() {
         }
         onActivate={openEntry}
         render={(e) => <LibraryCard entry={e} />}
+        postersFillCells
         captionHeight={CARD_CAPTION_HEIGHT}
         minColumnWidth={column}
         gap={POSTER_GAP}
@@ -310,6 +312,12 @@ function FadingTabs({ items, ...props }: Pick<TabsProps, 'items' | 'value' | 'on
   );
 }
 
+/** A recording card's width, `w-[17rem] max-sm:w-[14rem]`, in px at 100 % (the root font is 15 px). */
+const RECORDING_CARD_PX = 255;
+const RECORDING_CARD_NARROW_PX = 210;
+/** Tailwind's `sm` breakpoint. */
+const SM_QUERY = '(min-width: 40rem)';
+
 /**
  * The recordings in All (and Missing): a sideways rail of wide cards with its own heading. Each
  * card is a button; arrows walk the rail, as on Recently watched's Continue rail.
@@ -324,6 +332,9 @@ function RecordingsRail({
   onOpen: (e: RecordingEntry) => void;
 }) {
   const { t } = useTranslation('library');
+  // P2-POSTERS-4: the cards' width is known (17rem, 14rem below sm), so their logos load at it
+  // instead of each reading its frame as it mounts.
+  const cardWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? RECORDING_CARD_PX : RECORDING_CARD_NARROW_PX));
   return (
     <section aria-labelledby="my-videos-recordings" className="flex flex-col gap-3" data-testid="my-videos-recordings">
       <div className="flex items-baseline gap-3">
@@ -346,7 +357,9 @@ function RecordingsRail({
               }}
               className={cn(CARD_ROOT, 'block w-full cursor-pointer text-start')}
             >
-              <RecordingCard entry={e} />
+              <PosterCellWidthContext.Provider value={cardWidth}>
+                <RecordingCard entry={e} />
+              </PosterCellWidthContext.Provider>
             </button>
           </li>
         ))}

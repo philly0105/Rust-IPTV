@@ -8,10 +8,16 @@ import { useScrollMargin } from '../../hooks/useContainerColumns';
 import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, isResumable, isWatched, progressFraction } from '../../lib/format';
 import { handleGridKeyDown } from '../../lib/gridNav';
-import { MetaLine, Menu, Poster, ProgressBar, Tabs, WatchedChip, cn, useListVirtualizer } from '@/ui';
+import { useMediaQuery } from '@/shell/useMediaQuery';
+import { MetaLine, Menu, Poster, PosterCellWidthContext, ProgressBar, Tabs, WatchedChip, cn, useListVirtualizer, usePosterWidthBox, useScaledPx } from '@/ui';
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
+/** The thumbnail's box, `w-28 sm:w-40`: 28 or 40 spacing steps of 3.75 px at 100 % scale. */
+const THUMB_PX = 105;
+const THUMB_SM_PX = 150;
+/** Tailwind's `sm` breakpoint. */
+const SM_QUERY = '(min-width: 40rem)';
 
 /** Tab label for a season: provider name when meaningful, else "Season N" / "Specials". */
 export function useSeasonLabel(): (s: Pick<Season, 'number' | 'name'>) => string {
@@ -85,6 +91,9 @@ export function EpisodeList({
   const formatRuntime = useFormatRuntime();
   const listRef = useRef<HTMLDivElement>(null);
   const margin = useScrollMargin(listRef, scrollRef, [layoutKey, episodes.length]);
+  // P2-POSTERS-2: the thumbnails' width is known, so they do not read their frames as they mount, a
+  // forced layout per row between the rows' DOM writes.
+  const thumbWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? THUMB_SM_PX : THUMB_PX, true));
   const v = useListVirtualizer({
     count: episodes.length,
     getScrollElement: () => scrollRef.current,
@@ -141,14 +150,16 @@ export function EpisodeList({
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus max-sm:basis-full sm:gap-4"
               >
                 <div className="relative w-28 shrink-0 sm:w-40" data-testid="episode-thumb">
-                  <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
-                    <span
-                      aria-hidden
-                      className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 text-white opacity-0 group-hover:bg-scrim/50 group-hover:opacity-100 motion-safe:transition-opacity"
-                    >
-                      <Play size={22} className="fill-current" />
-                    </span>
-                  </Poster>
+                  <PosterCellWidthContext.Provider value={thumbWidth}>
+                    <Poster src={ep.posterUrl} sourceId={ep.seriesRef.sourceId} alt="" label={ep.title.trim() || code} aspect="wide" rounded="sm">
+                      <span
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0 flex items-center justify-center bg-scrim/0 text-white opacity-0 group-hover:bg-scrim/50 group-hover:opacity-100 motion-safe:transition-opacity"
+                      >
+                        <Play size={22} className="fill-current" />
+                      </span>
+                    </Poster>
+                  </PosterCellWidthContext.Provider>
                   {/* On the thumbnail the bar is glass, and drawn only (the row says how far). A watched
                       episode shows the watched tick instead, as a poster does. */}
                   {watched ? (

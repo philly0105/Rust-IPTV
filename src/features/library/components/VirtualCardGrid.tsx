@@ -12,6 +12,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 
 import { CARD_ROOT } from '@/ui/card';
 import { cn } from '@/ui/cn';
+import { PosterCellWidthContext } from '@/ui/Poster';
 import { useListVirtualizer } from '@/ui/virtualizer';
 
 export interface VirtualCardGridProps<T> {
@@ -43,6 +44,11 @@ export interface VirtualCardGridProps<T> {
    * returning to it restores scroll and focus. Omit to always start at the top.
    */
   restoreKey?: string;
+  /**
+   * Each card's artwork is as wide as the card: its Poster loads at the column width instead of
+   * measuring its frame as it mounts (P2-POSTERS-3).
+   */
+  postersFillCells?: boolean;
 }
 
 interface SavedGrid {
@@ -79,6 +85,7 @@ export function VirtualCardGrid<T>({
   testId,
   header,
   restoreKey,
+  postersFillCells,
 }: VirtualCardGridProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -100,6 +107,14 @@ export function VirtualCardGrid<T>({
   // Read once: what this history entry looked like when the user left it.
   const [restore] = useState(() => (restoreKey ? saved.get(restoreKey) : undefined));
   const [width, setWidth] = useState(restore?.width ?? 1024);
+  // P2-POSTERS-3: the cards mount once the grid has read its own width (a layout effect, before the
+  // first paint), not at the guess: a poster keeps the column width it mounted with, and the read
+  // lays out no cards. Each card's poster read its frame as it mounted, a forced layout per card
+  // between the cards' DOM writes.
+  const [measured, setMeasured] = useState(false);
+  /** The scroller's side padding (My List's px-2): the cards share the list's width, which is narrower. */
+  const [inset, setInset] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(restore?.active ?? 0);
   const offsetRef = useRef(restore?.offset ?? 0);
   const activeRef = useRef(active);
@@ -112,9 +127,14 @@ export function VirtualCardGrid<T>({
     const el = scrollRef.current;
     if (!el) return;
     const measure = () => {
-      if (el.clientWidth > 0) setWidth(el.clientWidth);
+      const w = el.clientWidth;
+      if (w > 0) {
+        setWidth(w);
+        setInset(w - (listRef.current?.clientWidth ?? w));
+      }
     };
     measure();
+    setMeasured(true);
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -125,6 +145,11 @@ export function VirtualCardGrid<T>({
   const cardWidth = (width - gap * (columns - 1)) / columns;
   const rowHeight = Math.round(cardWidth / aspect + captionHeight + gap);
   const rowCount = Math.ceil(items.length / columns);
+  // The list's column width, rounded as the frame's clientWidth is, in a box with one identity:
+  // posters read it as their pictures mount, so a new width re-renders none of them (P2-POSTERS-3,
+  // as P2-GRID-1).
+  const posterWidth = useRef(0);
+  posterWidth.current = Math.round((width - inset - gap * (columns - 1)) / columns);
 
   const virtualizer = useListVirtualizer({
     count: rowCount,
@@ -260,46 +285,48 @@ export function VirtualCardGrid<T>({
       data-testid={testId}
     >
       {hasHeader ? <div ref={headerRef}>{header}</div> : null}
-      <div role="list" aria-label={label} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-        {virtualizer.getVirtualItems().map((vr) => {
-          const start = vr.index * columns;
-          const slice = items.slice(start, start + columns);
-          return (
-            <div
-              key={vr.key}
-              className="absolute start-0 top-0 grid w-full"
-              style={{
-                transform: `translateY(${vr.start - headerHeight}px)`,
-                gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                columnGap: gap,
-                height: rowHeight - gap,
-              }}
-            >
-              {slice.map((item, j) => {
-                const index = start + j;
-                return (
-                  <div
-                    key={itemKey(item)}
-                    role="listitem"
-                    aria-label={cardLabel(item)}
-                    tabIndex={index === active ? 0 : -1}
-                    data-card-index={index}
-                    onFocus={() => {
-                      setActive(index);
-                      lastFocus.current = { key: itemKey(item), index };
-                    }}
-                    onKeyDown={(e) => onKeyDown(e, index, item)}
-                    onClick={() => open(index, item)}
-                    // CARD_ROOT hands the focus ring to the artwork (CARD_ART), so the caption is not boxed in too.
-                    className={cn(CARD_ROOT, 'min-w-0 cursor-pointer rounded-lg')}
-                  >
-                    {render(item, { index })}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+      <div ref={listRef} role="list" aria-label={label} className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        <PosterCellWidthContext.Provider value={postersFillCells ? posterWidth : undefined}>
+          {(measured ? virtualizer.getVirtualItems() : []).map((vr) => {
+            const start = vr.index * columns;
+            const slice = items.slice(start, start + columns);
+            return (
+              <div
+                key={vr.key}
+                className="absolute start-0 top-0 grid w-full"
+                style={{
+                  transform: `translateY(${vr.start - headerHeight}px)`,
+                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                  columnGap: gap,
+                  height: rowHeight - gap,
+                }}
+              >
+                {slice.map((item, j) => {
+                  const index = start + j;
+                  return (
+                    <div
+                      key={itemKey(item)}
+                      role="listitem"
+                      aria-label={cardLabel(item)}
+                      tabIndex={index === active ? 0 : -1}
+                      data-card-index={index}
+                      onFocus={() => {
+                        setActive(index);
+                        lastFocus.current = { key: itemKey(item), index };
+                      }}
+                      onKeyDown={(e) => onKeyDown(e, index, item)}
+                      onClick={() => open(index, item)}
+                      // CARD_ROOT hands the focus ring to the artwork (CARD_ART), so the caption is not boxed in too.
+                      className={cn(CARD_ROOT, 'min-w-0 cursor-pointer rounded-lg')}
+                    >
+                      {render(item, { index })}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </PosterCellWidthContext.Provider>
       </div>
     </div>
   );

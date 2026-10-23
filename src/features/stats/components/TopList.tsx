@@ -18,7 +18,7 @@ import { Link } from 'react-router';
 
 import type { WatchStatsTop } from '@/api/types';
 
-import { IconButton, Poster, cn, itemPath } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, cn, itemPath, usePosterWidthBox, useScaledPx } from '../deps';
 import { formatWatchTime } from '../lib/format';
 
 function TopSection({ title, empty, testId, children }: { title: string; empty: string | null; testId: string; children: ReactNode }) {
@@ -50,6 +50,8 @@ const revealOnFine =
 const ROW = 'flex min-h-17 items-center gap-3 py-1';
 /** The artwork frame: a poster fills it, a square logo sits centred in it. */
 const ART = 'flex h-15 w-10 shrink-0 items-center';
+/** {@link ART}'s width, ten spacing steps of 3.75 px at 100 % scale: the artwork loads at it (P2-POSTERS-4). */
+const ART_PX = 37.5;
 /** The trailing column: an IconButton's footprint (44 px under a coarse pointer), kept in every row. */
 const TRAILING = 'flex h-8 w-8 shrink-0 items-center justify-center pointer-coarse:w-[calc(44rem/15)]';
 /** The name: two lines at most in a narrow list, one beside the time from @sm, so rows keep one height. */
@@ -73,23 +75,26 @@ export interface TopChannelsProps {
 export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
   const { t, i18n } = useTranslation('stats');
   const most = items[0]?.seconds ?? 0;
+  const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
   return (
     <TopSection title={t('topChannels')} empty={items.length === 0 ? t('noChannels') : null} testId="stats-top-channels">
       {items.map((item, i) => (
         <li key={`${item.ref.sourceId}|${item.ref.contentType}|${item.ref.itemId}`} className={cn('group', ROW)} data-testid="stats-channel">
           <Rank n={i + 1} />
           <span className={ART}>
-            <Poster
-              src={item.posterUrl ?? null}
-              sourceId={item.ref.sourceId}
-              alt=""
-              label={item.title}
-              aspect="square"
-              fit="contain"
-              kind={item.ref.contentType === 'radio' ? 'radio' : 'live'}
-              rounded="sm"
-              className="w-full"
-            />
+            <PosterCellWidthContext.Provider value={artWidth}>
+              <Poster
+                src={item.posterUrl ?? null}
+                sourceId={item.ref.sourceId}
+                alt=""
+                label={item.title}
+                aspect="square"
+                fit="contain"
+                kind={item.ref.contentType === 'radio' ? 'radio' : 'live'}
+                rounded="sm"
+                className="w-full"
+              />
+            </PosterCellWidthContext.Provider>
           </span>
           {/* Narrow list: name (two lines at most), time, source. From @sm the time moves to the end of the name's line. */}
           <div className="grid min-w-0 flex-1 grid-cols-1 items-baseline @sm:grid-cols-[minmax(0,1fr)_auto] @sm:gap-x-3">
@@ -123,6 +128,7 @@ export function TopChannels({ items, canPlay, onPlay }: TopChannelsProps) {
 export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
   const { t, i18n } = useTranslation('stats');
   const most = items[0]?.seconds ?? 0;
+  const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
   return (
     <TopSection title={t('topTitles')} empty={items.length === 0 ? t('noTitles') : null} testId="stats-top-titles">
       {items.map((item, i) => (
@@ -136,7 +142,9 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
             data-testid="stats-open"
           >
             <span className={ART}>
-              <Poster src={item.posterUrl ?? null} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" rounded="sm" className="w-full" />
+              <PosterCellWidthContext.Provider value={artWidth}>
+                <Poster src={item.posterUrl ?? null} sourceId={item.ref.sourceId} alt="" label={item.title} aspect="poster" rounded="sm" className="w-full" />
+              </PosterCellWidthContext.Provider>
             </span>
             {/* The channel rows' template: name and time on one line from @sm, the source under it, then the meter. */}
             <span className="grid min-w-0 flex-1 grid-cols-1 items-baseline @sm:grid-cols-[minmax(0,1fr)_auto] @sm:gap-x-3">

@@ -147,13 +147,25 @@ pub fn ingest_reader(
     // avoids copying pages back mid-load. Both are restored afterwards.
     let cache: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0))?;
     let autockpt: i64 = conn.query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))?;
-    conn.execute_batch("PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0;")?;
+    let temp_store: i64 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0))?;
+    // Staged programmes sit in a temp table (P2-EPGRS-1). On file, behind
+    // the temp database's own 2 MB page cache, memory stays flat whatever
+    // the size of the feed (pooled connections keep temp tables in memory);
+    // restoring the setting closes the temp database, which deletes the
+    // file without walking the table's pages. Statement journals follow the
+    // setting: the swap's copy journals each page it reuses from the rows it
+    // replaces, so a refresh over a stored guide also needs about that
+    // guide's size in the temp directory until the swap commits (held in
+    // memory before; `epg_reingest_rss`).
+    conn.execute_batch(
+        "PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0; PRAGMA temp_store=FILE;",
+    )?;
     let result = ingest_inner(conn, url, reader, window, etag, on_progress);
     // Guide search (C5): the swap (or a discarded staging) marked the title
     // index stale; rebuild it while the bulk-load cache is still large.
     super::search::refresh_index(conn);
     let restore = conn.execute_batch(&format!(
-        "PRAGMA cache_size={cache}; PRAGMA wal_autocheckpoint={autockpt};"
+        "PRAGMA cache_size={cache}; PRAGMA wal_autocheckpoint={autockpt}; PRAGMA temp_store={temp_store};"
     ));
     if let Err(e) = restore {
         tracing::warn!(error = %e, "could not restore connection pragmas after EPG ingest");
@@ -191,9 +203,9 @@ fn ingest_inner(
         Ok::<_, CoreError>((stats, writer.channel_count, writer.program_count))
     })();
     match result {
-        Ok((stats, channels, programs)) => {
-            on_progress("saving", programs);
-            store::commit_staging(conn, url, etag, channels, programs)?;
+        Ok((stats, channels, staged)) => {
+            on_progress("saving", staged);
+            let programs = store::commit_staging(conn, url, etag, channels)?;
             // Most programmes unreadable (often an unknown time zone): the
             // status stays ok (the readable part was stored) but the source
             // row and the done event carry the C15 code saying why the
@@ -757,6 +769,175 @@ mod tests {
             9
         );
         assert_eq!(stored(&conn), (9, Some("v4".into()), "ok".into()));
+    }
+
+    /// P2-EPGRS-1: programmes are staged in the ingest connection's temp
+    /// table, so the main database (and its WAL) sees no commit between
+    /// programme batches and holds no staged programme; the swap copies them
+    /// in once, a slot the feed repeats keeps its first row, and afterwards
+    /// the connection's temp storage is back as it was.
+    #[test]
+    fn programmes_are_staged_outside_the_main_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&dir.path().join("t.db")).unwrap();
+        {
+            let mut c = pool.get().unwrap();
+            crate::db::migrate(&mut c).unwrap();
+            c.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+                .unwrap();
+        }
+        let ts = |t: i64| {
+            chrono::DateTime::from_timestamp(t, 0)
+                .unwrap()
+                .format("%Y%m%d%H%M%S +0000")
+                .to_string()
+        };
+        let n = 3 * store::BATCH + 7;
+        let mut xml =
+            String::from("<tv><channel id=\"c0\"><display-name>C0</display-name></channel>");
+        for i in 0..n {
+            let start = 1_800_000_000 + (i / 3) as i64 * 60;
+            xml.push_str(&format!(
+                "<programme channel=\"c{}\" start=\"{}\" stop=\"{}\"><title>T{i}</title></programme>",
+                i % 3,
+                ts(start),
+                ts(start + 60)
+            ));
+        }
+        // A repeat of the first slot, batches later: ignored.
+        xml.push_str(&format!(
+            "<programme channel=\"c0\" start=\"{}\" stop=\"{}\"><title>Repeat</title></programme></tv>",
+            ts(1_800_000_000),
+            ts(1_800_000_060)
+        ));
+        let observer = pool.get().unwrap();
+        let read = |sql: &str| -> i64 { observer.query_row(sql, [], |r| r.get(0)).unwrap() };
+        // (phase, data version, programme rows) at each progress call.
+        let mut seen = Vec::new();
+        let mut conn = pool.get().unwrap();
+        let temp_store: i64 = conn
+            .query_row("PRAGMA temp_store", [], |r| r.get(0))
+            .unwrap();
+        let stats = ingest_reader(
+            &mut conn,
+            "u",
+            std::io::Cursor::new(xml.into_bytes()),
+            Window::unbounded(),
+            None,
+            &mut |phase, _| {
+                seen.push((
+                    phase.to_string(),
+                    read("PRAGMA data_version"),
+                    read("SELECT count(*) FROM epg_programs"),
+                ));
+            },
+        )
+        .unwrap();
+        // The channel is written with the first batch; nothing after it
+        // reaches the main database before the swap.
+        let saving = seen.last().unwrap();
+        assert_eq!(saving.0, "saving", "{seen:?}");
+        assert!(
+            seen.iter().all(|s| s.1 == saving.1 && s.2 == 0),
+            "the main database changed while programmes were staged: {seen:?}"
+        );
+        assert_eq!(stats.programs, n as u64);
+        assert_eq!(
+            read("SELECT count(*) FROM epg_programs WHERE epg_url = 'u'"),
+            n as i64
+        );
+        assert_eq!(
+            read("SELECT program_count FROM epg_sources WHERE url = 'u'"),
+            n as i64
+        );
+        let first: String = observer
+            .query_row(
+                "SELECT title FROM epg_programs WHERE channel_id = 'c0' AND start = 1800000000",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(first, "T0");
+        let after: i64 = conn
+            .query_row("PRAGMA temp_store", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(after, temp_store);
+        let staged: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_temp_master WHERE name = 'epg_stage'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(staged, 0);
+    }
+
+    /// P2-EPGRS-1: a staging write that fails part-way ends the ingest with
+    /// its own error; the stored guide, its ETag and counts stay, and no
+    /// staging is left behind (rows under the key, nor the temp table).
+    #[test]
+    fn a_failed_staging_write_ends_the_ingest_with_its_error() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+            .unwrap();
+        let prog = |i: usize| {
+            format!(
+                "<programme channel=\"c\" start=\"{}\" stop=\"{}\"><title>T{i}</title></programme>",
+                20_261_012_000_000u64 + i as u64 * 100,
+                20_261_012_000_000u64 + i as u64 * 100 + 1
+            )
+        };
+        let ingest = |conn: &mut rusqlite::Connection, xml: String, etag: &str| {
+            ingest_reader(
+                conn,
+                "u",
+                std::io::Cursor::new(xml.into_bytes()),
+                Window::unbounded(),
+                Some(etag),
+                &mut |_, _| {},
+            )
+        };
+        let good = format!(
+            "<tv><channel id=\"c\"><display-name>C</display-name></channel>{}</tv>",
+            prog(0)
+        );
+        assert_eq!(ingest(&mut conn, good, "v1").unwrap().programs, 1);
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_bad BEFORE INSERT ON epg_channels WHEN new.channel_id = 'bad'
+             BEGIN SELECT RAISE(ABORT, 'refused by the test'); END;",
+        )
+        .unwrap();
+        // The bad channel is written with the fourth programme batch.
+        let n = 4 * store::BATCH;
+        let mut xml = String::from("<tv>");
+        for i in 0..n {
+            if i == 3 * store::BATCH + 1 {
+                xml.push_str("<channel id=\"bad\"><display-name>Bad</display-name></channel>");
+            }
+            xml.push_str(&prog(i % 60));
+        }
+        xml.push_str("</tv>");
+        let err = ingest(&mut conn, xml, "v2").unwrap_err();
+        assert!(err.to_string().contains("refused by the test"), "{err}");
+        let (programs, count, etag): (i64, i64, Option<String>) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM epg_programs), program_count, etag FROM epg_sources WHERE url = 'u'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((programs, count, etag.as_deref()), (1, 1, Some("v1")));
+        let staging: i64 = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM epg_sources WHERE origin = 'staging')
+                      + (SELECT count(*) FROM epg_channels WHERE epg_url <> 'u')
+                      + (SELECT count(*) FROM sqlite_temp_master WHERE name = 'epg_stage')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(staging, 0);
     }
 
     #[test]

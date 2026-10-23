@@ -154,7 +154,9 @@ pub fn register(r: &mut RpcRouter) {
         let deleted = s
             .db_call(|c| {
                 let deleted = super::store::clear_all(c)?;
-                // Guide search (C5): re-index what is left (staging rows only).
+                // Guide search (C5): mark the index, now empty, ready again
+                // (a running refresh stages its programmes outside
+                // `epg_programs`, P2-EPGRS-1).
                 super::search::refresh_index(c);
                 Ok(deleted)
             })

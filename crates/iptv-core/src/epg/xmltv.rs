@@ -224,6 +224,13 @@ impl Capture {
             return;
         }
         let max = self.field.max_chars();
+        // Nearly every node fits whole (a char is at least one byte): one
+        // copy instead of a push per char (P2-EPGRS-2).
+        if self.chars + s.len() <= max {
+            self.text.push_str(s);
+            self.chars += s.chars().count();
+            return;
+        }
         for ch in s.chars() {
             if self.chars >= max {
                 self.full = true;
@@ -467,6 +474,18 @@ impl Parser<'_> {
     /// The trimmed, unescaped value of attribute `key`: `Ok(None)` when it is
     /// missing or blank, `Err(())` when it is longer than `max` bytes.
     fn attr(&self, e: &BytesStart<'_>, key: &[u8], max: usize) -> Result<Option<String>, ()> {
+        self.attr_with(e, key, max, str::to_string)
+    }
+
+    /// [`Self::attr`] with the value passed to `f` instead of copied (a
+    /// programme's times are parsed in place, P2-EPGRS-2).
+    fn attr_with<T>(
+        &self,
+        e: &BytesStart<'_>,
+        key: &[u8],
+        max: usize,
+        f: impl FnOnce(&str) -> T,
+    ) -> Result<Option<T>, ()> {
         for a in e.attributes().with_checks(false).flatten() {
             if a.key.local_name().as_ref() == key {
                 let v = decode(&a.value, self.latin1);
@@ -477,11 +496,20 @@ impl Parser<'_> {
                 } else if v.len() > max {
                     Err(())
                 } else {
-                    Ok(Some(v.to_string()))
+                    Ok(Some(f(v)))
                 };
             }
         }
         Ok(None)
+    }
+
+    /// A programme time attribute: `None` when it is missing, blank, over
+    /// [`MAX_ID_BYTES`] or unreadable.
+    fn time_attr(&self, e: &BytesStart<'_>, key: &[u8]) -> Option<i64> {
+        self.attr_with(e, key, MAX_ID_BYTES, parse_xmltv_date)
+            .ok()
+            .flatten()
+            .flatten()
     }
 
     /// [`Self::attr`] with an over-long value treated as missing.
@@ -517,14 +545,8 @@ impl Parser<'_> {
                     channel: self
                         .attr_or_none(e, b"channel", MAX_ID_BYTES)
                         .unwrap_or_default(),
-                    start: self
-                        .attr_or_none(e, b"start", MAX_ID_BYTES)
-                        .as_deref()
-                        .and_then(parse_xmltv_date),
-                    stop: self
-                        .attr_or_none(e, b"stop", MAX_ID_BYTES)
-                        .as_deref()
-                        .and_then(parse_xmltv_date),
+                    start: self.time_attr(e, b"start"),
+                    stop: self.time_attr(e, b"stop"),
                     ..Default::default()
                 };
                 self.ctx = Ctx::Programme(pb);
@@ -570,7 +592,7 @@ impl Parser<'_> {
         if let Some(cap) = &self.capture {
             if cap.field.tag() == name {
                 let cap = self.capture.take().expect("checked above");
-                let value = collapse(&cap.text);
+                let value = collapse(cap.text);
                 if !value.is_empty() {
                     match (&mut self.ctx, cap.field) {
                         (Ctx::Channel(c), Field::DisplayName) => c.display_name = Some(value),
@@ -1014,10 +1036,19 @@ impl<R: BufRead> Read for Guard<R> {
 }
 
 /// Trims and collapses internal runs of whitespace (newlines, tabs) to one space.
-fn collapse(s: &str) -> String {
+fn collapse(mut s: String) -> String {
     let t = s.trim();
     if !t.contains(|c: char| c.is_whitespace() && c != ' ') && !t.contains("  ") {
-        return t.to_string();
+        if t.len() != s.len() {
+            return t.to_string();
+        }
+        // Already tidy, as nearly every title is: keep the buffer, minus any
+        // spare room. Text read in several nodes (a comment or CDATA in
+        // between) or past its cap grew by doubling, up to twice its length,
+        // and held programmes are counted by length (`MAX_PENDING_BYTES`).
+        // Text read in one node is already at its size (P2-EPGRS-2).
+        s.shrink_to_fit();
+        return s;
     }
     let mut out = String::with_capacity(t.len());
     let mut space = false;
@@ -1560,6 +1591,27 @@ mod tests {
         let two = progs.iter().find(|p| p.title == "Two").unwrap();
         assert_eq!(two.stop - two.start, DEFAULT_DURATION_SECS);
         assert!(progs.iter().any(|p| p.title == "B"));
+    }
+
+    /// Text read in several nodes is joined, cut at its cap across them, and
+    /// kept at its length: held programmes are counted by length, and a
+    /// buffer grown by doubling held up to twice that (P2-EPGRS-2).
+    #[test]
+    fn text_in_several_nodes_is_capped_and_kept_at_its_length() {
+        let (a, b) = ("a".repeat(500), "b".repeat(20));
+        let desc = "d".repeat(4096);
+        let xml = format!(
+            r#"<tv><programme start="20240101120000 +0000" stop="20240101130000 +0000" channel="c"><title>{a}<!---->{b}</title><desc>{desc}<![CDATA[e]]></desc></programme></tv>"#
+        );
+        let (items, _) = collect(&xml);
+        let XmltvItem::Programme(p) = &items[0] else {
+            panic!()
+        };
+        assert_eq!(p.title, format!("{a}{}", "b".repeat(MAX_TITLE_CHARS - 500)));
+        assert_eq!(p.title.capacity(), p.title.len());
+        let d = p.description.as_ref().unwrap();
+        assert_eq!(*d, format!("{desc}e"));
+        assert_eq!(d.capacity(), d.len());
     }
 
     fn collect_limited(xml: &[u8], max_doc: u64, max_node: usize) -> CoreResult<Vec<XmltvItem>> {

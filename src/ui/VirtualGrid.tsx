@@ -271,6 +271,11 @@ export function VirtualGrid<T>({
   }, []);
   const onPress = useCallback((index: number) => setActive(index), []);
   const renderCell = render as GridSlotProps['render'];
+  // Rounded as the frame's clientWidth is, so a poster asks for the size it measured before. A box
+  // with one identity: posters read it as their pictures mount, so a new width re-renders none of
+  // them (P2-GRID-1).
+  const posterWidth = useRef(0);
+  posterWidth.current = Math.round(cellWidth);
 
   return (
     <div
@@ -292,8 +297,7 @@ export function VirtualGrid<T>({
       className={cn('relative h-full overflow-y-auto overscroll-contain', className)}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-        {/* Rounded as the frame's clientWidth is, so a poster asks for the size it measured before (P2-GRID-1). */}
-        <PosterCellWidthContext.Provider value={postersFillCells ? Math.round(cellWidth) : undefined}>
+        <PosterCellWidthContext.Provider value={postersFillCells ? posterWidth : undefined}>
           {(measured ? rows : []).map((row) => {
             const start = row.index * columns;
             const cells = items.slice(start, start + columns);

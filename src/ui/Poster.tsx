@@ -87,9 +87,11 @@ export const PosterWidthContext = createContext<number | undefined>(undefined);
  * {@link PosterWidthContext} sizes its picture to it instead of reading `clientWidth` as it
  * mounts: read between the cells' DOM writes, that forced a layout per poster, 599 ms of a 30-step
  * fling of the movie grid (P2-GRID-1). Like the measured width it is taken once per picture, when
- * the picture mounts, so a window resize does not start the pictures on screen again.
+ * the picture mounts, so a window resize does not start the pictures on screen again. The grid
+ * keeps the width in a box that keeps its identity, so a resize does not re-render the posters
+ * either.
  */
-export const PosterCellWidthContext = createContext<number | undefined>(undefined);
+export const PosterCellWidthContext = createContext<{ readonly current: number } | undefined>(undefined);
 
 /** A load this soon after the picture mounted came from a cache: it shows at once, without the fade. */
 export const INSTANT_REVEAL_MS = 120;
@@ -166,7 +168,7 @@ export function Poster({
       // A card's width comes from its grid or rail, so the cache sends a copy that size
       // (L3-serve-ui-1): a grid's column width, else the frame is measured once it is in the page
       // (the <img> fills it).
-      const sized = priority || drawnWidth !== undefined ? url : sizedImageUrl(url, cellWidth ?? el.clientWidth);
+      const sized = priority || drawnWidth !== undefined ? url : sizedImageUrl(url, cellWidth?.current ?? el.clientWidth);
       const mountedAt = performance.now();
       const before = imageLoadedBefore(sized);
       const onLoad = () => reveal(el, sized, before || performance.now() - mountedAt < INSTANT_REVEAL_MS);
@@ -179,8 +181,7 @@ export function Poster({
         cancel();
       };
     },
-    // Not `cellWidth`: the picture keeps the width it mounted with, as a measured one did (P2-GRID-1).
-    [url, priority, eager, drawnWidth],
+    [url, priority, eager, drawnWidth, cellWidth],
   );
 
   const fallbackText = label ?? alt;

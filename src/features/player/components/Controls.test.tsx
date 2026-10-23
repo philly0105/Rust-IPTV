@@ -15,6 +15,14 @@ vi.mock('./useNarrow', async (orig) => {
   return { ...real, useNarrow: vi.fn(real.useNarrow) };
 });
 
+// The options icon draws through a counter: the bar's re-renders reuse its icons (P2-PLAYER-4).
+vi.mock('lucide-react', async (orig) => {
+  const real = await orig<typeof import('lucide-react')>();
+  const { createElement } = await import('react');
+  return { ...real, Settings2: vi.fn((props: object) => createElement(real.Settings2, props)) };
+});
+
+const { Settings2 } = await import('lucide-react');
 const { useNarrow } = await import('./useNarrow');
 const { usePlayerStore, __resetPlayerForTests, reportProgress } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
@@ -325,6 +333,18 @@ describe('Controls re-renders (PB-4)', () => {
     expect(barRenders()).toBe(before);
   });
 
+  it("the bar's own re-renders leave its icons as they were drawn (P2-PLAYER-4)", () => {
+    const { rerender } = render(<Controls variant="overlay" visible />);
+    const drawn = vi.mocked(Settings2).mock.calls.length;
+    expect(drawn).toBeGreaterThan(0);
+    const before = barRenders();
+    rerender(<Controls variant="overlay" visible={false} />);
+    act(() => usePlayerStore.setState({ status: 'paused' }));
+    expect(barRenders()).toBeGreaterThan(before);
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy();
+    expect(vi.mocked(Settings2).mock.calls.length).toBe(drawn);
+  });
+
   it('a report that repeats the last one leaves the store alone', () => {
     const listener = vi.fn();
     const stop = usePlayerStore.subscribe(listener);
@@ -510,6 +530,64 @@ describe('Controls in a narrow player', () => {
       const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
       expect(names).toEqual(['Picture in picture']);
     })();
+  });
+
+  it("measures the room in the row's ResizeObserver, after layout, not in a frame of its own (P2-PLAYER-1)", async () => {
+    /**
+     * Calls back only when the test says layout happened, and only for what a browser would report
+     * then: a target observed anew (an observation's first report). Nothing here resizes.
+     */
+    class LayoutObserver {
+      static all: LayoutObserver[] = [];
+      due = new Set<Element>();
+      constructor(private readonly cb: ResizeObserverCallback) {
+        LayoutObserver.all.push(this);
+      }
+      observe(el: Element): void {
+        this.due.add(el);
+      }
+      unobserve(el: Element): void {
+        this.due.delete(el);
+      }
+      disconnect(): void {
+        this.due.clear();
+      }
+      static layout(): void {
+        for (const o of LayoutObserver.all) {
+          const due = [...o.due];
+          o.due.clear();
+          if (due.length) o.cb(due.map((target) => ({ target }) as ResizeObserverEntry), o as unknown as ResizeObserver);
+        }
+      }
+    }
+    vi.stubGlobal('ResizeObserver', LayoutObserver);
+    const reads = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(330);
+    const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
+    try {
+      render(<Controls variant="overlay" visible />);
+      // The bar's size comes in: a narrow player.
+      act(() => LayoutObserver.layout());
+      expect(screen.queryByRole('button', { name: 'Back 10 seconds' })).toBeNull();
+      // The narrow render asks the row's observer for its room, which comes after layout.
+      act(() => LayoutObserver.layout());
+      expect(reads).toHaveBeenCalled();
+      reads.mockClear();
+      // No render since: the row was not observed anew, so nothing calls back or reads.
+      act(() => LayoutObserver.layout());
+      await frame();
+      expect(reads).not.toHaveBeenCalled();
+      // A render that changes what the row holds (a caption track) reads nothing itself...
+      act(() => useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: false }] } }));
+      await frame();
+      await frame();
+      expect(reads).not.toHaveBeenCalled();
+      // ...it observes the row anew, so the row's observer measures once layout is done.
+      act(() => LayoutObserver.layout());
+      expect(reads).toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('a wide player keeps the full row and a menu without moved controls', () => {

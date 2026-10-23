@@ -69,7 +69,9 @@ export function streamKey(s: Pick<PlayerSource, 'url' | 'ref' | 'episodeId'> | u
 }
 
 let lastKey = streamKey(usePlayerStore.getState().source);
-usePlayerStore.subscribe((s) => {
+usePlayerStore.subscribe((s, prev) => {
+  // The same source is the same stream: playback progress does not build its key again (P2-PLAYER-6).
+  if (s.source === prev.source) return;
   const key = streamKey(s.source);
   if (key === lastKey) return;
   lastKey = key;

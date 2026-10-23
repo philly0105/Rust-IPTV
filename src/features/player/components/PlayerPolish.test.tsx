@@ -13,7 +13,13 @@ vi.mock('../parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 // The DOM engine itself is not under test here: only the chrome around it.
 vi.mock('./InlinePlayer', () => ({ InlinePlayer: () => null }));
+// Unchanged behaviour; the bar asks `useNarrow(root)` once per render, so the calls count its renders.
+vi.mock('./useNarrow', async (orig) => {
+  const real = await orig<typeof import('./useNarrow')>();
+  return { ...real, useNarrow: vi.fn(real.useNarrow) };
+});
 
+const { useNarrow } = await import('./useNarrow');
 const { usePlayerStore, __resetPlayerForTests, DOUBLE_CLICK_MS } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
 const { usePlaybackShortcuts } = await import('../usePlaybackShortcuts');
@@ -760,5 +766,36 @@ describe('the mini dock in right-to-left layouts', () => {
     expect(saved()).toEqual({ end: 24, bottom: 30 });
     fireEvent.keyDown(dragHandle(), { key: 'ArrowRight', shiftKey: true });
     expect(saved()).toEqual({ end: 88, bottom: 30 });
+  });
+});
+
+describe('the surface re-renders without the bar (P2-PLAYER-3)', () => {
+  /** The bar's own `useNarrow(root)`; the surface's calls pass a height too. */
+  const barRenders = (): number => vi.mocked(useNarrow).mock.calls.filter((args) => args.length === 1).length;
+  const mount = (): void => {
+    act(() => usePlayerStore.setState({ source: live, mode: 'inline', status: 'playing', dock: 'stage' }));
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+  };
+
+  it('a stall coming and going shows the buffering dial and leaves the bar alone', () => {
+    mount();
+    const before = barRenders();
+    act(() => useMediaStore.setState({ waiting: true }));
+    expect(screen.getByRole('status', { name: 'Buffering' })).toBeTruthy();
+    act(() => useMediaStore.setState({ waiting: false }));
+    expect(screen.queryByRole('status', { name: 'Buffering' })).toBeNull();
+    expect(barRenders()).toBe(before);
+  });
+
+  it('the pointer resting on the bar keeps it up without drawing it again', () => {
+    mount();
+    const before = barRenders();
+    fireEvent.pointerEnter(screen.getByTestId('overlay-chrome'));
+    expect(barRenders()).toBe(before);
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
   });
 });

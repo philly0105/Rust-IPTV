@@ -820,7 +820,7 @@ export function reportProgress(positionSeconds: number, durationSeconds?: number
   if (durationSeconds !== undefined && Number.isFinite(durationSeconds) && durationSeconds > 0) {
     patch.durationSeconds = durationSeconds;
   }
-  // The element's `progress` events, and mpv state events, repeat the last report: nothing to tell subscribers.
+  // mpv state events, and the element's `timeupdate` at a pause, repeat the last report: nothing to tell subscribers.
   const s = usePlayerStore.getState();
   if (s.positionSeconds === patch.positionSeconds && (patch.durationSeconds === undefined || patch.durationSeconds === s.durationSeconds)) return;
   usePlayerStore.setState(patch);
@@ -954,7 +954,11 @@ function waitingOnMedia(s: Pick<PlayerState, 'status' | 'mode'>, key: string): b
   return s.status === 'paused' && startedFor !== key && userPausedFor !== key;
 }
 
-usePlayerStore.subscribe((s) => {
+usePlayerStore.subscribe((s, prev) => {
+  // A progress report (several a second) moves the position or the length of the same media in the
+  // same status: nothing here changes with it, so its key is not built again (P2-PLAYER-6).
+  const progress = s.positionSeconds !== prev.positionSeconds || s.durationSeconds !== prev.durationSeconds;
+  if (progress && s.source === prev.source && s.status === prev.status && s.mode === prev.mode) return;
   const key = watchKey(s.source);
   if (s.status === 'playing' && key) startedFor = key;
   if (userPausedFor && userPausedFor !== key) userPausedFor = undefined;

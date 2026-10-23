@@ -1,5 +1,5 @@
 import { AlertTriangle, ChevronRight, Copy, RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { proxiedUrl, isDesktop, rpc } from '@/api/transport';
@@ -132,8 +132,9 @@ export interface InlinePlayerProps {
 /**
  * The media element plus its engine. Reports progress/status into the store and
  * registers itself as the store's PlaybackController. Chrome is rendered by the caller.
+ * Memoized: the surface's own re-renders (its chrome coming and going) leave it alone (P2-PLAYER-3).
  */
-export function InlinePlayer({ as = 'video', className, compact = false, short = false, thumb = false }: InlinePlayerProps) {
+export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className, compact = false, short = false, thumb = false }: InlinePlayerProps) {
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
   const error = usePlayerStore((s) => s.error);
@@ -324,12 +325,17 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
     const isLive = (): boolean => !!usePlayerStore.getState().source?.isLive;
     /** Non-zero after an mpegts.js live reconnect restarted the element clock. */
     const offset = (): number => engineRef.current?.timeOffset?.() ?? 0;
-    const onTime = (): void => {
+    const onTime = (e: Event): void => {
       const off = offset();
-      // MPEG-TS through mpegts.js has no duration of its own; after a restart the element's covers the new stream only.
-      const own = Number.isFinite(el.duration) ? el.duration + off : undefined;
-      const dur = isLive() ? undefined : (engineRef.current?.duration?.() ?? own);
-      reportProgress(el.currentTime + off, dur);
+      // `progress` (data came in, every 350 ms or so while it loads) refreshes the buffer only: the
+      // position follows `timeupdate`. Reported on `progress` as well, it ran every store subscriber
+      // again for a time the next `timeupdate` brings anyway (P2-PLAYER-2).
+      if (e.type !== 'progress') {
+        // MPEG-TS through mpegts.js has no duration of its own; after a restart the element's covers the new stream only.
+        const own = Number.isFinite(el.duration) ? el.duration + off : undefined;
+        const dur = isLive() ? undefined : (engineRef.current?.duration?.() ?? own);
+        reportProgress(el.currentTime + off, dur);
+      }
       const now = performance.now();
       if (now - lastBufferedAt > 1000) {
         lastBufferedAt = now;
@@ -569,7 +575,7 @@ export function InlinePlayer({ as = 'video', className, compact = false, short =
       )}
     </div>
   );
-}
+});
 
 /** A thumbnail's failed stream still plays again by itself when the network comes back, as the error panel does. */
 function RetryWhenOnline({ kind, onRetry }: { kind: EngineError['kind'] | null; onRetry(): void }) {

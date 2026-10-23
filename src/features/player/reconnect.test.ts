@@ -14,7 +14,13 @@ vi.mock('@/api/transport', () => ({
   isDesktop: false,
   proxiedUrl: (s: { url: string }) => s.url,
 }));
+// Unchanged behaviour; the calls show which store updates build item keys (P2-PLAYER-6).
+vi.mock('@/api/types', async (orig) => {
+  const real = await orig<typeof import('@/api/types')>();
+  return { ...real, itemKey: vi.fn(real.itemKey) };
+});
 
+const { itemKey } = await import('@/api/types');
 const store = await import('./store');
 const media = await import('./media');
 const failover = await import('./failover');
@@ -373,6 +379,16 @@ describe('smart reconnect', () => {
     expect(phase()).toBe('idle');
     vi.advanceTimersByTime(ATTEMPT_TIMEOUT_MS);
     expect(useReconnectStore.getState().attempt).toBe(0);
+  });
+
+  it('follows playback progress without building item keys for it (P2-PLAYER-6)', () => {
+    start(live, 10);
+    vi.mocked(itemKey).mockClear();
+    for (let i = 1; i <= 8; i++) reportProgress(10 + i / 4);
+    expect(itemKey).not.toHaveBeenCalled();
+    // A position that stops moving is still a stall.
+    vi.advanceTimersByTime(STALL_MS + 1000);
+    expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 1 });
   });
 
   it('checks the account before retrying, and stops retrying a full one', async () => {

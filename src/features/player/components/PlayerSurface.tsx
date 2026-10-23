@@ -19,6 +19,7 @@ import {
   selectEnded,
   setPaused,
   usePlayerStore,
+  type PlayerState,
 } from '../store';
 import { useStreamInfoStore } from '../streamInfo';
 import { hideZapBanner } from '../zapBanner';
@@ -436,6 +437,18 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   return null;
 }
 
+/**
+ * The dial while the stream loads, or stalls while it plays. It follows the stall itself: a live
+ * stream at its edge can stall and resume every few seconds, and the surface around it (the bar,
+ * the media element) has no use for that (P2-PLAYER-3).
+ */
+function LoadingDial({ status }: { status: PlayerState['status'] }) {
+  const { t } = useTranslation('player');
+  const waiting = useMediaStore((s) => s.waiting);
+  if (status !== 'loading' && !(waiting && status === 'playing')) return null;
+  return <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />;
+}
+
 /** Loading indicator: a slowly sweeping dial arc, still under reduced motion. */
 function Tuning({ label }: { label: string }) {
   return (
@@ -760,7 +773,6 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
-  const waiting = useMediaStore((s) => s.waiting);
   const panelOpen = useMediaStore((s) => s.channelPanelOpen);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const pip = usePipStore((s) => s.active);
@@ -990,7 +1002,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
           {/* Click surface sits above the video so clicks never reach native controls. */}
           <div className="absolute inset-0 z-[5]" onClick={onSurfaceClick} onDoubleClick={onSurfaceDouble} aria-hidden />
           {ripple && <TapSeekRipple key={ripple.key} side={ripple.side} seconds={ripple.seconds} onDone={endRipple} />}
-          {(status === 'loading' || (waiting && playing)) && <Tuning label={status === 'loading' ? t('loading') : t('buffering')} />}
+          <LoadingDial status={status} />
           {/* failover: smart reconnect / failover progress under the dial. */}
           <ReconnectNotice compact={compact} />
 

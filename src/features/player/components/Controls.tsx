@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -198,17 +199,40 @@ function SkipIcon({ forward }: { forward: boolean }) {
   );
 }
 
-function VolumeControl({ compact }: { compact?: boolean }) {
+/**
+ * The control row's icons, made once: a render of the bar (the chrome showing or hiding, a pause)
+ * reuses them instead of building each SVG again (P2-PLAYER-4).
+ */
+const ICON = {
+  play: <Play className="fill-current" />,
+  pause: <Pause className="fill-current" />,
+  replay: <RotateCcw />,
+  previous: <SkipBack className="fill-current" />,
+  next: <SkipForward className="fill-current" />,
+  back10: <SkipIcon forward={false} />,
+  forward10: <SkipIcon forward />,
+  pip: <PictureInPicture2 />,
+  options: <Settings2 />,
+  captionsOn: <Captions />,
+  captionsOff: <CaptionsOff />,
+  fullscreen: <Maximize />,
+  exitFullscreen: <Minimize />,
+  muted: <VolumeX />,
+  quiet: <Volume1 />,
+  loud: <Volume2 />,
+};
+
+/** Memoized with the row's icons (P2-PLAYER-4): it follows the volume itself. */
+const VolumeControl = memo(function VolumeControl({ compact }: { compact?: boolean }) {
   const { t } = useTranslation('player');
   const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const shown = muted ? 0 : volume;
   const percent = Math.round(shown * 100);
-  const Icon = shown === 0 ? VolumeX : shown < 0.5 ? Volume1 : Volume2;
   return (
     <div data-vol="" className="group/vol flex items-center">
       <CtlButton id="mute" shortcut="mute" label={muted ? t('unmute') : t('mute')} onClick={() => usePlayerStore.getState().toggleMute()}>
-        <Icon />
+        {shown === 0 ? ICON.muted : shown < 0.5 ? ICON.quiet : ICON.loud}
       </CtlButton>
       <input
         type="range"
@@ -235,7 +259,7 @@ function VolumeControl({ compact }: { compact?: boolean }) {
       )}
     </div>
   );
-}
+});
 
 /** Start or stop `mpv.record` (embedded mpv live recording), with a toast for the outcome. */
 function useRecordToggle(): { recording: boolean; busy: boolean; toggle(): void } {
@@ -949,9 +973,10 @@ export const LIVE_PULSES = 3;
  * The live status at the stream's edge. On air (playing): the red dot pulses a few times, then
  * holds still, because a never-ending animation keeps the compositor redrawing over the video.
  * Starting or paused: a dim dot. Failed: "No signal" with a hollow dot, never the red badge.
- * The one live mark of the player (PL-DUPLICATE-CHROME): the title bar has none.
+ * The one live mark of the player (PL-DUPLICATE-CHROME): the title bar has none. Memoized: the
+ * readout around it follows the position several times a second while the chrome shows (P2-PLAYER-4).
  */
-function LiveBadge({ status, pulseKey, className }: { status: PlayerState['status']; pulseKey: string; className?: string }) {
+const LiveBadge = memo(function LiveBadge({ status, pulseKey, className }: { status: PlayerState['status']; pulseKey: string; className?: string }) {
   const { t } = useTranslation('player');
   const failed = status === 'error';
   const onAir = status === 'playing';
@@ -979,7 +1004,7 @@ function LiveBadge({ status, pulseKey, className }: { status: PlayerState['statu
       {failed ? t('liveNoSignal') : t('live')}
     </span>
   );
-}
+});
 
 /** Live DVR window: scrub only when the window is at least 30 s. */
 function liveWindowOf(seekable: TimeRange | undefined): TimeRange | undefined {
@@ -1204,9 +1229,10 @@ export function keepSpares<S extends string>(groups: readonly (readonly [S, numb
 /**
  * How many spare buttons fit in a narrow row: the spacer's width, the readout's beyond what it
  * keeps, and the spares shown now, less any overflow. That sum does not depend on how many spares
- * show, so it settles in one pass. Read after layout (the row's ResizeObserver, or the next frame
- * after a render), never during one. Not measured while the volume slider is out: the row lends it
- * room then (the spares step aside), and it is measured again when the pointer or focus leaves.
+ * show, so it settles in one pass. Read in the row's ResizeObserver callback, after layout (where
+ * there is none, in the next frame), never during a render. Not measured while the volume slider is
+ * out: the row lends it room then (the spares step aside), and it is measured again when the
+ * pointer or focus leaves.
  */
 function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: number; showing: { current: number } } {
   const [slots, setSlots] = useState(0);
@@ -1226,13 +1252,21 @@ function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: numbe
     setSlots((s) => (s === next ? s : next));
   };
   const frame = useRef(0);
+  const observer = useRef<{ ro: ResizeObserver; row: HTMLElement } | null>(null);
+  /**
+   * Measures after the next layout. The row observed anew makes its ResizeObserver call back
+   * then, with layout done. A read in the next frame's callback instead forced that layout itself,
+   * ahead of the browser's own, after every render of a narrow bar (P2-PLAYER-1).
+   */
   const later = useRef((): void => {
+    const o = observer.current;
+    if (o) {
+      o.ro.unobserve(o.row);
+      o.ro.observe(o.row);
+      return;
+    }
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => measure.current());
-  });
-  // What the row holds changes with the render (a badge, Retry, a caption track).
-  useEffect(() => {
-    if (active) later.current();
   });
   useEffect(() => {
     if (!row) return;
@@ -1241,13 +1275,20 @@ function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: numbe
     row.addEventListener('focusout', again);
     const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => measure.current());
     ro?.observe(row);
+    observer.current = ro ? { ro, row } : null;
     return () => {
       cancelAnimationFrame(frame.current);
       row.removeEventListener('pointerout', again);
       row.removeEventListener('focusout', again);
       ro?.disconnect();
+      observer.current = null;
     };
   }, [row]);
+  // What the row holds changes with the render (a badge, Retry, a caption track). After the
+  // effect above, so the first render already has the row's observer.
+  useEffect(() => {
+    if (active) later.current();
+  });
   return { slots: active ? slots : 0, showing };
 }
 
@@ -1256,7 +1297,12 @@ function jump(seconds: number): void {
   usePlayerStore.getState().seekBy(seconds);
 }
 
-export function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle }: ControlsProps) {
+/**
+ * The control bar. Memoized: it follows the stores itself, and the surface around it re-renders for
+ * what the bar does not show (the pointer resting on it, the chrome's idle timer, a stall), which
+ * re-rendered every button, tooltip and icon with it (P2-PLAYER-3).
+ */
+export const Controls = memo(function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle }: ControlsProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
@@ -1436,21 +1482,21 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
 
   const prevButton = prev && (
     <CtlButton id="prev" className={spareClass} shortcut="previousItem" label={episodic ? t('previousEpisode') : t('previous')} onClick={() => store.prev()}>
-      <SkipBack className="fill-current" />
+      {ICON.previous}
     </CtlButton>
   );
   const nextButton = next && (
     <CtlButton id="next" className={spareClass} shortcut="nextItem" label={episodic ? t('nextEpisode') : t('next')} onClick={() => store.next()}>
-      <SkipForward className="fill-current" />
+      {ICON.next}
     </CtlButton>
   );
   const jumpButtons = canJump && (
     <>
       <CtlButton id="back10" className={spareClass} shortcut="skipBack" label={t('seekBack', { count: SEEK_STEP_JL })} onClick={() => jump(-SEEK_STEP_JL)}>
-        <SkipIcon forward={false} />
+        {ICON.back10}
       </CtlButton>
       <CtlButton id="fwd10" className={spareClass} shortcut="skipForward" label={t('seekForward', { count: SEEK_STEP_JL })} onClick={() => jump(SEEK_STEP_JL)}>
-        <SkipIcon forward />
+        {ICON.forward10}
       </CtlButton>
     </>
   );
@@ -1472,26 +1518,26 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
         {movedJump && (
           <>
             <CtlButton role="menuitem" label={t('seekBack', { count: SEEK_STEP_JL })} shortcut="skipBack" onClick={() => jump(-SEEK_STEP_JL)}>
-              <SkipIcon forward={false} />
+              {ICON.back10}
             </CtlButton>
             <CtlButton role="menuitem" label={t('seekForward', { count: SEEK_STEP_JL })} shortcut="skipForward" onClick={() => jump(SEEK_STEP_JL)}>
-              <SkipIcon forward />
+              {ICON.forward10}
             </CtlButton>
           </>
         )}
         {prev && movedSkip && (
           <CtlButton role="menuitem" label={episodic ? t('previousEpisode') : t('previous')} shortcut="previousItem" onClick={closeThen(() => store.prev())}>
-            <SkipBack className="fill-current" />
+            {ICON.previous}
           </CtlButton>
         )}
         {next && movedSkip && (
           <CtlButton role="menuitem" label={episodic ? t('nextEpisode') : t('next')} shortcut="nextItem" onClick={closeThen(() => store.next())}>
-            <SkipForward className="fill-current" />
+            {ICON.next}
           </CtlButton>
         )}
         {movedPip && (
           <CtlButton role="menuitem" label={inPip ? t('exitPip') : t('pip')} onClick={closeThen(() => commands?.togglePip())}>
-            <PictureInPicture2 />
+            {ICON.pip}
           </CtlButton>
         )}
       </>
@@ -1506,16 +1552,16 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
 
   const playButton = ended ? (
     <CtlButton id="play" primary={!compact} label={t('replay')} onClick={replay}>
-      <RotateCcw />
+      {ICON.replay}
     </CtlButton>
   ) : failed ? (
     // Nothing to play or pause after a failure: the same spot tries the stream again.
     <CtlButton id="play" primary={!compact} label={t('retry')} onClick={retryPlayback}>
-      <RotateCcw />
+      {ICON.replay}
     </CtlButton>
   ) : (
     <CtlButton id="play" primary={!compact} shortcut="playPause" label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
-      {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
+      {playing ? ICON.pause : ICON.play}
     </CtlButton>
   );
 
@@ -1657,7 +1703,7 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
                       commands?.setText(captionsOn || !first ? null : first.id);
                     }}
                   >
-                    {captionsOn ? <Captions /> : <CaptionsOff />}
+                    {captionsOn ? ICON.captionsOn : ICON.captionsOff}
                   </CtlButton>
                 )}
                 {!compact && (
@@ -1670,7 +1716,7 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
                       setMenu(menu ? null : 'root');
                     }}
                   >
-                    <Settings2 />
+                    {ICON.options}
                   </CtlButton>
                 )}
               </div>
@@ -1684,7 +1730,7 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
                       label={inPip ? t('exitPip') : t('pip')}
                       onClick={() => commands?.togglePip()}
                     >
-                      <PictureInPicture2 />
+                      {ICON.pip}
                     </CtlButton>
                   )}
                   {showFullscreen && (
@@ -1694,7 +1740,7 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
                       label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
                       onClick={() => store.toggleFullscreen()}
                     >
-                      {isFullscreen ? <Minimize /> : <Maximize />}
+                      {isFullscreen ? ICON.exitFullscreen : ICON.fullscreen}
                     </CtlButton>
                   )}
                 </div>
@@ -1705,4 +1751,4 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
       </div>
     </ChromeScaleContext.Provider>
   );
-}
+});

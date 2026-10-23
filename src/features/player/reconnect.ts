@@ -517,7 +517,18 @@ export async function tryAnotherSource(): Promise<boolean> {
   return false;
 }
 
+/** `onPlayer` went all the way through since the last reset: what it keeps follows the store. */
+let followed = false;
+
 function onPlayer(s: PlayerState, prev: PlayerState): void {
+  // Playback progress moves only the position, several times a second. The item, its status and
+  // the mode decide everything below; the position matters only to a stall that has to move again
+  // to count as recovered (`onPlaying`). Keys are not built again for it (P2-PLAYER-6).
+  if (followed && s.source === prev.source && s.status === prev.status && s.mode === prev.mode && s.error === prev.error) {
+    if (s.status === 'playing' && session && s.source && !isPendingZap(s.source) && s.mode !== 'external') onPlaying(session, s.positionSeconds);
+    return;
+  }
+  followed = true;
   // A zap's placeholder (the last picture under the next channel's name) has no stream of its own to recover.
   const src = isPendingZap(s.source) ? undefined : s.source;
   const key = src ? keyOf(src) : null;
@@ -570,6 +581,7 @@ export function bindRecovery(): () => void {
 /** Testing only. */
 export function __resetReconnect(): void {
   endSession();
+  followed = false;
   playedKey = null;
   slowTimer = clear(slowTimer);
   slowFor = null;

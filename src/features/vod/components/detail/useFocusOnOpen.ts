@@ -37,7 +37,9 @@ export function useFocusOnOpen(ready: boolean, getTarget: () => HTMLElement | nu
     // committed that was the whole new page (41 ms at a 4x slowdown on a movie). A one-shot
     // observer's callback comes after the browser's own style and layout and before paint, so the
     // focus forces nothing there and the first frame still shows it. Focus moved meanwhile stays.
+    let done = false;
     const ro = new ResizeObserver(() => {
+      done = true;
       ro.disconnect();
       const now = document.activeElement;
       if (now && now !== document.body) return;
@@ -47,6 +49,8 @@ export function useFocusOnOpen(ready: boolean, getTarget: () => HTMLElement | nu
     return () => {
       ro.disconnect();
       stopIgnoring();
+      // Cleaned up before it ran (StrictMode's mount/unmount/mount, or `ready` dropping): the next run focuses.
+      if (!done) handled.current = null;
     };
   }, [ready, key, navigationType]);
 }

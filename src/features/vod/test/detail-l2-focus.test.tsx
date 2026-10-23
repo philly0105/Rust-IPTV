@@ -4,6 +4,7 @@
 // ResizeObserver callback, P2-RAILS-6); `layOut()` stands in for that layout here.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode, useRef } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { ItemRef, SeriesDetail, VodDetail } from '@/api/types';
 import { useToastStore } from '@/ui';
 
+import { useFocusOnOpen } from '../components/detail/useFocusOnOpen';
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
@@ -170,6 +172,28 @@ describe('Focus on open (L2-vod-9)', () => {
     expect(document.activeElement).toBe(document.body);
     act(() => observers.layOut());
     expect(document.activeElement).toBe(play);
+  });
+
+  it('focuses under StrictMode a page that mounts with its content (a cached row)', async () => {
+    // StrictMode runs a mount's effects twice: the first run's observer is gone before the layout
+    // it waits for, and the second run must not take the visit as handled.
+    function Title() {
+      const play = useRef<HTMLButtonElement>(null);
+      useFocusOnOpen(true, () => play.current);
+      return <button ref={play}>Play</button>;
+    }
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/grid']}>
+          <Routes>
+            <Route path="/grid" element={<Link to="/title">open</Link>} />
+            <Route path="/title" element={<Title />} />
+          </Routes>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    fireEvent.click(screen.getByRole('link', { name: 'open' }));
+    await focusLands(await screen.findByRole('button', { name: 'Play' }));
   });
 
   it('the held Enter that opened the page does not press Play by auto-repeat', async () => {

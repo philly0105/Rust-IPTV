@@ -203,8 +203,23 @@ function resolve(code: string, categoryName: string | undefined): ItemLanguage |
   return 'tag' in entry ? { code: short, tag: entry.tag } : { code: short, group: entry.group };
 }
 
+/**
+ * {@link fromCategory} per category name: a grid's titles share their category, and its fifty
+ * patterns ran again for every title a scroll mounted (P2-GRID-5).
+ */
+const byCategory = new Map<string, ItemLanguage | undefined>();
+const BY_CATEGORY_MAX = 2000;
+
 function fromCategory(categoryName: string | undefined): ItemLanguage | undefined {
   if (!categoryName) return undefined;
+  if (byCategory.has(categoryName)) return byCategory.get(categoryName);
+  const hit = categoryLanguage(categoryName);
+  if (byCategory.size >= BY_CATEGORY_MAX) byCategory.clear();
+  byCategory.set(categoryName, hit);
+  return hit;
+}
+
+function categoryLanguage(categoryName: string): ItemLanguage | undefined {
   const bracket = categoryName.match(CATEGORY_BRACKET);
   if (bracket?.[1]) {
     const hit = resolve(bracket[1], categoryName);

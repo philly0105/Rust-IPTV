@@ -121,17 +121,27 @@ export function useEdgeFades(contentKey: string): {
     el.addEventListener('scroll', measure, { passive: true });
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('focusin', onFocus);
-    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
-    ro?.observe(el);
     return () => {
       el.removeEventListener('scroll', measure);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('focusin', onFocus);
-      ro?.disconnect();
     };
   }, [el, measure]);
 
-  useEffect(measure, [measure, contentKey]);
+  // P2-RAILS-3: measured from an observer's first callback, which comes after the browser's own
+  // layout, instead of in an effect right after the commit, where the reads forced the page's
+  // layout (12 ms at a 4x slowdown on a cold Movies landing). A new observer per content, so a row
+  // whose chips changed without a resize is measured again.
+  useEffect(() => {
+    if (!el) return;
+    if (typeof ResizeObserver === 'undefined') {
+      measure();
+      return;
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el, measure, contentKey]);
 
   const mask = fadeMask(edges);
   return { ref: setEl, el, style: mask ? { maskImage: mask, WebkitMaskImage: mask } : {} };

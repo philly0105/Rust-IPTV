@@ -789,7 +789,6 @@ mod tests {
             "SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1",
             // epg/store.rs: replace, clear and remove a feed.
             "DELETE FROM epg_programs WHERE epg_url = ?1",
-            "UPDATE OR IGNORE epg_programs SET epg_url = ?1 WHERE epg_url = ?2",
             "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
             // epg/search.rs: guide search through the title index, and its fallback scan.
             crate::epg::search::FTS_SQL,

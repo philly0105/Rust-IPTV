@@ -1,10 +1,11 @@
 //! EPG tables (C3): `epg_sources`, `epg_channels`, `epg_programs`.
 //!
-//! Ingestion writes into a staging key (`<url>\u{1}staging`, with its own
-//! hidden `epg_sources` row, `origin = 'staging'`, `enabled = 0`) in
-//! transactions of [`BATCH`] rows, then [`commit_staging`] swaps it in for the
-//! real url inside one transaction. Readers never see a half-imported feed,
-//! and a failed import leaves the previous data untouched.
+//! Ingestion writes channels under a staging key (`<url>\u{1}staging`, with
+//! its own hidden `epg_sources` row, `origin = 'staging'`, `enabled = 0`) and
+//! programmes into the connection's temp table [`STAGE_TABLE`], in
+//! transactions of [`BATCH`] rows, then [`commit_staging`] swaps both in for
+//! the real url inside one transaction. Readers never see a half-imported
+//! feed, and a failed import leaves the previous data untouched.
 
 use super::xmltv::{XmltvChannel, XmltvProgramme};
 use crate::db::now_rfc3339;
@@ -19,6 +20,8 @@ pub const BATCH: usize = 2000;
 pub const STAGING_SUFFIX: &str = "\u{1}staging";
 /// `epg_sources.origin` of staging rows.
 pub const STAGING_ORIGIN: &str = "staging";
+/// Temp table holding the programmes of the import running on a connection.
+pub const STAGE_TABLE: &str = "temp.epg_stage";
 
 /// Staging key for `url`.
 pub fn staging_key(url: &str) -> String {
@@ -246,11 +249,13 @@ pub fn mark_not_modified(conn: &Connection, url: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// Removes staging rows of `url` (cascade deletes its staged channels and programmes).
+/// Removes staging rows of `url` (cascade deletes its staged channels and
+/// programmes) and this connection's [`STAGE_TABLE`].
 pub fn discard_staging(conn: &Connection, url: &str) -> CoreResult<()> {
     let key = staging_key(url);
     let deleted = conn.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [&key])?;
     conn.execute("DELETE FROM epg_sources WHERE url = ?1", [&key])?;
+    conn.execute_batch(&format!("DROP TABLE IF EXISTS {STAGE_TABLE}"))?;
     if deleted > 0 {
         // A rebuild may have indexed them (guide search, C5).
         super::search::invalidate_index(conn)?;
@@ -258,7 +263,9 @@ pub fn discard_staging(conn: &Connection, url: &str) -> CoreResult<()> {
     Ok(())
 }
 
-/// Clears any previous staging for `url` and creates a fresh staging row.
+/// Clears any previous staging for `url`, creates a fresh staging row and
+/// an empty [`STAGE_TABLE`]. The caller decides where temp tables live:
+/// `ingest::ingest_reader` puts them on disk (`temp_store=FILE`).
 pub fn begin_staging(conn: &Connection, url: &str) -> CoreResult<String> {
     discard_staging(conn, url)?;
     let key = staging_key(url);
@@ -266,6 +273,10 @@ pub fn begin_staging(conn: &Connection, url: &str) -> CoreResult<String> {
         "INSERT INTO epg_sources(url, enabled, origin, status) VALUES (?1, 0, ?2, 'fetching')",
         params![key, STAGING_ORIGIN],
     )?;
+    conn.execute_batch(&format!(
+        "CREATE TABLE {STAGE_TABLE} (channel_id TEXT NOT NULL, start INTEGER NOT NULL, stop INTEGER NOT NULL,
+         title TEXT NOT NULL, description TEXT, category TEXT, icon TEXT)"
+    ))?;
     Ok(key)
 }
 
@@ -278,7 +289,8 @@ pub struct StagingWriter<'c> {
     programmes: Vec<XmltvProgramme>,
     /// Distinct channels written.
     pub channel_count: u64,
-    /// Programmes written.
+    /// Programmes staged, repeated slots included ([`commit_staging`]
+    /// returns the count stored).
     pub program_count: u64,
 }
 
@@ -312,67 +324,89 @@ impl<'c> StagingWriter<'c> {
         Ok(false)
     }
 
-    /// Writes everything buffered in one transaction.
+    /// Writes everything buffered: channels in one transaction, programmes
+    /// in another.
     pub fn flush(&mut self) -> CoreResult<()> {
-        if self.channels.is_empty() && self.programmes.is_empty() {
-            return Ok(());
-        }
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        {
-            let mut ch = tx.prepare_cached(
-                "INSERT OR IGNORE INTO epg_channels(epg_url, channel_id, display_name, icon) VALUES (?1, ?2, ?3, ?4)",
-            )?;
-            for c in self.channels.drain(..) {
-                self.channel_count +=
-                    ch.execute(params![self.key, c.id, c.display_name, c.icon])? as u64;
+        if !self.channels.is_empty() {
+            let tx = self
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            {
+                let mut ch = tx.prepare_cached(
+                    "INSERT OR IGNORE INTO epg_channels(epg_url, channel_id, display_name, icon) VALUES (?1, ?2, ?3, ?4)",
+                )?;
+                for c in self.channels.drain(..) {
+                    self.channel_count +=
+                        ch.execute(params![self.key, c.id, c.display_name, c.icon])? as u64;
+                }
             }
-            // A feed that lists a slot twice (same channel and start) keeps
-            // the first; the unique index from migration 0007 makes the
-            // repeat a no-op instead of an error that would abort the import.
-            let mut pr = tx.prepare_cached(
-                "INSERT OR IGNORE INTO epg_programs(epg_url, channel_id, start, stop, title, description, category, icon)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            )?;
-            for p in self.programmes.drain(..) {
-                self.program_count += pr.execute(params![
-                    self.key,
-                    p.channel,
-                    p.start,
-                    p.stop,
-                    p.title,
-                    p.description,
-                    p.category,
-                    p.icon
-                ])? as u64;
-            }
+            tx.commit()?;
         }
-        tx.commit()?;
+        if !self.programmes.is_empty() {
+            // P2-EPGRS-1: programmes go to the temp table, which has no
+            // index and is never logged in the WAL. Staging them in
+            // `epg_programs` under the staging key wrote every row and its
+            // three index entries once, then the swap rewrote every row and
+            // its slot index entry to re-key it, and the WAL carried both
+            // into the checkpoint. On a 216k-programme feed that was 3.3-4.6
+            // s of a 5.6-7.0 s ingest (Colab, 2 vCPUs); now 1.2-1.8 s. A
+            // deferred transaction writes only the temp database, so this
+            // takes no lock on the main one.
+            let tx = self
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Deferred)?;
+            {
+                let mut pr = tx.prepare_cached(&format!(
+                    "INSERT INTO {STAGE_TABLE}(channel_id, start, stop, title, description, category, icon)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+                ))?;
+                for p in self.programmes.drain(..) {
+                    pr.execute(params![
+                        p.channel,
+                        p.start,
+                        p.stop,
+                        p.title,
+                        p.description,
+                        p.category,
+                        p.icon
+                    ])?;
+                    self.program_count += 1;
+                }
+            }
+            tx.commit()?;
+        }
         Ok(())
     }
 }
 
 /// Swaps staging in for `url` in one transaction: old rows deleted, staged
-/// rows re-keyed, staging row removed, status `ok` with counts, fetch time and etag.
+/// channels re-keyed, staged programmes copied in, staging row removed,
+/// status `ok` with counts, fetch time and etag. Returns the programmes
+/// stored. [`STAGE_TABLE`] is left to the caller (`ingest_reader` closes
+/// the temp database; dropping the table would first walk its pages).
 pub fn commit_staging(
     conn: &mut Connection,
     url: &str,
     etag: Option<&str>,
     channels: u64,
-    programs: u64,
-) -> CoreResult<()> {
+) -> CoreResult<u64> {
     let key = staging_key(url);
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
     tx.execute("DELETE FROM epg_channels WHERE epg_url = ?1", [url])?;
-    // The old rows of `url` are gone, so no re-keyed row can hit the unique
-    // slot index (0007); OR IGNORE only spares SQLite the abort bookkeeping
-    // of a constraint that cannot fire (a little less memory on big guides).
-    tx.execute(
-        "UPDATE OR IGNORE epg_programs SET epg_url = ?1 WHERE epg_url = ?2",
-        params![url, key],
-    )?;
+    // A feed that lists a slot twice (same channel and start) keeps the
+    // first: the old rows of `url` are gone, so the unique index from
+    // migration 0007 only meets the feed's own repeats, and copying in
+    // rowid (feed) order makes the later one the no-op instead of an error
+    // that would abort the import.
+    let programs = tx.execute(
+        &format!(
+            "INSERT OR IGNORE INTO epg_programs(epg_url, channel_id, start, stop, title, description, category, icon)
+             SELECT ?1, channel_id, start, stop, title, description, category, icon
+             FROM {STAGE_TABLE} ORDER BY rowid"
+        ),
+        [url],
+    )? as u64;
     tx.execute(
         "UPDATE epg_channels SET epg_url = ?1 WHERE epg_url = ?2",
         params![url, key],
@@ -386,7 +420,7 @@ pub fn commit_staging(
         params![url, now_rfc3339(), channels as i64, programs as i64, etag],
     )?;
     tx.commit()?;
-    Ok(())
+    Ok(programs)
 }
 
 /// Boot cleanup: drops leftover staging rows and resets `fetching` (a crash
@@ -495,8 +529,8 @@ mod tests {
         conn.execute("INSERT INTO epg_sources(url) VALUES (?1)", [url])
             .unwrap();
         let key = begin_staging(&conn, url).unwrap();
-        let n = {
-            let mut w = StagingWriter::new(&mut conn, key.clone());
+        {
+            let mut w = StagingWriter::new(&mut conn, key);
             w.push_programme(prog("a", 1000, "First")).unwrap();
             w.push_programme(prog("a", 1000, "Repeat")).unwrap();
             w.push_programme(prog("a", 1000, "First")).unwrap();
@@ -506,12 +540,18 @@ mod tests {
             // A repeat in a later batch is ignored too.
             w.push_programme(prog("a", 2800, "Late repeat")).unwrap();
             w.flush().unwrap();
-            w.program_count
-        };
+        }
+        let n = commit_staging(&mut conn, url, None, 0).unwrap();
         assert_eq!(n, 3);
-        assert_eq!(count(&conn, &key), 3);
-        commit_staging(&mut conn, url, None, 0, n).unwrap();
         assert_eq!(count(&conn, url), 3);
+        let stored: i64 = conn
+            .query_row(
+                "SELECT program_count FROM epg_sources WHERE url = ?1",
+                [url],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 3);
         let title: String = conn
             .query_row(
                 "SELECT title FROM epg_programs WHERE epg_url = ?1 AND channel_id = 'a' AND start = 1000",

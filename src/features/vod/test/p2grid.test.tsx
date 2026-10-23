@@ -1,7 +1,7 @@
 /**
  * Second performance pass, grid lane. P2-GRID-1: the movie grid's posters load at the grid's
  * column width without reading their frames as they mount. P2-GRID-2: so do the channel logos of
- * a search.
+ * a search. P2-GRID-6: the grid's cells share one page request and its key's hash.
  */
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +35,18 @@ vi.mock('@/api/transport', async (importOriginal) => {
 });
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
 vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
+/** Counts the page requests the grid builds. */
+const paging = vi.hoisted(() => ({ built: 0 }));
+vi.mock('../lib/paging', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/paging')>();
+  return {
+    ...actual,
+    buildPageRequest: (...args: Parameters<typeof actual.buildPageRequest>) => {
+      paging.built++;
+      return actual.buildPageRequest(...args);
+    },
+  };
+});
 
 const film = (i: number): VodItem => ({
   ref: { sourceId: 'src1', contentType: 'movie', itemId: `f${i}` },
@@ -55,6 +67,7 @@ beforeEach(() => {
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   rpcMock.calls.length = 0;
+  paging.built = 0;
   h['sources.get'] = () => makeSource('src1', 'xtream', 'Alpha IPTV');
   h['sources.list'] = () => [makeSource('src1', 'xtream', 'Alpha IPTV')];
   h['settings.get'] = () => settings();
@@ -111,6 +124,16 @@ describe('P2-GRID-1: the movie grid', () => {
     // with 16 px gaps are 179.2 px wide, which the cache serves from its 192 px copy.
     expect(imgs.map(sizeOf)).toEqual(imgs.map(() => '192'));
     expect(pictureReads).toEqual([]);
+  });
+
+  it("P2-GRID-6: builds a page's request once, not on every cell's render", async () => {
+    renderAt('/s/src1/movies/c/c1', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);
+    await screen.findByText('Film 0');
+    const cells = screen.getByTestId('vod-grid').querySelectorAll('[role="option"]').length;
+    expect(cells).toBeGreaterThan(10);
+    // One page per grid input (a source arriving late can make a second input): every cell and the
+    // page's own count read the same request. It was built again on every cell's render.
+    expect(paging.built).toBeLessThanOrEqual(2);
   });
 });
 

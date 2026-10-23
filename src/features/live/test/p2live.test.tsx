@@ -1,17 +1,20 @@
 /**
- * Second performance pass on Live's cold open (P2-LIVE-3): what a screen of channel rows costs
- * before the user does anything.
+ * Second performance pass on Live's cold open (P2-LIVE-3, P2-LIVE-4): what a screen of channel
+ * rows and the page cost before the user does anything.
  */
 import { QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { I18nextProvider } from 'react-i18next';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { queryClient } from '@/api/query';
+import { categoriesArgs } from '@/api/bootPrefetch';
+import { queryClient, rpcKey } from '@/api/query';
 import type { Channel, EpgNowNext, Page, PageQuery } from '@/api/types';
 
 import { ChannelList, resetChannelListMemory } from '../components/ChannelList';
+import { LivePage } from '../components/LivePage';
 import type { PagedChannels } from '../hooks/usePagedChannels';
 import { MINUTE } from '../lib/epgTime';
 import { i18n, installDomStubs, makeChannel, program, settings } from './harness';
@@ -125,5 +128,31 @@ describe('channel rows (P2-LIVE-3)', () => {
     t.mockClear();
     view.rerender(wrap(list(now + MINUTE)));
     expect(t.mock.calls.length).toBeLessThan(rows * 2);
+  });
+});
+
+describe('Live page dialogs (P2-LIVE-4)', () => {
+  const groupsQuery = () => queryClient.getQueryCache().find({ queryKey: rpcKey('catalog.categories', categoriesArgs('src1', 'live')) });
+
+  it('the groups dialog mounts on its first open and stays mounted once closed', async () => {
+    render(
+      wrap(
+        <MemoryRouter initialEntries={['/s/src1/live']}>
+          <Routes>
+            <Route path="/s/:sourceId/live" element={<LivePage />} />
+          </Routes>
+        </MemoryRouter>,
+      ),
+    );
+    await screen.findByText('Channel 0');
+    // Only the page reads the groups; a closed dialog read them too.
+    expect(groupsQuery()?.getObserversCount()).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Manage visible groups' }));
+    await screen.findByRole('dialog', { name: 'Manage visible groups' });
+    expect(groupsQuery()?.getObserversCount()).toBe(2);
+    await act(async () => fireEvent.keyDown(window, { key: 'Escape' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Kept for its exit and the next opening.
+    expect(groupsQuery()?.getObserversCount()).toBe(2);
   });
 });

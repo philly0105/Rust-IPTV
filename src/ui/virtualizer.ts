@@ -10,7 +10,7 @@ function currentOffset(el: Element | null, horizontal: boolean | undefined, rtl:
   return horizontal ? el.scrollLeft * (rtl ? -1 : 1) : el.scrollTop;
 }
 
-/** Per virtualizer whose ResizeObserver has not reported yet: takes its scroller's size now. */
+/** Per virtualizer attached since the last frame, its observer yet to report: takes the size now. */
 const sizeNow = new WeakMap<object, () => void>();
 /** Virtualizers whose scrolls take the size first (see {@link useListVirtualizer}). */
 const sizedScrolls = new WeakSet<object>();
@@ -25,19 +25,23 @@ const sizedScrolls = new WeakSet<object>();
  * more of the list than `initialRect` did, the missing rows render inside the callback, before
  * the frame paints, so a list never paints short; when it shows less, the extra rows go with the
  * next render. Without a ResizeObserver it reads the size at once, as react-virtual does. A scroll
- * asked for before the first callback reads it then (P2-LIVE-5, see {@link useListVirtualizer}).
+ * asked for before the next frame reads it then (P2-LIVE-5, see {@link useListVirtualizer}); by
+ * that frame's layout the callback has come (a no-op stub in jsdom never calls it, and lists there
+ * keep their seed).
  */
 export function observeElementRectAfterLayout<S extends Element, I extends Element>(
   instance: Virtualizer<S, I>,
   cb: (rect: Rect) => void,
 ): (() => void) | undefined {
   const element = instance.scrollElement;
-  const Observer = instance.targetWindow?.ResizeObserver;
-  if (!element || !Observer) return observeElementRect(instance, cb);
+  const win = instance.targetWindow;
+  const Observer = win?.ResizeObserver;
+  if (!element || !win || !Observer) return observeElementRect(instance, cb);
   sizeNow.set(instance, () => {
     sizeNow.delete(instance);
     cb({ width: (element as unknown as HTMLElement).offsetWidth, height: (element as unknown as HTMLElement).offsetHeight });
   });
+  const frame = win.requestAnimationFrame(() => sizeNow.delete(instance));
   let first = true;
   const observer = new Observer((entries) => {
     sizeNow.delete(instance);
@@ -53,6 +57,7 @@ export function observeElementRectAfterLayout<S extends Element, I extends Eleme
   });
   observer.observe(element, { box: 'border-box' });
   return () => {
+    win.cancelAnimationFrame(frame);
     sizeNow.delete(instance);
     observer.disconnect();
   };
@@ -76,11 +81,11 @@ export function observeElementRectAfterLayout<S extends Element, I extends Eleme
  * is left out when the scroller is known to be there: one created in that commit is at 0, and the
  * default offset is the one just read from it.
  *
- * A `scrollToIndex` or `scrollToOffset` before the ResizeObserver's first report reads the
- * scroller's size first (P2-LIVE-5). Aligned against the seed, the live list opening on the
- * playing channel left that row under the list's bottom edge until the report came. The scroll
- * lays the page out anyway (react-virtual reads `scrollHeight` to clamp it, and the write itself
- * does), so the read adds no layout.
+ * A `scrollToIndex` or `scrollToOffset` before the next frame, the ResizeObserver yet to report,
+ * reads the scroller's size first (P2-LIVE-5). Aligned against the seed, the live list opening on
+ * the playing channel left that row under the list's bottom edge until the report came. The
+ * scroll lays the page out anyway (react-virtual reads `scrollHeight` to clamp it, and the write
+ * itself does), so the read adds no layout.
  */
 export function useListVirtualizer<S extends Element, I extends Element = Element>(
   options: VirtualizerOptions<S, I>,

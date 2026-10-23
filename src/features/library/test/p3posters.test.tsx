@@ -1,16 +1,20 @@
 /**
  * P2-POSTERS-2: download and favorites/recent rows load their artwork at the width their boxes
  * are given, instead of each picture reading its frame as it mounts (a forced layout per row).
+ * P2-POSTERS-3: the card grid (My videos, My List) mounts its cards at the width it read before
+ * having any, and hands their posters the column width.
  */
 
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ItemRef } from '@/api/types';
+import { Poster } from '@/ui/Poster';
 
 import { DownloadRow } from '../components/DownloadRow';
 import { EntryRow } from '../components/EntryRow';
+import { VirtualCardGrid } from '../components/VirtualCardGrid';
 import { makeDownload } from './fixtures';
 import { i18n, installDomStubs } from './harness';
 
@@ -29,10 +33,13 @@ const POSTER = 'http://cdn.example.test/poster.jpg';
 
 /** Pictures whose box was read. */
 let pictureReads: Element[] = [];
+/** The width jsdom reports for an element (it lays nothing out: 0 unless set here). */
+let laidOut: (el: Element) => number | undefined = () => undefined;
 
 beforeAll(installDomStubs);
 beforeEach(() => {
   pictureReads = [];
+  laidOut = () => undefined;
   const onPicture = (el: Element) => {
     if (el instanceof HTMLImageElement) pictureReads.push(el);
   };
@@ -40,7 +47,7 @@ beforeEach(() => {
     const get = Object.getOwnPropertyDescriptor(Element.prototype, prop)!.get!;
     vi.spyOn(Element.prototype, prop, 'get').mockImplementation(function (this: Element) {
       onPicture(this);
-      return get.call(this) as number;
+      return (prop === 'clientWidth' ? laidOut(this) : undefined) ?? (get.call(this) as number);
     });
   }
   const rect = Element.prototype.getBoundingClientRect;
@@ -91,3 +98,45 @@ describe('P2-POSTERS-2: library rows', () => {
   }
 });
 
+type Film = { id: string; src: string };
+const films = Array.from({ length: 12 }, (_, i): Film => ({ id: `f${i}`, src: `http://cdn.example.test/f${i}.jpg` }));
+
+function Grid() {
+  return (
+    <VirtualCardGrid<Film>
+      items={films}
+      itemKey={(f) => f.id}
+      label="Films"
+      cardLabel={(f) => f.id}
+      onActivate={() => undefined}
+      render={(f) => <Poster src={f.src} alt="" label={f.id} aspect="poster" />}
+      postersFillCells
+      testId="cards"
+    />
+  );
+}
+
+const widthsIn = (container: HTMLElement) => [...container.querySelectorAll('img')].map((img) => new URL(img.getAttribute('src') ?? '', 'http://app.test').searchParams.get('w'));
+
+describe('P2-POSTERS-3: the card grid', () => {
+  it('loads its posters at the column width without reading them', () => {
+    const { container } = render(<Grid />);
+    // jsdom lays nothing out, so the grid keeps its 1024 px guess: five 168 px columns with 20 px
+    // gaps are 188.8 px wide, the 192 px copy.
+    const widths = widthsIn(container);
+    expect(widths.length).toBeGreaterThan(0);
+    expect(widths).toEqual(widths.map(() => '192'));
+    expect(pictureReads).toEqual([]);
+  });
+
+  it("takes the list's width inside the scroller's padding", () => {
+    // A 1050 px scroller with 7.5 px of padding on each side (My List's px-2): five columns of
+    // 191 px, not the 194 px the scroller's width gives, which the cache would serve at 256 px.
+    laidOut = (el) => (el.getAttribute('data-testid') === 'cards' ? 1050 : el.getAttribute('role') === 'list' ? 1035 : undefined);
+    const { container } = render(<Grid />);
+    expect(screen.getByRole('list').querySelectorAll('[role="listitem"]').length).toBeGreaterThan(0);
+    const widths = widthsIn(container);
+    expect(widths).toEqual(widths.map(() => '192'));
+    expect(pictureReads).toEqual([]);
+  });
+});

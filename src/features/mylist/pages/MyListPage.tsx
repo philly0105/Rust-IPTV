@@ -418,6 +418,7 @@ export function MyListPage() {
         }}
         render={renderCard}
         onActivate={(r) => open(r.entry)}
+        postersFillCells
         captionHeight={CARD_CAPTION_HEIGHT}
         minColumnWidth={column}
         gap={POSTER_GAP}

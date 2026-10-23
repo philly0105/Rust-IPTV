@@ -247,6 +247,7 @@ export function MyVideosPage() {
         }
         onActivate={openEntry}
         render={(e) => <LibraryCard entry={e} />}
+        postersFillCells
         captionHeight={CARD_CAPTION_HEIGHT}
         minColumnWidth={column}
         gap={POSTER_GAP}

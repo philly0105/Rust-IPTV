@@ -112,7 +112,9 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
   const fromCardsEnd = fromCards.end;
   const updateEdges = useCallback(() => {
     const el = scroller.current;
-    if (!el) return;
+    // Skeletons only: a rail without cards has no step buttons whatever its track holds, and a
+    // reading (8 skeletons overflow a laptop's track) would only re-render it before paint.
+    if (!el || cardCount === 0) return;
     const next = railEdges(el.scrollLeft, el.clientWidth, el.scrollWidth);
     // A reading that matches what the rail shows keeps the state, so it renders nothing.
     setRead((prev) => {

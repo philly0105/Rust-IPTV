@@ -9,8 +9,9 @@
  * jsdom has no layout: `layOut()` (fakeResizeObservers) stands in for the browser's.
  */
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { Profiler } from 'react';
 import { I18nextProvider } from 'react-i18next';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PosterRail } from '../components/PosterRail';
 import { actEnvironment, fakeResizeObservers, i18n, installDomStubs, layOutBox, QueryWrapper, spyLayoutReads } from './harness';
@@ -18,10 +19,10 @@ import { actEnvironment, fakeResizeObservers, i18n, installDomStubs, layOutBox, 
 const next = () => screen.queryByRole('button', { name: 'Scroll forward' }) as HTMLButtonElement | null;
 const back = () => screen.queryByRole('button', { name: 'Scroll back' }) as HTMLButtonElement | null;
 
-function rail(count: number) {
+function rail(count: number, loading?: boolean) {
   return (
     <I18nextProvider i18n={i18n}>
-      <PosterRail title="Rail" items={Array.from({ length: count }, (_, i) => i)} cardWidth={150} render={(i) => <span>Card {i}</span>} />
+      <PosterRail title="Rail" items={Array.from({ length: count }, (_, i) => i)} loading={loading} cardWidth={150} render={(i) => <span>Card {i}</span>} />
     </I18nextProvider>
   );
 }
@@ -83,5 +84,21 @@ describe('P2-RAILS-1: rail edges without a layout read in the commit', () => {
     layOutBox(screen.getByRole('list'), { clientWidth: 700, scrollWidth: 1004 });
     act(() => observers.layOut());
     expect(next()?.disabled).toBe(false);
+  });
+
+  it('a loading row is not read: its skeletons overflow the track, and laying it out renders nothing', () => {
+    const commits = vi.fn();
+    render(
+      <Profiler id="rail" onRender={commits}>
+        {rail(0, true)}
+      </Profiler>,
+      { wrapper: QueryWrapper },
+    );
+    commits.mockClear();
+    // Without cards a rail has no step buttons, so a reading of its skeletons could only re-render it.
+    layOutBox(screen.getByRole('list'), { clientWidth: 500, scrollWidth: 1300 });
+    act(() => observers.layOut());
+    expect(commits).not.toHaveBeenCalled();
+    expect(next()).toBeNull();
   });
 });

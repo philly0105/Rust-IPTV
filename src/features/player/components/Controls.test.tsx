@@ -15,6 +15,14 @@ vi.mock('./useNarrow', async (orig) => {
   return { ...real, useNarrow: vi.fn(real.useNarrow) };
 });
 
+// The options icon draws through a counter: the bar's re-renders reuse its icons (P2-PLAYER-4).
+vi.mock('lucide-react', async (orig) => {
+  const real = await orig<typeof import('lucide-react')>();
+  const { createElement } = await import('react');
+  return { ...real, Settings2: vi.fn((props: object) => createElement(real.Settings2, props)) };
+});
+
+const { Settings2 } = await import('lucide-react');
 const { useNarrow } = await import('./useNarrow');
 const { usePlayerStore, __resetPlayerForTests, reportProgress } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
@@ -323,6 +331,18 @@ describe('Controls re-renders (PB-4)', () => {
     expect(screen.queryByTestId('behind-live')).toBeNull();
     expect(screen.getByTestId('live-badge')).toBeTruthy();
     expect(barRenders()).toBe(before);
+  });
+
+  it("the bar's own re-renders leave its icons as they were drawn (P2-PLAYER-4)", () => {
+    const { rerender } = render(<Controls variant="overlay" visible />);
+    const drawn = vi.mocked(Settings2).mock.calls.length;
+    expect(drawn).toBeGreaterThan(0);
+    const before = barRenders();
+    rerender(<Controls variant="overlay" visible={false} />);
+    act(() => usePlayerStore.setState({ status: 'paused' }));
+    expect(barRenders()).toBeGreaterThan(before);
+    expect(screen.getByRole('button', { name: 'Play' })).toBeTruthy();
+    expect(vi.mocked(Settings2).mock.calls.length).toBe(drawn);
   });
 
   it('a report that repeats the last one leaves the store alone', () => {

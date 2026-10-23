@@ -199,17 +199,40 @@ function SkipIcon({ forward }: { forward: boolean }) {
   );
 }
 
-function VolumeControl({ compact }: { compact?: boolean }) {
+/**
+ * The control row's icons, made once: a render of the bar (the chrome showing or hiding, a pause)
+ * reuses them instead of building each SVG again (P2-PLAYER-4).
+ */
+const ICON = {
+  play: <Play className="fill-current" />,
+  pause: <Pause className="fill-current" />,
+  replay: <RotateCcw />,
+  previous: <SkipBack className="fill-current" />,
+  next: <SkipForward className="fill-current" />,
+  back10: <SkipIcon forward={false} />,
+  forward10: <SkipIcon forward />,
+  pip: <PictureInPicture2 />,
+  options: <Settings2 />,
+  captionsOn: <Captions />,
+  captionsOff: <CaptionsOff />,
+  fullscreen: <Maximize />,
+  exitFullscreen: <Minimize />,
+  muted: <VolumeX />,
+  quiet: <Volume1 />,
+  loud: <Volume2 />,
+};
+
+/** Memoized with the row's icons (P2-PLAYER-4): it follows the volume itself. */
+const VolumeControl = memo(function VolumeControl({ compact }: { compact?: boolean }) {
   const { t } = useTranslation('player');
   const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const shown = muted ? 0 : volume;
   const percent = Math.round(shown * 100);
-  const Icon = shown === 0 ? VolumeX : shown < 0.5 ? Volume1 : Volume2;
   return (
     <div data-vol="" className="group/vol flex items-center">
       <CtlButton id="mute" shortcut="mute" label={muted ? t('unmute') : t('mute')} onClick={() => usePlayerStore.getState().toggleMute()}>
-        <Icon />
+        {shown === 0 ? ICON.muted : shown < 0.5 ? ICON.quiet : ICON.loud}
       </CtlButton>
       <input
         type="range"
@@ -236,7 +259,7 @@ function VolumeControl({ compact }: { compact?: boolean }) {
       )}
     </div>
   );
-}
+});
 
 /** Start or stop `mpv.record` (embedded mpv live recording), with a toast for the outcome. */
 function useRecordToggle(): { recording: boolean; busy: boolean; toggle(): void } {
@@ -950,9 +973,10 @@ export const LIVE_PULSES = 3;
  * The live status at the stream's edge. On air (playing): the red dot pulses a few times, then
  * holds still, because a never-ending animation keeps the compositor redrawing over the video.
  * Starting or paused: a dim dot. Failed: "No signal" with a hollow dot, never the red badge.
- * The one live mark of the player (PL-DUPLICATE-CHROME): the title bar has none.
+ * The one live mark of the player (PL-DUPLICATE-CHROME): the title bar has none. Memoized: the
+ * readout around it follows the position several times a second while the chrome shows (P2-PLAYER-4).
  */
-function LiveBadge({ status, pulseKey, className }: { status: PlayerState['status']; pulseKey: string; className?: string }) {
+const LiveBadge = memo(function LiveBadge({ status, pulseKey, className }: { status: PlayerState['status']; pulseKey: string; className?: string }) {
   const { t } = useTranslation('player');
   const failed = status === 'error';
   const onAir = status === 'playing';
@@ -980,7 +1004,7 @@ function LiveBadge({ status, pulseKey, className }: { status: PlayerState['statu
       {failed ? t('liveNoSignal') : t('live')}
     </span>
   );
-}
+});
 
 /** Live DVR window: scrub only when the window is at least 30 s. */
 function liveWindowOf(seekable: TimeRange | undefined): TimeRange | undefined {
@@ -1458,21 +1482,21 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
 
   const prevButton = prev && (
     <CtlButton id="prev" className={spareClass} shortcut="previousItem" label={episodic ? t('previousEpisode') : t('previous')} onClick={() => store.prev()}>
-      <SkipBack className="fill-current" />
+      {ICON.previous}
     </CtlButton>
   );
   const nextButton = next && (
     <CtlButton id="next" className={spareClass} shortcut="nextItem" label={episodic ? t('nextEpisode') : t('next')} onClick={() => store.next()}>
-      <SkipForward className="fill-current" />
+      {ICON.next}
     </CtlButton>
   );
   const jumpButtons = canJump && (
     <>
       <CtlButton id="back10" className={spareClass} shortcut="skipBack" label={t('seekBack', { count: SEEK_STEP_JL })} onClick={() => jump(-SEEK_STEP_JL)}>
-        <SkipIcon forward={false} />
+        {ICON.back10}
       </CtlButton>
       <CtlButton id="fwd10" className={spareClass} shortcut="skipForward" label={t('seekForward', { count: SEEK_STEP_JL })} onClick={() => jump(SEEK_STEP_JL)}>
-        <SkipIcon forward />
+        {ICON.forward10}
       </CtlButton>
     </>
   );
@@ -1494,26 +1518,26 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
         {movedJump && (
           <>
             <CtlButton role="menuitem" label={t('seekBack', { count: SEEK_STEP_JL })} shortcut="skipBack" onClick={() => jump(-SEEK_STEP_JL)}>
-              <SkipIcon forward={false} />
+              {ICON.back10}
             </CtlButton>
             <CtlButton role="menuitem" label={t('seekForward', { count: SEEK_STEP_JL })} shortcut="skipForward" onClick={() => jump(SEEK_STEP_JL)}>
-              <SkipIcon forward />
+              {ICON.forward10}
             </CtlButton>
           </>
         )}
         {prev && movedSkip && (
           <CtlButton role="menuitem" label={episodic ? t('previousEpisode') : t('previous')} shortcut="previousItem" onClick={closeThen(() => store.prev())}>
-            <SkipBack className="fill-current" />
+            {ICON.previous}
           </CtlButton>
         )}
         {next && movedSkip && (
           <CtlButton role="menuitem" label={episodic ? t('nextEpisode') : t('next')} shortcut="nextItem" onClick={closeThen(() => store.next())}>
-            <SkipForward className="fill-current" />
+            {ICON.next}
           </CtlButton>
         )}
         {movedPip && (
           <CtlButton role="menuitem" label={inPip ? t('exitPip') : t('pip')} onClick={closeThen(() => commands?.togglePip())}>
-            <PictureInPicture2 />
+            {ICON.pip}
           </CtlButton>
         )}
       </>
@@ -1528,16 +1552,16 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
 
   const playButton = ended ? (
     <CtlButton id="play" primary={!compact} label={t('replay')} onClick={replay}>
-      <RotateCcw />
+      {ICON.replay}
     </CtlButton>
   ) : failed ? (
     // Nothing to play or pause after a failure: the same spot tries the stream again.
     <CtlButton id="play" primary={!compact} label={t('retry')} onClick={retryPlayback}>
-      <RotateCcw />
+      {ICON.replay}
     </CtlButton>
   ) : (
     <CtlButton id="play" primary={!compact} shortcut="playPause" label={playing ? t('pause') : t('play')} onClick={() => store.togglePlay()}>
-      {playing ? <Pause className="fill-current" /> : <Play className="fill-current" />}
+      {playing ? ICON.pause : ICON.play}
     </CtlButton>
   );
 
@@ -1679,7 +1703,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                       commands?.setText(captionsOn || !first ? null : first.id);
                     }}
                   >
-                    {captionsOn ? <Captions /> : <CaptionsOff />}
+                    {captionsOn ? ICON.captionsOn : ICON.captionsOff}
                   </CtlButton>
                 )}
                 {!compact && (
@@ -1692,7 +1716,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                       setMenu(menu ? null : 'root');
                     }}
                   >
-                    <Settings2 />
+                    {ICON.options}
                   </CtlButton>
                 )}
               </div>
@@ -1706,7 +1730,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                       label={inPip ? t('exitPip') : t('pip')}
                       onClick={() => commands?.togglePip()}
                     >
-                      <PictureInPicture2 />
+                      {ICON.pip}
                     </CtlButton>
                   )}
                   {showFullscreen && (
@@ -1716,7 +1740,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                       label={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
                       onClick={() => store.toggleFullscreen()}
                     >
-                      {isFullscreen ? <Minimize /> : <Maximize />}
+                      {isFullscreen ? ICON.exitFullscreen : ICON.fullscreen}
                     </CtlButton>
                   )}
                 </div>

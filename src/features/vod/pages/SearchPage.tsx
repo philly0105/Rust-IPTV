@@ -766,6 +766,38 @@ const POSTER_GAP = 16;
 const POSTER_CAPTION_HEIGHT = 64;
 
 /**
+ * Whether the grid growing or shrinking by the rows' reported sizes would start or stop its page
+ * scroller scrolling (P2-POSTERS-5). Called in the rows' observer callback, after the browser's
+ * layout, so its reads force none. The scroller's content ends at its last child's bottom edge
+ * (the search page's `Page`, with its own bottom padding).
+ */
+function changesOverflow(
+  scroller: HTMLElement | null,
+  list: HTMLElement,
+  virtualizer: Virtualizer<HTMLDivElement, Element>,
+  sizes: readonly { index: number; size: number }[],
+): boolean {
+  if (!scroller) return false;
+  // The list's height on screen against the virtualizer's total with these sizes in (which counts
+  // any it was given since it last rendered).
+  let grow = virtualizer.getTotalSize() - (parseFloat(list.style.height) || 0);
+  for (const { index, size } of sizes) {
+    const item = Number.isInteger(index) ? virtualizer.measurementsCache[index] : undefined;
+    if (item) grow += size - (virtualizer.itemSizeCache.get(item.key) ?? item.size);
+  }
+  if (Math.abs(grow) < 0.5) return false;
+  const room = scroller.clientHeight;
+  const last = scroller.lastElementChild;
+  const content =
+    scroller.scrollHeight > room || !last
+      ? scroller.scrollHeight
+      : last.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top - scroller.clientTop + scroller.scrollTop;
+  const after = content + grow;
+  // Within a pixel of the edge counts as a change: rounding could put either side over it.
+  return (content > room) !== (after > room) || Math.abs(after - room) < 1;
+}
+
+/**
  * Hits in a responsive grid whose rows are virtualized against the page
  * scroller, so a 1000-result step mounts only the rows near the viewport.
  * Arrow keys still move by cell and row (`handleGridKeyDown` scrolls the page
@@ -780,8 +812,9 @@ const POSTER_CAPTION_HEIGHT = 64;
  * where each new row read its offsetHeight as it mounted (react-virtual's
  * measureElement), a forced layout per row between the posters' DOM writes,
  * and the offset was read after every render. A changed row height commits in
- * the observer's callback (flushSync), before paint, so rows never show a
- * frame at their estimate.
+ * the observer's callback (flushSync), before paint, so rows do not show a
+ * frame at their estimate; unless that would start or stop the page scrolling
+ * (P2-POSTERS-5), when it renders as the next task.
  */
 function HitGrid({
   hits,
@@ -845,15 +878,24 @@ function HitGrid({
         index: Number((entry.target as HTMLElement).dataset['index']),
         size: Math.round(entry.borderBoxSize?.[0]?.blockSize ?? (entry.target as HTMLElement).offsetHeight),
       }));
-      seen.flushing = true;
-      try {
-        flushSync(() => {
-          setScrollMargin(now.margin);
-          for (const { index, size } of sizes) if (Number.isInteger(index)) latestVirtualizer.current?.resizeItem(index, size);
-        });
-      } finally {
-        seen.flushing = false;
-      }
+      const virtualizer = latestVirtualizer.current;
+      const commit = () => {
+        setScrollMargin(now.margin);
+        for (const { index, size } of sizes) if (Number.isInteger(index)) virtualizer?.resizeItem(index, size);
+      };
+      // P2-POSTERS-5: a commit that starts or stops the page scrolling shows or hides a classic
+      // scrollbar (Windows, Linux), which narrows or widens every row and the tabs above them
+      // inside this callback: the browser holds those reports back and raises a loop error. That
+      // one renders as the next task instead, as react-virtual rendered a row's later size
+      // changes, and its rows show one frame at their old sizes.
+      if (virtualizer && !changesOverflow(scrollRef.current, el, virtualizer, sizes)) {
+        seen.flushing = true;
+        try {
+          flushSync(commit);
+        } finally {
+          seen.flushing = false;
+        }
+      } else commit();
       // A new width lays the rows out again, which this callback must not commit (the rows' new
       // sizes would be a loop error); it renders as the next task, as it did before.
       if (now.width > 0) setWidth(now.width);

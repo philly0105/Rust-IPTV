@@ -3,7 +3,8 @@
  * width they read before having any, hand their posters the column width, and measure their rows
  * in an observer's callback, after the browser's layout, instead of each poster and row reading
  * its box as it mounts. P2-POSTERS-2: the detail pages' episode, Up next and other-source
- * thumbnails load at the width their boxes are given.
+ * thumbnails load at the width their boxes are given. P2-POSTERS-5: a row commit that would start
+ * or stop the page scrolling waits for the next task.
  */
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -177,6 +178,25 @@ describe('P2-POSTERS-1: search tab grids', { timeout: 20_000 }, () => {
     expect(added.filter((row) => ro.targets.has(row))).toEqual([]);
     await new Promise((resolve) => requestAnimationFrame(resolve));
     expect(added.filter((row) => !ro.targets.has(row))).toEqual([]);
+  });
+
+  it('commits rows that would start the page scrolling as the next task, so its scrollbar resizes nothing inside the callback', async () => {
+    const grid = await openMovies();
+    const rows = rowsOf(grid);
+    // A 720 px scroller whose page ends 20 px short of its bottom: it does not scroll.
+    const scroller = screen.getByTestId('vod-search');
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, get: () => 720 });
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 720 });
+    scroller.lastElementChild!.getBoundingClientRect = () => new DOMRect(0, 0, 960, 700);
+    actEnvironment(false);
+    // About 10 px shorter: the page still fits, and the new offsets are in the DOM when the callback returns.
+    report(new Map([[rows[0]!, 339]]));
+    expect(offsetOf(rows[1]!)).toBe(339);
+    // 40 px taller: the page would scroll, and a classic scrollbar would narrow the rows and the tabs
+    // inside the callback (a ResizeObserver loop error). The rows move with the next render instead.
+    report(new Map([[rows[0]!, 379]]));
+    expect(offsetOf(rows[1]!)).toBe(339);
+    await waitFor(() => expect(offsetOf(rows[1]!)).toBe(379));
   });
 });
 

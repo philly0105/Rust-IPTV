@@ -1,6 +1,8 @@
 import { useQueries } from '@tanstack/react-query';
+import type { Virtualizer } from '@tanstack/react-virtual';
 import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, Tv, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router';
 
@@ -54,7 +56,7 @@ import {
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, Page, Poster, SectionHeader, Skeleton, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, Page, Poster, PosterCellWidthContext, SectionHeader, Skeleton, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -757,10 +759,10 @@ const ProgrammeList = memo(function ProgrammeList({
 
 const CHANNEL_MIN_WIDTH = 260;
 const CHANNEL_GAP = 8;
-/** One channel button: 48px logo plus padding and border. Rows are measured after render; this is the estimate. */
+/** One channel button: 48px logo plus padding and border. Rows are measured after layout; this is the estimate. */
 const CHANNEL_ROW_HEIGHT = 66;
 const POSTER_GAP = 16;
-/** Title (two lines) and meta line under a poster; rows are measured after render. */
+/** Title (two lines) and meta line under a poster; rows are measured after layout. */
 const POSTER_CAPTION_HEIGHT = 64;
 
 /**
@@ -769,6 +771,17 @@ const POSTER_CAPTION_HEIGHT = 64;
  * Arrow keys still move by cell and row (`handleGridKeyDown` scrolls the page
  * when the target row is not mounted yet); ArrowUp on the first row returns
  * to the search field, where ArrowDown came in.
+ *
+ * P2-POSTERS-1: nothing reads layout while cells mount. The grid reads its
+ * width and offset once, in a layout effect before it has cells (a page
+ * layout without them), and mounts its cells at that width, so a poster grid
+ * hands its posters the column width instead of each reading its frame. Rows
+ * are measured by an observer of the grid's own, after the browser's layout,
+ * where each new row read its offsetHeight as it mounted (react-virtual's
+ * measureElement), a forced layout per row between the posters' DOM writes,
+ * and the offset was read after every render. A changed row height commits in
+ * the observer's callback (flushSync), before paint, so rows never show a
+ * frame at their estimate.
  */
 function HitGrid({
   hits,
@@ -778,6 +791,7 @@ function HitGrid({
   renderCell,
   scrollRef,
   testId,
+  postersFillCells,
 }: {
   hits: SearchHit[];
   minWidth: number;
@@ -787,32 +801,75 @@ function HitGrid({
   renderCell: (hit: SearchHit, index: number, cellWidth: number) => ReactNode;
   scrollRef: RefObject<HTMLDivElement | null>;
   testId: string;
+  /** Each cell's poster is as wide as the cell (poster cards): it loads at the column width (P2-POSTERS-1). */
+  postersFillCells?: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
   const [scrollMargin, setScrollMargin] = useState(0);
+  // The cells mount once the grid has read its own width, not at the 960 px guess: a poster keeps
+  // the column width it mounted with (P2-POSTERS-1).
+  const [measured, setMeasured] = useState(false);
+  /**
+   * The rows' observer. A row mounted while its callback commits is observed from the next frame:
+   * observed in the callback, at the depth of the rows it just reported, the browser would hold
+   * its first report back and raise a ResizeObserver loop error.
+   */
+  const rowsSeen = useRef<{ ro: ResizeObserver | null; flushing: boolean; late: Element[] }>({ ro: null, flushing: false, late: [] });
 
+  const latestVirtualizer = useRef<Virtualizer<HTMLDivElement, Element> | null>(null);
+
+  // Before the virtualizer's own observer is made, so this one's callback runs first in a frame,
+  // while the layout is still the browser's own.
   useLayoutEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    const measure = () => {
-      if (el.clientWidth > 0) setWidth(el.clientWidth);
+    // The offset of the grid inside the page scroller: the tabs, facets and notices above it can
+    // change height. Only the range of mounted rows depends on it, not where a row is drawn.
+    const read = () => {
+      const scroller = scrollRef.current;
+      const margin = scroller ? Math.round(el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop) : 0;
+      return { width: el.clientWidth, margin };
     };
-    measure();
+    const first = read();
+    if (first.width > 0) setWidth(first.width);
+    setScrollMargin(first.margin);
+    setMeasured(true);
     if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    const seen = rowsSeen.current;
+    const ro = new ResizeObserver((entries) => {
+      // After the browser's layout: these reads force none. A row's width is the grid's, so a
+      // resize reports the rows too.
+      const now = read();
+      const sizes = entries.map((entry) => ({
+        index: Number((entry.target as HTMLElement).dataset['index']),
+        size: Math.round(entry.borderBoxSize?.[0]?.blockSize ?? (entry.target as HTMLElement).offsetHeight),
+      }));
+      seen.flushing = true;
+      try {
+        flushSync(() => {
+          setScrollMargin(now.margin);
+          for (const { index, size } of sizes) if (Number.isInteger(index)) latestVirtualizer.current?.resizeItem(index, size);
+        });
+      } finally {
+        seen.flushing = false;
+      }
+      // A new width lays the rows out again, which this callback must not commit (the rows' new
+      // sizes would be a loop error); it renders as the next task, as it did before.
+      if (now.width > 0) setWidth(now.width);
+      if (seen.late.length > 0) {
+        const late = seen.late.splice(0);
+        requestAnimationFrame(() => {
+          for (const row of late) if (row.isConnected) seen.ro?.observe(row);
+        });
+      }
+    });
+    seen.ro = ro;
+    return () => {
+      ro.disconnect();
+      seen.ro = null;
+    };
   }, []);
-
-  // Offset of the grid inside the page scroller; the tabs, facets and notices above it can change height between renders.
-  useLayoutEffect(() => {
-    const el = listRef.current;
-    const scroller = scrollRef.current;
-    if (!el || !scroller) return;
-    const margin = Math.round(el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
-    if (margin !== scrollMargin) setScrollMargin(margin);
-  });
 
   const { columns, cellWidth } = gridLayout(width, minWidth, gap);
   const rowCount = Math.ceil(hits.length / columns);
@@ -824,10 +881,24 @@ function HitGrid({
     scrollMargin,
     initialRect: { width: 960, height: 720 },
   });
+  latestVirtualizer.current = virtualizer;
+
+  const observeRow = useCallback((row: HTMLDivElement | null) => {
+    const seen = rowsSeen.current;
+    if (!row || !seen.ro) return;
+    if (seen.flushing) seen.late.push(row);
+    else seen.ro.observe(row);
+    return () => seen.ro?.unobserve(row);
+  }, []);
 
   useEffect(() => {
     virtualizer.measure();
   }, [columns, cellWidth, virtualizer]);
+
+  // Rounded as the frame's clientWidth is, in a box with one identity: posters read it as their
+  // pictures mount, so a new width re-renders none of them (P2-POSTERS-1, as P2-GRID-1).
+  const posterWidth = useRef(0);
+  posterWidth.current = Math.round(cellWidth);
 
   return (
     <div
@@ -850,37 +921,39 @@ function HitGrid({
         handleGridKeyDown(e, { count: hits.length });
       }}
     >
-      {virtualizer.getVirtualItems().map((row) => {
-        const first = row.index * columns;
-        return (
-          <div
-            key={row.key}
-            role="presentation"
-            data-index={row.index}
-            ref={virtualizer.measureElement}
-            className="grid"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              columnGap: gap,
-              paddingBottom: gap,
-              transform: `translateY(${row.start - scrollMargin}px)`,
-              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-            }}
-          >
-            {hits.slice(first, first + columns).map((h, j) => {
-              const i = first + j;
-              return (
-                <div key={h.key} role="listitem" aria-posinset={i + 1} aria-setsize={hits.length} className="min-w-0">
-                  {renderCell(h, i, cellWidth)}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
+      <PosterCellWidthContext.Provider value={postersFillCells ? posterWidth : undefined}>
+        {(measured ? virtualizer.getVirtualItems() : []).map((row) => {
+          const first = row.index * columns;
+          return (
+            <div
+              key={row.key}
+              role="presentation"
+              data-index={row.index}
+              ref={observeRow}
+              className="grid"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                columnGap: gap,
+                paddingBottom: gap,
+                transform: `translateY(${row.start - scrollMargin}px)`,
+                gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+              }}
+            >
+              {hits.slice(first, first + columns).map((h, j) => {
+                const i = first + j;
+                return (
+                  <div key={h.key} role="listitem" aria-posinset={i + 1} aria-setsize={hits.length} className="min-w-0">
+                    {renderCell(h, i, cellWidth)}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </PosterCellWidthContext.Provider>
     </div>
   );
 }
@@ -930,6 +1003,7 @@ const PosterGrid = memo(function PosterGrid({
         rowHeight={(w) => w * 1.5 + POSTER_CAPTION_HEIGHT}
         scrollRef={scrollRef}
         testId={`vod-search-${kind}`}
+        postersFillCells
         renderCell={(h, i, cellWidth) => {
           const item = h.item as VodItem | SeriesItem;
           return (

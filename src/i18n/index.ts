@@ -14,6 +14,8 @@
  * until `settings.get` answers. `languageUnresolved()` reports that window;
  * the shell shows a text-free skeleton until the first `applyLanguage`
  * resolves, so a German user never sees an English first frame either.
+ * Settings that name the language already on screen (`languageActive`,
+ * English on a fresh profile) end the wait at once (P2-BOOT-1).
  */
 
 import i18next, { type Resource } from 'i18next';

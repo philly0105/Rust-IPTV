@@ -262,6 +262,12 @@ function tint(title: string): string {
   return `radial-gradient(120% 140% at 85% 10%, hsl(${hue} 45% 34%), transparent 60%), linear-gradient(150deg, hsl(${(hue + 40) % 360} 40% 16%), hsl(${hue} 30% 8%))`;
 }
 
+interface BackdropProps {
+  slide: HeroSlide;
+  active: boolean;
+  title: string;
+}
+
 /**
  * One slide's backdrop. The incoming layer animates in on top (z-index 1);
  * the outgoing one stays opaque underneath for the length of that fade and
@@ -271,14 +277,7 @@ function tint(title: string): string {
  * poster the same way, then the tint stays. A poster standing in for a
  * missing backdrop is drawn quarter-size, blurred and scaled up (C5), so it
  * reads as colour, not as a picture.
- */
-interface BackdropProps {
-  slide: HeroSlide;
-  active: boolean;
-  title: string;
-}
-
-/**
+ *
  * Only a slide that reads its catalog item mounts the query for it (P2-HOME-5): a new arrival
  * carries its own artwork, and a disabled query still built and cached a query per slide.
  */

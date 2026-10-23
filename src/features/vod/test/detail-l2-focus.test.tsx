@@ -1,8 +1,9 @@
 // Loop 2 VOD detail: a title opened from a grid (a PUSH) puts focus on Play, or on the title when
 // nothing plays (L2-vod-9); Back (POP) and focus the user moved are left alone. The episode list
-// holds only the selected season's rows (L2-vod-10).
+// holds only the selected season's rows (L2-vod-10). The focus waits for the browser's layout (a
+// ResizeObserver callback, P2-RAILS-6); `layOut()` stands in for that layout here.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +14,7 @@ import { useToastStore } from '@/ui';
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
-import { i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { fakeResizeObservers, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -53,8 +54,10 @@ const seriesDetail: SeriesDetail = {
 };
 const movieDetail: VodDetail = { item: { ref: mref, title: 'Dune: Part Two', categoryId: 'c1' }, cast: [], backdrops: [], providerDetailsUnavailable: false };
 
+let observers: ReturnType<typeof fakeResizeObservers>;
 beforeAll(installDomStubs);
 beforeEach(() => {
+  observers = fakeResizeObservers();
   forgetSpots();
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
@@ -75,7 +78,17 @@ beforeEach(() => {
   useToastStore.setState({ toasts: [] });
   localStorage.clear();
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  observers.restore();
+});
+
+/** Waits until `el` has focus, laying the page out on each try (the focus waits for layout). */
+const focusLands = (el: Element) =>
+  waitFor(() => {
+    observers.layOut();
+    expect(document.activeElement).toBe(el);
+  });
 
 /** A grid stand-in with a link into the detail page: clicking it is a PUSH, as opening a poster is. */
 function openFrom(to: string, outside?: boolean) {
@@ -101,7 +114,7 @@ describe('Focus on open (L2-vod-9)', () => {
   it('a movie opened from the grid focuses Play, which names the title', async () => {
     openFrom('/s/src1/movie/m7');
     const play = await screen.findByRole('button', { name: 'Play' });
-    await waitFor(() => expect(document.activeElement).toBe(play));
+    await focusLands(play);
     expect(play.getAttribute('aria-describedby')).toBe('vod-detail-title');
     expect(document.getElementById('vod-detail-title')?.textContent).toBe('Dune: Part Two');
   });
@@ -109,7 +122,7 @@ describe('Focus on open (L2-vod-9)', () => {
   it('a series opened from the grid focuses Play on its first episode', async () => {
     openFrom('/s/src1/series/s1');
     const play = await screen.findByRole('button', { name: 'Play S01E01' });
-    await waitFor(() => expect(document.activeElement).toBe(play));
+    await focusLands(play);
     expect(screen.getByRole('heading', { level: 1, name: 'Severance' }).getAttribute('tabindex')).toBe('-1');
   });
 
@@ -117,13 +130,14 @@ describe('Focus on open (L2-vod-9)', () => {
     rpcMock.handlers['xtream.seriesDetail'] = () => ({ ...seriesDetail, seasons: [] });
     openFrom('/s/src1/series/s1');
     const title = await screen.findByRole('heading', { level: 1, name: 'Severance' });
-    await waitFor(() => expect(document.activeElement).toBe(title));
+    await focusLands(title);
   });
 
   it('Back or a cold start (POP) leaves focus alone', async () => {
     renderAt('/s/src1/movie/m7', [{ path: '/s/:sourceId/movie/:itemId', element: <MovieDetailPage /> }]);
     await screen.findByRole('button', { name: 'Play' });
     await new Promise((r) => setTimeout(r, 20));
+    act(() => observers.layOut());
     expect(document.activeElement).toBe(document.body);
   });
 
@@ -133,23 +147,35 @@ describe('Focus on open (L2-vod-9)', () => {
     outside.focus();
     await screen.findByRole('button', { name: 'Play' });
     await new Promise((r) => setTimeout(r, 20));
+    act(() => observers.layOut());
     expect(document.activeElement).toBe(outside);
   });
 
   it('focuses once per visit: a later render does not pull focus back', async () => {
     openFrom('/s/src1/series/s1');
     const play = await screen.findByRole('button', { name: 'Play S01E01' });
-    await waitFor(() => expect(document.activeElement).toBe(play));
+    await focusLands(play);
     play.blur();
     fireEvent.click(screen.getByRole('tab', { name: /Season 2/ }));
     await screen.findByRole('button', { name: /Play S02E01/ });
+    act(() => observers.layOut());
     expect(document.activeElement).not.toBe(play);
+  });
+
+  it('focuses once the page is laid out, not in the commit that shows it (P2-RAILS-6)', async () => {
+    openFrom('/s/src1/movie/m7');
+    const play = await screen.findByRole('button', { name: 'Play' });
+    await new Promise((r) => setTimeout(r, 20));
+    // focus() in the commit forced the new page's style and layout before the browser's own.
+    expect(document.activeElement).toBe(document.body);
+    act(() => observers.layOut());
+    expect(document.activeElement).toBe(play);
   });
 
   it('the held Enter that opened the page does not press Play by auto-repeat', async () => {
     openFrom('/s/src1/movie/m7');
     const play = await screen.findByRole('button', { name: 'Play' });
-    await waitFor(() => expect(document.activeElement).toBe(play));
+    await focusLands(play);
     // Auto-repeat of the key still held is dropped...
     expect(fireEvent.keyDown(play, { key: 'Enter', repeat: true })).toBe(false);
     // ...and once it is released, Enter works as usual.

@@ -178,6 +178,13 @@ export default defineConfig(({ command }) => ({
   },
   clearScreen: false,
   envPrefix: ['VITE_', 'TAURI_ENV_'],
+  // P2-BOOT-2: each JSON module (the locale strings; nothing else in the app is JSON) becomes one
+  // `JSON.parse("…")`. Vite's default gave every key its own `export const` and every file an
+  // object literal over them, so `locale-en`, which every boot loads before the first render, was
+  // 3,140 statements for V8 to compile: 217,950 bytes and 18.8 ms to load in a fresh Node 24,
+  // against 150,775 bytes and 6.6 ms now. Every import of the strings takes the default export
+  // (`src/i18n/index.ts`, the `locale-<lang>` index files).
+  json: { namedExports: false, stringify: true },
   server: {
     port: 5173,
     strictPort: true,

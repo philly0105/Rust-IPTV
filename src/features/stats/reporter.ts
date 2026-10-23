@@ -8,7 +8,7 @@
  * and multi-view tiles (not in the store) are not counted.
  *
  * Time is taken from the clock, not from counting ticks: each accounting step
- * (a 1 s tick, a store change, a visibility change) adds the wall time since
+ * (a 1 s tick, a play state change, a visibility change) adds the wall time since
  * the previous one. A gap longer than timers can explain is a sleep or
  * suspend and adds only `MAX_TICK_MS`, so a laptop that sleeps mid-film adds
  * 2 s, not the night. On a visible page that bound is `MAX_TICK_MS`; on a
@@ -155,7 +155,11 @@ export function startWatchStatsReporter(): () => void {
     timer = null;
   };
 
-  const sync = (state: PlayerState) => {
+  const sync = (state: PlayerState, prev?: PlayerState) => {
+    // Playback progress changes the store several times a second. What counts here (the item, the
+    // mode, playing or not) stays as it was, and the clock keeps the time without a step for each
+    // change; building the session again on each one was most of the reporter's cost (P2-PLAYER-6).
+    if (prev && state.source === prev.source && state.mode === prev.mode && state.status === prev.status) return;
     // Charge the time since the last step to what was counting until now.
     account();
     const next = sessionOf(state);

@@ -115,6 +115,26 @@ describe('watch stats reporter', () => {
     expect(records().map((r) => r.seconds)).toEqual([30, 5]);
   });
 
+  it('leaves the session alone while only the position moves, and counts the time all the same (P2-PLAYER-6)', () => {
+    stop = startWatchStatsReporter();
+    let reads = 0;
+    const film = source(FILM, 'Black Harbor');
+    Object.defineProperty(film, 'title', {
+      get: () => {
+        reads++;
+        return 'Black Harbor';
+      },
+    });
+    play(film);
+    const before = reads;
+    for (let i = 1; i <= FLUSH_MS / 250; i++) {
+      wait(250);
+      set({ positionSeconds: i / 4 });
+    }
+    expect(reads).toBe(before);
+    expect(records()).toEqual([{ ref: FILM, title: 'Black Harbor', seconds: 30, day: '2026-10-14' }]);
+  });
+
   it('never counts an external player', () => {
     stop = startWatchStatsReporter();
     play(source(FILM, 'Black Harbor'), 'external');

@@ -132,6 +132,8 @@ export function holdZapBanner(on: boolean, gen: number = holdGen): number {
 
 // Every live channel change brings it up; leaving live TV (or the player) takes it down.
 usePlayerStore.subscribe((s, prev) => {
+  // Playback progress keeps the source: no keys to compare (P2-PLAYER-6).
+  if (s.source === prev.source && s.mode === prev.mode) return;
   const key = s.source?.ref && s.source.isLive ? itemKey(s.source.ref) : null;
   const before = prev.source?.ref && prev.source.isLive ? itemKey(prev.source.ref) : null;
   if (key === before && s.mode === prev.mode) return;

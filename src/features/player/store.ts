@@ -954,7 +954,11 @@ function waitingOnMedia(s: Pick<PlayerState, 'status' | 'mode'>, key: string): b
   return s.status === 'paused' && startedFor !== key && userPausedFor !== key;
 }
 
-usePlayerStore.subscribe((s) => {
+usePlayerStore.subscribe((s, prev) => {
+  // A progress report (several a second) moves the position or the length of the same media in the
+  // same status: nothing here changes with it, so its key is not built again (P2-PLAYER-6).
+  const progress = s.positionSeconds !== prev.positionSeconds || s.durationSeconds !== prev.durationSeconds;
+  if (progress && s.source === prev.source && s.status === prev.status && s.mode === prev.mode) return;
   const key = watchKey(s.source);
   if (s.status === 'playing' && key) startedFor = key;
   if (userPausedFor && userPausedFor !== key) userPausedFor = undefined;

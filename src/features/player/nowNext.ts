@@ -286,7 +286,10 @@ export function bindLiveProgramme(): () => void {
     timer = key ? setInterval(() => void check(), LIVE_PROGRAMME_CHECK_MS) : null;
   };
   follow();
-  const unsub = usePlayerStore.subscribe(follow);
+  // Only another source can be another channel: playback progress does not build its key again (P2-PLAYER-6).
+  const unsub = usePlayerStore.subscribe((s, prev) => {
+    if (s.source !== prev.source) follow();
+  });
   return () => {
     unsub();
     if (timer) clearInterval(timer);

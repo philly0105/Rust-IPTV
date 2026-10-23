@@ -1,4 +1,5 @@
 import { act, cleanup, render } from '@testing-library/react';
+import type { ReactVirtualizer } from '@tanstack/react-virtual';
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -64,9 +65,18 @@ function spyOnLayout() {
 
 const ROW = 48;
 
-function List({ initialRect, initialOffset }: { initialRect?: { width: number; height: number }; initialOffset?: number }) {
+function List({
+  initialRect,
+  initialOffset,
+  grab,
+}: {
+  initialRect?: { width: number; height: number };
+  initialOffset?: number;
+  grab?: (v: ReactVirtualizer<HTMLDivElement, Element>) => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const v = useListVirtualizer({ count: 1000, getScrollElement: () => ref.current, estimateSize: () => ROW, overscan: 2, initialRect, initialOffset });
+  grab?.(v);
   return (
     <div ref={ref} data-testid="scroller" style={{ height: 300, overflow: 'auto' }}>
       <div style={{ height: v.getTotalSize(), position: 'relative' }}>
@@ -126,5 +136,17 @@ describe('useListVirtualizer mounting', () => {
     const view = render(<List initialOffset={480} />);
     expect(scrolls).toEqual([480]);
     expect(Math.min(...rows(view.container))).toBe(8);
+  });
+
+  it('aligns a scroll asked for before the first ResizeObserver callback against the scroller (P2-LIVE-5)', () => {
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
+    vi.spyOn(Element.prototype, 'clientHeight', 'get').mockReturnValue(300);
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(1000 * ROW);
+    let v: ReactVirtualizer<HTMLDivElement, Element> | undefined;
+    render(<List grab={(x) => (v = x)} />);
+    act(() => v!.scrollToIndex(20));
+    // Row 20's bottom on the 300 px scroller's bottom edge. Against the 768 px window that stands
+    // in until the callback, it scrolled to 240 and left the row under the edge.
+    expect(scrolls[scrolls.length - 1]).toBe(21 * ROW - 300);
   });
 });

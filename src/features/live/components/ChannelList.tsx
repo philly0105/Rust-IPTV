@@ -116,7 +116,9 @@ export function ChannelList(props: ChannelListProps) {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 10,
-    initialRect: { width: 360, height: props.initialHeight ?? 800 },
+    // Without a hint, the window's size (P2-LIVE-1): the list's own comes after the first layout,
+    // and an 800 px guess rendered the rows again before a taller window's first paint.
+    initialRect: props.initialHeight === undefined ? undefined : { width: 360, height: props.initialHeight },
     // First paint already shows the remembered rows: no flash of the top of the list.
     initialOffset: () => listMemory.get(resetKey)?.scrollTop ?? 0,
   });

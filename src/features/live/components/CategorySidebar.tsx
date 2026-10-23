@@ -92,7 +92,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 10,
-    initialRect: { width: 240, height: 600 },
+    // No initialRect: the window's size stands in until the sidebar's own comes in after the first
+    // layout (P2-LIVE-1). A 600 px guess rendered the groups again before a tall window's first paint.
     initialOffset: initialTop,
   });
   // A new scale or density: drop the cached row sizes so every row takes the new height.

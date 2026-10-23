@@ -12,9 +12,29 @@ export type ProgramWhen = 'past' | 'now' | 'future';
 /** XMLTV's compact form: `20261012100000 +0545` (offset optional, UTC when missing). */
 const XMLTV_COMPACT = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*(?:([+-])(\d{2}):?(\d{2}))?$/;
 
+/**
+ * Times already read, by their text (P2-GUIDE-4): a guide row reads each programme's start and
+ * end many times per render (sorting, layout, past/now/future, catch-up, its label), and a fling
+ * renders hundreds of rows. Only UTC texts ("...Z", as the core and toISOString write them): a
+ * text without a zone is local time, which can change while the app runs.
+ */
+const parsedTimes = new Map<string, number>();
+const PARSED_TIMES_MAX = 4096;
+
 /** Epoch ms of a programme time; 0 when it cannot be read (see `isValidProgram`). */
 export function ms(iso: string | null | undefined): number {
   if (!iso) return 0;
+  if (!iso.endsWith('Z')) return parseTime(iso);
+  let t = parsedTimes.get(iso);
+  if (t === undefined) {
+    t = parseTime(iso);
+    if (parsedTimes.size >= PARSED_TIMES_MAX) parsedTimes.clear();
+    parsedTimes.set(iso, t);
+  }
+  return t;
+}
+
+function parseTime(iso: string): number {
   const t = Date.parse(iso);
   if (!Number.isNaN(t)) return t;
   const m = XMLTV_COMPACT.exec(iso.trim());
@@ -232,12 +252,31 @@ export function formatClockBare(t: number, locale?: string): string {
 }
 
 /**
+ * Ranges already formatted, by locale, start and end (P2-GUIDE-4): every guide cell names its
+ * range, a guide's programmes share a few dozen times, and formatting one takes two
+ * formatToParts and two format calls. Keyed like the formatters, which keep the zone they were
+ * made in.
+ */
+const ranges = new Map<string, string>();
+const RANGES_MAX = 2000;
+
+/**
  * "8:00 – 8:30 PM": a time range that names a shared AM/PM once, on the side the locale puts
  * it ("오후 8:00 – 8:30" in Korean). Hours keep the locale's form; 24-hour locales read "08:00 – 08:30".
  * Intl's own formatRange is not used: it switches some locales to longer forms ("8時00分～").
  */
 export function formatTimeRange(start: number, end: number, locale?: string): string {
-  const f = clockFormatter(locale);
+  const key = `${locale ?? ''}|${start}|${end}`;
+  let out = ranges.get(key);
+  if (out === undefined) {
+    out = timeRange(clockFormatter(locale), start, end);
+    if (ranges.size >= RANGES_MAX) ranges.clear();
+    ranges.set(key, out);
+  }
+  return out;
+}
+
+function timeRange(f: Intl.DateTimeFormat, start: number, end: number): string {
   const a = f.formatToParts(start);
   const b = f.formatToParts(end);
   const pa = a.find((p) => p.type === 'dayPeriod')?.value;

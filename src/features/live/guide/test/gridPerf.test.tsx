@@ -259,6 +259,7 @@ describe('clock ticks (LV-8)', () => {
       playing: false,
       genreFilter: null,
       genreNames: { movie: 'Movies', sports: 'Sports', news: 'News', kids: 'Kids', series: 'Series & shows' },
+      labels: { onNow: 'On now', archive: 'Archive', playingNow: 'Playing now', noGuideShort: 'No guide', playChannel: (name) => `Play ${name}` },
       cursorStart: null,
       lang: 'en',
       stripCountryPrefix: false,

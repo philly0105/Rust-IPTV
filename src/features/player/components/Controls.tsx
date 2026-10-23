@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -1272,7 +1273,12 @@ function jump(seconds: number): void {
   usePlayerStore.getState().seekBy(seconds);
 }
 
-export function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle }: ControlsProps) {
+/**
+ * The control bar. Memoized: it follows the stores itself, and the surface around it re-renders for
+ * what the bar does not show (the pointer resting on it, the chrome's idle timer, a stall), which
+ * re-rendered every button, tooltip and icon with it (P2-PLAYER-3).
+ */
+export const Controls = memo(function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle }: ControlsProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
@@ -1721,4 +1727,4 @@ export function Controls({ variant, visible, compact, short, onMenuOpenChange, r
       </div>
     </ChromeScaleContext.Provider>
   );
-}
+});

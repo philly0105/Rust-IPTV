@@ -6,6 +6,7 @@ import { Link, useParams } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import { itemKey, type SeriesItem, type TmdbBrief, type VodItem } from '@/api/types';
 import { useHeaderTitleAnchor } from '@/shell/store';
+import { useMediaQuery } from '@/shell/useMediaQuery';
 
 import { myListTarget, PosterCard } from '../components/PosterCard';
 import { PosterRail } from '../components/PosterRail';
@@ -17,7 +18,7 @@ import { useCatalogMatches } from '../hooks/useCatalogMatches';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { detailHref } from '../lib/search';
-import { EmptyState, Page, Poster, Skeleton, TEXT_LINK, buttonClass, cn } from '@/ui';
+import { EmptyState, Page, Poster, Skeleton, TEXT_LINK, buttonClass, cn, useScaledPx } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 const BIO_CLAMP = 600;
@@ -34,6 +35,12 @@ const NO_BRIEFS: TmdbBrief[] = [];
  * TMDB person: portrait, facts, biography, and a "Known for" rail of the person's titles that this
  * source has, each opening its own detail page (VL-tmdb-deadend).
  */
+/** The portrait's box, `w-40 sm:w-52`: spacing steps of 3.75 px at 100 % scale. */
+const PORTRAIT_PX = 150;
+const PORTRAIT_SM_PX = 195;
+/** Tailwind's `sm` breakpoint. */
+const SM_QUERY = '(min-width: 40rem)';
+
 export function ActorPage() {
   const { t, i18n } = useTranslation('vod');
   const { sourceId = '', personId = '' } = useParams();
@@ -42,6 +49,8 @@ export function ActorPage() {
   const valid = Number.isInteger(id) && id > 0;
   const person = useRpcQuery('tmdb.person', { personId: id }, { enabled: settings.tmdb.enabled && valid, staleTime: Infinity });
   const [expanded, setExpanded] = useState(false);
+  // P2-POSTERS-4: the portrait's width is known (w-40, sm:w-52), so it does not read its frame as it mounts.
+  const portraitWidth = useScaledPx(useMediaQuery(SM_QUERY) ? PORTRAIT_SM_PX : PORTRAIT_PX, true);
 
   // Mirrors the branch below that renders the visible h1 (the person's name).
   const loaded = settings.tmdb.enabled && valid && !person.isError && !!person.data;
@@ -102,7 +111,7 @@ export function ActorPage() {
       <>
         <section aria-labelledby="vod-actor-name" className="flex flex-col gap-6 sm:flex-row sm:items-start">
           <div className="w-40 shrink-0 overflow-hidden rounded-lg shadow-2 ring-1 ring-edge sm:w-52">
-            <Poster src={p.profileUrl} alt={p.name} aspect="poster" eager />
+            <Poster src={p.profileUrl} width={portraitWidth} alt={p.name} aspect="poster" eager />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
             <h1 ref={nameRef} id="vod-actor-name" className="text-display text-fg">

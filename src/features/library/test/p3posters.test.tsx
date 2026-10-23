@@ -2,7 +2,7 @@
  * P2-POSTERS-2: download and favorites/recent rows load their artwork at the width their boxes
  * are given, instead of each picture reading its frame as it mounts (a forced layout per row).
  * P2-POSTERS-3: the card grid (My videos, My List) mounts its cards at the width it read before
- * having any, and hands their posters the column width.
+ * having any, and hands their posters the column width. P2-POSTERS-4: so does the continue rail.
  */
 
 import { cleanup, render, screen } from '@testing-library/react';
@@ -12,6 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { ItemRef } from '@/api/types';
 import { Poster } from '@/ui/Poster';
 
+import { ContinueRail } from '../components/ContinueRail';
 import { DownloadRow } from '../components/DownloadRow';
 import { EntryRow } from '../components/EntryRow';
 import { VirtualCardGrid } from '../components/VirtualCardGrid';
@@ -137,6 +138,32 @@ describe('P2-POSTERS-3: the card grid', () => {
     expect(screen.getByRole('list').querySelectorAll('[role="listitem"]').length).toBeGreaterThan(0);
     const widths = widthsIn(container);
     expect(widths).toEqual(widths.map(() => '192'));
+    expect(pictureReads).toEqual([]);
+  });
+});
+
+describe('P2-POSTERS-4: the continue rail', () => {
+  it("loads its posters at the cards' 10rem width without reading them", () => {
+    const { container } = render(
+      <I18nextProvider i18n={i18n}>
+        <ContinueRail
+          positions={[
+            {
+              ref: { sourceId: 's1', contentType: 'movie', itemId: 'm1' },
+              positionSeconds: 600,
+              durationSeconds: 6000,
+              updatedAt: '2026-10-01T00:00:00Z',
+              watched: false,
+              snapshot: { title: 'Heat', contentType: 'movie', posterUrl: POSTER },
+            },
+          ]}
+          onOpen={() => undefined}
+          onRemove={() => undefined}
+        />
+      </I18nextProvider>,
+    );
+    // 150 px at 100 % (no matchMedia here, so the wide layout): the 192 px copy.
+    expect(widthOf(container)).toBe('192');
     expect(pictureReads).toEqual([]);
   });
 });

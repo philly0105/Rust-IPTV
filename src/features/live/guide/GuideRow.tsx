@@ -11,7 +11,6 @@
 
 import { AudioLines, History } from 'lucide-react';
 import { memo, useLayoutEffect, useRef, type MouseEvent } from 'react';
-import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 import { cn, Skeleton } from '@/ui';
@@ -43,14 +42,29 @@ const fitted = new WeakMap<HTMLElement, number | undefined>();
  * never a layout shift, L3-perf-ui-4). A cell that began before the visible edge only gets a
  * narrower text box here, so a long title ends in an ellipsis inside the cell instead of starting
  * under the column. Writes only the cells whose width changes; reads nothing from layout.
+ * A cell it never capped has no cap to clear: a new row's cells away from the edge are not
+ * written at all (P2-GUIDE-5).
  */
 export function fitCellText(root: ParentNode, scroll: number, shift = 0): void {
   for (const el of root.querySelectorAll<HTMLElement>('[data-pad-left]')) {
-    const max = cellTextMaxPx(scroll, Number(el.dataset.padLeft) + shift, Number(el.dataset.padWidth));
-    if (fitted.has(el) && fitted.get(el) === max) continue;
+    const max = cellTextMaxPx(scroll, Number(el.getAttribute('data-pad-left')) + shift, Number(el.getAttribute('data-pad-width')));
+    if (fitted.get(el) === max) continue;
     fitted.set(el, max);
     el.style.maxWidth = max === undefined ? '' : `${max}px`;
   }
+}
+
+/**
+ * A row's words in the UI language, one stable object from the page (P2-GUIDE-5): a translation
+ * hook per row built react-i18next's wrapper on every row's mount and read its state again on
+ * every render, and a fling mounts hundreds of rows.
+ */
+export interface GuideRowLabels {
+  onNow: string;
+  archive: string;
+  playingNow: string;
+  noGuideShort: string;
+  playChannel(name: string): string;
 }
 
 /** What a row does with its cells; one stable object for every row. */
@@ -94,6 +108,7 @@ export interface GuideRowProps {
   genreFilter: Genre | null;
   /** Each genre's name in the UI language: a cell's accessible name ends with its genre. */
   genreNames: Record<Genre, string>;
+  labels: GuideRowLabels;
   /**
    * The keyboard cursor, when it is on this row: the start of the programme it is on, or '' when
    * it is on none (the channel cell takes it). null when the cursor is on another row.
@@ -123,20 +138,20 @@ export const GuideRow = memo(function GuideRow({
   playing,
   genreFilter,
   genreNames,
+  labels,
   cursorStart,
   lang,
   stripCountryPrefix,
   schedule,
   handlers,
 }: GuideRowProps) {
-  const { t } = useTranslation('live');
   const ref = useRef<HTMLDivElement>(null);
   // LG-04: touch has no right click; a long press on the channel cell opens the same menu.
   const longPress = useLongPress((x, y) => {
     if (ch) handlers.menu(ch, x, y);
   });
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
-  const onNow = t('onNow');
+  const { onNow } = labels;
   // Cells this render added get their text fitted before paint.
   useLayoutEffect(() => {
     if (ref.current) handlers.fitText(ref.current);
@@ -186,7 +201,7 @@ export const GuideRow = memo(function GuideRow({
             data-highlighted={highlighted ? '' : undefined}
             tabIndex={cursorStart !== null && (!programs || programs.length === 0) ? 0 : -1}
             onClick={() => handlers.play(ch)}
-            title={t('playChannel', { name: chName })}
+            title={labels.playChannel(chName)}
             aria-current={playing ? 'true' : undefined}
             data-playing={playing ? '' : undefined}
             data-compact={compact ? '' : undefined}
@@ -203,12 +218,12 @@ export const GuideRow = memo(function GuideRow({
                   <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                   {hasUsableArchive(ch, kind) ? (
                     <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
-                      <History size={10} aria-label={t('archive')} />
+                      <History size={10} aria-label={labels.archive} />
                     </span>
                   ) : null}
                 </span>
                 <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
-                <span className="sr-only">{playing ? `${chName}, ${t('playingNow')}` : chName}</span>
+                <span className="sr-only">{playing ? `${chName}, ${labels.playingNow}` : chName}</span>
               </>
             ) : (
               <>
@@ -219,14 +234,14 @@ export const GuideRow = memo(function GuideRow({
                   {/* Catch-up rides on the logo's corner, so the name keeps the column's width. */}
                   {hasUsableArchive(ch, kind) ? (
                     <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
-                      <History size={10} aria-label={t('archive')} />
+                      <History size={10} aria-label={labels.archive} />
                     </span>
                   ) : null}
                 </span>
                 <span className={cn('min-w-0 flex-1 truncate text-body-sm text-fg', playing && 'font-semibold')}>{chName}</span>
                 {playing ? (
                   <span className="inline-flex shrink-0 text-accent-mark" data-testid="guide-playing-mark">
-                    <AudioLines size={14} aria-label={t('playingNow')} />
+                    <AudioLines size={14} aria-label={labels.playingNow} />
                   </span>
                 ) : null}
               </>
@@ -257,7 +272,7 @@ export const GuideRow = memo(function GuideRow({
           <div data-testid="no-guide-band" className="absolute inset-y-1 inset-x-0.5 flex items-center rounded-md bg-surface-2 text-xs text-fg-subtle dark:bg-surface">
             {/* Sticks just past the channel column, so a grid scrolled to now still shows it. */}
             <span data-testid="no-guide-label" className="sticky px-3" style={{ insetInlineStart: channelCol }}>
-              {t('noGuideShort')}
+              {labels.noGuideShort}
             </span>
           </div>
         ) : (

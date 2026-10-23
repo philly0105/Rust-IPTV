@@ -97,7 +97,7 @@ import { JumpToDialog } from '../guide/JumpToDialog';
 import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
 import { isGuideHitState } from '../guide/programmeSearch';
-import { fitCellText, GRID_NOW_VAR, GRID_SHIFT_VAR, GuideRow, type GuideRowHandlers } from '../guide/GuideRow';
+import { fitCellText, GRID_NOW_VAR, GRID_SHIFT_VAR, GuideRow, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
 import { GENRES, genreColor, genreOf, storedGenreFilter, storeGenreFilter, type Genre } from '../guide/genre';
 import { GuidePreview, storedPreviewOpen, storePreviewOpen } from '../guide/GuidePreview';
 import { useStable } from '../guide/useStable';
@@ -521,6 +521,16 @@ export function EpgGridPage() {
   });
   // The cells name their genre (CB-GUIDE-GENRE), so a filtered guide reads as it looks.
   const genreNames = useMemo(() => Object.fromEntries(GENRES.map((g) => [g, tg(`genre_${g}`)])) as Record<Genre, string>, [tg]);
+  const rowLabels = useMemo<GuideRowLabels>(
+    () => ({
+      onNow: t('onNow'),
+      archive: t('archive'),
+      playingNow: t('playingNow'),
+      noGuideShort: t('noGuideShort'),
+      playChannel: (name) => t('playChannel', { name }),
+    }),
+    [t],
+  );
   // CB-GUIDE-PREVIEW: from md up, on a window tall enough to keep a useful grid under the band.
   // Until the user opens or hides it, it is open only from 1000 px tall: on a laptop's 900 it
   // cost the grid three or four rows.
@@ -1661,6 +1671,7 @@ export function EpgGridPage() {
                     playing={!!ch && playingKey === itemKey(ch.ref)}
                     genreFilter={genreFilter}
                     genreNames={genreNames}
+                    labels={rowLabels}
                     cursorStart={v.index === cursor.row ? cursorStart : null}
                     lang={lang}
                     stripCountryPrefix={prefs.stripCountryPrefix}

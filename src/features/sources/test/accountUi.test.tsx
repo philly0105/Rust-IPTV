@@ -212,4 +212,19 @@ describe('settings rows', () => {
     render(<SourceRefreshGroup settings={settings({ sourceRefreshIntervalHours: 72 })} update={vi.fn(async () => true)} />);
     expect((screen.getByTestId('select-sourceRefreshIntervalHours') as HTMLSelectElement).value).toBe('72');
   });
+
+  // P2-BOOT-4: the closed source dialogs format their refresh hint on every render.
+  it('builds one unit formatter per language and unit, not one per call', () => {
+    const Original = Intl.NumberFormat;
+    const days = new Original('fr', { style: 'unit', unit: 'day', unitDisplay: 'long' });
+    const built: unknown[] = [];
+    vi.spyOn(Intl, 'NumberFormat').mockImplementation(function (locales?: string | string[], options?: Intl.NumberFormatOptions) {
+      if (options?.style === 'unit') built.push([locales, options.unit]);
+      return new Original(locales, options);
+    } as unknown as typeof Intl.NumberFormat);
+    expect(formatUnit(3, 'day', 'fr')).toBe(days.format(3));
+    expect(formatUnit(3, 'day', 'fr')).toBe(days.format(3));
+    expect(formatUnit(12, 'day', 'fr')).toBe(days.format(12));
+    expect(built.length).toBeLessThanOrEqual(1);
+  });
 });

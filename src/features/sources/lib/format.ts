@@ -1,6 +1,6 @@
 /** Locale-aware number and relative-time helpers (no date-fns locale bundles needed). */
 
-import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
+import { dateTimeFormat, intlLocale, numberFormat, relativeTimeFormat } from '@/lib/intl';
 
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['year', 365 * 24 * 3600],
@@ -40,12 +40,16 @@ export function absoluteTime(iso: string | undefined, lang: string): string | un
   }
 }
 
-/** "12 hours", "7 days" in the UI language, without plural keys. */
+/**
+ * "12 hours", "7 days" in the UI language, without plural keys. Through the formatter cache
+ * (P2-BOOT-4): the Sources page's two source dialogs format the auto-refresh hint on every render
+ * while closed, and the refresh settings once per choice.
+ */
 export function formatUnit(value: number, unit: 'hour' | 'day', lang: string): string {
   try {
-    return new Intl.NumberFormat(intlLocale(lang), { style: 'unit', unit, unitDisplay: 'long' }).format(value);
+    return numberFormat(intlLocale(lang), { style: 'unit', unit, unitDisplay: 'long' }).format(value);
   } catch {
-    return new Intl.NumberFormat('en', { style: 'unit', unit, unitDisplay: 'long' }).format(value);
+    return numberFormat('en', { style: 'unit', unit, unitDisplay: 'long' }).format(value);
   }
 }
 

@@ -1028,6 +1028,31 @@ const CLOSED_LIVE: EngineError = { message: 'The live stream closed the connecti
 /** A restart that lands this close before its target plays on from there instead of seeking again. */
 const TS_LEFTOVER_MIN_S = 0.25;
 
+/** How often mpegts.js may check whether its SourceBuffers hold more than the cleanup window. */
+export const TS_CLEANUP_CHECK_MS = 1000;
+
+/**
+ * mpegts.js checks after every appended segment (a live stream without the stash appends 20 and
+ * more a second) whether the SourceBuffers hold more than `autoCleanupMaxBackwardDuration` behind
+ * the playhead, reading each buffer's `buffered` and the element's `currentTime` on the main thread
+ * every time. Once a second is enough for a 30-60 s window (5-10 s for a tile): the buffer runs a
+ * second over it at most (P2-PLAYER-5). The controller is internal to mpegts.js 1.8 (pinned and
+ * patched in package.json); a build without it keeps its own check.
+ */
+function throttleCleanupCheck(player: unknown): void {
+  type Controller = { _needCleanupSourceBuffer?: () => boolean };
+  const ctl = (player as { _player_engine?: { _mse_controller?: Controller | null } } | null)?._player_engine?._mse_controller;
+  const check = ctl?._needCleanupSourceBuffer;
+  if (!ctl || typeof check !== 'function') return;
+  let next = 0;
+  ctl._needCleanupSourceBuffer = () => {
+    const now = performance.now();
+    if (now < next) return false;
+    next = now + TS_CLEANUP_CHECK_MS;
+    return check.call(ctl);
+  };
+}
+
 /**
  * The proxy keeps the provider's connection for mpegts.js's next lazy-load resume (server.md):
  * a torn-down player tells it to let go, so a stop or an Open in MPV frees a one-connection account.
@@ -1193,6 +1218,7 @@ async function mpegtsEngine(
       if (player === p) loadComplete = true;
     });
     p.attachMediaElement(el);
+    throttleCleanupCheck(p);
     p.load();
   };
 

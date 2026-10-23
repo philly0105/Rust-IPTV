@@ -10,6 +10,9 @@ class FakeTsPlayer {
   attached: HTMLMediaElement | null = null;
   loaded = false;
   destroyed = false;
+  /** mpegts.js 1.8's own check after each appended segment: past the cleanup window or not. */
+  cleanupCheck = vi.fn(() => true);
+  _player_engine = { _mse_controller: { _needCleanupSourceBuffer: this.cleanupCheck } };
   constructor(
     public source: { type: string; isLive?: boolean; url?: string },
     public config: Record<string, unknown>,
@@ -131,7 +134,7 @@ vi.mock('shaka-player', () => ({
 }));
 
 const engines = await import('./engines');
-const { createEngine, looksLikeMpegTs, worthSniffingAsMpegTs, tsRestartDelay, TS_MAX_RESTARTS } = engines;
+const { createEngine, looksLikeMpegTs, worthSniffingAsMpegTs, tsRestartDelay, TS_MAX_RESTARTS, TS_CLEANUP_CHECK_MS } = engines;
 
 function src(url: string, extra: Partial<PlayerSource> = {}): PlayerSource {
   return { url, kind: 'direct', title: 't', isLive: true, isRadio: false, ...extra };
@@ -200,6 +203,22 @@ describe('engine selection', () => {
     expect(p.loaded).toBe(true);
     engine.destroy();
     expect(p.destroyed).toBe(true);
+  });
+
+  it('lets mpegts.js check its cleanup window once a second, not after every segment (P2-PLAYER-5)', async () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(10_000);
+    try {
+      await createEngine(video(), src('http://h/live/u/p/101.ts'), 'http://h/live/u/p/101.ts', cb(), { captions: false });
+      const p = FakeTsPlayer.created[0]!;
+      const check = (): boolean | undefined => p._player_engine._mse_controller._needCleanupSourceBuffer();
+      expect([check(), check(), check()]).toEqual([true, false, false]);
+      expect(p.cleanupCheck).toHaveBeenCalledTimes(1);
+      now.mockReturnValue(10_000 + TS_CLEANUP_CHECK_MS);
+      expect(check()).toBe(true);
+      expect(p.cleanupCheck).toHaveBeenCalledTimes(2);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('resolves a same-origin proxy url to an absolute one and keeps VOD read-ahead bounded', async () => {

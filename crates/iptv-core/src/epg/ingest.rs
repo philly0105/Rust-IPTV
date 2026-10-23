@@ -868,6 +868,74 @@ mod tests {
         assert_eq!(staged, 0);
     }
 
+    /// P2-EPGRS-1: a staging write that fails part-way ends the ingest with
+    /// its own error; the stored guide, its ETag and counts stay, and no
+    /// staging is left behind (rows under the key, nor the temp table).
+    #[test]
+    fn a_failed_staging_write_ends_the_ingest_with_its_error() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute("INSERT INTO epg_sources(url) VALUES ('u')", [])
+            .unwrap();
+        let prog = |i: usize| {
+            format!(
+                "<programme channel=\"c\" start=\"{}\" stop=\"{}\"><title>T{i}</title></programme>",
+                20_261_012_000_000u64 + i as u64 * 100,
+                20_261_012_000_000u64 + i as u64 * 100 + 1
+            )
+        };
+        let ingest = |conn: &mut rusqlite::Connection, xml: String, etag: &str| {
+            ingest_reader(
+                conn,
+                "u",
+                std::io::Cursor::new(xml.into_bytes()),
+                Window::unbounded(),
+                Some(etag),
+                &mut |_, _| {},
+            )
+        };
+        let good = format!(
+            "<tv><channel id=\"c\"><display-name>C</display-name></channel>{}</tv>",
+            prog(0)
+        );
+        assert_eq!(ingest(&mut conn, good, "v1").unwrap().programs, 1);
+        conn.execute_batch(
+            "CREATE TRIGGER refuse_bad BEFORE INSERT ON epg_channels WHEN new.channel_id = 'bad'
+             BEGIN SELECT RAISE(ABORT, 'refused by the test'); END;",
+        )
+        .unwrap();
+        // The bad channel is written with the fourth programme batch.
+        let n = 4 * store::BATCH;
+        let mut xml = String::from("<tv>");
+        for i in 0..n {
+            if i == 3 * store::BATCH + 1 {
+                xml.push_str("<channel id=\"bad\"><display-name>Bad</display-name></channel>");
+            }
+            xml.push_str(&prog(i % 60));
+        }
+        xml.push_str("</tv>");
+        let err = ingest(&mut conn, xml, "v2").unwrap_err();
+        assert!(err.to_string().contains("refused by the test"), "{err}");
+        let (programs, count, etag): (i64, i64, Option<String>) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM epg_programs), program_count, etag FROM epg_sources WHERE url = 'u'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((programs, count, etag.as_deref()), (1, 1, Some("v1")));
+        let staging: i64 = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM epg_sources WHERE origin = 'staging')
+                      + (SELECT count(*) FROM epg_channels WHERE epg_url <> 'u')
+                      + (SELECT count(*) FROM sqlite_temp_master WHERE name = 'epg_stage')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(staging, 0);
+    }
+
     #[test]
     fn due_rules() {
         let now = chrono::Utc::now();

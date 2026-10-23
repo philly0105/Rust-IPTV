@@ -13,7 +13,10 @@
  *   source's landing opens, and that one restores its own offset.
  *
  * jsdom has no layout: the tests place the heading with getBoundingClientRect and give the
- * scroller a height, and stand in for the scroll with the scrollIntoView calls.
+ * scroller a height, and stand in for the scroll with the scrollIntoView calls. The landing reads
+ * that height from a ResizeObserver after the browser's layout (P2-RAILS-4), so IDX-3 calls the
+ * observers back where the browser would have laid the page out; with the index open at mount it
+ * reads the height at once.
  */
 import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useNavigate } from 'react-router';
@@ -23,7 +26,7 @@ import type { Category } from '@/api/types';
 
 import { forgetSpots, rememberSpot } from '../hooks/useScrollMemory';
 import { CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { currentLocation, findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
+import { currentLocation, fakeResizeObservers, findIndexLink, i18n, installDomStubs, makeSource, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -128,11 +131,22 @@ describe('IDX-2: opening the index from its heading', () => {
 describe('IDX-3: the open index keeps a screen of height', () => {
   /** The index body the heading's disclosure controls. */
   const body = (toggle: HTMLElement) => document.getElementById(toggle.getAttribute('aria-controls')!)!;
+  let observers: ReturnType<typeof fakeResizeObservers>;
+  beforeEach(() => {
+    observers = fakeResizeObservers();
+  });
+  afterEach(() => observers.restore());
+  /** The heading, once the landing is in and laid out. */
+  const laidOut = async () => {
+    const toggle = await heading();
+    act(() => observers.layOut());
+    return toggle;
+  };
 
   it('remembered open, it takes the height of the view as its minimum, filtered or not', async () => {
     localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     landing();
-    const toggle = await heading();
+    const toggle = await laidOut();
     await waitFor(() => expect(body(toggle).style.minHeight).toBe(`${VIEWPORT}px`));
     // A filter that leaves one category keeps the floor.
     fireEvent.change(screen.getByPlaceholderText(i18n.t('vod:filterCategories')), { target: { value: 'Category 39' } });
@@ -143,9 +157,18 @@ describe('IDX-3: the open index keeps a screen of height', () => {
     expect(body(toggle).style.minHeight).toBe('');
   });
 
-  it('opened from the chip, it gets the same floor', async () => {
+  it('remembered open, the floor is there as the landing mounts, without waiting for its layout', async () => {
+    // Back puts the landing's offset back in the commit and once more in the next frame, both
+    // before the observers are called back: an offset that needs the floor must find it there.
+    localStorage.setItem(CATEGORY_INDEX_KEY, '1');
     landing();
     const toggle = await heading();
+    await waitFor(() => expect(body(toggle).style.minHeight).toBe(`${VIEWPORT}px`));
+  });
+
+  it('opened from the chip, it gets the same floor', async () => {
+    landing();
+    const toggle = await laidOut();
     expect(body(toggle).style.minHeight).toBe('');
     fireEvent.click(screen.getByTestId('vod-chip-all'));
     await waitFor(() => expect(body(toggle).style.minHeight).toBe(`${VIEWPORT}px`));
@@ -153,7 +176,7 @@ describe('IDX-3: the open index keeps a screen of height', () => {
 
   it('folded at first, the floor is already there when the heading is taken to the top', async () => {
     landing();
-    const toggle = await heading();
+    const toggle = await laidOut();
     // A short index at the bottom of the page: without the floor, the browser clamps that scroll.
     const atReveal: string[] = [];
     vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => atReveal.push(body(toggle).style.minHeight));

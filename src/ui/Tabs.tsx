@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 
 import { cn } from './cn';
 import { SEGMENT_TRACK, segmentClass } from './Segmented';
@@ -62,10 +63,13 @@ function useOverflowFade(list: HTMLDivElement | null, enabled: boolean): CSSProp
       });
       setEdges((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
     };
-    measure();
     list.addEventListener('scroll', measure, { passive: true });
-    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
-    ro?.observe(list);
+    // P2-RAILS-5: the first reading comes from the observer too, after the browser's own layout.
+    // Read here, right after the page committed (search opening on its tabs), it forced that layout.
+    // The callback comes before paint, and flushSync puts the fade on screen in that frame.
+    const ro = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(() => flushSync(measure));
+    if (ro) ro.observe(list);
+    else measure();
     return () => {
       list.removeEventListener('scroll', measure);
       ro?.disconnect();
@@ -93,12 +97,24 @@ export function Tabs({ items, value, onChange, label, className, variant = 'unde
   // Keep the selected tab whole and clear of the fades (a click on a cut tab, arrow keys, opening on a later tab).
   useLayoutEffect(() => {
     const tab = refs.current.get(value);
-    if (!list || !tab || list.scrollWidth - list.clientWidth <= 1) return;
-    const box = list.getBoundingClientRect();
-    const r = tab.getBoundingClientRect();
-    if (box.width <= 0) return;
-    if (r.left < box.left + FADE_PX) list.scrollLeft -= box.left + FADE_PX - r.left;
-    else if (r.right > box.right - FADE_PX) list.scrollLeft += r.right - (box.right - FADE_PX);
+    if (!list || !tab) return;
+    const reveal = () => {
+      if (list.scrollWidth - list.clientWidth <= 1) return;
+      const box = list.getBoundingClientRect();
+      const r = tab.getBoundingClientRect();
+      if (box.width <= 0) return;
+      if (r.left < box.left + FADE_PX) list.scrollLeft -= box.left + FADE_PX - r.left;
+      else if (r.right > box.right - FADE_PX) list.scrollLeft += r.right - (box.right - FADE_PX);
+    };
+    // P2-RAILS-5: from a one-shot observer, whose callback comes after the browser's layout and
+    // before paint, so the tab is in view in the first frame and the commit reads no layout.
+    if (typeof ResizeObserver === 'undefined') return reveal();
+    const ro = new ResizeObserver(() => {
+      ro.disconnect();
+      reveal();
+    });
+    ro.observe(list);
+    return () => ro.disconnect();
   }, [list, value]);
 
   const move = (e: KeyboardEvent<HTMLDivElement>) => {

@@ -72,6 +72,49 @@ export function installDomStubs(): void {
   Element.prototype.scrollBy ??= function scrollBy() {};
 }
 
+/**
+ * A ResizeObserver the test drives (P2-RAILS-2): the rail reveals its active link from the
+ * observer's first callback, after the browser's layout, and jsdom never lays out. `layOut()`
+ * stands in for that layout and delivers each watched element's first callback, as an observer
+ * reports a new target once and then only when its size changes. Install before rendering;
+ * `restore()` puts the previous global back.
+ */
+export function fakeResizeObservers(): { layOut: () => void; restore: () => void } {
+  const original = globalThis.ResizeObserver;
+  // Each target and whether its first callback has gone out.
+  type Live = { cb: ResizeObserverCallback; targets: Map<Element, boolean>; observer: ResizeObserver };
+  const live = new Set<Live>();
+  globalThis.ResizeObserver = class {
+    private readonly live: Live;
+    constructor(cb: ResizeObserverCallback) {
+      this.live = { cb, targets: new Map(), observer: this as unknown as ResizeObserver };
+      live.add(this.live);
+    }
+    observe(el: Element) {
+      this.live.targets.set(el, false);
+    }
+    unobserve(el: Element) {
+      this.live.targets.delete(el);
+    }
+    disconnect() {
+      this.live.targets.clear();
+      live.delete(this.live);
+    }
+  } as unknown as typeof ResizeObserver;
+  return {
+    layOut: () => {
+      for (const o of [...live]) {
+        const fresh = [...o.targets].filter(([, reported]) => !reported).map(([target]) => target);
+        for (const target of fresh) o.targets.set(target, true);
+        if (fresh.length > 0) o.cb(fresh.map((target) => ({ target }) as ResizeObserverEntry), o.observer);
+      }
+    },
+    restore: () => {
+      globalThis.ResizeObserver = original;
+    },
+  };
+}
+
 export function renderRoutes(routes: RouteObject[], path: string) {
   queryClient.clear();
   queryClient.setDefaultOptions({ queries: { retry: false, gcTime: Infinity } });

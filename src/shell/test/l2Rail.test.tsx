@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import '@/i18n';
 
-import { installDomStubs, makeSource, Page, renderRoutes, rpcMock, settings } from './harness';
+import { fakeResizeObservers, installDomStubs, makeSource, Page, renderRoutes, rpcMock, settings } from './harness';
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -77,15 +77,45 @@ describe('rail scroll (L2-shell-1)', () => {
     expect(railRevealDelta({ top: 60, bottom: 668 }, { top: 300, bottom: 1000 })).toBe(300 - 60 - 24);
   });
 
-  it('opening a source from elsewhere (card, palette) scrolls its active link into view', async () => {
-    const { router } = renderRoutes(routes(false), '/dashboard');
-    await screen.findByText('Source s3');
-    const { scrollTop } = layOutRail();
-    expect(scrollTop()).toBe(0);
-    await act(() => router.navigate('/s/s3/live'));
-    expect(screen.getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page');
-    // The link at 701-733 now ends 24 px above the box's 668 px bottom edge.
-    expect(scrollTop()).toBe(733 - 668 + 24);
+  it('opening a source from elsewhere (card, palette) scrolls its active link into view once laid out', async () => {
+    const observers = fakeResizeObservers();
+    try {
+      const { router } = renderRoutes(routes(false), '/dashboard');
+      await screen.findByText('Source s3');
+      const { box, scrollTop } = layOutRail();
+      const rects = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
+      expect(scrollTop()).toBe(0);
+      await act(() => router.navigate('/s/s3/live'));
+      expect(screen.getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page');
+      // P2-RAILS-2: nothing is measured right after the new page committed (that forced its
+      // layout); the observer's first callback, after the browser's layout, scrolls the link in.
+      expect(rects.mock.contexts).not.toContain(box);
+      expect(scrollTop()).toBe(0);
+      act(() => observers.layOut());
+      // The link at 701-733 now ends 24 px above the box's 668 px bottom edge.
+      expect(scrollTop()).toBe(733 - 668 + 24);
+    } finally {
+      observers.restore();
+    }
+  });
+
+  it("fades the sources' hidden end in the observer's callback, so the rail never shows without it", async () => {
+    const observers = fakeResizeObservers();
+    try {
+      renderRoutes(routes(false), '/dashboard');
+      await screen.findByText('Source s3');
+      const { box } = layOutRail();
+      Object.defineProperty(box, 'clientHeight', { configurable: true, value: 608 });
+      Object.defineProperty(box, 'scrollHeight', { configurable: true, value: 900 });
+      // The callback runs after layout and before paint: the fade is in the DOM when it returns,
+      // not in a render a frame after the rail showed (act off: updates schedule as in the app).
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+      observers.layOut();
+      expect(box.getAttribute('data-fade-bottom')).toBe('true');
+    } finally {
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+      observers.restore();
+    }
   });
 
   it('expanding a source by hand below the fold scrolls its links into view', async () => {

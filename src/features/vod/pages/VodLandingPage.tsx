@@ -471,8 +471,11 @@ function CategoryIndexSection({
   // page under the view: the browser clamped the scroll, and the field being typed in dropped
   // toward the bottom, with the rails back in view. Measured while folded too, so the floor is in
   // the render that opens the index, before the reveal takes its heading to the top: a short index
-  // at the bottom of the page would clamp that scroll as well.
-  const viewport = useClientHeight(scrollRef);
+  // at the bottom of the page would clamp that scroll as well. Read after the browser's layout
+  // (P2-RAILS-4), except when the index is open as the landing mounts: Back puts back an offset
+  // that may need the floor, and a floor that came after the restore's second try left the page
+  // clamped above where it was left.
+  const viewport = useClientHeight(scrollRef, open);
 
   const entries = useMemo<CategoryEntry[]>(() => {
     const list = categoryEntries(shownCats ?? [], filter).map((e) => (locks.categoryLocked(e.id) ? { ...e, locked: true } : e));

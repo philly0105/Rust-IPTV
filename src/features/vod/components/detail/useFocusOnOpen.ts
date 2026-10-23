@@ -28,8 +28,30 @@ export function useFocusOnOpen(ready: boolean, getTarget: () => HTMLElement | nu
     if (active && active !== document.body) return;
     const el = getRef.current();
     if (!el) return;
-    el.focus({ preventScroll: true });
-    return ignoreHeldKey();
+    const stopIgnoring = ignoreHeldKey();
+    if (typeof ResizeObserver === 'undefined') {
+      el.focus({ preventScroll: true });
+      return stopIgnoring;
+    }
+    // P2-RAILS-6: focus() brings the page's style up to date first, and right after the content
+    // committed that was the whole new page (41 ms at a 4x slowdown on a movie). A one-shot
+    // observer's callback comes after the browser's own style and layout and before paint, so the
+    // focus forces nothing there and the first frame still shows it. Focus moved meanwhile stays.
+    let done = false;
+    const ro = new ResizeObserver(() => {
+      done = true;
+      ro.disconnect();
+      const now = document.activeElement;
+      if (now && now !== document.body) return;
+      el.focus({ preventScroll: true });
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      stopIgnoring();
+      // Cleaned up before it ran (StrictMode's mount/unmount/mount, or `ready` dropping): the next run focuses.
+      if (!done) handled.current = null;
+    };
   }, [ready, key, navigationType]);
 }
 

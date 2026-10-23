@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useCallback, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { MyListKey, useMyListKeyFocus, type MyListTarget } from '../hooks/useMyListKey';
@@ -36,6 +37,15 @@ export const RAIL_EDGE_TOLERANCE = 6;
 export function railEdges(scrollLeft: number, clientWidth: number, scrollWidth: number): { start: boolean; end: boolean } {
   const pos = Math.abs(scrollLeft);
   return { start: pos <= RAIL_EDGE_TOLERANCE, end: pos + clientWidth >= scrollWidth - RAIL_EDGE_TOLERANCE };
+}
+
+/**
+ * The edges of a rail at its start, from its cards alone (P2-RAILS-1). Cards wider together than
+ * the window cannot fit the track, which is never wider than the window, so that rail scrolls;
+ * a shorter row may or may not fit, and reads as both ends (no step buttons) until it is measured.
+ */
+export function railEdgesFromCards(count: number, cardWidth: number, windowWidth: number): { start: boolean; end: boolean } {
+  return { start: true, end: count * cardWidth <= windowWidth + RAIL_EDGE_TOLERANCE };
 }
 
 /** What a rail hands each card: pass `tabIndex` to the card's link (one Tab stop per rail). */
@@ -80,7 +90,14 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
   const autoWidth = useRailCardWidth();
   const cardWidth = fixedWidth ?? autoWidth;
   const scroller = useRef<HTMLDivElement>(null);
-  const [edges, setEdges] = useState({ start: true, end: true });
+  // The edges last read from the track, and the list they were read for. Until the observer has
+  // read a new list, the rail shows the edges its cards give, worked out once per list: a reading
+  // that matches them is not stored, so a later render (after a resize) must not change them.
+  const [read, setRead] = useState<{ start: boolean; end: boolean; cardCount: number; loading: boolean }>();
+  const cardCount = items.length;
+  const isLoading = !!loading;
+  const fromCards = useMemo(() => railEdgesFromCards(cardCount, cardWidth, window.innerWidth), [cardCount, cardWidth]);
+  const edges = read?.cardCount === cardCount && read.loading === isLoading ? read : fromCards;
   // The card holding the rail's Tab stop: the last one focused, clamped when the list shrinks.
   const [current, setCurrent] = useState(0);
   const tabStop = Math.max(0, Math.min(current, items.length - 1));
@@ -92,18 +109,34 @@ export function PosterRail<T>({ title, items, render, loading, empty, action, co
     if (cell && Number.isInteger(index) && index !== current) setCurrent(index);
   };
 
+  const fromCardsEnd = fromCards.end;
   const updateEdges = useCallback(() => {
     const el = scroller.current;
-    if (!el) return;
-    setEdges(railEdges(el.scrollLeft, el.clientWidth, el.scrollWidth));
-  }, []);
+    // Skeletons only: a rail without cards has no step buttons whatever its track holds, and a
+    // reading (8 skeletons overflow a laptop's track) would only re-render it before paint.
+    if (!el || cardCount === 0) return;
+    const next = railEdges(el.scrollLeft, el.clientWidth, el.scrollWidth);
+    // A reading that matches what the rail shows keeps the state, so it renders nothing.
+    setRead((prev) => {
+      const shown = prev?.cardCount === cardCount && prev.loading === isLoading ? prev : { start: true, end: fromCardsEnd };
+      return shown.start === next.start && shown.end === next.end ? prev : { ...next, cardCount, loading: isLoading };
+    });
+  }, [cardCount, isLoading, fromCardsEnd]);
 
-  // Measured before paint, so step buttons for a rail that does not scroll never flash in.
+  // P2-RAILS-1: read from an observer, not in the commit. Its first callback comes after the
+  // browser's own layout, so the reads force none (in the commit they forced the new page's layout,
+  // 100 ms at a 4x slowdown on the landing), and still before paint: flushSync puts a change on
+  // screen in that frame, so step buttons never flash in or out. A new list gets a new observer,
+  // whose first callback reads it again. Observed from a layout effect, so that callback is in the
+  // frame this commit paints.
   useLayoutEffect(() => {
-    updateEdges();
     const el = scroller.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(updateEdges);
+    if (!el) return;
+    if (typeof ResizeObserver === 'undefined') {
+      updateEdges();
+      return;
+    }
+    const ro = new ResizeObserver(() => flushSync(updateEdges));
     ro.observe(el);
     return () => ro.disconnect();
   }, [updateEdges, items.length, loading]);

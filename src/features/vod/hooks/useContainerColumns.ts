@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 /** Width-driven column count for a responsive list: floor((w + gap) / (min + gap)), at least 1. */
 export function columnsFor(width: number, minColumnWidth: number, gap: number): number {
@@ -22,17 +22,21 @@ export function useElementWidth(ref: RefObject<HTMLElement | null>): number {
 /**
  * The visible height of a scroller (its clientHeight), kept current. A child that mounts with its
  * page runs this before React attaches the page's ref, so as in useScrollMargin the scroller is
- * looked up again once the commit is done.
+ * looked up again once the commit is done. `readAtMount` (its value at mount) takes the first
+ * reading then too, for a caller that needs the height before the frame is drawn.
  */
-export function useClientHeight(ref: RefObject<HTMLElement | null>): number {
+export function useClientHeight(ref: RefObject<HTMLElement | null>, readAtMount = false): number {
   const [height, setHeight] = useState(0);
+  const eager = useRef(readAtMount);
   useLayoutEffect(() => {
     let ro: ResizeObserver | undefined;
     let cancelled = false;
     const start = () => {
       const el = ref.current;
       if (cancelled || !el) return;
-      setHeight(el.clientHeight);
+      // P2-RAILS-4: otherwise the first reading comes from the observer too, after the browser's
+      // own layout. Read here, right after the landing committed, it forced the page's layout.
+      if (eager.current || typeof ResizeObserver === 'undefined') setHeight(el.clientHeight);
       if (typeof ResizeObserver === 'undefined') return;
       ro = new ResizeObserver(() => setHeight(el.clientHeight));
       ro.observe(el);

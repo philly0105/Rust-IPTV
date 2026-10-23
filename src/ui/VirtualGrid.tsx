@@ -2,6 +2,7 @@ import { useListVirtualizer } from './virtualizer';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 import { cn } from './cn';
+import { PosterCellWidthContext } from './Poster';
 import { scalePx, useDensity, useUiScale } from './scale';
 import type { VirtualItemState } from './VirtualList';
 
@@ -103,6 +104,11 @@ export interface VirtualGridProps<T> {
    * to none otherwise, so it never points at whatever title now holds the old index.
    */
   resetKey?: string | number;
+  /**
+   * Each cell's artwork is as wide as the cell (poster cards): their Posters load at the column
+   * width instead of measuring their frames as they mount (P2-GRID-1).
+   */
+  postersFillCells?: boolean;
 }
 
 /**
@@ -130,6 +136,7 @@ export function VirtualGrid<T>({
   testId,
   initialActiveIndex,
   resetKey,
+  postersFillCells,
 }: VirtualGridProps<T>) {
   const uiScale = useUiScale();
   const density = useDensity();
@@ -140,6 +147,10 @@ export function VirtualGrid<T>({
   const parentRef = useRef<HTMLDivElement>(null);
   const baseId = useId();
   const [width, setWidth] = useState(initialRect.width);
+  // The cells mount once the grid has read its own width (a layout effect, before the first
+  // paint), not at the initialRect guess: a poster keeps the column width it mounted with
+  // (P2-GRID-1), and the read lays out no cells.
+  const [measured, setMeasured] = useState(false);
   const [active, setActive] = useState(() =>
     initialActiveIndex !== undefined && initialActiveIndex >= 0 && initialActiveIndex < items.length ? initialActiveIndex : -1,
   );
@@ -152,6 +163,7 @@ export function VirtualGrid<T>({
       if (w > 0) setWidth(w);
     };
     measure();
+    setMeasured(true);
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -259,6 +271,11 @@ export function VirtualGrid<T>({
   }, []);
   const onPress = useCallback((index: number) => setActive(index), []);
   const renderCell = render as GridSlotProps['render'];
+  // Rounded as the frame's clientWidth is, so a poster asks for the size it measured before. A box
+  // with one identity: posters read it as their pictures mount, so a new width re-renders none of
+  // them (P2-GRID-1).
+  const posterWidth = useRef(0);
+  posterWidth.current = Math.round(cellWidth);
 
   return (
     <div
@@ -280,45 +297,47 @@ export function VirtualGrid<T>({
       className={cn('relative h-full overflow-y-auto overscroll-contain', className)}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-        {rows.map((row) => {
-          const start = row.index * columns;
-          const cells = items.slice(start, start + columns);
-          return (
-            <div
-              key={row.key}
-              role="presentation"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: rowHeight,
-                transform: `translateY(${row.start}px)`,
-                display: 'grid',
-                gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                columnGap: gap,
-              }}
-            >
-              {cells.map((item, j) => {
-                const index = start + j;
-                return (
-                  <GridSlot
-                    key={getKey ? getKey(item, index) : index}
-                    item={item}
-                    index={index}
-                    id={cellId(index)}
-                    active={index === active}
-                    selected={index === selectedIndex}
-                    setSize={items.length}
-                    render={renderCell}
-                    onPick={onPick}
-                    onPress={onPress}
-                  />
-                );
-              })}
-            </div>
-          );
-        })}
+        <PosterCellWidthContext.Provider value={postersFillCells ? posterWidth : undefined}>
+          {(measured ? rows : []).map((row) => {
+            const start = row.index * columns;
+            const cells = items.slice(start, start + columns);
+            return (
+              <div
+                key={row.key}
+                role="presentation"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: rowHeight,
+                  transform: `translateY(${row.start}px)`,
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                  columnGap: gap,
+                }}
+              >
+                {cells.map((item, j) => {
+                  const index = start + j;
+                  return (
+                    <GridSlot
+                      key={getKey ? getKey(item, index) : index}
+                      item={item}
+                      index={index}
+                      id={cellId(index)}
+                      active={index === active}
+                      selected={index === selectedIndex}
+                      setSize={items.length}
+                      render={renderCell}
+                      onPick={onPick}
+                      onPress={onPress}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </PosterCellWidthContext.Provider>
       </div>
       {footer}
     </div>

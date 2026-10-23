@@ -803,6 +803,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
               items={filteredItems}
               minColumnWidth={coverWidth}
               aspect="poster"
+              postersFillCells
               label={categoryName}
               testId="vod-grid"
               initialActiveIndex={restoredIndex}
@@ -831,6 +832,7 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
                 items={indices}
                 minColumnWidth={coverWidth}
                 aspect="poster"
+                postersFillCells
                 label={categoryName}
                 testId="vod-grid"
                 initialActiveIndex={restoredIndex}

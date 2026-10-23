@@ -73,6 +73,8 @@ let batch = 0;
 let batchOpen = false;
 let lastScrollAt = Number.NEGATIVE_INFINITY;
 let pumpTimer: ReturnType<typeof setTimeout> | null = null;
+/** performance.now() when {@link pumpTimer} fires. */
+let pumpAt = 0;
 let observer: IntersectionObserver | null | undefined;
 
 /** Cache URLs that loaded in this session: the browser has them, so they skip the gate. */
@@ -199,10 +201,13 @@ function start(t: Ticket): void {
   el.src = t.url;
 }
 
+function wakePump(): void {
+  pumpTimer = null;
+  pump();
+}
+
 /** Starts waiting pictures while slots are free, best first; re-arms itself for pictures held by a scroll. */
 function pump(): void {
-  if (pumpTimer) clearTimeout(pumpTimer);
-  pumpTimer = null;
   const t0 = now();
   const scrolling = t0 - lastScrollAt < SETTLE_MS;
   let wake = Number.POSITIVE_INFINITY;
@@ -223,9 +228,15 @@ function pump(): void {
     const [t] = pending.splice(best, 1);
     start(t!);
   }
-  if (pending.length > 0 && Number.isFinite(wake)) {
-    pumpTimer = setTimeout(pump, Math.max(16, wake - t0));
-  }
+  if (pending.length === 0 || !Number.isFinite(wake)) return;
+  // One timer: an armed one that fires no later is kept, and its pump re-arms (one with nothing to
+  // start is harmless). Every poster a fling mounts or unmounts pumps, and clearing and setting
+  // the timer each time cost more than the pump itself (P2-GRID-3).
+  const at = Math.max(t0 + 16, wake);
+  if (pumpTimer && pumpAt <= at) return;
+  if (pumpTimer) clearTimeout(pumpTimer);
+  pumpAt = at;
+  pumpTimer = setTimeout(wakePump, at - t0);
 }
 
 /**

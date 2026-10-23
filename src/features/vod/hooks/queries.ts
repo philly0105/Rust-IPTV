@@ -4,7 +4,7 @@
  * reaches them.
  */
 
-import { queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { hashKey, queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef } from 'react';
 
 import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
@@ -153,6 +153,34 @@ export function sameGridSlot(a: readonly unknown[], b: readonly unknown[]): bool
 }
 
 /**
+ * Page requests per grid input, and their keys' hashes (P2-GRID-6): every cell of a page asks for
+ * the same page, and building and hashing its key on each cell's render took 20 ms of a 30-step
+ * fling of the movie grid.
+ */
+const pageRequests = new WeakMap<GridQueryInput, Map<number, ReturnType<typeof buildPageRequest>>>();
+const pageKeyHashes = new WeakMap<object, string>();
+
+function pageRequest(input: GridQueryInput, pageIndex: number): ReturnType<typeof buildPageRequest> {
+  let byPage = pageRequests.get(input);
+  if (!byPage) pageRequests.set(input, (byPage = new Map()));
+  let req = byPage.get(pageIndex);
+  if (!req) byPage.set(pageIndex, (req = buildPageRequest(input, pageIndex)));
+  return req;
+}
+
+/** TanStack's own hash (so every reader of the page shares the cache entry), once per request. */
+function pageKeyHash(key: QueryKey): string {
+  const args = key[1];
+  if (typeof args !== 'object' || args === null) return hashKey(key);
+  let hash = pageKeyHashes.get(args);
+  if (hash === undefined) {
+    hash = hashKey(key);
+    pageKeyHashes.set(args, hash);
+  }
+  return hash;
+}
+
+/**
  * One grid page. Cells subscribe to the page containing them; unused pages are garbage-collected.
  * A new sort, search, rating, year range or Hide watched keeps each page's previous titles on
  * screen until the new page answers (L2-vod-8, L3-vod-3), so the grid stays mounted and its cells
@@ -164,10 +192,11 @@ export function useVodPage(
   /** False holds the request (a grid page the user is dragging past, VD-2); cached data still shows. */
   fetchNow = true,
 ): UseQueryResult<Page<VodItem | SeriesItem>, RpcError> {
-  const req = input ? buildPageRequest(input, pageIndex) : undefined;
+  const req = input ? pageRequest(input, pageIndex) : undefined;
   const queryKey = req ? [req.cmd, req.args] : ['catalog.movies', 'disabled'];
   return useQuery<Page<VodItem | SeriesItem>, RpcError>({
     queryKey,
+    queryKeyHashFn: pageKeyHash,
     queryFn: async ({ signal }) => {
       if (!req) throw new RpcError('invalid', 'No source');
       return (await rpcRaw(req.cmd, req.args, { signal })) as Page<VodItem | SeriesItem>;
@@ -185,7 +214,7 @@ export function useVodPage(
  * filters them as they arrive. SQLite-backed grids filter in the core.
  */
 export function useVodPagesInOrder(input: GridQueryInput | undefined, enabled: boolean) {
-  const first = input ? buildPageRequest(input, 0) : undefined;
+  const first = input ? pageRequest(input, 0) : undefined;
   return useInfiniteQuery<Page<VodItem | SeriesItem>, RpcError>({
     queryKey: first ? [first.cmd, { ...first.args, query: { ...first.args.query, offset: undefined }, inOrder: true }] : ['catalog.movies', 'disabled-in-order'],
     initialPageParam: 0,

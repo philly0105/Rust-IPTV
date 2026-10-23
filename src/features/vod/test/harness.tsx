@@ -4,6 +4,7 @@ import i18next from 'i18next';
 import type { ReactNode } from 'react';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { vi } from 'vitest';
 import { create } from 'zustand';
 
 import type { ItemRef, Settings, Source } from '@/api/types';
@@ -90,6 +91,66 @@ export function installDomStubs(): void {
   Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 1200 });
   Element.prototype.scrollTo ??= function scrollTo() {};
   Element.prototype.scrollIntoView ??= function scrollIntoView() {};
+}
+
+/**
+ * A ResizeObserver the test drives (P2-RAILS). The rails, the edge fades and the landing's
+ * viewport height read their sizes in its callback, after the browser's layout, and jsdom never
+ * lays out: `layOut()` stands in for that layout and delivers each watched element's first
+ * callback, as an observer reports a new target once and then only when its size changes.
+ * Install before rendering; `restore()` puts the previous global back.
+ */
+export function fakeResizeObservers(): { layOut: () => void; restore: () => void } {
+  const original = globalThis.ResizeObserver;
+  // Each target and whether its first callback has gone out.
+  type Live = { cb: ResizeObserverCallback; targets: Map<Element, boolean>; observer: ResizeObserver };
+  const live = new Set<Live>();
+  globalThis.ResizeObserver = class {
+    private readonly live: Live;
+    constructor(cb: ResizeObserverCallback) {
+      this.live = { cb, targets: new Map(), observer: this as unknown as ResizeObserver };
+      live.add(this.live);
+    }
+    observe(el: Element) {
+      this.live.targets.set(el, false);
+    }
+    unobserve(el: Element) {
+      this.live.targets.delete(el);
+    }
+    disconnect() {
+      this.live.targets.clear();
+      live.delete(this.live);
+    }
+  } as unknown as typeof ResizeObserver;
+  return {
+    layOut: () => {
+      for (const o of [...live]) {
+        const fresh = [...o.targets].filter(([, reported]) => !reported).map(([target]) => target);
+        for (const target of fresh) o.targets.set(target, true);
+        if (fresh.length > 0) o.cb(fresh.map((target) => ({ target }) as ResizeObserverEntry), o.observer);
+      }
+    },
+    restore: () => {
+      globalThis.ResizeObserver = original;
+    },
+  };
+}
+
+/** Spies on the layout reads a commit could force: scroll and client boxes, offsets and rects. */
+export function spyLayoutReads(): { count: () => number } {
+  const props = ['clientWidth', 'clientHeight', 'scrollWidth', 'scrollHeight', 'scrollLeft', 'scrollTop'] as const;
+  const getters = [
+    ...props.map((p) => vi.spyOn(Element.prototype, p, 'get')),
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get'),
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get'),
+  ];
+  const rects = vi.spyOn(Element.prototype, 'getBoundingClientRect');
+  return { count: () => getters.reduce((n, s) => n + s.mock.calls.length, 0) + rects.mock.calls.length };
+}
+
+/** Gives a sideways scroller the box the browser would report after layout. */
+export function layOutBox(el: Element, box: { clientWidth: number; scrollWidth: number; scrollLeft?: number }): void {
+  for (const [k, v] of Object.entries({ scrollLeft: 0, ...box })) Object.defineProperty(el, k, { configurable: true, value: v });
 }
 
 /**

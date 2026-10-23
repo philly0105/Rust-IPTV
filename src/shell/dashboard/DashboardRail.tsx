@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -26,6 +27,15 @@ export function dashRailButtons(scrollLeft: number, scrollWidth: number, clientW
   const pos = Math.abs(scrollLeft);
   const max = scrollWidth - clientWidth - 2;
   return { canPrev: pos > 2, canNext: pos < max };
+}
+
+/**
+ * The step buttons of a rail at its start, from its cards alone (P2-HOME-1). Cards wider together
+ * than the window cannot fit the track, which is never wider than the window, so that rail goes
+ * forward; a shorter row may or may not fit, and shows no buttons until its track is read.
+ */
+export function dashRailButtonsFromCards(count: number, cardWidth: number, windowWidth: number): { canPrev: boolean; canNext: boolean } {
+  return { canPrev: false, canNext: count * cardWidth > windowWidth + 2 };
 }
 
 export interface RailCardProps {
@@ -113,6 +123,21 @@ function focusAdjacentRail(from: HTMLElement, dir: 1 | -1, index: number): boole
   return false;
 }
 
+interface RailCardSlotProps<T> {
+  item: T;
+  tabIndex: number;
+  renderCard: (item: T, props: RailCardProps) => ReactNode;
+}
+
+/**
+ * One card, rendered again only when its item, its Tab stop or the rail's `renderCard` changes
+ * (P2-HOME-2). The rail's own state (its step buttons, which card holds the Tab stop) re-rendered
+ * every card: the first scroll of a rail re-rendered all 24, and a move of focus as many.
+ */
+const RailCardSlot = memo(function RailCardSlot<T>({ item, tabIndex, renderCard }: RailCardSlotProps<T>) {
+  return renderCard(item, { tabIndex, 'data-rail-card': '' });
+}) as <T>(props: RailCardSlotProps<T>) => ReactNode;
+
 /**
  * Horizontal, snap-scrolling rail of cards. One tab stop per rail (roving
  * tabindex); ArrowLeft/Right/Home/End move within it, ArrowUp/Down jump to
@@ -141,9 +166,15 @@ export function DashboardRail<T>({
   const sectionRef = useRef<HTMLElement>(null);
   const trackRef = useRef<HTMLUListElement>(null);
   const [focusIndex, setFocusIndex] = useState(0);
-  const [canPrev, setCanPrev] = useState(false);
-  const [canNext, setCanNext] = useState(false);
   const count = items?.length ?? 0;
+  // The step buttons last read from the track, and the card count they were read for. Until the
+  // track of a new count has been read, the rail shows the buttons its cards give, worked out once
+  // per count (a later render, after a resize or a scale change, must not change them unread).
+  const [read, setRead] = useState<{ canPrev: boolean; canNext: boolean; count: number }>();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fromCards = useMemo(() => dashRailButtonsFromCards(count, width, window.innerWidth), [count]);
+  const { canPrev, canNext } = read?.count === count ? read : fromCards;
+  const trackShown = !error && count > 0;
   // Whether the track sat at its inline start before the last render.
   const atStartRef = useRef(true);
   // The track element and item order the last commit showed.
@@ -191,20 +222,31 @@ export function DashboardRail<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderKey]);
 
-  useEffect(() => {
+  const measure = useCallback(() => {
     const el = trackRef.current;
     if (!el) return;
-    const measure = () => {
-      const edges = dashRailButtons(el.scrollLeft, el.scrollWidth, el.clientWidth);
-      atStartRef.current = !edges.canPrev;
-      setCanPrev(edges.canPrev);
-      setCanNext(edges.canNext);
-    };
-    // No synchronous first measure: reading scroll sizes right after the rail's DOM went in
-    // forced a layout per rail on mount (most of a 100 ms task on a cold start). The
-    // ResizeObserver's first callback comes after layout and sets the arrows for free.
+    const next = dashRailButtons(el.scrollLeft, el.scrollWidth, el.clientWidth);
+    atStartRef.current = !next.canPrev;
+    // A reading that matches what the rail shows keeps the state, so it renders nothing.
+    setRead((prev) => {
+      const shown = prev?.count === count ? prev : fromCards;
+      return shown.canPrev === next.canPrev && shown.canNext === next.canNext ? prev : { ...next, count };
+    });
+  }, [count, fromCards]);
+
+  // No synchronous first measure: reading scroll sizes right after the rail's DOM went in
+  // forced a layout per rail on mount (most of a 100 ms task on a cold start). The
+  // ResizeObserver's first callback comes after layout, so its reads are free. P2-HOME-1: it
+  // used to set the buttons in a later render, which rendered every card of a rail that scrolls
+  // a second time and laid the page out again; now the rail starts with the buttons its cards
+  // give, and a reading that differs (a short row that overflows after all) goes on screen with
+  // flushSync, before paint. Observed from a layout effect, so that first callback comes in the
+  // frame this commit paints. A track that comes back (after an error) is observed anew.
+  useLayoutEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
     el.addEventListener('scroll', measure, { passive: true });
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => flushSync(measure)) : null;
     ro?.observe(el);
     const raf = ro ? 0 : requestAnimationFrame(measure);
     return () => {
@@ -212,7 +254,7 @@ export function DashboardRail<T>({
       ro?.disconnect();
       cancelAnimationFrame(raf);
     };
-  }, [count]);
+  }, [measure, trackShown]);
 
   // A rail that came back empty last time skips its skeleton (it would most likely
   // just collapse again), so slow empty favorites don't flash and shift the page.
@@ -353,7 +395,7 @@ export function DashboardRail<T>({
             <PosterWidthContext.Provider value={width}>
               {items!.map((item, i) => (
                 <li key={getKey(item)} data-rail-key={getKey(item)} className="shrink-0 snap-start" style={{ width }}>
-                  {renderCard(item, { tabIndex: i === focusIndex ? 0 : -1, 'data-rail-card': '' })}
+                  <RailCardSlot item={item} tabIndex={i === focusIndex ? 0 : -1} renderCard={renderCard} />
                 </li>
               ))}
             </PosterWidthContext.Provider>

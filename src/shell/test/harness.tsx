@@ -115,6 +115,31 @@ export function fakeResizeObservers(): { layOut: () => void; restore: () => void
   };
 }
 
+/**
+ * Sets whether React treats this as a test's act() environment. Off, updates schedule as in the
+ * app, so a test can tell a change flushed in an observer's callback from one rendered later.
+ */
+export function actEnvironment(on: boolean): void {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = on;
+}
+
+/** Spies on the layout reads a commit could force (P2-HOME): scroll and client boxes, offsets and rects. */
+export function spyLayoutReads(): { count: () => number } {
+  const props = ['clientWidth', 'clientHeight', 'scrollWidth', 'scrollHeight', 'scrollLeft', 'scrollTop'] as const;
+  const getters = [
+    ...props.map((p) => vi.spyOn(Element.prototype, p, 'get')),
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get'),
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get'),
+  ];
+  const rects = vi.spyOn(Element.prototype, 'getBoundingClientRect');
+  return { count: () => getters.reduce((n, s) => n + s.mock.calls.length, 0) + rects.mock.calls.length };
+}
+
+/** Gives a sideways scroller the box the browser would report after layout. */
+export function layOutBox(el: Element, box: { clientWidth: number; scrollWidth: number; scrollLeft?: number }): void {
+  for (const [k, v] of Object.entries({ scrollLeft: 0, ...box })) Object.defineProperty(el, k, { configurable: true, value: v });
+}
+
 export function renderRoutes(routes: RouteObject[], path: string) {
   queryClient.clear();
   queryClient.setDefaultOptions({ queries: { retry: false, gcTime: Infinity } });

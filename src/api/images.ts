@@ -167,8 +167,14 @@ export function imageCacheBase(): string | null {
   return isDesktopWindow ? desktopImageBase : WEB_IMAGE_ROUTE;
 }
 
+/** The page's origin, read once: a page keeps its origin, and `location.origin` cost two calls into the browser per picture (P2-GRID-4). */
+let originOfPage: string | null | undefined;
+
 function pageOrigin(): string | null {
-  return typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null' ? window.location.origin : null;
+  if (originOfPage === undefined) {
+    originOfPage = typeof window !== 'undefined' && window.location?.origin && window.location.origin !== 'null' ? window.location.origin : null;
+  }
+  return originOfPage;
 }
 
 /** True for an absolute http(s) URL the cache should front. */

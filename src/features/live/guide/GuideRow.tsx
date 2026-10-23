@@ -7,6 +7,10 @@
  * row's cells to the window with one CSS variable ({@link GRID_SHIFT_VAR}): a window move at the
  * edge of a sideways scroll leaves the rows' props alone, so no row re-renders inside the scroll
  * event (L3-perf-ui-4). The track clips the cells that fall outside the window.
+ *
+ * A row keeps its layout to itself (P2-GUIDE-3): it is sized from its props, so CSS layout
+ * containment lets the browser lay out a row whose cells or channel arrive without laying out
+ * the grid and the page around it again.
  */
 
 import { AudioLines, History } from 'lucide-react';
@@ -173,7 +177,7 @@ export const GuideRow = memo(function GuideRow({
       ref={ref}
       role="row"
       aria-rowindex={index + 2}
-      className="absolute start-0 flex border-b border-divider"
+      className="absolute start-0 flex border-b border-divider [contain:size_layout]"
       style={{ top, height, width: channelCol + trackWidth }}
       // Right click anywhere on the row (its channel cell or a programme): the channel's menu.
       onContextMenu={(e: MouseEvent) => {

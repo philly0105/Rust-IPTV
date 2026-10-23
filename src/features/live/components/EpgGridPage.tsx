@@ -1662,6 +1662,9 @@ export function EpgGridPage() {
             className="relative min-h-0 flex-1 overflow-auto overscroll-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset focus-visible:delay-150"
           >
             <div
+              // Sized from its style, so a row added or removed by a scroll is laid out in here
+              // without the page's flex layout around the grid running again (P2-GUIDE-3).
+              className="[contain:size_layout]"
               style={
                 {
                   width: channelCol + trackWidth,
@@ -1700,7 +1703,11 @@ export function EpgGridPage() {
                 />
               ) : null}
 
-              {vItems.map((v) => {
+              {/* The rows wait for the page's width, measured as this commit attaches the page
+                  (useElementWidth) and rendered before the first paint: the window's length follows
+                  the width, so rows rendered before it were laid out twice, inside the measurement's
+                  forced layout and again at the width it found (P2-GUIDE-2). */}
+              {pageMeasured && vItems.map((v) => {
                 const ch = paged.getChannel(v.index);
                 return (
                   <GuideRow

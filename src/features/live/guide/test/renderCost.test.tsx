@@ -1,6 +1,9 @@
 /**
- * The guide page's render costs (P2-GUIDE): grid keys hashed once per chunk and window.
+ * The guide page's render costs (P2-GUIDE): grid keys hashed once per chunk and window, a page
+ * that measures itself before its rows are in, and rows and the grid's content that keep their
+ * layout to themselves.
  */
+import { QueryClient } from '@tanstack/react-query';
 import { act, cleanup, configure, fireEvent, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -87,6 +90,29 @@ afterEach(() => {
 
 const GRID = [{ path: '/epg', element: <EpgGridPage /> }];
 
+describe('the page measurement (P2-GUIDE-2)', () => {
+  it('measures the page before its rows are in, and renders them before the commit ends', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 60_000 } } });
+    const first = renderGuide({ path: '/epg?source=src1', routes: GRID }, client);
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    first.unmount();
+
+    // A return visit: the channels are cached, so the grid mounts with the page.
+    const rowsAtMeasure: number[] = [];
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.testid === 'epg-grid-page') rowsAtMeasure.push(this.querySelectorAll('[role="row"][aria-rowindex]').length);
+      return original.call(this);
+    });
+    renderGuide({ path: '/epg?source=src1', routes: GRID }, client);
+    expect(screen.getByTestId('epg-grid')).toBeTruthy();
+    expect(rowsAtMeasure).toEqual([0]);
+    // In by the end of the render's act: the first paint shows them.
+    expect(screen.getAllByRole('row').filter((r) => r.hasAttribute('aria-rowindex'))).toHaveLength(6);
+    client.clear();
+  });
+});
+
 describe('grid keys (P2-GUIDE-6)', () => {
   it('a vertical scroll frame inside the chunks on screen hashes no grid key', async () => {
     channels = Array.from({ length: 3 * GRID_CHUNK }, (_, i) => makeChannel(i));
@@ -106,5 +132,15 @@ describe('grid keys (P2-GUIDE-6)', () => {
     stringify.mockRestore();
     expect(screen.getByRole('button', { name: /^c4 P0,/ })).toBeTruthy();
     expect(gridKeys).toEqual([]);
+  });
+});
+
+describe('layout containment (P2-GUIDE-3)', () => {
+  it('rows and the grid content keep their layout to themselves', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c1 P0,/ });
+    const content = screen.getByTestId('epg-grid').firstElementChild as HTMLElement;
+    expect(content.className).toContain('[contain:size_layout]');
+    expect(cell.closest('[aria-rowindex]')!.className).toContain('[contain:size_layout]');
   });
 });

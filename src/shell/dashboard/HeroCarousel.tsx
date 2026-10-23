@@ -48,7 +48,7 @@ import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
 import { MetaLine, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
-import { intlLocale } from '@/lib/intl';
+import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
 import { buttonMenuAnchor, CardMenuContext, itemPath, usePrefetchTarget, type CardMenuItem } from './cards';
@@ -74,13 +74,16 @@ export interface HeroCarouselProps {
 
 const isVod = (ref: ItemRef) => ref.contentType === 'movie' || ref.contentType === 'series';
 
+/** A continue slide of a movie or series: the only kind that reads its catalog item (useSlideDetails). */
+const readsDetails = (slide: HeroSlide) => slide.kind === 'continue' && isVod(slide.ref);
+
 /**
  * Continue-watching positions carry only a snapshot (title, poster). The
  * catalog item adds the backdrop, plot, year, genres and rating. Shared by the
  * backdrop layer and the slide body through the query cache.
  */
 function useSlideDetails(slide: HeroSlide, enabled: boolean): HeroSlide {
-  const wanted = enabled && slide.kind === 'continue' && isVod(slide.ref);
+  const wanted = enabled && readsDetails(slide);
   const item = useRpcQuery('catalog.item', { ref: slide.ref }, { enabled: wanted, staleTime: 10 * 60_000 });
   return useMemo(() => {
     const d = wanted ? item.data : undefined;
@@ -259,6 +262,12 @@ function tint(title: string): string {
   return `radial-gradient(120% 140% at 85% 10%, hsl(${hue} 45% 34%), transparent 60%), linear-gradient(150deg, hsl(${(hue + 40) % 360} 40% 16%), hsl(${hue} 30% 8%))`;
 }
 
+interface BackdropProps {
+  slide: HeroSlide;
+  active: boolean;
+  title: string;
+}
+
 /**
  * One slide's backdrop. The incoming layer animates in on top (z-index 1);
  * the outgoing one stays opaque underneath for the length of that fade and
@@ -268,9 +277,19 @@ function tint(title: string): string {
  * poster the same way, then the tint stays. A poster standing in for a
  * missing backdrop is drawn quarter-size, blurred and scaled up (C5), so it
  * reads as colour, not as a picture.
+ *
+ * Only a slide that reads its catalog item mounts the query for it (P2-HOME-5): a new arrival
+ * carries its own artwork, and a disabled query still built and cached a query per slide.
  */
-function Backdrop({ slide, active, title }: { slide: HeroSlide; active: boolean; title: string }) {
-  const s = useSlideDetails(slide, true);
+const Backdrop = memo(function Backdrop(props: BackdropProps) {
+  return readsDetails(props.slide) ? <DetailedBackdrop {...props} /> : <BackdropView {...props} s={props.slide} />;
+});
+
+function DetailedBackdrop(props: BackdropProps) {
+  return <BackdropView {...props} s={useSlideDetails(props.slide, true)} />;
+}
+
+function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlide }) {
   const image = useImageChain([s.backdropUrl, s.posterUrl], s.ref.sourceId);
   const [loaded, setLoaded] = useState<string | null>(null);
   const url = image.url;
@@ -339,38 +358,41 @@ const GLASS_BUTTON = cn(
   'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
 );
 
-function SlideBody({
-  slide,
-  active,
-  panelId,
-  sourceName,
-  canPlay,
-  onPlay,
-  menuFor,
-  onMenuOpen,
-  index,
-  count,
-}: {
+interface SlideBodyProps {
   slide: HeroSlide;
   active: boolean;
   panelId: string;
   sourceName: string | undefined;
   canPlay: boolean;
-  onPlay: () => void;
+  onPlay: HeroCarouselProps['onPlay'];
   menuFor: HeroCarouselProps['menuFor'];
   /** The slide's menu opened (true) or closed (false): the rotation holds still meanwhile. */
   onMenuOpen: (open: boolean) => void;
   index: number;
   count: number;
-}) {
+}
+
+/**
+ * Memoized with the carousel's stable props (P2-HOME-3): a hover, a focus, the rotation's pause
+ * and the next backdrop's mount re-rendered all six bodies; a turn now re-renders the two whose
+ * `active` changes. Only a slide that reads its catalog item mounts the query (P2-HOME-5).
+ */
+const SlideBody = memo(function SlideBody(props: SlideBodyProps) {
+  return readsDetails(props.slide) ? <DetailedSlideBody {...props} /> : <SlideBodyView {...props} s={props.slide} />;
+});
+
+function DetailedSlideBody(props: SlideBodyProps) {
+  return <SlideBodyView {...props} s={useSlideDetails(props.slide, props.active)} />;
+}
+
+function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, menuFor, onMenuOpen, index, count, s }: SlideBodyProps & { s: HeroSlide }) {
   const { t, i18n } = useTranslation('shell');
   const openMenu = useContext(CardMenuContext);
-  const s = useSlideDetails(slide, active);
   const title = s.title || t('untitled');
   const vod = isVod(s.ref);
   const continuing = s.kind === 'continue';
   const playable = continuing || s.ref.contentType === 'movie';
-  const rating = s.rating ? new Intl.NumberFormat(intlLocale(i18n.language), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
+  const rating = s.rating ? numberFormat(intlLocale(i18n.language), { maximumFractionDigits: 1, minimumFractionDigits: 1 }).format(s.rating) : undefined;
   // A displayed title that still ends with "(2025)" (no titleBase from the core, or an older
   // continue-watching snapshot) does not get the year again below it.
   const year = !titleEndsWithYear(title, s.year) ? s.year : undefined;
@@ -437,7 +459,7 @@ function SlideBody({
           {playable && (
             <button
               type="button"
-              onClick={onPlay}
+              onClick={() => onPlay(slide)}
               disabled={!canPlay}
               aria-describedby={titleId}
               className={cn(
@@ -559,7 +581,9 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
   // Backdrops mount once visited. The next one mounts when the main thread is idle, so it
   // is fetched (at low priority, through the image cache) and decoded before its turn
   // without competing with the visible slide's pictures.
-  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
+  // The first slide's from the start (P2-HOME-3): the effect below adding it re-rendered the whole
+  // hero right after it mounted, for a backdrop that was already drawn.
+  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set(slides[0] ? [slides[0].key] : []));
   const nextKey = count > 1 ? slides[wrapIndex(index, 1, count)]?.key : undefined;
   const visibleKey = active?.key;
   useEffect(() => {
@@ -754,7 +778,7 @@ export const HeroCarousel = memo(function HeroCarousel({ slides, sourceName, can
             panelId={panelId}
             sourceName={sourceName(s.ref.sourceId)}
             canPlay={canPlay(s.ref)}
-            onPlay={() => onPlay(s)}
+            onPlay={onPlay}
             menuFor={menuFor}
             onMenuOpen={setMenuOpen}
           />

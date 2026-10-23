@@ -32,6 +32,7 @@ vi.mock('@/features/player', () => ({
 const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');
 const { queryClient } = await import('@/api/query');
+const { LIST_KEY } = await import('@/features/mylist/lib/cache');
 
 function routes() {
   return [
@@ -151,5 +152,19 @@ describe('dashboard rail posters and My List', () => {
     await waitFor(() => expect(within(vod).getByRole('button', { name: 'Save Saved Film to My List' }).getAttribute('aria-pressed')).toBe('true'));
     expect(within(rail).queryByTestId('mylist-button')).toBeNull();
     expect(within(rail).queryByTestId('mylist-saved-marker')).toBeNull();
+  });
+
+  // P2-HOME-4: each corner toggle read the list itself, two observers per card (and a toggle and
+  // three useTranslation calls); a rail's posters now share the rail's one read.
+  it("a rail's posters share one read of the list", async () => {
+    dashboard(() => [savedEntry]);
+    const many = Array.from({ length: 12 }, (_, i) => favorite({ sourceId: 's1', contentType: 'movie', itemId: `f${i}` }, `Film ${i}`));
+    rpcMock.handlers['favorites.list'] = () => many;
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-favorite-vod');
+    await waitFor(() => expect(within(rail).getAllByTestId('mylist-button')).toHaveLength(12));
+    await waitFor(() => expect(within(rail).getByRole('button', { name: 'Save Film 0 to My List' }).getAttribute('aria-pressed')).toBe('false'));
+    const observers = queryClient.getQueryCache().find({ queryKey: LIST_KEY, exact: true })!.getObserversCount();
+    expect(observers).toBeLessThan(12);
   });
 });

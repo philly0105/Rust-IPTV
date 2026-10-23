@@ -1,10 +1,12 @@
+import type { TFunction } from 'i18next';
 import { BookmarkCheck, EllipsisVertical, Play, Search } from 'lucide-react';
 import { createContext, useContext, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
-import { MyListButton, canSave, useInMyList } from '@/features/mylist';
+import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
+import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from '@/features/mylist/components/MyListButton';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { intlLocale, listSeparator } from '@/lib/intl';
@@ -17,8 +19,16 @@ import { kindShortKey } from '../sourceKind';
 /** The focusable card; its focus ring, hover lift and press are drawn on the artwork (CARD_ART). */
 const cardRoot = cn(CARD_ROOT, 'block w-full rounded-md text-start');
 
+/**
+ * A letter or a digit in any script. Tried after the ASCII class (P2-HOME-6): the Unicode property
+ * test was 3 ms of a cold Home at a 4x slowdown, for its two or three parts per card, and nearly
+ * every part (a Latin title, a year, a count) has an ASCII letter or digit.
+ */
+const ASCII_WORD = /[A-Za-z0-9]/;
+const ANY_WORD = /[\p{L}\p{N}]/u;
+
 /** First-strong isolate (U+2068 ... U+2069): a part's own script sets its direction. */
-const isolate = (part: string) => (/[\p{L}\p{N}]/u.test(part) ? `\u2068${part}\u2069` : part);
+const isolate = (part: string) => (ASCII_WORD.test(part) || ANY_WORD.test(part) ? `\u2068${part}\u2069` : part);
 
 /**
  * Joins short facts ("120 channels", "40 movies") with the locale's separator,
@@ -287,6 +297,33 @@ function SavedMarkerCard({ itemRef, ...props }: PosterCardProps & { itemRef: Ite
   );
 }
 
+/** The shared My List of a Home rail's poster corners, with the `mylist` strings. */
+interface RailMyList {
+  state: MyListButtonState;
+  t: TFunction;
+}
+
+const RailMyListContext = createContext<RailMyList | null>(null);
+
+/**
+ * My List for every poster corner of one Home rail (P2-HOME-4): read once by the rail, instead of
+ * two list observers, a toggle and three `useTranslation` calls per card (72 of those on a cold
+ * Home's new arrivals rail alone). A card outside it reads the list on its own (same behaviour).
+ */
+export function RailMyListProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation('mylist');
+  const { keys, status, retry } = useMyListState();
+  const toggle = useMyListToggle();
+  const value = useMemo(() => ({ state: { keys, status, retry, toggle }, t }), [keys, status, retry, toggle, t]);
+  return <RailMyListContext.Provider value={value}>{children}</RailMyListContext.Provider>;
+}
+
+/** A poster corner's toggle: on the rail's shared list when there is one. Only it re-renders when the list changes. */
+function CornerMyListButton(props: MyListButtonProps) {
+  const shared = useContext(RailMyListContext);
+  return shared ? <MyListButtonView {...props} state={shared.state} t={shared.t} /> : <MyListButton {...props} />;
+}
+
 /**
  * A linked card with the My List toggle beside the link, not inside it (a button in a link is a
  * nested interactive control). Once the title is saved the toggle stays on show in the accent
@@ -300,7 +337,7 @@ function MyListPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef;
       {/* The artwork's box (2:3 at the card's width), so the toggle sits on the poster's corner. */}
       <div className={cn('pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]', WRAPPER_HOVER_LAYER)}>
         {/* The rail is one Tab stop (roving tabindex): only the card holding it also offers its toggle. */}
-        <MyListButton
+        <CornerMyListButton
           tabIndex={rail.tabIndex}
           variant="icon"
           itemRef={myList.itemRef}

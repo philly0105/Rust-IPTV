@@ -74,13 +74,16 @@ export interface HeroCarouselProps {
 
 const isVod = (ref: ItemRef) => ref.contentType === 'movie' || ref.contentType === 'series';
 
+/** A continue slide of a movie or series: the only kind that reads its catalog item (useSlideDetails). */
+const readsDetails = (slide: HeroSlide) => slide.kind === 'continue' && isVod(slide.ref);
+
 /**
  * Continue-watching positions carry only a snapshot (title, poster). The
  * catalog item adds the backdrop, plot, year, genres and rating. Shared by the
  * backdrop layer and the slide body through the query cache.
  */
 function useSlideDetails(slide: HeroSlide, enabled: boolean): HeroSlide {
-  const wanted = enabled && slide.kind === 'continue' && isVod(slide.ref);
+  const wanted = enabled && readsDetails(slide);
   const item = useRpcQuery('catalog.item', { ref: slide.ref }, { enabled: wanted, staleTime: 10 * 60_000 });
   return useMemo(() => {
     const d = wanted ? item.data : undefined;
@@ -269,8 +272,25 @@ function tint(title: string): string {
  * missing backdrop is drawn quarter-size, blurred and scaled up (C5), so it
  * reads as colour, not as a picture.
  */
-const Backdrop = memo(function Backdrop({ slide, active, title }: { slide: HeroSlide; active: boolean; title: string }) {
-  const s = useSlideDetails(slide, true);
+interface BackdropProps {
+  slide: HeroSlide;
+  active: boolean;
+  title: string;
+}
+
+/**
+ * Only a slide that reads its catalog item mounts the query for it (P2-HOME-5): a new arrival
+ * carries its own artwork, and a disabled query still built and cached a query per slide.
+ */
+const Backdrop = memo(function Backdrop(props: BackdropProps) {
+  return readsDetails(props.slide) ? <DetailedBackdrop {...props} /> : <BackdropView {...props} s={props.slide} />;
+});
+
+function DetailedBackdrop(props: BackdropProps) {
+  return <BackdropView {...props} s={useSlideDetails(props.slide, true)} />;
+}
+
+function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlide }) {
   const image = useImageChain([s.backdropUrl, s.posterUrl], s.ref.sourceId);
   const [loaded, setLoaded] = useState<string | null>(null);
   const url = image.url;
@@ -331,7 +351,7 @@ const Backdrop = memo(function Backdrop({ slide, active, title }: { slide: HeroS
       )}
     </div>
   );
-});
+}
 
 /** The hero's secondary buttons on glass: Details and the slide's menu. */
 const GLASS_BUTTON = cn(
@@ -339,23 +359,7 @@ const GLASS_BUTTON = cn(
   'hover:bg-on-glass/20 active:bg-on-glass/25 motion-safe:transition-[background-color,translate] motion-safe:duration-150 motion-safe:active:translate-y-px',
 );
 
-/**
- * Memoized with the carousel's stable props (P2-HOME-3): a hover, a focus, the rotation's pause
- * and the next backdrop's mount re-rendered all six bodies; a turn now re-renders the two whose
- * `active` changes.
- */
-const SlideBody = memo(function SlideBody({
-  slide,
-  active,
-  panelId,
-  sourceName,
-  canPlay,
-  onPlay,
-  menuFor,
-  onMenuOpen,
-  index,
-  count,
-}: {
+interface SlideBodyProps {
   slide: HeroSlide;
   active: boolean;
   panelId: string;
@@ -367,10 +371,24 @@ const SlideBody = memo(function SlideBody({
   onMenuOpen: (open: boolean) => void;
   index: number;
   count: number;
-}) {
+}
+
+/**
+ * Memoized with the carousel's stable props (P2-HOME-3): a hover, a focus, the rotation's pause
+ * and the next backdrop's mount re-rendered all six bodies; a turn now re-renders the two whose
+ * `active` changes. Only a slide that reads its catalog item mounts the query (P2-HOME-5).
+ */
+const SlideBody = memo(function SlideBody(props: SlideBodyProps) {
+  return readsDetails(props.slide) ? <DetailedSlideBody {...props} /> : <SlideBodyView {...props} s={props.slide} />;
+});
+
+function DetailedSlideBody(props: SlideBodyProps) {
+  return <SlideBodyView {...props} s={useSlideDetails(props.slide, props.active)} />;
+}
+
+function SlideBodyView({ slide, active, panelId, sourceName, canPlay, onPlay, menuFor, onMenuOpen, index, count, s }: SlideBodyProps & { s: HeroSlide }) {
   const { t, i18n } = useTranslation('shell');
   const openMenu = useContext(CardMenuContext);
-  const s = useSlideDetails(slide, active);
   const title = s.title || t('untitled');
   const vod = isVod(s.ref);
   const continuing = s.kind === 'continue';
@@ -492,7 +510,7 @@ const SlideBody = memo(function SlideBody({
       </div>
     </div>
   );
-});
+}
 
 /**
  * Under a coarse pointer the pill's buttons and ticks grow to 44 px square, like the kit's

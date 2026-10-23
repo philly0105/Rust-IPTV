@@ -533,25 +533,30 @@ describe('Controls in a narrow player', () => {
   });
 
   it("measures the room in the row's ResizeObserver, after layout, not in a frame of its own (P2-PLAYER-1)", async () => {
-    /** Calls back only when the test says layout happened. */
+    /**
+     * Calls back only when the test says layout happened, and only for what a browser would report
+     * then: a target observed anew (an observation's first report). Nothing here resizes.
+     */
     class LayoutObserver {
       static all: LayoutObserver[] = [];
-      targets = new Set<Element>();
+      due = new Set<Element>();
       constructor(private readonly cb: ResizeObserverCallback) {
         LayoutObserver.all.push(this);
       }
       observe(el: Element): void {
-        this.targets.add(el);
+        this.due.add(el);
       }
       unobserve(el: Element): void {
-        this.targets.delete(el);
+        this.due.delete(el);
       }
       disconnect(): void {
-        this.targets.clear();
+        this.due.clear();
       }
       static layout(): void {
         for (const o of LayoutObserver.all) {
-          if (o.targets.size) o.cb([...o.targets].map((target) => ({ target }) as ResizeObserverEntry), o as unknown as ResizeObserver);
+          const due = [...o.due];
+          o.due.clear();
+          if (due.length) o.cb(due.map((target) => ({ target }) as ResizeObserverEntry), o as unknown as ResizeObserver);
         }
       }
     }
@@ -563,14 +568,20 @@ describe('Controls in a narrow player', () => {
       // The bar's size comes in: a narrow player.
       act(() => LayoutObserver.layout());
       expect(screen.queryByRole('button', { name: 'Back 10 seconds' })).toBeNull();
-      await frame();
+      // The narrow render asks the row's observer for its room, which comes after layout.
+      act(() => LayoutObserver.layout());
+      expect(reads).toHaveBeenCalled();
       reads.mockClear();
+      // No render since: the row was not observed anew, so nothing calls back or reads.
+      act(() => LayoutObserver.layout());
+      await frame();
+      expect(reads).not.toHaveBeenCalled();
       // A render that changes what the row holds (a caption track) reads nothing itself...
       act(() => useMediaStore.setState({ tracks: { ...useMediaStore.getState().tracks, text: [{ id: '1', label: 'English', selected: false }] } }));
       await frame();
       await frame();
       expect(reads).not.toHaveBeenCalled();
-      // ...the row's observer measures once layout is done.
+      // ...it observes the row anew, so the row's observer measures once layout is done.
       act(() => LayoutObserver.layout());
       expect(reads).toHaveBeenCalled();
     } finally {

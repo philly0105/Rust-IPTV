@@ -23,7 +23,7 @@ import type { Source, WatchlistEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 import { joinList } from '@/shell/dashboard/cards';
 
-import { IconButton, Poster, ProgressBar, cn } from '../deps';
+import { IconButton, Poster, ProgressBar, cn, useMediaQuery, useScaledPx } from '../deps';
 
 /**
  * Fixed row height for the virtual list: a 48 x 72 poster plus breathing room,
@@ -83,6 +83,12 @@ export interface MyListRowProps {
 const revealOnFine =
   'sm:pointer-fine:opacity-0 sm:pointer-fine:group-hover:opacity-100 sm:pointer-fine:in-focus-visible:opacity-100 sm:pointer-fine:focus-within:opacity-100 motion-safe:transition-opacity';
 
+/** The artwork's box, `w-12 sm:w-14`: spacing steps of 3.75 px at 100 % scale. */
+const ART_PX = 45;
+const ART_SM_PX = 52.5;
+/** Tailwind's `sm` breakpoint. */
+const SM_QUERY = '(min-width: 40rem)';
+
 function MyListRowImpl({
   entry,
   rank,
@@ -108,6 +114,8 @@ function MyListRowImpl({
   const title = snapshotTitle(ref, snapshot.title).title;
   const movie = ref.contentType === 'movie';
   const TypeIcon = movie ? Film : Clapperboard;
+  // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
+  const artWidth = useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true);
   const onOpen = () => openEntry(entry);
 
   return (
@@ -174,7 +182,7 @@ function MyListRowImpl({
 
       {/* Artwork is a mouse shortcut: the title button carries the name for keyboard and AT. */}
       <div aria-hidden onClick={onOpen} className="row-span-2 w-12 shrink-0 cursor-pointer self-center overflow-hidden rounded-md shadow-1 ring-1 ring-edge sm:w-14">
-        <Poster src={snapshot.posterUrl} sourceId={ref.sourceId} alt="" label={title} aspect="poster" />
+        <Poster src={snapshot.posterUrl} sourceId={ref.sourceId} width={artWidth} alt="" label={title} aspect="poster" />
       </div>
 
       <button

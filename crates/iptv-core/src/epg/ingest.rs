@@ -152,7 +152,11 @@ pub fn ingest_reader(
     // the temp database's own 2 MB page cache, memory stays flat whatever
     // the size of the feed (pooled connections keep temp tables in memory);
     // restoring the setting closes the temp database, which deletes the
-    // file without walking the table's pages.
+    // file without walking the table's pages. Statement journals follow the
+    // setting: the swap's copy journals each page it reuses from the rows it
+    // replaces, so a refresh over a stored guide also needs about that
+    // guide's size in the temp directory until the swap commits (held in
+    // memory before; `epg_reingest_rss`).
     conn.execute_batch(
         "PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0; PRAGMA temp_store=FILE;",
     )?;

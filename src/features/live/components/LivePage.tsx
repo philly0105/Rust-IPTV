@@ -441,6 +441,13 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const [mapping, setMapping] = useState<Channel | null>(null);
   const closeMapping = useCallback(() => setMapping(null), []);
+  // The two dialogs mount when they first open, and stay for their exits and later openings
+  // (P2-LIVE-4). Closed, they still rendered with the page: the groups dialog's query observer and
+  // virtual rows over every group took 6.7 ms of Live's cold open at a 4x CPU slowdown.
+  const [manageUsed, setManageUsed] = useState(false);
+  if (manageOpen && !manageUsed) setManageUsed(true);
+  const [mappingUsed, setMappingUsed] = useState(false);
+  if (mapping && !mappingUsed) setMappingUsed(true);
   const [menu, setMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; favorite: boolean; nowTitle?: string } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ pos: { x: number; y: number }; category: Category } | null>(null);
 
@@ -976,8 +983,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         onClose={closeMenu}
       />
       <MemoContextMenu pos={groupMenu?.pos ?? null} items={groupMenuItems} label={groupMenu?.category.name ?? ''} onClose={closeGroupMenu} />
-      <MemoManageDialog open={manageOpen} onClose={closeManage} sourceId={sourceId} contentType={contentType} />
-      <MemoMappingDialog channel={mapping} onClose={closeMapping} />
+      {manageUsed ? <MemoManageDialog open={manageOpen} onClose={closeManage} sourceId={sourceId} contentType={contentType} /> : null}
+      {mappingUsed ? <MemoMappingDialog channel={mapping} onClose={closeMapping} /> : null}
     </div>
   );
 }

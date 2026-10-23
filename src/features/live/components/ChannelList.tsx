@@ -3,13 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { UNSAFE_LocationContext } from 'react-router';
 
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
+import { listSeparator } from '@/lib/intl';
 import { TEXT_LINK, cn, useListVirtualizer, useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { ParentalLocks } from '../hooks/useParentalLocks';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ChannelRow } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow } from './ChannelRow';
 
 export interface ChannelListProps {
   paged: PagedChannels;
@@ -70,7 +71,8 @@ export function resetChannelListMemory(): void {
 }
 
 export function ChannelList(props: ChannelListProps) {
-  const { t } = useTranslation('live');
+  const { t, i18n } = useTranslation('live');
+  const separator = listSeparator(i18n.language);
   const { paged, resetKey, playingRef, playingNumber, now } = props;
   // Outside a router (tests) there is no navigation type: treat it as a push.
   const navigationType = useContext(UNSAFE_LocationContext)?.navigationType;
@@ -116,7 +118,9 @@ export function ChannelList(props: ChannelListProps) {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 10,
-    initialRect: { width: 360, height: props.initialHeight ?? 800 },
+    // Without a hint, the window's size (P2-LIVE-1): the list's own comes after the first layout,
+    // and an 800 px guess rendered the rows again before a taller window's first paint.
+    initialRect: props.initialHeight === undefined ? undefined : { width: 360, height: props.initialHeight },
     // First paint already shows the remembered rows: no flash of the top of the list.
     initialOffset: () => listMemory.get(resetKey)?.scrollTop ?? 0,
   });
@@ -196,20 +200,28 @@ export function ChannelList(props: ChannelListProps) {
   const seenPlayingKey = useRef(playingKey);
   /** `playingKey|number|list` of the lookup under way for a channel outside the loaded pages. */
   const locating = useRef('');
+  const follow = (index: number, align: 'auto' | 'center') => {
+    followKey.current = '';
+    if (index === activeRef.current) return;
+    setActive(index);
+    virtualizer.scrollToIndex(index, { align });
+    // Keep keyboard focus on the list when it was there.
+    if (scrollRef.current?.contains(document.activeElement)) focusPending.current = index;
+  };
+  // A list that opens with the playing channel's row loaded is on that row when it first paints
+  // (P2-LIVE-5). The mount commit no longer renders twice (P2-LIVE-1), so the effect below can run
+  // after the paint: from there the list painted its top, then jumped to the row.
+  useLayoutEffect(() => {
+    if (!followKey.current || !playingRef) return;
+    const hit = paged.loaded.find((l) => sameRef(l.channel.ref, playingRef));
+    if (hit) follow(hit.index, 'auto');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (seenPlayingKey.current !== playingKey) {
       seenPlayingKey.current = playingKey;
       followKey.current = playingKey;
     }
     if (!followKey.current || !playingRef) return;
-    const follow = (index: number, align: 'auto' | 'center') => {
-      followKey.current = '';
-      if (index === activeRef.current) return;
-      setActive(index);
-      virtualizer.scrollToIndex(index, { align });
-      // Keep keyboard focus on the list when it was there.
-      if (scrollRef.current?.contains(document.activeElement)) focusPending.current = index;
-    };
     const hit = paged.loaded.find((l) => sameRef(l.channel.ref, playingRef));
     if (hit) {
       follow(hit.index, 'auto');
@@ -428,7 +440,9 @@ export function ChannelList(props: ChannelListProps) {
                 data-index={v.index}
                 style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}
               >
-                <ChannelRow
+                <ListChannelRow
+                  t={t}
+                  separator={separator}
                   index={v.index}
                   channel={ch}
                   nowNext={paged.getNowNext(v.index)}

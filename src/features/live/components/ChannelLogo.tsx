@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type SyntheticEvent } from 'react';
+import { memo, useCallback, useEffect, useState, type SyntheticEvent } from 'react';
 
 import { cn, gateImage, useImageChain } from '@/ui';
 
@@ -99,8 +99,11 @@ export function measureLogo(img: HTMLImageElement): LogoReading {
  * scrolls unless one has stayed in view, and a logo whose row goes is dropped. Rows flung past never ask; a
  * waiting logo shows the plate alone (no letters flashing before it), and a logo already showing stays,
  * since its <img> is kept while the address is the same.
+ *
+ * Memoized (P2-LIVE-3): a channel row renders again when the guide's now/next lands, and its logo
+ * rendered again with it.
  */
-export function ChannelLogo({
+export const ChannelLogo = memo(function ChannelLogo({
   src,
   name,
   size = 36,
@@ -133,8 +136,10 @@ export function ChannelLogo({
     if (!reading) {
       reading = measureLogo(e.currentTarget);
       readings.set(url, reading);
-      if (reading.plate) setMeasured((n) => n + 1);
     }
+    // Also when another tile of this address measured it after this one rendered: memoized, this
+    // tile gets no parent render to pick up the plate (P2-LIVE-6).
+    if (reading.plate !== (plate ?? null)) setMeasured((n) => n + 1);
     onHue?.(reading.hue);
   };
   // The monogram's hue is known from the name; a logo's once it has loaded (onLoad, or an
@@ -187,4 +192,4 @@ export function ChannelLogo({
       />
     </span>
   );
-}
+});

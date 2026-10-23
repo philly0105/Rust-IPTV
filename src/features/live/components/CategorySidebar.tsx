@@ -92,7 +92,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 10,
-    initialRect: { width: 240, height: 600 },
+    // No initialRect: the window's size stands in until the sidebar's own comes in after the first
+    // layout (P2-LIVE-1). A 600 px guess rendered the groups again before a tall window's first paint.
     initialOffset: initialTop,
   });
   // A new scale or density: drop the cached row sizes so every row takes the new height.
@@ -197,6 +198,9 @@ export function CategorySidebar(props: CategorySidebarProps) {
     e.preventDefault();
   };
 
+  // Read once for every row (P2-LIVE-3): a `useTranslation` per row subscribed each to i18next.
+  const lockedLabel = t('locked');
+  const menuLabel = t('groupMenu');
   const allHidden = !props.isLoading && !props.error && (props.categories?.length ?? 0) === 0 && props.hiddenCount > 0;
   const allActive = !props.activeId;
 
@@ -313,6 +317,8 @@ export function CategorySidebar(props: CategorySidebarProps) {
                     locked={locked}
                     tabbable={v.index === tabStop}
                     count={fmt.format(c.itemCount)}
+                    lockedLabel={lockedLabel}
+                    menuLabel={menuLabel}
                     onNavigate={props.onNavigate}
                     onFocus={() => setCursor(v.index)}
                     onMenu={
@@ -353,6 +359,9 @@ function ViewLink({ to, ...rest }: ComponentProps<typeof Link> & { to: string })
   return <Link {...intent} to={to} {...rest} />;
 }
 
+/** Made once, so a group row's re-render skips its icon (P2-LIVE-3). */
+const GROUP_MENU_ICON = <EllipsisVertical size={16} />;
+
 /**
  * A group's row: its link, and its menu (LG-13) from a right click, the context-menu key (the
  * list's own handler), a long press, or on touch a ⋮ button. iOS Safari fires no `contextmenu` on
@@ -367,6 +376,8 @@ function GroupLink({
   locked,
   tabbable,
   count,
+  lockedLabel,
+  menuLabel,
   onNavigate,
   onFocus,
   onMenu,
@@ -378,11 +389,13 @@ function GroupLink({
   locked: boolean;
   tabbable: boolean;
   count: string;
+  /** `t('locked')` and `t('groupMenu')`, from the sidebar. */
+  lockedLabel: string;
+  menuLabel: string;
   onNavigate?(): void;
   onFocus(): void;
   onMenu?(pos: { x: number; y: number }): void;
 }) {
-  const { t } = useTranslation('live');
   const longPress = useLongPress((x, y) => onMenu?.({ x, y }));
   // A rest on the link asks for the group's first page with its now/next and favourite flags, so
   // a click shows complete rows at once. Rows that scroll under a still pointer do not count.
@@ -412,19 +425,19 @@ function GroupLink({
         {...(onMenu ? longPress : undefined)}
         // No callout or text selection on a long press (iOS would offer to open the link).
         className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
-        title={locked ? `${c.name} (${t('locked')})` : c.name}
+        title={locked ? `${c.name} (${lockedLabel})` : c.name}
       >
         <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
-        {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={t('locked')} /> : null}
+        {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} /> : null}
         <span className={countClass(active)}>{count}</span>
       </Link>
       {onMenu ? (
         <IconButton
           size="sm"
           tabIndex={-1}
-          label={t('groupMenu')}
+          label={menuLabel}
           aria-haspopup="menu"
-          icon={<EllipsisVertical size={16} />}
+          icon={GROUP_MENU_ICON}
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             // Under the button from its inline start, as a channel row's ⋮ opens.

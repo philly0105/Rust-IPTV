@@ -1,5 +1,6 @@
+import type { TFunction } from 'i18next';
 import { EllipsisVertical, History, Lock, Star } from 'lucide-react';
-import { memo, type MouseEvent } from 'react';
+import { memo, type MouseEvent, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
@@ -84,8 +85,93 @@ export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
 const ROW_ACTIONS =
   'absolute inset-y-0 end-1.5 my-auto flex h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 opacity-0 shadow-2 group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 pointer-coarse:static pointer-coarse:me-1 pointer-coarse:border-transparent pointer-coarse:bg-transparent pointer-coarse:opacity-100 pointer-coarse:shadow-none';
 
+/** The UI language as ChannelList hands it to its rows (P2-LIVE-3). */
+interface RowLanguage {
+  t: TFunction<'live'>;
+  /** `listSeparator` of the UI language: between the parts of the row button's name. */
+  separator: string;
+}
+
+/**
+ * What every row says alike, read once per `t` (P2-LIVE-3): each row of a screen made six to nine
+ * i18next calls, and again on every re-render (the guide's now/next landing, the favourite flags).
+ * react-i18next makes a new `t` when the language changes, so these never outlive their language.
+ */
+interface RowText {
+  favorite: string;
+  locked: string;
+  playingNow: string;
+  addFavorite: string;
+  removeFavorite: string;
+  channelMenu: string;
+  guideNotAnswering: string;
+  archive: string;
+  archiveIcon: ReactElement;
+  /** Plural texts by key and count, filled as rows ask for them. */
+  counted: Map<string, string>;
+}
+const rowTexts = new WeakMap<TFunction<'live'>, RowText>();
+
+function rowText(t: TFunction<'live'>): RowText {
+  let text = rowTexts.get(t);
+  if (!text) {
+    text = {
+      favorite: t('favorite'),
+      locked: t('locked'),
+      playingNow: t('playingNow'),
+      addFavorite: t('addFavorite'),
+      removeFavorite: t('removeFavorite'),
+      channelMenu: t('channelMenu'),
+      guideNotAnswering: t('guideNotAnswering'),
+      archive: t('archive'),
+      archiveIcon: <History size={12} aria-label={t('archive')} data-testid="row-archive" />,
+      counted: new Map(),
+    };
+    rowTexts.set(t, text);
+  }
+  return text;
+}
+
+function countedText(t: TFunction<'live'>, key: 'archiveDays' | 'minutesLeft' | 'minutesLeftShort', count: number): string {
+  const { counted } = rowText(t);
+  const k = `${key}|${count}`;
+  let s = counted.get(k);
+  if (s === undefined) {
+    s = t(key, { count });
+    counted.set(k, s);
+  }
+  return s;
+}
+
+/**
+ * The icons that look the same on every row, made once (P2-LIVE-3): an element that is the same
+ * object as last render is not rendered again, so a row's re-render skips its lucide icons.
+ */
+const FAVORITE_MARK = (
+  <Star
+    data-testid="row-favorite"
+    aria-hidden
+    size={12}
+    className="shrink-0 fill-current text-fg-subtle not-pointer-coarse:group-hover/row:invisible not-pointer-coarse:group-has-[:focus-visible]/row:invisible"
+  />
+);
+const LOCKED_MARK = <Lock data-testid="row-locked" aria-hidden size={12} className="shrink-0 text-fg-subtle" />;
+const STAR_ON = <Star size={16} className="fill-current text-fg" />;
+const STAR_OFF = <Star size={16} />;
+const MENU_ICON = <EllipsisVertical size={16} />;
+
+/** A channel row that reads the UI language itself; ChannelList's rows take the list's (ListChannelRow). */
 export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const { t, i18n } = useTranslation('live');
+  return <ListChannelRow {...props} t={t} separator={listSeparator(i18n.language)} />;
+});
+
+/**
+ * A row of ChannelList. The list hands it `t` and the separator (P2-LIVE-3): `useTranslation` per
+ * row subscribed each of a screen of rows to i18next and copied the i18next instance for each.
+ */
+export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProps & RowLanguage) {
+  const { t } = props;
   const { channel, nowNext, favorite, playing, active, index, now, compact } = props;
   const longPress = useLongPress((x, y) => {
     if (channel) props.onMenuAt?.({ x, y }, channel, index);
@@ -101,9 +187,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
   const archive = hasUsableArchive(channel, props.sourceKind);
   const name = displayChannelName(channel.name, props.stripPrefix);
   const left = cur ? minutesLeft(cur, now) : 0;
-  const archiveLabel = channel.archive?.durationHours
-    ? t('archiveDays', { count: Math.max(1, Math.round(channel.archive.durationHours / 24)) })
-    : t('archive');
+  const text = rowText(t);
 
   return (
     <div
@@ -124,13 +208,13 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
         aria-label={[
           channel.number !== undefined ? `${channel.number}` : '',
           name,
-          favorite ? t('favorite') : '',
-          locked ? t('locked') : '',
+          favorite ? text.favorite : '',
+          locked ? text.locked : '',
           cur ? t('nowShowing', { title: cur.title }) : '',
-          playing ? t('playingNow') : '',
+          playing ? text.playingNow : '',
         ]
           .filter(Boolean)
-          .join(listSeparator(i18n.language))}
+          .join(props.separator)}
         onClick={() => props.onActivate(index, 'click')}
         onDoubleClick={() => props.onActivate(index, 'double')}
         className="flex min-w-0 flex-1 items-center gap-3 py-3 ps-2.5 pe-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
@@ -154,20 +238,20 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
             {/* Marks, not slots: an empty row gives their room to the title. */}
             {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
                 It steps aside while the floating actions show their own star. */}
-            {favorite ? (
-              <Star
-                data-testid="row-favorite"
-                aria-hidden
-                size={12}
-                className="shrink-0 fill-current text-fg-subtle not-pointer-coarse:group-hover/row:invisible not-pointer-coarse:group-has-[:focus-visible]/row:invisible"
-              />
-            ) : null}
+            {favorite ? FAVORITE_MARK : null}
             {archive ? (
-              <span title={archiveLabel} className="inline-flex shrink-0 text-fg-subtle">
-                <History size={12} aria-label={t('archive')} data-testid="row-archive" />
+              <span
+                title={
+                  channel.archive?.durationHours
+                    ? countedText(t, 'archiveDays', Math.max(1, Math.round(channel.archive.durationHours / 24)))
+                    : text.archive
+                }
+                className="inline-flex shrink-0 text-fg-subtle"
+              >
+                {text.archiveIcon}
               </span>
             ) : null}
-            {locked ? <Lock data-testid="row-locked" aria-hidden size={12} className="shrink-0 text-fg-subtle" /> : null}
+            {locked ? LOCKED_MARK : null}
           </span>
           {cur ? (
             <>
@@ -180,8 +264,8 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
                 </span>
                 {/* A phone's playing TV row leaves the time left and the progress to the guide
                     ribbon's bar right above the list, which shows both for the same programme. */}
-                <span className={cn('shrink-0 tabular-nums text-fg-subtle', playing && !props.station && 'max-md:hidden')} title={t('minutesLeft', { count: left })}>
-                  {t('minutesLeftShort', { count: left })}
+                <span className={cn('shrink-0 tabular-nums text-fg-subtle', playing && !props.station && 'max-md:hidden')} title={countedText(t, 'minutesLeft', left)}>
+                  {countedText(t, 'minutesLeftShort', left)}
                 </span>
               </span>
               {props.station ? null : (
@@ -198,7 +282,7 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
             </>
           ) : props.guideUnavailable ? (
             <span className="truncate text-caption text-fg-subtle" data-testid="row-guide-unavailable">
-              {t('guideNotAnswering')}
+              {text.guideNotAnswering}
             </span>
           ) : (
             <span dir="auto" className="truncate text-caption text-match-parent text-fg-subtle">
@@ -207,39 +291,64 @@ export const ChannelRow = memo(function ChannelRow(props: ChannelRowProps) {
           )}
         </span>
       </button>
-      <span className={ROW_ACTIONS} data-testid="row-actions">
+      <RowActions channel={channel} index={index} favorite={favorite} text={text} onToggleFavorite={props.onToggleFavorite} onMenuAt={props.onMenuAt} />
+    </div>
+  );
+});
+
+/**
+ * The row's floating actions (LG-04), memoized (P2-LIVE-3): the guide's now/next landing
+ * re-renders every row on screen, and each row's two IconButtons, with a tooltip's hooks each,
+ * rendered again with it.
+ */
+const RowActions = memo(function RowActions({
+  channel,
+  index,
+  favorite,
+  text,
+  onToggleFavorite,
+  onMenuAt,
+}: {
+  channel: Channel;
+  index: number;
+  favorite: boolean;
+  text: RowText;
+  onToggleFavorite: ChannelRowProps['onToggleFavorite'];
+  onMenuAt: ChannelRowProps['onMenuAt'];
+}) {
+  return (
+    <span className={ROW_ACTIONS} data-testid="row-actions">
+      <IconButton
+        size="sm"
+        tabIndex={-1}
+        // One name with the pressed state; the tooltip says what a press does.
+        pressed={favorite}
+        label={text.favorite}
+        tooltip={favorite ? text.removeFavorite : text.addFavorite}
+        shortcut="s"
+        icon={favorite ? STAR_ON : STAR_OFF}
+        onClick={() => onToggleFavorite(channel, favorite)}
+        // A pressed toggle draws the selected fill; the filled star says enough here. On touch the
+        // actions sit in the row's flow, so a 44 px star beside the ⋮ cut a tablet's narrow list to
+        // "M…": the ⋮ menu (and a long press) has Add to favorites, and the row keeps its mark.
+        className={cn('aria-pressed:bg-transparent hover:bg-hover', onMenuAt ? 'pointer-coarse:hidden' : 'pointer-coarse:max-sm:hidden')}
+      />
+      {onMenuAt ? (
         <IconButton
           size="sm"
           tabIndex={-1}
-          // One name with the pressed state; the tooltip says what a press does.
-          pressed={favorite}
-          label={t('favorite')}
-          tooltip={favorite ? t('removeFavorite') : t('addFavorite')}
-          shortcut="s"
-          icon={<Star size={16} className={favorite ? 'fill-current text-fg' : undefined} />}
-          onClick={() => props.onToggleFavorite(channel, favorite)}
-          // A pressed toggle draws the selected fill; the filled star says enough here. On touch the
-          // actions sit in the row's flow, so a 44 px star beside the ⋮ cut a tablet's narrow list to
-          // "M…": the ⋮ menu (and a long press) has Add to favorites, and the row keeps its mark.
-          className={cn('aria-pressed:bg-transparent hover:bg-hover', props.onMenuAt ? 'pointer-coarse:hidden' : 'pointer-coarse:max-sm:hidden')}
+          label={text.channelMenu}
+          aria-haspopup="menu"
+          icon={MENU_ICON}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            // Opens under the button from its inline start (the menu grows toward the inline end and
+            // stays on screen).
+            onMenuAt?.({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 }, channel, index);
+          }}
+          className="hover:bg-hover"
         />
-        {props.onMenuAt ? (
-          <IconButton
-            size="sm"
-            tabIndex={-1}
-            label={t('channelMenu')}
-            aria-haspopup="menu"
-            icon={<EllipsisVertical size={16} />}
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              // Opens under the button from its inline start (the menu grows toward the inline end and
-              // stays on screen).
-              props.onMenuAt?.({ x: documentIsRtl() ? r.right : r.left, y: r.bottom + 2 }, channel, index);
-            }}
-            className="hover:bg-hover"
-          />
-        ) : null}
-      </span>
-    </div>
+      ) : null}
+    </span>
   );
 });

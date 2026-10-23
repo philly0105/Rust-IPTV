@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { hashKey, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import {
   CalendarClock,
   ChevronLeft,
@@ -347,6 +347,7 @@ export function shownChunks(view: ChunkPair, settled: ChunkPair, all: boolean, c
 /** Rows of programme lists kept per channel before the cache starts over. */
 const PROGRAMS_CACHE_MAX = 2000;
 const NO_PROGRAMS: EpgProgram[] = [];
+const NO_REFS: ItemRef[] = [];
 /** The args of a disabled `catalog.item` query (nothing playing). */
 const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 
@@ -374,6 +375,35 @@ export function shortEpgReaches(start: number, end: number, now: number): boolea
  */
 export function gridArgs(refs: ItemRef[], from: string, to: string) {
   return { refs, from, to, withDescription: false };
+}
+
+/** Each refs array's grid key hash, with the window it was for. */
+const gridHashes = new WeakMap<readonly ItemRef[], { from: string; to: string; hash: string }>();
+
+/**
+ * TanStack's own hash of a {@link gridArgs} key, so prefetches and readers share the entry, worked
+ * out once per refs array and window (P2-GUIDE-6). The page renders on every scroll frame and
+ * looks its chunks up four times in each render: hashing 40 refs per lookup showed in a fling's profile.
+ */
+function gridKeyHash(key: QueryKey): string {
+  const args = key[1] as Partial<ReturnType<typeof gridArgs>> | null | undefined;
+  if (!args?.refs || args.from === undefined || args.to === undefined) return hashKey(key);
+  const hit = gridHashes.get(args.refs);
+  if (hit && hit.from === args.from && hit.to === args.to) return hit.hash;
+  const hash = hashKey(key);
+  gridHashes.set(args.refs, { from: args.from, to: args.to, hash });
+  return hash;
+}
+
+const refKeySets = new WeakMap<readonly ItemRef[], ReadonlySet<ItemKey>>();
+/** The item keys of a chunk's refs, made once per refs array. */
+function refKeys(refs: readonly ItemRef[]): ReadonlySet<ItemKey> {
+  let keys = refKeySets.get(refs);
+  if (!keys) {
+    keys = new Set(refs.map(itemKey));
+    refKeySets.set(refs, keys);
+  }
+  return keys;
 }
 
 /** The length of the window the guide last laid out this session (0 until one was): it follows the page width. */
@@ -576,18 +606,29 @@ export function EpgGridPage() {
   const toIso = new Date(dataEnd - offsetMs).toISOString();
 
   // A view (favorites, a list) knows each row's ref before its channel arrives: its chunk is
-  // asked once with every ref, not again as each batch of `catalog.item` answers lands.
+  // asked once with every ref, not again as each batch of `catalog.item` answers lands. A chunk's
+  // refs stay the same array while its rows hold the same refs, so its keys hash once, and a
+  // render reads them once: during a fling every row outside the observed pages looks its page up
+  // in the query cache, hashing that page's key, on each read (P2-GUIDE-6).
+  const chunkRefsSeen = useRef(new Map<number, ItemRef[]>());
+  const chunkRefsRead = new Map<number, ItemRef[]>();
   const chunkRefs = (c: number) => {
-    const refs = [];
+    const read = chunkRefsRead.get(c);
+    if (read) return read;
+    const refs: ItemRef[] = [];
     for (let i = c * GRID_CHUNK; i < Math.min(count, (c + 1) * GRID_CHUNK); i++) {
       const ref = paged.refAt ? paged.refAt(i) : paged.getChannel(i)?.ref;
       if (ref) refs.push(ref);
     }
-    return refs;
+    const seen = chunkRefsSeen.current.get(c);
+    const out = seen && seen.length === refs.length && seen.every((r, i) => r === refs[i]) ? seen : refs;
+    chunkRefsSeen.current.set(c, out);
+    chunkRefsRead.set(c, out);
+    return out;
   };
   const chunkCached = (c: number) => {
     const refs = chunkRefs(c);
-    return refs.length > 0 && queryClient.getQueryData(rpcKey('epg.grid', gridArgs(refs, fromIso, toIso))) !== undefined;
+    return refs.length > 0 && queryClient.getQueryCache().get(gridKeyHash(rpcKey('epg.grid', gridArgs(refs, fromIso, toIso))))?.state.data !== undefined;
   };
   // The chunks on screen, and the ones asked for: those follow once the visible chunk settles.
   const viewA = Math.floor(first / GRID_CHUNK);
@@ -616,15 +657,25 @@ export function EpgGridPage() {
   }, [listKey, viewA, viewB, atRest]);
 
   const refsA = chunkRefs(chunkA);
-  const refsB = chunkB !== chunkA ? chunkRefs(chunkB) : [];
+  const refsB = chunkB !== chunkA ? chunkRefs(chunkB) : NO_REFS;
   // The previous answer stays while the next chunk or window loads (keepPrevious): rows it
   // covers keep their programmes and the no-guide notice does not blink. Rows it does not
   // cover show as loading (see `programsFor`). Nothing is asked before the page is measured: the
   // first measurement sets the window's length (L2-perf-desktop-12).
-  const gridA = useRpcQuery('epg.grid', gridArgs(refsA, fromIso, toIso), { enabled: pageMeasured && refsA.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
-  const gridB = useRpcQuery('epg.grid', gridArgs(refsB, fromIso, toIso), { enabled: pageMeasured && refsB.length > 0, staleTime: GRID_STALE_MS, keepPrevious: true });
-  const keysA = new Set(refsA.map(itemKey));
-  const keysB = new Set(refsB.map(itemKey));
+  const gridA = useRpcQuery('epg.grid', gridArgs(refsA, fromIso, toIso), {
+    enabled: pageMeasured && refsA.length > 0,
+    staleTime: GRID_STALE_MS,
+    keepPrevious: true,
+    queryKeyHashFn: gridKeyHash,
+  });
+  const gridB = useRpcQuery('epg.grid', gridArgs(refsB, fromIso, toIso), {
+    enabled: pageMeasured && refsB.length > 0,
+    staleTime: GRID_STALE_MS,
+    keepPrevious: true,
+    queryKeyHashFn: gridKeyHash,
+  });
+  const keysA = refKeys(refsA);
+  const keysB = refKeys(refsB);
 
   // At rest, the chunks above and below are fetched ahead, so the next rows arrive drawn.
   const prefetchChunk = useStable((c: number) => {

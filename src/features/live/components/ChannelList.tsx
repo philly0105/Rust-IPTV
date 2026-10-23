@@ -3,13 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { UNSAFE_LocationContext } from 'react-router';
 
 import { itemKey, sameRef, type Channel, type EpgNowNext, type ItemKey, type ItemRef, type SourceKind } from '@/api/types';
+import { listSeparator } from '@/lib/intl';
 import { TEXT_LINK, cn, useListVirtualizer, useRowHeight } from '@/ui';
 
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
 import type { ParentalLocks } from '../hooks/useParentalLocks';
 import { documentIsRtl } from '../lib/rtl';
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ChannelRow } from './ChannelRow';
+import { CHANNEL_ROW_HEIGHT, CHANNEL_ROW_SPACING, ListChannelRow } from './ChannelRow';
 
 export interface ChannelListProps {
   paged: PagedChannels;
@@ -70,7 +71,8 @@ export function resetChannelListMemory(): void {
 }
 
 export function ChannelList(props: ChannelListProps) {
-  const { t } = useTranslation('live');
+  const { t, i18n } = useTranslation('live');
+  const separator = listSeparator(i18n.language);
   const { paged, resetKey, playingRef, playingNumber, now } = props;
   // Outside a router (tests) there is no navigation type: treat it as a push.
   const navigationType = useContext(UNSAFE_LocationContext)?.navigationType;
@@ -430,7 +432,9 @@ export function ChannelList(props: ChannelListProps) {
                 data-index={v.index}
                 style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: v.size, transform: `translateY(${v.start}px)` }}
               >
-                <ChannelRow
+                <ListChannelRow
+                  t={t}
+                  separator={separator}
                   index={v.index}
                   channel={ch}
                   nowNext={paged.getNowNext(v.index)}

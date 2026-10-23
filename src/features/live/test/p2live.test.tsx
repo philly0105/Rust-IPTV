@@ -1,0 +1,129 @@
+/**
+ * Second performance pass on Live's cold open (P2-LIVE-3): what a screen of channel rows costs
+ * before the user does anything.
+ */
+import { QueryClientProvider } from '@tanstack/react-query';
+import { cleanup, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { I18nextProvider } from 'react-i18next';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { queryClient } from '@/api/query';
+import type { Channel, EpgNowNext, Page, PageQuery } from '@/api/types';
+
+import { ChannelList, resetChannelListMemory } from '../components/ChannelList';
+import type { PagedChannels } from '../hooks/usePagedChannels';
+import { MINUTE } from '../lib/epgTime';
+import { i18n, installDomStubs, makeChannel, program, settings } from './harness';
+
+const rpcMock = vi.hoisted(() => {
+  const handlers: Record<string, (args: unknown) => unknown> = {};
+  const call = async (cmd: string, args?: unknown) => {
+    const h = handlers[cmd];
+    if (!h) throw new Error(`unmocked rpc ${cmd}`);
+    return h(args);
+  };
+  return { handlers, call };
+});
+
+vi.mock('@/api/transport', () => ({
+  rpc: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
+  rpcRaw: (cmd: string, args?: unknown) => rpcMock.call(cmd, args),
+  isDesktop: false,
+  RpcError: class RpcError extends Error {},
+  proxiedUrl: (s: { url: string }) => s.url,
+}));
+vi.mock('@/api/events', () => ({
+  onAppEvent: () => () => undefined,
+  onAnyAppEvent: () => () => undefined,
+}));
+vi.mock('@/ui', async (orig) => ({ ...(await orig<object>()), ...(await import('./fakes')) }));
+vi.mock('@/shell', async () => await import('./fakes'));
+vi.mock('@/features/player', async () => await import('./fakes'));
+vi.mock('@/features/player/remote', async () => await import('./fakes'));
+
+const TOTAL = 200;
+
+beforeAll(installDomStubs);
+beforeEach(() => {
+  const h = rpcMock.handlers;
+  for (const k of Object.keys(h)) delete h[k];
+  h['settings.get'] = () => settings();
+  h['sources.get'] = () => ({ id: 'src1', kind: 'm3u', name: 'Demo', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
+  h['sources.list'] = () => [h['sources.get']!({})];
+  h['catalog.categories'] = () => [{ id: 'g1', sourceId: 'src1', contentType: 'live', name: 'News', hidden: false, itemCount: TOTAL, position: 0 }];
+  h['catalog.channels'] = (a) => {
+    const q = (a as { query: PageQuery }).query;
+    const items = Array.from({ length: Math.max(0, Math.min(q.limit, TOTAL - q.offset)) }, (_, i) => makeChannel(q.offset + i));
+    return { items, total: TOTAL, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
+  };
+  h['epg.nowNext'] = () => ({});
+  h['favorites.contains'] = () => [];
+  h['remote.status'] = () => ({ running: false, port: 7310 });
+});
+afterEach(() => {
+  cleanup();
+  queryClient.clear();
+  resetChannelListMemory();
+});
+
+function wrap(ui: ReactNode) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <I18nextProvider i18n={i18n}>{ui}</I18nextProvider>
+    </QueryClientProvider>
+  );
+}
+
+describe('channel rows (P2-LIVE-3)', () => {
+  const now = Date.now();
+  // Every row has a programme on, as on a source with a guide.
+  const airing: EpgNowNext = { now: program('News at noon', now - 10 * MINUTE, now + 20 * MINUTE) };
+  const paged: PagedChannels = {
+    total: TOTAL,
+    getChannel: (i) => (i >= 0 && i < TOTAL ? makeChannel(i) : undefined),
+    getNowNext: () => airing,
+    isFavorite: () => false,
+    setVisibleRange: () => undefined,
+    isLoading: false,
+    refreshing: false,
+    error: null,
+    retry: () => undefined,
+    loaded: [],
+    pageSize: 120,
+    guideUnavailable: false,
+    retryGuide: () => undefined,
+  };
+  const list = (at: number) => (
+    <ChannelList
+      paged={paged}
+      resetKey="k"
+      openOnDoubleClick={false}
+      now={at}
+      onPlay={() => undefined}
+      onToggleFavorite={() => undefined}
+      onContextMenu={() => undefined}
+    />
+  );
+
+  it('a screen of rows asks i18next to listen once, not once per row', () => {
+    const on = vi.spyOn(i18n, 'on');
+    render(wrap(list(now)));
+    const rows = screen.getAllByRole('listitem').length;
+    expect(rows).toBeGreaterThanOrEqual(12);
+    // The list's own useTranslation; each row's subscribed too.
+    expect(on.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  it('reads the words every row shares once, not on every row and render', () => {
+    const t = vi.spyOn(i18n, 't');
+    const view = render(wrap(list(now)));
+    const rows = screen.getAllByRole('listitem').length;
+    // Each row still names its own programme ("Now: …"); the favourite, menu, archive and time-left
+    // texts are the same on every row.
+    expect(t.mock.calls.length).toBeLessThan(rows * 2);
+    t.mockClear();
+    view.rerender(wrap(list(now + MINUTE)));
+    expect(t.mock.calls.length).toBeLessThan(rows * 2);
+  });
+});

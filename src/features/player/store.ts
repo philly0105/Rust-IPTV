@@ -65,6 +65,8 @@ export interface PlayerState {
   status: 'idle' | 'loading' | 'playing' | 'paused' | 'error';
   error?: string;
   isFullscreen: boolean;
+  /** Player covers the app viewport while the desktop window keeps its normal size. */
+  isWindowFilled: boolean;
   dock: 'stage' | 'mini' | 'hidden';
   volume: number;
   muted: boolean;
@@ -102,6 +104,7 @@ export interface PlayerActions {
   adjustVolume(delta: number): void;
   toggleMute(): void;
   toggleFullscreen(): void;
+  toggleWindowFill(): void;
   setDock(d: PlayerState['dock']): void;
   next(): void;
   prev(): void;
@@ -560,6 +563,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   mode: 'inline',
   status: 'idle',
   isFullscreen: false,
+  isWindowFilled: false,
   dock: 'hidden',
   volume: initialVolume.volume,
   muted: initialVolume.muted,
@@ -610,6 +614,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       positionSeconds: source.resumeSeconds ?? 0,
       durationSeconds: source.durationSeconds,
       dock: mode === 'external' ? 'hidden' : stageCount > 0 ? 'stage' : 'mini',
+      isWindowFilled: mode === 'external' ? false : get().isWindowFilled,
       playGeneration: get().playGeneration + 1,
     });
 
@@ -675,6 +680,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       queue: [],
       dock: 'hidden',
       isFullscreen: false,
+      isWindowFilled: false,
       mode: 'inline',
     });
   },
@@ -756,8 +762,16 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     if (!get().source) return;
     // iPhone Safari: no element fullscreen, so the video goes to the system player and the flag
     // stays off (PL-IOS-FULLSCREEN). Everywhere else the dock follows the flag (PlayerDock).
-    if (!get().isFullscreen && enterVideoFullscreen()) return;
-    set({ isFullscreen: !get().isFullscreen });
+    if (!get().isFullscreen && enterVideoFullscreen()) {
+      set({ isWindowFilled: false });
+      return;
+    }
+    set({ isFullscreen: !get().isFullscreen, isWindowFilled: false });
+  },
+
+  toggleWindowFill() {
+    if (!get().source || get().mode === 'external') return;
+    set({ isWindowFilled: !get().isWindowFilled, isFullscreen: false });
   },
 
   setDock(d) {
@@ -2360,6 +2374,7 @@ export function __resetPlayerForTests(): void {
     status: 'idle',
     error: undefined,
     isFullscreen: false,
+    isWindowFilled: false,
     dock: 'hidden',
     volume: 1,
     muted: false,

@@ -131,7 +131,7 @@ export const SCRIM_SELECTOR = '[data-scrim], .fixed.inset-0.bg-scrim';
  * Anything whose arrival or removal can change the layout: the mutation filter in MpvSurface
  * re-measures only for these (simple selectors: they are matched against detached nodes too).
  */
-export const LAYOUT_WATCH_SELECTOR = `${OVERLAY_SELECTOR}, ${RESERVED_SELECTOR}, ${SCRIM_SELECTOR}, [aria-modal], [data-toast-id], [data-mpv-reserved-global], [data-pip-layer]`;
+export const LAYOUT_WATCH_SELECTOR = `${OVERLAY_SELECTOR}, ${RESERVED_SELECTOR}, ${SCRIM_SELECTOR}, [aria-modal], [data-toast-id], [data-mpv-reserved-global], [data-pip-layer], [data-player-window-layer]`;
 
 /** A scrim colour: 0-255 channels and 0-1 alpha. */
 export interface Dim {
@@ -155,9 +155,10 @@ export function parseRgb(css: string): Dim | null {
  */
 export function measureScrim(surface: Element): Dim | null {
   const layer = topLayer();
+  const windowLayer = document.querySelector('[data-player-window-layer]:not([hidden])');
   let dim: Dim | null = null;
   for (const node of Array.from(document.querySelectorAll(SCRIM_SELECTOR))) {
-    if (node.contains(surface) || (layer && !layer.contains(node))) continue;
+    if (node.contains(surface) || (layer && !layer.contains(node)) || !aboveWindowFill(node, windowLayer)) continue;
     const b = node.getBoundingClientRect();
     if (b.width <= 0 || b.height <= 0) continue;
     const c = parseRgb(getComputedStyle(node).backgroundColor);
@@ -218,6 +219,17 @@ function topLayer(): Element | null {
   return document.fullscreenElement ?? document.querySelector('[data-pip-layer]:not([hidden])');
 }
 
+/** Body portals above window fill remain visible; page chrome below it does not. */
+function aboveWindowFill(node: Element, windowLayer: Element | null): boolean {
+  if (!windowLayer || windowLayer.contains(node)) return true;
+  const layerZ = Number.parseInt(getComputedStyle(windowLayer).zIndex, 10) || 45;
+  for (let el: Element | null = node; el; el = el.parentElement) {
+    const z = Number.parseInt(getComputedStyle(el).zIndex, 10);
+    if (z > layerZ) return true;
+  }
+  return false;
+}
+
 interface Parts {
   surfaceRect: Rect;
   clip: Rect[];
@@ -231,6 +243,7 @@ interface Parts {
 function measureParts(surface: Element): Parts {
   const clip: Rect[] = [{ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }];
   const layer = topLayer();
+  const windowLayer = document.querySelector('[data-player-window-layer]:not([hidden])');
   for (let el = surface.parentElement; el && el !== document.documentElement; el = el.parentElement) {
     const cs = getComputedStyle(el);
     if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') clip.push(rectOf(el.getBoundingClientRect()));
@@ -248,6 +261,9 @@ function measureParts(surface: Element): Parts {
     // shows. Toasts, dialogs and menus portal into the fullscreen element (`ui/portal.ts`), so
     // they are inside it and cut out like any other overlay.
     if (layer && !layer.contains(node)) return null;
+    // Window fill covers the app chrome, but body-portalled dialogs and player menus may
+    // still sit above it and need holes in the native video.
+    if (!aboveWindowFill(node, windowLayer)) return null;
     const b = node.getBoundingClientRect();
     return b.width > 0 && b.height > 0 ? rectOf(b) : null;
   };

@@ -383,6 +383,27 @@ describe('measureMpvLayout: menus, tooltips and dialogs anywhere in the document
     });
     expect(measureMpvLayout(surface).holes).toEqual([]);
   });
+
+  it('ignores covered app chrome in window fill but cuts out a body-portalled menu', () => {
+    document.body.innerHTML = `
+      <div data-mpv-reserved-global="" id="header"></div>
+      <div data-player-window-layer=""><div data-player-host=""><div data-mpv-surface="" id="surface"></div></div></div>
+      <div role="menu" id="menu" style="z-index: 60"></div>`;
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(600);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const rect = this.id === 'header'
+        ? { left: 0, top: 0, width: 1000, height: 50 }
+        : this.id === 'menu'
+          ? { left: 700, top: 100, width: 200, height: 150 }
+          : { left: 0, top: 0, width: 1000, height: 600 };
+      return { ...rect, x: rect.left, y: rect.top, right: rect.left + rect.width, bottom: rect.top + rect.height, toJSON: () => rect } as DOMRect;
+    });
+    expect(measureMpvLayout(document.getElementById('surface')!)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 600 },
+      holes: [{ x: 700, y: 100, width: 200, height: 150 }],
+    });
+  });
 });
 
 // L3-desktop-10: a dialog's backdrop cannot cover the native video, so mpv dims itself to match.

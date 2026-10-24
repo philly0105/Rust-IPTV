@@ -212,6 +212,7 @@ export const PlayerDock = memo(function PlayerDock() {
   const mode = usePlayerStore((s) => s.mode);
   const dock = usePlayerStore((s) => s.dock);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const zapContext = usePlayerStore((s) => s.zapContext);
   const pip = usePipStore((s) => s.active);
   const settings = usePlayerSettings();
@@ -224,12 +225,13 @@ export const PlayerDock = memo(function PlayerDock() {
   });
   const miniSlotRef = useRef<HTMLDivElement>(null);
   const pipSlotRef = useRef<HTMLDivElement>(null);
+  const windowSlotRef = useRef<HTMLDivElement>(null);
   const miniRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MiniPos>(readPos);
 
   const visible = !!source && mode !== 'external';
   const inStage = visible && dock === 'stage' && !!stageTarget;
-  const inMini = visible && !inStage && dock !== 'hidden';
+  const inMini = visible && !inStage && !isWindowFilled && dock !== 'hidden';
   // Below sm (the shell's tab bar shows) the mini player is a full-width bar docked above the tab
   // bar, not a floating window over the page: a phone's floating frame covered the content column
   // and cut the name to a few letters.
@@ -295,10 +297,11 @@ export const PlayerDock = memo(function PlayerDock() {
 
   // Place the host node: the picture-in-picture layer wins over the stage and the mini frame.
   const inPip = pip && visible;
+  const inWindowFill = isWindowFilled && visible && !inPip;
   useLayoutEffect(() => {
-    const target = inPip ? pipSlotRef.current : inStage ? stageTarget : miniSlotRef.current;
+    const target = inPip ? pipSlotRef.current : inWindowFill ? windowSlotRef.current : inStage ? stageTarget : miniSlotRef.current;
     if (target && host.parentNode !== target) moveKeepingFocus(host, target);
-  }, [inPip, inStage, stageTarget, host]);
+  }, [inPip, inWindowFill, inStage, stageTarget, host]);
   // The page showing this stream in its stage: Expand comes back to it for a stream with no page of its own.
   const sourceUrl = source?.url;
   useLayoutEffect(() => {
@@ -447,7 +450,7 @@ export const PlayerDock = memo(function PlayerDock() {
     <>
       {/* Fullscreen from the mini frame fills the screen: full controls, not the mini bar. */}
       {createPortal(
-        <PlayerSurface compact={inMini && !isFullscreen && !inPip} thumb={barShown && !isFullscreen && !inPip} channelPanelAvailable={channelPanelAvailable} />,
+        <PlayerSurface compact={inMini && !isFullscreen && !inWindowFill && !inPip} thumb={barShown && !isFullscreen && !inWindowFill && !inPip} channelPanelAvailable={channelPanelAvailable} />,
         host,
       )}
       {/* Sleep timer (C5): the one-minute warning toast. */}
@@ -587,6 +590,8 @@ export const PlayerDock = memo(function PlayerDock() {
       </div>
       {/* Picture-in-picture: the player covers the whole (shrunken, borderless) window. */}
       <div ref={pipSlotRef} data-pip-layer="" hidden={!inPip} className="fixed inset-0 z-[2147483000] bg-black" />
+      {/* Window fill stays inside the normal app window; menus and dialogs can still appear over it. */}
+      <div ref={windowSlotRef} data-player-window-layer="" hidden={!inWindowFill} className="fixed inset-0 z-[45] bg-black" />
     </>
   );
 });

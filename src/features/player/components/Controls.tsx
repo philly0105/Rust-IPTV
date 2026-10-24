@@ -11,7 +11,9 @@ import {
   History,
   Lock,
   Maximize,
+  Maximize2,
   Minimize,
+  Minimize2,
   PanelLeftOpen,
   Pause,
   PictureInPicture2,
@@ -1332,6 +1334,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const hasPosition = usePlayerStore((s) => s.positionSeconds > 0);
   const duration = usePlayerStore((s) => s.durationSeconds);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const mode = usePlayerStore((s) => s.mode);
   const mpvAttached = useMediaStore((s) => !!s.mpv?.attached);
   const ended = usePlayerStore(selectEnded);
@@ -1475,7 +1478,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   // An iPhone has no element fullscreen; its video goes fullscreen natively (PL-IOS-FULLSCREEN).
   const showFullscreen = !windowPip && canEnterFullscreen();
   // Fullscreen: larger controls, further in from the edges, read from across a room.
-  const scale: ChromeScale = compact ? 'mini' : isFullscreen && !windowPip ? 'big' : 'normal';
+  const scale: ChromeScale = compact ? 'mini' : (isFullscreen || isWindowFilled) && !windowPip ? 'big' : 'normal';
   const big = scale === 'big';
   // The 10 s skips (PL-BAR-HIERARCHY): VOD with a known length, outside the mini player.
   const canJump = isVod && !!duration && !compact && !ended && !failed;
@@ -1763,7 +1766,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                     id="captions"
                     className={spareClass}
                     // In live fullscreen, C opens the channel list instead.
-                    shortcut={isLive && isFullscreen ? undefined : 'captions'}
+                    shortcut={isLive && (isFullscreen || isWindowFilled) ? undefined : 'captions'}
                     label={t('captions')}
                     tooltip={captionsOn ? t('captionsOn') : t('captionsOff')}
                     pressed={captionsOn}
@@ -1789,7 +1792,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                   </CtlButton>
                 )}
               </div>
-              {(showPip && (windowPip || inRow('pip'))) || showFullscreen ? (
+              {(showPip && (windowPip || inRow('pip'))) || showFullscreen || (!compact && !windowPip) ? (
                 <div className={cn('flex items-center', big ? 'ms-4 gap-2' : 'gap-1', !compact && !big && 'ms-1 sm:ms-2')}>
                   {showPip && (windowPip || inRow('pip')) && (
                     <CtlButton
@@ -1800,6 +1803,15 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                       onClick={() => commands?.togglePip()}
                     >
                       {ICON.pip}
+                    </CtlButton>
+                  )}
+                  {!compact && !windowPip && (
+                    <CtlButton
+                      id="window-fill"
+                      label={isWindowFilled ? t('exitWindowFill') : t('windowFill')}
+                      onClick={() => store.toggleWindowFill()}
+                    >
+                      {isWindowFilled ? <Minimize2 /> : <Maximize2 />}
                     </CtlButton>
                   )}
                   {showFullscreen && (

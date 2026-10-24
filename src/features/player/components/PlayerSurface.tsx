@@ -167,7 +167,7 @@ function UpNextCard({ variant = 'overlay', compact = false, short = false }: { v
   const { t } = useTranslation('player');
   const upNext = useMediaStore((s) => s.upNext);
   // Clear of the bar, which is taller in fullscreen.
-  const fullscreen = usePlayerStore((s) => s.isFullscreen);
+  const fullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const [now, setNow] = useState(() => Date.now());
   // Display only: the store's timer advances at zero (see `playUpNextNow` / the up-next timer).
   useEffect(() => {
@@ -284,7 +284,7 @@ function EndedOverlay({ compact, short = false }: { compact: boolean; short?: bo
   const { t } = useTranslation('player');
   const ended = usePlayerStore(selectEnded);
   const upNext = useMediaStore((s) => s.upNext);
-  const fullscreen = usePlayerStore((s) => s.isFullscreen);
+  const fullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   if (!ended || upNext) return null;
   const small = compact || short;
   return (
@@ -480,7 +480,7 @@ function Tuning({ label }: { label: string }) {
  */
 function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   const { t } = useTranslation('player');
-  const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const status = usePlayerStore((s) => s.status);
   const title = usePlayerStore((s) => s.source?.title);
   const pip = usePipStore((s) => s.active);
@@ -788,7 +788,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const mode = usePlayerStore((s) => s.mode);
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
-  const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const panelOpen = useMediaStore((s) => s.channelPanelOpen);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const pip = usePipStore((s) => s.active);

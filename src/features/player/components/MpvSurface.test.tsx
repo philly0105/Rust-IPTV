@@ -1084,6 +1084,7 @@ describe('wheel and context menu over the native video', () => {
     // The same rows as the built-in player's menu (PL-NATIVE-CONTEXT-MENU): Speed for VOD, Picture.
     expect(items).toEqual([
       'Pause',
+      'Fill window',
       'Fullscreen',
       'Picture in picture',
       'SubtitlesOff',

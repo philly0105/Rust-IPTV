@@ -49,6 +49,10 @@
   background: #000;
 }
 
+[data-player-window-layer] [data-player-host] {
+  background: #000;
+}
+
 /*
  * A stage whose page heads it with the title (PlayerStage showTitle={false}) drops the player's
  * own title bar, except in fullscreen, where the page's heading is not on screen (PL-DUPLICATE-CHROME).
@@ -56,10 +60,13 @@
 [data-player-stage][data-stage-title='off'] [data-player-host]:not(:fullscreen) [data-testid='player-titlebar'] {
   display: none;
 }
-
 /* Hide the cursor with the chrome in fullscreen. */
 [data-player-host][data-idle='true']:fullscreen,
 [data-player-host][data-idle='true']:fullscreen * {
+  cursor: none;
+}
+[data-player-window-layer] [data-player-host][data-idle='true'],
+[data-player-window-layer] [data-player-host][data-idle='true'] * {
   cursor: none;
 }
 
@@ -88,6 +95,9 @@
   bottom: min(6rem, 32%);
 }
 [data-player-host][data-idle='false']:fullscreen .player-subs {
+  bottom: min(9.5rem, 30%);
+}
+[data-player-window-layer] [data-player-host][data-idle='false'] .player-subs {
   bottom: min(9.5rem, 30%);
 }
 @media (prefers-reduced-motion: no-preference) {

@@ -164,6 +164,7 @@ function useActionContext(view: StreamErrorView, source: PlayerSource | undefine
 function leavePlayerView(): void {
   const s = usePlayerStore.getState();
   if (s.isFullscreen) s.toggleFullscreen();
+  if (s.isWindowFilled) s.toggleWindowFill();
   if (usePipStore.getState().active) void exitPip();
 }
 

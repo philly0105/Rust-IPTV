@@ -80,6 +80,39 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
+describe('player window fill', () => {
+  it('moves the same player host into the window and restores its stage on Escape', () => {
+    phone(false);
+    playing(live);
+    render(<><PlayerStage className="h-40 w-64" /><PlayerDock /></>);
+    const stage = document.querySelector('[data-player-stage]')!;
+    const layer = document.querySelector('[data-player-window-layer]')!;
+    const host = stage.querySelector('[data-player-host]')!;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill window' }));
+    expect(usePlayerStore.getState()).toMatchObject({ isWindowFilled: true, isFullscreen: false });
+    expect(layer.contains(host)).toBe(true);
+    expect(layer.hasAttribute('hidden')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Exit window fill' })).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(usePlayerStore.getState().isWindowFilled).toBe(false);
+    expect(stage.contains(host)).toBe(true);
+    expect(layer.hasAttribute('hidden')).toBe(true);
+  });
+
+  it('leaves window fill when entering native fullscreen or stopping playback', () => {
+    phone(false);
+    playing(live);
+    render(<><PlayerStage className="h-40 w-64" /><PlayerDock /></>);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill window' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fullscreen' }));
+    expect(usePlayerStore.getState()).toMatchObject({ isWindowFilled: false, isFullscreen: true });
+    act(() => usePlayerStore.getState().stop());
+    expect(usePlayerStore.getState()).toMatchObject({ isWindowFilled: false, isFullscreen: false });
+  });
+});
+
 describe('the mini player on a phone', () => {
   it('is a bar over the tab bar: a picture-only thumbnail, the name and what airs, play and close; no drag handle', () => {
     phone(true);

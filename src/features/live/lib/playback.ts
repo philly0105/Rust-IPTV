@@ -205,6 +205,7 @@ export async function catchupDownloadArgs(
     subtitle: opts.subtitle,
     url: src.url,
     fileNameHint: `${title} - ${opts.subtitle.replace(/\s*·\s*/g, ' - ')}.${ext}`,
+    durationSeconds: src.durationSeconds ?? durationMinutes(program) * 60,
   };
   if (src.headers) args.headers = src.headers;
   if (channel.logoUrl) args.posterUrl = channel.logoUrl;

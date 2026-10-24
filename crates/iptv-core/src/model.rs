@@ -802,6 +802,8 @@ pub struct Download {
     pub file_available: Option<bool>,
     #[serde(default)]
     pub position_seconds: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<i64>,
     /// Why a queued row waits, when it is more than its turn (live, never
     /// stored).
     #[serde(default, skip_serializing_if = "Option::is_none")]

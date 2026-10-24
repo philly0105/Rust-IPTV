@@ -19,7 +19,7 @@ pub struct DownloadRow {
 const COLUMNS: &str =
     "id, source_id, content_type, item_id, episode_id, title, subtitle, url, file_name, \
     file_path, poster_url, headers_json, status, bytes_downloaded, total_bytes, resume_validator, \
-    error_message, position_seconds, created_at, updated_at, completed_at";
+    error_message, position_seconds, created_at, updated_at, completed_at, duration_seconds";
 
 fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
     let content_type: String = r.get(2)?;
@@ -57,6 +57,7 @@ fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
             position_seconds: r.get(17)?,
             waiting: None,
             connections: None,
+            duration_seconds: r.get(21)?,
         },
         headers,
         resume_validator: r.get(15)?,
@@ -161,6 +162,7 @@ pub struct NewDownload<'a> {
     pub url: &'a str,
     pub poster_url: Option<&'a str>,
     pub headers: &'a RequestHeaders,
+    pub duration_seconds: Option<i64>,
 }
 
 fn headers_json(h: &RequestHeaders) -> Option<String> {
@@ -172,8 +174,8 @@ pub fn insert(conn: &Connection, n: &NewDownload<'_>) -> CoreResult<i64> {
     let now = now_rfc3339();
     conn.execute(
         "INSERT INTO downloads (source_id, content_type, item_id, episode_id, title, subtitle, url, \
-         poster_url, headers_json, status, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'queued', ?10, ?10)",
+         poster_url, headers_json, duration_seconds, status, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'queued', ?11, ?11)",
         params![
             n.item_ref.source_id,
             n.item_ref.content_type.as_str(),
@@ -184,6 +186,7 @@ pub fn insert(conn: &Connection, n: &NewDownload<'_>) -> CoreResult<i64> {
             n.url,
             n.poster_url,
             headers_json(n.headers),
+            n.duration_seconds,
             now
         ],
     )?;
@@ -194,7 +197,7 @@ pub fn insert(conn: &Connection, n: &NewDownload<'_>) -> CoreResult<i64> {
 /// no progress). Keeps id, created_at and the playback position.
 pub fn reset(conn: &Connection, id: i64, n: &NewDownload<'_>) -> CoreResult<()> {
     conn.execute(
-        "UPDATE downloads SET title = ?2, subtitle = ?3, url = ?4, poster_url = ?5, headers_json = ?6, \
+        "UPDATE downloads SET title = ?2, subtitle = ?3, url = ?4, poster_url = ?5, headers_json = ?6, duration_seconds = ?8, \
          status = 'queued', bytes_downloaded = 0, total_bytes = NULL, resume_validator = NULL, \
          error_message = NULL, file_name = NULL, file_path = NULL, completed_at = NULL, updated_at = ?7 \
          WHERE id = ?1",
@@ -205,7 +208,8 @@ pub fn reset(conn: &Connection, id: i64, n: &NewDownload<'_>) -> CoreResult<()> 
             n.url,
             n.poster_url,
             headers_json(n.headers),
-            now_rfc3339()
+            now_rfc3339(),
+            n.duration_seconds
         ],
     )?;
     Ok(())

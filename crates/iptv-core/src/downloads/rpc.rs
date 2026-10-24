@@ -13,6 +13,7 @@ pub const COMMANDS: &[&str] = &[
     "downloads.list",
     "downloads.get",
     "downloads.start",
+    "downloads.playSource",
     "downloads.pause",
     "downloads.resume",
     "downloads.cancel",
@@ -51,6 +52,8 @@ pub struct StartArgs {
     pub poster_url: Option<String>,
     #[serde(default)]
     pub file_name_hint: Option<String>,
+    #[serde(default)]
+    pub duration_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,8 +117,12 @@ pub fn register(r: &mut RpcRouter) {
             headers: a.headers,
             poster_url: a.poster_url,
             file_name_hint: a.file_name_hint,
+            duration_seconds: a.duration_seconds,
         };
         Ok::<_, RpcError>(super::start(&s, req).await?)
+    });
+    r.add("downloads.playSource", |s: S, a: IdArgs| async move {
+        Ok::<_, RpcError>(super::active_play_source(&s, a.id).await?)
     });
     r.add("downloads.pause", |s: S, a: IdArgs| async move {
         Ok::<_, RpcError>(super::pause(&s, a.id).await?)

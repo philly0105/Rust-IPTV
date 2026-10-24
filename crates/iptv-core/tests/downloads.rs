@@ -822,6 +822,7 @@ fn every_c4_download_command_is_registered() {
         "downloads.list",
         "downloads.get",
         "downloads.start",
+        "downloads.playSource",
         "downloads.pause",
         "downloads.resume",
         "downloads.cancel",
@@ -1240,6 +1241,7 @@ async fn xtream_catchup_download_keeps_its_archive_url() {
                 "episodeId": "catchup:2026-10-18T20:00:00Z",
                 "title": "Channel 1",
                 "subtitle": "Evening news",
+                "durationSeconds": 1800,
                 "url": url,
             }),
         )
@@ -1248,7 +1250,44 @@ async fn xtream_catchup_download_keeps_its_archive_url() {
     .unwrap();
     let done = c.wait_status(d.id, DownloadStatus::Completed).await;
     assert_eq!(done.url, url, "the archive URL is kept");
+    assert_eq!(done.duration_seconds, Some(1800));
     assert_eq!(done.file_available, Some(true));
+    let source = c.ok("downloads.playSource", json!({"id": d.id})).await;
+    assert_eq!(
+        source["kind"], "file",
+        "a transfer that finished before Watch uses its local file"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn active_catchup_download_can_play_provider_stream() {
+    let c = ctx().await;
+    let sid = add_xtream_source(&c, iptv_fixtures::XTREAM_PASSWORD).await;
+    iptv_core::downloads::set_rate_limit(&c.state, Some(32 * 1024));
+    let url = c.srv.url("/files/video.bin?size=1048576");
+    let d: Download = serde_json::from_value(
+        c.ok(
+            "downloads.start",
+            json!({
+                "ref": {"sourceId": sid, "contentType": "live", "itemId": "1"},
+                "episodeId": "catchup:2026-10-18T20:00:00Z",
+                "title": "Channel 1",
+                "subtitle": "Evening news",
+                "durationSeconds": 1800,
+                "url": url,
+                "headers": {"userAgent": "Catchup test"}
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    c.wait_status(d.id, DownloadStatus::Downloading).await;
+    let source = c.ok("downloads.playSource", json!({"id": d.id})).await;
+    assert_eq!(source["url"], url);
+    assert_eq!(source["kind"], "direct");
+    assert_eq!(source["headers"]["userAgent"], "Catchup test");
+    assert_eq!(c.get(d.id).await.duration_seconds, Some(1800));
+    c.ok("downloads.pause", json!({"id": d.id})).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

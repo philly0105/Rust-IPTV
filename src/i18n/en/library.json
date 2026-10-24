@@ -20,6 +20,8 @@
   "statusCanceled": "Canceled",
   "actionPause": "Pause",
   "actionResume": "Resume",
+  "actionWatchCatchup": "Watch while downloading",
+  "actionWatchCatchupAria": "Watch {{title}} while downloading",
   "actionCancel": "Cancel download",
   "actionRetry": "Retry",
   "actionRemove": "Remove",

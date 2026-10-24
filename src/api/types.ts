@@ -392,6 +392,7 @@ export interface Download {
   completedAt?: string;
   fileAvailable?: boolean;
   positionSeconds: number;
+  durationSeconds?: number;
   /** Why a queued row waits, when it is more than its turn (live, never stored). */
   waiting?: DownloadWait;
   /** Connections a running transfer holds, when more than one (live). */

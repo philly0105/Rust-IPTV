@@ -45,3 +45,21 @@ export async function playDownload(d: Download, opts?: DownloadStart): Promise<v
   await playSource(source);
   trackDownloadPosition(usePlayerStore, d.id, source.url);
 }
+
+/** Watch the provider's archived stream while its download continues separately. */
+export async function playActiveCatchupDownload(d: Download): Promise<void> {
+  const src = await rpc('downloads.playSource', { id: d.id });
+  const source: PlayerSource = {
+    ...src,
+    title: src.title || d.title,
+    subtitle: d.subtitle?.split(' · ')[0] || src.subtitle,
+    posterUrl: src.posterUrl ?? d.posterUrl,
+    durationSeconds: d.durationSeconds,
+    catchupProgramStart: d.episodeId?.slice('catchup:'.length),
+    resumeSeconds: downloadStartSeconds(d),
+    isLive: false,
+    isRadio: false,
+  };
+  await playSource(source);
+  trackDownloadPosition(usePlayerStore, d.id, source.url);
+}

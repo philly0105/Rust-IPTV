@@ -39,6 +39,7 @@ vi.mock('@/ui', async (orig) => ({ ...(await orig<object>()), ...(await import('
 vi.mock('@/shell', async () => await import('./fakes'));
 vi.mock('@/features/player', async () => await import('./fakes'));
 vi.mock('@/features/player/remote', async () => await import('./fakes'));
+vi.mock('@/features/parental/gate', async (orig) => ({ ...(await orig<object>()), ensureUnlocked: async () => true }));
 
 const fakes = await import('./fakes');
 
@@ -152,6 +153,28 @@ describe('LivePage short-EPG fallback and archive entry', () => {
 });
 
 describe('EpgGridPage short-EPG fallback', () => {
+  it('offers a past archive programme download from its guide context menu', async () => {
+    handlers(false);
+    const now = Date.now();
+    const past = program('Yesterday news', now - 2 * HOUR, now - HOUR);
+    rpcMock.handlers['epg.grid'] = (a) => Object.fromEntries((a as { refs: ItemRef[] }).refs.map((r) => [
+      `${r.sourceId}|${r.contentType}|${r.itemId}`, r.itemId === 'c0' ? [past] : [],
+    ]));
+    rpcMock.handlers['xtream.catchupUrl'] = () => ({ url: 'http://provider.test/timeshift/news.ts', kind: 'direct' });
+    rpcMock.handlers['downloads.start'] = () => ({ id: 42 });
+    renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
+    const cell = await screen.findByRole('button', { name: /Yesterday news/ });
+    fireEvent.contextMenu(cell, { clientX: 500, clientY: 40 });
+    const menu = await screen.findByRole('menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Download Yesterday news/ }));
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'downloads.start')).toHaveLength(1));
+    expect(rpcMock.calls.find((c) => c.cmd === 'downloads.start')?.args).toMatchObject({
+      episodeId: `catchup:${past.start}`,
+      durationSeconds: 3600,
+      url: 'http://provider.test/timeshift/news.ts',
+    });
+  });
+
   it('fills empty rows from the provider and marks them in the programme dialog', async () => {
     renderAt('/epg?source=src1', [
       { path: '/epg', element: <EpgGridPage /> },

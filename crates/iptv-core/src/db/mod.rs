@@ -236,6 +236,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0024_category_added_index",
         sql: include_str!("migrations/0024_category_added_index.sql"),
     },
+    Migration {
+        version: 25,
+        name: "0025_download_duration",
+        sql: include_str!("migrations/0025_download_duration.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.

@@ -117,6 +117,36 @@ describe('DownloadsPage', () => {
     await waitFor(() => expect(rpc.callsOf('downloads.prioritize')).toEqual([{ id: 10 }]));
   });
 
+  it('watches a catch-up stream while its download continues', async () => {
+    const d = makeDownload({
+      id: 31,
+      ref: { sourceId: 'src1', contentType: 'live', itemId: '3307' },
+      episodeId: 'catchup:2026-10-18T20:00:00Z',
+      title: 'Channel 1',
+      subtitle: 'Evening news · Sun 18 Oct 8:00 PM',
+      status: 'downloading',
+      durationSeconds: 1800,
+      positionSeconds: 300,
+    });
+    rpc.handlers['downloads.list'] = () => [d];
+    rpc.handlers['downloads.playSource'] = () => ({
+      url: 'http://provider.test/timeshift/1.ts', kind: 'direct', title: d.title,
+      headers: { userAgent: 'Test' }, ref: d.ref, isLive: false, isRadio: false,
+    });
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Watch Evening news while downloading' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.playSource')).toEqual([{ id: 31 }]));
+    expect(fakePlayer.played.at(-1)).toMatchObject({
+      url: 'http://provider.test/timeshift/1.ts',
+      headers: { userAgent: 'Test' },
+      durationSeconds: 1800,
+      catchupProgramStart: '2026-10-18T20:00:00Z',
+      resumeSeconds: 300,
+      subtitle: 'Evening news',
+    });
+    expect(screen.getByRole('button', { name: 'Pause Channel 1' })).toBeTruthy();
+  });
+
   it('offers Try again on a retryable failure and re-issues the command', async () => {
     const { useToastStore } = await import('@/ui');
     const { RpcError } = await import('@/api/transport');

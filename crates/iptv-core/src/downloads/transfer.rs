@@ -33,6 +33,26 @@ const WRITE_BUFFER: usize = 256 * 1024;
 /// Longest single throttle sleep, so a rate-limit change (or lifting it) is
 /// noticed quickly even when one chunk is worth seconds at the old rate.
 pub(super) const THROTTLE_SLICE: Duration = Duration::from_millis(200);
+/// A per-transfer cap for provider archive streams. Keeps catch-up saves at a
+/// viewing-speed pace even when ordinary movie downloads are unrestricted.
+const CATCHUP_RATE_LIMIT_BPS: u64 = 1024 * 1024;
+
+fn is_catchup(row: &DownloadRow) -> bool {
+    row.download.item_ref.content_type == ContentType::Live
+        && row
+            .download
+            .episode_id
+            .as_deref()
+            .is_some_and(|e| e.starts_with("catchup:"))
+}
+
+fn effective_rate_limit(catchup: bool, global: Option<u64>) -> Option<u64> {
+    match (catchup, global) {
+        (true, Some(global)) => Some(global.min(CATCHUP_RATE_LIMIT_BPS)),
+        (true, None) => Some(CATCHUP_RATE_LIMIT_BPS),
+        (false, global) => global,
+    }
+}
 
 /// How a run ended.
 #[derive(Debug, Clone)]
@@ -767,7 +787,8 @@ async fn attempt(
     let started_at = offset;
     let mut progress = Progress::new(offset);
     let mut stream = resp.bytes_stream().boxed();
-    let mut pace = Pace::new(mgr.rate_limit(), offset);
+    let catchup = is_catchup(row);
+    let mut pace = Pace::new(effective_rate_limit(catchup, mgr.rate_limit()), offset);
     let mut split_checked = Instant::now();
     let mut hand_over = false;
 
@@ -792,7 +813,7 @@ async fn attempt(
                 offset += chunk.len() as i64;
                 ctl.bytes.store(offset, Ordering::Relaxed);
                 progress.tick(state, id, offset, rep.total);
-                if throttle(&mut pace, mgr, ctl, offset).await {
+                if throttle(&mut pace, mgr, ctl, offset, catchup).await {
                     break None;
                 }
                 if worth_splitting(offset) && split_checked.elapsed() >= SPLIT_CHECK {
@@ -1065,8 +1086,18 @@ impl Pace {
 
 /// Sleeps as the rate limit requires, re-reading it every
 /// [`THROTTLE_SLICE`]. Returns true when the transfer was asked to stop.
-async fn throttle(pace: &mut Pace, mgr: &DownloadManager, ctl: &TaskCtl, offset: i64) -> bool {
-    while let Some(wait) = pace.delay(mgr.rate_limit(), offset, Instant::now()) {
+async fn throttle(
+    pace: &mut Pace,
+    mgr: &DownloadManager,
+    ctl: &TaskCtl,
+    offset: i64,
+    catchup: bool,
+) -> bool {
+    while let Some(wait) = pace.delay(
+        effective_rate_limit(catchup, mgr.rate_limit()),
+        offset,
+        Instant::now(),
+    ) {
         tokio::select! {
             biased;
             _ = ctl.token.cancelled() => return true,
@@ -1310,5 +1341,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(saved, 5_000);
+    }
+
+    #[test]
+    fn catchup_has_its_own_speed_cap() {
+        assert_eq!(
+            effective_rate_limit(true, None),
+            Some(CATCHUP_RATE_LIMIT_BPS)
+        );
+        assert_eq!(
+            effective_rate_limit(true, Some(512 * 1024)),
+            Some(512 * 1024)
+        );
+        assert_eq!(
+            effective_rate_limit(true, Some(2 * 1024 * 1024)),
+            Some(CATCHUP_RATE_LIMIT_BPS)
+        );
+        assert_eq!(effective_rate_limit(false, None), None);
+        assert_eq!(
+            effective_rate_limit(false, Some(2 * 1024 * 1024)),
+            Some(2 * 1024 * 1024)
+        );
     }
 }

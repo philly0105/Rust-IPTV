@@ -9,6 +9,7 @@ import { invalidate } from '@/api/query';
 import { isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
+import { errorDescription, toast } from '@/ui';
 import { formatList } from '@/lib/intl';
 
 import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useShortcut } from '../deps';
@@ -20,6 +21,7 @@ import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useDownloads, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { actionsFor, buildQueueRows, queueCounts, type QueueAction, type QueueRow } from '../lib/queue';
+import { playActiveCatchupDownload } from '../lib/playDownload';
 
 const HEADER_HEIGHT = 52;
 
@@ -75,6 +77,12 @@ export function DownloadsPage() {
     },
     [perform],
   );
+
+  const onPlayCatchup = useCallback((d: Download) => {
+    void playActiveCatchupDownload(d).catch((err: unknown) =>
+      toast({ title: t('playFailed', { title: d.subtitle?.split(' · ')[0] || d.title }), description: errorDescription(err), variant: 'error' }),
+    );
+  }, [t]);
 
   const runFocused = (pick: (d: Download, actions: readonly QueueAction[]) => QueueAction | undefined) => {
     const id = focusedDownloadId();
@@ -163,11 +171,12 @@ export function DownloadsPage() {
           busy={pending.has(d.id)}
           tabbable={info.tabStop}
           onAction={onAction}
+          onPlayCatchup={onPlayCatchup}
         />
       );
     },
     // Each row subscribes to its own live sample (VD-4): a progress event re-renders that row only.
-    [mixedSources, onAction, pending, sources, t],
+    [mixedSources, onAction, onPlayCatchup, pending, sources, t],
   );
 
   let body;

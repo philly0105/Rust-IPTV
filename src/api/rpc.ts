@@ -228,6 +228,7 @@ export interface DownloadStartArgs {
   headers?: RequestHeaders;
   posterUrl?: string;
   fileNameHint?: string;
+  durationSeconds?: number;
 }
 
 export interface DetectedPlayers {
@@ -542,6 +543,7 @@ export interface RpcMap {
   'downloads.list': Cmd<void, Download[]>;
   'downloads.get': Cmd<{ id: number }, Download>;
   'downloads.start': Cmd<DownloadStartArgs, Download>;
+  'downloads.playSource': Cmd<{ id: number }, PlayerSource>;
   'downloads.pause': Cmd<{ id: number }, void>;
   'downloads.resume': Cmd<{ id: number }, void>;
   'downloads.cancel': Cmd<{ id: number }, void>;
@@ -879,6 +881,7 @@ export const RPC_COMMANDS = [
   'downloads.list',
   'downloads.get',
   'downloads.start',
+  'downloads.playSource',
   'downloads.pause',
   'downloads.resume',
   'downloads.cancel',

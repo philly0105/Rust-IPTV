@@ -20,7 +20,9 @@ pub mod store;
 pub mod transfer;
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{Download, DownloadStatus, ItemRef, PlayerKind, PlayerSource, RequestHeaders};
+use crate::model::{
+    ContentType, Download, DownloadStatus, ItemRef, PlayerKind, PlayerSource, RequestHeaders,
+};
 use crate::state::AppState;
 use manager::{StopReason, Stopped};
 use std::path::{Path, PathBuf};
@@ -201,6 +203,7 @@ pub struct StartRequest {
     pub headers: Option<RequestHeaders>,
     pub poster_url: Option<String>,
     pub file_name_hint: Option<String>,
+    pub duration_seconds: Option<i64>,
 }
 
 /// Scheme check everywhere; in server mode also the SSRF guard, trusting
@@ -261,6 +264,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                 url: req.url.trim(),
                 poster_url: req.poster_url.as_deref(),
                 headers: &headers,
+                duration_seconds: req.duration_seconds.filter(|s| *s > 0),
             };
             let id = match store::find_by_ref(c, &item_ref, episode_id.as_deref())? {
                 Some(existing) => {
@@ -586,6 +590,49 @@ pub async fn play_source(state: &Arc<AppState>, id: i64) -> CoreResult<PlayerSou
         url,
         kind: PlayerKind::File,
         headers: None,
+        title: d.title,
+        subtitle: d.subtitle,
+        poster_url: d.poster_url,
+        item_ref: Some(d.item_ref),
+        episode_id: d.episode_id,
+        resume_seconds: (d.position_seconds > 0).then_some(d.position_seconds),
+        is_live: false,
+        is_radio: false,
+    })
+}
+
+/// The provider stream for a catch-up transfer that has not finished yet.
+/// Playback uses its own request so the growing `.part` never has to masquerade
+/// as a seekable, complete file (which many MP4 players cannot read).
+pub async fn active_play_source(state: &Arc<AppState>, id: i64) -> CoreResult<PlayerSource> {
+    let row = state.db_call(move |c| store::get(c, id)).await?;
+    let d = row.download;
+    if d.item_ref.content_type != ContentType::Live
+        || !d
+            .episode_id
+            .as_deref()
+            .is_some_and(|e| e.starts_with("catchup:"))
+    {
+        return Err(CoreError::Conflict(
+            "Only a catch-up download can be watched from this queue.".into(),
+        ));
+    }
+    // The queue may finish between rendering its Watch button and the click.
+    if d.status == DownloadStatus::Completed {
+        return play_source(state, id).await;
+    }
+    if !matches!(
+        d.status,
+        DownloadStatus::Queued | DownloadStatus::Downloading | DownloadStatus::Paused
+    ) {
+        return Err(CoreError::Conflict(
+            "This catch-up download is no longer available to watch.".into(),
+        ));
+    }
+    Ok(PlayerSource {
+        url: d.url,
+        kind: PlayerKind::Direct,
+        headers: (!row.headers.is_empty()).then_some(row.headers),
         title: d.title,
         subtitle: d.subtitle,
         poster_url: d.poster_url,

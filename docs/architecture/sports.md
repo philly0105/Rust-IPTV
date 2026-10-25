@@ -39,7 +39,7 @@ College football adds `&groups=80`, which keeps it to FBS. ESPN answers date ran
 - `timeValid` is false for a TBD start, which ESPN dates at midnight Eastern. `timeNote` keeps a kickoff-window note (`EARLY:`, `FLEX:`, `NIGHT:`, `LATE:`), whose listed time is a placeholder.
 - `gamecastUrl` is the event link whose `rel` includes `summary`, or while the game is on, when ESPN swaps that link for one with `live` and `event` in its `rel`, that one.
 
-No game was live while the responses were surveyed, so the live payload (clock, period, halftime and delay statuses) is unverified. Live detection rests on `state === 'in'` alone, never on status names.
+A live NFL game checked on 2026-10-25 had the shape the normalizer reads: `state` `in` with `completed` false, status name `STATUS_IN_PROGRESS`, `shortDetail` "12:42 - 2nd" (the clock line the card shows), `period` 2, the scores as strings, and the event's page under a link whose `rel` holds `live` and `event` instead of `summary`. Halftime and delay statuses are still unverified, so live detection rests on `state === 'in'` alone, never on status names.
 
 ### Caching and polling
 

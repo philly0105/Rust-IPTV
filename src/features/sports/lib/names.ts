@@ -798,10 +798,15 @@ export function networkIdForChannel(tokens: readonly string[]): string | null {
 
 /** Broadcast networks whose channels are mostly local stations ("FOX 5 (WNYW) New York", "CBS 2 Chicago"). */
 const AFFILIATED = new Set(['abc', 'cbs', 'nbc', 'fox', 'cw']);
-/** Words after a network's name that pick its national feed or say nothing of a place. */
+/**
+ * Words after a network's name that pick its national feed or say nothing of a place: time zones, feed and
+ * tier names ("FOX ⱽᴵᴾ" reads "vip"), languages and the weekly game slots ("NBC SNF").
+ */
 const FEED_WORDS = new Set([
   'east', 'eastern', 'west', 'western', 'pacific', 'mountain', 'central', 'atlantic', 'feed', 'national', 'network', 'net',
-  'tv', 'channel', 'live', 'us', 'usa', 'main', 'dt', 'hdtv', 'plus', 'pl',
+  'tv', 'channel', 'live', 'us', 'usa', 'main', 'dt', 'hdtv', 'plus', 'pl', 'et', 'pt', 'ct', 'mt', 'est', 'pst', 'vip',
+  'premium', 'gold', 'extra', 'multi', 'audio', 'dolby', 'atmos', 'en', 'english', 'es', 'esp', 'spanish', 'snf', 'tnf',
+  'mnf', 'nfl', 'sports', 'sport', 'event', 'events', 'ppv', 'ott', 'stream', 'direct', 'link',
 ]);
 
 /**
@@ -824,7 +829,8 @@ export function affiliateMarket(tokens: readonly string[]): string[] | null {
       continue;
     }
     if (!AFFILIATED.has(hit.alias.id)) return null;
-    return tokens.slice(hit.end).filter((t) => t !== DASH && !NUMBER.test(t) && !FEED_WORDS.has(t));
+    // Single letters are feed marks too ("NBC 5 (KING) SEATTLE (A)", "NBC (E)").
+    return tokens.slice(hit.end).filter((t) => t !== DASH && t.length > 1 && !NUMBER.test(t) && !FEED_WORDS.has(t));
   }
   return null;
 }

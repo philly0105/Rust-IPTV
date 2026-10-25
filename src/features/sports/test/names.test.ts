@@ -712,6 +712,12 @@ describe('broadcast network stations', () => {
     expect(market('US: FOX HD')).toEqual([]);
     expect(market('US| NBC EAST')).toEqual([]);
     expect(market('US| CBS (Backup)')).toEqual([]);
+    // Tier, time zone, feed letters and game slots say nothing of a place.
+    expect(market('US| FOX ⱽᴵᴾ')).toEqual([]);
+    expect(market('US: NBC (E)')).toEqual([]);
+    expect(market('US: CBS ET')).toEqual([]);
+    expect(market('US: NBC SNF')).toEqual([]);
+    expect(market('US: NBC 5 (KING) SEATTLE (A) ᴿᴬᵂ')).toEqual(['king', 'seattle']);
   });
 
   it('is null for every other channel', () => {

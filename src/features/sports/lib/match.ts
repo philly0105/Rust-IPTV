@@ -77,6 +77,8 @@ const MONTH_DAY_RE = new RegExp(
   `(?<![a-z])${MONTH}\\.?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?!\\s*[:.h]\\d)(?!\\s*[ap]\\.?m)(?![ap](?![a-z]))`,
 );
 const DAY_MONTH_RE = new RegExp(`(?<![\\d:.])(\\d{1,2})(?:st|nd|rd|th)?\\s*${MONTH}(?![a-z])`);
+/** "start:2026-10-25 01:00:00": a guide-style start some providers put in event channel names, in UTC. */
+const START_STAMP_RE = /(?<![a-z])start:\s*(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})/;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 interface NameTime {
@@ -172,10 +174,13 @@ export function isCurrentGame(game: Game, now: number): boolean {
  * True unless a time or date in a channel name contradicts the game: a date must be the game's Eastern day,
  * and a time (read in the zone the name gives, Eastern when none) must be within 3 hours of the start.
  * Times are not checked for games whose start is still TBD or a flex window. With `now`, a name without a
- * date must also be the current game (`isCurrentGame`); without it, a name with neither agrees.
+ * date must also be the current game (`isCurrentGame`); without it, a name with neither agrees. A `start:`
+ * stamp is read on its own (`stampAgrees`).
  */
 export function nameTimeAgrees(name: string, game: Game, now?: number): boolean {
   const s = name.normalize('NFKD').toLowerCase();
+  const stamp = START_STAMP_RE.exec(s);
+  if (stamp) return stampAgrees(stamp, game);
   const dates = readDates(s);
   if (dates.length === 0 && now !== undefined && !isCurrentGame(game, now)) return false;
   const time = game.timeValid && !game.timeNote ? readTime(s) : null;
@@ -196,6 +201,19 @@ export function nameTimeAgrees(name: string, game: Game, now?: number): boolean 
     }
   }
   return false;
+}
+
+/**
+ * A `start:` stamp names an instant in UTC ("MLB 01 | Rays x Brewers start:2026-10-25 01:00:00" is a 9 PM ET
+ * game on the 24th), not a time in Eastern: it must be within 3 hours of the start, or on the game's Eastern
+ * day while the start is TBD or a flex window.
+ */
+function stampAgrees(m: RegExpExecArray, game: Game): boolean {
+  const at = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  if (game.timeValid && !game.timeNote) return Math.abs(at - game.startMs) <= NAME_TIME_SLACK;
+  const a = wallIn(ET_ZONE, at);
+  const g = wallIn(ET_ZONE, game.startMs);
+  return a.year === g.year && a.month === g.month && a.day === g.day;
 }
 
 /**

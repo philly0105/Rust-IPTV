@@ -621,7 +621,8 @@ export const NETWORKS: readonly NetworkAlias[] = [
   ]),
   net('cbs', 'linear', 'CBS', ['CBS', 'CBS2'], ['CBS News', 'CBS Reality', 'CBS Drama', 'CBS Justice', 'CBS Europa', 'CBS Action']),
   net('cbssn', 'linear', 'CBS', ['CBS Sports Network', 'CBS Sports Net', 'CBSSN', 'CBS Sports'], ['CBS Sports HQ', 'CBS Sports Golazo']),
-  net('nbc', 'linear', 'NBC', ['NBC'], ['NBC News', 'NBC Universo', 'NBC Sports']),
+  // "NBC USA Network" is USA Network under its owner's name.
+  net('nbc', 'linear', 'NBC', ['NBC'], ['NBC News', 'NBC Universo', 'NBC Sports', 'NBC USA']),
   net('nbcsn', 'linear', 'NBC', ['NBCSN', 'NBC Sports Network']),
   net('fox', 'linear', 'FOX', ['FOX'], [
     'FOX News', 'FOX Business', 'FOX Sports', 'FOX Soccer', 'FOX Weather', 'FOX Nation', 'FOX Life', 'FOX Crime', 'FOX Movies',
@@ -780,6 +781,65 @@ export function networkIdForChannel(tokens: readonly string[]): string | null {
   if (separated(tokens, 0, MATCHUP_WORDS)) return null;
   for (const n of LOCALS) if (n.phrases.some((p) => findPhrase(tokens, p) >= 0)) return n.id;
   return null;
+}
+
+/** Broadcast networks whose channels are mostly local stations ("FOX 5 (WNYW) New York", "CBS 2 Chicago"). */
+const AFFILIATED = new Set(['abc', 'cbs', 'nbc', 'fox', 'cw']);
+/** Words after a network's name that pick its national feed or say nothing of a place. */
+const FEED_WORDS = new Set([
+  'east', 'eastern', 'west', 'western', 'pacific', 'mountain', 'central', 'atlantic', 'feed', 'national', 'network', 'net',
+  'tv', 'channel', 'live', 'us', 'usa', 'main', 'dt', 'hdtv', 'plus', 'pl',
+]);
+
+/**
+ * The words that place a broadcast network's channel in a local market: what follows the network's name,
+ * less numbers and feed words ("US: FOX 5 (WNYW) NEW YORK HD" gives wnyw, new, york; "FOX NET [WAUSAU]"
+ * gives wausau). Empty for the network's own feed ("US| FOX HD", "NBC East"); null for a channel of any
+ * other network, or of none. A provider with a broadcast network's group lists a station for nearly
+ * every market (about 150 FOX stations on one real account), and only the teams' markets carry a
+ * regional game.
+ */
+export function affiliateMarket(tokens: readonly string[]): string[] | null {
+  let slot = false;
+  for (let at = 0; at < tokens.length; at++) {
+    const hit = networkAt(tokens, at);
+    if (!hit) {
+      if (hit === null) return null;
+      const t = tokens[at]!;
+      if (SLOT_LEAGUES.has(t)) slot = true;
+      else if (!LEAD_TAGS.has(t) && !(slot && (NUMBER.test(t) || t === DASH))) return null;
+      continue;
+    }
+    if (!AFFILIATED.has(hit.alias.id)) return null;
+    return tokens.slice(hit.end).filter((t) => t !== DASH && !NUMBER.test(t) && !FEED_WORDS.has(t));
+  }
+  return null;
+}
+
+/** Cities a team's location stands for where its market's stations name another ("New England" is Boston). */
+const MARKET_ALIASES: Record<string, readonly string[]> = {
+  'new england': ['boston'],
+  carolina: ['charlotte'],
+  arizona: ['phoenix'],
+  tennessee: ['nashville'],
+  minnesota: ['minneapolis'],
+  'tampa bay': ['tampa'],
+  'green bay': ['milwaukee'],
+  'golden state': ['san francisco', 'oakland'],
+  utah: ['salt lake'],
+  indiana: ['indianapolis'],
+  brooklyn: ['new york'],
+  la: ['los angeles'],
+  texas: ['dallas', 'fort worth'],
+  colorado: ['denver'],
+  washington: ['washington'],
+};
+
+/** The words of the markets a team's games air in: its location, and the cities above. */
+export function teamMarkets(team: Pick<GameTeam, 'location'>): string[][] {
+  const location = textTokens(team.location);
+  if (location.length === 0) return [];
+  return [location, ...(MARKET_ALIASES[location.join(' ')] ?? []).map(textTokens)];
 }
 
 /** The network of an ESPN broadcast name ("ESPN2", "FanDuel SN West", "KFAA-TV"); null for team apps and the like. */

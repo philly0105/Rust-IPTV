@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   NETWORKS,
+  affiliateMarket,
   foreignFeed,
   hasMatchup,
   isBackupFeed,
@@ -18,6 +19,7 @@ import {
   teamAt,
   teamChannelName,
   teamKeys,
+  teamMarkets,
   textTokens,
 } from '../lib/names';
 import type { Game, GameTeam, League } from '../lib/types';
@@ -697,5 +699,31 @@ describe('isSportsGroup', () => {
     ];
     expect(kept.filter((g) => !isSportsGroup(g))).toEqual([]);
     expect(skipped.filter((g) => isSportsGroup(g))).toEqual([]);
+  });
+});
+
+describe('broadcast network stations', () => {
+  const market = (name: string) => affiliateMarket(nameTokens(name));
+
+  it('reads the words that place a station in a market, and none for the network\'s own feed', () => {
+    expect(market('US: FOX 5 (WNYW) NEW YORK HD')).toEqual(['wnyw', 'new', 'york']);
+    expect(market('US: FOX NET [WAUSAU]')).toEqual(['wausau']);
+    expect(market('US: CBS 2 WCBS (NEW YORK) HD')).toEqual(['wcbs', 'new', 'york']);
+    expect(market('US: FOX HD')).toEqual([]);
+    expect(market('US| NBC EAST')).toEqual([]);
+    expect(market('US| CBS (Backup)')).toEqual([]);
+  });
+
+  it('is null for every other channel', () => {
+    expect(market('US: FOX SPORTS 1 4K')).toBeNull();
+    expect(market('US| ESPN HD')).toBeNull();
+    expect(market('US: FOX NEWS HD')).toBeNull();
+    expect(market('NBA: BOSTON CELTICS')).toBeNull();
+  });
+
+  it("names a team's markets: its location and the cities its stations name instead", () => {
+    expect(teamMarkets({ location: 'Green Bay' })).toEqual([['green', 'bay'], ['milwaukee']]);
+    expect(teamMarkets({ location: 'New England' })).toEqual([['new', 'england'], ['boston']]);
+    expect(teamMarkets({ location: 'Detroit' })).toEqual([['detroit']]);
   });
 });

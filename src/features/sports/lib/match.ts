@@ -28,6 +28,7 @@ import {
   teamAt,
   teamFirstWords,
   teamKeys,
+  teamMarkets,
   textTokens,
 } from './names';
 import type { Game } from './types';
@@ -379,11 +380,32 @@ function gameNetworks(game: Game): Map<string, boolean> {
   return out;
 }
 
-/** Whether a channel is one of the game's networks, and regional; undefined when it is none of them. */
-function networkMatch(ch: IndexedChannel, networks: Map<string, boolean>, locals: readonly string[][]): boolean | undefined {
+/** Stations outside the teams' markets that a national game lists when the network has no feed of its own. */
+const SPARE_STATIONS = 3;
+
+/**
+ * Whether a channel is one of the game's networks, and regional; undefined when it is none of them. A local
+ * station of a broadcast network (`IndexedChannel.affiliate`) counts in one of the teams' markets, where it
+ * carries the game whatever else the network shows. Elsewhere it may show another game (a regional window)
+ * or the same one as the network's own feed, so it counts only for a national game on an index that has no
+ * feed of the network's own, as a 'spare': a big provider's network group lists a station for nearly every
+ * market, and the first few of them are as good as all.
+ */
+function networkMatch(
+  ch: IndexedChannel,
+  networks: Map<string, boolean>,
+  locals: readonly string[][],
+  markets: readonly string[][],
+  ownFeeds: ReadonlySet<string>,
+): boolean | 'spare' | undefined {
   if (ch.network !== null) {
     const regional = networks.get(ch.network);
-    if (regional !== undefined) return regional;
+    const market = ch.affiliate;
+    if (regional !== undefined && (!market || market.length === 0)) return regional;
+    if (regional !== undefined && market) {
+      if (markets.some((p) => hasRun(market, p))) return false;
+      if (!regional && !ownFeeds.has(ch.network)) return 'spare';
+    }
   }
   // A local station is recognised by its call sign anywhere ("FOX 5 Washington (WTTG)" is a FOX channel too).
   return locals.some((p) => hasRun(ch.tokens, p)) ? true : undefined;
@@ -400,6 +422,8 @@ function hasRun(tokens: readonly string[], phrase: readonly string[]): boolean {
 interface IndexMeta {
   keys: ItemKey[];
   sourceRank: Map<string, number>;
+  /** Broadcast networks with a feed of their own in the index, not only local stations. */
+  ownFeeds: Set<string>;
 }
 
 const indexMetas = new WeakMap<readonly IndexedChannel[], IndexMeta>();
@@ -409,8 +433,12 @@ function indexMeta(index: readonly IndexedChannel[]): IndexMeta {
   let meta = indexMetas.get(index);
   if (!meta) {
     const sourceRank = new Map<string, number>();
-    for (const ch of index) if (!sourceRank.has(ch.sourceId)) sourceRank.set(ch.sourceId, sourceRank.size);
-    meta = { keys: index.map((ch) => itemKey(ch.channel.ref)), sourceRank };
+    const ownFeeds = new Set<string>();
+    for (const ch of index) {
+      if (!sourceRank.has(ch.sourceId)) sourceRank.set(ch.sourceId, sourceRank.size);
+      if (ch.network !== null && ch.affiliate?.length === 0) ownFeeds.add(ch.network);
+    }
+    meta = { keys: index.map((ch) => itemKey(ch.channel.ref)), sourceRank, ownFeeds };
     indexMetas.set(index, meta);
   }
   return meta;
@@ -518,12 +546,14 @@ interface GameRoutes {
   window: { from: number; to: number };
   networks: Map<string, boolean>;
   locals: string[][];
+  /** The teams' markets, for broadcast network stations (`networkMatch`). */
+  markets: string[][];
 }
 
 function routesOf(game: Game): GameRoutes {
   const networks = gameNetworks(game);
   const locals = [...networks.keys()].flatMap((id) => (networkAlias(id)?.kind === 'local' ? networkAlias(id)!.phrases : []));
-  return { window: gameWindow(game), networks, locals };
+  return { window: gameWindow(game), networks, locals, markets: [...teamMarkets(game.home), ...teamMarkets(game.away)] };
 }
 
 const HOME = 1;
@@ -592,7 +622,7 @@ export function matchGameScanForTests(
 
 function matchAt(
   game: Game,
-  { window, networks, locals }: GameRoutes,
+  { window, networks, locals, markets }: GameRoutes,
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now: number | undefined,
@@ -600,6 +630,8 @@ function matchAt(
 ): StreamMatch[] {
   const meta = indexMeta(index);
   const found = new Map<ItemKey, { match: StreamMatch; rank: number; foreign: boolean; backup: boolean }>();
+  // Spare stations taken per network, in index order, which the candidate map and a full scan share.
+  const spares = new Map<string, number>();
   for (const i of positions) {
     const ch = index[i]!;
     const key = meta.keys[i]!;
@@ -611,10 +643,15 @@ function matchAt(
     else if (isEventChannel(ch, game, now)) reason = 'event';
     else if (isTeamChannel(ch, game)) reason = 'team';
     else {
-      const r = networkMatch(ch, networks, locals);
+      const r = networkMatch(ch, networks, locals, markets, meta.ownFeeds);
       if (r === undefined) continue;
+      if (r === 'spare') {
+        const taken = spares.get(ch.network!) ?? 0;
+        if (taken >= SPARE_STATIONS) continue;
+        spares.set(ch.network!, taken + 1);
+      }
       reason = 'network';
-      regional = r;
+      regional = r === true;
     }
     const rank = REASON_RANK[reason] * 2 + Number(regional);
     const prev = found.get(key);

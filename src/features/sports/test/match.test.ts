@@ -494,7 +494,8 @@ describe('network channels', () => {
   it('takes FOX, not FS1, Fox News or Fox Business', () => {
     const ws = game('mlb', team('TB', 'Tampa Bay', 'Rays'), team('MIL', 'Milwaukee', 'Brewers'), '2026-10-24T00:00Z', { broadcasts: national('Fox') });
     const index = ['FS1', 'Fox Sports 1', 'Fox News', 'FOX Business', 'FOX 5 New York', 'US| FOX HD'].map((n) => indexed(n));
-    expect(names(matchGame(ws, index, NONE))).toEqual(['FOX 5 New York', 'US| FOX HD']);
+    // New York is neither team's market, and the network's own feed carries the game.
+    expect(names(matchGame(ws, index, NONE))).toEqual(['US| FOX HD']);
   });
 
   it('does not take feeds from abroad that share the network’s name', () => {
@@ -562,12 +563,17 @@ describe('network channels', () => {
   });
 
   it('flags NFL Sunday games on CBS or FOX only as regional, and a guide confirmation clears it', () => {
+    const cbs = indexed('US| CBS HD');
     const ny = indexed('CBS 2 New York');
     const miami = indexed('CBS 4 Miami');
+    const pittsburgh = indexed('CBS 2 Pittsburgh (KDKA)');
     const programs = guide([[miami, [programme('NFL Football', '2026-10-18T17:00Z', '2026-10-18T20:15Z', 'The Steelers visit the Buccaneers.')]]]);
-    expect(brief(matchGame(NFL_SUNDAY, [ny, miami], programs))).toEqual([
+    // The network's own feed may show another market's game; a station in Pittsburgh shows this one, and one
+    // in New York, neither team's market, is left out.
+    expect(brief(matchGame(NFL_SUNDAY, [cbs, ny, miami, pittsburgh], programs))).toEqual([
       ['CBS 4 Miami', 'guide', false],
-      ['CBS 2 New York', 'network', true],
+      ['CBS 2 Pittsburgh (KDKA)', 'network', false],
+      ['US| CBS HD', 'network', true],
     ]);
     // Monday on ESPN, and Sunday night on NBC, reach every market.
     const monday = game('nfl', STEELERS, BUCS, '2026-10-20T00:15Z', { broadcasts: national('ESPN') });
@@ -577,6 +583,45 @@ describe('network channels', () => {
     // Preseason Sunday games are not the regional window.
     const pre = game('nfl', STEELERS, BUCS, '2026-08-16T17:00Z', { broadcasts: national('CBS'), seasonType: 1 });
     expect(brief(matchGame(pre, [ny], NONE))).toEqual([['CBS 2 New York', 'network', false]]);
+  });
+
+  it("counts a broadcast network's local stations only in the teams' markets", () => {
+    // Sun 2026-10-18 1:00 PM EDT on FOX only: a regional window game.
+    const lions = team('DET', 'Detroit', 'Lions');
+    const packers = team('GB', 'Green Bay', 'Packers');
+    const regional = game('nfl', lions, packers, '2026-10-18T17:00Z', { broadcasts: national('FOX') });
+    const own = indexed('US: FOX HD');
+    const detroit = indexed('US: FOX 2 (WJBK) DETROIT HD');
+    const greenBay = indexed('US: FOX (WLUK) GREEN BAY HD');
+    const milwaukee = indexed('US: FOX 6 (WITI) MILWAUKEE HD');
+    const newYork = indexed('US: FOX 5 (WNYW) NEW YORK HD');
+    const wausau = indexed('US: FOX NET [WAUSAU]');
+    const stations = [own, detroit, greenBay, milwaukee, newYork, wausau];
+    const flags = (matches: StreamMatch[]) => Object.fromEntries(matches.map((m) => [m.channel.name, m.regional]));
+    // The markets' stations carry the game; the network's own feed may show another; the rest are left out.
+    expect(flags(matchGame(regional, stations, NONE))).toEqual({
+      'US: FOX 2 (WJBK) DETROIT HD': false,
+      'US: FOX (WLUK) GREEN BAY HD': false,
+      // Green Bay's games air in Milwaukee too.
+      'US: FOX 6 (WITI) MILWAUKEE HD': false,
+      'US: FOX HD': true,
+    });
+    // Out-of-market stations stay out of a regional game even without the network's own feed.
+    expect(names(matchGame(regional, [newYork, wausau], NONE))).toEqual([]);
+
+    // Sunday night on NBC reaches every market: with the network's own feed the stations add nothing
+    // outside the markets; without one, each of them carries the game.
+    const sundayNight = game('nfl', lions, packers, '2026-10-19T00:20Z', { broadcasts: national('NBC') });
+    const nbc = indexed('US| NBC HD');
+    const nbcDetroit = indexed('US: NBC 4 (WDIV) DETROIT HD');
+    const nbcBoston = indexed('US: NBC 10 (WBTS) BOSTON HD');
+    expect(flags(matchGame(sundayNight, [nbc, nbcDetroit, nbcBoston], NONE))).toEqual({ 'US: NBC 4 (WDIV) DETROIT HD': false, 'US| NBC HD': false });
+    expect(flags(matchGame(sundayNight, [nbcDetroit, nbcBoston], NONE))).toEqual({ 'US: NBC 4 (WDIV) DETROIT HD': false, 'US: NBC 10 (WBTS) BOSTON HD': false });
+    // ...but only the first three of them, not one per market.
+    const elsewhere = ['Atlanta (WXIA)', 'Chicago (WMAQ)', 'Dallas (KXAS)', 'Denver (KUSA)', 'Miami (WTVJ)'].map((c) => indexed(`US: NBC ${c} HD`));
+    expect(names(matchGame(sundayNight, elsewhere, NONE))).toHaveLength(3);
+    // "NBC USA Network" is USA Network, not a feed of NBC's own.
+    expect(names(matchGame(sundayNight, [indexed('US: NBC USA NETWORK (EAST)'), nbcBoston], NONE))).toEqual(['US: NBC 10 (WBTS) BOSTON HD']);
   });
 
   it('flags regional sports networks and local stations as regional', () => {

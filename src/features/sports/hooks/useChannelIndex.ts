@@ -18,6 +18,7 @@ import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import {
   NETWORKS,
+  affiliateMarket,
   foreignFeed,
   hasMatchup,
   isBackupFeed,
@@ -46,6 +47,11 @@ export interface IndexedChannel {
   teamName: string | null;
   /** `isBackupFeed`: a backup feed or SD copy ("ESPN (Backup)"), listed after the main feeds. */
   backup: boolean;
+  /**
+   * `affiliateMarket`: for a broadcast network's channel, the words that place it in a local market (empty
+   * for the network's own feed); null for any other channel. Rows built without it count as null.
+   */
+  affiliate?: string[] | null;
 }
 
 /** Rows per `catalog.channels` page: the core's cap. */
@@ -73,6 +79,7 @@ interface Described {
   foreign: boolean;
   teamName: string | null;
   backup: boolean;
+  affiliate: string[] | null;
 }
 
 const described = new WeakMap<Channel, Described>();
@@ -85,24 +92,38 @@ function describe(channel: Channel): Described {
     const foreign = foreignFeed(channel.name, channel.categoryName);
     // A feed from abroad is not the US network of its name ("BR: ESPN", "AU| FOX FOOTY").
     let network: string | null = null;
+    let affiliate: string[] | null = null;
     if (!foreign) {
       network = networkIdForChannel(tokens);
+      let read: readonly string[] = tokens;
       // The cut tag may be a service's ("ESPN+ | Texas vs Georgia") or a slot's league word ("NFL | 02 - ESPN").
       if (network === null) {
         const all = textTokens(channel.name);
-        if (all.length !== tokens.length) network = networkIdForChannel(all);
+        if (all.length !== tokens.length) {
+          network = networkIdForChannel(all);
+          read = all;
+        }
       }
+      if (network !== null) affiliate = affiliateMarket(read);
     }
-    d = { tokens, network, foreign, teamName: teamChannelName(tokens), backup: isBackupFeed(channel.name) };
+    d = { tokens, network, foreign, teamName: teamChannelName(tokens), backup: isBackupFeed(channel.name), affiliate };
     described.set(channel, d);
   }
   return d;
 }
 
+/**
+ * A provider's heading row between groups of channels ("##### FOX ᴴᴰ/ᴿᴬᵂ #####", "===== NFL ====="): a
+ * playlist entry with a name, but no channel, which would otherwise read as the network it names.
+ */
+export function isSeparatorName(name: string): boolean {
+  return /^\s*[#=*~_]{3,}|[#=*~_]{3,}\s*$/.test(name);
+}
+
 /** One index row. */
 export function toIndexed(channel: Channel, source: Pick<Source, 'id' | 'kind' | 'name'>, fromSportsGroup: boolean): IndexedChannel {
-  const { tokens, network, foreign, teamName, backup } = describe(channel);
-  return { channel, sourceId: source.id, sourceKind: source.kind, sourceName: source.name, tokens, network, fromSportsGroup, foreign, teamName, backup };
+  const { tokens, network, foreign, teamName, backup, affiliate } = describe(channel);
+  return { channel, sourceId: source.id, sourceKind: source.kind, sourceName: source.name, tokens, network, fromSportsGroup, foreign, teamName, backup, affiliate };
 }
 
 /**
@@ -212,7 +233,7 @@ function buildIndex(
   const seen = new Set<ItemKey>();
   const add = (ch: Channel, source: Source, fromSportsGroup: boolean) => {
     const key = itemKey(ch.ref);
-    if (seen.has(key)) return;
+    if (seen.has(key) || isSeparatorName(ch.name)) return;
     seen.add(key);
     out.push(toIndexed(ch, source, fromSportsGroup));
   };

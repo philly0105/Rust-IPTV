@@ -46,6 +46,12 @@ describe('fallback initials', () => {
     expect(monogramText('M6')).toBe('M6');
     expect(monogramText('Sport 1')).toBe('S1');
     expect(monogramText('Meridian News HD')).toBe('MN');
+    // A per-game channel takes one letter of each team, past its slot number and kickoff time.
+    expect(monogramText('NFL 03: Cleveland Browns vs Tennessee Titans @ 1:00 PM ET')).toBe('CT');
+    expect(monogramText('NFL  | 03 - 1pm 49ers at Falcons')).toBe('4F');
+    expect(monogramText('NBA 05: Celtics vs Knicks')).toBe('CK');
+    // A name with "at" in it but no matchup keeps its own initials.
+    expect(monogramText('Art at Home')).toBe('AH');
     // A letter outside the Basic Multilingual Plane and an emoji stay whole.
     expect(monogramText('𠀀 Beta')).toBe('𠀀B');
     expect(monogramText('🏈 Sunday Football')).toBe('🏈S');

@@ -65,7 +65,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 - Favorites and Recently watched sit at the top of each source's groups, in Live TV and Radio. Type a channel number in the guide to jump to its row.
 - Make your own channel lists across sources, or add a whole group at once, and rename or hide channels without changing the provider's data.
 - Hide channels below a picture quality, such as anything under 1080p, read from the provider's channel names.
-- Follow NFL, college football, NBA and MLB on the Sports page: games from a week ago to a week ahead with scores from ESPN, each with the channels of yours that carry it, found by channel name, the guide and the TV network. Watch a game live, replay it from a channel's archive, or record it.
+- Follow NFL, college football, NBA and MLB on the Sports page: games from a week ago to a week ahead with scores from ESPN, each with the channels of yours that carry it, found by channel name, the guide and the TV network. Find a team, follow your teams, and watch a game live, replay it from a channel's archive, record it, or put several games side by side in multi-view.
 
 ![Live TV with the group sidebar, the channel list and the player](docs/screenshots/live.png)
 

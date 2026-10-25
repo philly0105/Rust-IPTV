@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { homeContinueArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
@@ -42,10 +42,10 @@ import { snapshotTitle } from '@/lib/title';
 import { cn, Dialog, Kbd, Poster, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
-import { ALL_NAV_LINKS } from './navigation';
+import { LIBRARY_LINKS, readLastSource, watchLinks } from './navigation';
 import { playFromShell, type PlayItemArgs } from './playFromShell';
 import { railFadeMask } from './Rail';
-import { railLinks } from './railLinks';
+import { railLinks, routeSourceId } from './railLinks';
 import { useShellStore } from './store';
 import { useVisibleSources } from './useVisibleSources';
 import { persistTheme, useTheme } from './theme';
@@ -327,21 +327,28 @@ function settingsKeywords(key: string, section: string, t: TFunction, en: TFunct
 export function usePaletteItems(): PaletteItem[] {
   const { t, i18n } = useTranslation(['shell', 'parental']);
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const sources = useVisibleSources();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const registered = useCommandList();
   const parental = useParentalStatus();
   // Only while a PIN is set and the session is unlocked: there is nothing to lock otherwise.
   const canLockParental = !!parental.data?.enabled && !!parental.data.unlocked;
+  // Live TV, Movies and Series go where the rail's do: the source on show, else the one last opened.
+  const preferredSource = routeSourceId(pathname) ?? readLastSource();
 
   return useMemo(() => {
     const go = (to: string) => () => navigate(to);
     const nav = t('groupNavigation');
-    // The rail's destinations in rail order, with the words people search them by.
+    // The rail's destinations in rail order, with the words people search them by. Keyed by path,
+    // or by section for Live TV, Movies and Series, whose path follows the source.
     const NAV_EXTRA: Record<string, Pick<PaletteItem, 'keywords' | 'shortcut'>> = {
       '/dashboard': { keywords: ['home'] },
       '/search': { shortcut: 'mod+f' },
+      live: { keywords: ['channels', 'tv'] },
       '/epg': { keywords: ['epg', 'tv guide', 'schedule'] },
+      movies: { keywords: ['films', 'vod'] },
+      series: { keywords: ['shows', 'tv shows', 'episodes'] },
       '/sports': { keywords: ['nfl', 'nba', 'mlb', 'college football', 'cfb', 'scores', 'games'] },
       '/multiview': { keywords: ['multiview', 'wall', 'split screen', 'mosaic'] },
       '/my-list': { keywords: ['watchlist', 'watch later'] },
@@ -368,13 +375,13 @@ export function usePaletteItems(): PaletteItem[] {
       '/stats': 'stats',
     };
     const items: PaletteItem[] = [
-      ...ALL_NAV_LINKS.map((l): PaletteItem => ({
-        id: `nav.${NAV_IDS[l.to] ?? l.to}`,
+      ...[...watchLinks(sources.data, preferredSource), ...LIBRARY_LINKS].map((l): PaletteItem => ({
+        id: `nav.${l.section ?? NAV_IDS[l.to] ?? l.to}`,
         title: t(l.labelKey),
         group: nav,
         icon: l.icon,
         run: go(l.to),
-        ...NAV_EXTRA[l.to],
+        ...NAV_EXTRA[l.section ?? l.to],
       })),
       { id: 'nav.sources', title: t('manageSources'), group: nav, icon: ListVideo, run: go('/sources'), keywords: ['playlists'] },
       { id: 'nav.addSource', title: t('addSource'), group: nav, icon: Plus, run: go('/sources?add=1'), keywords: ['playlist', 'm3u', 'xtream', 'stalker', 'portal'] },
@@ -440,7 +447,7 @@ export function usePaletteItems(): PaletteItem[] {
       items.push({ id: `cmd.${c.id}`, title: c.title, group: c.group, icon: Terminal, shortcut: c.shortcut, keywords: c.keywords, run: () => c.run() });
     }
     return items;
-  }, [t, navigate, sources.data, setHelpOpen, registered, canLockParental]);
+  }, [t, navigate, sources.data, preferredSource, setHelpOpen, registered, canLockParental]);
 }
 
 /** The empty palette's actions, ahead of the destinations: the theme flip, a new source, the keys. */

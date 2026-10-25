@@ -10,7 +10,7 @@ Code: `src/features/sports/`. Tests: `src/features/sports/test/` (the ESPN norma
 | --- | --- |
 | `sportsRoutes`, `SPORTS_PATH` | One lazy route, `/sports` → `SportsPage`. The app router mounts it among the shell layout's children. |
 
-The rail's Watch group lists it after the TV guide (`WATCH_LINKS`, label `sports:title`), the phone's More sheet lists it beside Multi-view, and the command palette finds it as `nav.sports` (keywords such as NFL, NBA, MLB, college football and scores). The strings are in the `sports` namespace, in all 19 languages. Team names, notes and network names are ESPN's English text and are not translated.
+The rail's Watch group lists it after Series (`WATCH_LINKS`, label `sports:title`), the phone's More sheet lists it beside Multi-view, and the command palette finds it as `nav.sports` (keywords such as NFL, NBA, MLB, college football and scores). The strings are in the `sports` namespace, in all 19 languages. Team names, notes and network names are ESPN's English text and are not translated.
 
 ## Game data: ESPN's scoreboard
 

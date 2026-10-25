@@ -9,7 +9,7 @@ import type { Source } from '@/api/types';
 import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
 import { useOffline } from './connection';
-import { LIBRARY_LINKS, WATCH_LINKS, type NavLinkDef } from './navigation';
+import { LIBRARY_LINKS, readLastSource, sectionCurrent, watchLinks, type NavLinkDef } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
@@ -20,7 +20,8 @@ import { useVisibleSources } from './useVisibleSources';
  * One look for every rail row: rest (muted), hover (the see-through hover layer, full text),
  * pressed (the active layer), current (the neutral selected fill, tuning tick, accent icon). The
  * height is --rail-item-height, so compact density tightens the rail with everything else.
- * `dim`: a Library link while there are no sources, where every one of them opens empty.
+ * `dim`: while there are no sources, a Library link (every one of them opens empty) and Live TV,
+ * Movies and Series (they lead to adding a source).
  */
 const itemClass = (active: boolean, collapsed: boolean, dim = false) =>
   cn(
@@ -35,6 +36,11 @@ const itemClass = (active: boolean, collapsed: boolean, dim = false) =>
 /** The leading glyph's box: the 18 px icons and the source monograms both sit in it. */
 const RAIL_GLYPH = 'inline-flex size-5 shrink-0 items-center justify-center';
 
+/**
+ * One rail link. `current`, when given, says whether it stands for the page on show, in place of
+ * the router's match of `to`: Live TV, Movies and Series follow the source on show, and count
+ * pages that sit beside their path (sectionCurrent).
+ */
 function RailNavLink({
   to,
   labelKey,
@@ -43,31 +49,46 @@ function RailNavLink({
   end,
   tour,
   dim,
-}: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour'> & { collapsed: boolean; dim?: boolean; tour?: string }) {
+  current,
+}: Pick<NavLinkDef, 'to' | 'labelKey' | 'icon' | 'end' | 'tour'> & { collapsed: boolean; dim?: boolean; tour?: string; current?: boolean }) {
   const { t } = useTranslation('shell');
   const label = t(labelKey);
   // A rest on the link starts the page's code and first data.
   const intent = useRouteIntent(to);
+  const content = (active: boolean) => (
+    <>
+      {/* One 20 px box for every leading glyph (icons and source monograms), so the labels share a column. */}
+      <span aria-hidden className={RAIL_GLYPH}>
+        <Icon size={18} className={cn(active && 'text-accent')} />
+      </span>
+      {!collapsed && <span className="truncate">{label}</span>}
+    </>
+  );
   return (
     <Tooltip content={collapsed ? label : null} side="inline-end" describe={false}>
-      <NavLink
-        {...intent}
-        to={to}
-        end={end}
-        data-tour={tour}
-        aria-label={collapsed ? label : undefined}
-        className={({ isActive }) => itemClass(isActive, collapsed, dim)}
-      >
-        {({ isActive }) => (
-          <>
-            {/* One 20 px box for every leading glyph (icons and source monograms), so the labels share a column. */}
-            <span aria-hidden className={RAIL_GLYPH}>
-              <Icon size={18} className={cn(isActive && 'text-accent')} />
-            </span>
-            {!collapsed && <span className="truncate">{label}</span>}
-          </>
-        )}
-      </NavLink>
+      {current === undefined ? (
+        <NavLink
+          {...intent}
+          to={to}
+          end={end}
+          data-tour={tour}
+          aria-label={collapsed ? label : undefined}
+          className={({ isActive }) => itemClass(isActive, collapsed, dim)}
+        >
+          {({ isActive }) => content(isActive)}
+        </NavLink>
+      ) : (
+        <Link
+          {...intent}
+          to={to}
+          data-tour={tour}
+          aria-label={collapsed ? label : undefined}
+          aria-current={current ? 'page' : undefined}
+          className={itemClass(current, collapsed, dim)}
+        >
+          {content(current)}
+        </Link>
+      )}
     </Tooltip>
   );
 }
@@ -229,8 +250,18 @@ function RailGroup({
       {open && (
         <ul id={listId} className="flex flex-col gap-0.5">
           {links.map((l) => (
-            <li key={l.to}>
-              <RailNavLink {...l} collapsed={collapsed} dim={dim} />
+            // Keyed by section too: with no sources, Live TV, Movies and Series share one path.
+            <li key={l.section ?? l.to}>
+              <RailNavLink
+                to={l.to}
+                labelKey={l.labelKey}
+                icon={l.icon}
+                end={l.end}
+                tour={l.tour}
+                collapsed={collapsed}
+                dim={dim || l.dim}
+                current={l.section ? sectionCurrent(l.section, pathname) : undefined}
+              />
             </li>
           ))}
         </ul>
@@ -327,14 +358,13 @@ function rememberRailSource(id: string | null): void {
 }
 
 /**
- * The open source before the user presses one this session and while no source's page shows:
- * the one they left open, else the only source (Live TV, Movies and Series one click away), else
- * none. Exported for tests.
+ * The open source before the user presses one this session and while no source's page has opened
+ * one: the one they left open, else none. The only source no longer opens by itself: Live TV,
+ * Movies and Series are in the Watch group, and with its links open the rail ran past the fold at
+ * laptop heights. Exported for tests.
  */
 export function defaultOpenSource(sources: readonly Pick<Source, 'id'>[], remembered: string | null): string | null {
-  if (remembered === '') return null;
-  if (remembered && sources.some((s) => s.id === remembered)) return remembered;
-  return sources.length === 1 ? sources[0]!.id : null;
+  return remembered && sources.some((s) => s.id === remembered) ? remembered : null;
 }
 
 function SourceEntry({
@@ -650,16 +680,22 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const tourSourceId = liveTourSource(sources.data)?.id;
   const sourceCount = sources.data?.length ?? 0;
   const noSources = sources.isSuccess && sourceCount === 0;
-  // The sources' accordion. Undefined until this session decides (a press, or a source's page
-  // opening); until then the remembered press, or the only source, is open.
-  const [openSource, setOpenSource] = useState<string | null | undefined>(() => activeSourceId);
+  // Live TV, Movies and Series open the source on show, else the one last opened.
+  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource());
+  // With two or more sources, the source of the page on show opens. A lone source stays as the
+  // user left it: the Watch links already lead to its sections and mark its pages.
+  const pageSource = sourceCount > 1 ? activeSourceId : undefined;
+  // The sources' accordion. Undefined until this session decides (a press, or a page opening its
+  // source); until then the remembered press is open.
+  const [openSource, setOpenSource] = useState<string | null | undefined>(pageSource);
   // A source's page opening (from a card or the palette) opens its entry in the same render, not
   // in an effect a commit later: the rail's scroll effect runs once per route, and it must find
-  // the active sub-link already on the page to bring it into view.
-  const [lastActive, setLastActive] = useState(activeSourceId);
-  if (activeSourceId !== lastActive) {
-    setLastActive(activeSourceId);
-    if (activeSourceId) setOpenSource(activeSourceId);
+  // the active sub-link already on the page to bring it into view. Sources that load after the
+  // page has opened open it then, in the render they arrive in.
+  const [lastPageSource, setLastPageSource] = useState(pageSource);
+  if (pageSource !== lastPageSource) {
+    setLastPageSource(pageSource);
+    if (pageSource) setOpenSource(pageSource);
   }
   const [remembered] = useState(readRailSource);
   const openId = openSource !== undefined ? openSource : defaultOpenSource(sources.data ?? [], remembered);
@@ -784,7 +820,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           style={railFadeMask(primaryFade.top, primaryFade.bottom)}
           className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2 pb-1', RAIL_PRIMARY_MAX)}
         >
-          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={WATCH_LINKS} collapsed={collapsed} first />
+          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={watch} collapsed={collapsed} first />
         </div>
 
         <div

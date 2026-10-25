@@ -97,7 +97,16 @@ describe('rail (SH-rail-ia)', () => {
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
     await within(nav).findByText('Night Portal');
     const group = (name: string) => within(nav).getByRole('group', { name });
-    expect(within(group('Watch')).getAllByRole('link').map((l) => l.textContent)).toEqual(['Home', 'Search', 'TV guide', 'Sports', 'Multi-view']);
+    expect(within(group('Watch')).getAllByRole('link').map((l) => l.textContent)).toEqual([
+      'Home',
+      'Search',
+      'Live TV',
+      'TV guide',
+      'Movies',
+      'Series',
+      'Sports',
+      'Multi-view',
+    ]);
     expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual([
       'My List',
       'Favorites',
@@ -122,12 +131,15 @@ describe('rail (SH-rail-ia)', () => {
     expect(within(nav).getByRole('button', { name: /Night Portal, Xtream/ })).toBeTruthy();
   });
 
-  it('opens the only source, so its Live TV, Movies and Series are one click away', async () => {
+  it('leaves the only source closed: its Live TV, Movies and Series are in the Watch group', async () => {
     handlers([makeSource('s1', { name: 'Only One' })]);
     renderRoutes(routes(), '/favorites');
     const entry = await screen.findByRole('button', { name: /Only One/ });
-    expect(entry.getAttribute('aria-expanded')).toBe('true');
-    expect(screen.getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live');
+    expect(entry.getAttribute('aria-expanded')).toBe('false');
+    const watch = screen.getByRole('group', { name: 'Watch' });
+    expect(within(watch).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live');
+    expect(within(watch).getByRole('link', { name: 'Movies' }).getAttribute('href')).toBe('/s/s1/movies');
+    expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('href')).toBe('/s/s1/series');
   });
 
   it('with no sources: Library steps back and one dashed Add source row stands in, except where onboarding shows', async () => {
@@ -138,6 +150,14 @@ describe('rail (SH-rail-ia)', () => {
     expect(add.getAttribute('href')).toBe('/sources?add=1');
     expect(add.className).toContain('border-dashed');
     expect(within(nav).getByRole('link', { name: 'My List' }).className).toContain('text-fg-subtle');
+    // Live TV, Movies and Series step back too, and lead to the Sources page, as the phone tab does.
+    const watch = within(nav).getByRole('group', { name: 'Watch' });
+    for (const name of ['Live TV', 'Movies', 'Series']) {
+      const link = within(watch).getByRole('link', { name });
+      expect(link.getAttribute('href'), name).toBe('/sources');
+      expect(link.className, name).toContain('text-fg-subtle');
+    }
+    expect(within(watch).getByRole('link', { name: 'TV guide' }).className).not.toContain('text-fg-subtle');
     // No "+" beside the Sources label: the row is the one way in.
     expect(within(within(nav).getByRole('group', { name: 'Sources' })).queryByRole('link', { name: 'Add source' })).toBe(add);
     await act(() => router.navigate('/dashboard'));
@@ -209,16 +229,16 @@ describe('rail at laptop heights (stage 2)', () => {
     renderRoutes(routes(), '/dashboard');
     expect((await screen.findByRole('button', { name: /^Backup/ })).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
-    // The only source opens by itself, until the user closes it.
+    // The only source stays closed until the user opens it, and then stays open next launch.
     cleanup();
     handlers([makeSource('s1', { name: 'Night Portal' })]);
     renderRoutes(routes(), '/dashboard');
     const only = await screen.findByRole('button', { name: /^Night Portal/ });
-    expect(only.getAttribute('aria-expanded')).toBe('true');
+    expect(only.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(only);
     cleanup();
     renderRoutes(routes(), '/dashboard');
-    expect((await screen.findByRole('button', { name: /^Night Portal/ })).getAttribute('aria-expanded')).toBe('false');
+    expect((await screen.findByRole('button', { name: /^Night Portal/ })).getAttribute('aria-expanded')).toBe('true');
   });
 
   it('collapsed: the footer keeps Settings and the toggle, and the current source is marked for the scroll', async () => {

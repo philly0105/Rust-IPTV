@@ -234,11 +234,16 @@ describe('the rail', () => {
   it("marks Movies on a movie's page and player, and Live TV on the catch-up archive", async () => {
     const { router } = renderRoutes(routes(), '/s/s1/movie/m1');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
-    await waitFor(() => expect(within(nav).getByRole('link', { name: 'Movies' }).getAttribute('aria-current')).toBe('page'));
-    expect(within(nav).getByRole('link', { name: 'Movies' }).className).toContain('tuning-tick');
+    // The Watch group's link and the open source's own (two sources: the page opened its source).
+    const links = (name: string) => within(nav).getAllByRole('link', { name });
+    await waitFor(() => expect(links('Movies')).toHaveLength(2));
+    for (const link of links('Movies')) {
+      expect(link.getAttribute('aria-current')).toBe('page');
+      expect(link.className).toContain('tuning-tick');
+    }
     await act(() => router.navigate('/live/archive/s1/ch1'));
-    await waitFor(() => expect(within(nav).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page'));
-    expect(within(nav).getByRole('link', { name: 'Movies' }).getAttribute('aria-current')).toBeNull();
+    await waitFor(() => expect(links('Live TV').map((l) => l.getAttribute('aria-current'))).toEqual(['page', 'page']));
+    for (const link of links('Movies')) expect(link.getAttribute('aria-current')).toBeNull();
   });
 
   it('railLinkCurrent counts the paths beside a link, never another source or section', () => {
@@ -279,13 +284,15 @@ describe('the rail', () => {
     expect(localStorage.getItem('tsrust.railSource')).toBe('s1');
   });
 
-  it('defaultOpenSource: the remembered one while it exists, else the only source, never a closed one', () => {
+  it('defaultOpenSource: the remembered one while it exists, never a closed one, and not the only source by itself', () => {
     const one = [makeSource('a')];
     const two = [makeSource('a'), makeSource('b')];
     expect(defaultOpenSource(two, 'b')).toBe('b');
     expect(defaultOpenSource(two, 'gone')).toBeNull();
-    expect(defaultOpenSource(one, 'gone')).toBe('a');
-    expect(defaultOpenSource(one, null)).toBe('a');
+    expect(defaultOpenSource(one, 'a')).toBe('a');
+    // Its Live TV, Movies and Series are in the Watch group: the only source waits for a press.
+    expect(defaultOpenSource(one, 'gone')).toBeNull();
+    expect(defaultOpenSource(one, null)).toBeNull();
     expect(defaultOpenSource(one, '')).toBeNull();
     expect(defaultOpenSource(two, null)).toBeNull();
   });

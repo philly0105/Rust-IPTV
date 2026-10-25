@@ -372,6 +372,8 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
             {!collapsed && <Skeleton className="h-4 w-28" />}
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden px-2">
+            {/* The Watch label, which the expanded rail shows above Home (the icon rail has no rule there). */}
+            {!collapsed && label()}
             {/* Every Watch link, Live TV, Movies and Series included: most sources have movies and series. */}
             {rows(WATCH_LINKS.length)}
             {label()}

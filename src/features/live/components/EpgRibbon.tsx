@@ -659,7 +659,7 @@ function Timeline(
 
   const onScroll = () => {
     const el = scroller.current;
-    if (el) setView({ left: scrollStart(el), width: el.clientWidth || 1200 });
+    if (el) setView({ left: scrollStart(el, rtl), width: el.clientWidth || 1200 });
   };
 
   // Window the blocks: only those near the viewport are in the DOM.

@@ -47,7 +47,6 @@ describe('rows (P2-GUIDE-5)', () => {
       now: at + 10 * MINUTE,
       pxPerMin: 5,
       channelCol: 220,
-      trackWidth: 1800,
       compact: false,
       rtl: false,
       kind: 'm3u',

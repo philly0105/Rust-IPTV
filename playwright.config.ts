@@ -8,7 +8,7 @@ import { defineConfig, devices } from '@playwright/test';
 // `pnpm build` must have produced ./dist first.
 //
 // Env overrides:
-//   PW_CHANNEL      browser channel (default msedge; the bundled Chromium lacks H.264). Use "chromium" for the bundled build.
+//   PW_CHANNEL      browser channel (default msedge; the bundled Chromium lacks H.264). Use "chromium" or "webkit" for bundled builds.
 //   E2E_PORT        iptv-server port (default 7180)
 //   E2E_MOCK_PORT   iptv-mock port (default 7290; the mock URLs in specs assume 7290)
 //   E2E_KEEP_DATA=1 keep ./.e2e-data from the previous run
@@ -16,6 +16,7 @@ import { defineConfig, devices } from '@playwright/test';
 const port = Number(process.env['E2E_PORT'] ?? 7180);
 const mockPort = Number(process.env['E2E_MOCK_PORT'] ?? 7290);
 const channel = process.env['PW_CHANNEL'] ?? 'msedge';
+const webkit = channel === 'webkit';
 const dataDir = './.e2e-data';
 
 // Fresh data dir per run. This runs at config load, before Playwright starts the
@@ -59,7 +60,7 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
-    channel: channel === 'chromium' ? undefined : channel,
+    channel: channel === 'chromium' || webkit ? undefined : channel,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: ffmpegInstalled() ? 'retain-on-failure' : 'off',
@@ -68,8 +69,9 @@ export default defineConfig({
     {
       name: channel,
       use: {
-        ...devices['Desktop Chrome'],
-        channel: channel === 'chromium' ? undefined : channel,
+        ...(webkit ? devices['Desktop Safari'] : devices['Desktop Chrome']),
+        browserName: webkit ? 'webkit' : 'chromium',
+        channel: channel === 'chromium' || webkit ? undefined : channel,
         viewport: { width: 1280, height: 800 },
       },
     },

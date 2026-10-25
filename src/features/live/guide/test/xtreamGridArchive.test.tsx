@@ -64,6 +64,22 @@ afterEach(() => {
 });
 
 describe('Xtream programmes in the grid', () => {
+  it('loads a provider table for a nearby archive gap before horizontal scrolling exposes it', async () => {
+    const at = defaultStart(Date.now() - 2 * DAY);
+    handlers(
+      (r) => r.itemId === 'c0' ? [program('Current XML', at, at + 7 * HOUR)] : [],
+      (r) => r.itemId === 'c0' ? [program('Earlier provider', at - 3 * HOUR, at - 2 * HOUR)] : [],
+    );
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^Current XML,/ });
+    const channelCalls = () => rpc.of('catchup.table').filter((a) => (a as { ref: ItemRef }).ref.itemId === 'c0');
+    await waitFor(() => expect(channelCalls()).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
+    expect(await screen.findByRole('button', { name: /^Earlier provider,/ })).toBeTruthy();
+    expect(channelCalls()).toHaveLength(1);
+  });
+
   it('fills older XMLTV gaps from the provider while keeping XMLTV for overlaps', async () => {
     const at = defaultStart(Date.now() - 2 * DAY);
     handlers(
@@ -125,6 +141,7 @@ describe('Xtream programmes in the grid', () => {
     expect(await screen.findByRole('button', { name: /^Current programme,/ })).toBeTruthy();
     const initialGridCalls = rpc.of('epg.grid').length;
     rpc.handlers['epg.grid'] = () => new Promise(() => undefined);
+    fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
     fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
     await waitFor(() => expect(rpc.of('epg.grid').length).toBeGreaterThan(initialGridCalls));
     expect(screen.queryByTestId('guide-no-data')).toBeNull();

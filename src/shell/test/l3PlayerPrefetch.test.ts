@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/features/player', () => ({}));
 
-const { PLAYER_IDLE_TIMEOUT_MS, PLAYER_PREFETCH_DELAY_MS, schedulePlayerLoad } = await import('../ShellLayout');
+const { PLAYER_IDLE_TIMEOUT_MS, PLAYER_PREFETCH_DELAY_MS, PLAYER_SCROLL_QUIET_MS, schedulePlayerLoad } = await import('../ShellLayout');
 
 function fakeWindow() {
   const target = new EventTarget();
@@ -20,6 +20,40 @@ afterEach(() => {
 });
 
 describe('player prefetch delay', () => {
+  it('Shift-wheel waits for a quiet period even when the idle timeout fires', () => {
+    vi.useFakeTimers();
+    const load = vi.fn();
+    const { win, idleCallbacks } = fakeWindow();
+    schedulePlayerLoad(load, false, win, PLAYER_PREFETCH_DELAY_MS);
+    win.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' }));
+    expect(load).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(PLAYER_PREFETCH_DELAY_MS);
+    win.dispatchEvent(new Event('wheel'));
+    idleCallbacks.shift()!();
+    expect(load).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(PLAYER_SCROLL_QUIET_MS - 1);
+    win.dispatchEvent(new Event('scroll'));
+    vi.advanceTimersByTime(1);
+    idleCallbacks.shift()!();
+    expect(load).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(PLAYER_SCROLL_QUIET_MS);
+    idleCallbacks.shift()!();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('a play intent bypasses the scroll delay and cancels pending idle callbacks', () => {
+    vi.useFakeTimers();
+    const load = vi.fn();
+    const { win, idleCallbacks } = fakeWindow();
+    schedulePlayerLoad(load, false, win);
+    win.dispatchEvent(new Event('wheel'));
+    win.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(load).toHaveBeenCalledTimes(1);
+    idleCallbacks[0]!();
+    vi.advanceTimersByTime(PLAYER_SCROLL_QUIET_MS);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
   it('starts the idle wait only once the delay has passed', () => {
     vi.useFakeTimers();
     const load = vi.fn();

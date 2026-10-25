@@ -111,7 +111,9 @@ describe("the provider's short guide (L3-guide-library-4)", () => {
     // Room for a busy machine (the suite runs files in parallel); the settle itself is 200 ms.
     await waitFor(() => expect(asked()).toContain(241), { timeout: 3000 });
     await new Promise((r) => setTimeout(r, SHORT_EPG_SETTLE_MS + 100));
-    expect(asked().filter((i) => i < 200)).toEqual([]);
+    // Initial viewport calls may still finish after the counter is reset on a busy runner.
+    // Only rows crossed during this fling distinguish a wasted request from that work.
+    expect(asked().filter((i) => i >= 60 && i < 200)).toEqual([]);
   });
 });
 

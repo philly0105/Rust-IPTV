@@ -425,8 +425,6 @@ export interface PlayerSource {
   ref?: ItemRef;
   episodeId?: string;
   resumeSeconds?: number;
-  /** Expected length of an archive/catch-up stream, in seconds. */
-  durationSeconds?: number;
   /** Display-time EPG start of the catch-up programme selected for this stream. */
   catchupProgramStart?: string;
   isLive: boolean;

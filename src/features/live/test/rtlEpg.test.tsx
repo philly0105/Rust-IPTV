@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import type { Channel, Page, PageQuery } from '@/api/types';
 
-import { EpgGridPage, GRID_SLOT_MIN, GRID_SLOT_PX } from '../components/EpgGridPage';
+import { EpgGridPage, GRID_SLOT_MIN, GRID_SLOT_PX, GRID_TRACK_BEFORE } from '../components/EpgGridPage';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { floorLocal, HOUR, MINUTE } from '../lib/epgTime';
 import { inlineStart, scrollLeftFor, scrollStart, timeStep } from '../lib/rtl';
@@ -135,7 +135,8 @@ describe('rtl helpers', () => {
     expect(scrollLeftFor(300, true)).toBe(-300);
     const el = document.createElement('div');
     el.scrollLeft = -120;
-    expect(scrollStart(el)).toBe(120);
+    expect(scrollStart(el, true)).toBe(120);
+    expect(scrollStart(el, false)).toBe(0);
     expect(timeStep('ArrowRight', false)).toBe(1);
     expect(timeStep('ArrowLeft', false)).toBe(-1);
     expect(timeStep('ArrowRight', true)).toBe(-1);
@@ -145,7 +146,7 @@ describe('rtl helpers', () => {
 });
 
 describe('EpgGridPage RTL (F2)', () => {
-  it('positions blocks and the now-line from the right and scrolls with a negative scrollLeft', async () => {
+  it('positions blocks and the now-line from the right on the native track', async () => {
     document.documentElement.dir = 'rtl';
     const now = midSlotClock();
     rpcMock.handlers['epg.grid'] = gridHandler(now);
@@ -158,18 +159,14 @@ describe('EpgGridPage RTL (F2)', () => {
     const line = screen.getByTestId('epg-now-line');
     expect(line.style.left).toBe('');
     const grid = screen.getByTestId('epg-grid');
-    // now sits 30-60 min into the window: right = channel column + now offset - 1
     const right = px(line.style.right);
-    expect(right).toBeGreaterThan(CHANNEL_COL + 30 * GRID_PX_PER_MIN - 2);
-    expect(right).toBeLessThan(CHANNEL_COL + 60 * GRID_PX_PER_MIN);
-
-    // The initial scroll to the half hour now is in (one slot into the window, now 15 minutes
-    // past it) runs once the grid mounts, counted down from 0 in RTL.
-    await waitFor(() => expect(grid.scrollLeft).toBeLessThan(0));
-    expect(-grid.scrollLeft).toBe(GRID_SLOT_PX);
+    expect(right).toBeGreaterThan(CHANNEL_COL + GRID_TRACK_BEFORE / MINUTE * GRID_PX_PER_MIN);
+    expect(grid.scrollLeft).toBeLessThan(0);
+    expect(right + grid.scrollLeft).toBeGreaterThan(CHANNEL_COL + 15 * GRID_PX_PER_MIN - 2);
+    expect(right + grid.scrollLeft).toBeLessThan(CHANNEL_COL + 45 * GRID_PX_PER_MIN);
   });
 
-  it('keeps physical left offsets and a positive scrollLeft in LTR', async () => {
+  it('keeps physical left offsets and native positive scrollLeft in LTR', async () => {
     const now = midSlotClock();
     rpcMock.handlers['epg.grid'] = gridHandler(now);
     renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
@@ -177,7 +174,7 @@ describe('EpgGridPage RTL (F2)', () => {
     expect(cell.style.right).toBe('');
     expect(px(cell.style.left)).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('epg-now-line').style.right).toBe('');
-    await waitFor(() => expect(screen.getByTestId('epg-grid').scrollLeft).toBeGreaterThan(0));
+    expect(screen.getByTestId('epg-grid').scrollLeft).toBeGreaterThan(0);
   });
 
   it('moves later in time with ArrowLeft in RTL', async () => {

@@ -319,7 +319,7 @@ export function StreamList({
         ))}
       </ul>
       {list.length > STREAMS_SHOWN ? (
-        <Button variant="ghost" size="sm" className="self-start" aria-expanded={all} onClick={() => setAll((v) => !v)} data-testid="sports-show-all">
+        <Button variant="ghost" size="sm" className="-ms-3 self-start" aria-expanded={all} onClick={() => setAll((v) => !v)} data-testid="sports-show-all">
           {all ? t('showFewer') : t('showAllStreams', { count: list.length })}
         </Button>
       ) : null}

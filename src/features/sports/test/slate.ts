@@ -185,10 +185,14 @@ const BRANDS = [
   'SPORT 1', 'PPV EVENT', 'NHL',
 ];
 
+/**
+ * No group carries another country's tag: the page skips those (isSportsGroup), and the channels here are
+ * spread over the groups at random, so every group holds some of the slate's networks and events.
+ */
 const GROUP_NAMES = [
-  ...PREFIXES.map((p) => `${p}| SPORTS`),
+  ...PREFIXES.map((p) => `SPORTS ${p}`),
   'USA SPORTS HD', 'NCAAF', 'NBA LEAGUE PASS', 'PPV EVENTS', 'ESPN+', 'PEACOCK', 'NFL SUNDAY TICKET', 'MLB EXTRA INNINGS',
-  'US| REGIONAL SPORTS', 'DAZN', 'FUBO SPORTS', 'BEIN SPORTS', 'ZA| SUPERSPORT EVENTS', 'US| COLLEGE SPORTS', 'UK| FOOTBALL',
+  'US| REGIONAL SPORTS', 'DAZN', 'FUBO SPORTS', 'BEIN SPORTS', 'SUPERSPORT EVENTS', 'US| COLLEGE SPORTS', 'FOOTBALL',
   'EVENTS 24/7', 'SPORTS PPV', 'US| NBA', 'US| MLB', 'US| NFL', 'CA| SPORTS', 'LATINO DEPORTES',
 ];
 /** Groups the page must leave alone. */

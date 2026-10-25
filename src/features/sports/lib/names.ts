@@ -750,11 +750,37 @@ const GROUP_WORDS = new Set([
 ]);
 const GROUP_PHRASES = ['league pass', 'sunday ticket', 'game pass', 'red zone', 'big ten', 'big 12', 'mountain west'].map(textTokens);
 
+/** The four leagues and their packages: a group naming one may carry their games, wherever it is from. */
+const LEAGUE_GROUP_PHRASES = [
+  'nfl', 'ncaaf', 'cfb', 'nba', 'mlb', 'college football', 'league pass', 'sunday ticket', 'redzone', 'red zone', 'extra innings',
+].map(textTokens);
+
+/** Other sports' leagues, events and services, besides `LEAGUE_WORDS` and `SPORT_WORDS` ("US| FLO PPV", "CA| WHL PPV"). */
+const OTHER_SPORT_WORDS = new Set([
+  'f1', 'formula', 'indycar', 'motogp', 'racing', 'supercross', 'motocross', 'pga', 'atp', 'wta', 'mma', 'aew', 'fifa', 'uefa',
+  'liga', 'futbol', 'ahl', 'echl', 'ohl', 'whl', 'qmjhl', 'khl', 'nfhs', 'flo', 'flosports', 'darts', 'snooker', 'cycling', 'olympics',
+]);
+
+const otherSportWord = (t: string) => LEAGUE_WORDS.get(t)?.length === 0 || SPORT_WORDS.get(t)?.length === 0 || OTHER_SPORT_WORDS.has(t);
+const ourSportWord = (t: string) => (SPORT_WORDS.get(t)?.length ?? 0) > 0;
+
 /**
- * True for a live group that may hold games: sports, a league, a sports service or package, regional
- * networks, PPV or events. Generous on purpose: an extra group costs one page read, a missed one loses games.
+ * True for a live group that may hold games of the four leagues: sports, a league, a sports service or
+ * package, regional networks, PPV or events, or a network that carries them ("US| FOX", which holds FS1 and
+ * the FOX stations; not a streaming service's, "US| NETFLIX ON AIR"). Two kinds are skipped unless they name
+ * one of the four leagues or their packages: a group tagged for another country ("UK| SKY SPORT+ PPV", "DE|
+ * DAZN PPV"), whose feeds share no US network's programming, and a group that names only other sports ("US|
+ * SOCCER PPV", "US| NHL PPV", "US| NCAAB PPV", "US| FLO PPV"). Generous otherwise ("US| PPV EVENT", "US| ESPN+
+ * PPV", "8K| SPORT ON AIR"): an extra group costs a page read and its guide, a missed one loses games.
  */
 export function isSportsGroup(groupName: string): boolean {
   const tokens = textTokens(groupName);
-  return tokens.some((t) => GROUP_WORDS.has(t)) || GROUP_PHRASES.some((p) => findPhrase(tokens, p) >= 0);
+  if (!LEAGUE_GROUP_PHRASES.some((p) => findPhrase(tokens, p) >= 0)) {
+    if (region(groupName) === 'foreign') return false;
+    if (tokens.some(otherSportWord) && !tokens.some(ourSportWord)) return false;
+  }
+  if (tokens.some((t) => GROUP_WORDS.has(t)) || GROUP_PHRASES.some((p) => findPhrase(tokens, p) >= 0)) return true;
+  // Not a service's group ("US| NETFLIX ON AIR"): its game feeds sit in its PPV or event groups.
+  const network = networkIdForChannel(nameTokens(groupName));
+  return network !== null && networkAlias(network)!.kind !== 'package';
 }

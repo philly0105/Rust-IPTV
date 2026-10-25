@@ -1,6 +1,6 @@
 // Sports name matching: the tokenizer, team keys for pros and college (schools that share words, St/State,
 // accents and apostrophes, mascots), league marks, the network alias table and its avoid lists, ESPN's
-// broadcast names, and which live groups the index reads.
+// broadcast names, and which live groups the index reads (with a real provider's groups).
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -591,6 +591,55 @@ describe('isSportsGroup', () => {
   });
 
   it('skips the rest', () => {
-    for (const g of ['US| ENTERTAINMENT', 'UK: News', 'Movies', 'Kids', 'USA Locals']) expect(isSportsGroup(g), g).toBe(false);
+    for (const g of ['US| ENTERTAINMENT', 'UK: News', 'Movies', 'Kids', 'USA Locals', 'US| FOX NEWS']) expect(isSportsGroup(g), g).toBe(false);
+  });
+
+  it('takes a group named after a network that carries the games', () => {
+    for (const g of ['US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| CBS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| NBC', 'US| TNT', 'CA| TSN']) expect(isSportsGroup(g), g).toBe(true);
+    // A streaming service's group is mostly shows; its games sit in its PPV group.
+    for (const g of ['US| NETFLIX ON AIR ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| DISNEY+ NETWORK ᴿᴬᵂ ⁶⁰ᶠᵖˢ']) expect(isSportsGroup(g), g).toBe(false);
+    expect(isSportsGroup('US| NETFLIX PPV')).toBe(true);
+  });
+
+  it('skips a group tagged for another country unless it names one of the four leagues', () => {
+    for (const g of ['UK| SKY SPORT+ PPV ᴿᴬᵂ', 'UK| ESPN+ PPV', 'DE| DAZN PPV', 'BR| ESPN SPORT ᴴᴰ', 'FR| SOCCER PPV', 'UK SPORTS', '|AR| DEPORTES', 'UK| FOOTBALL']) {
+      expect(isSportsGroup(g), g).toBe(false);
+    }
+    for (const g of ['BR| NBA PASS PPV', 'UK| NFL GAME PASS', 'MX| NFL', 'LATAM| MLB', 'CA| SPORTS EN', 'US| SPORTS']) expect(isSportsGroup(g), g).toBe(true);
+  });
+
+  it('skips a group that names only other sports', () => {
+    for (const g of [
+      'US| SOCCER PPV', 'US| NHL PPV', 'US| UFC PPV', 'US| WNBA PPV', 'US| MILB PPV', 'US| NCAAB PPV', 'US| FLO ⱽᴵᴾ PPV', 'US| TENNIS PPV',
+      'US| GOLF PPV', 'US| FIFA+ PPV', 'US| UEFA PPV', 'US| APPLE TV F1 PPV', 'US| NFHS PPV', 'US| BOXING PPV', 'US| WWE PPV', 'US| NASCAR',
+      'CA| WHL PPV', 'US| SUPERCROSS PPV',
+    ]) {
+      expect(isSportsGroup(g), g).toBe(false);
+    }
+    // One of the four leagues or their sports beside it keeps the group.
+    for (const g of ['US| NHL & NBA PPV', 'US| SOCCER & FOOTBALL', 'US| MLB EXTRA INNINGS']) expect(isSportsGroup(g), g).toBe(true);
+  });
+
+  it('keeps ambiguous groups', () => {
+    for (const g of ['US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| PPV EVENT', 'US| ESPN+ PPV ⱽᴵᴾ', 'US| PEACOCK PPV ⱽᴵᴾ', '8K| SPORT ON AIR ⁸ᴷ', 'BEIN SPORTS', 'LATINO DEPORTES']) {
+      expect(isSportsGroup(g), g).toBe(true);
+    }
+  });
+
+  it("reads a real provider's groups", () => {
+    // From a 56,990-channel Xtream account (Oct 2026): 917 live groups, of which these are the sports-like ones.
+    const kept = [
+      'US| NFL PPV', 'US| NFL REPLAY', 'US| NBA PPV', 'US| NBA TEAM PPV', 'US| NBA PASS PPV ⁸ᴷ', 'US| MLB PPV', 'US| MLB TEAM PPV',
+      'US| NCAAF PPV', 'US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| ESPN+ PPV ⱽᴵᴾ', 'US| ESPN+ PPV', 'US| PEACOCK PPV ⱽᴵᴾ', 'US| BTN+ PPV',
+      'US| BALLY SPORTS PPV', 'US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| CBS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'BR| NBA PASS PPV', 'CA| SPORTS EN',
+      'CA| TSN SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'CA| SPORTSNET PPV', '8K| SPORT ON AIR ⁸ᴷ',
+    ];
+    const skipped = [
+      'US| NCAAB PPV', 'US| SOCCER PPV', 'US| NHL PPV', 'US| WNBA PPV', 'US| MILB PPV', 'US| UFC PPV', 'US| FLO ⱽᴵᴾ PPV', 'US| TENNIS PPV',
+      'US| GOLF PPV', 'US| FIFA+ PPV', 'US| UEFA PPV', 'US| APPLE TV F1 PPV', 'US| NFHS PPV', 'UK| SKY SPORT+ PPV ᴿᴬᵂ',
+      'UK| ESPN+ PPV', 'DE| DAZN PPV', 'FR| SOCCER PPV', 'BR| ESPN SPORT ᴴᴰ',
+    ];
+    expect(kept.filter((g) => !isSportsGroup(g))).toEqual([]);
+    expect(skipped.filter((g) => isSportsGroup(g))).toEqual([]);
   });
 });

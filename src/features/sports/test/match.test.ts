@@ -376,6 +376,7 @@ describe('team channels', () => {
     const clippers = game('nba', team('LAC', 'LA', 'Clippers'), team('LAL', 'Los Angeles', 'Lakers'), '2026-10-24T02:00Z');
     expect(of('NBA: LA CLIPPERS ᴴᴰ', clippers)).toBe(true);
     expect(of('NBA: LOS ANGELES CLIPPERS ᴴᴰ', clippers)).toBe(true);
+    expect(of('NBA: NEW YORK KNICKS (NYK) ᴴᴰ', NBA_GAME)).toBe(true);
     const athletics = game('mlb', team('ATH', 'Athletics', 'Athletics', 'Athletics', 'Athletics'), team('SEA', 'Seattle', 'Mariners'), '2026-09-12T02:10Z');
     expect(of('US: MLB OAKLAND ATHLETICS ᴿᴬᵂ', athletics)).toBe(true);
     // College: the full name only.
@@ -736,6 +737,7 @@ describe('candidates', () => {
     indexed('NBA: BOSTON CELTICS ᴴᴰ'),
     indexed('NBA: CELTICS'),
     indexed('CELTICS'),
+    indexed('NBA: NEW YORK KNICKS (NYK) SD'),
     indexed('US: MLB NEW YORK YANKEES ᴿᴬᵂ'),
     indexed('NCAAF: TEXAS LONGHORNS'),
   ];
@@ -761,6 +763,7 @@ describe('candidates', () => {
       ['NBA League Pass 07: Knicks @ Celtics', 'event', false],
       ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
       ['NBA: CELTICS', 'team', false],
+      ['NBA: NEW YORK KNICKS (NYK) SD', 'team', false],
       ['US: ESPN', 'network', false],
       ['NESN', 'network', true],
     ]);

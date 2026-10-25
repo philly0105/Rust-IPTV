@@ -195,7 +195,7 @@ export interface TeamKeys {
   school?: boolean;
   /** College mascots, which count only on their own ("Tigers vs Bulldogs", not the "Tigers" of "Auburn Tigers"). */
   mascots?: string[][];
-  /** The team's full names of two words or more, as `teamChannelName` gives a team channel's ("boston celtics"). */
+  /** The team's full names of two words or more, as `teamChannelName` gives a team channel's ("boston celtics", "boston celtics bos"). */
   channelNames: string[];
   /** Pros: the nickname and its spellings ("celtics", "sixers"), which make a team channel only beside the league's word. */
   channelNicknames: string[];
@@ -363,6 +363,8 @@ function buildKeys(team: GameTeam, league: League): TeamKeys {
   addPhrases(full, [team.displayName, `${team.location} ${team.name}`], league === 'cfb');
   // A one-word full name ("Athletics") is no surer than a nickname.
   const channelNames = [...full].filter(([, p]) => p.length > 1).map(([key]) => key);
+  // The team's abbreviation may close a team channel's name ("NBA: NEW YORK KNICKS (NYK)").
+  const withAbbrs = (names: string[]) => names.flatMap((n) => [n, ...[...abbrs].map((a) => `${n} ${a}`)]);
   if (league === 'cfb') {
     addPhrases(phrases, [team.displayName, team.location, team.shortDisplayName, ...aliases], true);
     const mascot = textTokens(team.name);
@@ -371,7 +373,7 @@ function buildKeys(team: GameTeam, league: League): TeamKeys {
       abbrs: [...abbrs],
       school: true,
       mascots: mascot.length ? [mascot] : [],
-      channelNames,
+      channelNames: withAbbrs(channelNames),
       // A school alone or a mascot alone names no team channel: schools share words, and many share a mascot.
       channelNicknames: [],
     };
@@ -387,7 +389,12 @@ function buildKeys(team: GameTeam, league: League): TeamKeys {
       phrases.delete(key);
     }
   }
-  const keys: TeamKeys = { phrases: longestFirst(phrases), abbrs: [...abbrs], channelNames, channelNicknames };
+  const keys: TeamKeys = {
+    phrases: longestFirst(phrases),
+    abbrs: [...abbrs],
+    channelNames: withAbbrs(channelNames),
+    channelNicknames: withAbbrs(channelNicknames),
+  };
   if (guarded.size > 0) {
     keys.guarded = [...guarded];
     keys.nickname = textTokens(team.name)[0];
@@ -782,7 +789,7 @@ function teamFiller(t: string): boolean {
   return LEAGUE_WORDS.has(t) || LEAD_TAGS.has(t) || t === DASH || NUMBER.test(t);
 }
 
-/** The most words a team's full name has ("Georgia Tech Yellow Jackets"). */
+/** The most words a team channel's team has: a full name ("Georgia Tech Yellow Jackets") and its abbreviation. */
 const TEAM_NAME_WORDS = 5;
 
 /**

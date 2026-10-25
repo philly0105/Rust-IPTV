@@ -349,6 +349,7 @@ describe('team channel names', () => {
       'US: MLB NEW YORK YANKEES ᴿᴬᵂ': 'new york yankees',
       'US: MLB ST. LOUIS CARDINALS ᴿᴬᵂ': 'st louis cardinals',
       'NBA 05: Celtics': 'celtics',
+      'NBA: NEW YORK KNICKS (NYK) ᴴᴰ': 'new york knicks nyk',
       'Texas A&M Aggies 2': 'texas am aggies',
       'NBA: LEAGUE PASS 1': 'league pass',
       'MLB 03 :': null,
@@ -360,21 +361,25 @@ describe('team channel names', () => {
   });
 
   it('keeps full names apart from the nicknames that need the league beside them', () => {
-    expect(teamKeys(CELTICS, 'nba')).toMatchObject({ channelNames: ['boston celtics'], channelNicknames: ['celtics'] });
-    const sixers = teamKeys(team('PHI', 'Philadelphia', '76ers'), 'nba');
-    expect(sixers.channelNames).toEqual(['philadelphia 76ers']);
-    expect(sixers.channelNicknames.sort()).toEqual(['76ers', 'sixers']);
-    expect(teamKeys(team('LAC', 'LA', 'Clippers'), 'nba')).toMatchObject({
-      channelNames: ['la clippers'],
-      channelNicknames: ['clippers', 'los angeles clippers'],
+    expect(teamKeys(CELTICS, 'nba')).toMatchObject({
+      channelNames: ['boston celtics', 'boston celtics bos'],
+      channelNicknames: ['celtics', 'celtics bos'],
     });
+    const sixers = teamKeys(team('PHI', 'Philadelphia', '76ers'), 'nba');
+    expect(sixers.channelNames).toEqual(['philadelphia 76ers', 'philadelphia 76ers phi']);
+    expect(sixers.channelNicknames).toEqual(expect.arrayContaining(['76ers', 'sixers']));
+    const clippers = teamKeys(team('LAC', 'LA', 'Clippers'), 'nba');
+    expect(clippers.channelNames).toContain('la clippers');
+    expect(clippers.channelNicknames).toEqual(expect.arrayContaining(['clippers', 'los angeles clippers']));
+    // The team's abbreviations may close the name.
+    expect(teamKeys(KNICKS, 'nba').channelNames).toEqual(['new york knicks', 'new york knicks ny', 'new york knicks nyk']);
     // A one-word full name is only a nickname.
     const as = teamKeys(team('ATH', 'Athletics', 'Athletics', 'Athletics', 'Athletics'), 'mlb');
     expect(as.channelNicknames).toEqual(expect.arrayContaining(['athletics', 'oakland athletics']));
     expect(as.channelNames).not.toContain('athletics');
     // College: the full name only, with St/State spellings.
-    expect(teamKeys(TEXAS, 'cfb')).toMatchObject({ channelNames: ['texas longhorns'], channelNicknames: [] });
-    expect(teamKeys(FSU, 'cfb').channelNames.sort()).toEqual(['florida st seminoles', 'florida state seminoles']);
+    expect(teamKeys(TEXAS, 'cfb')).toMatchObject({ channelNames: ['texas longhorns', 'texas longhorns tex'], channelNicknames: [] });
+    expect(teamKeys(FSU, 'cfb').channelNames).toEqual(expect.arrayContaining(['florida state seminoles', 'florida st seminoles']));
   });
 });
 

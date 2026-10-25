@@ -66,5 +66,11 @@
   "noMatchesHint": "Prueba con otro equipo, liga o día, o borra los filtros.",
   "clearFilters": "Borrar filtros",
   "withStreamsFilter": "Con transmisión",
-  "withStreamsHint": "Solo partidos con un canal para verlos"
+  "withStreamsHint": "Solo partidos con un canal para verlos",
+  "myTeams": "Mis equipos",
+  "myTeamsHint": "Solo partidos de los equipos que sigues",
+  "followTeam": "Seguir a {{team}}",
+  "unfollowTeam": "Dejar de seguir a {{team}}",
+  "following": "Siguiendo",
+  "gameMenu": "Más sobre {{title}}"
 }

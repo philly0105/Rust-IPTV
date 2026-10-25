@@ -63,5 +63,11 @@
   "noMatchesHint": "Try another team, league or day, or clear the filters.",
   "clearFilters": "Clear filters",
   "withStreamsFilter": "With streams",
-  "withStreamsHint": "Only games with a channel to watch them on"
+  "withStreamsHint": "Only games with a channel to watch them on",
+  "myTeams": "My teams",
+  "myTeamsHint": "Only games of the teams you follow",
+  "followTeam": "Follow {{team}}",
+  "unfollowTeam": "Stop following {{team}}",
+  "following": "Following",
+  "gameMenu": "More for {{title}}"
 }

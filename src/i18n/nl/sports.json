@@ -63,5 +63,11 @@
   "noMatchesHint": "Probeer een ander team, een andere competitie of dag, of wis de filters.",
   "clearFilters": "Filters wissen",
   "withStreamsFilter": "Met streams",
-  "withStreamsHint": "Alleen wedstrijden met een zender om ze op te kijken"
+  "withStreamsHint": "Alleen wedstrijden met een zender om ze op te kijken",
+  "myTeams": "Mijn teams",
+  "myTeamsHint": "Alleen wedstrijden van teams die je volgt",
+  "followTeam": "{{team}} volgen",
+  "unfollowTeam": "{{team}} niet meer volgen",
+  "following": "Gevolgd",
+  "gameMenu": "Meer voor {{title}}"
 }

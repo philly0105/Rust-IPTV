@@ -75,5 +75,11 @@
   "noMatchesHint": "جرّب فريقًا أو دوريًا أو يومًا آخر، أو امسح عوامل التصفية.",
   "clearFilters": "مسح عوامل التصفية",
   "withStreamsFilter": "ببث",
-  "withStreamsHint": "المباريات التي لها قناة تشاهدها عليها فقط"
+  "withStreamsHint": "المباريات التي لها قناة تشاهدها عليها فقط",
+  "myTeams": "فرقي",
+  "myTeamsHint": "مباريات الفرق التي تتابعها فقط",
+  "followTeam": "تابِع {{team}}",
+  "unfollowTeam": "ألغِ متابعة {{team}}",
+  "following": "متابَع",
+  "gameMenu": "المزيد عن {{title}}"
 }

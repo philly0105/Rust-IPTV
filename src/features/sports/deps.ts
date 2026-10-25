@@ -17,6 +17,7 @@ export {
   ErrorState,
   FilterChip,
   LivePill,
+  Menu,
   MetaLine,
   Page,
   SectionHeader,
@@ -38,7 +39,7 @@ export { canCatchUp, formatClock, formatDay, formatTimeRange, ms } from '@/featu
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';
 export { useRecordingCapabilities, useScheduleActions, useScheduleIndex } from '@/features/recording/hooks';
 export { markFor } from '@/features/recording/lib/schedule';
-export { openExternal } from '@/features/settings/lib/links';
+export { openExternalUrl } from '@/features/settings/lib/links';
 
 /** Live's playChannel and playCatchup, which load the player: only ever behind a press. */
 export const loadPlayback = () => import('@/features/live/lib/playback');

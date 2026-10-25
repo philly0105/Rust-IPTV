@@ -65,7 +65,8 @@ export function LeagueFilter({
           scrollbar, so the row wraps instead of hiding its last leagues. */}
       <Tabs
         variant="pill"
-        className="flex-wrap"
+        // Tighter pills on a phone, where the five tabs must share about 360 px.
+        className="flex-wrap max-sm:[&>button]:px-2"
         label={t('leagues')}
         value={value ?? ALL}
         onChange={(id) => onChange(LEAGUES.find((l) => l === id) ?? null)}

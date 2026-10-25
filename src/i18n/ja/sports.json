@@ -63,5 +63,11 @@
   "noMatchesHint": "別のチーム、リーグ、日付を試すか、フィルタをクリアしてください。",
   "clearFilters": "フィルタをクリア",
   "withStreamsFilter": "配信あり",
-  "withStreamsHint": "視聴できるチャンネルがある試合だけを表示"
+  "withStreamsHint": "視聴できるチャンネルがある試合だけを表示",
+  "myTeams": "マイチーム",
+  "myTeamsHint": "フォロー中のチームの試合だけを表示",
+  "followTeam": "{{team}}をフォロー",
+  "unfollowTeam": "{{team}}のフォローを解除",
+  "following": "フォロー中",
+  "gameMenu": "{{title}}のその他の操作"
 }

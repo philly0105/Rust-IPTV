@@ -21,6 +21,17 @@ export function openExternal(e: MouseEvent<HTMLAnchorElement>): void {
     .catch(() => window.open(href, '_blank', 'noopener'));
 }
 
+/** Opens `href` in the system browser on desktop and in a new tab in a browser, for a menu item rather than a link. */
+export function openExternalUrl(href: string): void {
+  if (!isDesktop) {
+    window.open(href, '_blank', 'noopener');
+    return;
+  }
+  void import('@tauri-apps/plugin-opener')
+    .then(({ openUrl }) => openUrl(href))
+    .catch(() => window.open(href, '_blank', 'noopener'));
+}
+
 /** "Windows", "macOS", "Linux" for `app.info.platform` (Rust's `std::env::consts::OS`); anything else as it is. */
 export function platformName(os: string): string {
   const names: Record<string, string> = { windows: 'Windows', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iOS', freebsd: 'FreeBSD' };

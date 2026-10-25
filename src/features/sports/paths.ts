@@ -43,3 +43,22 @@ export function writeStreamsOnly(on: boolean): void {
     // storage blocked: the filter still applies, until the page opens again
   }
 }
+
+/** Whether "My teams" shows only the games of the teams the user follows (hooks/useFollowedTeams.ts). */
+const MY_TEAMS_ONLY_KEY = 'tsrust.sportsMyTeamsOnly';
+
+export function readMyTeamsOnly(): boolean {
+  try {
+    return localStorage.getItem(MY_TEAMS_ONLY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeMyTeamsOnly(on: boolean): void {
+  try {
+    localStorage.setItem(MY_TEAMS_ONLY_KEY, on ? '1' : '0');
+  } catch {
+    // storage blocked: the filter still applies, until the page opens again
+  }
+}

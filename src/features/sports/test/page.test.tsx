@@ -90,6 +90,7 @@ const { etDate, etDays, TYPICAL_LENGTH_MS } = await import('../lib/espn');
 const { formatClock } = await import('@/features/live/lib/epgTime');
 const { pickDay } = await import('../paths');
 const { gameProgram, streamAction } = await import('../components/StreamList');
+const { forgetFollowedTeamsForTests } = await import('../hooks/useFollowedTeams');
 
 const today = () => etDate(Date.now());
 /** The Today tab, named with its date ("Today Oct 25"). */
@@ -144,6 +145,10 @@ beforeEach(() => {
   player.catchups.length = 0;
   player.fail = null;
   player.state = {};
+  localStorage.removeItem('tsrust.sportsTeams');
+  localStorage.removeItem('tsrust.sportsMyTeamsOnly');
+  localStorage.removeItem('tsrust.sportsStreamsOnly');
+  forgetFollowedTeamsForTests();
   rpc.handlers['sources.list'] = () => h.SOURCES;
   rpc.handlers['settings.get'] = () => ({ stripCountryPrefix: true });
   rpc.handlers['recordings.capabilities'] = () => ({ supported: true });
@@ -296,9 +301,38 @@ describe('sports page', () => {
     expect(within(c).getByTestId('sports-notes').textContent).toBe('BOS leads series 2-1');
     // One mention per network, whatever markets it is listed under.
     expect(within(c).getByTestId('sports-networks').textContent).toBe('ESPN · MSG');
-    const gamecast = within(c).getByTestId('sports-gamecast');
-    expect(gamecast.getAttribute('href')).toBe('https://www.espn.com/nba/game/_/gameId/1');
-    expect(gamecast.getAttribute('target')).toBe('_blank');
+    // The card's menu follows either team and opens ESPN's Gamecast.
+    fireEvent.click(within(c).getByRole('button', { name: 'More for Boston Celtics at New York Knicks' }));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['Follow Boston Celtics', 'Follow New York Knicks', 'Gamecast']);
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null);
+    fireEvent.click(items[2]!);
+    expect(opened).toHaveBeenCalledWith('https://www.espn.com/nba/game/_/gameId/1', '_blank', 'noopener');
+    opened.mockRestore();
+  });
+
+  it('follows a team from a card, stars it everywhere, and "My teams" keeps only its games', async () => {
+    const celtics = h.game('1');
+    const bears = h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
+    setDay([celtics, bears]);
+    await openReady();
+    // Nothing followed yet: no chip.
+    expect(screen.queryByTestId('sports-my-teams')).toBeNull();
+    fireEvent.click(within(card(celtics)).getByRole('button', { name: 'More for Boston Celtics at New York Knicks' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Follow Boston Celtics' }));
+    await waitFor(() => expect(within(card(celtics)).getAllByTestId('sports-team-followed')).toHaveLength(1));
+    expect(JSON.parse(localStorage.getItem('tsrust.sportsTeams') ?? '[]')).toEqual(['nba:BOS']);
+    const chip = screen.getByTestId('sports-my-teams');
+    expect(chip.textContent).toBe('My teams1');
+    fireEvent.click(chip);
+    await waitFor(() => expect(screen.getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual(['nba:1']));
+    expect(localStorage.getItem('tsrust.sportsMyTeamsOnly')).toBe('1');
+
+    // Unfollowing the last team takes the chip away, and its filter with it.
+    fireEvent.click(within(card(celtics)).getByRole('button', { name: 'More for Boston Celtics at New York Knicks' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Stop following Boston Celtics' }));
+    await waitFor(() => expect(screen.getAllByTestId('sports-game')).toHaveLength(2));
+    expect(screen.queryByTestId('sports-my-teams')).toBeNull();
   });
 
   it('draws finals, start times, TBD and postponed games', async () => {
@@ -398,7 +432,6 @@ describe('sports page', () => {
     await openReady();
     expect(screen.getByTestId('sports-streams-only').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
-    localStorage.removeItem('tsrust.sportsStreamsOnly');
   });
 
   it('lists matched streams with their reason, the best one first', async () => {

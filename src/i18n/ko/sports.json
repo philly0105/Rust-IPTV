@@ -63,5 +63,11 @@
   "noMatchesHint": "다른 팀, 리그 또는 날짜를 선택하거나 필터를 지우세요.",
   "clearFilters": "필터 지우기",
   "withStreamsFilter": "스트림 있음",
-  "withStreamsHint": "볼 수 있는 채널이 있는 경기만 표시"
+  "withStreamsHint": "볼 수 있는 채널이 있는 경기만 표시",
+  "myTeams": "내 팀",
+  "myTeamsHint": "팔로우한 팀의 경기만 표시",
+  "followTeam": "{{team}} 팔로우",
+  "unfollowTeam": "{{team}} 팔로우 취소",
+  "following": "팔로우 중",
+  "gameMenu": "{{title}} 더보기"
 }

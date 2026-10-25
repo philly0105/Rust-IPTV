@@ -63,5 +63,11 @@
   "noMatchesHint": "Próbálj másik csapatot, bajnokságot vagy napot, vagy töröld a szűrőket.",
   "clearFilters": "Szűrők törlése",
   "withStreamsFilter": "Közvetítéssel",
-  "withStreamsHint": "Csak azok a meccsek, amelyekhez van csatorna"
+  "withStreamsHint": "Csak azok a meccsek, amelyekhez van csatorna",
+  "myTeams": "Csapataim",
+  "myTeamsHint": "Csak a követett csapatok meccsei",
+  "followTeam": "{{team}} követése",
+  "unfollowTeam": "{{team}} követésének leállítása",
+  "following": "Követed",
+  "gameMenu": "Továbbiak: {{title}}"
 }

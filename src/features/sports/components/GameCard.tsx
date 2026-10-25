@@ -1,14 +1,16 @@
 /**
  * One game, compact: a status line (the league when every league shows, LIVE with the clock, the
  * final, the start time in the user's language and zone, or a postponement, then the networks and a
- * Gamecast link), both teams with logos, ranks, records and scores, ESPN's notes, then the matched
- * streams. Team names, notes and network names are ESPN's English text and stay as they are (dir="auto").
+ * menu to follow either team or open ESPN's Gamecast), both teams with logos, ranks, records, scores
+ * and a star on a followed team, ESPN's notes, then the matched streams. Team names, notes and
+ * network names are ESPN's English text and stay as they are (dir="auto").
  */
 
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Badge, LivePill, MetaLine, cn, formatClock, formatDay, openExternal } from '../deps';
+import { Badge, LivePill, Menu, MetaLine, cn, formatClock, formatDay, openExternalUrl } from '../deps';
+import { setFollowed, teamKey, useFollowedTeams } from '../hooks/useFollowedTeams';
 import type { StreamMatch } from '../lib/match';
 import type { Game, GameTeam } from '../lib/types';
 import { LEAGUE_SHORT_KEYS } from './LeagueFilter';
@@ -60,7 +62,7 @@ function GameStatus({ game }: { game: Game }) {
   }
 }
 
-function TeamRow({ team, game }: { team: GameTeam; game: Game }) {
+function TeamRow({ team, game, followed }: { team: GameTeam; game: Game; followed: boolean }) {
   const { t } = useTranslation('sports');
   const lost = game.phase === 'final' && team.winner === false;
   return (
@@ -81,6 +83,12 @@ function TeamRow({ team, game }: { team: GameTeam; game: Game }) {
           {team.displayName}
         </span>
         {team.record ? <span className="shrink-0 text-caption text-fg-subtle tabular-nums">{team.record}</span> : null}
+        {followed ? (
+          <span className="shrink-0 self-center" data-testid="sports-team-followed">
+            <Star aria-hidden size={12} className="fill-accent text-accent" />
+            <span className="sr-only">{t('following')}</span>
+          </span>
+        ) : null}
       </span>
       {team.score !== null ? (
         <span className={cn('shrink-0 text-title-sm tabular-nums', lost ? 'text-fg-muted' : 'text-fg')} data-testid="sports-score">
@@ -109,6 +117,18 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
   // A postponed or canceled game has nothing on air to offer.
   const playable = game.phase === 'live' || game.phase === 'final' || game.phase === 'scheduled';
   const notes = [game.seriesSummary, game.note, game.timeNote].filter((n): n is string => !!n);
+  const teams = useFollowedTeams();
+  const follows = (team: GameTeam) => teams.has(teamKey(game.league, team));
+  const menu = [game.away, game.home].map((team) => {
+    const on = follows(team);
+    return {
+      id: `follow-${team.id}`,
+      label: t(on ? 'unfollowTeam' : 'followTeam', { team: team.displayName }),
+      icon: <Star aria-hidden size={15} className={cn(on && 'fill-accent text-accent')} />,
+      onSelect: () => setFollowed(teamKey(game.league, team), !on),
+    };
+  });
+  const gamecast = game.gamecastUrl;
   return (
     <li
       className={cn(
@@ -144,23 +164,24 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
             </span>
           ) : null}
         </div>
-        {game.gamecastUrl ? (
-          <a
-            href={game.gamecastUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            onClick={openExternal}
-            className="inline-flex shrink-0 items-center gap-1 rounded-sm text-caption font-medium text-fg-muted hover:text-fg active:text-accent-pressed motion-safe:transition-colors"
-            data-testid="sports-gamecast"
-          >
-            {t('gamecast')}
-            <ExternalLink size={13} aria-hidden />
-          </a>
-        ) : null}
+        <Menu
+          label={t('gameMenu', { title })}
+          align="end"
+          triggerClassName="-my-1.5 -me-1.5 size-8 shrink-0 text-fg-muted"
+          items={[
+            ...menu,
+            ...(gamecast
+              ? [
+                  { id: 'gamecast-sep', type: 'separator' as const },
+                  { id: 'gamecast', label: t('gamecast'), icon: <ExternalLink aria-hidden size={15} />, onSelect: () => openExternalUrl(gamecast) },
+                ]
+              : []),
+          ]}
+        />
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
-        <TeamRow team={game.away} game={game} />
-        <TeamRow team={game.home} game={game} />
+        <TeamRow team={game.away} game={game} followed={follows(game.away)} />
+        <TeamRow team={game.home} game={game} followed={follows(game.home)} />
       </div>
       {notes.length > 0 ? (
         <MetaLine

@@ -66,5 +66,11 @@
   "noMatchesHint": "Essayez une autre équipe, une autre ligue ou un autre jour, ou effacez les filtres.",
   "clearFilters": "Effacer les filtres",
   "withStreamsFilter": "Avec flux",
-  "withStreamsHint": "Uniquement les matchs avec une chaîne pour les regarder"
+  "withStreamsHint": "Uniquement les matchs avec une chaîne pour les regarder",
+  "myTeams": "Mes équipes",
+  "myTeamsHint": "Uniquement les matchs des équipes que vous suivez",
+  "followTeam": "Suivre {{team}}",
+  "unfollowTeam": "Ne plus suivre {{team}}",
+  "following": "Suivie",
+  "gameMenu": "Plus pour {{title}}"
 }

@@ -75,5 +75,11 @@
   "noMatchesHint": "جرب فرقة ولا بطولة ولا نهار آخر، ولا مسح الفلاتر.",
   "clearFilters": "مسح الفلاتر",
   "withStreamsFilter": "فيهم بث",
-  "withStreamsHint": "غير الماتشات اللي عندها قناة تتفرج فيها"
+  "withStreamsHint": "غير الماتشات اللي عندها قناة تتفرج فيها",
+  "myTeams": "الفرق ديالي",
+  "myTeamsHint": "غير ماتشات الفرق اللي كتبع",
+  "followTeam": "تبع {{team}}",
+  "unfollowTeam": "حبس التبع ديال {{team}}",
+  "following": "كتبعو",
+  "gameMenu": "كثر على {{title}}"
 }

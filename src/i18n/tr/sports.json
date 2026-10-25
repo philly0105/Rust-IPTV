@@ -63,5 +63,11 @@
   "noMatchesHint": "Başka bir takım, lig veya gün dene ya da filtreleri temizle.",
   "clearFilters": "Filtreleri temizle",
   "withStreamsFilter": "Yayınlı",
-  "withStreamsHint": "Yalnızca izleyebileceğin bir kanalı olan maçlar"
+  "withStreamsHint": "Yalnızca izleyebileceğin bir kanalı olan maçlar",
+  "myTeams": "Takımlarım",
+  "myTeamsHint": "Yalnızca takip ettiğin takımların maçları",
+  "followTeam": "{{team}} takımını takip et",
+  "unfollowTeam": "{{team}} takımını takip etmeyi bırak",
+  "following": "Takip ediliyor",
+  "gameMenu": "{{title}} için diğer seçenekler"
 }

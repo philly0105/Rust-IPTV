@@ -63,5 +63,11 @@
   "noMatchesHint": "試試其他球隊、聯盟或日期，或清除篩選條件。",
   "clearFilters": "清除篩選",
   "withStreamsFilter": "有直播來源",
-  "withStreamsHint": "只顯示有頻道可看的比賽"
+  "withStreamsHint": "只顯示有頻道可看的比賽",
+  "myTeams": "我的球隊",
+  "myTeamsHint": "只顯示你關注的球隊的比賽",
+  "followTeam": "關注{{team}}",
+  "unfollowTeam": "取消關注{{team}}",
+  "following": "已關注",
+  "gameMenu": "{{title}}的更多操作"
 }

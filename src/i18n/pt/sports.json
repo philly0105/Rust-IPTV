@@ -66,5 +66,11 @@
   "noMatchesHint": "Experimente outra equipa, liga ou dia, ou limpe os filtros.",
   "clearFilters": "Limpar filtros",
   "withStreamsFilter": "Com transmissão",
-  "withStreamsHint": "Só jogos com um canal para os ver"
+  "withStreamsHint": "Só jogos com um canal para os ver",
+  "myTeams": "As minhas equipas",
+  "myTeamsHint": "Só jogos das equipas que segue",
+  "followTeam": "Seguir {{team}}",
+  "unfollowTeam": "Deixar de seguir {{team}}",
+  "following": "Seguida",
+  "gameMenu": "Mais sobre {{title}}"
 }

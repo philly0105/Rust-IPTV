@@ -2,12 +2,12 @@
  * /sports: NFL, college football, NBA and MLB games from ESPN's scoreboard (lib/espn.ts), with
  * the user's channels that carry each one (lib/match.ts).
  *
- * The controls sit together at the top: the league tabs with each league's count for the day, a
- * "With streams" filter, and the Eastern day ESPN files games under (a week either way). The header's
- * search field narrows every section to the games whose teams or networks it names. The league
- * (`?league=nba`) and the day (`?day=YYYY-MM-DD`) live in the URL; the defaults leave their parameter
- * out, and a day picked in an earlier run of the app opens today (paths.ts). The filter is kept across
- * visits; the search is not.
+ * The controls sit together at the top: the league tabs with each league's count for the day, the
+ * "My teams" filter (once a team is followed from a card's menu) and the "With streams" filter, and the
+ * Eastern day ESPN files games under (a week either way). The header's search field narrows every
+ * section to the games whose teams or networks it names. The league (`?league=nba`) and the day
+ * (`?day=YYYY-MM-DD`) live in the URL; the defaults leave their parameter out, and a day picked in an
+ * earlier run of the app opens today (paths.ts). The filters are kept across visits; the search is not.
  *
  * Below them, three sections: Live now (whatever day is picked: games in progress from today and
  * yesterday, whose late games run past midnight), then the picked day's Upcoming and Final games, so
@@ -16,7 +16,7 @@
  * the league and search leave on screen.
  */
 
-import { CalendarX2, SearchX, Tv } from 'lucide-react';
+import { CalendarX2, SearchX, Star, Tv } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router';
@@ -27,13 +27,14 @@ import { LeagueFilter } from '../components/LeagueFilter';
 import { SportsSkeleton } from '../components/SportsSkeleton';
 import { useStreamContext, type StreamContext } from '../components/StreamList';
 import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, buttonClass, useNow, useShell, useVisibleSources } from '../deps';
+import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
 import { etDate, etDays } from '../lib/espn';
 import { filterGames, leagueCounts, sectionGames } from '../lib/filter';
 import type { StreamMatch } from '../lib/match';
 import { LEAGUES, type Game, type League } from '../lib/types';
-import { pickDay, readDay, readLeague, readStreamsOnly, writeStreamsOnly } from '../paths';
+import { pickDay, readDay, readLeague, readMyTeamsOnly, readStreamsOnly, writeMyTeamsOnly, writeStreamsOnly } from '../paths';
 
 const DAY_PANEL = 'sports-day';
 
@@ -109,6 +110,14 @@ export function SportsPage() {
     writeStreamsOnly(on);
     setStreamsOnly(on);
   };
+  const followed = useFollowedTeams();
+  const [myTeamsOnly, setMyTeamsOnly] = useState(readMyTeamsOnly);
+  const toggleMyTeamsOnly = (on: boolean) => {
+    writeMyTeamsOnly(on);
+    setMyTeamsOnly(on);
+  };
+  // With no team followed the chip is gone, so its filter must not hide anything either.
+  const filterMyTeams = myTeamsOnly && followed.size > 0;
 
   const sources = useVisibleSources();
   const sourceCount = sources.data?.length ?? 0;
@@ -127,8 +136,14 @@ export function SportsPage() {
   const liveOnly = useMemo(() => leagueLive.filter((g) => !dayKeys.has(g.key)), [leagueLive, dayKeys]);
   const dayStreams = useGameStreams(leagueDay, hasSources);
   const liveStreams = useGameStreams(liveOnly, hasSources);
-  const liveGames = useMemo(() => filterGames(leagueLive, null, query), [leagueLive, query]);
-  const dayGames = useMemo(() => filterGames(leagueDay, null, query), [leagueDay, query]);
+  const liveGames = useMemo(
+    () => filterGames(leagueLive, null, query).filter((g) => !filterMyTeams || followsGame(followed, g)),
+    [leagueLive, query, filterMyTeams, followed],
+  );
+  const dayGames = useMemo(
+    () => filterGames(leagueDay, null, query).filter((g) => !filterMyTeams || followsGame(followed, g)),
+    [leagueDay, query, filterMyTeams, followed],
+  );
   const ctx = useStreamContext(now, sourceCount);
 
   const streamsOf: StreamsOf = (g) => {
@@ -150,10 +165,15 @@ export function SportsPage() {
   const counts = allDay.games.length > 0 || !allDay.loading ? leagueCounts(allDay.games) : undefined;
   const liveLeagues = useMemo(() => new Set<League>(allLive.games.map((g) => g.league)), [allLive.games]);
   const showLeague = league === null;
-  const filtered = league !== null || query.trim() !== '' || filterStreams;
+  const myTeamsCount = useMemo(
+    () => (followed.size > 0 ? [...new Set([...leagueLive, ...leagueDay].filter((g) => followsGame(followed, g)).map((g) => g.key))].length : 0),
+    [leagueLive, leagueDay, followed],
+  );
+  const filtered = league !== null || query.trim() !== '' || filterStreams || filterMyTeams;
   const clearFilters = () => {
     setQuery('');
     toggleStreamsOnly(false);
+    toggleMyTeamsOnly(false);
     setParam('league', null);
   };
 
@@ -209,18 +229,32 @@ export function SportsPage() {
       <div className="flex min-w-0 flex-col gap-3" data-testid="sports-toolbar">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
           <LeagueFilter value={league} onChange={(next) => setParam('league', next)} counts={counts} live={liveLeagues} />
-          {hasSources ? (
-            <FilterChip
-              pressed={streamsOnly}
-              onClick={() => toggleStreamsOnly(!streamsOnly)}
-              icon={<Tv aria-hidden size={14} className="shrink-0" />}
-              count={watchable}
-              title={t('withStreamsHint')}
-              data-testid="sports-streams-only"
-            >
-              {t('withStreamsFilter')}
-            </FilterChip>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {followed.size > 0 ? (
+              <FilterChip
+                pressed={myTeamsOnly}
+                onClick={() => toggleMyTeamsOnly(!myTeamsOnly)}
+                icon={<Star aria-hidden size={14} className={myTeamsOnly ? 'shrink-0 fill-current' : 'shrink-0'} />}
+                count={myTeamsCount}
+                title={t('myTeamsHint')}
+                data-testid="sports-my-teams"
+              >
+                {t('myTeams')}
+              </FilterChip>
+            ) : null}
+            {hasSources ? (
+              <FilterChip
+                pressed={streamsOnly}
+                onClick={() => toggleStreamsOnly(!streamsOnly)}
+                icon={<Tv aria-hidden size={14} className="shrink-0" />}
+                count={watchable}
+                title={t('withStreamsHint')}
+                data-testid="sports-streams-only"
+              >
+                {t('withStreamsFilter')}
+              </FilterChip>
+            ) : null}
+          </div>
         </div>
         <DayStrip
           days={days}

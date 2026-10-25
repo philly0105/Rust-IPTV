@@ -16,7 +16,17 @@ import { rpcKey } from '@/api/query';
 import { itemKey, type Category, type Channel, type ItemKey, type Page, type Source, type SourceKind } from '@/api/types';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
-import { NETWORKS, foreignFeed, hasMatchup, isSportsGroup, nameTokens, networkIdForChannel, textTokens } from '../lib/names';
+import {
+  NETWORKS,
+  foreignFeed,
+  hasMatchup,
+  isBackupFeed,
+  isSportsGroup,
+  nameTokens,
+  networkIdForChannel,
+  teamChannelName,
+  textTokens,
+} from '../lib/names';
 import { sportsRead } from './sportsRead';
 
 export interface IndexedChannel {
@@ -32,6 +42,10 @@ export interface IndexedChannel {
   fromSportsGroup: boolean;
   /** `foreignFeed`: a feed from outside North America ("BR: ESPN"), listed after the others. */
   foreign: boolean;
+  /** `teamChannelName(tokens)`: the team a team channel's name leaves ("boston celtics"), or null. */
+  teamName: string | null;
+  /** `isBackupFeed`: a backup feed or SD copy ("ESPN (Backup)"), listed after the main feeds. */
+  backup: boolean;
 }
 
 /** Rows per `catalog.channels` page: the core's cap. */
@@ -57,11 +71,13 @@ interface Described {
   tokens: string[];
   network: string | null;
   foreign: boolean;
+  teamName: string | null;
+  backup: boolean;
 }
 
 const described = new WeakMap<Channel, Described>();
 
-/** Tokens, network and origin of a channel row, kept per row: a refetch with unchanged rows keeps the objects. */
+/** Tokens, network, origin and team of a channel row, kept per row: a refetch with unchanged rows keeps the objects. */
 function describe(channel: Channel): Described {
   let d = described.get(channel);
   if (!d) {
@@ -71,13 +87,13 @@ function describe(channel: Channel): Described {
     let network: string | null = null;
     if (!foreign) {
       network = networkIdForChannel(tokens);
-      // The cut tag may be a service's ("ESPN+ | Texas vs Georgia").
+      // The cut tag may be a service's ("ESPN+ | Texas vs Georgia") or a slot's league word ("NFL | 02 - ESPN").
       if (network === null) {
         const all = textTokens(channel.name);
         if (all.length !== tokens.length) network = networkIdForChannel(all);
       }
     }
-    d = { tokens, network, foreign };
+    d = { tokens, network, foreign, teamName: teamChannelName(tokens), backup: isBackupFeed(channel.name) };
     described.set(channel, d);
   }
   return d;
@@ -85,8 +101,8 @@ function describe(channel: Channel): Described {
 
 /** One index row. */
 export function toIndexed(channel: Channel, source: Pick<Source, 'id' | 'kind' | 'name'>, fromSportsGroup: boolean): IndexedChannel {
-  const { tokens, network, foreign } = describe(channel);
-  return { channel, sourceId: source.id, sourceKind: source.kind, sourceName: source.name, tokens, network, fromSportsGroup, foreign };
+  const { tokens, network, foreign, teamName, backup } = describe(channel);
+  return { channel, sourceId: source.id, sourceKind: source.kind, sourceName: source.name, tokens, network, fromSportsGroup, foreign, teamName, backup };
 }
 
 /**

@@ -44,7 +44,7 @@ const LEAD_MS = 10 * MINUTE;
 /** Rows shown before "Show all": the best stream, with the action the game allows now. */
 export const STREAMS_SHOWN = 1;
 
-const REASON_KEYS: Record<MatchReason, string> = { guide: 'reasonGuide', event: 'reasonEvent', network: 'reasonNetwork' };
+const REASON_KEYS: Record<MatchReason, string> = { guide: 'reasonGuide', event: 'reasonEvent', team: 'reasonTeam', network: 'reasonNetwork' };
 
 /** What every stream row reads, built once per page by {@link useStreamContext}. */
 export interface StreamContext {

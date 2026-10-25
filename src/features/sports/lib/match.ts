@@ -1,14 +1,15 @@
 /**
- * Which of the user's channels carry a game. Three routes, strongest first:
+ * Which of the user's channels carry a game. Four routes, strongest first:
  * - guide: a programme on the channel covering the game names both teams (title or description), and is
  *   not a pregame or postgame show;
  * - event: the channel's own name names both teams (providers rename per-game channels), with any time or
  *   date in the name agreeing with the game, and a name without a date meaning a game of the last 36 hours or
  *   the next 24;
+ * - team: the channel's name is one team's and nothing else ("NBA: BOSTON CELTICS"), a feed of that team's games;
  * - network: the channel is a network ESPN lists for the game. Package services (ESPN+, League Pass,
- *   Peacock, ...) never count by network alone: their channels are per-game feeds, found by the other two.
+ *   Peacock, ...) never count by network alone: their channels are per-game feeds, found by the other routes.
  * Pure: the hooks feed it the channel index and the guide window. A game is checked only against the
- * channels that can match it, found in a map of words and networks built once per index and guide.
+ * channels that can match it, found in a map of words, networks and team names built once per index and guide.
  */
 
 import { itemKey, type Channel, type EpgProgram, type ItemKey, type SourceKind } from '@/api/types';
@@ -18,6 +19,7 @@ import { dateTimeFormat } from '@/lib/intl';
 import type { IndexedChannel } from '../hooks/useChannelIndex';
 import { ET_ZONE, TYPICAL_LENGTH_MS, gameWindow } from './espn';
 import {
+  hasLeagueWord,
   mentionsBoth,
   mentionsTeam,
   networkAlias,
@@ -30,7 +32,7 @@ import {
 } from './names';
 import type { Game } from './types';
 
-export type MatchReason = 'guide' | 'event' | 'network';
+export type MatchReason = 'guide' | 'event' | 'team' | 'network';
 
 export interface StreamMatch {
   channel: Channel;
@@ -77,6 +79,8 @@ const MONTH_DAY_RE = new RegExp(
   `(?<![a-z])${MONTH}\\.?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)(?!\\s*[:.h]\\d)(?!\\s*[ap]\\.?m)(?![ap](?![a-z]))`,
 );
 const DAY_MONTH_RE = new RegExp(`(?<![\\d:.])(\\d{1,2})(?:st|nd|rd|th)?\\s*${MONTH}(?![a-z])`);
+/** "start:2026-10-25 01:00:00": a guide-style start some providers put in event channel names, in UTC. */
+const START_STAMP_RE = /(?<![a-z])start:\s*(\d{4})-(\d{2})-(\d{2})[ t](\d{2}):(\d{2})/;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 interface NameTime {
@@ -172,10 +176,13 @@ export function isCurrentGame(game: Game, now: number): boolean {
  * True unless a time or date in a channel name contradicts the game: a date must be the game's Eastern day,
  * and a time (read in the zone the name gives, Eastern when none) must be within 3 hours of the start.
  * Times are not checked for games whose start is still TBD or a flex window. With `now`, a name without a
- * date must also be the current game (`isCurrentGame`); without it, a name with neither agrees.
+ * date must also be the current game (`isCurrentGame`); without it, a name with neither agrees. A `start:`
+ * stamp is read on its own (`stampAgrees`).
  */
 export function nameTimeAgrees(name: string, game: Game, now?: number): boolean {
   const s = name.normalize('NFKD').toLowerCase();
+  const stamp = START_STAMP_RE.exec(s);
+  if (stamp) return stampAgrees(stamp, game);
   const dates = readDates(s);
   if (dates.length === 0 && now !== undefined && !isCurrentGame(game, now)) return false;
   const time = game.timeValid && !game.timeNote ? readTime(s) : null;
@@ -196,6 +203,19 @@ export function nameTimeAgrees(name: string, game: Game, now?: number): boolean 
     }
   }
   return false;
+}
+
+/**
+ * A `start:` stamp names an instant in UTC ("MLB 01 | Rays x Brewers start:2026-10-25 01:00:00" is a 9 PM ET
+ * game on the 24th), not a time in Eastern: it must be within 3 hours of the start, or on the game's Eastern
+ * day while the start is TBD or a flex window.
+ */
+function stampAgrees(m: RegExpExecArray, game: Game): boolean {
+  const at = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  if (game.timeValid && !game.timeNote) return Math.abs(at - game.startMs) <= NAME_TIME_SLACK;
+  const a = wallIn(ET_ZONE, at);
+  const g = wallIn(ET_ZONE, game.startMs);
+  return a.year === g.year && a.month === g.month && a.day === g.day;
 }
 
 /**
@@ -226,6 +246,27 @@ export function isEventChannel(channel: Pick<IndexedChannel, 'channel' | 'tokens
     directionAgrees(channel.tokens, game) &&
     nameTimeAgrees(name, game, now)
   );
+}
+
+/**
+ * A team channel of this game: its name is one of the teams' and nothing else (`IndexedChannel.teamName`),
+ * either a full name ("NBA: BOSTON CELTICS", "US: MLB ST. LOUIS CARDINALS") or a pro nickname beside the
+ * league's own word ("NBA: CELTICS"), and no other league ("MLB: ST. LOUIS CARDINALS" is not the NFL's
+ * Cardinals, and "CARDINALS" alone is no one's). It carries that team's games, whoever they play.
+ */
+export function isTeamChannel(channel: Pick<IndexedChannel, 'channel' | 'teamName'>, game: Game): boolean {
+  const name = channel.teamName;
+  if (name === null) return false;
+  let full = false;
+  let nickname = false;
+  for (const team of [game.home, game.away]) {
+    const keys = teamKeys(team, game.league);
+    full ||= keys.channelNames.includes(name);
+    nickname ||= keys.channelNicknames.includes(name);
+  }
+  if (!full && !nickname) return false;
+  const all = textTokens(channel.channel.name);
+  return !otherLeague(all, game.league) && (full || hasLeagueWord(all, game.league));
 }
 
 interface ProgrammeWords {
@@ -379,12 +420,14 @@ function indexMeta(index: readonly IndexedChannel[]): IndexMeta {
 // Candidates
 
 /**
- * Where words and networks sit in an index: the positions, ascending, of the channels whose name or guide
- * programmes (titles and descriptions) hold each word, and of the channels of each network.
+ * Where words, networks and teams sit in an index: the positions, ascending, of the channels whose name or
+ * guide programmes (titles and descriptions) hold each word, of the channels of each network, and of the
+ * channels by the team name a team channel's name would be (`IndexedChannel.teamName`).
  */
 interface Candidates {
   byWord: Map<string, number[]>;
   byNetwork: Map<string, number[]>;
+  byTeamName: Map<string, number[]>;
 }
 
 const NO_POSITIONS: readonly number[] = [];
@@ -409,6 +452,7 @@ function addChannels(
     const ch = index[i]!;
     for (const w of ch.tokens) addPosition(c.byWord, w, i);
     if (ch.network !== null) addPosition(c.byNetwork, ch.network, i);
+    if (ch.teamName !== null) addPosition(c.byTeamName, ch.teamName, i);
     for (const p of programs.get(keys[i]!) ?? []) {
       const words = programmeWords(p, programmeText(p));
       for (const w of words.title) addPosition(c.byWord, w, i);
@@ -430,7 +474,7 @@ function storeCandidates(index: readonly IndexedChannel[], programs: ReadonlyMap
 function candidatesOf(index: readonly IndexedChannel[], programs: ReadonlyMap<ItemKey, EpgProgram[]>): Candidates {
   let c = candidateMaps.get(index)?.get(programs);
   if (!c) {
-    c = { byWord: new Map(), byNetwork: new Map() };
+    c = { byWord: new Map(), byNetwork: new Map(), byTeamName: new Map() };
     addChannels(c, index, programs, indexMeta(index).keys, 0, index.length);
     storeCandidates(index, programs, c);
   }
@@ -458,7 +502,7 @@ export async function prepareMatch(
   signal?: AbortSignal,
 ): Promise<boolean> {
   if (candidateMaps.get(index)?.get(programs)) return !signal?.aborted;
-  const c: Candidates = { byWord: new Map(), byNetwork: new Map() };
+  const c: Candidates = { byWord: new Map(), byNetwork: new Map(), byTeamName: new Map() };
   const { keys } = indexMeta(index);
   for (let from = 0; from < index.length; from += PREPARE_SLICE) {
     if (from > 0) await yieldToPage();
@@ -487,16 +531,23 @@ const BOTH = 3;
 
 /**
  * Positions, ascending, of the channels that can match `game`: those whose name or guide text holds a first
- * word of each team, those of the game's networks, and those holding the first word of a local station's call
- * sign. Every other channel fails all three routes: guide and event matches need both teams named, which
- * `mentionsTeam` only finds where a first word is, and a network match needs one of the networks or a call
- * sign in the name.
+ * word of each team, those whose name is a team channel's of either team, those of the game's networks, and
+ * those holding the first word of a local station's call sign. Every other channel fails all four routes:
+ * guide and event matches need both teams named, which `mentionsTeam` only finds where a first word is, a team
+ * match needs the channel's team name to be one of the teams' names, and a network match needs one of the
+ * networks or a call sign in the name.
  */
 function candidatePositions(c: Candidates, size: number, game: Game, routes: GameRoutes): number[] {
   const mark = new Uint8Array(size);
   for (const w of teamFirstWords(teamKeys(game.home, game.league))) for (const i of c.byWord.get(w) ?? NO_POSITIONS) mark[i] = HOME;
   for (const w of teamFirstWords(teamKeys(game.away, game.league))) {
     for (const i of c.byWord.get(w) ?? NO_POSITIONS) if (mark[i] === HOME) mark[i] = BOTH;
+  }
+  for (const team of [game.home, game.away]) {
+    const keys = teamKeys(team, game.league);
+    for (const name of [...keys.channelNames, ...keys.channelNicknames]) {
+      for (const i of c.byTeamName.get(name) ?? NO_POSITIONS) mark[i] = BOTH;
+    }
   }
   for (const id of routes.networks.keys()) for (const i of c.byNetwork.get(id) ?? NO_POSITIONS) mark[i] = BOTH;
   for (const p of routes.locals) for (const i of c.byWord.get(p[0]!) ?? NO_POSITIONS) mark[i] = BOTH;
@@ -508,16 +559,16 @@ function candidatePositions(c: Candidates, size: number, game: Game, routes: Gam
 // ---------------------------------------------------------------------------
 // Matching
 
-const REASON_RANK: Record<MatchReason, number> = { guide: 0, event: 1, network: 2 };
+const REASON_RANK: Record<MatchReason, number> = { guide: 0, event: 1, team: 2, network: 3 };
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 /**
  * The channels that carry `game`, one entry per channel with its strongest route (a guide match on a
  * network channel is a guide match and not regional). Ordered by route, then non-regional first, then feeds
- * from abroad last, then the sources' order, then channel name. `now` is read only by `isCurrentGame` (for
- * event names without a date), so a result stays good for as long as that answer does. Only the channels
- * that can match are checked (`candidatePositions`), from a map built once per index and programmes
- * (`prepareMatch` builds it ahead, in slices).
+ * from abroad last, then backup feeds and SD copies after the main feeds, then the sources' order, then
+ * channel name. `now` is read only by `isCurrentGame` (for event names without a date), so a result stays
+ * good for as long as that answer does. Only the channels that can match are checked (`candidatePositions`),
+ * from a map built once per index and programmes (`prepareMatch` builds it ahead, in slices).
  */
 export function matchGame(
   game: Game,
@@ -548,7 +599,7 @@ function matchAt(
   positions: Iterable<number>,
 ): StreamMatch[] {
   const meta = indexMeta(index);
-  const found = new Map<ItemKey, { match: StreamMatch; rank: number; foreign: boolean }>();
+  const found = new Map<ItemKey, { match: StreamMatch; rank: number; foreign: boolean; backup: boolean }>();
   for (const i of positions) {
     const ch = index[i]!;
     const key = meta.keys[i]!;
@@ -558,6 +609,7 @@ function matchAt(
     let regional = false;
     if (program) reason = 'guide';
     else if (isEventChannel(ch, game, now)) reason = 'event';
+    else if (isTeamChannel(ch, game)) reason = 'team';
     else {
       const r = networkMatch(ch, networks, locals);
       if (r === undefined) continue;
@@ -568,13 +620,15 @@ function matchAt(
     const prev = found.get(key);
     if (prev && prev.rank <= rank) continue;
     const { channel, sourceId, sourceKind, sourceName } = ch;
-    found.set(key, { match: { channel, sourceId, sourceKind, sourceName, reason, regional, program }, rank, foreign: ch.foreign });
+    const match = { channel, sourceId, sourceKind, sourceName, reason, regional, program };
+    found.set(key, { match, rank, foreign: ch.foreign, backup: ch.backup });
   }
   return [...found.values()]
     .sort(
       (a, b) =>
         a.rank - b.rank ||
         Number(a.foreign) - Number(b.foreign) ||
+        Number(a.backup) - Number(b.backup) ||
         (meta.sourceRank.get(a.match.sourceId) ?? 0) - (meta.sourceRank.get(b.match.sourceId) ?? 0) ||
         collator.compare(a.match.channel.name, b.match.channel.name),
     )

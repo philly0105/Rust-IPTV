@@ -1,9 +1,10 @@
 /**
  * A big account's Sports page, generated for the performance tests: a 60-game Saturday slate (42 college
  * football, 15 NBA and 3 MLB games) and 8,000 live channels in 40 sports groups (5% network channels, 1%
- * event channels, the rest other sports channels from around the world). Every channel has 12 guide
- * programmes of 80 minutes over 16 hours with 300-character descriptions; a network channel's programme is
- * the game when its network carries one. Seeded, so every run builds the same data.
+ * event channels, a team channel for each NBA and MLB team that plays, the rest other sports channels from
+ * around the world). Every channel has 12 guide programmes of 80 minutes over 16 hours with 300-character
+ * descriptions; a network channel's programme is the game when its network carries one. Seeded, so every
+ * run builds the same data.
  */
 
 import { itemKey, type Category, type Channel, type EpgProgram, type ItemKey, type Source } from '@/api/types';
@@ -185,10 +186,14 @@ const BRANDS = [
   'SPORT 1', 'PPV EVENT', 'NHL',
 ];
 
+/**
+ * No group carries another country's tag: the page skips those (isSportsGroup), and the channels here are
+ * spread over the groups at random, so every group holds some of the slate's networks and events.
+ */
 const GROUP_NAMES = [
-  ...PREFIXES.map((p) => `${p}| SPORTS`),
+  ...PREFIXES.map((p) => `SPORTS ${p}`),
   'USA SPORTS HD', 'NCAAF', 'NBA LEAGUE PASS', 'PPV EVENTS', 'ESPN+', 'PEACOCK', 'NFL SUNDAY TICKET', 'MLB EXTRA INNINGS',
-  'US| REGIONAL SPORTS', 'DAZN', 'FUBO SPORTS', 'BEIN SPORTS', 'ZA| SUPERSPORT EVENTS', 'US| COLLEGE SPORTS', 'UK| FOOTBALL',
+  'US| REGIONAL SPORTS', 'DAZN', 'FUBO SPORTS', 'BEIN SPORTS', 'SUPERSPORT EVENTS', 'US| COLLEGE SPORTS', 'FOOTBALL',
   'EVENTS 24/7', 'SPORTS PPV', 'US| NBA', 'US| MLB', 'US| NFL', 'CA| SPORTS', 'LATINO DEPORTES',
 ];
 /** Groups the page must leave alone. */
@@ -212,6 +217,12 @@ function channelNames(): string[] {
   const names: string[] = [];
   for (const copy of NETWORK_COPIES) for (const n of NETWORK_NAMES) names.push(`US| ${n}${copy}`);
   SLATE.slice(0, 50).forEach((g, i) => names.push(eventName(g, i + 1)));
+  for (const g of SLATE) {
+    for (const t of [g.away, g.home]) {
+      if (g.league === 'nba') names.push(`NBA: ${t.displayName.toUpperCase()} ᴴᴰ`);
+      if (g.league === 'mlb') names.push(`US: MLB ${t.displayName.toUpperCase()} ᴿᴬᵂ`);
+    }
+  }
   for (let i = 0; i < 30; i++) names.push(OTHER_EVENTS[i % OTHER_EVENTS.length]!.replace('{n}', String(i + 1)));
   for (let i = 0; names.length < SLATE_CHANNELS; i++) {
     names.push(`${PREFIXES[i % PREFIXES.length]}| ${BRANDS[Math.floor(i / PREFIXES.length) % BRANDS.length]} ${Math.floor(i / 360) + 1}`);

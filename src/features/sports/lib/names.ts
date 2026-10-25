@@ -65,6 +65,15 @@ export function textTokens(text: string): string[] {
 }
 
 /**
+ * True for a backup feed or an SD copy ("ESPN (Backup)", "ESPN BKP", "BIG TEN NETWORK ALT", "CELTICS SD"):
+ * `textTokens` drops those markers, so the copy reads as the main feed, and the match lists it after.
+ */
+export function isBackupFeed(name: string): boolean {
+  const words = name.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return words.some((w) => BACKUP.test(w) || w === 'lq') || words[words.length - 1] === 'sd';
+}
+
+/**
  * A channel name's tag and words. `stripCountryPrefix` cuts at the first pipe whatever comes before it, so a
  * "tag" of more than two words is part of the name ("NBA 04: Hornets x Nets | 7:30PM ET"): then the whole
  * name is read and there is no tag.
@@ -186,6 +195,10 @@ export interface TeamKeys {
   school?: boolean;
   /** College mascots, which count only on their own ("Tigers vs Bulldogs", not the "Tigers" of "Auburn Tigers"). */
   mascots?: string[][];
+  /** The team's full names of two words or more, as `teamChannelName` gives a team channel's ("boston celtics", "boston celtics bos"). */
+  channelNames: string[];
+  /** Pros: the nickname and its spellings ("celtics", "sixers"), which make a team channel only beside the league's word. */
+  channelNicknames: string[];
 }
 
 /** Provider spellings of ESPN's abbreviations, by `${league}:${ESPN abbreviation}`. */
@@ -229,9 +242,11 @@ const NAME_ALIASES: Record<string, readonly string[]> = {
   'nba:POR': ['Blazers'],
   'nba:PHI': ['Sixers'],
   'nba:GS': ['Golden St Warriors'],
+  'nba:LAC': ['Los Angeles Clippers'],
   'nfl:SF': ['Niners'],
   'mlb:TOR': ['Jays'],
   'mlb:ARI': ['D-backs', 'Dbacks'],
+  'mlb:ATH': ['Oakland Athletics'],
   'cfb:M-OH': ['Miami Ohio'],
   'cfb:APP': ['Appalachian State'],
   'cfb:UL': ['Louisiana Lafayette', 'UL Lafayette'],
@@ -344,12 +359,29 @@ function buildKeys(team: GameTeam, league: League): TeamKeys {
     else if (tokens.length > 1) phrases.set(tokens.join(' '), tokens);
   }
   const aliases = NAME_ALIASES[`${league}:${abbr}`] ?? [];
+  const full = new Map<string, string[]>();
+  addPhrases(full, [team.displayName, `${team.location} ${team.name}`], league === 'cfb');
+  // A one-word full name ("Athletics") is no surer than a nickname.
+  const channelNames = [...full].filter(([, p]) => p.length > 1).map(([key]) => key);
+  // The team's abbreviation may close a team channel's name ("NBA: NEW YORK KNICKS (NYK)").
+  const withAbbrs = (names: string[]) => names.flatMap((n) => [n, ...[...abbrs].map((a) => `${n} ${a}`)]);
   if (league === 'cfb') {
     addPhrases(phrases, [team.displayName, team.location, team.shortDisplayName, ...aliases], true);
     const mascot = textTokens(team.name);
-    return { phrases: longestFirst(phrases), abbrs: [...abbrs], school: true, mascots: mascot.length ? [mascot] : [] };
+    return {
+      phrases: longestFirst(phrases),
+      abbrs: [...abbrs],
+      school: true,
+      mascots: mascot.length ? [mascot] : [],
+      channelNames: withAbbrs(channelNames),
+      // A school alone or a mascot alone names no team channel: schools share words, and many share a mascot.
+      channelNicknames: [],
+    };
   }
   addPhrases(phrases, [team.displayName, `${team.location} ${team.name}`, team.shortDisplayName, team.name, ...aliases], false);
+  const nicknames = new Map<string, string[]>();
+  addPhrases(nicknames, [team.name, team.shortDisplayName, ...aliases], false);
+  const channelNicknames = [...new Set([...full.keys(), ...nicknames.keys()])].filter((key) => !channelNames.includes(key));
   const shared: string[][] = [];
   for (const [key, p] of phrases) {
     if (p.length === 1 && SHARED_NICKNAMES.has(p[0]!)) {
@@ -357,7 +389,12 @@ function buildKeys(team: GameTeam, league: League): TeamKeys {
       phrases.delete(key);
     }
   }
-  const keys: TeamKeys = { phrases: longestFirst(phrases), abbrs: [...abbrs] };
+  const keys: TeamKeys = {
+    phrases: longestFirst(phrases),
+    abbrs: [...abbrs],
+    channelNames: withAbbrs(channelNames),
+    channelNicknames: withAbbrs(channelNicknames),
+  };
   if (guarded.size > 0) {
     keys.guarded = [...guarded];
     keys.nickname = textTokens(team.name)[0];
@@ -377,7 +414,8 @@ const keyCache = new WeakMap<GameTeam, Map<League, TeamKeys>>();
  * the short name, and the abbreviation plus provider spellings (NY/NYK, GS/GSW). College: the school by its
  * location, short and display names (with St/State variants), longest first and bounded so "Texas" never
  * takes "Texas A&M", "Texas Tech" or "North Texas" and "Miami" never takes "Miami (OH)"; the mascot only on
- * its own. Kept per team object, since one game is tested against every indexed channel.
+ * its own. Also the names a team channel goes by: the full names, and for pros the nicknames. Kept per team
+ * object, since one game is tested against every indexed channel.
  */
 export function teamKeys(team: GameTeam, league: League): TeamKeys {
   let byLeague = keyCache.get(team);
@@ -507,6 +545,11 @@ export function otherLeague(tokens: readonly string[], league: League): boolean 
   return marked(tokens, SPORT_WORDS, league) ?? false;
 }
 
+/** True when the text holds one of the league's own words ("NBA", "NCAAF"); a sport word is not enough. */
+export function hasLeagueWord(tokens: readonly string[], league: League): boolean {
+  return tokens.some((t) => LEAGUE_WORDS.get(t)?.includes(league));
+}
+
 // ---------------------------------------------------------------------------
 // Networks
 
@@ -535,11 +578,19 @@ function net(id: string, kind: NetworkKind, search: string, names: readonly stri
   return alias;
 }
 
-/** FanDuel Sports Network regions (the former Bally Sports and Fox Sports regionals). */
-const FDSN_REGIONS = [
-  'Arizona', 'Detroit', 'Florida', 'Great Lakes', 'Indiana', 'Kansas City', 'Midwest', 'New Orleans', 'North', 'Ohio',
-  'Oklahoma', 'San Diego', 'SoCal', 'South', 'Southeast', 'Southwest', 'Sun', 'West', 'Wisconsin',
-];
+/**
+ * FanDuel Sports Network regions (the former Bally Sports and Fox Sports regionals), each with the other
+ * spellings and the old feeds providers still name its channel by ("FOX SPORTS SOUTH EAST", "BALLY SPORTS
+ * PRIME TICKET", "BALLY SPORTS CINCINNATI", "FOX SPORTS TENNESSEE").
+ */
+const FDSN_REGIONS: Record<string, readonly string[]> = {
+  Arizona: [], Detroit: [], Florida: [], 'Great Lakes': ['SportsTime Ohio'], Indiana: [], 'Kansas City': [], Midwest: ['Mid West'],
+  'New Orleans': [], North: [], Ohio: ['Cincinnati'], Oklahoma: [], 'San Diego': [], SoCal: ['Prime Ticket'], South: ['Tennessee'],
+  Southeast: ['South East'], Southwest: ['South West'], Sun: [], West: [], Wisconsin: [],
+};
+const FDSN_BRANDS = ['FanDuel Sports Network', 'FanDuel Sports', 'FanDuel SN', 'FDSN', 'Bally Sports', 'Fox Sports'];
+/** Old names no brand above builds; "FOX SPORTSTIME OHIO" would otherwise read as FOX. */
+const FDSN_OLD_NAMES: Record<string, readonly string[]> = { 'Great Lakes': ['SportsTime Ohio', 'Fox SportsTime Ohio'] };
 
 /** Editions of a US brand abroad, with or without a country tag ("ESPN Brasil", "ESPN 2 Sur"). */
 const abroad = (brands: readonly string[], editions: readonly string[]) => brands.flatMap((b) => editions.map((e) => `${b} ${e}`));
@@ -631,6 +682,8 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('sportsnet', 'rsn', 'Sportsnet', ['Sportsnet']),
   net('sportsnet-one', 'rsn', 'Sportsnet', ['Sportsnet One', 'Sportsnet 1', 'SN1']),
   net('sportsnet-pittsburgh', 'rsn', 'Sportsnet', ['SportsNet Pittsburgh', 'AT&T SportsNet Pittsburgh']),
+  // Canada's TSN, which ESPN lists for the Raptors and Blue Jays: one game goes out on some of its five feeds.
+  net('tsn', 'rsn', 'TSN', ['TSN', 'TSN1', 'TSN2', 'TSN3', 'TSN4', 'TSN5']),
   net('tva-sports', 'rsn', 'TVA Sports', ['TVA Sports', 'TVA']),
   net('gcsen', 'rsn', 'GCSEN', ['GCSEN', 'Gulf Coast Sports']),
   net('altitude', 'rsn', 'Altitude', ['Altitude Sports', 'Altitude']),
@@ -641,13 +694,10 @@ export const NETWORKS: readonly NetworkAlias[] = [
     'NBC Sports Phil +',
   ]),
   net('nbcs-boston', 'rsn', 'NBC Sports', ['NBC Sports Boston', 'NBCS Boston']),
-  ...FDSN_REGIONS.map((r) =>
+  ...Object.entries(FDSN_REGIONS).map(([r, spellings]) =>
     net(`fdsn-${textTokens(r).join('-')}`, 'rsn', 'FanDuel', [
-      `FanDuel Sports Network ${r}`,
-      `FanDuel Sports ${r}`,
-      `FanDuel SN ${r}`,
-      `FDSN ${r}`,
-      `Bally Sports ${r}`,
+      ...[r, ...spellings].flatMap((s) => FDSN_BRANDS.map((b) => `${b} ${s}`)),
+      ...(FDSN_OLD_NAMES[r] ?? []),
     ]),
   ),
   // Local stations that carry team games (ESPN market home/away).
@@ -686,6 +736,9 @@ export function networkAlias(id: string): NetworkAlias | undefined {
 
 /** Country tags a name may still start with after `stripCountryPrefix` ("USA ESPN", "US FOX 5"). */
 const LEAD_TAGS = new Set(['us', 'usa', 'ca', 'can', 'uk', 'en']);
+/** League words a slot channel opens with, before its number and the network it carries ("NCAAF 02: ESPN2"). */
+const SLOT_LEAGUES = new Set(['nfl', 'ncaaf', 'cfb', 'ncaa', 'nba', 'mlb']);
+const NUMBER = /^\d+$/;
 
 /**
  * The network whose longest phrase starts at `at`, with where the phrase ends; null when the best one is
@@ -706,19 +759,23 @@ function networkAt(tokens: readonly string[], at: number): { alias: NetworkAlias
 
 /**
  * The network a channel name is, from its tokens: the alias whose longest phrase opens the name (after any
- * leftover country tags), unless that alias's avoid list matches there too ("Fox News"). Event channels that
- * merely mention a network later in the name are not that network, and neither is a network name followed by
- * a matchup ("ESPN | Knicks @ Celtics", "ABC: LSU vs Auburn"): that is one game's channel. Package services keep
- * their id there, since their channels are all per-game feeds. Failing that, a local station's call sign
- * anywhere in a name without a matchup. Only a separator word makes a matchup here: a spaced dash after a
- * network sets off its feed, region or station ("ESPN - East", "FOX 5 - WTTG Washington", "SNY - Mets").
+ * leftover country tags, or a slot's league word, number and dash: "NCAAF 02: ESPN2", "NFL | 02 - ESPN"),
+ * unless that alias's avoid list matches there too ("Fox News"). Event channels that merely mention a network
+ * later in the name are not that network, and neither is a network name followed by a matchup ("ESPN | Knicks
+ * @ Celtics", "ABC: LSU vs Auburn"): that is one game's channel. Package services keep their id there, since
+ * their channels are all per-game feeds. Failing that, a local station's call sign anywhere in a name without
+ * a matchup. Only a separator word makes a matchup here: a spaced dash after a network sets off its feed,
+ * region or station ("ESPN - East", "FOX 5 - WTTG Washington", "SNY - Mets").
  */
 export function networkIdForChannel(tokens: readonly string[]): string | null {
+  let slot = false;
   for (let at = 0; at < tokens.length; at++) {
     const hit = networkAt(tokens, at);
     if (hit === null) return null;
     if (hit) return hit.alias.kind !== 'package' && separated(tokens, hit.end, MATCHUP_WORDS) ? null : hit.alias.id;
-    if (!LEAD_TAGS.has(tokens[at]!)) break;
+    const t = tokens[at]!;
+    if (SLOT_LEAGUES.has(t)) slot = true;
+    else if (!LEAD_TAGS.has(t) && !(slot && (NUMBER.test(t) || t === DASH))) break;
   }
   if (separated(tokens, 0, MATCHUP_WORDS)) return null;
   for (const n of LOCALS) if (n.phrases.some((p) => findPhrase(tokens, p) >= 0)) return n.id;
@@ -728,6 +785,33 @@ export function networkIdForChannel(tokens: readonly string[]): string | null {
 /** The network of an ESPN broadcast name ("ESPN2", "FanDuel SN West", "KFAA-TV"); null for team apps and the like. */
 export function networkIdForBroadcast(name: string): string | null {
   return networkIdForChannel(textTokens(name));
+}
+
+// ---------------------------------------------------------------------------
+// Team channels
+
+/** Words around a team channel's team: league words, country tags, slot or feed numbers and dashes. */
+function teamFiller(t: string): boolean {
+  return LEAGUE_WORDS.has(t) || LEAD_TAGS.has(t) || t === DASH || NUMBER.test(t);
+}
+
+/** The most words a team channel's team has: a full name ("Georgia Tech Yellow Jackets") and its abbreviation. */
+const TEAM_NAME_WORDS = 5;
+
+/**
+ * What a team channel's name is once the words around its team are cut from both ends ("NBA: BOSTON CELTICS
+ * ᴴᴰ" and "US: MLB NEW YORK YANKEES ᴿᴬᵂ" give "boston celtics" and "new york yankees"), joined by spaces;
+ * null when nothing is left or more words than a team's name has. The channel is a team's when this is one of
+ * its `channelNames`, or one of its `channelNicknames` beside the league's own word ("NBA: CELTICS"), so a
+ * name that also names a second team ("Celtics vs Knicks") or anything else ("NBA: LEAGUE PASS 1", "US: MLB
+ * NETWORK") never is.
+ */
+export function teamChannelName(tokens: readonly string[]): string | null {
+  let from = 0;
+  let to = tokens.length;
+  while (from < to && teamFiller(tokens[from]!)) from++;
+  while (to > from && teamFiller(tokens[to - 1]!)) to--;
+  return to > from && to - from <= TEAM_NAME_WORDS ? tokens.slice(from, to).join(' ') : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -742,11 +826,37 @@ const GROUP_WORDS = new Set([
 ]);
 const GROUP_PHRASES = ['league pass', 'sunday ticket', 'game pass', 'red zone', 'big ten', 'big 12', 'mountain west'].map(textTokens);
 
+/** The four leagues and their packages: a group naming one may carry their games, wherever it is from. */
+const LEAGUE_GROUP_PHRASES = [
+  'nfl', 'ncaaf', 'cfb', 'nba', 'mlb', 'college football', 'league pass', 'sunday ticket', 'redzone', 'red zone', 'extra innings',
+].map(textTokens);
+
+/** Other sports' leagues, events and services, besides `LEAGUE_WORDS` and `SPORT_WORDS` ("US| FLO PPV", "CA| WHL PPV"). */
+const OTHER_SPORT_WORDS = new Set([
+  'f1', 'formula', 'indycar', 'motogp', 'racing', 'supercross', 'motocross', 'pga', 'atp', 'wta', 'mma', 'aew', 'fifa', 'uefa',
+  'liga', 'futbol', 'ahl', 'echl', 'ohl', 'whl', 'qmjhl', 'khl', 'nfhs', 'flo', 'flosports', 'darts', 'snooker', 'cycling', 'olympics',
+]);
+
+const otherSportWord = (t: string) => LEAGUE_WORDS.get(t)?.length === 0 || SPORT_WORDS.get(t)?.length === 0 || OTHER_SPORT_WORDS.has(t);
+const ourSportWord = (t: string) => (SPORT_WORDS.get(t)?.length ?? 0) > 0;
+
 /**
- * True for a live group that may hold games: sports, a league, a sports service or package, regional
- * networks, PPV or events. Generous on purpose: an extra group costs one page read, a missed one loses games.
+ * True for a live group that may hold games of the four leagues: sports, a league, a sports service or
+ * package, regional networks, PPV or events, or a network that carries them ("US| FOX", which holds FS1 and
+ * the FOX stations; not a streaming service's, "US| NETFLIX ON AIR"). Two kinds are skipped unless they name
+ * one of the four leagues or their packages: a group tagged for another country ("UK| SKY SPORT+ PPV", "DE|
+ * DAZN PPV"), whose feeds share no US network's programming, and a group that names only other sports ("US|
+ * SOCCER PPV", "US| NHL PPV", "US| NCAAB PPV", "US| FLO PPV"). Generous otherwise ("US| PPV EVENT", "US| ESPN+
+ * PPV", "8K| SPORT ON AIR"): an extra group costs a page read and its guide, a missed one loses games.
  */
 export function isSportsGroup(groupName: string): boolean {
   const tokens = textTokens(groupName);
-  return tokens.some((t) => GROUP_WORDS.has(t)) || GROUP_PHRASES.some((p) => findPhrase(tokens, p) >= 0);
+  if (!LEAGUE_GROUP_PHRASES.some((p) => findPhrase(tokens, p) >= 0)) {
+    if (region(groupName) === 'foreign') return false;
+    if (tokens.some(otherSportWord) && !tokens.some(ourSportWord)) return false;
+  }
+  if (tokens.some((t) => GROUP_WORDS.has(t)) || GROUP_PHRASES.some((p) => findPhrase(tokens, p) >= 0)) return true;
+  // Not a service's group ("US| NETFLIX ON AIR"): its game feeds sit in its PPV or event groups.
+  const network = networkIdForChannel(nameTokens(groupName));
+  return network !== null && networkAlias(network)!.kind !== 'package';
 }

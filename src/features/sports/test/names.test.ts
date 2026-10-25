@@ -1,12 +1,13 @@
 // Sports name matching: the tokenizer, team keys for pros and college (schools that share words, St/State,
-// accents and apostrophes, mascots), league marks, the network alias table and its avoid lists, ESPN's
-// broadcast names, and which live groups the index reads.
+// accents and apostrophes, mascots), team channel names, league marks, the network alias table and its avoid
+// lists, ESPN's broadcast names, and which live groups the index reads (with a real provider's groups).
 import { describe, expect, it } from 'vitest';
 
 import {
   NETWORKS,
   foreignFeed,
   hasMatchup,
+  isBackupFeed,
   isSportsGroup,
   mentionsBoth,
   mentionsTeam,
@@ -15,6 +16,7 @@ import {
   networkIdForChannel,
   otherLeague,
   teamAt,
+  teamChannelName,
   teamKeys,
   textTokens,
 } from '../lib/names';
@@ -117,6 +119,13 @@ describe('nameTokens', () => {
   it('keeps SD inside a name (San Diego) and drops it only as a trailing quality tag', () => {
     expect(nameTokens('MLB 07: SD @ LAD')).toEqual(['mlb', '07', 'sd', 'at', 'lad']);
     expect(nameTokens('FOX SD')).toEqual(['fox']);
+  });
+
+  it('tells a backup feed or SD copy by the markers the tokens drop', () => {
+    for (const n of ['US| ESPN (Backup)', 'ESPN BKP', 'NCAAF 10: BIG TEN NETWORK ALT', 'NBA: BOSTON CELTICS SD', 'ESPN 1080p [BK1]', 'FOX LQ']) {
+      expect(isBackupFeed(n), n).toBe(true);
+    }
+    for (const n of ['US| ESPN HD', 'NBA: BOSTON CELTICS ᴴᴰ', 'MLB 07: SD @ LAD', 'ALTITUDE', 'NBC Sports Boston']) expect(isBackupFeed(n), n).toBe(false);
   });
 
   it('keeps tags inside the name when stripping would cut a real word', () => {
@@ -332,6 +341,48 @@ describe('team keys: college', () => {
   });
 });
 
+describe('team channel names', () => {
+  it('cuts the league word, country tag, numbers and quality from both ends of a team channel name', () => {
+    const want: Record<string, string | null> = {
+      'NBA: BOSTON CELTICS ᴴᴰ': 'boston celtics',
+      'NBA: BOSTON CELTICS SD': 'boston celtics',
+      'US: MLB NEW YORK YANKEES ᴿᴬᵂ': 'new york yankees',
+      'US: MLB ST. LOUIS CARDINALS ᴿᴬᵂ': 'st louis cardinals',
+      'NBA 05: Celtics': 'celtics',
+      'NBA: NEW YORK KNICKS (NYK) ᴴᴰ': 'new york knicks nyk',
+      'Texas A&M Aggies 2': 'texas am aggies',
+      'NBA: LEAGUE PASS 1': 'league pass',
+      'MLB 03 :': null,
+      ':NBA  09': null,
+      'NFL  | 01 -': null,
+      'ENDED | CHA - HORNETS VS MIA - HEAT | Sat 24 Oct 17:00 EDT (US) | 8K EXCLUSIVE | US: NBA PASS PPV 1': null,
+    };
+    for (const [name, expected] of Object.entries(want)) expect(teamChannelName(nameTokens(name)), name).toBe(expected);
+  });
+
+  it('keeps full names apart from the nicknames that need the league beside them', () => {
+    expect(teamKeys(CELTICS, 'nba')).toMatchObject({
+      channelNames: ['boston celtics', 'boston celtics bos'],
+      channelNicknames: ['celtics', 'celtics bos'],
+    });
+    const sixers = teamKeys(team('PHI', 'Philadelphia', '76ers'), 'nba');
+    expect(sixers.channelNames).toEqual(['philadelphia 76ers', 'philadelphia 76ers phi']);
+    expect(sixers.channelNicknames).toEqual(expect.arrayContaining(['76ers', 'sixers']));
+    const clippers = teamKeys(team('LAC', 'LA', 'Clippers'), 'nba');
+    expect(clippers.channelNames).toContain('la clippers');
+    expect(clippers.channelNicknames).toEqual(expect.arrayContaining(['clippers', 'los angeles clippers']));
+    // The team's abbreviations may close the name.
+    expect(teamKeys(KNICKS, 'nba').channelNames).toEqual(['new york knicks', 'new york knicks ny', 'new york knicks nyk']);
+    // A one-word full name is only a nickname.
+    const as = teamKeys(team('ATH', 'Athletics', 'Athletics', 'Athletics', 'Athletics'), 'mlb');
+    expect(as.channelNicknames).toEqual(expect.arrayContaining(['athletics', 'oakland athletics']));
+    expect(as.channelNames).not.toContain('athletics');
+    // College: the full name only, with St/State spellings.
+    expect(teamKeys(TEXAS, 'cfb')).toMatchObject({ channelNames: ['texas longhorns', 'texas longhorns tex'], channelNicknames: [] });
+    expect(teamKeys(FSU, 'cfb').channelNames).toEqual(expect.arrayContaining(['florida state seminoles', 'florida st seminoles']));
+  });
+});
+
 describe('league marks', () => {
   const giants = team('NYG', 'New York', 'Giants');
   const cards = team('ARI', 'Arizona', 'Cardinals');
@@ -412,9 +463,61 @@ describe('network aliases', () => {
     expect(id('Fox Sports 2')).toBe('fs2');
     expect(id('Fox News')).toBeNull();
     expect(id('US | FOX NEWS HD')).toBeNull();
+    expect(id('US: FOX NEWS HD')).toBeNull();
     expect(id('Fox Business')).toBeNull();
-    expect(id('FOX Sports Detroit')).toBeNull();
+    // A regional network's old name, not FOX.
+    expect(id('FOX Sports Detroit')).toBe('fdsn-detroit');
+    expect(id('FOX Sports')).toBeNull();
     expect(id('FOX Deportes')).toBe('fox-deportes');
+  });
+
+  it("reads a real provider's FOX Sports, Bally Sports and TSN channels", () => {
+    const want: Record<string, string | null> = {
+      'US: FOX SPORTS 1 4K': 'fs1',
+      'US: FOX SPORTS 2 HD': 'fs2',
+      'US: FOX SPORTS DETROIT HD': 'fdsn-detroit',
+      'US: FOX SPORTS SOUTH HD': 'fdsn-south',
+      'US: FOX SPORTS SOUTH EAST HD': 'fdsn-southeast',
+      'US: FOX SPORTS SOUTH WEST HD': 'fdsn-southwest',
+      'US: FOX SPORTS MID WEST HD': 'fdsn-midwest',
+      'US: FOX SPORTS PRIME TICKET HD': 'fdsn-socal',
+      'US: FOX SPORTS COLLEGE ATLANTIC HD': null,
+      'US: BALLY SPORTS SOUTHWEST PLUS (DALLAS) HD': 'fdsn-southwest',
+      'US: BALLY SPORTS SUN (MIAMI) HD': 'fdsn-sun',
+      'US: BALLY SPORTS PRIME TICKET HD': 'fdsn-socal',
+      'US: BALLY SPORTS CINCINNATI PLUS HD': 'fdsn-ohio',
+      'US: FOX SPORTS TENNESSEE HD': 'fdsn-south',
+      'US: FOX SPORTS SPORTSTIME OHIO HD': 'fdsn-great-lakes',
+      'US: FOX SPORTSTIME OHIO HD': 'fdsn-great-lakes',
+      'US: FOX SPORTS YES NETWORK HD': null,
+      'CA EN: TSN 1': 'tsn',
+      'CA EN: TSN 5': 'tsn',
+      'CA EN: SPORTSNET ONTARIO': 'sportsnet',
+    };
+    for (const [name, expected] of Object.entries(want)) expect(id(name), name).toBe(expected);
+    expect(networkIdForBroadcast('TSN')).toBe('tsn');
+    expect(networkIdForBroadcast('FanDuel SN Detroit')).toBe('fdsn-detroit');
+  });
+
+  it('reads the network a slot channel carries after its league word and number', () => {
+    const full = (name: string) => networkIdForChannel(textTokens(name));
+    const want: Record<string, string> = {
+      'NCAAF 02: ESPN2': 'espn2',
+      'NCAAF 04: ABC': 'abc',
+      'NCAAF 09: BIG TEN NETWORK': 'btn',
+      'NCAAF 10: BIG TEN NETWORK ALT': 'btn',
+      'NCAAF 12: CBSSN': 'cbssn',
+      'NFL 02: ESPN': 'espn',
+      'NFL | 02 - ESPN': 'espn',
+    };
+    for (const [name, expected] of Object.entries(want)) expect(full(name), name).toBe(expected);
+    // Empty slots, and slots that carry one game.
+    for (const n of ['NCAAF 17:', 'MLB 03 :', 'NFL  | 01 -', ':NBA  09', 'NFL  | 03 - 1pm 49ers at Falcons', 'NCAAF 01: NC State at Wake Forest 7:30pm']) {
+      expect(full(n), n).toBeNull();
+    }
+    // The league's own networks still open with the league word.
+    expect(full('NFL Network')).toBe('nfl-network');
+    expect(full('MLB: MLB NETWORK')).toBe('mlb-network');
   });
 
   it('never takes a bare USA', () => {
@@ -544,6 +647,55 @@ describe('isSportsGroup', () => {
   });
 
   it('skips the rest', () => {
-    for (const g of ['US| ENTERTAINMENT', 'UK: News', 'Movies', 'Kids', 'USA Locals']) expect(isSportsGroup(g), g).toBe(false);
+    for (const g of ['US| ENTERTAINMENT', 'UK: News', 'Movies', 'Kids', 'USA Locals', 'US| FOX NEWS']) expect(isSportsGroup(g), g).toBe(false);
+  });
+
+  it('takes a group named after a network that carries the games', () => {
+    for (const g of ['US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| CBS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| NBC', 'US| TNT', 'CA| TSN']) expect(isSportsGroup(g), g).toBe(true);
+    // A streaming service's group is mostly shows; its games sit in its PPV group.
+    for (const g of ['US| NETFLIX ON AIR ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| DISNEY+ NETWORK ᴿᴬᵂ ⁶⁰ᶠᵖˢ']) expect(isSportsGroup(g), g).toBe(false);
+    expect(isSportsGroup('US| NETFLIX PPV')).toBe(true);
+  });
+
+  it('skips a group tagged for another country unless it names one of the four leagues', () => {
+    for (const g of ['UK| SKY SPORT+ PPV ᴿᴬᵂ', 'UK| ESPN+ PPV', 'DE| DAZN PPV', 'BR| ESPN SPORT ᴴᴰ', 'FR| SOCCER PPV', 'UK SPORTS', '|AR| DEPORTES', 'UK| FOOTBALL']) {
+      expect(isSportsGroup(g), g).toBe(false);
+    }
+    for (const g of ['BR| NBA PASS PPV', 'UK| NFL GAME PASS', 'MX| NFL', 'LATAM| MLB', 'CA| SPORTS EN', 'US| SPORTS']) expect(isSportsGroup(g), g).toBe(true);
+  });
+
+  it('skips a group that names only other sports', () => {
+    for (const g of [
+      'US| SOCCER PPV', 'US| NHL PPV', 'US| UFC PPV', 'US| WNBA PPV', 'US| MILB PPV', 'US| NCAAB PPV', 'US| FLO ⱽᴵᴾ PPV', 'US| TENNIS PPV',
+      'US| GOLF PPV', 'US| FIFA+ PPV', 'US| UEFA PPV', 'US| APPLE TV F1 PPV', 'US| NFHS PPV', 'US| BOXING PPV', 'US| WWE PPV', 'US| NASCAR',
+      'CA| WHL PPV', 'US| SUPERCROSS PPV',
+    ]) {
+      expect(isSportsGroup(g), g).toBe(false);
+    }
+    // One of the four leagues or their sports beside it keeps the group.
+    for (const g of ['US| NHL & NBA PPV', 'US| SOCCER & FOOTBALL', 'US| MLB EXTRA INNINGS']) expect(isSportsGroup(g), g).toBe(true);
+  });
+
+  it('keeps ambiguous groups', () => {
+    for (const g of ['US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| PPV EVENT', 'US| ESPN+ PPV ⱽᴵᴾ', 'US| PEACOCK PPV ⱽᴵᴾ', '8K| SPORT ON AIR ⁸ᴷ', 'BEIN SPORTS', 'LATINO DEPORTES']) {
+      expect(isSportsGroup(g), g).toBe(true);
+    }
+  });
+
+  it("reads a real provider's groups", () => {
+    // From a 56,990-channel Xtream account (Oct 2026): 917 live groups, of which these are the sports-like ones.
+    const kept = [
+      'US| NFL PPV', 'US| NFL REPLAY', 'US| NBA PPV', 'US| NBA TEAM PPV', 'US| NBA PASS PPV ⁸ᴷ', 'US| MLB PPV', 'US| MLB TEAM PPV',
+      'US| NCAAF PPV', 'US| SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| ESPN+ PPV ⱽᴵᴾ', 'US| ESPN+ PPV', 'US| PEACOCK PPV ⱽᴵᴾ', 'US| BTN+ PPV',
+      'US| BALLY SPORTS PPV', 'US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'US| CBS ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'BR| NBA PASS PPV', 'CA| SPORTS EN',
+      'CA| TSN SPORT ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ', 'CA| SPORTSNET PPV', '8K| SPORT ON AIR ⁸ᴷ',
+    ];
+    const skipped = [
+      'US| NCAAB PPV', 'US| SOCCER PPV', 'US| NHL PPV', 'US| WNBA PPV', 'US| MILB PPV', 'US| UFC PPV', 'US| FLO ⱽᴵᴾ PPV', 'US| TENNIS PPV',
+      'US| GOLF PPV', 'US| FIFA+ PPV', 'US| UEFA PPV', 'US| APPLE TV F1 PPV', 'US| NFHS PPV', 'UK| SKY SPORT+ PPV ᴿᴬᵂ',
+      'UK| ESPN+ PPV', 'DE| DAZN PPV', 'FR| SOCCER PPV', 'BR| ESPN SPORT ᴴᴰ',
+    ];
+    expect(kept.filter((g) => !isSportsGroup(g))).toEqual([]);
+    expect(skipped.filter((g) => isSportsGroup(g))).toEqual([]);
   });
 });

@@ -762,6 +762,9 @@ describe("regional networks under the spellings one real account uses", () => {
     expect(id('US: MASSN HD')).toBe('masn');
     expect(id('US: NBC SPORTS PHILADELFIA')).toBe('nbcs-philadelphia');
     expect(id('US: FOX SPORTS CAROLINAS HD')).toBe('fdsn-south');
+    // The Lakers' channel, not the Dodgers' SportsNet LA.
+    expect(id('US: SPORTSNET LA LAKERS')).toBe('spectrum-sportsnet');
+    expect(id('US: SPORTSNET LA')).toBe('spectrum-sportsnet-la');
     // FOX's own avoid list still holds for the rest of its sports brands.
     expect(id('US: FOX SPORTS SOCCER HD')).toBeNull();
   });

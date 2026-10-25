@@ -673,7 +673,8 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('msg', 'rsn', 'MSG', ['MSG', 'MSG Network', 'MSGSN']),
   net('sny', 'rsn', 'SNY', ['SNY', 'SportsNet New York']),
   net('marquee', 'rsn', 'Marquee', ['Marquee Sports Network', 'Marquee Sports Net', 'Marquee']),
-  net('spectrum-sportsnet', 'rsn', 'Spectrum', ['Spectrum SportsNet', 'Spectrum Sports Net', 'Spectrum Sports Network']),
+  // The Lakers' network; "SportsNet LA Lakers" names it beside the Dodgers' SportsNet LA, the longer phrase winning.
+  net('spectrum-sportsnet', 'rsn', 'Spectrum', ['Spectrum SportsNet', 'Spectrum Sports Net', 'Spectrum Sports Network', 'SportsNet LA Lakers']),
   net('spectrum-sportsnet-la', 'rsn', 'Sportsnet', ['Spectrum SportsNet LA', 'Spectrum Sports Net LA', 'SportsNet LA', 'SNLA']),
   net('space-city', 'rsn', 'Space City', ['Space City Home Network', 'Space City', 'SCHN', 'AT&T SportsNet Southwest']),
   net('root-sports', 'rsn', 'Root Sports', ['Root Sports']),

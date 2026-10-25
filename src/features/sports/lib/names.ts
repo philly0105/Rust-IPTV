@@ -580,14 +580,17 @@ function net(id: string, kind: NetworkKind, search: string, names: readonly stri
 
 /**
  * FanDuel Sports Network regions (the former Bally Sports and Fox Sports regionals), each with the other
- * spellings providers still name its channel by ("FOX SPORTS SOUTH EAST", "BALLY SPORTS PRIME TICKET").
+ * spellings and the old feeds providers still name its channel by ("FOX SPORTS SOUTH EAST", "BALLY SPORTS
+ * PRIME TICKET", "BALLY SPORTS CINCINNATI", "FOX SPORTS TENNESSEE").
  */
 const FDSN_REGIONS: Record<string, readonly string[]> = {
-  Arizona: [], Detroit: [], Florida: [], 'Great Lakes': [], Indiana: [], 'Kansas City': [], Midwest: ['Mid West'],
-  'New Orleans': [], North: [], Ohio: [], Oklahoma: [], 'San Diego': [], SoCal: ['Prime Ticket'], South: [],
+  Arizona: [], Detroit: [], Florida: [], 'Great Lakes': ['SportsTime Ohio'], Indiana: [], 'Kansas City': [], Midwest: ['Mid West'],
+  'New Orleans': [], North: [], Ohio: ['Cincinnati'], Oklahoma: [], 'San Diego': [], SoCal: ['Prime Ticket'], South: ['Tennessee'],
   Southeast: ['South East'], Southwest: ['South West'], Sun: [], West: [], Wisconsin: [],
 };
 const FDSN_BRANDS = ['FanDuel Sports Network', 'FanDuel Sports', 'FanDuel SN', 'FDSN', 'Bally Sports', 'Fox Sports'];
+/** Old names no brand above builds; "FOX SPORTSTIME OHIO" would otherwise read as FOX. */
+const FDSN_OLD_NAMES: Record<string, readonly string[]> = { 'Great Lakes': ['SportsTime Ohio', 'Fox SportsTime Ohio'] };
 
 /** Editions of a US brand abroad, with or without a country tag ("ESPN Brasil", "ESPN 2 Sur"). */
 const abroad = (brands: readonly string[], editions: readonly string[]) => brands.flatMap((b) => editions.map((e) => `${b} ${e}`));
@@ -692,7 +695,10 @@ export const NETWORKS: readonly NetworkAlias[] = [
   ]),
   net('nbcs-boston', 'rsn', 'NBC Sports', ['NBC Sports Boston', 'NBCS Boston']),
   ...Object.entries(FDSN_REGIONS).map(([r, spellings]) =>
-    net(`fdsn-${textTokens(r).join('-')}`, 'rsn', 'FanDuel', [r, ...spellings].flatMap((s) => FDSN_BRANDS.map((b) => `${b} ${s}`))),
+    net(`fdsn-${textTokens(r).join('-')}`, 'rsn', 'FanDuel', [
+      ...[r, ...spellings].flatMap((s) => FDSN_BRANDS.map((b) => `${b} ${s}`)),
+      ...(FDSN_OLD_NAMES[r] ?? []),
+    ]),
   ),
   // Local stations that carry team games (ESPN market home/away).
   net('kfaa', 'local', 'KFAA', ['KFAA']),

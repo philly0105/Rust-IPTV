@@ -7,6 +7,7 @@ import {
   NETWORKS,
   foreignFeed,
   hasMatchup,
+  isBackupFeed,
   isSportsGroup,
   mentionsBoth,
   mentionsTeam,
@@ -117,6 +118,13 @@ describe('nameTokens', () => {
   it('keeps SD inside a name (San Diego) and drops it only as a trailing quality tag', () => {
     expect(nameTokens('MLB 07: SD @ LAD')).toEqual(['mlb', '07', 'sd', 'at', 'lad']);
     expect(nameTokens('FOX SD')).toEqual(['fox']);
+  });
+
+  it('tells a backup feed or SD copy by the markers the tokens drop', () => {
+    for (const n of ['US| ESPN (Backup)', 'ESPN BKP', 'NCAAF 10: BIG TEN NETWORK ALT', 'NBA: BOSTON CELTICS SD', 'ESPN 1080p [BK1]', 'FOX LQ']) {
+      expect(isBackupFeed(n), n).toBe(true);
+    }
+    for (const n of ['US| ESPN HD', 'NBA: BOSTON CELTICS ᴴᴰ', 'MLB 07: SD @ LAD', 'ALTITUDE', 'NBC Sports Boston']) expect(isBackupFeed(n), n).toBe(false);
   });
 
   it('keeps tags inside the name when stripping would cut a real word', () => {

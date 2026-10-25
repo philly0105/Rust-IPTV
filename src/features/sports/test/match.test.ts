@@ -617,6 +617,21 @@ describe('order and dedup', () => {
     ]);
   });
 
+  it('lists backup feeds and SD copies after the main feeds of the same route', () => {
+    const g = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: national('ESPN') });
+    const index = ['US| ESPN (Backup)', 'US| ESPN SD', 'US| ESPN HD', 'US| ESPN BKP 2', 'NBA 05: Knicks @ Celtics ALT', 'NBA 06: Knicks @ Celtics'].map((n) =>
+      indexed(n),
+    );
+    expect(brief(matchGame(g, index, NONE))).toEqual([
+      ['NBA 06: Knicks @ Celtics', 'event', false],
+      ['NBA 05: Knicks @ Celtics ALT', 'event', false],
+      ['US| ESPN HD', 'network', false],
+      ['US| ESPN (Backup)', 'network', false],
+      ['US| ESPN BKP 2', 'network', false],
+      ['US| ESPN SD', 'network', false],
+    ]);
+  });
+
   it('lists a channel once, with its strongest route', () => {
     const espn = indexed('ESPN: Knicks vs Celtics');
     const g = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: national('ESPN') });

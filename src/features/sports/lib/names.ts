@@ -65,6 +65,15 @@ export function textTokens(text: string): string[] {
 }
 
 /**
+ * True for a backup feed or an SD copy ("ESPN (Backup)", "ESPN BKP", "BIG TEN NETWORK ALT", "CELTICS SD"):
+ * `textTokens` drops those markers, so the copy reads as the main feed, and the match lists it after.
+ */
+export function isBackupFeed(name: string): boolean {
+  const words = name.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return words.some((w) => BACKUP.test(w) || w === 'lq') || words[words.length - 1] === 'sd';
+}
+
+/**
  * A channel name's tag and words. `stripCountryPrefix` cuts at the first pipe whatever comes before it, so a
  * "tag" of more than two words is part of the name ("NBA 04: Hornets x Nets | 7:30PM ET"): then the whole
  * name is read and there is no tag.

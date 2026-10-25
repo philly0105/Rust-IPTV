@@ -532,10 +532,10 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
 /**
  * The channels that carry `game`, one entry per channel with its strongest route (a guide match on a
  * network channel is a guide match and not regional). Ordered by route, then non-regional first, then feeds
- * from abroad last, then the sources' order, then channel name. `now` is read only by `isCurrentGame` (for
- * event names without a date), so a result stays good for as long as that answer does. Only the channels
- * that can match are checked (`candidatePositions`), from a map built once per index and programmes
- * (`prepareMatch` builds it ahead, in slices).
+ * from abroad last, then backup feeds and SD copies after the main feeds, then the sources' order, then
+ * channel name. `now` is read only by `isCurrentGame` (for event names without a date), so a result stays
+ * good for as long as that answer does. Only the channels that can match are checked (`candidatePositions`),
+ * from a map built once per index and programmes (`prepareMatch` builds it ahead, in slices).
  */
 export function matchGame(
   game: Game,
@@ -566,7 +566,7 @@ function matchAt(
   positions: Iterable<number>,
 ): StreamMatch[] {
   const meta = indexMeta(index);
-  const found = new Map<ItemKey, { match: StreamMatch; rank: number; foreign: boolean }>();
+  const found = new Map<ItemKey, { match: StreamMatch; rank: number; foreign: boolean; backup: boolean }>();
   for (const i of positions) {
     const ch = index[i]!;
     const key = meta.keys[i]!;
@@ -586,13 +586,15 @@ function matchAt(
     const prev = found.get(key);
     if (prev && prev.rank <= rank) continue;
     const { channel, sourceId, sourceKind, sourceName } = ch;
-    found.set(key, { match: { channel, sourceId, sourceKind, sourceName, reason, regional, program }, rank, foreign: ch.foreign });
+    const match = { channel, sourceId, sourceKind, sourceName, reason, regional, program };
+    found.set(key, { match, rank, foreign: ch.foreign, backup: ch.backup });
   }
   return [...found.values()]
     .sort(
       (a, b) =>
         a.rank - b.rank ||
         Number(a.foreign) - Number(b.foreign) ||
+        Number(a.backup) - Number(b.backup) ||
         (meta.sourceRank.get(a.match.sourceId) ?? 0) - (meta.sourceRank.get(b.match.sourceId) ?? 0) ||
         collator.compare(a.match.channel.name, b.match.channel.name),
     )

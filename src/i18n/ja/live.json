@@ -38,6 +38,8 @@
   "epgSettings": "EPG設定",
   "externalFailed": "{{player}}を起動できませんでした。設定 > プレーヤーでパスを確認してください。",
   "filterGroups": "グループを絞り込む",
+  "region": "地域",
+  "allRegions": "すべての地域",
   "groups": "グループ",
   "groupsSaved": "グループの表示設定を保存しました",
   "groupsSaveFailed": "グループの表示設定を保存できませんでした",

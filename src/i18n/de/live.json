@@ -38,6 +38,8 @@
   "epgSettings": "EPG-Einstellungen",
   "externalFailed": "{{player}} konnte nicht gestartet werden. Prüfen Sie den Pfad unter Einstellungen > Player.",
   "filterGroups": "Gruppen filtern",
+  "region": "Region",
+  "allRegions": "Alle Regionen",
   "groups": "Gruppen",
   "groupsSaved": "Sichtbarkeit der Gruppen gespeichert",
   "groupsSaveFailed": "Die Sichtbarkeit der Gruppen konnte nicht gespeichert werden",

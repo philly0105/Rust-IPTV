@@ -35,8 +35,8 @@ describe('fallback initials', () => {
     expect(monogramText('US| FS1 4K')).toBe('FS');
     expect(monogramText('Sport 1')).toBe('S1');
     expect(monogramText('Meridian News HD')).toBe('MN');
-    // A letter outside the Basic Multilingual Plane stays whole; an emoji is not a letter.
+    // A letter outside the Basic Multilingual Plane and an emoji stay whole.
     expect(monogramText('𠀀 Beta')).toBe('𠀀B');
-    expect(monogramText('🏈 Sunday Football')).toBe('SF');
+    expect(monogramText('🏈 Sunday Football')).toBe('🏈S');
   });
 });

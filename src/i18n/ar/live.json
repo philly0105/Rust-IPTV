@@ -50,6 +50,8 @@
   "epgSettings": "إعدادات EPG",
   "externalFailed": "تعذّر تشغيل {{player}}. تحقّق من مساره في الإعدادات > المشغلات.",
   "filterGroups": "تصفية المجموعات",
+  "region": "المنطقة",
+  "allRegions": "كل المناطق",
   "groups": "المجموعات",
   "groupsSaved": "تم حفظ ظهور المجموعات",
   "groupsSaveFailed": "تعذّر حفظ ظهور المجموعات",

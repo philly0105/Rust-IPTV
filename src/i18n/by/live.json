@@ -44,6 +44,8 @@
   "epgSettings": "Налады EPG",
   "externalFailed": "Не ўдалося запусціць {{player}}. Праверце шлях да яго ў Налады > Плэеры.",
   "filterGroups": "Фільтр груп",
+  "region": "Рэгіён",
+  "allRegions": "Усе рэгіёны",
   "groups": "Групы",
   "groupsSaved": "Бачнасць груп захавана",
   "groupsSaveFailed": "Не ўдалося захаваць бачнасць груп",

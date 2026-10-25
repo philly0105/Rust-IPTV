@@ -38,6 +38,8 @@
   "epgSettings": "EPG 설정",
   "externalFailed": "{{player}}을(를) 시작할 수 없습니다. 설정 > 플레이어에서 경로를 확인하세요.",
   "filterGroups": "그룹 필터",
+  "region": "지역",
+  "allRegions": "모든 지역",
   "groups": "그룹",
   "groupsSaved": "그룹 표시 설정을 저장했습니다",
   "groupsSaveFailed": "그룹 표시 설정을 저장할 수 없습니다",

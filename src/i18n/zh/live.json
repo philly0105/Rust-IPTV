@@ -38,6 +38,8 @@
   "epgSettings": "EPG 设置",
   "externalFailed": "无法启动 {{player}}。请在“设置 > 播放器”中检查其路径。",
   "filterGroups": "筛选分组",
+  "region": "地区",
+  "allRegions": "所有地区",
   "groups": "分组",
   "groupsSaved": "分组可见性已保存",
   "groupsSaveFailed": "无法保存分组可见性",

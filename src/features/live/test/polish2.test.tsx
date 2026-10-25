@@ -321,6 +321,49 @@ describe('groups sidebar', () => {
     expect(el.tabIndex).toBe(0);
   });
 
+  it('a playlist that tags its groups by country gets a region picker, kept per source', () => {
+    const tagged = ['US| SPORT ᴴᴰ', 'US| NEWS', 'US| NFL PPV', 'UK| SPORT', 'UK| NEWS', 'DE| SPORT', 'Sports misc'].map((name, i) => cat(i, { name }));
+    const withScope = (activeId?: string) => (
+      <CategorySidebar
+        categories={tagged}
+        hiddenCount={0}
+        isLoading={false}
+        error={null}
+        onRetry={() => undefined}
+        activeId={activeId}
+        hrefFor={(id) => `/s/src1/live${id ? `/${id}` : ''}`}
+        onManage={() => undefined}
+        totalLabel="All channels"
+        regionScope="src1:live"
+      />
+    );
+    // A row reads its name, then its channel count.
+    const names = () =>
+      [...document.querySelectorAll<HTMLElement>('[data-cat-index]')].map((l) => l.textContent?.replace(/\d+$/, '')).filter((n) => n?.includes('|'));
+    renderIn('/', [{ path: '/', element: withScope() }]);
+    const picker = screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement;
+    // Most groups first; a tag on one group only (DE) is not offered.
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['All regions', 'US · 3', 'UK · 2']);
+    fireEvent.change(picker, { target: { value: 'UK' } });
+    expect(names()).toEqual(['UK| SPORT', 'UK| NEWS']);
+    expect(localStorage.getItem('tsrust.liveRegion:src1:live')).toBe('UK');
+    // The filter works inside the region.
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter groups' }), { target: { value: 'news' } });
+    expect(names()).toEqual(['UK| NEWS']);
+    cleanup();
+
+    // Kept for the source; the open group stays listed outside the region.
+    renderIn('/', [{ path: '/', element: withScope('g0') }]);
+    expect((screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement).value).toBe('UK');
+    expect(names()).toEqual(['US| SPORT ᴴᴰ', 'UK| SPORT', 'UK| NEWS']);
+    localStorage.removeItem('tsrust.liveRegion:src1:live');
+    cleanup();
+
+    // Mostly untagged groups: no picker.
+    renderIn('/', [{ path: '/', element: sidebar(cats) }]);
+    expect(screen.queryByRole('combobox', { name: 'Region' })).toBeNull();
+  });
+
   it('the filter ignores accents and case', () => {
     renderIn('/', [{ path: '/', element: sidebar([cat(1, { name: 'España' }), cat(2, { name: 'Ελλάδα' }), cat(3, { name: 'France' })]) }]);
     fireEvent.change(screen.getByRole('searchbox', { name: 'Filter groups' }), { target: { value: 'ESPANA' } });

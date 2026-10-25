@@ -38,6 +38,8 @@
   "epgSettings": "EPG settings",
   "externalFailed": "Could not start {{player}}. Check its path in Settings > Players.",
   "filterGroups": "Filter groups",
+  "region": "Region",
+  "allRegions": "All regions",
   "groups": "Groups",
   "groupsSaved": "Group visibility saved",
   "groupsSaveFailed": "Could not save group visibility",

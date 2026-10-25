@@ -38,6 +38,8 @@
   "epgSettings": "EPG-beállítások",
   "externalFailed": "Nem sikerült elindítani: {{player}}. Ellenőrizze az elérési útját a Beállítások > Külső lejátszók részben.",
   "filterGroups": "Csoportok szűrése",
+  "region": "Régió",
+  "allRegions": "Minden régió",
   "groups": "Csoportok",
   "groupsSaved": "Csoportok láthatósága mentve",
   "groupsSaveFailed": "Nem sikerült menteni a csoportok láthatóságát",

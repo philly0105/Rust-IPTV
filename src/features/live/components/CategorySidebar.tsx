@@ -6,9 +6,10 @@ import { Link } from 'react-router';
 import type { Category } from '@/api/types';
 import { useRouteIntent } from '@/shell/routeIntent';
 
-import { Button, cn, ErrorState, IconButton, SearchInput, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
+import { Button, cn, ErrorState, IconButton, SearchInput, Select, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 import { useLongPress } from '../hooks/useLongPress';
+import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
 import { documentIsRtl } from '../lib/rtl';
 
 /** A group row's slot at 100 %. */
@@ -47,6 +48,11 @@ export interface CategorySidebarProps {
    * playlists often file every station under one group), unless it is the open one.
    */
   hideLoneGroup?: boolean;
+  /**
+   * Where the region picker keeps its choice (`${sourceId}:${contentType}`). The picker shows when
+   * most groups carry a country tag ("US| ", "UK: "), as in big international playlists.
+   */
+  regionScope?: string;
 }
 
 function linkClass(active: boolean): string {
@@ -75,12 +81,18 @@ export function CategorySidebar(props: CategorySidebarProps) {
   const rowHeight = useRowHeight(ROW, ROW_SPACING);
 
   const lone = !!props.hideLoneGroup && props.categories?.length === 1 && props.categories[0]!.id !== props.activeId;
+  const regions = useMemo(() => groupRegions((props.categories ?? []).map((c) => c.name)), [props.categories]);
+  const [regionPick, setRegionPick] = useState(() => readRegion(props.regionScope));
+  // A pick from another source, or a tag the playlist no longer has, shows every group.
+  const region = regionPick && regions.some((r) => r.tag === regionPick) ? regionPick : null;
   const visible = useMemo(() => {
     if (lone) return [];
     const q = foldForFilter(filter.trim());
     const list = props.categories ?? [];
-    return q ? list.filter((c) => foldForFilter(c.name).includes(q)) : list;
-  }, [props.categories, filter, lone]);
+    // The open group stays listed whatever the region, so the list never loses the page on show.
+    const inRegion = (c: Category) => !region || c.id === props.activeId || groupRegion(c.name) === region;
+    return list.filter((c) => inRegion(c) && (!q || foldForFilter(c.name).includes(q)));
+  }, [props.categories, filter, lone, region, props.activeId]);
   const allCount = useMemo(() => (props.categories ?? []).reduce((n, c) => n + c.itemCount, 0), [props.categories]);
 
   // The open group is in view on arrival, even when it is row 1500 of a virtualized list:
@@ -208,6 +220,25 @@ export function CategorySidebar(props: CategorySidebarProps) {
     <nav ref={navRef} aria-label={t('groups')} className="flex h-full min-h-0 flex-col" onKeyDown={onListKey}>
       <div className="flex items-center gap-1 px-3 pt-3 pb-2">
         <h2 className="flex-1 text-sm font-semibold text-fg">{t('groups')}</h2>
+        {regions.length > 0 && !lone ? (
+          <Select
+            aria-label={t('region')}
+            title={t('region')}
+            className="h-7 w-auto max-w-28 ps-2 pe-7 text-xs"
+            value={region ?? ''}
+            onValueChange={(v) => {
+              const next = v || null;
+              writeRegion(props.regionScope, next);
+              setRegionPick(next);
+              setCursor(ALL);
+            }}
+            options={[
+              { value: '', label: t('allRegions') },
+              ...regions.map((r) => ({ value: r.tag, label: `${r.tag} · ${fmt.format(r.groups)}` })),
+            ]}
+            data-testid="group-region"
+          />
+        ) : null}
         <IconButton size="sm" label={t('manageCategories')} icon={<SlidersHorizontal className="size-4" />} onClick={props.onManage} />
       </div>
       {lone ? null : (

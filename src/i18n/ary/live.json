@@ -50,6 +50,8 @@
   "epgSettings": "إعدادات EPG",
   "externalFailed": "ما قدرناش نشغّلو {{player}}. شوف المسار ديالو فالإعدادات > المشغلات.",
   "filterGroups": "فلتر المجموعات",
+  "region": "المنطقة",
+  "allRegions": "كاع المناطق",
   "groups": "المجموعات",
   "groupsSaved": "ظهور المجموعات تحفظ",
   "groupsSaveFailed": "ما قدرناش نحفظو ظهور المجموعات",

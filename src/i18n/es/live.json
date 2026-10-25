@@ -41,6 +41,8 @@
   "epgSettings": "Ajustes de EPG",
   "externalFailed": "No se pudo iniciar {{player}}. Revisa su ruta en Ajustes > Reproductores.",
   "filterGroups": "Filtrar grupos",
+  "region": "Región",
+  "allRegions": "Todas las regiones",
   "groups": "Grupos",
   "groupsSaved": "Se guardó la visibilidad de los grupos",
   "groupsSaveFailed": "No se pudo guardar la visibilidad de los grupos",

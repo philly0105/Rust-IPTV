@@ -38,6 +38,8 @@
   "epgSettings": "EPG-instellingen",
   "externalFailed": "Kan {{player}} niet starten. Controleer het pad in Instellingen > Spelers.",
   "filterGroups": "Groepen filteren",
+  "region": "Regio",
+  "allRegions": "Alle regio's",
   "groups": "Groepen",
   "groupsSaved": "Zichtbaarheid van groepen opgeslagen",
   "groupsSaveFailed": "Kan zichtbaarheid van groepen niet opslaan",

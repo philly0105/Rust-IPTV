@@ -742,6 +742,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           onNavigate={closeDrawer}
           totalLabel={isRadio ? t('allStations') : t('allChannels')}
           hideLoneGroup={isRadio}
+          regionScope={`${sourceId}:${contentType}`}
           onGroupMenu={openGroupMenu}
           isLocked={locks.categoryLocked}
         />

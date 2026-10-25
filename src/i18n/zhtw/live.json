@@ -38,6 +38,8 @@
   "epgSettings": "EPG 設定",
   "externalFailed": "無法啟動 {{player}}。請在「設定 > 播放器」中檢查其路徑。",
   "filterGroups": "篩選群組",
+  "region": "地區",
+  "allRegions": "所有地區",
   "groups": "群組",
   "groupsSaved": "已儲存群組顯示設定",
   "groupsSaveFailed": "無法儲存群組顯示設定",

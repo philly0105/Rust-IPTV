@@ -74,7 +74,8 @@ export function initialWords(text: string): string[] {
   const words = text
     .normalize('NFKC')
     .split(/\s+/)
-    .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+    // Punctuation only: an emoji (a symbol) stays an initial, as in "🎵 Music".
+    .map((w) => w.replace(/^\p{P}+|\p{P}+$/gu, ''))
     .filter(Boolean);
   const named = words.filter((w) => !NAME_MARKERS.test(w));
   return named.length > 0 ? named : words;

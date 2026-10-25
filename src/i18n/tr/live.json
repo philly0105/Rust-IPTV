@@ -38,6 +38,8 @@
   "epgSettings": "EPG ayarları",
   "externalFailed": "{{player}} başlatılamadı. Yolunu Ayarlar > Oynatıcılar bölümünde kontrol edin.",
   "filterGroups": "Grupları filtrele",
+  "region": "Bölge",
+  "allRegions": "Tüm bölgeler",
   "groups": "Gruplar",
   "groupsSaved": "Grup görünürlüğü kaydedildi",
   "groupsSaveFailed": "Grup görünürlüğü kaydedilemedi",

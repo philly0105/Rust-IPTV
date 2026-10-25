@@ -41,6 +41,8 @@
   "epgSettings": "Impostazioni EPG",
   "externalFailed": "Impossibile avviare {{player}}. Controlla il percorso in Impostazioni > Lettori.",
   "filterGroups": "Filtra gruppi",
+  "region": "Regione",
+  "allRegions": "Tutte le regioni",
   "groups": "Gruppi",
   "groupsSaved": "Visibilità dei gruppi salvata",
   "groupsSaveFailed": "Impossibile salvare la visibilità dei gruppi",

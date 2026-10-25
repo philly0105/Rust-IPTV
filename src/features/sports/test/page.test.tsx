@@ -356,6 +356,12 @@ describe('sports page', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Stop following Boston Celtics' }));
     await waitFor(() => expect(screen.getAllByTestId('sports-game')).toHaveLength(2));
     expect(screen.queryByTestId('sports-my-teams')).toBeNull();
+    // The filter is off again, so the next team followed hides nothing until it is pressed.
+    expect(localStorage.getItem('tsrust.sportsMyTeamsOnly')).toBe('0');
+    fireEvent.click(within(card(bears)).getByRole('button', { name: 'More for New England Patriots at Chicago Bears' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Follow Chicago Bears' }));
+    await waitFor(() => expect(screen.getByTestId('sports-my-teams').getAttribute('aria-pressed')).toBe('false'));
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
   });
 
   it('draws finals, start times, TBD and postponed games', async () => {

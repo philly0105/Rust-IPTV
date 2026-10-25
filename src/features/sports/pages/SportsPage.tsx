@@ -116,8 +116,15 @@ export function SportsPage() {
     writeMyTeamsOnly(on);
     setMyTeamsOnly(on);
   };
-  // With no team followed the chip is gone, so its filter must not hide anything either.
+  // With no team followed the chip is gone, so its filter must not hide anything either, and it is off
+  // again when the last team goes: following a team later must not hide every other game at once.
   const filterMyTeams = myTeamsOnly && followed.size > 0;
+  useEffect(() => {
+    if (followed.size === 0 && myTeamsOnly) {
+      writeMyTeamsOnly(false);
+      setMyTeamsOnly(false);
+    }
+  }, [followed.size, myTeamsOnly]);
 
   const sources = useVisibleSources();
   const sourceCount = sources.data?.length ?? 0;

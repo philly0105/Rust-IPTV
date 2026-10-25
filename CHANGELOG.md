@@ -37,6 +37,10 @@ Work after the 0.2.0 notes were written: the redesign, fixes that followed the O
 - In the desktop app the window's title bar follows the app's theme.
 - Rust 1.90 is the minimum version (`rust-version` in Cargo.toml). The locked Tauri 2.12 crates need it.
 - The installer no longer names a licence in its copyright line; the project licence is not chosen yet.
+- Sports is simpler to use: the league tabs, the day strip and the filters sit together at the top, each league tab counts the day's games and marks one that is on, and the page shows Live now, Upcoming and Final with each game once. A card shows the best stream with its action, and Show all for the rest. The search field finds teams and networks, "With streams" hides games no channel was found for, and a card's menu follows a team (then "My teams" shows only their games), opens ESPN's Gamecast, and puts a live game on the multi-view wall.
+- Sports finds channels better: team channels ("NBA: Boston Celtics") and network slots ("NCAAF 04: ABC") match their games, a TV service's lineup channel counts as the network it carries ("PRIME: ABC Cincinnati"), and a broadcast network's local stations match only the games of their own market, so a FOX game no longer lists every FOX station. It also reads only the groups that can carry the four leagues' games, which on one big account cut the channels it reads from about 22,000 to 7,000.
+- Live TV's group list has a region picker when most of a source's groups start with a country tag ("US| Sports", "UK: News").
+- Channels and posters without artwork take their initials from the name, not from a country tag or a quality marker ("US| ESPN HD" shows ES, "ESPN2" E2).
 - Xtream live channels start faster in the built-in player: the stream format has a new Auto setting, now the default, that plays them as MPEG-TS where the player can and as HLS in mpv, VLC and browsers that can't. Installs still on the old HLS default move to Auto; pick HLS in Settings > Playback to keep it.
 
 ### Fixed

@@ -606,6 +606,13 @@ describe('network channels', () => {
       ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
       ['MSG', 'network', true],
     ]);
+    // On ESPN nationally and on a regional network in Boston: the Celtics' feed carries it, the Knicks' may not.
+    const both = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: [...national('ESPN'), { name: 'NBC Sports Boston', market: 'home', kind: 'tv' }] });
+    expect(brief(matchGame(both, [celtics, indexed('NBA: NEW YORK KNICKS ᴴᴰ'), espn], NONE))).toEqual([
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
+      ['US| ESPN HD', 'network', false],
+      ['NBA: NEW YORK KNICKS ᴴᴰ', 'team', true],
+    ]);
   });
 
   it("counts a broadcast network's local stations only in the teams' markets", () => {
@@ -829,10 +836,12 @@ describe('candidates', () => {
       ['Sports 1', 'guide', false],
       ['Sports 2', 'guide', false],
       ['NBA League Pass 07: Knicks @ Celtics', 'event', false],
+      // ESPN lists NESN in Boston: the Celtics' feeds carry the game, ahead of ESPN.
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
+      ['NBA: CELTICS', 'team', false],
       ['US: ESPN', 'network', false],
-      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', true],
-      ['NBA: CELTICS', 'team', true],
       ['NESN', 'network', true],
+      // Nothing is listed in New York: the Knicks' feed may be blacked out.
       ['NBA: NEW YORK KNICKS (NYK) SD', 'team', true],
     ]);
     expect(names(matchGame(MLB_GAME, index, programs, now))).toContain('US: MLB NEW YORK YANKEES ᴿᴬᵂ');

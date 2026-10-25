@@ -256,7 +256,7 @@ function StreamRow({ game, match, title, ctx, first }: { game: Game; match: Stre
               {t(REASON_KEYS[match.reason])}
             </Badge>,
             match.regional ? (
-              <Badge key="regional" variant="warning" title={t('regionalHint')} data-testid="sports-regional">
+              <Badge key="regional" variant="warning" title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')} data-testid="sports-regional">
                 {t('regional')}
               </Badge>
             ) : null,

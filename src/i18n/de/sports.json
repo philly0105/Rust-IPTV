@@ -36,6 +36,7 @@
   "reasonTeam": "Team-Sender",
   "regional": "Regional",
   "regionalHint": "Dieser Sender zeigt möglicherweise ein anderes regionales Spiel.",
+  "regionalTeamHint": "Der Sender des Teams kann bei einer landesweiten Übertragung gesperrt sein.",
   "watch": "Ansehen",
   "watchLabel": "{{title}} auf {{name}} ansehen",
   "replay": "Wiederholen",

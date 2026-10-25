@@ -36,6 +36,7 @@
   "reasonTeam": "球队频道",
   "regional": "地区",
   "regionalHint": "此频道可能播出另一场地区比赛。",
+  "regionalTeamHint": "全国转播时，球队自己的频道可能会被屏蔽。",
   "watch": "观看",
   "watchLabel": "在 {{name}} 观看 {{title}}",
   "replay": "回看",

@@ -40,6 +40,7 @@
   "reasonTeam": "قناة ديال الفريق",
   "regional": "جهوي",
   "regionalHint": "يقدر تكون هاد القناة كتعرض ماتش جهوي آخر.",
+  "regionalTeamHint": "يقدر يتحبس البث ديال الفرقة فالبث الوطني.",
   "watch": "تفرّج",
   "watchLabel": "تفرّج ف{{title}} على {{name}}",
   "replay": "عاود",

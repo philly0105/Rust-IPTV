@@ -37,6 +37,7 @@
   "reasonTeam": "Canal do time",
   "regional": "Regional",
   "regionalHint": "Este canal pode exibir outro jogo regional.",
+  "regionalTeamHint": "O canal da equipa pode estar bloqueado numa transmissão nacional.",
   "watch": "Assistir",
   "watchLabel": "Assistir {{title}} em {{name}}",
   "replay": "Reprise",

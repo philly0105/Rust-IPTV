@@ -37,6 +37,7 @@
   "reasonTeam": "Chaîne de l'équipe",
   "regional": "Régional",
   "regionalHint": "Cette chaîne diffuse peut-être un autre match régional.",
+  "regionalTeamHint": "La chaîne de l'équipe peut être bloquée lors d'une diffusion nationale.",
   "watch": "Regarder",
   "watchLabel": "Regarder {{title}} sur {{name}}",
   "replay": "Revoir",

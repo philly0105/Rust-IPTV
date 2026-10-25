@@ -36,6 +36,7 @@
   "reasonTeam": "球隊頻道",
   "regional": "地區",
   "regionalHint": "此頻道可能播出另一場地區比賽。",
+  "regionalTeamHint": "全國轉播時，球隊自己的頻道可能會被封鎖。",
   "watch": "觀看",
   "watchLabel": "在 {{name}} 觀看 {{title}}",
   "replay": "回看",

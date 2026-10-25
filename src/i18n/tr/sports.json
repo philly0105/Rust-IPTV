@@ -36,6 +36,7 @@
   "reasonTeam": "Takım kanalı",
   "regional": "Bölgesel",
   "regionalHint": "Bu kanal başka bir bölgesel maçı gösteriyor olabilir.",
+  "regionalTeamHint": "Ulusal yayında takımın kendi kanalı karartılmış olabilir.",
   "watch": "İzle",
   "watchLabel": "{{title}} maçını {{name}} kanalında izle",
   "replay": "Tekrar izle",

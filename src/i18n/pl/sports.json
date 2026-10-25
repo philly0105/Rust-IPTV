@@ -38,6 +38,7 @@
   "reasonTeam": "Kanał drużyny",
   "regional": "Regionalny",
   "regionalHint": "Ten kanał może pokazywać inny mecz regionalny.",
+  "regionalTeamHint": "Kanał drużyny może być zablokowany podczas transmisji ogólnokrajowej.",
   "watch": "Oglądaj",
   "watchLabel": "Oglądaj {{title}} na {{name}}",
   "replay": "Powtórka",

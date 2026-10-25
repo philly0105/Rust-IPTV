@@ -36,6 +36,7 @@
   "reasonTeam": "Teamkanaal",
   "regional": "Regionaal",
   "regionalHint": "Dit kanaal toont mogelijk een andere regionale wedstrijd.",
+  "regionalTeamHint": "De eigen zender van het team kan bij een landelijke uitzending geblokkeerd zijn.",
   "watch": "Kijken",
   "watchLabel": "{{title}} kijken op {{name}}",
   "replay": "Terugkijken",

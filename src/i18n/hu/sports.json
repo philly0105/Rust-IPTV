@@ -36,6 +36,7 @@
   "reasonTeam": "Csapatcsatorna",
   "regional": "Regionális",
   "regionalHint": "Ez a csatorna lehet, hogy egy másik regionális mérkőzést ad.",
+  "regionalTeamHint": "Országos közvetítéskor a csapat saját csatornája le lehet tiltva.",
   "watch": "Nézés",
   "watchLabel": "{{title}} nézése itt: {{name}}",
   "replay": "Visszanézés",

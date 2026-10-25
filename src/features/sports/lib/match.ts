@@ -31,7 +31,7 @@ import {
   teamMarkets,
   textTokens,
 } from './names';
-import type { Game } from './types';
+import type { Game, GameTeam } from './types';
 
 export type MatchReason = 'guide' | 'event' | 'team' | 'network';
 
@@ -43,7 +43,8 @@ export interface StreamMatch {
   reason: MatchReason;
   /**
    * A network match that may carry another regional game (NFL Sunday CBS/FOX, regional networks, local
-   * stations), or a team channel of a game a national network carries, which the team's feed may black out.
+   * stations), or a team channel of a game a national network carries with nothing listed in that team's market,
+   * which may be blacked out.
    */
   regional: boolean;
   /** The matched guide programme, in display time. */
@@ -271,6 +272,17 @@ export function isTeamChannel(channel: Pick<IndexedChannel, 'channel' | 'teamNam
   if (!full && !nickname) return false;
   const all = textTokens(channel.channel.name);
   return !otherLeague(all, game.league) && (full || hasLeagueWord(all, game.league));
+}
+
+/** Which team a team channel's name is: home, away, or null when it reads as both or neither. */
+function teamSide(name: string, game: Game): 'home' | 'away' | null {
+  const names = (team: GameTeam) => {
+    const keys = teamKeys(team, game.league);
+    return keys.channelNames.includes(name) || keys.channelNicknames.includes(name);
+  };
+  const home = names(game.home);
+  const away = names(game.away);
+  return home === away ? null : home ? 'home' : 'away';
 }
 
 interface ProgrammeWords {
@@ -552,17 +564,20 @@ interface GameRoutes {
   /** The teams' markets, for broadcast network stations (`networkMatch`). */
   markets: string[][];
   /**
-   * ESPN lists a network that reaches every market (ESPN, TNT, NBC on Sunday night): the teams' own
-   * feeds are often blacked out for such a game, so a team channel is regional and follows that network.
+   * ESPN lists a network that reaches every market (ESPN, TNT, NBC on Sunday night): a team's own feed
+   * is often blacked out for such a game, unless ESPN also lists a broadcast in that team's market.
    */
   national: boolean;
+  /** The markets ESPN lists a broadcast in besides the national ones ('home', 'away'). */
+  marketsListed: ReadonlySet<string>;
 }
 
 function routesOf(game: Game): GameRoutes {
   const networks = gameNetworks(game);
   const locals = [...networks.keys()].flatMap((id) => (networkAlias(id)?.kind === 'local' ? networkAlias(id)!.phrases : []));
   const national = [...networks.values()].some((regional) => !regional);
-  return { window: gameWindow(game), networks, locals, markets: [...teamMarkets(game.home), ...teamMarkets(game.away)], national };
+  const marketsListed = new Set(game.broadcasts.map((b) => b.market).filter((m) => m !== 'national'));
+  return { window: gameWindow(game), networks, locals, markets: [...teamMarkets(game.home), ...teamMarkets(game.away)], national, marketsListed };
 }
 
 const HOME = 1;
@@ -631,7 +646,7 @@ export function matchGameScanForTests(
 
 function matchAt(
   game: Game,
-  { window, networks, locals, markets, national }: GameRoutes,
+  { window, networks, locals, markets, national, marketsListed }: GameRoutes,
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now: number | undefined,
@@ -652,7 +667,9 @@ function matchAt(
     else if (isEventChannel(ch, game, now)) reason = 'event';
     else if (isTeamChannel(ch, game)) {
       reason = 'team';
-      regional = national;
+      // Blacked out under a national broadcast, unless ESPN lists one in the team's own market.
+      const side = national ? teamSide(ch.teamName!, game) : null;
+      regional = national && !(side !== null && marketsListed.has(side));
     } else {
       const r = networkMatch(ch, networks, locals, markets, meta.ownFeeds);
       if (r === undefined) continue;

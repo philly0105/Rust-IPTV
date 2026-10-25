@@ -40,6 +40,7 @@
   "reasonTeam": "قناة الفريق",
   "regional": "إقليمية",
   "regionalHint": "قد تعرض هذه القناة مباراة إقليمية أخرى.",
+  "regionalTeamHint": "قد تُحجب قناة الفريق أثناء البث الوطني.",
   "watch": "مشاهدة",
   "watchLabel": "مشاهدة {{title}} على {{name}}",
   "replay": "إعادة",

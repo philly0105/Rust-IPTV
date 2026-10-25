@@ -520,6 +520,7 @@ describe('sports page', () => {
     expect(within(rows[1]!).getByText('Event channel')).toBeTruthy();
     expect(within(rows[2]!).getByText('Network')).toBeTruthy();
     expect(within(rows[2]!).getByTestId('sports-regional').textContent).toBe('Regional');
+    expect(within(rows[2]!).getByTestId('sports-regional').getAttribute('title')).toBe('This channel may show a different regional game.');
     expect(within(rows[0]!).queryByTestId('sports-regional')).toBeNull();
     // The strip setting is on: "US| ESPN HD" shows as "ESPN HD". One source: no source names.
     expect(within(rows[1]!).getByText('ESPN HD')).toBeTruthy();

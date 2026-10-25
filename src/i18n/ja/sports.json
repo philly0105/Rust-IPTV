@@ -36,6 +36,7 @@
   "reasonTeam": "チームチャンネル",
   "regional": "地域",
   "regionalHint": "このチャンネルでは別の地域の試合が放送されている可能性があります。",
+  "regionalTeamHint": "全国放送の試合では、チームの配信が視聴できない場合があります。",
   "watch": "視聴",
   "watchLabel": "{{name}} で {{title}} を視聴",
   "replay": "見逃し視聴",

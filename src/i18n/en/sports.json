@@ -36,6 +36,7 @@
   "reasonTeam": "Team channel",
   "regional": "Regional",
   "regionalHint": "This channel may show a different regional game.",
+  "regionalTeamHint": "The team's own feed may be blacked out for a national broadcast.",
   "watch": "Watch",
   "watchLabel": "Watch {{title}} on {{name}}",
   "replay": "Replay",

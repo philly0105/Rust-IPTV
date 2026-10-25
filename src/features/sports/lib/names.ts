@@ -804,8 +804,8 @@ const AFFILIATED = new Set(['abc', 'cbs', 'nbc', 'fox', 'cw']);
  */
 const FEED_WORDS = new Set([
   'east', 'eastern', 'west', 'western', 'pacific', 'mountain', 'central', 'atlantic', 'feed', 'national', 'network', 'net',
-  'tv', 'channel', 'live', 'us', 'usa', 'main', 'dt', 'hdtv', 'plus', 'pl', 'et', 'pt', 'ct', 'mt', 'est', 'pst', 'vip',
-  'premium', 'gold', 'extra', 'multi', 'audio', 'dolby', 'atmos', 'en', 'english', 'es', 'esp', 'spanish', 'snf', 'tnf',
+  'tv', 'channel', 'live', 'us', 'usa', 'main', 'dt', 'hdtv', 'plus', 'pl', 'et', 'est', 'pst', 'vip',
+  'premium', 'gold', 'extra', 'multi', 'audio', 'dolby', 'atmos', 'en', 'english', 'spanish', 'snf', 'tnf',
   'mnf', 'nfl', 'sports', 'sport', 'event', 'events', 'ppv', 'ott', 'stream', 'direct', 'link',
 ]);
 

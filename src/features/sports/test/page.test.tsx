@@ -1,8 +1,9 @@
-// The /sports page: the league filter and the Eastern day strip in the URL, Live now ahead of any
-// day, game cards in every state, matched stream rows with their reason and the action the game's
-// phase allows (Watch, Replay, Record), Show all, and the loading, empty, error and no-source states.
+// The /sports page: the league tabs with their counts and the Eastern day strip in the URL, the team
+// search and the "With streams" filter, Live now ahead of any day and the day's Upcoming and Final
+// games, game cards in every state, the matched stream rows with their reason and the action the
+// game's phase allows (Watch, Replay, Record), Show all, and the loading, empty, error and no-source states.
 // The game and stream hooks and the player are mocked; nothing here reaches ESPN or the core.
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Game, League } from '../lib/types';
@@ -91,6 +92,8 @@ const { pickDay } = await import('../paths');
 const { gameProgram, streamAction } = await import('../components/StreamList');
 
 const today = () => etDate(Date.now());
+/** The Today tab, named with its date ("Today Oct 25"). */
+const TODAY = /^Today /;
 const ALL: League[] = ['nfl', 'cfb', 'nba', 'mlb'];
 
 function open(path = '/sports') {
@@ -172,17 +175,19 @@ describe('sports page', () => {
     const strip = screen.getByRole('tablist', { name: 'Day' });
     const tabs = within(strip).getAllByRole('tab');
     expect(tabs).toHaveLength(15);
-    expect(tabs.slice(6, 9).map((t) => t.textContent)).toEqual(['Yesterday', 'Today', 'Tomorrow']);
-    expect(screen.getByRole('tab', { name: 'Today' }).getAttribute('aria-selected')).toBe('true');
+    expect(tabs.slice(6, 9).map((t) => t.textContent?.split(' ')[0])).toEqual(['Yesterday', 'Today', 'Tomorrow']);
+    // Two short lines a tab, the relative day or weekday over the date, read as one name.
+    expect(tabs[7]!.textContent).toMatch(/^Today \w{3} \d{1,2}$/);
+    expect(screen.getByRole('tab', { name: TODAY }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByTestId('sports-day-panel').getAttribute('aria-labelledby')).toBe(`sports-day-tab-${today()}`);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Tomorrow' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^Tomorrow / }));
     await waitFor(() => expect(h.location.current).toBe(`/sports?day=${tomorrow}`));
     expect(data.dayCalls.at(-1)).toEqual({ day: tomorrow, leagues: ALL });
     await waitFor(() => expect(card(data.days[tomorrow]![0] as Game)).toBeTruthy());
 
     // Today is the default and leaves the parameter out.
-    fireEvent.click(screen.getByRole('tab', { name: 'Today' }));
+    fireEvent.click(screen.getByRole('tab', { name: TODAY }));
     await waitFor(() => expect(h.location.current).toBe('/sports'));
   });
 
@@ -191,7 +196,7 @@ describe('sports page', () => {
     const dayTab = () => screen.getByRole('tablist', { name: 'Day' }).querySelectorAll('[role="tab"]')[1]!;
     // Startup restored lastRoute from an earlier run (picked on Monday, opened on Wednesday): today.
     open(`/sports?day=${days[1]}`);
-    expect(screen.getByRole('tab', { name: 'Today' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: TODAY }).getAttribute('aria-selected')).toBe('true');
     expect(data.dayCalls.at(-1)?.day).toBe(today());
 
     // Picking that day now works, even though the URL already names it.
@@ -208,32 +213,44 @@ describe('sports page', () => {
 
     pickDay('2020-01-01');
     open('/sports?day=2020-01-01');
-    expect(screen.getByRole('tab', { name: 'Today' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: TODAY }).getAttribute('aria-selected')).toBe('true');
     expect(data.dayCalls.at(-1)?.day).toBe(today());
   });
 
-  it('filters by league from the pills and the URL', async () => {
-    setDay([h.game('1'), h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') })]);
-    open();
-    expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
+  it('filters by league from the tabs and the URL, each tab counting its games of the day', async () => {
+    const nfl = h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
+    setDay([h.game('1'), nfl]);
+    data.live = [h.liveGame('9', { league: 'mlb', etDate: today() })];
+    await openReady();
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(3);
     const pills = within(screen.getByTestId('sports-leagues')).getAllByRole('tab');
-    expect(pills.map((p) => p.textContent)).toEqual(['All', 'NFL', 'College Football', 'NBA', 'MLB']);
+    // The day's games per league (the live game is from the live list, not the day), and a dot where a game is on.
+    // College football carries a short name for phones, hidden from the tab's name.
+    expect(pills.map((p) => p.textContent)).toEqual(['All 2, Live now', 'NFL 1', 'NCAAFCollege Football 0', 'NBA 1', 'MLB 0, Live now']);
+    expect(screen.getByRole('tab', { name: 'College Football 0' })).toBeTruthy();
+    expect(within(pills[4]!).getByTestId('sports-league-live')).toBeTruthy();
+    expect(within(pills[1]!).queryByTestId('sports-league-live')).toBeNull();
     // Wider than a phone in most languages, and pill tabs scroll with no visible cue: the row wraps.
     expect(within(screen.getByTestId('sports-leagues')).getByRole('tablist').className).toContain('flex-wrap');
+    // Every league is on show: each card names its own.
+    expect(within(card(nfl)).getByTestId('sports-game-league').textContent).toBe('NFL');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'NBA' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^NBA / }));
     await waitFor(() => expect(h.location.current).toBe('/sports?league=nba'));
-    expect(data.dayCalls.at(-1)).toEqual({ day: today(), leagues: ['nba'] });
-    expect(data.liveCalls.at(-1)).toEqual(['nba']);
+    // Every league's day is still read (the tabs count them); the league only filters what shows and what is matched.
+    expect(data.dayCalls.at(-1)).toEqual({ day: today(), leagues: ALL });
+    expect(data.liveCalls.at(-1)).toEqual(ALL);
     await waitFor(() => expect(screen.getAllByTestId('sports-game')).toHaveLength(1));
-    expect(screen.queryByTestId('sports-league-nfl')).toBeNull();
+    expect(screen.getByTestId('sports-game').getAttribute('data-game')).toBe('nba:1');
+    expect(screen.queryByTestId('sports-game-league')).toBeNull();
+    expect(data.streamCalls.at(-2)).toEqual({ keys: ['nba:1'], enabled: true });
 
-    fireEvent.click(screen.getByRole('tab', { name: 'All' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^All / }));
     await waitFor(() => expect(h.location.current).toBe('/sports'));
     cleanup();
 
     open('/sports?league=cricket');
-    expect(screen.getByRole('tab', { name: 'All' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: /^All / }).getAttribute('aria-selected')).toBe('true');
     expect(data.dayCalls.at(-1)?.leagues).toEqual(ALL);
   });
 
@@ -278,7 +295,7 @@ describe('sports page', () => {
     expect(within(c).getByRole('heading', { level: 3 }).textContent).toBe('Boston Celtics at New York Knicks');
     expect(within(c).getByTestId('sports-notes').textContent).toBe('BOS leads series 2-1');
     // One mention per network, whatever markets it is listed under.
-    expect(within(c).getByTestId('sports-networks').textContent).toBe('ESPN·, MSG');
+    expect(within(c).getByTestId('sports-networks').textContent).toBe('ESPN · MSG');
     const gamecast = within(c).getByTestId('sports-gamecast');
     expect(gamecast.getAttribute('href')).toBe('https://www.espn.com/nba/game/_/gameId/1');
     expect(gamecast.getAttribute('target')).toBe('_blank');
@@ -314,24 +331,77 @@ describe('sports page', () => {
     expect(within(card(postponed)).queryByTestId('sports-no-streams')).toBeNull();
   });
 
-  it('groups the day by league with counts, live games first', async () => {
+  it('splits the day into Live now, Upcoming and Final, so no game shows twice', async () => {
     const early = h.finalGame('1');
     const playing = h.liveGame('2');
-    const later = h.game('3');
+    const later = h.game('3', { startMs: Date.now() + 2 * h.HOUR });
     const kickoff = h.game('4', { league: 'nfl' });
-    setDay([early, playing, later, kickoff]);
+    const rained = h.game('5', { league: 'mlb', state: 'post', phase: 'postponed', startMs: Date.now() - 8 * h.HOUR });
+    setDay([early, playing, later, kickoff, rained]);
+    // The live list holds the day's live game too.
+    data.live = [playing];
     setStreams(playing, [h.match(ESPN)]);
     setStreams(kickoff, [h.match(ESPN)]);
     await openReady();
-    const sections = screen.getAllByTestId(/^sports-league-/);
-    expect(sections.map((s) => s.getAttribute('data-testid'))).toEqual(['sports-league-nfl', 'sports-league-nba']);
-    const nba = screen.getByTestId('sports-league-nba');
-    expect(within(nba).getByRole('heading', { level: 2 }).textContent).toBe('NBA3 games, 1 with a stream');
-    expect(within(screen.getByTestId('sports-league-nfl')).getByRole('heading', { level: 2 }).textContent).toBe('NFL1 game, 1 with a stream');
-    expect(within(nba).getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual(['nba:2', 'nba:1', 'nba:3']);
+    const ids = (id: string) => within(screen.getByTestId(`sports-${id}`)).getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'));
+    const heading = (id: string) => within(screen.getByTestId(`sports-${id}`)).getByRole('heading', { level: 2 }).textContent;
+    expect(ids('live')).toEqual(['nba:2']);
+    expect(heading('live')).toBe('Live now1');
+    // By start, whatever the league.
+    expect(ids('upcoming')).toEqual(['nfl:4', 'nba:3']);
+    expect(heading('upcoming')).toBe('Upcoming2');
+    // A postponed game is over for the page, after the finals.
+    expect(ids('final')).toEqual(['nba:1', 'mlb:5']);
+    expect(heading('final')).toBe('Final2');
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(5);
+    // "With streams" counts the games a channel was found for.
+    expect(within(screen.getByTestId('sports-streams-only')).getByText('2')).toBeTruthy();
   });
 
-  it('lists matched streams with their reason, top three first', async () => {
+  it('narrows every section to the teams or networks the header search names', async () => {
+    const celtics = h.liveGame('1');
+    const bears = h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots'), broadcasts: [{ name: 'CBS', market: 'national', kind: 'tv' }] });
+    setDay([celtics, bears]);
+    await openReady();
+    const search = useShellStore.getState().header?.search;
+    expect(search?.placeholder).toBe('Search teams');
+    act(() => search!.onChange('new eng'));
+    await waitFor(() => expect(screen.getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual(['nfl:2']));
+    act(() => useShellStore.getState().header!.search!.onChange('cbs'));
+    await waitFor(() => expect(screen.getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual(['nfl:2']));
+    // The search only hides cards: the streams are still matched for the whole league.
+    expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1', 'nfl:2']);
+    act(() => useShellStore.getState().header!.search!.onChange('lakers'));
+    await screen.findByText('No games match');
+    fireEvent.click(screen.getByTestId('sports-clear-filters'));
+    await waitFor(() => expect(screen.getAllByTestId('sports-game')).toHaveLength(2));
+    expect(useShellStore.getState().header?.search?.value).toBe('');
+  });
+
+  it('hides the games no stream was found for while "With streams" is on, and remembers it', async () => {
+    const found = h.game('1');
+    const missing = h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
+    setDay([found, missing]);
+    setStreams(found, [h.match(ESPN)]);
+    await openReady();
+    const chip = screen.getByTestId('sports-streams-only');
+    expect(chip.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
+    fireEvent.click(chip);
+    await waitFor(() => expect(screen.getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual(['nba:1']));
+    expect(chip.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem('tsrust.sportsStreamsOnly')).toBe('1');
+    cleanup();
+
+    // Kept for the next visit; while matching runs nothing is hidden for want of a stream.
+    data.streamsLoading = true;
+    await openReady();
+    expect(screen.getByTestId('sports-streams-only').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
+    localStorage.removeItem('tsrust.sportsStreamsOnly');
+  });
+
+  it('lists matched streams with their reason, the best one first', async () => {
     const g = h.liveGame('1');
     const fourth = h.channel('4', 'NBA League Pass 1');
     const fifth = h.channel('5', 'NBA League Pass 2');
@@ -347,7 +417,11 @@ describe('sports page', () => {
     const c = card(g);
     const list = within(c).getByRole('list', { name: 'Streams for Boston Celtics at New York Knicks' });
     let rows = within(list).getAllByTestId('sports-stream');
-    expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide', 'event', 'network']);
+    // One row a card until Show all.
+    expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide']);
+    fireEvent.click(within(c).getByRole('button', { name: 'Show all 5 streams' }));
+    rows = within(list).getAllByTestId('sports-stream');
+    expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide', 'event', 'network', 'network', 'network']);
     expect(within(rows[0]!).getByText('In guide')).toBeTruthy();
     expect(within(rows[1]!).getByText('Event channel')).toBeTruthy();
     expect(within(rows[2]!).getByText('Network')).toBeTruthy();
@@ -357,11 +431,8 @@ describe('sports page', () => {
     expect(within(rows[1]!).getByText('ESPN HD')).toBeTruthy();
     expect(within(c).queryByTestId('sports-stream-source')).toBeNull();
 
-    fireEvent.click(within(c).getByRole('button', { name: 'Show all 5 streams' }));
-    rows = within(list).getAllByTestId('sports-stream');
-    expect(rows).toHaveLength(5);
     fireEvent.click(within(c).getByRole('button', { name: 'Show fewer' }));
-    expect(within(list).getAllByTestId('sports-stream')).toHaveLength(3);
+    expect(within(list).getAllByTestId('sports-stream')).toHaveLength(1);
   });
 
   it('names the source of each stream when there are several', async () => {
@@ -370,6 +441,7 @@ describe('sports page', () => {
     setDay([g]);
     setStreams(g, [h.match(ESPN), h.match(h.channel('7', 'ESPN', { ref: { sourceId: 'src2', contentType: 'live', itemId: '7' } }), { sourceId: 'src2', sourceKind: 'm3u', sourceName: 'Backup list' })]);
     open();
+    fireEvent.click(await within(card(g)).findByRole('button', { name: 'Show all 2 streams' }));
     await waitFor(() => expect(within(card(g)).getAllByTestId('sports-stream-source').map((s) => s.textContent)).toEqual(['Home portal', 'Backup list']));
   });
 
@@ -453,7 +525,8 @@ describe('sports page', () => {
     await openReady();
     const c = card(g);
     const names = () => within(c).getAllByTestId('sports-stream').map((r) => r.querySelector('span[dir="auto"]')?.textContent);
-    expect(names()).toEqual(['ESPN', 'ESPN 1', 'ESPN 2']);
+    // The one row shown is the one that can act.
+    expect(names()).toEqual(['ESPN']);
     expect(within(c).getAllByTestId('sports-replay')).toHaveLength(1);
     expect(within(within(c).getAllByTestId('sports-stream')[0]!).getByTestId('sports-replay')).toBeTruthy();
     // The rest keep matchGame's order.
@@ -518,6 +591,7 @@ describe('sports page', () => {
       { id: 'r1', kind: 'programme', status: 'scheduled', ref: ESPN.ref, start: new Date(g.startMs - 10 * h.MINUTE).toISOString(), end: new Date(g.startMs + 3 * h.HOUR).toISOString(), channelName: 'ESPN' },
     ];
     await openReady(`/sports?day=${tomorrow}`);
+    fireEvent.click(await within(card(g)).findByRole('button', { name: 'Show all 2 streams' }));
     await waitFor(() => expect(within(card(g)).getAllByTestId('sports-recording-set')).toHaveLength(1));
     expect(within(card(g)).getAllByTestId('sports-record')).toHaveLength(1);
     cleanup();
@@ -550,7 +624,9 @@ describe('sports page', () => {
     data.streamsLoading = true;
     await openReady();
     await waitFor(() => expect(within(card(g)).getByTestId('sports-streams-loading').textContent).toBe('Looking for streams…'));
-    expect(within(screen.getByTestId('sports-league-nba')).getByRole('heading', { level: 2 }).textContent).toBe('NBA1 game');
+    expect(within(screen.getByTestId('sports-live')).getByRole('heading', { level: 2 }).textContent).toBe('Live now1');
+    // Nothing is counted as having a stream until matching is done.
+    expect(within(screen.getByTestId('sports-streams-only')).queryByText('0')).toBeNull();
   });
 
   it('shows a skeleton while the day loads', () => {

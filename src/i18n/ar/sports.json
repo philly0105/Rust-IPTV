@@ -4,6 +4,7 @@
   "leagueAll": "الكل",
   "leagueNfl": "NFL",
   "leagueCfb": "كرة القدم الأمريكية الجامعية",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "الأيام",
@@ -66,5 +67,13 @@
   "emptyDayHint": "اختر يومًا آخر أو دوريًا آخر.",
   "noSourcesTitle": "لا توجد مصادر بعد",
   "noSourcesHint": "أضف قائمة تشغيل أو بوابة لمشاهدة هذه المباريات.",
-  "addSource": "إضافة مصدر"
+  "addSource": "إضافة مصدر",
+  "searchTeams": "ابحث عن فريق",
+  "upcoming": "القادمة",
+  "finalGames": "المنتهية",
+  "noMatches": "لا مباريات مطابقة",
+  "noMatchesHint": "جرّب فريقًا أو دوريًا أو يومًا آخر، أو امسح عوامل التصفية.",
+  "clearFilters": "مسح عوامل التصفية",
+  "withStreamsFilter": "ببث",
+  "withStreamsHint": "المباريات التي لها قناة تشاهدها عليها فقط"
 }

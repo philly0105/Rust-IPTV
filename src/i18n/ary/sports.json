@@ -4,6 +4,7 @@
   "leagueAll": "كلشي",
   "leagueNfl": "NFL",
   "leagueCfb": "فوتبول الجامعات الأمريكية",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "النهار",
@@ -66,5 +67,13 @@
   "emptyDayHint": "ختار نهار آخر ولا بطولة أخرى.",
   "noSourcesTitle": "مازال ماكاين حتى مصدر",
   "noSourcesHint": "زيد شي لائحة تشغيل ولا بوابة باش تتفرج فهاد الماتشات.",
-  "addSource": "زيد مصدر"
+  "addSource": "زيد مصدر",
+  "searchTeams": "قلب على فرقة",
+  "upcoming": "الجايين",
+  "finalGames": "اللي سالاو",
+  "noMatches": "ما كاين حتى ماتش مناسب",
+  "noMatchesHint": "جرب فرقة ولا بطولة ولا نهار آخر، ولا مسح الفلاتر.",
+  "clearFilters": "مسح الفلاتر",
+  "withStreamsFilter": "فيهم بث",
+  "withStreamsHint": "غير الماتشات اللي عندها قناة تتفرج فيها"
 }

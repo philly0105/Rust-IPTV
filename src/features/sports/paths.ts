@@ -24,3 +24,22 @@ export function pickDay(day: string): void {
 export function readDay(value: string | null, days: readonly string[], today: string): string {
   return value !== null && days.includes(value) && pickedDays.has(value) ? value : today;
 }
+
+/** Whether "With streams" hides the games no channel was found for: a UI preference, kept in localStorage. */
+const STREAMS_ONLY_KEY = 'tsrust.sportsStreamsOnly';
+
+export function readStreamsOnly(): boolean {
+  try {
+    return localStorage.getItem(STREAMS_ONLY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeStreamsOnly(on: boolean): void {
+  try {
+    localStorage.setItem(STREAMS_ONLY_KEY, on ? '1' : '0');
+  } catch {
+    // storage blocked: the filter still applies, until the page opens again
+  }
+}

@@ -15,6 +15,7 @@ export {
   Button,
   EmptyState,
   ErrorState,
+  FilterChip,
   LivePill,
   MetaLine,
   Page,

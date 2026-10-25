@@ -4,6 +4,7 @@
   "leagueAll": "Alle",
   "leagueNfl": "NFL",
   "leagueCfb": "College football",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "Dag",
@@ -54,5 +55,13 @@
   "emptyDayHint": "Kies een andere dag of competitie.",
   "noSourcesTitle": "Nog geen bronnen",
   "noSourcesHint": "Voeg een playlist of portal toe om deze wedstrijden te kijken.",
-  "addSource": "Bron toevoegen"
+  "addSource": "Bron toevoegen",
+  "searchTeams": "Teams zoeken",
+  "upcoming": "Binnenkort",
+  "finalGames": "Afgelopen",
+  "noMatches": "Geen wedstrijden gevonden",
+  "noMatchesHint": "Probeer een ander team, een andere competitie of dag, of wis de filters.",
+  "clearFilters": "Filters wissen",
+  "withStreamsFilter": "Met streams",
+  "withStreamsHint": "Alleen wedstrijden met een zender om ze op te kijken"
 }

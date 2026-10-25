@@ -4,6 +4,7 @@
   "leagueAll": "All",
   "leagueNfl": "NFL",
   "leagueCfb": "College Football",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "Day",
@@ -54,5 +55,13 @@
   "emptyDayHint": "Pick another day or league.",
   "noSourcesTitle": "No sources yet",
   "noSourcesHint": "Add a playlist or portal to watch these games.",
-  "addSource": "Add a source"
+  "addSource": "Add a source",
+  "searchTeams": "Search teams",
+  "upcoming": "Upcoming",
+  "finalGames": "Final",
+  "noMatches": "No games match",
+  "noMatchesHint": "Try another team, league or day, or clear the filters.",
+  "clearFilters": "Clear filters",
+  "withStreamsFilter": "With streams",
+  "withStreamsHint": "Only games with a channel to watch them on"
 }

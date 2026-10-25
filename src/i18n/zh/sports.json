@@ -4,6 +4,7 @@
   "leagueAll": "全部",
   "leagueNfl": "NFL",
   "leagueCfb": "大学橄榄球",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "日期",
@@ -54,5 +55,13 @@
   "emptyDayHint": "请选择其他日期或联赛。",
   "noSourcesTitle": "还没有播放源",
   "noSourcesHint": "添加播放列表或门户即可观看这些比赛。",
-  "addSource": "添加播放源"
+  "addSource": "添加播放源",
+  "searchTeams": "搜索球队",
+  "upcoming": "即将开始",
+  "finalGames": "已结束",
+  "noMatches": "没有符合条件的比赛",
+  "noMatchesHint": "试试其他球队、联赛或日期，或清除筛选条件。",
+  "clearFilters": "清除筛选",
+  "withStreamsFilter": "有直播源",
+  "withStreamsHint": "只显示有频道可看的比赛"
 }

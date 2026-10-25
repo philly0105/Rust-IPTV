@@ -4,6 +4,7 @@
   "leagueAll": "Tümü",
   "leagueNfl": "NFL",
   "leagueCfb": "Kolej futbolu",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "Gün",
@@ -54,5 +55,13 @@
   "emptyDayHint": "Başka bir gün veya lig seç.",
   "noSourcesTitle": "Henüz kaynak yok",
   "noSourcesHint": "Bu maçları izlemek için bir oynatma listesi veya portal ekle.",
-  "addSource": "Kaynak ekle"
+  "addSource": "Kaynak ekle",
+  "searchTeams": "Takım ara",
+  "upcoming": "Yaklaşan",
+  "finalGames": "Bitenler",
+  "noMatches": "Eşleşen maç yok",
+  "noMatchesHint": "Başka bir takım, lig veya gün dene ya da filtreleri temizle.",
+  "clearFilters": "Filtreleri temizle",
+  "withStreamsFilter": "Yayınlı",
+  "withStreamsHint": "Yalnızca izleyebileceğin bir kanalı olan maçlar"
 }

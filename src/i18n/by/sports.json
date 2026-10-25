@@ -4,6 +4,7 @@
   "leagueAll": "Усе",
   "leagueNfl": "NFL",
   "leagueCfb": "Студэнцкі футбол",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "Дзень",
@@ -60,5 +61,13 @@
   "emptyDayHint": "Выберыце іншы дзень або іншую лігу.",
   "noSourcesTitle": "Крыніц пакуль няма",
   "noSourcesHint": "Дадайце плэйліст або партал, каб глядзець гэтыя матчы.",
-  "addSource": "Дадаць крыніцу"
+  "addSource": "Дадаць крыніцу",
+  "searchTeams": "Пошук каманд",
+  "upcoming": "Хутка",
+  "finalGames": "Завершаныя",
+  "noMatches": "Няма адпаведных матчаў",
+  "noMatchesHint": "Паспрабуйце іншую каманду, лігу ці дзень або скіньце фільтры.",
+  "clearFilters": "Скінуць фільтры",
+  "withStreamsFilter": "З трансляцыяй",
+  "withStreamsHint": "Толькі матчы, якія можна паглядзець на адным з вашых каналаў"
 }

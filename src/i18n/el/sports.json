@@ -4,6 +4,7 @@
   "leagueAll": "Όλα",
   "leagueNfl": "NFL",
   "leagueCfb": "Κολεγιακό φούτμπολ",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "Ημέρα",
@@ -54,5 +55,13 @@
   "emptyDayHint": "Επιλέξτε άλλη ημέρα ή άλλο πρωτάθλημα.",
   "noSourcesTitle": "Δεν υπάρχουν πηγές ακόμα",
   "noSourcesHint": "Προσθέστε μια λίστα ή μια πύλη για να δείτε αυτούς τους αγώνες.",
-  "addSource": "Προσθήκη πηγής"
+  "addSource": "Προσθήκη πηγής",
+  "searchTeams": "Αναζήτηση ομάδων",
+  "upcoming": "Επερχόμενοι",
+  "finalGames": "Ολοκληρωμένοι",
+  "noMatches": "Κανένας αγώνας δεν ταιριάζει",
+  "noMatchesHint": "Δοκιμάστε άλλη ομάδα, πρωτάθλημα ή ημέρα ή καθαρίστε τα φίλτρα.",
+  "clearFilters": "Καθαρισμός φίλτρων",
+  "withStreamsFilter": "Με μετάδοση",
+  "withStreamsHint": "Μόνο αγώνες με κανάλι για να τους δείτε"
 }

@@ -4,6 +4,7 @@
   "leagueAll": "すべて",
   "leagueNfl": "NFL",
   "leagueCfb": "カレッジフットボール",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "日付",
@@ -54,5 +55,13 @@
   "emptyDayHint": "別の日付またはリーグを選んでください。",
   "noSourcesTitle": "ソースがまだありません",
   "noSourcesHint": "これらの試合を見るには、プレイリストまたはポータルを追加してください。",
-  "addSource": "ソースを追加"
+  "addSource": "ソースを追加",
+  "searchTeams": "チームを検索",
+  "upcoming": "これから",
+  "finalGames": "試合終了",
+  "noMatches": "条件に合う試合はありません",
+  "noMatchesHint": "別のチーム、リーグ、日付を試すか、フィルタをクリアしてください。",
+  "clearFilters": "フィルタをクリア",
+  "withStreamsFilter": "配信あり",
+  "withStreamsHint": "視聴できるチャンネルがある試合だけを表示"
 }

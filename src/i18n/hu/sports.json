@@ -4,6 +4,7 @@
   "leagueAll": "Összes",
   "leagueNfl": "NFL",
   "leagueCfb": "Egyetemi amerikai futball",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "Nap",
@@ -54,5 +55,13 @@
   "emptyDayHint": "Válassz másik napot vagy bajnokságot.",
   "noSourcesTitle": "Még nincs forrás",
   "noSourcesHint": "Adj hozzá egy lejátszási listát vagy portált, hogy megnézhesd ezeket a mérkőzéseket.",
-  "addSource": "Forrás hozzáadása"
+  "addSource": "Forrás hozzáadása",
+  "searchTeams": "Csapat keresése",
+  "upcoming": "Hamarosan",
+  "finalGames": "Befejezett",
+  "noMatches": "Nincs ilyen meccs",
+  "noMatchesHint": "Próbálj másik csapatot, bajnokságot vagy napot, vagy töröld a szűrőket.",
+  "clearFilters": "Szűrők törlése",
+  "withStreamsFilter": "Közvetítéssel",
+  "withStreamsHint": "Csak azok a meccsek, amelyekhez van csatorna"
 }

@@ -167,12 +167,18 @@ describe('sports page with its real hooks', () => {
 
     const live = await screen.findByTestId('sports-live');
     // The guide names the game on ESPN; the event channel names both teams; ESPNews carries nothing.
-    await waitFor(() => expect(rows(card(LIVE, live))).toEqual(['guide ESPN HD', 'event NBA 05: Timberwolves vs Heat']));
+    // A card shows the best stream, and the rest behind Show all.
+    await waitFor(() => expect(rows(card(LIVE, live))).toEqual(['guide ESPN HD']));
+    fireEvent.click(within(card(LIVE, live)).getByRole('button', { name: 'Show all 2 streams' }));
+    expect(rows(card(LIVE, live))).toEqual(['guide ESPN HD', 'event NBA 05: Timberwolves vs Heat']);
     expect(within(card(LIVE, live)).getByTestId('sports-clock').textContent).toBe('5:12 - 3rd');
 
+    // The live game leads the page once; the day panel holds the rest, upcoming before final.
     const day = screen.getByTestId('sports-day-panel');
-    expect(within(day).getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual([LIVE, FINAL, LATER]);
-    expect(within(screen.getByTestId('sports-league-nba')).getByRole('heading', { level: 2 }).textContent).toBe('NBA3 games, 3 with streams');
+    expect(within(day).getAllByTestId('sports-game').map((c) => c.getAttribute('data-game'))).toEqual([LATER, FINAL]);
+    expect(within(screen.getByTestId('sports-upcoming')).getByRole('heading', { level: 2 }).textContent).toBe('Upcoming1');
+    expect(within(screen.getByTestId('sports-final')).getByRole('heading', { level: 2 }).textContent).toBe('Final1');
+    expect(within(screen.getByTestId('sports-streams-only')).getByText('3')).toBeTruthy();
     // Over, on ESPN only: the network channel, whose archive holds it.
     expect(rows(card(FINAL, day))).toEqual(['network ESPN HD']);
     // Prime Video is a package, so only the event channel counts.

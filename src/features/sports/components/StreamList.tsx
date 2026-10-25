@@ -1,6 +1,6 @@
 /**
- * The streams matched to one game (lib/match.ts): the first three, rows with an action ahead of
- * rows without, then "Show all". Each row names
+ * The streams matched to one game (lib/match.ts): the best one, rows with an action ahead of rows
+ * without, then "Show all" for the rest, so a card stays one stream tall. Each row names
  * the channel, why it matched (the guide, an event channel's name, or a network carrying the game)
  * and offers what fits the game's phase: Watch from 15 minutes before the start, Replay from the
  * channel's archive once it is over, Record before it starts. The player loads on the press.
@@ -41,8 +41,8 @@ const MINUTE = 60_000;
 export const WATCH_BEFORE_MS = 15 * MINUTE;
 /** A synthetic programme starts this long before the listed start, so a replay or recording opens on the pre-game. */
 const LEAD_MS = 10 * MINUTE;
-/** Rows shown before "Show all". */
-export const STREAMS_SHOWN = 3;
+/** Rows shown before "Show all": the best stream, with the action the game allows now. */
+export const STREAMS_SHOWN = 1;
 
 const REASON_KEYS: Record<MatchReason, string> = { guide: 'reasonGuide', event: 'reasonEvent', network: 'reasonNetwork' };
 

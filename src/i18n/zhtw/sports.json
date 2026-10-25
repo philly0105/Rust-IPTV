@@ -4,6 +4,7 @@
   "leagueAll": "全部",
   "leagueNfl": "NFL",
   "leagueCfb": "大學美式足球",
+  "leagueCfbShort": "NCAAF",
   "leagueNba": "NBA",
   "leagueMlb": "MLB",
   "days": "日期",
@@ -54,5 +55,13 @@
   "emptyDayHint": "請選擇其他日期或聯盟。",
   "noSourcesTitle": "還沒有播放來源",
   "noSourcesHint": "新增播放清單或入口網站即可觀看這些比賽。",
-  "addSource": "新增播放來源"
+  "addSource": "新增播放來源",
+  "searchTeams": "搜尋球隊",
+  "upcoming": "即將開始",
+  "finalGames": "已結束",
+  "noMatches": "沒有符合條件的比賽",
+  "noMatchesHint": "試試其他球隊、聯盟或日期，或清除篩選條件。",
+  "clearFilters": "清除篩選",
+  "withStreamsFilter": "有直播來源",
+  "withStreamsHint": "只顯示有頻道可看的比賽"
 }

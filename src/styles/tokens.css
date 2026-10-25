@@ -452,6 +452,17 @@
 }
 
 /*
+ * A window too short for the rail at full height (a 1080p screen at 125 %, a 900 px laptop): with
+ * Live TV, Movies and Series in the Watch group, Library and the sources fell below the fold. The
+ * rail's links tighten toward compact density's, so the whole rail fits.
+ */
+@media (height < 60rem) {
+  :root:not([data-density='compact']) {
+    --rail-item-height: 2.25rem;
+  }
+}
+
+/*
  * Compact density: every Tailwind spacing step (padding, gaps, control heights)
  * shrinks by an eighth, and the chrome tightens with it. Type sizes stay put, so
  * text never gets smaller than the user's UI scale asks for.

@@ -70,6 +70,11 @@ const NAME_MARKERS = /^(?:sd|hd|fhd|uhd|qhd|4k|8k|hevc|hdr|raw|\d{3,4}[pi]|\d+fp
  * around each word trimmed ("(Backup)" is "Backup") and the markers above dropped, unless the name
  * is nothing but markers. Shared with Live's channel monograms (live/lib/monogram.ts).
  */
+/** A quality or copy marker, or "the" (`NAME_MARKERS`). */
+export function isNameMarker(word: string): boolean {
+  return NAME_MARKERS.test(word);
+}
+
 export function initialWords(text: string): string[] {
   const words = text
     .normalize('NFKC')
@@ -103,7 +108,7 @@ export function twoInitials(words: readonly string[]): string {
  * A provider's country or group tag before a name ("US| ", "UK: ", "[DE] "), which no initial should
  * come from. Before a colon only a two-letter code counts: "CSI: Miami" and "NCIS: LA" are titles.
  */
-const NAME_TAG = /^(?:\[[A-Z0-9+-]{2,8}\]|[A-Z]{2,3}\s*\||[A-Z]{2}\s*:)\s*/;
+const NAME_TAG = /^(?:\[[A-Z0-9+-]{2,8}\]|\|?[A-Z]{2,3}\s*\||[A-Z]{2}\s*:)\s*/;
 
 /** Up to two initials for fallback tiles ("BBC One HD" -> "BO", "US| ESPN HD" -> "ES", "US| CBS (Backup)" -> "CB"). */
 export function initialsOf(text: string): string {

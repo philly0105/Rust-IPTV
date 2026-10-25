@@ -28,7 +28,7 @@ describe('fallback initials', () => {
     // A name of markers only keeps them.
     expect(initialsOf('HD')).toBe('HD');
     // Pipes and plus signs are no initials; a title with a colon keeps its first word.
-    expect(initialsOf('|EN| The Matrix')).toBe('EM');
+    expect(initialsOf('|EN| The Matrix')).toBe('MA');
     expect(initialsOf('4K | Dune')).toBe('DU');
     expect(initialsOf('IPTV | Main')).toBe('IM');
     expect(initialsOf('CSI: Miami')).toBe('CM');
@@ -51,8 +51,10 @@ describe('fallback initials', () => {
     expect(monogramText('NFL 03: Cleveland Browns vs Tennessee Titans @ 1:00 PM ET')).toBe('CT');
     expect(monogramText('NFL  | 03 - 1pm 49ers at Falcons')).toBe('4F');
     expect(monogramText('NBA 05: Celtics vs Knicks')).toBe('CK');
-    // A name with "at" in it but no matchup keeps its own initials.
-    expect(monogramText('Art at Home')).toBe('AH');
+    expect(monogramText('NFL 05: 1 PM Bears at Packers')).toBe('BP');
+    // A side of quality markers is no team: the name keeps its own initials.
+    expect(monogramText('Channel V HD')).toBe('CV');
+    expect(monogramText('Planet X 4K')).toBe('PX');
     // A letter outside the Basic Multilingual Plane and an emoji stay whole.
     expect(monogramText('𠀀 Beta')).toBe('𠀀B');
     expect(monogramText('🏈 Sunday Football')).toBe('🏈S');

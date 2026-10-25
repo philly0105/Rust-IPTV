@@ -1,4 +1,4 @@
-import { hueOf, initialWords, twoInitials } from '@/ui/Poster';
+import { hueOf, initialWords, isNameMarker, twoInitials } from '@/ui/Poster';
 
 /**
  * A channel's monogram (LG-14): two letters on a two-stop fill from its name, one of eight hues
@@ -19,12 +19,12 @@ export function monogramFill(name: string): string {
 const SLOT_TAG = /^[A-Z]{2,5}\s*[|:-]?\s*\d{1,3}\s*[:|-]\s*/;
 /** The word between the two teams of a matchup. */
 const MATCHUP = /\s+(?:vs\.?|v\.?|versus|at|@|x)\s+/i;
-/** A slot number or a kickoff time ("03", "1pm", "8:20pm"), never a team's initial. */
-const NOT_A_NAME = /^\d+(?::\d+)?(?:am|pm)?$/i;
+/** A slot number, a kickoff time or its zone ("03", "1pm", "8:20", "PM", "ET"), never a team's initial. */
+const NOT_A_NAME = /^(?:\d+(?::\d+)?(?:am|pm)?|am|pm|et|pt|ct|mt|est|edt|pst|pdt|cst|cdt|gmt|utc)$/i;
 
-/** The first letter of the first word of a matchup side that names something. */
+/** The first letter of the first word of a matchup side that names something, past markers ("HD", "4K"). */
 function sideInitial(side: string): string | undefined {
-  const word = initialWords(side).find((w) => !NOT_A_NAME.test(w));
+  const word = initialWords(side).find((w) => !NOT_A_NAME.test(w) && !isNameMarker(w));
   return word === undefined ? undefined : Array.from(word)[0];
 }
 

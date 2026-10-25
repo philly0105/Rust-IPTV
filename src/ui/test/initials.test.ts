@@ -32,7 +32,11 @@ describe('fallback initials', () => {
     expect(monogramText('UK: BBC One HD')).toBe('BO');
     expect(monogramText('US| ESPN ᴴᴰ')).toBe('ES');
     expect(monogramText('US| CBS (Backup)')).toBe('CB');
-    expect(monogramText('US| FS1 4K')).toBe('FS');
+    // A family's numbered channels keep apart.
+    expect(monogramText('US| FS1 4K')).toBe('F1');
+    expect(monogramText('US| ESPN2 FHD')).toBe('E2');
+    expect(monogramText('US| ESPN HD')).toBe('ES');
+    expect(monogramText('M6')).toBe('M6');
     expect(monogramText('Sport 1')).toBe('S1');
     expect(monogramText('Meridian News HD')).toBe('MN');
     // A letter outside the Basic Multilingual Plane and an emoji stay whole.

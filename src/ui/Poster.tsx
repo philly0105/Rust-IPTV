@@ -81,10 +81,18 @@ export function initialWords(text: string): string[] {
   return named.length > 0 ? named : words;
 }
 
-/** Two letters from `words`, by code point: the first of each of the first two words, or one word's first two letters or digits. */
+/**
+ * Two letters from `words`, by code point: the first of each of the first two words, or one word's first
+ * two letters or digits, or its first and last when it ends in a digit, so a channel family keeps apart
+ * ("ESPN" ES, "ESPN2" E2, "FS1" F1).
+ */
 export function twoInitials(words: readonly string[]): string {
   if (words.length === 0) return '?';
-  if (words.length === 1) return Array.from(words[0]!.replace(/[^\p{L}\p{N}]/gu, '') || words[0]!).slice(0, 2).join('').toUpperCase();
+  if (words.length === 1) {
+    const chars = Array.from(words[0]!.replace(/[^\p{L}\p{N}]/gu, '') || words[0]!);
+    const last = chars[chars.length - 1]!;
+    return (chars.length > 2 && /\d/.test(last) ? chars[0]! + last : chars.slice(0, 2).join('')).toUpperCase();
+  }
   return (Array.from(words[0]!)[0]! + Array.from(words[1]!)[0]!).toUpperCase();
 }
 

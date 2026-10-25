@@ -412,9 +412,35 @@ describe('network aliases', () => {
     expect(id('Fox Sports 2')).toBe('fs2');
     expect(id('Fox News')).toBeNull();
     expect(id('US | FOX NEWS HD')).toBeNull();
+    expect(id('US: FOX NEWS HD')).toBeNull();
     expect(id('Fox Business')).toBeNull();
-    expect(id('FOX Sports Detroit')).toBeNull();
+    // A regional network's old name, not FOX.
+    expect(id('FOX Sports Detroit')).toBe('fdsn-detroit');
+    expect(id('FOX Sports')).toBeNull();
     expect(id('FOX Deportes')).toBe('fox-deportes');
+  });
+
+  it("reads a real provider's FOX Sports, Bally Sports and TSN channels", () => {
+    const want: Record<string, string | null> = {
+      'US: FOX SPORTS 1 4K': 'fs1',
+      'US: FOX SPORTS 2 HD': 'fs2',
+      'US: FOX SPORTS DETROIT HD': 'fdsn-detroit',
+      'US: FOX SPORTS SOUTH HD': 'fdsn-south',
+      'US: FOX SPORTS SOUTH EAST HD': 'fdsn-southeast',
+      'US: FOX SPORTS SOUTH WEST HD': 'fdsn-southwest',
+      'US: FOX SPORTS MID WEST HD': 'fdsn-midwest',
+      'US: FOX SPORTS PRIME TICKET HD': 'fdsn-socal',
+      'US: FOX SPORTS COLLEGE ATLANTIC HD': null,
+      'US: BALLY SPORTS SOUTHWEST PLUS (DALLAS) HD': 'fdsn-southwest',
+      'US: BALLY SPORTS SUN (MIAMI) HD': 'fdsn-sun',
+      'US: BALLY SPORTS PRIME TICKET HD': 'fdsn-socal',
+      'CA EN: TSN 1': 'tsn',
+      'CA EN: TSN 5': 'tsn',
+      'CA EN: SPORTSNET ONTARIO': 'sportsnet',
+    };
+    for (const [name, expected] of Object.entries(want)) expect(id(name), name).toBe(expected);
+    expect(networkIdForBroadcast('TSN')).toBe('tsn');
+    expect(networkIdForBroadcast('FanDuel SN Detroit')).toBe('fdsn-detroit');
   });
 
   it('reads the network a slot channel carries after its league word and number', () => {

@@ -535,11 +535,16 @@ function net(id: string, kind: NetworkKind, search: string, names: readonly stri
   return alias;
 }
 
-/** FanDuel Sports Network regions (the former Bally Sports and Fox Sports regionals). */
-const FDSN_REGIONS = [
-  'Arizona', 'Detroit', 'Florida', 'Great Lakes', 'Indiana', 'Kansas City', 'Midwest', 'New Orleans', 'North', 'Ohio',
-  'Oklahoma', 'San Diego', 'SoCal', 'South', 'Southeast', 'Southwest', 'Sun', 'West', 'Wisconsin',
-];
+/**
+ * FanDuel Sports Network regions (the former Bally Sports and Fox Sports regionals), each with the other
+ * spellings providers still name its channel by ("FOX SPORTS SOUTH EAST", "BALLY SPORTS PRIME TICKET").
+ */
+const FDSN_REGIONS: Record<string, readonly string[]> = {
+  Arizona: [], Detroit: [], Florida: [], 'Great Lakes': [], Indiana: [], 'Kansas City': [], Midwest: ['Mid West'],
+  'New Orleans': [], North: [], Ohio: [], Oklahoma: [], 'San Diego': [], SoCal: ['Prime Ticket'], South: [],
+  Southeast: ['South East'], Southwest: ['South West'], Sun: [], West: [], Wisconsin: [],
+};
+const FDSN_BRANDS = ['FanDuel Sports Network', 'FanDuel Sports', 'FanDuel SN', 'FDSN', 'Bally Sports', 'Fox Sports'];
 
 /** Editions of a US brand abroad, with or without a country tag ("ESPN Brasil", "ESPN 2 Sur"). */
 const abroad = (brands: readonly string[], editions: readonly string[]) => brands.flatMap((b) => editions.map((e) => `${b} ${e}`));
@@ -631,6 +636,8 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('sportsnet', 'rsn', 'Sportsnet', ['Sportsnet']),
   net('sportsnet-one', 'rsn', 'Sportsnet', ['Sportsnet One', 'Sportsnet 1', 'SN1']),
   net('sportsnet-pittsburgh', 'rsn', 'Sportsnet', ['SportsNet Pittsburgh', 'AT&T SportsNet Pittsburgh']),
+  // Canada's TSN, which ESPN lists for the Raptors and Blue Jays: one game goes out on some of its five feeds.
+  net('tsn', 'rsn', 'TSN', ['TSN', 'TSN1', 'TSN2', 'TSN3', 'TSN4', 'TSN5']),
   net('tva-sports', 'rsn', 'TVA Sports', ['TVA Sports', 'TVA']),
   net('gcsen', 'rsn', 'GCSEN', ['GCSEN', 'Gulf Coast Sports']),
   net('altitude', 'rsn', 'Altitude', ['Altitude Sports', 'Altitude']),
@@ -641,14 +648,8 @@ export const NETWORKS: readonly NetworkAlias[] = [
     'NBC Sports Phil +',
   ]),
   net('nbcs-boston', 'rsn', 'NBC Sports', ['NBC Sports Boston', 'NBCS Boston']),
-  ...FDSN_REGIONS.map((r) =>
-    net(`fdsn-${textTokens(r).join('-')}`, 'rsn', 'FanDuel', [
-      `FanDuel Sports Network ${r}`,
-      `FanDuel Sports ${r}`,
-      `FanDuel SN ${r}`,
-      `FDSN ${r}`,
-      `Bally Sports ${r}`,
-    ]),
+  ...Object.entries(FDSN_REGIONS).map(([r, spellings]) =>
+    net(`fdsn-${textTokens(r).join('-')}`, 'rsn', 'FanDuel', [r, ...spellings].flatMap((s) => FDSN_BRANDS.map((b) => `${b} ${s}`))),
   ),
   // Local stations that carry team games (ESPN market home/away).
   net('kfaa', 'local', 'KFAA', ['KFAA']),

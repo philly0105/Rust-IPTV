@@ -356,7 +356,31 @@ describe('groups sidebar', () => {
     renderIn('/', [{ path: '/', element: withScope('g0') }]);
     expect((screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement).value).toBe('UK');
     expect(names()).toEqual(['US| SPORT ᴴᴰ', 'UK| SPORT', 'UK| NEWS']);
+    cleanup();
+
+    // The sidebar stays mounted when Live TV moves to another source: that source's own pick shows.
+    localStorage.setItem('tsrust.liveRegion:src2:live', 'US');
+    const otherSource = (scope: string) => (
+      <CategorySidebar
+        categories={tagged}
+        hiddenCount={0}
+        isLoading={false}
+        error={null}
+        onRetry={() => undefined}
+        hrefFor={(id) => `/s/src1/live${id ? `/${id}` : ''}`}
+        onManage={() => undefined}
+        totalLabel="All channels"
+        regionScope={scope}
+      />
+    );
+    const view = render(<I18nextProvider i18n={i18n}><MemoryRouter>{otherSource('src1:live')}</MemoryRouter></I18nextProvider>);
+    expect((screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement).value).toBe('UK');
+    view.rerender(<I18nextProvider i18n={i18n}><MemoryRouter>{otherSource('src2:live')}</MemoryRouter></I18nextProvider>);
+    expect((screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement).value).toBe('US');
+    view.rerender(<I18nextProvider i18n={i18n}><MemoryRouter>{otherSource('src1:radio')}</MemoryRouter></I18nextProvider>);
+    expect((screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement).value).toBe('');
     localStorage.removeItem('tsrust.liveRegion:src1:live');
+    localStorage.removeItem('tsrust.liveRegion:src2:live');
     cleanup();
 
     // Mostly untagged groups: no picker.

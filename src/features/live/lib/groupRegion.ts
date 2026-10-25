@@ -6,7 +6,14 @@
 
 import { stripCountryPrefix } from './channelName';
 
-/** The group's tag in upper case ("US" for "US| SPORT ᴴᴰ"), or null when its name has none. */
+/** Region tags longer than a country code that playlists use ("LATAM| DEPORTES", "EXYU| SPORT"). */
+const LONG_TAGS = new Set(['LATAM', 'EXYU', 'ARAB', 'ARABIC', 'ASIA', 'AFRICA', 'EURO', 'NORDIC', 'BALKAN', 'CARIB', 'MENA']);
+
+/**
+ * The group's tag ("US" for "US| SPORT ᴴᴰ"), or null when its name has none. A tag is a country code
+ * written in capitals (two or three characters) or one of the longer region names above, so a playlist
+ * that files "Movies | Action" and "Sports | NBA" gets no region picker.
+ */
 export function groupRegion(name: string): string | null {
   const trimmed = name.trim();
   const rest = stripCountryPrefix(trimmed);
@@ -14,9 +21,9 @@ export function groupRegion(name: string): string | null {
   const tag = trimmed
     .slice(0, trimmed.length - rest.length)
     .replace(/^[\s|[]+|[\s|:\-\]]+$/g, '')
-    .normalize('NFKC')
-    .toUpperCase();
-  return tag.length >= 2 && tag.length <= 8 ? tag : null;
+    .normalize('NFKC');
+  if (tag !== tag.toUpperCase()) return null;
+  return (tag.length >= 2 && tag.length <= 3) || LONG_TAGS.has(tag) ? tag : null;
 }
 
 export interface GroupRegion {

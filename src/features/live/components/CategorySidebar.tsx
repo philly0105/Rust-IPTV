@@ -82,8 +82,15 @@ export function CategorySidebar(props: CategorySidebarProps) {
 
   const lone = !!props.hideLoneGroup && props.categories?.length === 1 && props.categories[0]!.id !== props.activeId;
   const regions = useMemo(() => groupRegions((props.categories ?? []).map((c) => c.name)), [props.categories]);
-  const [regionPick, setRegionPick] = useState(() => readRegion(props.regionScope));
-  // A pick from another source, or a tag the playlist no longer has, shows every group.
+  // The pick of the scope on show: the sidebar stays mounted when Live TV moves to another source or
+  // to Radio, so the stored pick is read again for the new scope in the same render.
+  const [picked, setPicked] = useState(() => ({ scope: props.regionScope, tag: readRegion(props.regionScope) }));
+  let regionPick = picked.tag;
+  if (picked.scope !== props.regionScope) {
+    regionPick = readRegion(props.regionScope);
+    setPicked({ scope: props.regionScope, tag: regionPick });
+  }
+  // A tag the playlist no longer has shows every group.
   const region = regionPick && regions.some((r) => r.tag === regionPick) ? regionPick : null;
   const visible = useMemo(() => {
     if (lone) return [];
@@ -229,7 +236,7 @@ export function CategorySidebar(props: CategorySidebarProps) {
             onValueChange={(v) => {
               const next = v || null;
               writeRegion(props.regionScope, next);
-              setRegionPick(next);
+              setPicked({ scope: props.regionScope, tag: next });
               setCursor(ALL);
             }}
             options={[

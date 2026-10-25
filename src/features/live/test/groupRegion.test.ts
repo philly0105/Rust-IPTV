@@ -13,6 +13,14 @@ describe('group regions', () => {
     expect(groupRegion('[FR] Cinéma')).toBe('FR');
     expect(groupRegion('NCIS: LA')).toBe(null);
     expect(groupRegion('Sports')).toBe(null);
+    expect(groupRegion('LATAM| DEPORTES')).toBe('LATAM');
+  });
+
+  it('takes no word for a country: a group named "Movies | Action" has no region', () => {
+    expect(groupRegion('Movies | Action')).toBe(null);
+    expect(groupRegion('Sports | NBA')).toBe(null);
+    expect(groupRegion('MOVIES | ACTION')).toBe(null);
+    expect(groupRegions(['Movies | Action', 'Movies | Comedy', 'Sports | NFL', 'Sports | NBA'])).toEqual([]);
   });
 
   it('offers tags of two groups or more, most groups first, when most groups are tagged', () => {

@@ -40,6 +40,7 @@ export { ChannelLogo } from '@/features/live/components/ChannelLogo';
 export { useRecordingCapabilities, useScheduleActions, useScheduleIndex } from '@/features/recording/hooks';
 export { markFor } from '@/features/recording/lib/schedule';
 export { openExternalUrl } from '@/features/settings/lib/links';
+export { useMultiviewMenuItem } from '@/features/multiview/useMultiviewMenuItem';
 
 /** Live's playChannel and playCatchup, which load the player: only ever behind a press. */
 export const loadPlayback = () => import('@/features/live/lib/playback');

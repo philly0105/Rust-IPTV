@@ -1,7 +1,8 @@
 /**
  * One game, compact: a status line (the league when every league shows, LIVE with the clock, the
  * final, the start time in the user's language and zone, or a postponement, then the networks and a
- * menu to follow either team or open ESPN's Gamecast), both teams with logos, ranks, records, scores
+ * menu to put the game's best stream on the multi-view wall while it is on, follow either team or
+ * open ESPN's Gamecast), both teams with logos, ranks, records, scores
  * and a star on a followed team, ESPN's notes, then the matched streams. Team names, notes and
  * network names are ESPN's English text and stay as they are (dir="auto").
  */
@@ -9,12 +10,12 @@
 import { ExternalLink, Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Badge, LivePill, Menu, MetaLine, cn, formatClock, formatDay, openExternalUrl } from '../deps';
+import { Badge, LivePill, Menu, MetaLine, cn, displayChannelName, formatClock, formatDay, openExternalUrl, useMultiviewMenuItem } from '../deps';
 import { setFollowed, teamKey, useFollowedTeams } from '../hooks/useFollowedTeams';
 import type { StreamMatch } from '../lib/match';
 import type { Game, GameTeam } from '../lib/types';
 import { LEAGUE_SHORT_KEYS } from './LeagueFilter';
-import { StreamList, type StreamContext } from './StreamList';
+import { StreamList, streamAction, type StreamContext } from './StreamList';
 
 /** The viewer's local date of `t` as 'YYYY-MM-DD', to compare with a game's Eastern date. */
 function localDate(t: number): string {
@@ -129,6 +130,20 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
     };
   });
   const gamecast = game.gamecastUrl;
+  // While Watch is on offer (the game is on, or starts within 15 minutes), the menu puts the best
+  // stream that plays it on the multi-view wall, so a Sunday's games can share the screen.
+  const wallStream = streams?.find((m) => streamAction(game, m, ctx.now, ctx.canRecord, title)?.kind === 'watch');
+  const wallItem = useMultiviewMenuItem(
+    wallStream
+      ? {
+          ref: wallStream.channel.ref,
+          title: displayChannelName(wallStream.channel.name, ctx.strip) || wallStream.channel.name,
+          ...(wallStream.channel.logoUrl ? { logo: wallStream.channel.logoUrl } : {}),
+          ...(wallStream.channel.number !== undefined ? { number: wallStream.channel.number } : {}),
+          ...(wallStream.channel.categoryId ? { categoryId: wallStream.channel.categoryId } : {}),
+        }
+      : null,
+  );
   return (
     <li
       className={cn(
@@ -169,6 +184,7 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
           align="end"
           triggerClassName="-my-1.5 -me-1.5 size-8 shrink-0 text-fg-muted"
           items={[
+            ...(wallStream ? [wallItem, { id: 'multiview-sep', type: 'separator' as const }] : []),
             ...menu,
             ...(gamecast
               ? [

@@ -18,6 +18,7 @@ import { queryClient } from '@/api/query';
 import type { Channel, Source } from '@/api/types';
 import common from '@/i18n/en/common.json';
 import live from '@/i18n/en/live.json';
+import multiview from '@/i18n/en/multiview.json';
 import sports from '@/i18n/en/sports.json';
 import { shortcutRegistry } from '@/shell/shortcuts';
 import { useShellStore } from '@/shell/store';
@@ -31,9 +32,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['sports', 'common', 'live'],
+  ns: ['sports', 'common', 'live', 'multiview'],
   defaultNS: 'sports',
-  resources: { en: { sports, common, live } },
+  resources: { en: { sports, common, live, multiview } },
   interpolation: { escapeValue: false },
   initAsync: false,
 });

@@ -17,6 +17,8 @@ vi.mock('@/api/transport', async (importOriginal) => ({
   isDesktop: false,
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
+// Multi-view's parental gate lets every channel up here; the gate has tests of its own.
+vi.mock('@/features/multiview/parentalGate', () => ({ ensureUnlocked: async () => true, requestPin: async () => true }));
 
 /** What the mocked hooks answer, and what the page asked them for. */
 const data = vi.hoisted(() => ({
@@ -91,6 +93,7 @@ const { formatClock } = await import('@/features/live/lib/epgTime');
 const { pickDay } = await import('../paths');
 const { gameProgram, streamAction } = await import('../components/StreamList');
 const { forgetFollowedTeamsForTests } = await import('../hooks/useFollowedTeams');
+const { useMultiviewStore } = await import('@/features/multiview/store');
 
 const today = () => etDate(Date.now());
 /** The Today tab, named with its date ("Today Oct 25"). */
@@ -149,6 +152,7 @@ beforeEach(() => {
   localStorage.removeItem('tsrust.sportsMyTeamsOnly');
   localStorage.removeItem('tsrust.sportsStreamsOnly');
   forgetFollowedTeamsForTests();
+  useMultiviewStore.setState({ tiles: [] });
   rpc.handlers['sources.list'] = () => h.SOURCES;
   rpc.handlers['settings.get'] = () => ({ stripCountryPrefix: true });
   rpc.handlers['recordings.capabilities'] = () => ({ supported: true });
@@ -309,6 +313,25 @@ describe('sports page', () => {
     fireEvent.click(items[2]!);
     expect(opened).toHaveBeenCalledWith('https://www.espn.com/nba/game/_/gameId/1', '_blank', 'noopener');
     opened.mockRestore();
+  });
+
+  it("puts a live game's best stream on the multi-view wall from its menu", async () => {
+    const g = h.liveGame('1');
+    const later = h.game('2', { league: 'nfl', startMs: Date.now() + 2 * h.HOUR, home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
+    setDay([g, later]);
+    setStreams(g, [h.match(EVENT, { reason: 'event' }), h.match(ESPN)]);
+    setStreams(later, [h.match(ESPN)]);
+    await openReady();
+    fireEvent.click(within(card(g)).getByRole('button', { name: 'More for Boston Celtics at New York Knicks' }));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.map((i) => i.textContent)).toEqual(['Add to multi-view', 'Follow Boston Celtics', 'Follow New York Knicks']);
+    fireEvent.click(items[0]!);
+    await waitFor(() => expect(useMultiviewStore.getState().tiles.map((t) => t.title)).toEqual(['NBA 05: Celtics vs Knicks']));
+    expect(useMultiviewStore.getState().tiles[0]!.ref).toEqual(EVENT.ref);
+    await waitFor(() => expect(h.lastToast()?.title).toBe('Added NBA 05: Celtics vs Knicks to multi-view'));
+    // Two hours before the start there is nothing to put up yet.
+    fireEvent.click(within(card(later)).getByRole('button', { name: 'More for New England Patriots at Chicago Bears' }));
+    await waitFor(() => expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Follow New England Patriots', 'Follow Chicago Bears']));
   });
 
   it('follows a team from a card, stars it everywhere, and "My teams" keeps only its games', async () => {

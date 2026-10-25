@@ -727,3 +727,23 @@ describe('broadcast network stations', () => {
     expect(teamMarkets({ location: 'Detroit' })).toEqual([['detroit']]);
   });
 });
+
+describe('a network on a TV service\'s lineup', () => {
+  const id = (name: string) => networkIdForChannel(nameTokens(name));
+
+  it('reads the network a service name or lineup tag leads into', () => {
+    expect(id('PRIME: ABC CINCINNATI (WCPO) ᴿᴬᵂ')).toBe('abc');
+    expect(affiliateMarket(nameTokens('PRIME: ABC CINCINNATI (WCPO) ᴿᴬᵂ'))).toEqual(['cincinnati', 'wcpo']);
+    expect(id('US: PRIME MLB NETWORK ᴿᴬᵂ')).toBe('mlb-network');
+    expect(id('US: SLING MLB NETWORK ᴴᴰ')).toBe('mlb-network');
+    expect(id('US: TUBI FOX SPORTS 1')).toBe('fs1');
+  });
+
+  it('keeps the service for its own channels', () => {
+    expect(id('PRIME: 80S SITCOM ᴿᴬᵂ')).toBe('prime-video');
+    expect(id('Prime Video')).toBe('prime-video');
+    expect(id('ESPN+ 012: Texas vs Georgia')).toBe('espn-plus');
+    // An avoided network after the service ("ABC News") is no network: the service stays.
+    expect(id('PRIME: ABC NEWS LIVE ᴿᴬᵂ')).toBe('prime-video');
+  });
+});

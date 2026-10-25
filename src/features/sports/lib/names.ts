@@ -739,6 +739,19 @@ export function networkAlias(id: string): NetworkAlias | undefined {
 const LEAD_TAGS = new Set(['us', 'usa', 'ca', 'can', 'uk', 'en']);
 /** League words a slot channel opens with, before its number and the network it carries ("NCAAF 02: ESPN2"). */
 const SLOT_LEAGUES = new Set(['nfl', 'ncaaf', 'cfb', 'ncaa', 'nba', 'mlb']);
+/** Live TV services a provider names a channel's lineup after ("US: SLING MLB NETWORK"): not the channel. */
+const SERVICE_TAGS = new Set(['sling', 'tubi', 'hulu', 'philo', 'directv', 'fubo', 'roku', 'pluto', 'xfinity', 'vidgo', 'frndly']);
+
+/**
+ * The network a name opens with at `at`: a package service's name followed at once by a network's is that
+ * network on the service's lineup ("PRIME: ABC CINCINNATI (WCPO)", "US: PRIME MLB NETWORK"), not the service.
+ */
+function leadingNetwork(tokens: readonly string[], at: number): { alias: NetworkAlias; end: number } | null | undefined {
+  const hit = networkAt(tokens, at);
+  if (!hit || hit.alias.kind !== 'package') return hit;
+  const next = networkAt(tokens, hit.end);
+  return next && next.alias.kind !== 'package' ? next : hit;
+}
 const NUMBER = /^\d+$/;
 
 /**
@@ -771,12 +784,12 @@ function networkAt(tokens: readonly string[], at: number): { alias: NetworkAlias
 export function networkIdForChannel(tokens: readonly string[]): string | null {
   let slot = false;
   for (let at = 0; at < tokens.length; at++) {
-    const hit = networkAt(tokens, at);
+    const hit = leadingNetwork(tokens, at);
     if (hit === null) return null;
     if (hit) return hit.alias.kind !== 'package' && separated(tokens, hit.end, MATCHUP_WORDS) ? null : hit.alias.id;
     const t = tokens[at]!;
     if (SLOT_LEAGUES.has(t)) slot = true;
-    else if (!LEAD_TAGS.has(t) && !(slot && (NUMBER.test(t) || t === DASH))) break;
+    else if (!LEAD_TAGS.has(t) && !SERVICE_TAGS.has(t) && !(slot && (NUMBER.test(t) || t === DASH))) break;
   }
   if (separated(tokens, 0, MATCHUP_WORDS)) return null;
   for (const n of LOCALS) if (n.phrases.some((p) => findPhrase(tokens, p) >= 0)) return n.id;
@@ -802,12 +815,12 @@ const FEED_WORDS = new Set([
 export function affiliateMarket(tokens: readonly string[]): string[] | null {
   let slot = false;
   for (let at = 0; at < tokens.length; at++) {
-    const hit = networkAt(tokens, at);
+    const hit = leadingNetwork(tokens, at);
     if (!hit) {
       if (hit === null) return null;
       const t = tokens[at]!;
       if (SLOT_LEAGUES.has(t)) slot = true;
-      else if (!LEAD_TAGS.has(t) && !(slot && (NUMBER.test(t) || t === DASH))) return null;
+      else if (!LEAD_TAGS.has(t) && !SERVICE_TAGS.has(t) && !(slot && (NUMBER.test(t) || t === DASH))) return null;
       continue;
     }
     if (!AFFILIATED.has(hit.alias.id)) return null;

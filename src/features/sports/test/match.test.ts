@@ -339,17 +339,18 @@ describe('a real provider’s event channels', () => {
 });
 
 describe('team channels', () => {
-  it('match their team’s games, home or away, after the event channels and before the networks', () => {
+  it('match their team’s games, home or away, after the event channels, and after a national network as regional', () => {
     const g = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: national('ESPN') });
     const index = ['NBA: BOSTON CELTICS SD', 'US: ESPN HD', 'NBA: BOSTON CELTICS ᴴᴰ', 'NBA: NEW YORK KNICKS ᴴᴰ', 'NBA 05: Knicks @ Celtics', 'NBA: MIAMI HEAT ᴴᴰ'].map(
       (n) => indexed(n),
     );
+    // ESPN carries it nationally, so the teams' own feeds may be blacked out.
     expect(brief(matchGame(g, index, NONE))).toEqual([
       ['NBA 05: Knicks @ Celtics', 'event', false],
-      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
-      ['NBA: NEW YORK KNICKS ᴴᴰ', 'team', false],
-      ['NBA: BOSTON CELTICS SD', 'team', false],
       ['US: ESPN HD', 'network', false],
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', true],
+      ['NBA: NEW YORK KNICKS ᴴᴰ', 'team', true],
+      ['NBA: BOSTON CELTICS SD', 'team', true],
     ]);
     const mlb = ['US: MLB NEW YORK YANKEES ᴿᴬᵂ', 'US: MLB BOSTON RED SOX ᴿᴬᵂ', 'US: MLB NETWORK', 'US: PRIME MLB ᴴᴰ', 'US: SLING MLB NETWORK ᴴᴰ'].map((n) => indexed(n));
     expect(brief(matchGame(MLB_GAME, mlb, NONE))).toEqual([
@@ -585,6 +586,28 @@ describe('network channels', () => {
     expect(brief(matchGame(pre, [ny], NONE))).toEqual([['CBS 2 New York', 'network', false]]);
   });
 
+  it('puts a team channel after the national network that carries the game, as regional', () => {
+    const celtics = indexed('NBA: BOSTON CELTICS ᴴᴰ');
+    const espn = indexed('US| ESPN HD');
+    // On ESPN nationally: the team's own feed may be blacked out.
+    const onEspn = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: national('ESPN') });
+    expect(brief(matchGame(onEspn, [celtics, espn], NONE))).toEqual([
+      ['US| ESPN HD', 'network', false],
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', true],
+    ]);
+    // On the teams' regional networks only: the team's feed carries it, ahead of them.
+    const local = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', {
+      broadcasts: [
+        { name: 'NBC Sports Boston', market: 'home', kind: 'tv' },
+        { name: 'MSG', market: 'away', kind: 'tv' },
+      ],
+    });
+    expect(brief(matchGame(local, [celtics, indexed('MSG')], NONE))).toEqual([
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
+      ['MSG', 'network', true],
+    ]);
+  });
+
   it("counts a broadcast network's local stations only in the teams' markets", () => {
     // Sun 2026-10-18 1:00 PM EDT on FOX only: a regional window game.
     const lions = team('DET', 'Detroit', 'Lions');
@@ -806,11 +829,11 @@ describe('candidates', () => {
       ['Sports 1', 'guide', false],
       ['Sports 2', 'guide', false],
       ['NBA League Pass 07: Knicks @ Celtics', 'event', false],
-      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
-      ['NBA: CELTICS', 'team', false],
-      ['NBA: NEW YORK KNICKS (NYK) SD', 'team', false],
       ['US: ESPN', 'network', false],
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', true],
+      ['NBA: CELTICS', 'team', true],
       ['NESN', 'network', true],
+      ['NBA: NEW YORK KNICKS (NYK) SD', 'team', true],
     ]);
     expect(names(matchGame(MLB_GAME, index, programs, now))).toContain('US: MLB NEW YORK YANKEES ᴿᴬᵂ');
     expect(names(matchGame(CFB_GAME, index, programs, now))).toContain('NCAAF: TEXAS LONGHORNS');

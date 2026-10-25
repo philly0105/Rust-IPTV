@@ -41,7 +41,10 @@ export interface StreamMatch {
   sourceKind: SourceKind;
   sourceName: string;
   reason: MatchReason;
-  /** A network match that may carry another regional game (NFL Sunday CBS/FOX, regional networks, local stations). */
+  /**
+   * A network match that may carry another regional game (NFL Sunday CBS/FOX, regional networks, local
+   * stations), or a team channel of a game a national network carries, which the team's feed may black out.
+   */
   regional: boolean;
   /** The matched guide programme, in display time. */
   program: EpgProgram | null;
@@ -548,12 +551,18 @@ interface GameRoutes {
   locals: string[][];
   /** The teams' markets, for broadcast network stations (`networkMatch`). */
   markets: string[][];
+  /**
+   * ESPN lists a network that reaches every market (ESPN, TNT, NBC on Sunday night): the teams' own
+   * feeds are often blacked out for such a game, so a team channel is regional and follows that network.
+   */
+  national: boolean;
 }
 
 function routesOf(game: Game): GameRoutes {
   const networks = gameNetworks(game);
   const locals = [...networks.keys()].flatMap((id) => (networkAlias(id)?.kind === 'local' ? networkAlias(id)!.phrases : []));
-  return { window: gameWindow(game), networks, locals, markets: [...teamMarkets(game.home), ...teamMarkets(game.away)] };
+  const national = [...networks.values()].some((regional) => !regional);
+  return { window: gameWindow(game), networks, locals, markets: [...teamMarkets(game.home), ...teamMarkets(game.away)], national };
 }
 
 const HOME = 1;
@@ -622,7 +631,7 @@ export function matchGameScanForTests(
 
 function matchAt(
   game: Game,
-  { window, networks, locals, markets }: GameRoutes,
+  { window, networks, locals, markets, national }: GameRoutes,
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now: number | undefined,
@@ -641,8 +650,10 @@ function matchAt(
     let regional = false;
     if (program) reason = 'guide';
     else if (isEventChannel(ch, game, now)) reason = 'event';
-    else if (isTeamChannel(ch, game)) reason = 'team';
-    else {
+    else if (isTeamChannel(ch, game)) {
+      reason = 'team';
+      regional = national;
+    } else {
       const r = networkMatch(ch, networks, locals, markets, meta.ownFeeds);
       if (r === undefined) continue;
       if (r === 'spare') {
@@ -653,7 +664,8 @@ function matchAt(
       reason = 'network';
       regional = r === true;
     }
-    const rank = REASON_RANK[reason] * 2 + Number(regional);
+    // A team channel that may be blacked out ranks with the regional networks, after the national one.
+    const rank = reason === 'team' && regional ? REASON_RANK.network * 2 + 1 : REASON_RANK[reason] * 2 + Number(regional);
     const prev = found.get(key);
     if (prev && prev.rank <= rank) continue;
     const { channel, sourceId, sourceKind, sourceName } = ch;

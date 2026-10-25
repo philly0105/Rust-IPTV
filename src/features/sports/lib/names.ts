@@ -686,6 +686,9 @@ export function networkAlias(id: string): NetworkAlias | undefined {
 
 /** Country tags a name may still start with after `stripCountryPrefix` ("USA ESPN", "US FOX 5"). */
 const LEAD_TAGS = new Set(['us', 'usa', 'ca', 'can', 'uk', 'en']);
+/** League words a slot channel opens with, before its number and the network it carries ("NCAAF 02: ESPN2"). */
+const SLOT_LEAGUES = new Set(['nfl', 'ncaaf', 'cfb', 'ncaa', 'nba', 'mlb']);
+const NUMBER = /^\d+$/;
 
 /**
  * The network whose longest phrase starts at `at`, with where the phrase ends; null when the best one is
@@ -706,19 +709,23 @@ function networkAt(tokens: readonly string[], at: number): { alias: NetworkAlias
 
 /**
  * The network a channel name is, from its tokens: the alias whose longest phrase opens the name (after any
- * leftover country tags), unless that alias's avoid list matches there too ("Fox News"). Event channels that
- * merely mention a network later in the name are not that network, and neither is a network name followed by
- * a matchup ("ESPN | Knicks @ Celtics", "ABC: LSU vs Auburn"): that is one game's channel. Package services keep
- * their id there, since their channels are all per-game feeds. Failing that, a local station's call sign
- * anywhere in a name without a matchup. Only a separator word makes a matchup here: a spaced dash after a
- * network sets off its feed, region or station ("ESPN - East", "FOX 5 - WTTG Washington", "SNY - Mets").
+ * leftover country tags, or a slot's league word, number and dash: "NCAAF 02: ESPN2", "NFL | 02 - ESPN"),
+ * unless that alias's avoid list matches there too ("Fox News"). Event channels that merely mention a network
+ * later in the name are not that network, and neither is a network name followed by a matchup ("ESPN | Knicks
+ * @ Celtics", "ABC: LSU vs Auburn"): that is one game's channel. Package services keep their id there, since
+ * their channels are all per-game feeds. Failing that, a local station's call sign anywhere in a name without
+ * a matchup. Only a separator word makes a matchup here: a spaced dash after a network sets off its feed,
+ * region or station ("ESPN - East", "FOX 5 - WTTG Washington", "SNY - Mets").
  */
 export function networkIdForChannel(tokens: readonly string[]): string | null {
+  let slot = false;
   for (let at = 0; at < tokens.length; at++) {
     const hit = networkAt(tokens, at);
     if (hit === null) return null;
     if (hit) return hit.alias.kind !== 'package' && separated(tokens, hit.end, MATCHUP_WORDS) ? null : hit.alias.id;
-    if (!LEAD_TAGS.has(tokens[at]!)) break;
+    const t = tokens[at]!;
+    if (SLOT_LEAGUES.has(t)) slot = true;
+    else if (!LEAD_TAGS.has(t) && !(slot && (NUMBER.test(t) || t === DASH))) break;
   }
   if (separated(tokens, 0, MATCHUP_WORDS)) return null;
   for (const n of LOCALS) if (n.phrases.some((p) => findPhrase(tokens, p) >= 0)) return n.id;

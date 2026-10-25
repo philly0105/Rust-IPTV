@@ -417,6 +417,27 @@ describe('network aliases', () => {
     expect(id('FOX Deportes')).toBe('fox-deportes');
   });
 
+  it('reads the network a slot channel carries after its league word and number', () => {
+    const full = (name: string) => networkIdForChannel(textTokens(name));
+    const want: Record<string, string> = {
+      'NCAAF 02: ESPN2': 'espn2',
+      'NCAAF 04: ABC': 'abc',
+      'NCAAF 09: BIG TEN NETWORK': 'btn',
+      'NCAAF 10: BIG TEN NETWORK ALT': 'btn',
+      'NCAAF 12: CBSSN': 'cbssn',
+      'NFL 02: ESPN': 'espn',
+      'NFL | 02 - ESPN': 'espn',
+    };
+    for (const [name, expected] of Object.entries(want)) expect(full(name), name).toBe(expected);
+    // Empty slots, and slots that carry one game.
+    for (const n of ['NCAAF 17:', 'MLB 03 :', 'NFL  | 01 -', ':NBA  09', 'NFL  | 03 - 1pm 49ers at Falcons', 'NCAAF 01: NC State at Wake Forest 7:30pm']) {
+      expect(full(n), n).toBeNull();
+    }
+    // The league's own networks still open with the league word.
+    expect(full('NFL Network')).toBe('nfl-network');
+    expect(full('MLB: MLB NETWORK')).toBe('mlb-network');
+  });
+
   it('never takes a bare USA', () => {
     expect(id('USA')).toBeNull();
     expect(id('US| USA')).toBeNull();

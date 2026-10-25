@@ -71,7 +71,7 @@ function describe(channel: Channel): Described {
     let network: string | null = null;
     if (!foreign) {
       network = networkIdForChannel(tokens);
-      // The cut tag may be a service's ("ESPN+ | Texas vs Georgia").
+      // The cut tag may be a service's ("ESPN+ | Texas vs Georgia") or a slot's league word ("NFL | 02 - ESPN").
       if (network === null) {
         const all = textTokens(channel.name);
         if (all.length !== tokens.length) network = networkIdForChannel(all);

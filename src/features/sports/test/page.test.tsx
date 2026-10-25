@@ -528,6 +528,9 @@ describe('sports page', () => {
     player.fail = new Error('Stream offline');
     await openReady();
     expect(within(card(later)).queryByTestId('sports-watch')).toBeNull();
+    // With nothing to do yet, the best row says when Watch comes.
+    expect(within(card(later)).getByTestId('sports-watch-from').textContent).toBe(`Watch from ${formatClock(later.startMs - 15 * h.MINUTE, 'en')}`);
+    expect(within(card(soon)).queryByTestId('sports-watch-from')).toBeNull();
     fireEvent.click(within(card(soon)).getByTestId('sports-watch'));
     await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't play ESPN HD"));
     expect(h.lastToast()?.variant).toBe('error');

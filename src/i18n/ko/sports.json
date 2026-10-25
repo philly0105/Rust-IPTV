@@ -70,5 +70,6 @@
   "followTeam": "{{team}} 팔로우",
   "unfollowTeam": "{{team}} 팔로우 취소",
   "following": "팔로우 중",
-  "gameMenu": "{{title}} 더보기"
+  "gameMenu": "{{title}} 더보기",
+  "watchFrom": "{{time}}부터 시청 가능"
 }

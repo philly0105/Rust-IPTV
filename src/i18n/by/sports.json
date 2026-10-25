@@ -76,5 +76,6 @@
   "followTeam": "Падпісацца на {{team}}",
   "unfollowTeam": "Адпісацца ад {{team}}",
   "following": "Вы падпісаныя",
-  "gameMenu": "Яшчэ для матча {{title}}"
+  "gameMenu": "Яшчэ для матча {{title}}",
+  "watchFrom": "Глядзець з {{time}}"
 }

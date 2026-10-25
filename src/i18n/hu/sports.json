@@ -70,5 +70,6 @@
   "followTeam": "{{team}} követése",
   "unfollowTeam": "{{team}} követésének leállítása",
   "following": "Követed",
-  "gameMenu": "Továbbiak: {{title}}"
+  "gameMenu": "Továbbiak: {{title}}",
+  "watchFrom": "Nézhető {{time}}-tól"
 }

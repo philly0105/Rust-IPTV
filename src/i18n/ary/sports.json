@@ -82,5 +82,6 @@
   "followTeam": "تبع {{team}}",
   "unfollowTeam": "حبس التبع ديال {{team}}",
   "following": "كتبعو",
-  "gameMenu": "كثر على {{title}}"
+  "gameMenu": "كثر على {{title}}",
+  "watchFrom": "تتفرج من {{time}}"
 }

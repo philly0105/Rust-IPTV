@@ -70,5 +70,6 @@
   "followTeam": "{{team}} takımını takip et",
   "unfollowTeam": "{{team}} takımını takip etmeyi bırak",
   "following": "Takip ediliyor",
-  "gameMenu": "{{title}} için diğer seçenekler"
+  "gameMenu": "{{title}} için diğer seçenekler",
+  "watchFrom": "{{time}} itibarıyla izle"
 }

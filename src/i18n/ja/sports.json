@@ -70,5 +70,6 @@
   "followTeam": "{{team}}をフォロー",
   "unfollowTeam": "{{team}}のフォローを解除",
   "following": "フォロー中",
-  "gameMenu": "{{title}}のその他の操作"
+  "gameMenu": "{{title}}のその他の操作",
+  "watchFrom": "{{time}}から視聴できます"
 }

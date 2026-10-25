@@ -20,6 +20,7 @@ import {
   canCatchUp,
   displayChannelName,
   errorDescription,
+  formatClock,
   formatTimeRange,
   loadPlayback,
   loadPlayerStore,
@@ -146,6 +147,11 @@ export function gameProgram(game: Game, m: StreamMatch, title: string): EpgProgr
 
 export type StreamAction = { kind: 'watch' } | { kind: 'replay' | 'record'; program: EpgProgram } | null;
 
+/** A game with a real start time whose Watch is still to come: more than {@link WATCH_BEFORE_MS} before the start. */
+function watchesLater(game: Game, now: number): boolean {
+  return game.phase === 'scheduled' && game.timeValid && !game.timeNote && game.startMs - now > WATCH_BEFORE_MS;
+}
+
 /** The one action a row offers for `game` at `now`, or null (no archive, no recording, or a postponed game). */
 export function streamAction(game: Game, m: StreamMatch, now: number, canRecord: boolean, title: string): StreamAction {
   const soon = game.phase === 'scheduled' && game.timeValid && !game.timeNote && game.startMs - now <= WATCH_BEFORE_MS;
@@ -162,7 +168,7 @@ export function streamAction(game: Game, m: StreamMatch, now: number, canRecord:
   return null;
 }
 
-function StreamRow({ game, match, title, ctx }: { game: Game; match: StreamMatch; title: string; ctx: StreamContext }) {
+function StreamRow({ game, match, title, ctx, first }: { game: Game; match: StreamMatch; title: string; ctx: StreamContext; first: boolean }) {
   const { t, i18n } = useTranslation('sports');
   const [busy, setBusy] = useState(false);
   const name = displayChannelName(match.channel.name, ctx.strip) || match.channel.name;
@@ -256,6 +262,12 @@ function StreamRow({ game, match, title, ctx }: { game: Game; match: StreamMatch
         />
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
+      {!button && first && watchesLater(game, ctx.now) ? (
+        // Where nothing can be done yet (no recording here), the best row says when Watch comes.
+        <span className="shrink-0 text-caption text-fg-subtle tabular-nums" data-testid="sports-watch-from">
+          {t('watchFrom', { time: formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language) })}
+        </span>
+      ) : null}
     </li>
   );
 }
@@ -303,7 +315,7 @@ export function StreamList({
     <div className="flex flex-col">
       <ul className="flex flex-col divide-y divide-divider" aria-label={t('streamsFor', { title })} data-testid="sports-streams">
         {shown.map((m) => (
-          <StreamRow key={`${m.sourceId}|${m.channel.ref.itemId}`} game={game} match={m} title={title} ctx={ctx} />
+          <StreamRow key={`${m.sourceId}|${m.channel.ref.itemId}`} game={game} match={m} title={title} ctx={ctx} first={m === shown[0]} />
         ))}
       </ul>
       {list.length > STREAMS_SHOWN ? (

@@ -82,5 +82,6 @@
   "followTeam": "تابِع {{team}}",
   "unfollowTeam": "ألغِ متابعة {{team}}",
   "following": "متابَع",
-  "gameMenu": "المزيد عن {{title}}"
+  "gameMenu": "المزيد عن {{title}}",
+  "watchFrom": "للمشاهدة من {{time}}"
 }

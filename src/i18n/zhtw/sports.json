@@ -70,5 +70,6 @@
   "followTeam": "關注{{team}}",
   "unfollowTeam": "取消關注{{team}}",
   "following": "已關注",
-  "gameMenu": "{{title}}的更多操作"
+  "gameMenu": "{{title}}的更多操作",
+  "watchFrom": "{{time}} 起可觀看"
 }

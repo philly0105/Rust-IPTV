@@ -73,5 +73,6 @@
   "followTeam": "Seguir a {{team}}",
   "unfollowTeam": "Dejar de seguir a {{team}}",
   "following": "Siguiendo",
-  "gameMenu": "Más sobre {{title}}"
+  "gameMenu": "Más sobre {{title}}",
+  "watchFrom": "Para ver desde las {{time}}"
 }

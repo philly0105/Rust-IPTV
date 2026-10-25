@@ -284,13 +284,15 @@ describe('the rail', () => {
     expect(localStorage.getItem('tsrust.railSource')).toBe('s1');
   });
 
-  it('defaultOpenSource: the remembered one while it exists, else the only source, never a closed one', () => {
+  it('defaultOpenSource: the remembered one while it exists, never a closed one, and not the only source by itself', () => {
     const one = [makeSource('a')];
     const two = [makeSource('a'), makeSource('b')];
     expect(defaultOpenSource(two, 'b')).toBe('b');
     expect(defaultOpenSource(two, 'gone')).toBeNull();
-    expect(defaultOpenSource(one, 'gone')).toBe('a');
-    expect(defaultOpenSource(one, null)).toBe('a');
+    expect(defaultOpenSource(one, 'a')).toBe('a');
+    // Its Live TV, Movies and Series are in the Watch group: the only source waits for a press.
+    expect(defaultOpenSource(one, 'gone')).toBeNull();
+    expect(defaultOpenSource(one, null)).toBeNull();
     expect(defaultOpenSource(one, '')).toBeNull();
     expect(defaultOpenSource(two, null)).toBeNull();
   });

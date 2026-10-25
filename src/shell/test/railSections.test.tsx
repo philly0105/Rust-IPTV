@@ -1,7 +1,8 @@
 /**
  * Live TV, Movies and Series at the top of the rail (navigation pass, 2026-10-25): the Watch
  * group's links to a source's sections, the source each one opens, their current mark, the icon
- * rail and the palette's Go to list.
+ * rail, the palette's Go to list, and the sources' accordion, whose only source no longer opens by
+ * itself.
  */
 
 import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -191,6 +192,8 @@ describe('the Watch group', () => {
     expect(current()).toEqual(['Live TV']);
     await act(() => router.navigate('/dashboard'));
     expect(current()).toEqual(['Home']);
+    // The only source stayed closed on its own pages: the Watch links mark them.
+    expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
   });
 
   it('leaves out Movies and Series when no source has them', async () => {
@@ -258,5 +261,32 @@ describe('the palette', () => {
     // Night Portal has no series: neither Go to nor its own entries offer them.
     fireEvent.change(input, { target: { value: 'series' } });
     await waitFor(() => expect(within(palette).queryByRole('option', { name: 'Series' })).toBeNull());
+  });
+});
+
+describe('the sources accordion', () => {
+  it('with two or more sources, a page opens its source, also when the sources arrive after the page', async () => {
+    let answer: (list: Source[]) => void = () => undefined;
+    rpcMock.handlers['sources.list'] = () => new Promise<Source[]>((resolve) => (answer = resolve));
+    renderRoutes(routes(), '/s/s2/live');
+    await screen.findByText('source page');
+    await act(async () => answer([night, backup]));
+    const entry = await screen.findByRole('button', { name: /^Backup/ });
+    expect(entry.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
+    // Opened by its page, not a press: nothing is remembered.
+    expect(localStorage.getItem('tsrust.railSource')).toBeNull();
+  });
+
+  it('the only source opens on a press, from any page, and stays as the user left it', async () => {
+    handlers([night]);
+    const { router } = renderRoutes(routes(), '/s/s1/live');
+    const entry = await screen.findByRole('button', { name: /^Night Portal/ });
+    expect(entry.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(entry);
+    expect(entry.getAttribute('aria-expanded')).toBe('true');
+    expect(localStorage.getItem('tsrust.railSource')).toBe('s1');
+    await act(() => router.navigate('/dashboard'));
+    expect(entry.getAttribute('aria-expanded')).toBe('true');
   });
 });

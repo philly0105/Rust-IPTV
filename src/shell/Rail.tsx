@@ -358,14 +358,13 @@ function rememberRailSource(id: string | null): void {
 }
 
 /**
- * The open source before the user presses one this session and while no source's page shows:
- * the one they left open, else the only source (Live TV, Movies and Series one click away), else
- * none. Exported for tests.
+ * The open source before the user presses one this session and while no source's page has opened
+ * one: the one they left open, else none. The only source no longer opens by itself: Live TV,
+ * Movies and Series are in the Watch group, and with its links open the rail ran past the fold at
+ * laptop heights. Exported for tests.
  */
 export function defaultOpenSource(sources: readonly Pick<Source, 'id'>[], remembered: string | null): string | null {
-  if (remembered === '') return null;
-  if (remembered && sources.some((s) => s.id === remembered)) return remembered;
-  return sources.length === 1 ? sources[0]!.id : null;
+  return remembered && sources.some((s) => s.id === remembered) ? remembered : null;
 }
 
 function SourceEntry({
@@ -683,16 +682,20 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const noSources = sources.isSuccess && sourceCount === 0;
   // Live TV, Movies and Series open the source on show, else the one last opened.
   const watch = watchLinks(sources.data, activeSourceId ?? readLastSource());
-  // The sources' accordion. Undefined until this session decides (a press, or a source's page
-  // opening); until then the remembered press, or the only source, is open.
-  const [openSource, setOpenSource] = useState<string | null | undefined>(() => activeSourceId);
+  // With two or more sources, the source of the page on show opens. A lone source stays as the
+  // user left it: the Watch links already lead to its sections and mark its pages.
+  const pageSource = sourceCount > 1 ? activeSourceId : undefined;
+  // The sources' accordion. Undefined until this session decides (a press, or a page opening its
+  // source); until then the remembered press is open.
+  const [openSource, setOpenSource] = useState<string | null | undefined>(pageSource);
   // A source's page opening (from a card or the palette) opens its entry in the same render, not
   // in an effect a commit later: the rail's scroll effect runs once per route, and it must find
-  // the active sub-link already on the page to bring it into view.
-  const [lastActive, setLastActive] = useState(activeSourceId);
-  if (activeSourceId !== lastActive) {
-    setLastActive(activeSourceId);
-    if (activeSourceId) setOpenSource(activeSourceId);
+  // the active sub-link already on the page to bring it into view. Sources that load after the
+  // page has opened open it then, in the render they arrive in.
+  const [lastPageSource, setLastPageSource] = useState(pageSource);
+  if (pageSource !== lastPageSource) {
+    setLastPageSource(pageSource);
+    if (pageSource) setOpenSource(pageSource);
   }
   const [remembered] = useState(readRailSource);
   const openId = openSource !== undefined ? openSource : defaultOpenSource(sources.data ?? [], remembered);

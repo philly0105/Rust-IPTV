@@ -6,13 +6,17 @@
 
 import { stripCountryPrefix } from './channelName';
 
-/** Region tags longer than a country code that playlists use ("LATAM| DEPORTES", "EXYU| SPORT"). */
-const LONG_TAGS = new Set(['LATAM', 'EXYU', 'ARAB', 'ARABIC', 'ASIA', 'AFRICA', 'EURO', 'NORDIC', 'BALKAN', 'CARIB', 'MENA']);
+/** Words a playlist files groups under in capitals that are kinds of content, not places ("MOVIES | ACTION"). */
+const CATEGORY_TAGS = new Set([
+  'MOVIES', 'MOVIE', 'FILMS', 'FILM', 'VOD', 'SERIES', 'SHOWS', 'TV', 'SPORT', 'SPORTS', 'NEWS', 'KIDS', 'MUSIC', 'DOCU',
+  'DOCS', 'ADULT', 'XXX', 'PPV', 'EVENT', 'EVENTS', 'RADIO', 'LIVE', 'LOCAL', 'NFL', 'NBA', 'MLB', 'NHL', 'NCAA', 'NCAAF',
+  'UFC', 'WWE', '24/7', 'HD', 'FHD', 'UHD', 'SD', 'VIP', 'RAW',
+]);
 
 /**
- * The group's tag ("US" for "US| SPORT ᴴᴰ"), or null when its name has none. A tag is a country code
- * written in capitals (two or three characters) or one of the longer region names above, so a playlist
- * that files "Movies | Action" and "Sports | NBA" gets no region picker.
+ * The group's tag ("US" for "US| SPORT ᴴᴰ", "CANADA" for "CANADA | NEWS"), or null when its name has
+ * none. A tag is written in capitals and is no kind of content, so a playlist that files "Movies | Action"
+ * or "MOVIES | ACTION" and "SPORTS | NBA" gets no region picker.
  */
 export function groupRegion(name: string): string | null {
   const trimmed = name.trim();
@@ -22,8 +26,8 @@ export function groupRegion(name: string): string | null {
     .slice(0, trimmed.length - rest.length)
     .replace(/^[\s|[]+|[\s|:\-\]]+$/g, '')
     .normalize('NFKC');
-  if (tag !== tag.toUpperCase()) return null;
-  return (tag.length >= 2 && tag.length <= 3) || LONG_TAGS.has(tag) ? tag : null;
+  if (tag !== tag.toUpperCase() || CATEGORY_TAGS.has(tag)) return null;
+  return tag.length >= 2 && tag.length <= 8 ? tag : null;
 }
 
 export interface GroupRegion {

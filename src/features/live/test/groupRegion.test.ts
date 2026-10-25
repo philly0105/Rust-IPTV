@@ -14,6 +14,9 @@ describe('group regions', () => {
     expect(groupRegion('NCIS: LA')).toBe(null);
     expect(groupRegion('Sports')).toBe(null);
     expect(groupRegion('LATAM| DEPORTES')).toBe('LATAM');
+    // A country written out in capitals is a tag too.
+    expect(groupRegion('CANADA | SPORTS')).toBe('CANADA');
+    expect(groupRegion('EX-YU| SPORT')).toBe('EX-YU');
   });
 
   it('takes no word for a country: a group named "Movies | Action" has no region', () => {

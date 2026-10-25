@@ -585,7 +585,7 @@ function net(id: string, kind: NetworkKind, search: string, names: readonly stri
  */
 const FDSN_REGIONS: Record<string, readonly string[]> = {
   Arizona: [], Detroit: [], Florida: [], 'Great Lakes': ['SportsTime Ohio'], Indiana: [], 'Kansas City': [], Midwest: ['Mid West'],
-  'New Orleans': [], North: [], Ohio: ['Cincinnati'], Oklahoma: [], 'San Diego': [], SoCal: ['Prime Ticket'], South: ['Tennessee'],
+  'New Orleans': [], North: [], Ohio: ['Cincinnati'], Oklahoma: [], 'San Diego': [], SoCal: ['Prime Ticket'], South: ['Tennessee', 'Carolinas'],
   Southeast: ['South East'], Southwest: ['South West'], Sun: [], West: [], Wisconsin: [],
 };
 const FDSN_BRANDS = ['FanDuel Sports Network', 'FanDuel Sports', 'FanDuel SN', 'FDSN', 'Bally Sports', 'Fox Sports'];
@@ -666,7 +666,8 @@ export const NETWORKS: readonly NetworkAlias[] = [
   // Regional sports networks.
   net('nesn', 'rsn', 'NESN', ['NESN', 'New England Sports Network']),
   // Israel's "yes" packages share the name.
-  net('yes', 'rsn', 'YES', ['YES Network', 'YES', 'DAZN (YES)'], [
+  // "US: FOX SPORTS YES (NETWORK)" on one real account: the longer phrase keeps it from FOX's avoid list.
+  net('yes', 'rsn', 'YES', ['YES Network', 'YES', 'DAZN (YES)', 'Fox Sports YES'], [
     'Yes TV', 'yes Action', 'yes Drama', 'yes Comedy', 'yes Kids', 'yes Docu', 'yes Movies',
   ]),
   net('msg', 'rsn', 'MSG', ['MSG', 'MSG Network', 'MSGSN']),
@@ -676,7 +677,8 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('spectrum-sportsnet-la', 'rsn', 'Sportsnet', ['Spectrum SportsNet LA', 'Spectrum Sports Net LA', 'SportsNet LA', 'SNLA']),
   net('space-city', 'rsn', 'Space City', ['Space City Home Network', 'Space City', 'SCHN', 'AT&T SportsNet Southwest']),
   net('root-sports', 'rsn', 'Root Sports', ['Root Sports']),
-  net('masn', 'rsn', 'MASN', ['MASN', 'MASN2', 'Mid-Atlantic Sports Network']),
+  // "MASSN" is a provider's spelling of it.
+  net('masn', 'rsn', 'MASN', ['MASN', 'MASN2', 'MASSN', 'Mid-Atlantic Sports Network']),
   net('monumental', 'rsn', 'Monumental', ['Monumental Sports Network', 'Monumental', 'MNMT', 'NBC Sports Washington']),
   net('chsn', 'rsn', 'CHSN', ['Chicago Sports Network', 'CHSN', 'NBC Sports Chicago']),
   net('rangers-sn', 'rsn', 'Rangers Sports', ['Rangers Sports Network']),
@@ -692,7 +694,7 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('nbcs-california', 'rsn', 'NBC Sports', ['NBC Sports California', 'NBCS California', 'NBCSCA', 'NBC Sports CA']),
   net('nbcs-philadelphia', 'rsn', 'NBC Sports', [
     'NBC Sports Philadelphia', 'NBCS Philadelphia', 'NBCSP', 'NBC Sports Phil', 'NBC Sports Philly', 'NBC Sports Philadelphia+',
-    'NBC Sports Phil +',
+    'NBC Sports Phil +', 'NBC Sports Philadelfia',
   ]),
   net('nbcs-boston', 'rsn', 'NBC Sports', ['NBC Sports Boston', 'NBCS Boston']),
   ...Object.entries(FDSN_REGIONS).map(([r, spellings]) =>

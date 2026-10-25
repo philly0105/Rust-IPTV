@@ -491,7 +491,7 @@ describe('network aliases', () => {
       'US: FOX SPORTS TENNESSEE HD': 'fdsn-south',
       'US: FOX SPORTS SPORTSTIME OHIO HD': 'fdsn-great-lakes',
       'US: FOX SPORTSTIME OHIO HD': 'fdsn-great-lakes',
-      'US: FOX SPORTS YES NETWORK HD': null,
+      'US: FOX SPORTS YES NETWORK HD': 'yes',
       'CA EN: TSN 1': 'tsn',
       'CA EN: TSN 5': 'tsn',
       'CA EN: SPORTSNET ONTARIO': 'sportsnet',
@@ -751,5 +751,18 @@ describe('a network on a TV service\'s lineup', () => {
     expect(id('ESPN+ 012: Texas vs Georgia')).toBe('espn-plus');
     // An avoided network after the service ("ABC News") is no network: the service stays.
     expect(id('PRIME: ABC NEWS LIVE ᴿᴬᵂ')).toBe('prime-video');
+  });
+});
+
+describe("regional networks under the spellings one real account uses", () => {
+  const id = (name: string) => networkIdForChannel(nameTokens(name));
+
+  it('reads them as their networks', () => {
+    expect(id('US: FOX SPORTS YES (NETWORK)')).toBe('yes');
+    expect(id('US: MASSN HD')).toBe('masn');
+    expect(id('US: NBC SPORTS PHILADELFIA')).toBe('nbcs-philadelphia');
+    expect(id('US: FOX SPORTS CAROLINAS HD')).toBe('fdsn-south');
+    // FOX's own avoid list still holds for the rest of its sports brands.
+    expect(id('US: FOX SPORTS SOCCER HD')).toBeNull();
   });
 });

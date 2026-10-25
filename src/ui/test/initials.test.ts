@@ -20,12 +20,19 @@ describe('fallback initials', () => {
   it('skip a provider tag, quality and copy markers, and punctuation', () => {
     expect(initialsOf('US| ESPN HD')).toBe('ES');
     expect(initialsOf('US: FOX NEWS HD')).toBe('FN');
-    expect(initialsOf('NBA: BOSTON CELTICS ᴴᴰ')).toBe('BC');
+    // Three letters before a colon may start a title ("CSI: Miami"), so they stay.
+    expect(initialsOf('NBA: BOSTON CELTICS ᴴᴰ')).toBe('NB');
     expect(initialsOf('US| CBS (Backup)')).toBe('CB');
     expect(initialsOf('[DE] Das Erste')).toBe('DE');
     expect(initialsOf('Night Portal HD')).toBe('NP');
     // A name of markers only keeps them.
     expect(initialsOf('HD')).toBe('HD');
+    // Pipes and plus signs are no initials; a title with a colon keeps its first word.
+    expect(initialsOf('|EN| The Matrix')).toBe('EM');
+    expect(initialsOf('4K | Dune')).toBe('DU');
+    expect(initialsOf('IPTV | Main')).toBe('IM');
+    expect(initialsOf('CSI: Miami')).toBe('CM');
+    expect(initialsOf('1917')).toBe('19');
   });
 
   it('channel monograms read names the same way, and keep whole code points', () => {

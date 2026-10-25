@@ -74,8 +74,9 @@ export function initialWords(text: string): string[] {
   const words = text
     .normalize('NFKC')
     .split(/\s+/)
-    // Punctuation only: an emoji (a symbol) stays an initial, as in "🎵 Music".
-    .map((w) => w.replace(/^\p{P}+|\p{P}+$/gu, ''))
+    // Punctuation and math or modifier symbols ("|", "+", "^"); an emoji (another symbol) stays an
+    // initial, as in "🎵 Music".
+    .map((w) => w.replace(/^[\p{P}\p{Sm}\p{Sk}]+|[\p{P}\p{Sm}\p{Sk}]+$/gu, ''))
     .filter(Boolean);
   const named = words.filter((w) => !NAME_MARKERS.test(w));
   return named.length > 0 ? named : words;
@@ -91,13 +92,18 @@ export function twoInitials(words: readonly string[]): string {
   if (words.length === 1) {
     const chars = Array.from(words[0]!.replace(/[^\p{L}\p{N}]/gu, '') || words[0]!);
     const last = chars[chars.length - 1]!;
-    return (chars.length > 2 && /\d/.test(last) ? chars[0]! + last : chars.slice(0, 2).join('')).toUpperCase();
+    // A name of letters ending in a number ("ESPN2"), not a number ("1917").
+    const numbered = chars.length > 2 && /\p{L}/u.test(chars[0]!) && /\d/.test(last);
+    return (numbered ? chars[0]! + last : chars.slice(0, 2).join('')).toUpperCase();
   }
   return (Array.from(words[0]!)[0]! + Array.from(words[1]!)[0]!).toUpperCase();
 }
 
-/** A provider's country or group tag before a name ("US| ", "UK: ", "[DE] "), which no initial should come from. */
-const NAME_TAG = /^(?:\[[A-Z0-9+-]{2,8}\]|[A-Z]{2,3}\s*[|:])\s*/;
+/**
+ * A provider's country or group tag before a name ("US| ", "UK: ", "[DE] "), which no initial should
+ * come from. Before a colon only a two-letter code counts: "CSI: Miami" and "NCIS: LA" are titles.
+ */
+const NAME_TAG = /^(?:\[[A-Z0-9+-]{2,8}\]|[A-Z]{2,3}\s*\||[A-Z]{2}\s*:)\s*/;
 
 /** Up to two initials for fallback tiles ("BBC One HD" -> "BO", "US| ESPN HD" -> "ES", "US| CBS (Backup)" -> "CB"). */
 export function initialsOf(text: string): string {

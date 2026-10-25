@@ -151,6 +151,7 @@ beforeEach(() => {
   localStorage.removeItem('tsrust.sportsTeams');
   localStorage.removeItem('tsrust.sportsMyTeamsOnly');
   localStorage.removeItem('tsrust.sportsStreamsOnly');
+  localStorage.removeItem('tsrust.sportsLeague');
   forgetFollowedTeamsForTests();
   useMultiviewStore.setState({ tiles: [] });
   rpc.handlers['sources.list'] = () => h.SOURCES;
@@ -256,6 +257,19 @@ describe('sports page', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /^All / }));
     await waitFor(() => expect(h.location.current).toBe('/sports'));
+    cleanup();
+
+    // The league picked last opens when the URL names none (the rail's link), and All forgets it.
+    localStorage.setItem('tsrust.sportsLeague', 'nba');
+    open();
+    expect(screen.getByRole('tab', { name: /^NBA / }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: /^NFL / }));
+    await waitFor(() => expect(h.location.current).toBe('/sports?league=nfl'));
+    expect(localStorage.getItem('tsrust.sportsLeague')).toBe('nfl');
+    fireEvent.click(screen.getByRole('tab', { name: /^All / }));
+    await waitFor(() => expect(h.location.current).toBe('/sports'));
+    expect(screen.getByRole('tab', { name: /^All / }).getAttribute('aria-selected')).toBe('true');
+    expect(localStorage.getItem('tsrust.sportsLeague')).toBeNull();
     cleanup();
 
     open('/sports?league=cricket');

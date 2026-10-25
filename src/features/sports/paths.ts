@@ -62,3 +62,23 @@ export function writeMyTeamsOnly(on: boolean): void {
     // storage blocked: the filter still applies, until the page opens again
   }
 }
+
+/** The league picked last, opened when the URL names none: kept in localStorage like the filters. */
+const LEAGUE_KEY = 'tsrust.sportsLeague';
+
+export function readRememberedLeague(): League | null {
+  try {
+    return readLeague(localStorage.getItem(LEAGUE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+export function rememberLeague(league: League | null): void {
+  try {
+    if (league) localStorage.setItem(LEAGUE_KEY, league);
+    else localStorage.removeItem(LEAGUE_KEY);
+  } catch {
+    // storage blocked: the league holds while the page is open
+  }
+}

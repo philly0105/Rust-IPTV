@@ -6,8 +6,9 @@
  * "My teams" filter (once a team is followed from a card's menu) and the "With streams" filter, and the
  * Eastern day ESPN files games under (a week either way). The header's search field narrows every
  * section to the games whose teams or networks it names. The league (`?league=nba`) and the day
- * (`?day=YYYY-MM-DD`) live in the URL; the defaults leave their parameter out, and a day picked in an
- * earlier run of the app opens today (paths.ts). The filters are kept across visits; the search is not.
+ * (`?day=YYYY-MM-DD`) live in the URL; the defaults leave their parameter out, a URL without a league
+ * opens the one picked last, and a day picked in an earlier run of the app opens today (paths.ts). The
+ * filters and the league are kept across visits; the search is not.
  *
  * Below them, three sections: Live now (whatever day is picked: games in progress from today and
  * yesterday, whose late games run past midnight), then the picked day's Upcoming and Final games, so
@@ -34,7 +35,17 @@ import { etDate, etDays } from '../lib/espn';
 import { filterGames, leagueCounts, sectionGames } from '../lib/filter';
 import type { StreamMatch } from '../lib/match';
 import { LEAGUES, type Game, type League } from '../lib/types';
-import { pickDay, readDay, readLeague, readMyTeamsOnly, readStreamsOnly, writeMyTeamsOnly, writeStreamsOnly } from '../paths';
+import {
+  pickDay,
+  readDay,
+  readLeague,
+  readMyTeamsOnly,
+  readRememberedLeague,
+  readStreamsOnly,
+  rememberLeague,
+  writeMyTeamsOnly,
+  writeStreamsOnly,
+} from '../paths';
 
 const DAY_PANEL = 'sports-day';
 
@@ -90,7 +101,9 @@ export function SportsPage() {
   const days = useMemo(() => etDays(now, 7, 7), [today]);
 
   const [params, setParams] = useSearchParams();
-  const league = readLeague(params.get('league'));
+  // The URL's league, else the one picked last (a page opened from the rail names none).
+  const [remembered, setRemembered] = useState(readRememberedLeague);
+  const league = params.has('league') ? readLeague(params.get('league')) : remembered;
   const day = readDay(params.get('day'), days, today);
   const setParam = useCallback(
     (key: 'day' | 'league', value: string | null) =>
@@ -177,11 +190,16 @@ export function SportsPage() {
     [leagueLive, leagueDay, followed],
   );
   const filtered = league !== null || query.trim() !== '' || filterStreams || filterMyTeams;
+  const pickLeague = (next: League | null) => {
+    rememberLeague(next);
+    setRemembered(next);
+    setParam('league', next);
+  };
   const clearFilters = () => {
     setQuery('');
     toggleStreamsOnly(false);
     toggleMyTeamsOnly(false);
-    setParam('league', null);
+    pickLeague(null);
   };
 
   const { loading, error, refetch } = allDay;
@@ -235,7 +253,7 @@ export function SportsPage() {
       <h1 className="sr-only">{title}</h1>
       <div className="flex min-w-0 flex-col gap-3" data-testid="sports-toolbar">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-          <LeagueFilter value={league} onChange={(next) => setParam('league', next)} counts={counts} live={liveLeagues} />
+          <LeagueFilter value={league} onChange={pickLeague} counts={counts} live={liveLeagues} />
           <div className="flex flex-wrap items-center gap-2">
             {followed.size > 0 ? (
               <FilterChip

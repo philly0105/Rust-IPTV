@@ -37,7 +37,7 @@ College football adds `&groups=80`, which keeps it to FBS. ESPN answers date ran
 - `rank` is the college poll rank from 1 to 25, otherwise null (ESPN sends 99 for unranked teams). `record` is the overall record.
 - `broadcasts` is the union of `geoBroadcasts` (TV and streaming; radio dropped) and the names in `broadcasts[]`, one entry per name and market. NBA League Pass is only in `broadcasts[]`.
 - `timeValid` is false for a TBD start, which ESPN dates at midnight Eastern. `timeNote` keeps a kickoff-window note (`EARLY:`, `FLEX:`, `NIGHT:`, `LATE:`), whose listed time is a placeholder.
-- `gamecastUrl` is the event link whose `rel` includes `summary`.
+- `gamecastUrl` is the event link whose `rel` includes `summary`, or while the game is on, when ESPN swaps that link for one with `live` and `event` in its `rel`, that one.
 
 No game was live while the responses were surveyed, so the live payload (clock, period, halftime and delay statuses) is unverified. Live detection rests on `state === 'in'` alone, never on status names.
 

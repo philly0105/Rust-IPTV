@@ -542,6 +542,17 @@ describe('normalizeScoreboard: missing and odd fields', () => {
     expect(g!.home.score).toBe(128);
   });
 
+  it("takes the game's live link for Gamecast while it is on, when ESPN lists no summary link", () => {
+    const e = eventOf(nba, '401909093');
+    const live = { rel: ['live', 'desktop', 'event'], href: 'https://www.espn.com/nba/game?gameId=401909093' };
+    const boxscore = { rel: ['boxscore', 'desktop', 'event'], href: 'https://www.espn.com/nba/boxscore/_/gameId/401909093' };
+    e.links = [live, boxscore];
+    expect(normalizeScoreboard('nba', board(e))[0]!.gamecastUrl).toBe('https://www.espn.com/nba/game?gameId=401909093');
+    // A summary link wins when both are there.
+    e.links = [live, boxscore, { rel: ['summary', 'desktop', 'event'], href: 'https://www.espn.com/nba/game/_/gameId/401909093' }];
+    expect(normalizeScoreboard('nba', board(e))[0]!.gamecastUrl).toBe('https://www.espn.com/nba/game/_/gameId/401909093');
+  });
+
   it('rejects links and logos that are not http(s), and colours that are not hex', () => {
     const e = eventOf(nba, '401909093');
     e.links = [{ rel: ['summary'], href: 'javascript:alert(1)' }];

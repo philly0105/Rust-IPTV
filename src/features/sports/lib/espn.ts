@@ -248,9 +248,10 @@ function gameOf(league: League, e: Json): Game | null {
     .filter((h): h is string => h !== null);
   const season = obj(e.season);
   const seasonType = num(obj(season?.type)?.type ?? season?.type);
-  const link = arr(e.links)
-    .map(obj)
-    .find((l) => arr(l?.rel).includes('summary'));
+  // The game's page: its summary link, which ESPN swaps for a "live" one while the game is on.
+  const links = arr(e.links).map(obj);
+  const link =
+    links.find((l) => arr(l?.rel).includes('summary')) ?? links.find((l) => arr(l?.rel).includes('live') && arr(l?.rel).includes('event'));
 
   return {
     key: `${league}:${id}`,

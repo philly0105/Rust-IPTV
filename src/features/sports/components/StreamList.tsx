@@ -168,6 +168,18 @@ export function streamAction(game: Game, m: StreamMatch, now: number, canRecord:
   return null;
 }
 
+function WatchFrom({ time }: { time: string }) {
+  const { t } = useTranslation('sports');
+  const label = t('watchFrom', { time });
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 text-caption text-fg-subtle tabular-nums" title={label} data-testid="sports-watch-from">
+      <Play aria-hidden size={12} />
+      <span aria-hidden>{time}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 function StreamRow({ game, match, title, ctx, first }: { game: Game; match: StreamMatch; title: string; ctx: StreamContext; first: boolean }) {
   const { t, i18n } = useTranslation('sports');
   const [busy, setBusy] = useState(false);
@@ -263,10 +275,9 @@ function StreamRow({ game, match, title, ctx, first }: { game: Game; match: Stre
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
       {!button && first && watchesLater(game, ctx.now) ? (
-        // Where nothing can be done yet (no recording here), the best row says when Watch comes.
-        <span className="shrink-0 text-caption text-fg-subtle tabular-nums" data-testid="sports-watch-from">
-          {t('watchFrom', { time: formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language) })}
-        </span>
+        // Where nothing can be done yet (no recording here), the best row says when Watch comes: a play
+        // mark and the time, small enough to leave the channel's name its room; the sentence is its name.
+        <WatchFrom time={formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language)} />
       ) : null}
     </li>
   );

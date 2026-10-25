@@ -554,7 +554,11 @@ describe('sports page', () => {
     await openReady();
     expect(within(card(later)).queryByTestId('sports-watch')).toBeNull();
     // With nothing to do yet, the best row says when Watch comes.
-    expect(within(card(later)).getByTestId('sports-watch-from').textContent).toBe(`Watch from ${formatClock(later.startMs - 15 * h.MINUTE, 'en')}`);
+    const from = within(card(later)).getByTestId('sports-watch-from');
+    const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
+    // A play mark and the time on screen; the sentence is what it reads and its tooltip.
+    expect(from.getAttribute('title')).toBe(`Watch from ${at}`);
+    expect(within(from).getByText(`Watch from ${at}`).className).toContain('sr-only');
     expect(within(card(soon)).queryByTestId('sports-watch-from')).toBeNull();
     fireEvent.click(within(card(soon)).getByTestId('sports-watch'));
     await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't play ESPN HD"));

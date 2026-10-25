@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Tabs } from '../deps';
+import { Tabs, intlLocale } from '../deps';
 
 const DAY_MS = 86_400_000;
 
@@ -28,10 +28,12 @@ const formatters = new Map<string, { weekday: Intl.DateTimeFormat; date: Intl.Da
 function formattersFor(lang: string) {
   let f = formatters.get(lang);
   if (!f) {
+    // The app's language codes are not all Intl's (Moroccan Arabic formats as Arabic).
+    const locale = intlLocale(lang);
     f = {
-      weekday: new Intl.DateTimeFormat(lang, { weekday: 'short' }),
-      date: new Intl.DateTimeFormat(lang, { month: 'short', day: 'numeric' }),
-      full: new Intl.DateTimeFormat(lang, { weekday: 'long', month: 'long', day: 'numeric' }),
+      weekday: new Intl.DateTimeFormat(locale, { weekday: 'short' }),
+      date: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+      full: new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }),
     };
     formatters.set(lang, f);
   }

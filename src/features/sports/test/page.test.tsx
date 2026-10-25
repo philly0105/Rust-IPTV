@@ -455,6 +455,17 @@ describe('sports page', () => {
     expect(useShellStore.getState().header?.search?.value).toBe('');
   });
 
+  it('says the filters hide every game of the day even while Live now shows another day\'s game', async () => {
+    const tomorrow = etDays(Date.now(), 7, 7)[8]!;
+    data.live = [h.liveGame('9')];
+    setDay([h.game('2', { league: 'nfl', startMs: Date.now() + 26 * h.HOUR, etDate: tomorrow, home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') })], tomorrow);
+    pickDay(tomorrow);
+    await openReady(`/sports?day=${tomorrow}&league=nba`);
+    expect(within(screen.getByTestId('sports-live')).getAllByTestId('sports-game')).toHaveLength(1);
+    expect(within(screen.getByTestId('sports-day-panel')).getByText('No games match')).toBeTruthy();
+    expect(screen.getByTestId('sports-clear-filters')).toBeTruthy();
+  });
+
   it('hides the games no stream was found for while "With streams" is on, and remembers it', async () => {
     const found = h.game('1');
     const missing = h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });

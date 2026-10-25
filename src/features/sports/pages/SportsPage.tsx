@@ -212,8 +212,8 @@ export function SportsPage() {
     body = <ErrorState error={error} title={t('errorTitle')} hint={t('errorHint')} onRetry={refetch} />;
   } else if (allDay.games.length === 0) {
     body = <EmptyState icon={<CalendarX2 />} title={t('emptyDay')} description={t('emptyDayHint')} />;
-  } else if (upcoming.length === 0 && final.length === 0 && live.length === 0) {
-    // Every game of the day is filtered away (a live one may still lead the page above).
+  } else if (keep(dayGames).length === 0) {
+    // Every game of the day is filtered away; Live now may still show games of today or yesterday above.
     body = (
       <EmptyState
         icon={<SearchX />}

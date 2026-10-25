@@ -4,9 +4,9 @@
  * the anchor is missing or not on screen (phone layout, a collapsed source),
  * the step shows as a centred card instead.
  *
- * The `vod` anchor is the rail's My List entry, the one movie and series
- * entry on screen at every width (a source's Movies and Series links only
- * show while that source is expanded). The step's title, text and icon name
+ * The `vod` anchor is the rail's My List entry: unlike the Watch group's
+ * Movies and Series, which a rail with no movies or series leaves out, it is
+ * always there, collapsed or expanded. The step's title, text and icon name
  * My List so the card matches what the spotlight shows.
  */
 

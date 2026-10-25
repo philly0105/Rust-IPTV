@@ -86,7 +86,7 @@ describe('rail scroll (L2-shell-1)', () => {
       const rects = vi.mocked(HTMLElement.prototype.getBoundingClientRect);
       expect(scrollTop()).toBe(0);
       await act(() => router.navigate('/s/s3/live'));
-      expect(screen.getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page');
+      expect(within(box).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBe('page');
       // P2-RAILS-2: nothing is measured right after the new page committed (that forced its
       // layout); the observer's first callback, after the browser's layout, scrolls the link in.
       expect(rects.mock.contexts).not.toContain(box);

@@ -297,7 +297,8 @@ export function isTextEntry(el: HTMLElement): boolean {
 function ShellNavigationEffects() {
   const { key, pathname } = useLocation();
   const last = useRef(key);
-  // The phone tab bar's Live TV tab opens the source the user last opened.
+  // The phone tab bar's Live TV tab, and Live TV, Movies and Series in the rail and the palette,
+  // open the source the user last opened.
   useEffect(() => {
     rememberRouteSource(pathname);
   }, [pathname]);
@@ -371,6 +372,7 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
             {!collapsed && <Skeleton className="h-4 w-28" />}
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden px-2">
+            {/* Every Watch link, Live TV, Movies and Series included: most sources have movies and series. */}
             {rows(WATCH_LINKS.length)}
             {label()}
             {rows(LIBRARY_LINKS.length)}

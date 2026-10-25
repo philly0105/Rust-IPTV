@@ -117,7 +117,8 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
   const networks = [...new Set(game.broadcasts.map((b) => b.name))];
   // A postponed or canceled game has nothing on air to offer.
   const playable = game.phase === 'live' || game.phase === 'final' || game.phase === 'scheduled';
-  const notes = [game.seriesSummary, game.note, game.timeNote].filter((n): n is string => !!n);
+  // A live game's down and distance leads ESPN's notes ("2nd & 7 at NO 35").
+  const notes = [game.phase === 'live' ? game.situation : null, game.seriesSummary, game.note, game.timeNote].filter((n): n is string => !!n);
   const teams = useFollowedTeams();
   const follows = (team: GameTeam) => teams.has(teamKey(game.league, team));
   const menu = [game.away, game.home].map((team) => {

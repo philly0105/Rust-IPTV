@@ -542,6 +542,17 @@ describe('normalizeScoreboard: missing and odd fields', () => {
     expect(g!.home.score).toBe(128);
   });
 
+  it("reads a live football game's down and distance, and nothing once it is over", () => {
+    const e = eventOf(nba, '401909093');
+    const comp = (e.competitions as Record<string, unknown>[])[0]!;
+    // The competition's status is the one read (the event's repeats it).
+    comp.status = { period: 2, displayClock: '12:42', type: { name: 'STATUS_IN_PROGRESS', state: 'in', completed: false, shortDetail: '12:42 - 2nd' } };
+    comp.situation = { downDistanceText: '2nd & 7 at NO 35', possession: '18' };
+    expect(normalizeScoreboard('nba', board(e))[0]!.situation).toBe('2nd & 7 at NO 35');
+    comp.status = { period: 4, displayClock: '0:00', type: { name: 'STATUS_FINAL', state: 'post', completed: true, shortDetail: 'Final' } };
+    expect(normalizeScoreboard('nba', board(e))[0]!).not.toHaveProperty('situation');
+  });
+
   it("takes the game's live link for Gamecast while it is on, when ESPN lists no summary link", () => {
     const e = eventOf(nba, '401909093');
     const live = { rel: ['live', 'desktop', 'event'], href: 'https://www.espn.com/nba/game?gameId=401909093' };

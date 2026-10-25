@@ -327,6 +327,13 @@ describe('sports page', () => {
     fireEvent.click(items[2]!);
     expect(opened).toHaveBeenCalledWith('https://www.espn.com/nba/game/_/gameId/1', '_blank', 'noopener');
     opened.mockRestore();
+    cleanup();
+    // A live football game's down and distance leads the notes.
+    const nfl = h.liveGame('3', { league: 'nfl', situation: '2nd & 7 at NO 35', home: h.team('NO', 'New Orleans Saints'), away: h.team('PIT', 'Pittsburgh Steelers') });
+    setDay([nfl]);
+    data.cache.clear();
+    open();
+    expect(within(card(nfl)).getByTestId('sports-notes').textContent).toBe('2nd & 7 at NO 35');
   });
 
   it("puts a live game's best stream on the multi-view wall from its menu", async () => {

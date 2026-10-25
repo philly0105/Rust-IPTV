@@ -66,4 +66,6 @@ export interface Game {
   seriesSummary: string | null;
   broadcasts: GameBroadcast[];
   gamecastUrl: string | null;
+  /** While a football game is on: ESPN's down and distance ("2nd & 7 at NO 35"). Absent otherwise. */
+  situation?: string;
 }

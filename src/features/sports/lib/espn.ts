@@ -249,6 +249,8 @@ function gameOf(league: League, e: Json): Game | null {
   const season = obj(e.season);
   const seasonType = num(obj(season?.type)?.type ?? season?.type);
   // The game's page: its summary link, which ESPN swaps for a "live" one while the game is on.
+  // A live football game's down and distance; other sports' situations (balls and strikes) are not read.
+  const situation = state === 'in' ? str(obj(comp.situation)?.downDistanceText) : null;
   const links = arr(e.links).map(obj);
   const link =
     links.find((l) => arr(l?.rel).includes('summary')) ?? links.find((l) => arr(l?.rel).includes('live') && arr(l?.rel).includes('event'));
@@ -277,6 +279,7 @@ function gameOf(league: League, e: Json): Game | null {
     seriesSummary: str(obj(comp.series)?.summary),
     broadcasts: broadcastsOf(comp),
     gamecastUrl: httpUrl(link?.href),
+    ...(situation ? { situation } : {}),
   };
 }
 

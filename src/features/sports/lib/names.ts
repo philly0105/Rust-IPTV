@@ -195,6 +195,10 @@ export interface TeamKeys {
   school?: boolean;
   /** College mascots, which count only on their own ("Tigers vs Bulldogs", not the "Tigers" of "Auburn Tigers"). */
   mascots?: string[][];
+  /** The team's full names of two words or more, as `teamChannelName` gives a team channel's ("boston celtics"). */
+  channelNames: string[];
+  /** Pros: the nickname and its spellings ("celtics", "sixers"), which make a team channel only beside the league's word. */
+  channelNicknames: string[];
 }
 
 /** Provider spellings of ESPN's abbreviations, by `${league}:${ESPN abbreviation}`. */
@@ -238,9 +242,11 @@ const NAME_ALIASES: Record<string, readonly string[]> = {
   'nba:POR': ['Blazers'],
   'nba:PHI': ['Sixers'],
   'nba:GS': ['Golden St Warriors'],
+  'nba:LAC': ['Los Angeles Clippers'],
   'nfl:SF': ['Niners'],
   'mlb:TOR': ['Jays'],
   'mlb:ARI': ['D-backs', 'Dbacks'],
+  'mlb:ATH': ['Oakland Athletics'],
   'cfb:M-OH': ['Miami Ohio'],
   'cfb:APP': ['Appalachian State'],
   'cfb:UL': ['Louisiana Lafayette', 'UL Lafayette'],
@@ -353,12 +359,27 @@ function buildKeys(team: GameTeam, league: League): TeamKeys {
     else if (tokens.length > 1) phrases.set(tokens.join(' '), tokens);
   }
   const aliases = NAME_ALIASES[`${league}:${abbr}`] ?? [];
+  const full = new Map<string, string[]>();
+  addPhrases(full, [team.displayName, `${team.location} ${team.name}`], league === 'cfb');
+  // A one-word full name ("Athletics") is no surer than a nickname.
+  const channelNames = [...full].filter(([, p]) => p.length > 1).map(([key]) => key);
   if (league === 'cfb') {
     addPhrases(phrases, [team.displayName, team.location, team.shortDisplayName, ...aliases], true);
     const mascot = textTokens(team.name);
-    return { phrases: longestFirst(phrases), abbrs: [...abbrs], school: true, mascots: mascot.length ? [mascot] : [] };
+    return {
+      phrases: longestFirst(phrases),
+      abbrs: [...abbrs],
+      school: true,
+      mascots: mascot.length ? [mascot] : [],
+      channelNames,
+      // A school alone or a mascot alone names no team channel: schools share words, and many share a mascot.
+      channelNicknames: [],
+    };
   }
   addPhrases(phrases, [team.displayName, `${team.location} ${team.name}`, team.shortDisplayName, team.name, ...aliases], false);
+  const nicknames = new Map<string, string[]>();
+  addPhrases(nicknames, [team.name, team.shortDisplayName, ...aliases], false);
+  const channelNicknames = [...new Set([...full.keys(), ...nicknames.keys()])].filter((key) => !channelNames.includes(key));
   const shared: string[][] = [];
   for (const [key, p] of phrases) {
     if (p.length === 1 && SHARED_NICKNAMES.has(p[0]!)) {
@@ -366,7 +387,7 @@ function buildKeys(team: GameTeam, league: League): TeamKeys {
       phrases.delete(key);
     }
   }
-  const keys: TeamKeys = { phrases: longestFirst(phrases), abbrs: [...abbrs] };
+  const keys: TeamKeys = { phrases: longestFirst(phrases), abbrs: [...abbrs], channelNames, channelNicknames };
   if (guarded.size > 0) {
     keys.guarded = [...guarded];
     keys.nickname = textTokens(team.name)[0];
@@ -386,7 +407,8 @@ const keyCache = new WeakMap<GameTeam, Map<League, TeamKeys>>();
  * the short name, and the abbreviation plus provider spellings (NY/NYK, GS/GSW). College: the school by its
  * location, short and display names (with St/State variants), longest first and bounded so "Texas" never
  * takes "Texas A&M", "Texas Tech" or "North Texas" and "Miami" never takes "Miami (OH)"; the mascot only on
- * its own. Kept per team object, since one game is tested against every indexed channel.
+ * its own. Also the names a team channel goes by: the full names, and for pros the nicknames. Kept per team
+ * object, since one game is tested against every indexed channel.
  */
 export function teamKeys(team: GameTeam, league: League): TeamKeys {
   let byLeague = keyCache.get(team);
@@ -514,6 +536,11 @@ export function otherLeague(tokens: readonly string[], league: League): boolean 
   if (mark !== null) return mark;
   if (league !== 'cfb' && tokens.includes('college')) return true;
   return marked(tokens, SPORT_WORDS, league) ?? false;
+}
+
+/** True when the text holds one of the league's own words ("NBA", "NCAAF"); a sport word is not enough. */
+export function hasLeagueWord(tokens: readonly string[], league: League): boolean {
+  return tokens.some((t) => LEAGUE_WORDS.get(t)?.includes(league));
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +772,33 @@ export function networkIdForChannel(tokens: readonly string[]): string | null {
 /** The network of an ESPN broadcast name ("ESPN2", "FanDuel SN West", "KFAA-TV"); null for team apps and the like. */
 export function networkIdForBroadcast(name: string): string | null {
   return networkIdForChannel(textTokens(name));
+}
+
+// ---------------------------------------------------------------------------
+// Team channels
+
+/** Words around a team channel's team: league words, country tags, slot or feed numbers and dashes. */
+function teamFiller(t: string): boolean {
+  return LEAGUE_WORDS.has(t) || LEAD_TAGS.has(t) || t === DASH || NUMBER.test(t);
+}
+
+/** The most words a team's full name has ("Georgia Tech Yellow Jackets"). */
+const TEAM_NAME_WORDS = 5;
+
+/**
+ * What a team channel's name is once the words around its team are cut from both ends ("NBA: BOSTON CELTICS
+ * ᴴᴰ" and "US: MLB NEW YORK YANKEES ᴿᴬᵂ" give "boston celtics" and "new york yankees"), joined by spaces;
+ * null when nothing is left or more words than a team's name has. The channel is a team's when this is one of
+ * its `channelNames`, or one of its `channelNicknames` beside the league's own word ("NBA: CELTICS"), so a
+ * name that also names a second team ("Celtics vs Knicks") or anything else ("NBA: LEAGUE PASS 1", "US: MLB
+ * NETWORK") never is.
+ */
+export function teamChannelName(tokens: readonly string[]): string | null {
+  let from = 0;
+  let to = tokens.length;
+  while (from < to && teamFiller(tokens[from]!)) from++;
+  while (to > from && teamFiller(tokens[to - 1]!)) to--;
+  return to > from && to - from <= TEAM_NAME_WORDS ? tokens.slice(from, to).join(' ') : null;
 }
 
 // ---------------------------------------------------------------------------

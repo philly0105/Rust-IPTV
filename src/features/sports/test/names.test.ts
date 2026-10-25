@@ -1,6 +1,6 @@
 // Sports name matching: the tokenizer, team keys for pros and college (schools that share words, St/State,
-// accents and apostrophes, mascots), league marks, the network alias table and its avoid lists, ESPN's
-// broadcast names, and which live groups the index reads (with a real provider's groups).
+// accents and apostrophes, mascots), team channel names, league marks, the network alias table and its avoid
+// lists, ESPN's broadcast names, and which live groups the index reads (with a real provider's groups).
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,6 +16,7 @@ import {
   networkIdForChannel,
   otherLeague,
   teamAt,
+  teamChannelName,
   teamKeys,
   textTokens,
 } from '../lib/names';
@@ -337,6 +338,43 @@ describe('team keys: college', () => {
     for (const [t, n] of cases) expect(names(t, 'cfb', n), n).toBe(true);
     // Georgia is not Ga Tech's.
     expect(names(GEORGIA, 'cfb', 'Ga Tech vs Duke')).toBe(false);
+  });
+});
+
+describe('team channel names', () => {
+  it('cuts the league word, country tag, numbers and quality from both ends of a team channel name', () => {
+    const want: Record<string, string | null> = {
+      'NBA: BOSTON CELTICS ᴴᴰ': 'boston celtics',
+      'NBA: BOSTON CELTICS SD': 'boston celtics',
+      'US: MLB NEW YORK YANKEES ᴿᴬᵂ': 'new york yankees',
+      'US: MLB ST. LOUIS CARDINALS ᴿᴬᵂ': 'st louis cardinals',
+      'NBA 05: Celtics': 'celtics',
+      'Texas A&M Aggies 2': 'texas am aggies',
+      'NBA: LEAGUE PASS 1': 'league pass',
+      'MLB 03 :': null,
+      ':NBA  09': null,
+      'NFL  | 01 -': null,
+      'ENDED | CHA - HORNETS VS MIA - HEAT | Sat 24 Oct 17:00 EDT (US) | 8K EXCLUSIVE | US: NBA PASS PPV 1': null,
+    };
+    for (const [name, expected] of Object.entries(want)) expect(teamChannelName(nameTokens(name)), name).toBe(expected);
+  });
+
+  it('keeps full names apart from the nicknames that need the league beside them', () => {
+    expect(teamKeys(CELTICS, 'nba')).toMatchObject({ channelNames: ['boston celtics'], channelNicknames: ['celtics'] });
+    const sixers = teamKeys(team('PHI', 'Philadelphia', '76ers'), 'nba');
+    expect(sixers.channelNames).toEqual(['philadelphia 76ers']);
+    expect(sixers.channelNicknames.sort()).toEqual(['76ers', 'sixers']);
+    expect(teamKeys(team('LAC', 'LA', 'Clippers'), 'nba')).toMatchObject({
+      channelNames: ['la clippers'],
+      channelNicknames: ['clippers', 'los angeles clippers'],
+    });
+    // A one-word full name is only a nickname.
+    const as = teamKeys(team('ATH', 'Athletics', 'Athletics', 'Athletics', 'Athletics'), 'mlb');
+    expect(as.channelNicknames).toEqual(expect.arrayContaining(['athletics', 'oakland athletics']));
+    expect(as.channelNames).not.toContain('athletics');
+    // College: the full name only, with St/State spellings.
+    expect(teamKeys(TEXAS, 'cfb')).toMatchObject({ channelNames: ['texas longhorns'], channelNicknames: [] });
+    expect(teamKeys(FSU, 'cfb').channelNames.sort()).toEqual(['florida st seminoles', 'florida state seminoles']);
   });
 });
 

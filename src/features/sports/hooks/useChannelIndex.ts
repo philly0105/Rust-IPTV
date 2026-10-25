@@ -24,6 +24,7 @@ import {
   isSportsGroup,
   nameTokens,
   networkIdForChannel,
+  teamChannelName,
   textTokens,
 } from '../lib/names';
 import { sportsRead } from './sportsRead';
@@ -41,6 +42,8 @@ export interface IndexedChannel {
   fromSportsGroup: boolean;
   /** `foreignFeed`: a feed from outside North America ("BR: ESPN"), listed after the others. */
   foreign: boolean;
+  /** `teamChannelName(tokens)`: the team a team channel's name leaves ("boston celtics"), or null. */
+  teamName: string | null;
   /** `isBackupFeed`: a backup feed or SD copy ("ESPN (Backup)"), listed after the main feeds. */
   backup: boolean;
 }
@@ -68,12 +71,13 @@ interface Described {
   tokens: string[];
   network: string | null;
   foreign: boolean;
+  teamName: string | null;
   backup: boolean;
 }
 
 const described = new WeakMap<Channel, Described>();
 
-/** Tokens, network and origin of a channel row, kept per row: a refetch with unchanged rows keeps the objects. */
+/** Tokens, network, origin and team of a channel row, kept per row: a refetch with unchanged rows keeps the objects. */
 function describe(channel: Channel): Described {
   let d = described.get(channel);
   if (!d) {
@@ -89,7 +93,7 @@ function describe(channel: Channel): Described {
         if (all.length !== tokens.length) network = networkIdForChannel(all);
       }
     }
-    d = { tokens, network, foreign, backup: isBackupFeed(channel.name) };
+    d = { tokens, network, foreign, teamName: teamChannelName(tokens), backup: isBackupFeed(channel.name) };
     described.set(channel, d);
   }
   return d;
@@ -97,8 +101,8 @@ function describe(channel: Channel): Described {
 
 /** One index row. */
 export function toIndexed(channel: Channel, source: Pick<Source, 'id' | 'kind' | 'name'>, fromSportsGroup: boolean): IndexedChannel {
-  const { tokens, network, foreign, backup } = describe(channel);
-  return { channel, sourceId: source.id, sourceKind: source.kind, sourceName: source.name, tokens, network, fromSportsGroup, foreign, backup };
+  const { tokens, network, foreign, teamName, backup } = describe(channel);
+  return { channel, sourceId: source.id, sourceKind: source.kind, sourceName: source.name, tokens, network, fromSportsGroup, foreign, teamName, backup };
 }
 
 /**

@@ -33,6 +33,7 @@ describe('fallback initials', () => {
     expect(initialsOf('IPTV | Main')).toBe('IM');
     expect(initialsOf('CSI: Miami')).toBe('CM');
     expect(initialsOf('1917')).toBe('19');
+    expect(initialsOf('S01E01')).toBe('S0');
   });
 
   it('channel monograms read names the same way, and keep whole code points', () => {

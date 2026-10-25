@@ -90,11 +90,11 @@ export function initialWords(text: string): string[] {
 export function twoInitials(words: readonly string[]): string {
   if (words.length === 0) return '?';
   if (words.length === 1) {
-    const chars = Array.from(words[0]!.replace(/[^\p{L}\p{N}]/gu, '') || words[0]!);
-    const last = chars[chars.length - 1]!;
-    // A name of letters ending in a number ("ESPN2"), not a number ("1917").
-    const numbered = chars.length > 2 && /\p{L}/u.test(chars[0]!) && /\d/.test(last);
-    return (numbered ? chars[0]! + last : chars.slice(0, 2).join('')).toUpperCase();
+    const word = words[0]!.replace(/[^\p{L}\p{N}]/gu, '') || words[0]!;
+    const chars = Array.from(word);
+    // Letters and then a number ("ESPN2", "FS1"); not a number ("1917") or a code ("S01E01").
+    const numbered = /^\p{L}{2,}\d+$/u.test(word);
+    return (numbered ? chars[0]! + chars[chars.length - 1]! : chars.slice(0, 2).join('')).toUpperCase();
   }
   return (Array.from(words[0]!)[0]! + Array.from(words[1]!)[0]!).toUpperCase();
 }

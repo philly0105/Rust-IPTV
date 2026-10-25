@@ -62,15 +62,39 @@ export function hueOf(text: string): number {
   return h % 360;
 }
 
-/** Up to two initials for fallback tiles ("BBC One HD" -> "BO"). */
-export function initialsOf(text: string): string {
+/** Quality, codec and copy markers, and "the": never what a name's initials stand for. */
+const NAME_MARKERS = /^(?:sd|hd|fhd|uhd|qhd|4k|8k|hevc|hdr|raw|\d{3,4}[pi]|\d+fps|backup|bkp|the)$/i;
+
+/**
+ * The words a name's initials come from: compatibility-folded ("ᴴᴰ" is "HD"), with the punctuation
+ * around each word trimmed ("(Backup)" is "Backup") and the markers above dropped, unless the name
+ * is nothing but markers. Shared with Live's channel monograms (live/lib/monogram.ts).
+ */
+export function initialWords(text: string): string[] {
   const words = text
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .normalize('NFKC')
     .split(/\s+/)
-    .filter((w) => w && !/^(hd|fhd|uhd|4k|sd|the)$/i.test(w));
+    .map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ''))
+    .filter(Boolean);
+  const named = words.filter((w) => !NAME_MARKERS.test(w));
+  return named.length > 0 ? named : words;
+}
+
+/** Two letters from `words`, by code point: the first of each of the first two words, or one word's first two letters or digits. */
+export function twoInitials(words: readonly string[]): string {
   if (words.length === 0) return '?';
-  if (words.length === 1) return words[0]!.slice(0, 2).toUpperCase();
-  return (words[0]![0]! + words[1]![0]!).toUpperCase();
+  if (words.length === 1) return Array.from(words[0]!.replace(/[^\p{L}\p{N}]/gu, '') || words[0]!).slice(0, 2).join('').toUpperCase();
+  return (Array.from(words[0]!)[0]! + Array.from(words[1]!)[0]!).toUpperCase();
+}
+
+/** A provider's country or group tag before a name ("US| ", "UK: ", "[DE] "), which no initial should come from. */
+const NAME_TAG = /^(?:\[[A-Z0-9+-]{2,8}\]|[A-Z]{2,3}\s*[|:])\s*/;
+
+/** Up to two initials for fallback tiles ("BBC One HD" -> "BO", "US| ESPN HD" -> "ES", "US| CBS (Backup)" -> "CB"). */
+export function initialsOf(text: string): string {
+  const trimmed = text.trim();
+  const untagged = trimmed.replace(NAME_TAG, '');
+  return twoInitials(initialWords(untagged || trimmed));
 }
 
 /**

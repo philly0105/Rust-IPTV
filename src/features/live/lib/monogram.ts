@@ -1,4 +1,4 @@
-import { hueOf } from '@/ui/Poster';
+import { hueOf, initialWords, twoInitials } from '@/ui/Poster';
 
 /**
  * A channel's monogram (LG-14): two letters on a two-stop fill from its name, one of eight hues
@@ -15,14 +15,12 @@ export function monogramFill(name: string): string {
   return `linear-gradient(150deg, hsl(${hue} 40% 34%), hsl(${(hue + 30) % 360} 46% 22%))`;
 }
 
-/** Two letters ("UK: BBC One HD" -> "BO"): no country tag, and whole code points. */
+/**
+ * Two letters ("UK: BBC One HD" -> "BO", "US| ESPN ᴴᴰ" -> "ES", "US| CBS (Backup)" -> "CB"): no
+ * country tag, no quality or copy markers, and whole code points, so an emoji or astral-plane letter
+ * never splits into half a surrogate pair.
+ */
 export function monogramText(name: string): string {
-  const words = name
-    .replace(/^[A-Z]{2,3}\s*[:|-]\s*/, '')
-    .split(/\s+/)
-    .filter(Boolean);
-  // Code points, not UTF-16 units: an emoji or astral-plane letter must not split into half a surrogate pair.
-  const first = Array.from(words[0] ?? '?');
-  const second = Array.from(words[1] ?? '');
-  return (second.length > 0 ? `${first[0]}${second[0]}` : first.slice(0, 2).join('')).toUpperCase();
+  const untagged = name.trim().replace(/^[A-Z]{2,3}\s*[:|-]\s*/, '');
+  return twoInitials(initialWords(untagged || name));
 }

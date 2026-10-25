@@ -1,7 +1,7 @@
 /**
  * The streams matched to one game (lib/match.ts): the best one, rows with an action ahead of rows
  * without, then "Show all" for the rest, so a card stays one stream tall. Each row names
- * the channel, why it matched (the guide, an event channel's name, or a network carrying the game)
+ * the channel, why it matched (the guide, an event channel's name, a team's own channel, or a network carrying the game)
  * and offers what fits the game's phase: Watch from 15 minutes before the start, Replay from the
  * channel's archive once it is over, Record before it starts. The player loads on the press.
  */

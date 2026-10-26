@@ -473,6 +473,28 @@ describe('the ruler and the row menu (stage 2)', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Play in MPV' })).toBeTruthy();
     expect(within(menu).getAllByRole('separator').length).toBeGreaterThanOrEqual(2);
   });
+
+  it.each(['MPV', 'VLC'] as const)('opens a past programme’s timeshift URL in %s', async (player) => {
+    const start = Date.now() - 2 * HOUR;
+    const past = program('Yesterday news', start, start + HOUR);
+    rpc.handlers['sources.list'] = () => [{ id: 'src1', kind: 'xtream', name: 'Demo', channelCount: CHANNELS.length }];
+    rpc.handlers['epg.grid'] = (a) => Object.fromEntries((a as { refs: Channel['ref'][] }).refs.map((r) => [key(r), r.itemId === 'c0' ? [past] : []]));
+    rpc.handlers['xtream.catchupUrl'] = () => ({ url: 'http://provider.test/timeshift/news.ts', kind: 'direct' });
+    rpc.handlers['player.openExternal'] = () => ({ pid: 42 });
+    renderGuide({ path: `/epg?source=src1&at=${defaultStart(start)}`, routes: GRID });
+
+    const cell = await screen.findByRole('button', { name: /^Yesterday news,/ });
+    fireEvent.contextMenu(cell, { clientX: 500, clientY: 200 });
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: `Play in ${player}` }));
+
+    await waitFor(() => expect(rpc.of('player.openExternal')).toHaveLength(1));
+    expect(rpc.of('xtream.catchupUrl')).toEqual([{ ref: CHANNELS[0]!.ref, start: past.start, durationMinutes: 60 }]);
+    expect(rpc.of('xtream.streamUrl')).toEqual([]);
+    expect(rpc.of('player.openExternal')[0]).toMatchObject({
+      player: player.toLowerCase(),
+      source: { url: 'http://provider.test/timeshift/news.ts', title: 'Channel 0', subtitle: past.title, isLive: false, catchupProgramStart: past.start },
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -32,7 +32,7 @@ import type { MenuEntry, MenuHeader, MenuItem } from '../components/ContextMenu'
 import { archivePath, canBrowseArchive } from '../lib/archive';
 import { displayChannelName } from '../lib/channelName';
 import { canCatchUp, formatClock, formatDay, ms, programWhen } from '../lib/epgTime';
-import { canDownloadCatchup, catchupDownloadArgs, catchupSource, openChannelSource, playCatchup } from '../lib/playback';
+import { canDownloadCatchup, catchupDownloadArgs, catchupSource, openCatchupSource, openChannelSource, playCatchup } from '../lib/playback';
 import { useDisplayPrefs } from './useDisplayPrefs';
 
 export interface ChannelMenuOptions {
@@ -88,11 +88,14 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
     if (!channel) return [];
     const ch = channel;
     const src = source && source.id === ch.ref.sourceId ? source : undefined;
+    const playableProgramme = !!src && !!programme && programWhen(programme, now) === 'past' && canCatchUp(programme, ch, src.kind, now);
     const external = async (player: 'mpv' | 'vlc') => {
       if (!src) return;
       try {
         // C2: a locked channel or group asks for the PIN first, as inline playback does.
-        const s = await openChannelSource(ch, src, name);
+        const s = playableProgramme && programme
+          ? await openCatchupSource(ch, src.kind, programme, now, name)
+          : await openChannelSource(ch, src, name);
         if (!s) return;
         // The stage says what plays where, with Stop and Reopen (the player's ExternalStage), instead
         // of "Nothing playing"; the in-app player gives way to it (L2-desktop-9). The store opens it and
@@ -169,7 +172,6 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
         toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
       );
     };
-    const playableProgramme = !!src && !!programme && programWhen(programme, now) === 'past' && canCatchUp(programme, ch, src.kind, now);
     const out: MenuEntry[] = [
       { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
       ...(playableProgramme ? [{ id: 'watch-programme', label: t('watchCatchup'), icon: <Play className="size-4" />, onSelect: watchProgramme }] : []),

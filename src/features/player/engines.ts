@@ -1128,7 +1128,7 @@ async function mpegtsEngine(
   let offset = 0;
   /** Set by a reconnect until the new pipeline has media: the displayed position to continue from. */
   let anchor: number | null = null;
-  const restartable = !isLive && !!seeker && !source.catchup;
+  const restartable = !isLive && !!seeker && !seeksByArchiveUrl;
   /** A restart's target until the new stream is there and sought: the display holds at it. */
   let hold: number | null = null;
   /** What the new stream still has to be sought by once it has media (catch-up starts on a whole minute). */
@@ -1210,12 +1210,19 @@ async function mpegtsEngine(
     if (!destroyed) cb.onError(err);
   };
 
+  const withPark = (from: string): string => {
+    if (isLive || seeksByArchiveUrl || !proxyRoute(from)) return from;
+    const parked = new URL(from);
+    parked.searchParams.set('park', '1');
+    return parked.href;
+  };
+
   const start = (from = activeUrl): void => {
     traceTimeshift(source, 'mpegts load', { restarts, currentTime: el.currentTime });
     loadComplete = false;
     const duration = source.durationSeconds ? (source.durationSeconds - archiveOffset) * 1000 : 0;
     config.expectedDuration = duration;
-    const requestUrl = from;
+    const requestUrl = withPark(from);
     const p = mpegts.createPlayer({
       type: 'mpegts', isLive, url: requestUrl, cors: true,
       ...(duration ? { duration } : {}),
@@ -1422,6 +1429,7 @@ async function mpegtsEngine(
   };
   el.addEventListener('timeupdate', rebase);
   el.addEventListener('loadedmetadata', rebase);
+  el.addEventListener('loadedmetadata', land);
   const onArchiveMetadata = (): void => {
     const pending = pendingArchiveSeek;
     if (!pending || destroyed) return;
@@ -1441,6 +1449,20 @@ async function mpegtsEngine(
   return {
     kind: 'mpegts',
     resumes: resumeAt > 0,
+    duration() {
+      return restartable ? seeker?.duration() : undefined;
+    },
+    setPaused(paused) {
+      if (hold === null || player !== null || destroyed) return false;
+      restartPlays = !paused;
+      return true;
+    },
+    seek(target) {
+      if (!restartable || destroyed || !Number.isFinite(target) || !seeker?.usable()) return false;
+      if (hold === null && target >= offset && bufferedAt(el, target - offset)) return false;
+      restartAt(target, hold !== null && player === null ? restartPlays : !el.paused);
+      return true;
+    },
     setQuality() {},
     setAudio() {},
     setText() {},
@@ -1500,7 +1522,9 @@ async function mpegtsEngine(
     timeOffset() {
       // While reconnecting the display holds at the anchor whatever the element reports.
       if (pendingArchiveSeek) return pendingArchiveSeek.target - (Number.isFinite(el.currentTime) ? el.currentTime : 0);
-      return anchor !== null ? anchor - (Number.isFinite(el.currentTime) ? el.currentTime : 0) : offset + archiveOffset;
+      const current = Number.isFinite(el.currentTime) ? el.currentTime : 0;
+      if (hold !== null) return hold - current;
+      return anchor !== null ? anchor - current : offset + archiveOffset;
     },
     destroy() {
       traceTimeshift(source, 'mpegts destroy', { currentTime: el.currentTime, hadMedia, loadComplete, restarts });

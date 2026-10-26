@@ -222,8 +222,8 @@ export const GuideRow = memo(function GuideRow({
     <div
       role="row"
       aria-rowindex={index + 2}
-      className="absolute start-0 flex border-b border-divider"
-      style={{ top, height, width: 'var(--grid-total-width)', contain: 'layout style' }}
+      className="absolute start-0 flex border-b border-divider [contain:size_layout]"
+      style={{ top, height, width: 'var(--grid-total-width)', contain: 'size layout style' }}
       // Right click anywhere on the row (its channel cell or a programme): the channel's menu.
       onContextMenu={(e: MouseEvent) => {
         if (!ch) return;

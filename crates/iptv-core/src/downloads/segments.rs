@@ -789,7 +789,9 @@ async fn worker(
     // the extra ones are retired.
     let share = || {
         let workers = job.ctl.connections.load(Ordering::Relaxed).max(1) as u64;
-        job.ctl.rate_limit(job.state.settings.read().download_rate_limit_bps).map(|bps| (bps / workers).max(1))
+        job.ctl
+            .rate_limit(job.state.settings.read().download_rate_limit_bps)
+            .map(|bps| (bps / workers).max(1))
     };
     let mut pace = super::transfer::Pace::new(share(), pos);
     loop {

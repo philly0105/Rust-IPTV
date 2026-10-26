@@ -487,9 +487,30 @@ fn migrate_in_tx(conn: &mut Connection) -> CoreResult<()> {
         tracing::error!(current, latest, "database schema is newer than this build");
         return Err(newer_schema_error());
     }
+    // Local builds before the origin rebase used 22 for download duration and 23 for its
+    // rate limit. Origin uses those numbers for channel quality and the stream-format default.
+    // The old database records only numbers, so identify that path by its actual columns and
+    // apply the two origin migrations it would otherwise skip. Keep this inside the transaction:
+    // a failed upgrade leaves both the schema and recorded versions untouched.
+    if (22..=23).contains(&current)
+        && has_column(&tx, "downloads", "duration_seconds")?
+        && !has_column(&tx, "items", "quality")?
+    {
+        tx.execute_batch(MIGRATIONS[21].sql)?;
+        if current == 23 {
+            tx.execute_batch(MIGRATIONS[22].sql)?;
+        }
+    }
     for m in MIGRATIONS.iter().filter(|m| m.version > current) {
         tracing::info!(version = m.version, name = m.name, "applying migration");
-        tx.execute_batch(m.sql)?;
+        let already_present = match m.version {
+            25 => has_column(&tx, "downloads", "duration_seconds")?,
+            26 => has_column(&tx, "downloads", "rate_limit_bps")?,
+            _ => false,
+        };
+        if !already_present {
+            tx.execute_batch(m.sql)?;
+        }
         tx.execute(
             "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
             [m.version],
@@ -497,6 +518,17 @@ fn migrate_in_tx(conn: &mut Connection) -> CoreResult<()> {
     }
     tx.commit()?;
     Ok(())
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> CoreResult<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2 LIMIT 1",
+            (table, column),
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false))
 }
 
 /// Current schema version (0 for an empty database).
@@ -922,7 +954,7 @@ mod tests {
     fn download_rate_migration_preserves_existing_progress_and_inherits_default() {
         let mut conn = Connection::open_in_memory().unwrap();
         configure(&mut conn).unwrap();
-        for m in MIGRATIONS.iter().filter(|m| m.version <= 22) {
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 25) {
             conn.execute_batch(m.sql).unwrap();
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
@@ -938,6 +970,51 @@ mod tests {
         assert_eq!(row.duration_seconds, Some(1800));
         assert_eq!(row.status, crate::model::DownloadStatus::Paused);
         assert_eq!(row.file_path.as_deref(), Some("/saved/News.ts"));
+    }
+
+    #[test]
+    fn upgrades_pre_rebase_download_migrations_without_losing_data() {
+        for old_version in [22, 23] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            configure(&mut conn).unwrap();
+            for m in MIGRATIONS.iter().filter(|m| m.version <= 21) {
+                conn.execute_batch(m.sql).unwrap();
+                conn.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                    [m.version],
+                )
+                .unwrap();
+            }
+            conn.execute_batch(include_str!("migrations/0025_download_duration.sql"))
+                .unwrap();
+            conn.execute("INSERT INTO schema_migrations(version) VALUES (22)", [])
+                .unwrap();
+            if old_version == 23 {
+                conn.execute_batch(include_str!("migrations/0026_download_rate_limit.sql"))
+                    .unwrap();
+                conn.execute("INSERT INTO schema_migrations(version) VALUES (23)", [])
+                    .unwrap();
+            }
+            conn.execute("INSERT INTO downloads (source_id, content_type, item_id, title, url, status, bytes_downloaded, duration_seconds) VALUES ('s', 'live', '1', 'News', 'http://example.test/archive.ts', 'paused', 123456, 1800)", []).unwrap();
+            if old_version == 23 {
+                conn.execute(
+                    "UPDATE downloads SET rate_limit_bps = 512000 WHERE id = 1",
+                    [],
+                )
+                .unwrap();
+            }
+
+            migrate(&mut conn).unwrap();
+            assert_eq!(schema_version(&conn).unwrap(), latest_version());
+            assert!(has_column(&conn, "items", "quality").unwrap());
+            assert!(has_column(&conn, "downloads", "duration_seconds").unwrap());
+            assert!(has_column(&conn, "downloads", "rate_limit_bps").unwrap());
+            let row = crate::downloads::store::get(&conn, 1).unwrap().download;
+            assert_eq!(row.bytes_downloaded, 123456);
+            assert_eq!(row.duration_seconds, Some(1800));
+            assert_eq!(row.rate_limit_bps, (old_version == 23).then_some(512_000));
+            migrate(&mut conn).unwrap();
+        }
     }
 
     #[test]

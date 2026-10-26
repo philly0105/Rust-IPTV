@@ -1188,7 +1188,12 @@ fn take_one(n: &AtomicU32) -> bool {
 
 /// The conditional `queued -> downloading` claim, retried with backoff a
 /// few times when the database is busy or briefly unavailable.
-async fn claim(state: &Arc<AppState>, mgr: &DownloadManager, id: i64, ctl: &Arc<TaskCtl>) -> CoreResult<bool> {
+async fn claim(
+    state: &Arc<AppState>,
+    mgr: &DownloadManager,
+    id: i64,
+    ctl: &Arc<TaskCtl>,
+) -> CoreResult<bool> {
     let mut attempt = 0;
     loop {
         let simulated = take_one(&mgr.failing_claims);
@@ -1431,7 +1436,7 @@ mod tests {
 
     #[test]
     fn download_limit_inherits_or_overrides_the_live_default() {
-        let ctl = TaskCtl::new();
+        let ctl = TaskCtl::new(0, "test".into());
         assert_eq!(ctl.rate_limit(1024), Some(1024));
         assert_eq!(ctl.rate_limit(2048), Some(2048));
         assert_eq!(ctl.rate_limit(0), None);

@@ -419,6 +419,7 @@ const gridHashes = new WeakMap<readonly ItemRef[], { from: string; to: string; h
  */
 function gridKeyHash(key: QueryKey): string {
   const args = key[1] as Partial<ReturnType<typeof gridArgs>> | null | undefined;
+  if (args?.refs?.length === 0) return 'epg.grid:empty';
   if (!args?.refs || args.from === undefined || args.to === undefined) return hashKey(key);
   const hit = gridHashes.get(args.refs);
   if (hit && hit.from === args.from && hit.to === args.to) return hit.hash;
@@ -609,7 +610,9 @@ export function EpgGridPage() {
     // the query cache for each one outside the loaded pages, about 150 ms inside the click.
     let matching = 0;
     for (const { index } of paged.loaded) {
-      for (const p of windowPrograms(index)) if (genreOf(p.category) === g) matching++;
+      for (const p of windowPrograms(index)) {
+        if (ms(p.start) < shownTime[1] && ms(p.end) > shownTime[0] && genreOf(p.category) === g) matching++;
+      }
     }
     setGenreNote(tg('genreFilterOn', { genre: tg(`genre_${g}`), count: matching }));
   });
@@ -855,6 +858,7 @@ export function EpgGridPage() {
     staleTime: GRID_STALE_MS,
     gcTime: GRID_CACHE_MS,
     keepPrevious: true,
+    queryKeyHashFn: gridKeyHash,
   });
   // A small move can change the request's bucket or visible row set while its previous answer
   // still covers the screen. Retain that answer, with its actual query span, until replaced.

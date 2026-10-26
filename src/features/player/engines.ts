@@ -11,10 +11,13 @@ import hlsWorkerUrl from 'hls.js/dist/hls.worker.js?url';
 import i18next from 'i18next';
 
 import type { MpvStats, PlayerSource } from '@/api/types';
+import { proxiedUrl } from '@/api/transport';
 import { intlLocale } from '@/lib/intl';
 
+import { archiveRequest } from './archiveRequest';
 import { hideDrawnTracks, isExternalTrack, isShownTrack, releaseTrack } from './subtitles/tracks';
 import type { TsSeeker } from './tsSeek';
+import { traceTimeshift } from './timeshiftDiagnostics';
 
 export interface TrackOption {
   id: string;
@@ -45,6 +48,8 @@ export interface EngineCallbacks {
    * comes, and fires no `waiting` meanwhile.
    */
   onWaiting?(): void;
+  /** Archive bytes are arriving even if a seek scan has not produced buffered media yet. */
+  onArchiveActivity?(): void;
 }
 
 export interface Engine {
@@ -56,11 +61,12 @@ export interface Engine {
   setText(id: string | null): void;
   /** Recover after a non-fatal stall: hls.js `recoverMediaError`/`startLoad`. */
   recover(): void;
+  /** Seek on the programme clock when an engine can open a new archive request. */
+  seekTo?(seconds: number): number | false;
   /**
    * Seconds to add to `el.currentTime` (and buffered/seekable ranges) for display, and to
-   * subtract when seeking. Non-zero only after mpegts.js started a new pipeline, which starts the
-   * element clock at 0: a live reconnect (the shown position must not jump back), or a restart
-   * at a seek in non-live MPEG-TS (the item time the new stream starts at).
+   * subtract when seeking. Used after a live reconnect and when an archive request starts at a
+   * later programme minute, both of which restart the element clock at 0.
    */
   timeOffset?(): number;
   /**
@@ -1101,11 +1107,15 @@ async function mpegtsEngine(
     console.info(`[IPTV-TS] runtime revision=${revision ?? 'missing'} origin=${window.location.origin}`);
   }
   let player: TsPlayer | null = null;
+  let activeUrl = absolute;
+  let archiveOffset = 0;
+  let pendingArchiveSeek: { target: number } | null = null;
   let destroyed = false;
   let restarts = 0;
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let stableTimer: ReturnType<typeof setTimeout> | null = null;
   let loadComplete = false;
+  let lastNetworkTraceAt = 0;
   /** The stream produced media once: only then is a dropped connection restarted here. */
   let hadMedia = false;
   /** Handed to `onNotTs`: whatever this pipeline reports after that is moot. */
@@ -1117,7 +1127,7 @@ async function mpegtsEngine(
   let offset = 0;
   /** Set by a reconnect until the new pipeline has media: the displayed position to continue from. */
   let anchor: number | null = null;
-  const restartable = !isLive && !!seeker;
+  const restartable = !isLive && !!seeker && !source.catchup;
   /** A restart's target until the new stream is there and sought: the display holds at it. */
   let hold: number | null = null;
   /** What the new stream still has to be sought by once it has media (catch-up starts on a whole minute). */
@@ -1131,12 +1141,15 @@ async function mpegtsEngine(
   let seekRun = 0;
   let seekAbort: AbortController | null = null;
 
-  type TsConfig = Parameters<typeof mpegts.createPlayer>[1] & { expectedDuration?: number; archiveTrace?: boolean };
+  type TsConfig = Parameters<typeof mpegts.createPlayer>[1] & { expectedDuration?: number; archiveTrace?: boolean; archiveScanMaxGap?: number; archiveSkipTimestampGaps?: boolean };
   const config: TsConfig = {
     enableWorker: true,
     // Live: low-latency reads. No latency chasing: servers that burst their buffer on connect
     // (or serve a whole loop at once) would be skipped to the last seconds, then end and reconnect.
-    enableStashBuffer: !isLive,
+    // A catch-up provider can send a short opening burst followed by steady chunks.
+    // The adaptive stash grows to 8 MiB and withholds those chunks until it fills,
+    // exhausting the first few seconds of video before the next segment is appended.
+    enableStashBuffer: !isLive && !source.catchupProgramStart,
     liveBufferLatencyChasing: false,
     // Hours-long sessions must not sit at the SourceBuffer quota. A tile never seeks back.
     autoCleanupSourceBuffer: true,
@@ -1148,9 +1161,23 @@ async function mpegtsEngine(
     lazyLoadMaxDuration: 60,
     lazyLoadRecoverDuration: 20,
     expectedDuration: source.durationSeconds ? source.durationSeconds * 1000 : 0,
+    // The patched loader resumes a finite archive after this long without bytes. Its 10 s
+    // default is too eager for timeshift providers that prepare or seek slowly.
+    ...(source.catchupProgramStart ? { archiveStallTimeout: 45_000, archiveScanMaxGap: 30_000, archiveSkipTimestampGaps: true } : {}),
     archiveTrace: traceArchive,
     reuseRedirectedURL: true,
   };
+  traceTimeshift(source, 'mpegts configured', {
+    revision: (mpegts as typeof mpegts & { iptvPatchRevision?: string }).iptvPatchRevision ?? 'missing',
+    programmeStart: source.catchupProgramStart,
+    requestedArchiveStamp: source.url.match(/\/(\d{4}-\d{2}-\d{2}:\d{2}-\d{2})\//)?.[1],
+    expectedDuration: config.expectedDuration,
+    archiveStallTimeout: source.catchupProgramStart ? 45_000 : undefined,
+    archiveScanMaxGap: config.archiveScanMaxGap,
+    archiveSkipTimestampGaps: config.archiveSkipTimestampGaps,
+    enableStashBuffer: config.enableStashBuffer,
+    worker: config.enableWorker,
+  });
 
   /** Real playback progress (not loader stats): after TS_STABLE_MS of it the restart budget refills. */
   const markStable = (): void => {
@@ -1172,32 +1199,26 @@ async function mpegtsEngine(
   };
 
   const fail = (err: EngineError): void => {
+    traceTimeshift(source, 'mpegts fatal', { kind: err.kind, message: err.message, currentTime: el.currentTime, hadMedia });
     if (!destroyed) cb.onError(err);
   };
 
-  /**
-   * What mpegts.js loads: a non-live body through the proxy asks it to park for the lazy-load
-   * resume (`park=1`, server.md). Only this player resumes such a body and releases it, so the
-   * proxy parks nothing else (an HLS segment). The reason lookup and the seeker's probes go without.
-   */
-  const withPark = (from: string): string => {
-    if (isLive || !proxyRoute(from)) return from;
-    const u = new URL(from);
-    u.searchParams.set('park', '1');
-    return u.href;
-  };
-
-  const start = (from = absolute): void => {
+  const start = (from = activeUrl): void => {
+    traceTimeshift(source, 'mpegts load', { restarts, currentTime: el.currentTime });
     loadComplete = false;
+    const duration = source.durationSeconds ? (source.durationSeconds - archiveOffset) * 1000 : 0;
+    config.expectedDuration = duration;
+    const requestUrl = from;
     const p = mpegts.createPlayer({
-      type: 'mpegts', isLive, url: withPark(from), cors: true,
-      ...(source.durationSeconds ? { duration: source.durationSeconds * 1000 } : {}),
+      type: 'mpegts', isLive, url: requestUrl, cors: true,
+      ...(duration ? { duration } : {}),
     }, config);
     player = p;
     p.on(mpegts.Events.ERROR, (type: string, detail: string, info?: { code?: number; msg?: string }) => {
       if (player !== p || destroyed || handedOff) return;
       const http = info?.code && info.code > 0 ? ` (HTTP ${info.code})` : '';
       const message = `${detail || type}${http}`;
+      traceTimeshift(source, 'mpegts error', { type, detail, code: info?.code, hadMedia, loadComplete, currentTime: el.currentTime });
       if (type === mpegts.ErrorTypes.NETWORK_ERROR) {
         // An HTTP answer (404, 503, ...) is the provider's verdict: it goes up at once, and the
         // player's reconnect decides whether a retry is worth it (`reconnect.ts`, one layer
@@ -1205,8 +1226,8 @@ async function mpegtsEngine(
         if (info?.code && info.code > 0) {
           const status = info.code;
           // mpegts.js drops the body; our own server (proxy guard, relayed status) is asked once for the reason.
-          if (isOwnServerUrl(from)) {
-            void fetchFailureReason(from).then((r) => {
+          if (isOwnServerUrl(requestUrl)) {
+            void fetchFailureReason(requestUrl).then((r) => {
               if (player === p) fail({ message: withReason(message, r?.reason ?? null, r?.status ?? status), fatal: true, kind: 'network' });
             });
           } else fail({ message, fatal: true, kind: 'network' });
@@ -1229,7 +1250,29 @@ async function mpegtsEngine(
       fail({ message, fatal: true, kind: 'other' });
     });
     p.on(mpegts.Events.LOADING_COMPLETE, () => {
-      if (player === p) loadComplete = true;
+      if (player === p) {
+        loadComplete = true;
+        traceTimeshift(source, 'mpegts loading complete', { currentTime: el.currentTime, hadMedia });
+      }
+    });
+    if (source.catchupProgramStart) p.on(mpegts.Events.MEDIA_INFO, (info: Record<string, unknown>) => {
+      if (player !== p || destroyed) return;
+      const fields = ['hasAudio', 'hasVideo', 'audioCodec', 'videoCodec', 'width', 'height', 'fps', 'audioSampleRate', 'audioChannelCount'] as const;
+      const picked: Record<string, string | number | boolean> = {};
+      for (const key of fields) {
+        const value = info[key];
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') picked[key] = value;
+      }
+      traceTimeshift(source, 'mpegts media info', picked);
+    });
+    if (source.catchupProgramStart) p.on(mpegts.Events.STATISTICS_INFO, (stats: { speed?: number }) => {
+      if (player !== p || destroyed || !(stats.speed && stats.speed > 0)) return;
+      cb.onArchiveActivity?.();
+      const now = Date.now();
+      if (now - lastNetworkTraceAt >= 10_000) {
+        lastNetworkTraceAt = now;
+        traceTimeshift(source, 'mpegts receiving archive bytes', { kbPerSecond: Math.round(stats.speed) });
+      }
     });
     p.attachMediaElement(el);
     throttleCleanupCheck(p);
@@ -1239,6 +1282,7 @@ async function mpegtsEngine(
   /** Rebuild the pipeline on the same element: a closed live connection or a dropped network. */
   function restart(reason: EngineError): void {
     if (destroyed || restartTimer) return;
+    traceTimeshift(source, 'mpegts restart', { reason: reason.message, restarts, hadMedia, currentTime: el.currentTime });
     if (restarts >= TS_MAX_RESTARTS) {
       fail(reason);
       return;
@@ -1324,6 +1368,23 @@ async function mpegtsEngine(
     const ranges: string[] = [];
     for (let i = 0; i < el.buffered.length; i++) ranges.push(`${el.buffered.start(i).toFixed(1)}-${el.buffered.end(i).toFixed(1)}`);
     console.info(`[IPTV-TS] ${event} time=${el.currentTime.toFixed(1)} buffer=${ranges.join(',')} ready=${el.readyState}`);
+    const video = el as HTMLVideoElement & {
+      webkitDecodedFrameCount?: number;
+      webkitDroppedFrameCount?: number;
+      webkitAudioDecodedByteCount?: number;
+      webkitVideoDecodedByteCount?: number;
+    };
+    const quality = video.getVideoPlaybackQuality?.();
+    traceTimeshift(source, 'mpegts decoder state', {
+      trigger: event, position: el.currentTime, readyState: el.readyState, networkState: el.networkState,
+      paused: el.paused, playbackRate: el.playbackRate, buffered: ranges.join(','),
+      videoWidth: video.videoWidth, videoHeight: video.videoHeight,
+      decodedFrames: quality?.totalVideoFrames ?? video.webkitDecodedFrameCount,
+      droppedFrames: quality?.droppedVideoFrames ?? video.webkitDroppedFrameCount,
+      decodedAudioBytes: video.webkitAudioDecodedByteCount,
+      decodedVideoBytes: video.webkitVideoDecodedByteCount,
+      muted: el.muted, volume: el.volume, errorCode: el.error?.code, errorMessage: el.error?.message,
+    });
   };
   const onTraceTimeUpdate = (): void => {
     if (!traceArchive) return;
@@ -1349,11 +1410,19 @@ async function mpegtsEngine(
   // Listener order does not matter: until rebased, `timeOffset()` holds the display at the anchor.
   const onData = (): void => {
     if (!hadMedia) rememberLiveFormat(source, 'ts');
+    if (!hadMedia) traceTimeshift(source, 'mpegts first media', { currentTime: el.currentTime });
     hadMedia = true;
   };
   el.addEventListener('timeupdate', rebase);
   el.addEventListener('loadedmetadata', rebase);
-  el.addEventListener('loadedmetadata', land);
+  const onArchiveMetadata = (): void => {
+    const pending = pendingArchiveSeek;
+    if (!pending || destroyed) return;
+    pendingArchiveSeek = null;
+    traceTimeshift(source, 'mpegts archive request ready', { target: pending.target, offset: archiveOffset });
+  };
+  el.addEventListener('loadedmetadata', onArchiveMetadata);
+  el.addEventListener('loadeddata', onArchiveMetadata);
   el.addEventListener('timeupdate', markStable);
   el.addEventListener('loadeddata', onData);
   // A resume starts where it resumes instead of loading everything before it.
@@ -1368,22 +1437,29 @@ async function mpegtsEngine(
     setQuality() {},
     setAudio() {},
     setText() {},
-    duration() {
-      return restartable ? seeker?.duration() : undefined;
-    },
-    setPaused(paused) {
-      // Once the new pipeline is attached the element plays and pauses itself.
-      if (hold === null || player !== null || destroyed) return false;
-      restartPlays = !paused;
-      return true;
-    },
-    seek(target) {
-      if (!restartable || destroyed || !Number.isFinite(target) || !seeker?.usable()) return false;
-      // Inside what the element holds (and no restart under way) the element seeks itself.
-      if (hold === null && target >= offset && bufferedAt(el, target - offset)) return false;
-      // The torn-down element reads as paused until the new pipeline is attached.
-      restartAt(target, hold !== null && player === null ? restartPlays : !el.paused);
-      return true;
+    seekTo(seconds) {
+      const request = archiveRequest(source, seconds);
+      if (!request || destroyed) return false;
+      const target = request.offset;
+      if (request.offset === archiveOffset && pendingArchiveSeek) {
+        return target;
+      }
+      const playing = !el.paused;
+      activeUrl = new URL(proxiedUrl({ ...source, url: request.url }), window.location.href).href;
+      archiveOffset = request.offset;
+      pendingArchiveSeek = { target };
+      restarts = 0;
+      hadMedia = false;
+      loadComplete = false;
+      if (restartTimer) clearTimeout(restartTimer);
+      restartTimer = null;
+      if (stableTimer) clearTimeout(stableTimer);
+      stableTimer = null;
+      if (player) teardown(player);
+      traceTimeshift(source, 'mpegts archive request seek', { requested: seconds, target, offset: archiveOffset });
+      start();
+      if (playing) void el.play().catch(() => undefined);
+      return target;
     },
     recover() {
       restarts = 0;
@@ -1415,16 +1491,18 @@ async function mpegtsEngine(
       return out;
     },
     timeOffset() {
-      // While reconnecting or restarting the display holds at the anchor or the target, whatever the element reports.
-      const t = Number.isFinite(el.currentTime) ? el.currentTime : 0;
-      if (hold !== null) return hold - t;
-      return anchor !== null ? anchor - t : offset;
+      // While reconnecting the display holds at the anchor whatever the element reports.
+      if (pendingArchiveSeek) return pendingArchiveSeek.target - (Number.isFinite(el.currentTime) ? el.currentTime : 0);
+      return anchor !== null ? anchor - (Number.isFinite(el.currentTime) ? el.currentTime : 0) : offset + archiveOffset;
     },
     destroy() {
+      traceTimeshift(source, 'mpegts destroy', { currentTime: el.currentTime, hadMedia, loadComplete, restarts });
       destroyed = true;
       seekAbort?.abort();
       if (restartTimer) clearTimeout(restartTimer);
       if (stableTimer) clearTimeout(stableTimer);
+      el.removeEventListener('loadedmetadata', onArchiveMetadata);
+      el.removeEventListener('loadeddata', onArchiveMetadata);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('waiting', onWaiting);
       if (traceArchive) {
@@ -1487,6 +1565,7 @@ async function tsFirstEngine(
     setText: (id) => current.setText(id),
     recover: () => current.recover(),
     timeOffset: () => current.timeOffset?.() ?? 0,
+    seekTo: (seconds) => current.seekTo?.(seconds) ?? false,
     stats: () => current.stats?.() ?? {},
     destroy() {
       destroyed = true;

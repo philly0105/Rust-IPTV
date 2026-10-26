@@ -9,11 +9,13 @@ import { queryClient, rpcKey } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { bindWindowFullscreen } from '@/api/window';
 import { startupTarget } from '@/shell/StartupRedirect';
+import { captureMpegtsArchiveTrace } from '@/features/player/timeshiftDiagnostics';
 import { App } from './App';
 import { preloadRoute } from './routes';
 
 // U1 owns src/styles/globals.css. Loaded via glob so the build passes before it exists.
 import.meta.glob('./styles/globals.css', { eager: true });
+captureMpegtsArchiveTrace();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root element missing from index.html');

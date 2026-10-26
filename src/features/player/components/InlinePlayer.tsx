@@ -43,6 +43,7 @@ import {
   usePlayerStore,
 } from '../store';
 import { clearExternal, selectText, setInlineSubtitleTarget, withExternal } from '../subtitles/tracks';
+import { traceTimeshift } from '../timeshiftDiagnostics';
 import { usePlayerSettings } from '../useSettings';
 import { useRetryWhenOnline, useStreamError } from '../useStreamError';
 import { ErrorActions, rawTsHintKey } from './ErrorActions';
@@ -238,6 +239,11 @@ export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className
           onWaiting: () => {
             if (!disposed) useMediaStore.setState({ waiting: true });
           },
+          onArchiveActivity: () => {
+            if (disposed) return;
+            const now = Date.now();
+            if (now - (useMediaStore.getState().archiveNetworkAt ?? 0) >= 1_000) useMediaStore.setState({ archiveNetworkAt: now });
+          },
         },
         // MPEG-TS seeks past the buffer and resumes by restarting there (tsSeek.ts).
         { captions: captionsDefault, signal: abort.signal, forceMpegts, seeker: tsSeekerFor(src, loadUrl) },
@@ -283,7 +289,10 @@ export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className
       const s = usePlayerStore.getState().source;
       if (engineRef.current?.resumes) return;
       if (s && !s.isLive && s.resumeSeconds && (s.kind === 'direct' || s.kind === 'file')) {
-        if (el.duration && s.resumeSeconds < el.duration - 2) el.currentTime = s.resumeSeconds;
+        if (el.duration && s.resumeSeconds < (s.durationSeconds ?? el.duration) - 2) {
+          const landed = engineRef.current?.seekTo?.(s.resumeSeconds);
+          if (landed === undefined || landed === false) el.currentTime = s.resumeSeconds;
+        }
       }
     };
     el.addEventListener('loadedmetadata', onMeta, { once: true });
@@ -365,6 +374,10 @@ export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className
       if (!s || !el.error) return;
       const code = el.error.code;
       const engineKind = engineRef.current?.kind;
+      traceTimeshift(s, 'media element error', {
+        code, message: el.error.message, engineKind, position: el.currentTime,
+        readyState: el.readyState, networkState: el.networkState,
+      });
       if (engineKind ? engineKind !== 'native' : s.kind === 'hls' || s.kind === 'dash' || looksLikeMpegTs(s)) {
         // hls.js, shaka and mpegts.js report their own failures, and may recover from this one.
         // When they stay quiet and the element still holds the error, say so: never a black
@@ -423,19 +436,20 @@ export const InlinePlayer = memo(function InlinePlayer({ as = 'video', className
     el.addEventListener('leavepictureinpicture', onLeavePip);
 
     const unController = setController({
-      // Between two MPEG-TS pipelines the element fires nothing: the engine keeps the wish and
-      // the status follows it here.
       play: () => {
         if (engineRef.current?.setPaused?.(false)) reportStatus('playing');
         else void el.play().catch(() => undefined);
       },
+      seekTo: (s) => {
+        if (!Number.isFinite(s)) return;
+        const landed = engineRef.current?.seekTo?.(s);
+        if (landed !== undefined && landed !== false) return landed;
+        if (engineRef.current?.seek?.(s)) return;
+        el.currentTime = Math.max(0, s - offset());
+      },
       pause: () => {
         if (engineRef.current?.setPaused?.(true)) reportStatus('paused');
         else el.pause();
-      },
-      seekTo: (s) => {
-        if (!Number.isFinite(s) || engineRef.current?.seek?.(s)) return;
-        el.currentTime = Math.max(0, s - offset());
       },
       holds: (s) => bufferedAt(el, s - offset()),
       setVolume: (v) => {

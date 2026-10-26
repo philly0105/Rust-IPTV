@@ -139,6 +139,15 @@ describe('store transitions', () => {
     expect(usePlayerStore.getState().muted).toBe(true);
   });
 
+  it('shows the minute reached when an archive engine snaps a seek', async () => {
+    const ctl = { play: vi.fn(), pause: vi.fn(), seekTo: vi.fn((seconds: number) => Math.floor(seconds / 60) * 60), setVolume: vi.fn(), setMuted: vi.fn() };
+    store.setController(ctl);
+    await usePlayerStore.getState().play(vod('1'));
+    usePlayerStore.getState().seekTo(139 * 60 + 35);
+    expect(ctl.seekTo).toHaveBeenLastCalledWith(139 * 60 + 35);
+    expect(usePlayerStore.getState().positionSeconds).toBe(139 * 60);
+  });
+
   it('external player setting opens vlc and hides the dock (desktop)', async () => {
     env.desktop = true;
     try {
@@ -211,7 +220,21 @@ describe('store transitions', () => {
 });
 
 describe('startup and stall watchdog', () => {
-  const { reportStatus, STARTUP_TIMEOUT_MS } = store;
+  const { reportStatus, STARTUP_TIMEOUT_MS, CATCHUP_STARTUP_TIMEOUT_MS } = store;
+
+  it('allows a slow catch-up programme longer to show its first frame', async () => {
+    vi.useFakeTimers();
+    await usePlayerStore.getState().play(vod('1', {
+      ref: liveRef,
+      url: 'http://h/timeshift/1.ts',
+      catchupProgramStart: '2026-10-25T10:00:00Z',
+      durationSeconds: 3600,
+    }));
+    await vi.advanceTimersByTimeAsync(STARTUP_TIMEOUT_MS);
+    expect(usePlayerStore.getState().status).toBe('loading');
+    await vi.advanceTimersByTimeAsync(CATCHUP_STARTUP_TIMEOUT_MS - STARTUP_TIMEOUT_MS);
+    expect(usePlayerStore.getState().status).toBe('error');
+  });
 
   it('a stream that never starts (401 Basic, no engine event) ends in a timeout error with Retry', async () => {
     vi.useFakeTimers();

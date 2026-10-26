@@ -39,6 +39,7 @@ import { __resetNowNextForTests, fetchNowNext, holdNowNext, passNowNext, peekNow
 import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
 import { hideModeNow, lockedNow, onPlaybackHidden } from './parentalLocks';
 import { reportAnswered } from './playbackReport';
+import { traceTimeshift } from './timeshiftDiagnostics';
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 
@@ -115,7 +116,8 @@ export interface PlayerActions {
 export interface PlaybackController {
   play(): void;
   pause(): void;
-  seekTo(seconds: number): void;
+  /** Return the position reached when the engine snaps a seek to a supported boundary. */
+  seekTo(seconds: number): number | void;
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
   /** The surface holds the media at `seconds` (shown time): a seek there asks the server for nothing. */
@@ -725,8 +727,6 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
         upNextHandledFor = undefined;
       }
     }
-    // A step the surface can't serve from what it holds waits for the next one (or a key up):
-    // a held key would otherwise send a request to the provider per repeat.
     if (opts?.step && controller && !controller.holds?.(target)) {
       set({ positionSeconds: target, pendingSeek: target });
       if (seekTimer) clearTimeout(seekTimer);
@@ -735,8 +735,8 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       return;
     }
     dropPendingSeek();
-    controller?.seekTo(target);
-    set({ positionSeconds: target });
+    const landed = controller?.seekTo(target);
+    set({ positionSeconds: typeof landed === 'number' ? landed : target });
   },
 
   setVolume(v) {
@@ -934,13 +934,16 @@ usePlayerStore.subscribe((s, prev) => {
  * event. Until the item's first frame, a timeout is raised after `LIVE_STARTUP_TIMEOUT_MS` (live)
  * or `STARTUP_TIMEOUT_MS` (VOD), whether the surface says `loading` or `paused` (a stream with
  * nothing to show can report a pause it never had); only a pause the user asked for stops it.
- * Once the item played, a re-buffer in `loading` gets `STARTUP_TIMEOUT_MS`. The timeout goes to
+ * Once the item played, a re-buffer in `loading` gets `STARTUP_TIMEOUT_MS`, or the longer catch-up
+ * limit for an archive programme. The timeout goes to
  * smart reconnect, which retries or switches before the error overlay shows its Retry. (The 401
  * itself is not visible from here, so this is a timeout, not an auth error; streams whose 401
  * the engine does report still classify as auth.)
  */
 export const STARTUP_TIMEOUT_MS = 30_000;
 export const LIVE_STARTUP_TIMEOUT_MS = 10_000;
+/** Catch-up providers can take much longer to open a timeshift response or return the next chunk. */
+export const CATCHUP_STARTUP_TIMEOUT_MS = 150_000;
 let stallTimer: ReturnType<typeof setTimeout> | null = null;
 let stallFor: string | undefined;
 /** The media that showed its first frame (`playing` once), by `watchKey`. */
@@ -991,10 +994,11 @@ usePlayerStore.subscribe((s, prev) => {
       stallFor = undefined;
       const now = usePlayerStore.getState();
       if (watchKey(now.source) !== key || !waitingOnMedia(now, key)) return;
+      traceTimeshift(now.source, 'player startup watchdog expired', { status: now.status, position: now.positionSeconds });
       useMediaStore.setState({ errorCode: 'timeout' });
       reportStatus('error', 'Timed out waiting for the stream');
     },
-    firstFrame && s.source?.isLive ? LIVE_STARTUP_TIMEOUT_MS : STARTUP_TIMEOUT_MS,
+    s.source?.catchupProgramStart ? CATCHUP_STARTUP_TIMEOUT_MS : firstFrame && s.source?.isLive ? LIVE_STARTUP_TIMEOUT_MS : STARTUP_TIMEOUT_MS,
   );
 });
 

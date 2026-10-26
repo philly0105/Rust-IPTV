@@ -239,6 +239,7 @@ function desktopLoadsDirect(url: string, proxyBase: string): boolean {
 function proxyParams(source: PlayerSource, url: string): URLSearchParams {
   const params = new URLSearchParams({ url });
   if (source.ref?.sourceId) params.set('sourceId', source.ref.sourceId);
+  if (source.catchupProgramStart) params.set('archive', 'true');
   const h = source.headers;
   if (h?.userAgent) params.set('ua', h.userAgent);
   if (h?.referrer) params.set('referer', h.referrer);
@@ -269,12 +270,6 @@ export function proxiedUrl(source: PlayerSource): string {
   }
   if (!/^https?:/i.test(url)) return url; // relative (/api/files/..) or blob/data
   if (!hasHeaders(source) && !isMixedContent(url)) return url;
-  const params = new URLSearchParams({ url });
-  if (source.ref?.sourceId) params.set('sourceId', source.ref.sourceId);
-  // Explicit headers (source-level merged with per-channel) override the server's stored ones.
-  const h = source.headers;
-  if (h?.userAgent) params.set('ua', h.userAgent);
-  if (h?.referrer) params.set('referer', h.referrer);
-  if (h?.origin) params.set('origin', h.origin);
+  const params = proxyParams(source, url);
   return `${API_BASE}/proxy?${params.toString()}`;
 }

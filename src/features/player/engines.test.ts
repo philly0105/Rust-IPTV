@@ -229,12 +229,39 @@ describe('engine selection', () => {
   });
 
   it('bounds finite catch-up TS read-ahead while retaining the programme duration', async () => {
-    await createEngine(video(), src('http://h/archive.ts', { isLive: false, durationSeconds: 3720 }), 'http://h/archive.ts', cb(), {
+    const onArchiveActivity = vi.fn();
+    await createEngine(video(), src('http://h/archive.ts', { isLive: false, durationSeconds: 3720, catchupProgramStart: '2026-10-25T10:00:00Z' }), 'http://h/archive.ts', { ...cb(), onArchiveActivity }, {
       captions: false,
     });
     const p = FakeTsPlayer.created[0]!;
-    expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, lazyLoadRecoverDuration: 20, expectedDuration: 3_720_000, enableStashBuffer: true });
+    expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, lazyLoadRecoverDuration: 20, expectedDuration: 3_720_000, archiveStallTimeout: 45_000, archiveScanMaxGap: 30_000, archiveSkipTimestampGaps: true, enableStashBuffer: false });
     expect(p.source.duration).toBe(3_720_000);
+    p.emit(mpegtsMock.Events.STATISTICS_INFO, { speed: 256 });
+    p.emit(mpegtsMock.Events.STATISTICS_INFO, { speed: 0 });
+    expect(onArchiveActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('reopens an Xtream archive at a requested minute instead of scanning the full response', async () => {
+    const el = video();
+    const source = src('http://h/timeshift/u/p/180/2026-10-25:18-00/101.ts', {
+      isLive: false, durationSeconds: 10_800, catchupProgramStart: '2026-10-25T18:00:00Z',
+    });
+    const engine = await createEngine(el, source, source.url, cb(), { captions: false });
+    expect(engine.seekTo?.(2 * 3600 + 19 * 60 + 35)).toBe(8340);
+    expect(FakeTsPlayer.created[0]?.destroyed).toBe(true);
+    expect(FakeTsPlayer.created[1]?.source).toMatchObject({
+      url: 'http://h/timeshift/u/p/180/2026-10-25:20-19/101.ts', duration: 2_460_000,
+    });
+    expect(FakeTsPlayer.created[1]?.config.expectedDuration).toBe(2_460_000);
+    expect(engine.timeOffset?.()).toBe(8340);
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(0);
+    expect(engine.timeOffset?.()).toBe(8340);
+    Object.defineProperty(el, 'buffered', { value: { length: 1, start: () => 0, end: () => 300 } });
+    expect(engine.seekTo?.(2 * 3600 + 20 * 60 + 35)).toBe(8400);
+    expect(FakeTsPlayer.created[1]?.destroyed).toBe(true);
+    expect(FakeTsPlayer.created[2]?.source.url).toBe('http://h/timeshift/u/p/180/2026-10-25:20-20/101.ts');
+    engine.destroy();
   });
 
   it('forceMpegts routes an extensionless stream through mpegts.js', async () => {

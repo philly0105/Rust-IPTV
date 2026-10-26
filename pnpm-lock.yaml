@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   mpegts.js@1.8.2:
-    hash: 3d6de8e6e0f5e7b6fe092a3126c75882dd557991c0bf60cb2e3907825cbb7a1f
+    hash: 1a7e8b9c0649098f0dd46c2d3a7f3cb836f59bbfe76a7952fcddaeb37987d5f7
     path: patches/mpegts.js@1.8.2.patch
 
 importers:
@@ -54,7 +54,7 @@ importers:
         version: 1.55.0(@types/react@19.3.0)(react@19.3.0)
       mpegts.js:
         specifier: 1.8.2
-        version: 1.8.2(patch_hash=3d6de8e6e0f5e7b6fe092a3126c75882dd557991c0bf60cb2e3907825cbb7a1f)
+        version: 1.8.2(patch_hash=1a7e8b9c0649098f0dd46c2d3a7f3cb836f59bbfe76a7952fcddaeb37987d5f7)
       react:
         specifier: ^19.3.0
         version: 19.3.0
@@ -2876,7 +2876,7 @@ snapshots:
 
   mdn-data@2.27.1: {}
 
-  mpegts.js@1.8.2(patch_hash=3d6de8e6e0f5e7b6fe092a3126c75882dd557991c0bf60cb2e3907825cbb7a1f):
+  mpegts.js@1.8.2(patch_hash=1a7e8b9c0649098f0dd46c2d3a7f3cb836f59bbfe76a7952fcddaeb37987d5f7):
     dependencies:
       es6-promise: 4.2.8
       events: 3.3.0

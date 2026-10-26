@@ -235,6 +235,7 @@ describe('engine selection', () => {
     });
     const p = FakeTsPlayer.created[0]!;
     expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, lazyLoadRecoverDuration: 20, expectedDuration: 3_720_000, archiveStallTimeout: 45_000, archiveScanMaxGap: 30_000, archiveSkipTimestampGaps: true, enableStashBuffer: false });
+    expect(p.config.enableArchiveByteRangeSeek).toBe(true);
     expect(p.source.duration).toBe(3_720_000);
     p.emit(mpegtsMock.Events.STATISTICS_INFO, { speed: 256 });
     p.emit(mpegtsMock.Events.STATISTICS_INFO, { speed: 0 });
@@ -247,6 +248,8 @@ describe('engine selection', () => {
       isLive: false, durationSeconds: 10_800, catchupProgramStart: '2026-10-25T18:00:00Z',
     });
     const engine = await createEngine(el, source, source.url, cb(), { captions: false });
+    expect(FakeTsPlayer.created[0]?.config.archiveScanMaxGap).toBeUndefined();
+    expect(FakeTsPlayer.created[0]?.config.enableArchiveByteRangeSeek).toBe(false);
     expect(engine.seekTo?.(2 * 3600 + 19 * 60 + 35)).toBe(8340);
     expect(FakeTsPlayer.created[0]?.destroyed).toBe(true);
     expect(FakeTsPlayer.created[1]?.source).toMatchObject({

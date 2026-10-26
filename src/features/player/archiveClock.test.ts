@@ -8,6 +8,11 @@ type Controller = {
   _config: Record<string, unknown>;
   _trace: (message: string) => void;
   _onRemuxerMediaSegmentArrival: (type: string, segment: Record<string, unknown>) => void;
+  seek: (milliseconds: number) => void;
+  _mediaInfo: Record<string, unknown>;
+  _emitter: { emit: ReturnType<typeof vi.fn> };
+  _updateKeyframesIndex: ReturnType<typeof vi.fn>;
+  _searchSegmentIndexContains: ReturnType<typeof vi.fn>;
 };
 const vendorModule = '../../../vendor/mpegts.js/src/core/' + 'transmuxing-controller';
 const { default: TransmuxingController } = await vi.importActual<{ default: { prototype: Controller } }>(vendorModule);
@@ -37,5 +42,32 @@ describe('archive byte-range seek with a reset TS clock', () => {
     expect(ioSeek).toHaveBeenCalledWith(from);
     expect(seek.clockRebases).toBe(1);
     expect(seek.correcting).toBe(false);
+  });
+});
+
+describe('archive URLs with their own seek position', () => {
+  it('does not seek the old response by byte range', () => {
+    const controller = Object.create(TransmuxingController.prototype) as Controller;
+    controller._config = { expectedDuration: 14_400_000, enableArchiveByteRangeSeek: false };
+    controller._mediaInfo = { isSeekable: () => true };
+    controller._ioctl = { seek: vi.fn() };
+    controller._searchSegmentIndexContains = vi.fn();
+    controller.seek(8_340_000);
+    expect(controller._searchSegmentIndexContains).not.toHaveBeenCalled();
+    expect(controller._ioctl.seek).not.toHaveBeenCalled();
+  });
+
+  it('does not build the byte-position index while playing a URL-based archive', () => {
+    const controller = Object.create(TransmuxingController.prototype) as Controller;
+    controller._config = { expectedDuration: 14_400_000, enableArchiveByteRangeSeek: false };
+    controller._mediaInfo = {};
+    controller._emitter = { emit: vi.fn() };
+    controller._pendingArchiveSeek = null;
+    controller._updateKeyframesIndex = vi.fn();
+    controller._onRemuxerMediaSegmentArrival('video', {
+      info: { endDts: 1_000, syncPoints: [{ dts: 1_000, fileposition: 188 }] },
+    });
+    expect(controller._updateKeyframesIndex).not.toHaveBeenCalled();
+    expect(controller._emitter.emit).toHaveBeenCalled();
   });
 });

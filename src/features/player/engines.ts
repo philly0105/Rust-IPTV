@@ -1101,6 +1101,7 @@ async function mpegtsEngine(
   type TsPlayer = ReturnType<typeof mpegts.createPlayer>;
   const absolute = new URL(url, window.location.href).href;
   const isLive = source.isLive;
+  const seeksByArchiveUrl = archiveRequest(source, 0) !== null;
   const traceArchive = import.meta.env.DEV && !isLive && !!source.durationSeconds;
   if (traceArchive) {
     const revision = (mpegts as typeof mpegts & { iptvPatchRevision?: string }).iptvPatchRevision;
@@ -1141,7 +1142,7 @@ async function mpegtsEngine(
   let seekRun = 0;
   let seekAbort: AbortController | null = null;
 
-  type TsConfig = Parameters<typeof mpegts.createPlayer>[1] & { expectedDuration?: number; archiveTrace?: boolean; archiveScanMaxGap?: number; archiveSkipTimestampGaps?: boolean };
+  type TsConfig = Parameters<typeof mpegts.createPlayer>[1] & { expectedDuration?: number; archiveTrace?: boolean; archiveScanMaxGap?: number; archiveSkipTimestampGaps?: boolean; enableArchiveByteRangeSeek?: boolean };
   const config: TsConfig = {
     enableWorker: true,
     // Live: low-latency reads. No latency chasing: servers that burst their buffer on connect
@@ -1161,9 +1162,14 @@ async function mpegtsEngine(
     lazyLoadMaxDuration: 60,
     lazyLoadRecoverDuration: 20,
     expectedDuration: source.durationSeconds ? source.durationSeconds * 1000 : 0,
+    enableArchiveByteRangeSeek: !seeksByArchiveUrl,
     // The patched loader resumes a finite archive after this long without bytes. Its 10 s
     // default is too eager for timeshift providers that prepare or seek slowly.
-    ...(source.catchupProgramStart ? { archiveStallTimeout: 45_000, archiveScanMaxGap: 30_000, archiveSkipTimestampGaps: true } : {}),
+    ...(source.catchupProgramStart ? {
+      archiveStallTimeout: 45_000,
+      archiveSkipTimestampGaps: true,
+      ...(!seeksByArchiveUrl ? { archiveScanMaxGap: 30_000 } : {}),
+    } : {}),
     archiveTrace: traceArchive,
     reuseRedirectedURL: true,
   };
@@ -1174,6 +1180,7 @@ async function mpegtsEngine(
     expectedDuration: config.expectedDuration,
     archiveStallTimeout: source.catchupProgramStart ? 45_000 : undefined,
     archiveScanMaxGap: config.archiveScanMaxGap,
+    enableArchiveByteRangeSeek: config.enableArchiveByteRangeSeek,
     archiveSkipTimestampGaps: config.archiveSkipTimestampGaps,
     enableStashBuffer: config.enableStashBuffer,
     worker: config.enableWorker,

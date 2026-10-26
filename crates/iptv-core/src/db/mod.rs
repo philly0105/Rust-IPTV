@@ -241,6 +241,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0025_download_duration",
         sql: include_str!("migrations/0025_download_duration.sql"),
     },
+    Migration {
+        version: 26,
+        name: "0026_download_rate_limit",
+        sql: include_str!("migrations/0026_download_rate_limit.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -911,6 +916,28 @@ mod tests {
                 .unwrap();
             assert_eq!(recorded, latest_version(), "every version is recorded once");
         }
+    }
+
+    #[test]
+    fn download_rate_migration_preserves_existing_progress_and_inherits_default() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        configure(&mut conn).unwrap();
+        for m in MIGRATIONS.iter().filter(|m| m.version <= 22) {
+            conn.execute_batch(m.sql).unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
+                [m.version],
+            )
+            .unwrap();
+        }
+        conn.execute("INSERT INTO downloads (source_id, content_type, item_id, title, url, status, bytes_downloaded, duration_seconds, file_path) VALUES ('s', 'live', '1', 'News', 'http://example.test/archive.ts', 'paused', 123456, 1800, '/saved/News.ts')", []).unwrap();
+        migrate(&mut conn).unwrap();
+        let row = crate::downloads::store::get(&conn, 1).unwrap().download;
+        assert_eq!(row.rate_limit_bps, None);
+        assert_eq!(row.bytes_downloaded, 123456);
+        assert_eq!(row.duration_seconds, Some(1800));
+        assert_eq!(row.status, crate::model::DownloadStatus::Paused);
+        assert_eq!(row.file_path.as_deref(), Some("/saved/News.ts"));
     }
 
     #[test]

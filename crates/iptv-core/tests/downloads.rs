@@ -834,6 +834,7 @@ fn every_c4_download_command_is_registered() {
         "downloads.setPosition",
         "downloads.prioritize",
         "downloads.playback",
+        "downloads.setRateLimit",
         "myvideos.list",
         "myvideos.playSource",
     ];
@@ -1409,6 +1410,9 @@ async fn failed_start_leaves_no_stuck_row() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_starts_of_one_item_make_one_row() {
     let c = ctx().await;
+    // This tests queue identity, not pacing: eight 20 MiB files at the new
+    // default would take longer than the per-row completion deadline.
+    iptv_core::downloads::set_rate_limit(&c.state, None);
     for n in 0..8 {
         let args = json!({
             "ref": {"sourceId": "src", "contentType": "movie", "itemId": format!("c{n}")},
@@ -1428,5 +1432,181 @@ async fn concurrent_starts_of_one_item_make_one_row() {
     assert_eq!(listed.len(), 8, "{listed:?}");
     for d in listed {
         c.wait_status(d.id, DownloadStatus::Completed).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn download_speed_override_and_global_default_apply_in_flight() {
+    let mut c = ctx().await;
+    iptv_core::settings::update(&c.state, json!({"downloadRateLimitBps": 128 * 1024}))
+        .await
+        .unwrap();
+    let catchup: Download = serde_json::from_value(
+        c.ok(
+            "downloads.start",
+            json!({
+                "ref": {"sourceId": "src", "contentType": "live", "itemId": "channel"},
+                "episodeId": "catchup:2026-10-18T20:00:00Z",
+                "title": "Archived programme",
+                "url": c.srv.url("/files/video.bin?size=8388608"),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let inherited = c
+        .start(
+            "inherited",
+            "Default speed",
+            "/files/video.bin?size=8388608",
+        )
+        .await;
+    c.wait_progress(catchup.id, 1).await;
+    c.wait_progress(inherited.id, 1).await;
+    // A catch-up override above 1 MiB/s must remove the old hard-coded ceiling,
+    // without lifting the limit for the other, default-following download.
+    let started = Instant::now();
+    c.ok(
+        "downloads.setRateLimit",
+        json!({"id": catchup.id, "bytesPerSecond": 8 * 1024 * 1024}),
+    )
+    .await;
+    c.wait_status(catchup.id, DownloadStatus::Completed).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "catch-up still capped at 1 MiB/s"
+    );
+    assert_eq!(
+        c.get(inherited.id).await.status,
+        DownloadStatus::Downloading
+    );
+    // Changing the saved default speeds up the already-running inherited row.
+    iptv_core::settings::update(&c.state, json!({"downloadRateLimitBps": 0}))
+        .await
+        .unwrap();
+    let lifted = Instant::now();
+    c.wait_status(inherited.id, DownloadStatus::Completed).await;
+    assert!(lifted.elapsed() < Duration::from_secs(5));
+    // Unlimited is a real override, even while the default is capped.
+    iptv_core::settings::update(&c.state, json!({"downloadRateLimitBps": 32 * 1024}))
+        .await
+        .unwrap();
+    let unlimited = c
+        .start("unlimited", "Unlimited", "/files/video.bin?size=8388608")
+        .await;
+    c.wait_progress(unlimited.id, 1).await;
+    c.ok(
+        "downloads.setRateLimit",
+        json!({"id": unlimited.id, "bytesPerSecond": 0}),
+    )
+    .await;
+    let lifted = Instant::now();
+    c.wait_status(unlimited.id, DownloadStatus::Completed).await;
+    assert!(lifted.elapsed() < Duration::from_secs(5));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn download_speed_settings_persist_validate_and_restore_inheritance() {
+    let mut c = ctx().await;
+    assert_eq!(
+        c.state.settings_snapshot().download_rate_limit_bps,
+        1024 * 1024
+    );
+    iptv_core::settings::update(&c.state, json!({"downloadRateLimitBps": 64 * 1024}))
+        .await
+        .unwrap();
+    let d = c.start("saved", "Saved speed", "/files/video.bin").await;
+    c.wait_progress(d.id, 1).await;
+    c.ok("downloads.pause", json!({"id": d.id})).await;
+    assert_eq!(c.get(d.id).await.rate_limit_bps, None);
+    c.ok(
+        "downloads.setRateLimit",
+        json!({"id": d.id, "bytesPerSecond": 32 * 1024}),
+    )
+    .await;
+    assert_eq!(c.get(d.id).await.rate_limit_bps, Some(32 * 1024));
+    for bad in [json!(-1), json!(1.5), json!(1073741825_u64), json!("fast")] {
+        assert!(c
+            .call(
+                "downloads.setRateLimit",
+                json!({"id": d.id, "bytesPerSecond": bad})
+            )
+            .await
+            .is_err());
+        assert!(
+            iptv_core::settings::update(&c.state, json!({"downloadRateLimitBps": bad}))
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(c.get(d.id).await.rate_limit_bps, Some(32 * 1024));
+    assert_eq!(
+        c.state.settings_snapshot().download_rate_limit_bps,
+        64 * 1024
+    );
+    assert_eq!(
+        c.call(
+            "downloads.setRateLimit",
+            json!({"id": i64::MAX, "bytesPerSecond": 0})
+        )
+        .await
+        .unwrap_err()
+        .code,
+        RpcErrorCode::NotFound
+    );
+    // A fresh runtime loads both persisted settings, then claims the paused row.
+    let fresh = AppState::new(
+        c.data_dir.clone(),
+        Arc::new(iptv_core::events::NoopSink),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(fresh.settings_snapshot().download_rate_limit_bps, 64 * 1024);
+    assert_eq!(
+        iptv_core::downloads::get(&fresh, d.id)
+            .await
+            .unwrap()
+            .rate_limit_bps,
+        Some(32 * 1024)
+    );
+    iptv_core::downloads::init(fresh.clone()).await.unwrap();
+    iptv_core::downloads::resume(&fresh, d.id).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let before = iptv_core::downloads::get(&fresh, d.id)
+        .await
+        .unwrap()
+        .bytes_downloaded;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let after = iptv_core::downloads::get(&fresh, d.id).await.unwrap();
+    assert_eq!(after.status, DownloadStatus::Downloading);
+    assert!(
+        after.bytes_downloaded - before < 512 * 1024,
+        "saved override not applied on resume"
+    );
+    // Back to default must affect the running task as well as the stored row.
+    iptv_core::settings::update(&fresh, json!({"downloadRateLimitBps": 0}))
+        .await
+        .unwrap();
+    c.router
+        .dispatch(
+            fresh.clone(),
+            "downloads.setRateLimit",
+            json!({"id": d.id, "bytesPerSecond": null}),
+        )
+        .await
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let row = iptv_core::downloads::get(&fresh, d.id).await.unwrap();
+        assert_eq!(row.rate_limit_bps, None);
+        if row.status == DownloadStatus::Completed {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "restoring inheritance did not lift the override"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

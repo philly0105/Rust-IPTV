@@ -69,11 +69,44 @@ fn notify(state: &AppState) {
     state.emit("downloads.update", serde_json::json!({}));
 }
 
-/// Caps each transfer's speed (bytes per second; `None` = unlimited). Takes
-/// effect on running transfers at their next chunk. Used by tests to make
-/// pause points deterministic; not a C4 command.
+/// Sets the in-memory global default (bytes/s; `None` = unlimited). Takes
+/// effect on running transfers that inherit it at their next chunk. Used by
+/// tests for deterministic pause points; does not persist or emit an event.
 pub fn set_rate_limit(state: &AppState, bytes_per_second: Option<u64>) {
-    manager::manager(state).set_rate_limit(bytes_per_second);
+    state.settings.write().download_rate_limit_bps = bytes_per_second.unwrap_or(0);
+}
+
+/// Maximum accepted cap: 1 GiB/s. Zero means unlimited.
+pub const MAX_RATE_LIMIT_BPS: u64 = 1024 * 1024 * 1024;
+
+pub fn validate_rate_limit(bps: u64) -> CoreResult<()> {
+    if bps > MAX_RATE_LIMIT_BPS {
+        return Err(CoreError::invalid(
+            "Download speed must be between 0 and 1073741824 bytes/s (0 means unlimited)",
+        ));
+    }
+    Ok(())
+}
+
+/// Persists an override and applies it to an active transfer without restarting it.
+pub async fn set_download_rate_limit(
+    state: &Arc<AppState>,
+    id: i64,
+    bps: Option<u64>,
+) -> CoreResult<()> {
+    if let Some(bps) = bps {
+        validate_rate_limit(bps)?;
+    }
+    let mgr = manager::manager(state);
+    state
+        .db_write(move |c| {
+            store::set_rate_limit(c, id, bps)?;
+            mgr.set_download_rate_limit(id, bps);
+            Ok(())
+        })
+        .await?;
+    notify(state);
+    Ok(())
 }
 
 /// Overrides how long pause/cancel/remove wait for a running transfer to stop

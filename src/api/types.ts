@@ -397,6 +397,8 @@ export interface Download {
   waiting?: DownloadWait;
   /** Connections a running transfer holds, when more than one (live). */
   connections?: number;
+  /** Absent follows the global default; zero is unlimited; otherwise bytes/s. */
+  rateLimitBps?: number;
 }
 
 /**
@@ -563,6 +565,8 @@ export interface Settings {
   openStreamOnDoubleClick: boolean;
   showCaptions: boolean;
   downloadsDir?: string;
+  /** Default cap per download in bytes/s; zero is unlimited. */
+  downloadRateLimitBps: number;
   tmdb: TmdbSettings;
   dashboardRails: DashboardRails;
   remoteControl: RemoteControlSettings;
@@ -674,6 +678,7 @@ export interface Settings {
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
 export const DEFAULT_SETTINGS: Settings = {
+  downloadRateLimitBps: 1024 * 1024,
   player: 'html5',
   streamFormat: 'auto',
   epgUrls: [],

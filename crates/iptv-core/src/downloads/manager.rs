@@ -83,6 +83,8 @@ pub struct TaskCtl {
     reason: Mutex<Option<StopReason>>,
     /// Live byte count (the DB is written every few seconds only).
     pub bytes: AtomicI64,
+    /// u64::MAX inherits; zero is explicitly unlimited.
+    rate_limit: AtomicU64,
     done: tokio::sync::watch::Sender<bool>,
     /// Start order among running transfers.
     seq: u64,
@@ -99,6 +101,7 @@ impl TaskCtl {
             token: CancellationToken::new(),
             reason: Mutex::new(None),
             bytes: AtomicI64::new(0),
+            rate_limit: AtomicU64::new(u64::MAX),
             done: tokio::sync::watch::channel(false).0,
             seq,
             source,
@@ -118,6 +121,19 @@ impl TaskCtl {
             *reason = Some(StopReason::Yield);
             self.token.cancel();
         }
+    }
+
+    pub fn set_rate_limit(&self, bps: Option<u64>) {
+        self.rate_limit
+            .store(bps.unwrap_or(u64::MAX), Ordering::Relaxed);
+    }
+
+    pub fn rate_limit(&self, global: u64) -> Option<u64> {
+        let limit = match self.rate_limit.load(Ordering::Relaxed) {
+            u64::MAX => global,
+            limit => limit,
+        };
+        (limit > 0).then_some(limit)
     }
 
     /// Reason recorded by the first stop request.
@@ -366,9 +382,6 @@ impl Default for OrderTx {
 #[derive(Default)]
 pub struct DownloadManager {
     inner: Mutex<Inner>,
-    /// Bytes per second cap per transfer; 0 = unlimited. Read by running
-    /// transfers on every chunk, so changes apply in flight.
-    rate_limit: AtomicU64,
     /// Stop wait override in milliseconds; 0 = [`STOP_TIMEOUT`]. Tests only.
     stop_timeout_ms: AtomicU64,
     /// Response-head and body-idle limit override in milliseconds; 0 = the
@@ -411,16 +424,11 @@ pub enum Stopped {
 }
 
 impl DownloadManager {
-    /// Bytes-per-second cap applied to each transfer (`None` = unlimited).
-    pub fn rate_limit(&self) -> Option<u64> {
-        match self.rate_limit.load(Ordering::Relaxed) {
-            0 => None,
-            n => Some(n),
+    /// Called inside the serialized DB write so startup cannot install an older cap.
+    pub fn set_download_rate_limit(&self, id: i64, bps: Option<u64>) {
+        if let Some(ctl) = self.inner.lock().active.get(&id) {
+            ctl.set_rate_limit(bps);
         }
-    }
-
-    pub fn set_rate_limit(&self, bps: Option<u64>) {
-        self.rate_limit.store(bps.unwrap_or(0), Ordering::Relaxed);
     }
 
     /// How long an RPC waits for a running transfer to stop.
@@ -1180,15 +1188,17 @@ fn take_one(n: &AtomicU32) -> bool {
 
 /// The conditional `queued -> downloading` claim, retried with backoff a
 /// few times when the database is busy or briefly unavailable.
-async fn claim(state: &Arc<AppState>, mgr: &DownloadManager, id: i64) -> CoreResult<bool> {
+async fn claim(state: &Arc<AppState>, mgr: &DownloadManager, id: i64, ctl: &Arc<TaskCtl>) -> CoreResult<bool> {
     let mut attempt = 0;
     loop {
         let simulated = take_one(&mgr.failing_claims);
         let claimed = if simulated {
             Err(CoreError::Timeout("simulated claim failure".into()))
         } else {
+            let claim_ctl = ctl.clone();
             state
-                .db_call(move |c| {
+                .db_write(move |c| {
+                    claim_ctl.set_rate_limit(store::get(c, id)?.download.rate_limit_bps);
                     store::transition(
                         c,
                         id,
@@ -1215,7 +1225,7 @@ async fn run_task(state: Arc<AppState>, mgr: Arc<DownloadManager>, id: i64, ctl:
     // Bytes and `.part` of a run that goes back to the queue, and whether
     // it waits for its source (else it yielded).
     let mut back: Option<(i64, Option<std::path::PathBuf>, bool)> = None;
-    match claim(&state, &mgr, id).await {
+    match claim(&state, &mgr, id, &ctl).await {
         Ok(true) => {
             state.emit("downloads.update", serde_json::json!({}));
             // A panic in the transfer must still free the concurrency slot
@@ -1413,4 +1423,24 @@ async fn persist_once(state: &Arc<AppState>, id: i64, outcome: Outcome) -> CoreR
             }
         })
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_limit_inherits_or_overrides_the_live_default() {
+        let ctl = TaskCtl::new();
+        assert_eq!(ctl.rate_limit(1024), Some(1024));
+        assert_eq!(ctl.rate_limit(2048), Some(2048));
+        assert_eq!(ctl.rate_limit(0), None);
+        ctl.set_rate_limit(Some(4096));
+        assert_eq!(ctl.rate_limit(1024), Some(4096));
+        assert_eq!(ctl.rate_limit(0), Some(4096));
+        ctl.set_rate_limit(Some(0));
+        assert_eq!(ctl.rate_limit(1024), None);
+        ctl.set_rate_limit(None);
+        assert_eq!(ctl.rate_limit(1024), Some(1024));
+    }
 }

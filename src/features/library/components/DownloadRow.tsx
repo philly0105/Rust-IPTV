@@ -1,7 +1,7 @@
 /** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
-import { ArrowUpToLine, FolderOpen, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowUpToLine, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -48,6 +48,8 @@ export interface DownloadRowProps {
   tabbable?: boolean;
   onAction: (action: QueueAction, d: Download) => void;
   onPlayCatchup?: (d: Download) => void;
+  onSpeedLimit?: (d: Download) => void;
+  globalRateLimitBps?: number;
 }
 
 /**
@@ -138,7 +140,7 @@ const ART_SM_PX = 45;
 /** Tailwind's `sm` breakpoint. */
 const SM_QUERY = '(min-width: 40rem)';
 
-function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup }: DownloadRowProps) {
+function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, globalRateLimitBps = 1024 * 1024 }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
   const lang = i18n.language;
@@ -152,6 +154,9 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
     : progress.bytesDownloaded > 0
       ? formatBytes(progress.bytesDownloaded, lang)
       : '';
+  const limit = d.rateLimitBps ?? globalRateLimitBps;
+  const speed = limit === 0 ? t('speedUnlimited') : t('speedValue', { value: (limit / (1024 * 1024)).toLocaleString(lang, { maximumFractionDigits: 6 }) });
+  const speedLabel = d.rateLimitBps === undefined ? t('speedInherited', { speed }) : speed;
   const tone = isActive ? 'accent' : d.status === 'failed' ? 'danger' : 'muted';
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true));
@@ -212,6 +217,19 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
           >
             {detail}
           </span>
+          {onSpeedLimit && (
+            <button
+              type="button"
+              className="ms-auto inline-flex shrink-0 items-center gap-1 rounded-sm text-caption text-fg-muted hover:text-fg focus-visible:text-fg"
+              aria-label={t('speedEditAria', { title: d.subtitle || d.title, speed: speedLabel })}
+              title={t('speedEditAria', { title: d.subtitle || d.title, speed: speedLabel })}
+              tabIndex={tabbable ? 0 : -1}
+              onClick={() => onSpeedLimit(d)}
+            >
+              <Gauge size={12} aria-hidden />
+              <span>{speedLabel}</span>
+            </button>
+          )}
           {showSource && <SourceBadge source={source} className="ms-auto hidden shrink-0 lg:inline-flex" />}
         </div>
       </div>

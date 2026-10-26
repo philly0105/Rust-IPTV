@@ -19,7 +19,7 @@ pub struct DownloadRow {
 const COLUMNS: &str =
     "id, source_id, content_type, item_id, episode_id, title, subtitle, url, file_name, \
     file_path, poster_url, headers_json, status, bytes_downloaded, total_bytes, resume_validator, \
-    error_message, position_seconds, created_at, updated_at, completed_at, duration_seconds";
+    error_message, position_seconds, created_at, updated_at, completed_at, duration_seconds, rate_limit_bps";
 
 fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
     let content_type: String = r.get(2)?;
@@ -58,6 +58,7 @@ fn map_row(r: &Row<'_>) -> rusqlite::Result<DownloadRow> {
             waiting: None,
             connections: None,
             duration_seconds: r.get(21)?,
+            rate_limit_bps: r.get(22)?,
         },
         headers,
         resume_validator: r.get(15)?,
@@ -76,6 +77,18 @@ pub fn derive_availability(d: &mut Download) {
     } else {
         None
     };
+}
+
+/// Sets the override without changing the transfer's progress or lifecycle.
+pub fn set_rate_limit(conn: &Connection, id: i64, bps: Option<u64>) -> CoreResult<()> {
+    let changed = conn.execute(
+        "UPDATE downloads SET rate_limit_bps = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, bps, now_rfc3339()],
+    )?;
+    if changed == 0 {
+        return Err(CoreError::NotFound(format!("download {id} not found")));
+    }
+    Ok(())
 }
 
 /// One row by id.

@@ -457,7 +457,7 @@ pub async fn run(
     // segment after another).
     let allowance = || {
         let one = job.one_connection.load(Ordering::Relaxed);
-        let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.mgr, one) {
+        let cap = if super::transfer::may_split(job.state, &job.ctl.source, job.ctl, one) {
             MAX_CONNECTIONS
         } else {
             1
@@ -789,7 +789,7 @@ async fn worker(
     // the extra ones are retired.
     let share = || {
         let workers = job.ctl.connections.load(Ordering::Relaxed).max(1) as u64;
-        job.mgr.rate_limit().map(|bps| (bps / workers).max(1))
+        job.ctl.rate_limit(job.state.settings.read().download_rate_limit_bps).map(|bps| (bps / workers).max(1))
     };
     let mut pace = super::transfer::Pace::new(share(), pos);
     loop {

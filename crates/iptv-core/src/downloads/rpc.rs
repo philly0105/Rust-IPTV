@@ -25,6 +25,7 @@ pub const COMMANDS: &[&str] = &[
     "downloads.setPosition",
     "downloads.prioritize",
     "downloads.playback",
+    "downloads.setRateLimit",
     "myvideos.list",
     "myvideos.playSource",
 ];
@@ -91,6 +92,14 @@ pub struct PlaybackArgs {
 /// Most sources one player reports at once (a multi-view wall has four).
 const MAX_PLAYBACK_SOURCES: usize = 16;
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRateLimitArgs {
+    pub id: i64,
+    /// null/missing inherits the global default; zero is unlimited.
+    pub bytes_per_second: Option<u64>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirResult {
@@ -121,6 +130,12 @@ pub fn register(r: &mut RpcRouter) {
         };
         Ok::<_, RpcError>(super::start(&s, req).await?)
     });
+    r.add(
+        "downloads.setRateLimit",
+        |s: S, a: SetRateLimitArgs| async move {
+            Ok::<_, RpcError>(super::set_download_rate_limit(&s, a.id, a.bytes_per_second).await?)
+        },
+    );
     r.add("downloads.playSource", |s: S, a: IdArgs| async move {
         Ok::<_, RpcError>(super::active_play_source(&s, a.id).await?)
     });

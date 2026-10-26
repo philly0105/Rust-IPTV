@@ -552,6 +552,7 @@ export interface RpcMap {
   'downloads.reveal': Cmd<{ id: number }, void>;
   'downloads.setDir': Cmd<{ path: string }, void>;
   'downloads.dir': Cmd<void, { path: string }>;
+  'downloads.setRateLimit': Cmd<{ id: number; bytesPerSecond: number | null }, void>;
   'downloads.setPosition': Cmd<{ id: number; positionSeconds: number }, void>;
   /** "Download next": a queued row moves to the front of the queue (saved, so a restart keeps it). */
   'downloads.prioritize': Cmd<{ id: number }, void>;
@@ -890,6 +891,7 @@ export const RPC_COMMANDS = [
   'downloads.reveal',
   'downloads.setDir',
   'downloads.dir',
+  'downloads.setRateLimit',
   'downloads.setPosition',
   'downloads.prioritize',
   'downloads.playback',

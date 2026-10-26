@@ -811,6 +811,9 @@ pub struct Download {
     /// Connections a running transfer holds, when more than one (live).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connections: Option<usize>,
+    /// None inherits the global default; Some(0) is unlimited; otherwise bytes/s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_bps: Option<u64>,
 }
 
 /// Why a queued download waits (`Download.waiting`).
@@ -1161,6 +1164,8 @@ pub struct Settings {
     pub show_captions: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub downloads_dir: Option<String>,
+    /// Default cap per download, in bytes/s; zero is unlimited.
+    pub download_rate_limit_bps: u64,
     pub tmdb: TmdbSettings,
     pub dashboard_rails: DashboardRails,
     pub remote_control: RemoteControlSettings,
@@ -1291,6 +1296,7 @@ impl Default for Settings {
             open_stream_on_double_click: false,
             show_captions: false,
             downloads_dir: None,
+            download_rate_limit_bps: 1024 * 1024,
             tmdb: TmdbSettings::default(),
             dashboard_rails: DashboardRails::default(),
             remote_control: RemoteControlSettings::default(),

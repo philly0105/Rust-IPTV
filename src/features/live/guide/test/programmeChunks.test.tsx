@@ -33,7 +33,7 @@ function props(): GuideRowProps {
     labels: { onNow: 'On now', archive: 'Archive', playingNow: 'Playing now', noGuideShort: 'No guide', playChannel: (name) => `Play ${name}` },
     cursorStart: null, lang: 'en', stripCountryPrefix: false, schedule: buildScheduleIndex(),
     handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(),
-      fitText: vi.fn(() => vi.fn()), press: vi.fn(), hover: vi.fn() },
+      trackTitles: vi.fn(() => vi.fn()), press: vi.fn(), hover: vi.fn() },
   };
 }
 
@@ -93,12 +93,12 @@ describe('programme time groups', () => {
     const view = render(row(p));
     const retained = [...view.container.querySelectorAll<HTMLElement>('button[data-start]')]
       .filter((cell) => Date.parse(cell.dataset.start!) >= at + 6 * HOUR);
-    vi.mocked(p.handlers.fitText).mockClear();
+    vi.mocked(p.handlers.trackTitles).mockClear();
     view.rerender(row({ ...p, programs: programmes(6, 30) }));
     expect(retained.every((cell) => cell.isConnected)).toBe(true);
     expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(96);
-    expect(p.handlers.fitText).toHaveBeenCalledTimes(3);
-    expect(vi.mocked(p.handlers.fitText).mock.calls.every(([chunk]) =>
+    expect(p.handlers.trackTitles).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(p.handlers.trackTitles).mock.calls.every(([chunk]) =>
       Number(chunk.getAttribute('data-programme-chunk')) >= Math.floor((at + 24 * HOUR) / (2 * HOUR)))).toBe(true);
   });
 
@@ -143,32 +143,32 @@ describe('programme time groups', () => {
   it('updates only affected groups for keyboard focus, recording marks, and programme corrections', () => {
     const p = props();
     const view = render(row(p));
-    vi.mocked(p.handlers.fitText).mockClear();
+    vi.mocked(p.handlers.trackTitles).mockClear();
     const first = p.programs![0]!;
     const later = p.programs![16]!;
     view.rerender(row({ ...p, cursorStart: first.start }));
-    expect(p.handlers.fitText).toHaveBeenCalledTimes(1);
-    vi.mocked(p.handlers.fitText).mockClear();
+    expect(p.handlers.trackTitles).toHaveBeenCalledTimes(1);
+    vi.mocked(p.handlers.trackTitles).mockClear();
     view.rerender(row({ ...p, cursorStart: later.start }));
-    expect(p.handlers.fitText).toHaveBeenCalledTimes(2);
+    expect(p.handlers.trackTitles).toHaveBeenCalledTimes(2);
     expect(screen.getByRole('button', { name: /^P16,/ }).tabIndex).toBe(0);
 
     const schedule: ScheduleIndex = { ...p.schedule, reminders: new Map(p.schedule.reminders) };
-    vi.mocked(p.handlers.fitText).mockClear();
+    vi.mocked(p.handlers.trackTitles).mockClear();
     view.rerender(row({ ...p, cursorStart: later.start, schedule }));
-    expect(p.handlers.fitText).not.toHaveBeenCalled();
+    expect(p.handlers.trackTitles).not.toHaveBeenCalled();
     const marked: ScheduleIndex = { ...schedule, reminders: new Map([[slotKey(p.channel!.ref, later.start), {
       id: 'reminder', ref: p.channel!.ref, channelName: p.channel!.name, title: later.title,
       start: later.start, end: later.end, status: 'pending',
     }]]) };
     view.rerender(row({ ...p, cursorStart: later.start, schedule: marked }));
-    expect(p.handlers.fitText).toHaveBeenCalledTimes(1);
+    expect(p.handlers.trackTitles).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: /^P16,/ }).querySelector('[data-testid="mark-reminder"]')).not.toBeNull();
 
-    vi.mocked(p.handlers.fitText).mockClear();
+    vi.mocked(p.handlers.trackTitles).mockClear();
     const corrected = p.programs!.map((item, i) => i === 40 ? { ...item, title: 'Corrected', description: 'Latest details' } : { ...item });
     view.rerender(row({ ...p, programs: corrected, cursorStart: later.start, schedule: marked }));
-    expect(p.handlers.fitText).toHaveBeenCalledTimes(1);
+    expect(p.handlers.trackTitles).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: /^Corrected,/ }));
     expect(p.handlers.open).toHaveBeenCalledWith(0, p.channel, corrected[40], expect.any(HTMLElement));
   });

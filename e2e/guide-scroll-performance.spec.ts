@@ -279,8 +279,8 @@ test('dense guide keeps native scrolling and bounded rows across both axes', asy
     const metrics = Object.fromEntries((after?.metrics ?? []).filter(({ name }) => ['TaskDuration', 'ScriptDuration', 'LayoutDuration', 'RecalcStyleDuration'].includes(name)).map(({ name, value }) => [name, Math.round(1000 * (value - (before?.metrics.find((m) => m.name === name)?.value ?? 0)))]));
     reports.push({ axis, ...result, requests: requests() - beforeCalls, ...metrics });
     expect(result.rows).toBeLessThan(40);
-    // Offscreen titles must not each create a sticky constraint in the compositor.
-    if (!process.env.EPG_BASELINE) expect(result.stickyTitles).toBeLessThanOrEqual(result.rows);
+    // Only the boundary programme and its two neighbours may create sticky constraints.
+    if (!process.env.EPG_BASELINE) expect(result.stickyTitles).toBeLessThanOrEqual(result.rows * 3);
     expect(result.visibleCells).toBeGreaterThan(0);
     expect(result.finalX).toBe(result.initialX);
     await page.waitForTimeout(500);
@@ -330,13 +330,38 @@ test('clipped programme titles remain inside their cells in LTR and RTL', async 
       const row = el.querySelector<HTMLElement>('[aria-rowindex]')!;
       const col = row.querySelector<HTMLElement>('[role=rowheader]')!.getBoundingClientRect().width;
       const text = [...row.querySelectorAll<HTMLElement>('[data-pad-left]')].find((node) => Number(node.dataset.padLeft) < x && Number(node.dataset.padLeft) + Number(node.dataset.padWidth) > x);
-      if (!text || !text.style.transform) return false;
+      if (!text || getComputedStyle(text).position !== 'sticky') return false;
       const box = text.getBoundingClientRect();
       const cell = text.closest('button')!.getBoundingClientRect();
       const edge = rtl ? viewport.right - col : viewport.left + col;
       return rtl
         ? box.right <= edge && box.right >= edge - 15 && box.left >= cell.left
         : box.left >= edge && box.left <= edge + 15 && box.right <= cell.right;
+    }, rtl)).toBe(true);
+    // Native sticky positioning must hold on the same task as a wheel sized scroll. A
+    // requestAnimationFrame based transform would still show the old position here.
+    expect(await grid.evaluate((el, rtl) => {
+      const x = Math.abs(el.scrollLeft);
+      const text = [...el.querySelectorAll<HTMLElement>('[data-pad-left]')].find((node) =>
+        Number(node.dataset.padLeft) < x && Number(node.dataset.padLeft) + Number(node.dataset.padWidth) > x);
+      if (!text || getComputedStyle(text).position !== 'sticky') return false;
+      const before = text.getBoundingClientRect();
+      el.scrollLeft += rtl ? -30 : 30;
+      const after = text.getBoundingClientRect();
+      el.scrollLeft += rtl ? 30 : -30;
+      const reversed = text.getBoundingClientRect();
+      const edge = (box: DOMRect) => rtl ? box.right : box.left;
+      return Math.abs(edge(before) - edge(after)) <= 1 && Math.abs(edge(before) - edge(reversed)) <= 1;
+    }, rtl)).toBe(true);
+    expect(await grid.evaluate((el, rtl) => {
+      const x = Math.abs(el.scrollLeft);
+      const text = [...el.querySelectorAll<HTMLElement>('[data-pad-left]')].find((node) =>
+        Number(node.dataset.padLeft) < x && Number(node.dataset.padLeft) + Number(node.dataset.padWidth) > x);
+      if (!text) return false;
+      el.scrollLeft = (rtl ? -1 : 1) * (Number(text.dataset.padLeft) + Number(text.dataset.padWidth) - 30);
+      const box = text.getBoundingClientRect();
+      const cell = text.closest('button')!.getBoundingClientRect();
+      return rtl ? box.left >= cell.left - 1 : box.right <= cell.right + 1;
     }, rtl)).toBe(true);
   }
 });

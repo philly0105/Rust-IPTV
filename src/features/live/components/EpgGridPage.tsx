@@ -101,7 +101,7 @@ import { JumpToDialog } from '../guide/JumpToDialog';
 import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
 import { isGuideHitState } from '../guide/programmeSearch';
-import { createCellTextFitter, updateGuideClock, GuideRow, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
+import { createStickyTitleManager, updateGuideClock, GuideRow, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
 import { createGuideHydrator } from '../guide/hydration';
 import { createGuideWheelScroller, guideWheelMotionAllowed, isWheelStep } from '../guide/wheelScroll';
 import { GENRES, genreColor, genreOf, storedGenreFilter, storeGenreFilter, type Genre } from '../guide/genre';
@@ -129,7 +129,7 @@ const GRID_STALE_MS = 5 * 60_000;
 const GRID_CACHE_MS = 15 * 60_000;
 /** Keep toolbar updates off the browser's scroll frames. Data-window crossings still publish at once. */
 const GRID_VIEWPORT_PUBLISH_MS = 100;
-/** Keep title fitting and optional buffer replacement outside a continuous wheel gesture. */
+/** Delay optional buffer replacement until a horizontal gesture settles. */
 export const GRID_HORIZONTAL_IDLE_MS = 180;
 /** Portal programmes per row: enough to fill the 6 h window from now. */
 const STALKER_GRID_LIMIT = 12;
@@ -1128,7 +1128,7 @@ export function EpgGridPage() {
   // The browser owns horizontal scrolling. This canvas never changes width during a gesture,
   // and scroll events only observe its position for the toolbar and rolling guide queries.
   const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
-  const textFitter = useRef(createCellTextFitter());
+  const stickyTitles = useRef(createStickyTitleManager());
   const clockPosition = ((now - origin) / MINUTE) * pxPerMin;
   const clockPositionRef = useRef(clockPosition);
   clockPositionRef.current = clockPosition;
@@ -1184,7 +1184,7 @@ export function EpgGridPage() {
     const publish = () => {
       const visibleWidth = width > channelCol ? width : channelCol + baseWindowMs / MINUTE * pxPerMin;
       const next = visibleGuideTime(start, x, visibleWidth, channelCol, pxPerMin, end);
-      textFitter.current.update(x);
+      stickyTitles.current.update(x);
       const crossing = guideDataStart(next[0]) !== guideDataStart(shownTime[0]);
       const elapsed = performance.now() - viewportPublishAt.current;
       if (immediate || crossing || elapsed >= GRID_VIEWPORT_PUBLISH_MS) {
@@ -1215,19 +1215,17 @@ export function EpgGridPage() {
     }
     return { x, time };
   });
-  const observeHorizontalInput = useStable((deferText: boolean = true) => {
-    // Mark continuous motion for diagnostics and defer clipped-title fitting until it settles.
+  const observeHorizontalInput = useStable((markGesture: boolean = true) => {
+    // Mark continuous motion for diagnostics. CSS sticky keeps clipped titles in place.
     // This marker has no CSS dependents: ancestor hover rules made every tile restyle here.
-    if (deferText && scroller.current && scroller.current.dataset.guideScrolling === undefined) scroller.current.dataset.guideScrolling = '';
+    if (markGesture && scroller.current && scroller.current.dataset.guideScrolling === undefined) scroller.current.dataset.guideScrolling = '';
     horizontalScrolling.current = true;
-    textFitter.current.setScrolling(deferText, scrollX.current);
     window.clearTimeout(horizontalIdleTimer.current);
     horizontalIdleTimer.current = window.setTimeout(() => {
       // Read the final native offset even if its scroll event has not yet been delivered.
       if (scroller.current) publishViewport(scroller.current, true);
       horizontalScrolling.current = false;
       if (scroller.current) delete scroller.current.dataset.guideScrolling;
-      textFitter.current.setScrolling(false, scrollX.current);
       setBufferStart(guideDataStart(viewAtRef.current));
     }, GRID_HORIZONTAL_IDLE_MS);
   });
@@ -1260,14 +1258,12 @@ export function EpgGridPage() {
     wheelScroller.current.cancel(root);
     // A button jump moves the native viewport immediately. The buffer effect and shared
     // hydration queue prepare its surrounding hours without replacing overlapping tiles.
-    // A discrete jump can fit its clipped titles immediately; only continuous gestures
-    // leave them travelling with the cells until the motion ends.
+    // Update sticky title eligibility immediately for jumps, or once per frame for gestures.
     if (deferBuffer) observeHorizontalInput(false);
     else {
       window.clearTimeout(horizontalIdleTimer.current);
       horizontalScrolling.current = false;
       delete root.dataset.guideScrolling;
-      textFitter.current.setScrolling(false, scrollX.current);
       setBufferStart(guideDataStart(time));
     }
     programmaticX.current = x;
@@ -1851,9 +1847,9 @@ export function EpgGridPage() {
     setCursor((c) => (c.row === row && c.time >= ms(program.start) && c.time < ms(program.end) ? c : { row, time: ms(program.start) })),
   );
   const rowMenuAt = useStable((channel: Channel, x: number, y: number, programme?: EpgProgram) => setRowMenu({ pos: { x, y }, channel, programme }));
-  const fitText = useCallback((row: HTMLElement) => {
+  const trackTitles = useCallback((row: HTMLElement) => {
     updateGuideClock(row, clockPositionRef.current);
-    return textFitter.current.register(row, scrollX.current);
+    return stickyTitles.current.register(row, scrollX.current);
   }, []);
   const pressCell = useStable((channel: Channel, program: EpgProgram) => prefetchProgramDescription(queryClient, channel.ref, program, offsetMs));
   // The preview band follows the pointer after it rests a moment (a sweep across the grid does
@@ -1879,8 +1875,8 @@ export function EpgGridPage() {
     hoverTimer.current = window.setTimeout(() => setHovered(null), PREVIEW_HOVER_MS);
   });
   const rowHandlers = useMemo<GuideRowHandlers>(
-    () => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt, fitText, press: pressCell, hover: hoverCell, hydration }),
-    [playLive, openCell, focusCell, rowMenuAt, fitText, pressCell, hoverCell, hydration],
+    () => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt, trackTitles, press: pressCell, hover: hoverCell, hydration }),
+    [playLive, openCell, focusCell, rowMenuAt, trackTitles, pressCell, hoverCell, hydration],
   );
 
   // ---- render ---------------------------------------------------------------

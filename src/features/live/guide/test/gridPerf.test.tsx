@@ -19,7 +19,7 @@ import { useToastStore } from '@/ui';
 import { defaultStart, EpgGridPage, GRID_CHUNK, GRID_DATA_LENGTH, GRID_DATA_STEP, GRID_HORIZONTAL_IDLE_MS, GRID_ROW, guideDataLength, guideDataStart } from '../../components/EpgGridPage';
 import { HOUR, MINUTE, layoutBlocks } from '../../lib/epgTime';
 import * as guideClock from '../../hooks/useNow';
-import { cellTextPadPx, createCellTextFitter, fitCellText, GRID_NOW_VAR, GuideRow, type GuideRowProps } from '../GuideRow';
+import { cellTextPadPx, createStickyTitleManager, GRID_NOW_VAR, GuideRow, type GuideRowProps } from '../GuideRow';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -148,100 +148,57 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     expect(cellTextPadPx(100, 300, 300)).toBe(0); // not clipped
   });
 
-  // Only a clipped title moves inside its cell; the rest of the pre-rendered guide stays
-  // ordinary text. No sticky constraints, inherited scroll variable, or padding on every cell.
-  it('fitCellText caps only the clipped cells on the native track', () => {
-    const root = document.createElement('div');
-    root.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span><span data-pad-left="600" data-pad-width="300"></span>';
-    const [a, b] = root.querySelectorAll<HTMLElement>('span');
-    fitCellText(root, 300);
-    expect(a!.style.maxWidth).toBe(`${600 - 20 - 298}px`);
-    expect(b!.style.maxWidth).toBe('');
-    expect(a!.style.transform).toBe('translateX(298px)');
-    expect(a!.style.position).toBe('');
-    expect(b!.style.transform).toBe('');
-    fitCellText(root, 0);
-    expect(a!.style.maxWidth).toBe('');
-    expect(a!.style.position).toBe('');
-    // The same fixed cells are clipped as the browser moves the viewport.
-    fitCellText(root, 600);
-    expect(a!.style.maxWidth).toBe('');
-    expect(a!.style.position).toBe('');
-    expect(b!.style.maxWidth).toBe('');
-    expect(a!.style.paddingInlineStart).toBe('');
-  });
-
-  it('fits only crossed cells from cached row positions while scrolling in either direction', () => {
+  it('primes only the titles at and beside the viewport edge while scrolling in either direction', () => {
     const row = document.createElement('div');
-    row.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span><span data-pad-left="600" data-pad-width="300"></span><span data-pad-left="900" data-pad-width="300"></span>';
-    const [a, b, c] = row.querySelectorAll<HTMLElement>('span');
+    row.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span><span data-pad-left="600" data-pad-width="300"></span><span data-pad-left="900" data-pad-width="300"></span><span data-pad-left="1200" data-pad-width="300"></span>';
+    const [a, b, c, d] = row.querySelectorAll<HTMLElement>('span');
     const query = vi.spyOn(row, 'querySelectorAll');
-    const fitter = createCellTextFitter();
+    const fitter = createStickyTitleManager();
     const unregister = fitter.register(row, 0);
     expect(query).toHaveBeenCalledTimes(1);
-
+    expect([a!.classList.contains('sticky'), b!.classList.contains('sticky'), c!.classList.contains('sticky'), d!.classList.contains('sticky')]).toEqual([true, true, false, false]);
     fitter.update(750);
-    expect(a!.style.maxWidth).toBe('');
-    expect(b!.style.maxWidth).toBe(`${300 - 20 - 148}px`);
-    expect(c!.style.maxWidth).toBe('');
+    expect([a!.classList.contains('sticky'), b!.classList.contains('sticky'), c!.classList.contains('sticky'), d!.classList.contains('sticky')]).toEqual([true, true, true, false]);
+    fitter.update(1050);
+    expect([a!.classList.contains('sticky'), b!.classList.contains('sticky'), c!.classList.contains('sticky'), d!.classList.contains('sticky')]).toEqual([false, true, true, true]);
     fitter.update(0);
-    expect(a!.style.maxWidth).toBe('');
-    expect(b!.style.maxWidth).toBe('');
+    expect([a!.classList.contains('sticky'), b!.classList.contains('sticky'), c!.classList.contains('sticky'), d!.classList.contains('sticky')]).toEqual([true, true, false, false]);
     expect(query).toHaveBeenCalledTimes(1);
     unregister();
   });
 
-  it('leaves titles static during a gesture, including newly mounted rows, then fits once', () => {
+  it('keeps the current title sticky through a gesture and primes newly mounted rows', () => {
     const row = document.createElement('div');
     row.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span>';
     const text = row.firstElementChild as HTMLElement;
-    const fitter = createCellTextFitter();
+    const fitter = createStickyTitleManager();
     fitter.register(row, 200);
-    expect(text.style.transform).toBe('translateX(198px)');
-    fitter.setScrolling(true, 200);
+    expect(text.classList.contains('sticky')).toBe(true);
+    fitter.update(250);
+    fitter.update(350);
+    expect(text.classList.contains('sticky')).toBe(true);
     expect(text.style.transform).toBe('');
-    expect(text.style.maxWidth).toBe('');
-    for (const x of [250, 300, 350, 300]) fitter.update(x);
-    expect(text.style.cssText).toBe('');
-    const newRow = row.cloneNode(true) as HTMLElement;
+    fitter.update(300);
+    const newRow = document.createElement('div');
+    newRow.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span>';
     fitter.register(newRow, 300);
-    expect((newRow.firstElementChild as HTMLElement).style.cssText).toBe('');
-    fitter.setScrolling(false, 300);
-    expect(text.style.transform).toBe('translateX(298px)');
-    expect((newRow.firstElementChild as HTMLElement).style.transform).toBe('translateX(298px)');
+    expect(text.classList.contains('sticky')).toBe(true);
+    expect((newRow.firstElementChild as HTMLElement).classList.contains('sticky')).toBe(true);
   });
 
-  it('reverses the clipped title transform when the guide switches to RTL', () => {
-    const row = document.createElement('div');
-    row.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span>';
-    const text = row.firstElementChild as HTMLElement;
-    fitCellText(row, 200);
-    expect(text.style.transform).toBe('translateX(198px)');
-    text.dataset.padRtl = 'true';
-    fitCellText(row, 200);
-    expect(text.style.transform).toBe('translateX(-198px)');
-    fitCellText(row, 0);
-    expect(text.style.transform).toBe('');
-  });
-
-  it('a horizontal scroll caps the clipped cells, and pads nothing or publishes an inherited variable', async () => {
+  it('a horizontal scroll keeps the boundary title sticky without moving it in JavaScript', async () => {
     const at = defaultStart(Date.now());
     rpc.handlers['epg.grid'] = hourly(at);
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     await screen.findByRole('button', { name: /^c1 P0,/ });
     const grid = screen.getByTestId('epg-grid');
+    expect(textOf(/^c1 P1,/).classList.contains('sticky')).toBe(true);
     act(() => { grid.scrollLeft += 400; fireEvent.scroll(grid); });
-    expect(textOf(/^c1 P0,/).style.maxWidth).toBe('');
+    expect(textOf(/^c1 P1,/).classList.contains('sticky')).toBe(true);
     expect(textOf(/^c1 P1,/).style.transform).toBe('');
-    await waitFor(() => expect(textOf(/^c1 P1,/).style.transform).toBe('translateX(98px)'));
-    expect(textOf(/^c1 P0,/).style.position).toBe('');
-    expect(textOf(/^c1 P1,/).style.transform).toBe('translateX(98px)');
-    expect(textOf(/^c1 P1,/).style.maxWidth).toBe(`${300 - 20 - 98}px`);
-    expect(textOf(/^c1 P2,/).style.maxWidth).toBe('');
-    expect(textOf(/^c1 P1,/).style.paddingInlineStart).toBe('');
     expect(grid.style.getPropertyValue('--grid-scroll')).toBe('');
     act(() => { grid.scrollLeft -= 400; fireEvent.scroll(grid); });
-    await waitFor(() => expect(textOf(/^c1 P0,/).style.maxWidth).toBe(''));
+    await waitFor(() => expect(textOf(/^c1 P0,/).classList.contains('sticky')).toBe(true));
   });
 
   it('a cell keeps its full title as a tooltip (L3-visual-12)', async () => {
@@ -259,6 +216,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     await screen.findByRole('button', { name: /^c1 P0,/ });
     const grid = screen.getByTestId('epg-grid');
+    const title = textOf(/^c1 P0,/);
     let left = grid.scrollLeft;
     const readsDuringGesture: boolean[] = [];
     Object.defineProperty(grid, 'scrollLeft', {
@@ -290,6 +248,9 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     });
     expect(readsDuringGesture).toEqual([false, true]);
     expect(Number(grid.dataset.viewAt)).toBe(at + 48 * MINUTE);
+    expect(grid.hasAttribute('data-guide-scrolling')).toBe(true);
+    expect(title.classList.contains('sticky')).toBe(true);
+    expect(title.style.transform).toBe('');
   });
 
   it('moves a time-navigation click synchronously before replenishing the surrounding programme buffer', async () => {
@@ -308,7 +269,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
       expect(grid.scrollLeft).toBe(initial - 900);
       expect(Number(grid.dataset.viewAt)).toBe(at - 3 * HOUR);
       expect(grid.hasAttribute('data-guide-scrolling')).toBe(false);
-      expect(cell.querySelector<HTMLElement>('[data-testid="cell-text"]')!.style.transform).toBe('translateX(148px)');
+      expect(cell.querySelector<HTMLElement>('[data-testid="cell-text"]')!.classList.contains('sticky')).toBe(true);
       expect(layoutBlocks).not.toHaveBeenCalled();
       expect(rpc.of('epg.grid')).toHaveLength(0);
     });
@@ -316,7 +277,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     // A wheel gesture immediately after the jump still enables the continuous-scroll treatment.
     fireEvent.wheel(grid, { deltaX: 8 });
     expect(grid.hasAttribute('data-guide-scrolling')).toBe(true);
-    expect(cell.querySelector<HTMLElement>('[data-testid="cell-text"]')!.style.transform).toBe('');
+    expect(cell.querySelector<HTMLElement>('[data-testid="cell-text"]')!.classList.contains('sticky')).toBe(true);
     // Prepare the next six hours while retaining the programme that was already visible.
     const nextFrom = new Date(guideDataStart(at - 3 * HOUR)).toISOString();
     await waitFor(() => expect((rpc.of('epg.grid') as { from: string }[]).some((a) => a.from === nextFrom)).toBe(true));
@@ -674,7 +635,7 @@ describe('clock ticks (LV-8)', () => {
       lang: 'en',
       stripCountryPrefix: false,
       schedule: buildScheduleIndex(),
-      handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(), fitText: vi.fn(), press: vi.fn(), hover: vi.fn() },
+      handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(), trackTitles: vi.fn(), press: vi.fn(), hover: vi.fn() },
     };
     let setNow: (n: number) => void = () => undefined;
     function Host() {

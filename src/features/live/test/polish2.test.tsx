@@ -20,14 +20,14 @@ import { CategorySidebar } from '../components/CategorySidebar';
 import { ACTIVE_SETTLE_MS, ChannelList, resetChannelListMemory } from '../components/ChannelList';
 import { CHANNEL_ROW_HEIGHT, ChannelRow } from '../components/ChannelRow';
 import { ChannelLogo } from '../components/ChannelLogo';
-import { EpgGridPage } from '../components/EpgGridPage';
+import { defaultStart, EpgGridPage } from '../components/EpgGridPage';
 import { EpgMappingDialog } from '../components/EpgMappingDialog';
 import { EpgRibbon } from '../components/EpgRibbon';
 import { LivePage } from '../components/LivePage';
 import { cellTextPadPx } from '../guide/GuideRow';
 import { ManageCategoriesDialog } from '../components/ManageCategoriesDialog';
 import type { PagedChannels } from '../hooks/usePagedChannels';
-import { addLocalDays, cellTextMaxPx, floorTo, MINUTE } from '../lib/epgTime';
+import { addLocalDays, floorTo, MINUTE } from '../lib/epgTime';
 import { resetStalkerPreviewSources } from '../lib/stalkerPreviewQueue';
 import { i18n, installDomStubs, makeChannel, program, settings } from './harness';
 
@@ -863,23 +863,22 @@ describe('guide grid', () => {
     rpcMock.handlers['epg.grid'] = () => ({});
     renderIn('/epg', [{ path: '/epg', element: <EpgGridPage /> }]);
     await screen.findByText('Channel 0');
-    const froms = () => calls('epg.grid').map((c) => Date.parse((c.args as { from: string }).from));
-    await waitFor(() => expect(froms().length).toBeGreaterThan(0));
-    const first = froms().at(-1)!;
-    expect(new Date(first).getHours()).toBe(19);
-    expect(new Date(first).getMinutes()).toBe(30);
+    const visibleAt = () => Number(screen.getByTestId('epg-grid').dataset.viewAt);
+    await waitFor(() => expect(visibleAt()).toBeGreaterThan(0));
+    const first = defaultStart(Date.now());
 
     fireEvent.click(screen.getByRole('button', { name: 'Next day' }));
-    await waitFor(() => expect(froms().at(-1)).not.toBe(first));
-    const next = froms().at(-1)!;
+    await waitFor(() => expect(visibleAt()).toBe(addLocalDays(first, 1)));
+    const next = visibleAt();
     expect(next).toBe(addLocalDays(first, 1));
-    expect(new Date(next).getHours()).toBe(19);
+    expect(new Date(next).getHours()).toBe(new Date(first).getHours());
+    expect(new Date(next).getMinutes()).toBe(new Date(first).getMinutes());
     expect(next - first).toBe(25 * 60 * MINUTE);
 
     fireEvent.click(screen.getByRole('button', { name: 'Previous day' }));
     fireEvent.click(screen.getByRole('button', { name: 'Previous day' }));
-    await waitFor(() => expect(froms().at(-1)).toBe(addLocalDays(first, -1)));
-    expect(new Date(froms().at(-1)!).getHours()).toBe(19);
+    await waitFor(() => expect(visibleAt()).toBe(addLocalDays(first, -1)));
+    expect(new Date(visibleAt()).getHours()).toBe(new Date(first).getHours());
   });
 
   it('a show that began before the visible edge keeps its title on screen, and the filters are the kit Select', async () => {
@@ -895,10 +894,11 @@ describe('guide grid', () => {
     const cells = await screen.findAllByRole('button', { name: /Breakfast Briefing/ });
     const cell = cells[0]!;
     const text = within(cell).getByTestId('cell-text');
-    // The title sticks at the visible edge (position: sticky, L3-perf-ui-4), narrowed to the
-    // part of the cell that is on screen so it ends in an ellipsis there.
+    // Native sticky positioning holds the title at the visible edge; the programme clips it
+    // when the cell ends, with no per-scroll width calculation.
     expect(text.className).toContain('sticky');
-    expect(parseFloat(text.style.maxWidth)).toBeGreaterThan(0);
+    expect(parseFloat(text.style.insetInlineStart)).toBeGreaterThan(0);
+    expect(text.style.maxWidth).toBe('');
     // The guide's pickers (LG-11): same accessible name, with a chevron like the kit Select's. One
     // source here, so the group picker leads (the source picker shows only with a choice).
     const group = screen.getByRole('combobox', { name: 'Group' });
@@ -990,7 +990,7 @@ describe('Live list: keys survive row recycling (round 2)', () => {
 describe('guide grid (round 2)', () => {
   const grid = () => screen.getByTestId('epg-grid');
 
-  it('cell text padding follows the scroll: past the channel column, never past the cell', () => {
+  it('ribbon text padding keeps a clipped title inside its programme block', () => {
     // A cell 100 px into the track, 300 px wide: text starts at left + 10, so it is padded by scroll - 102,
     // and keeps at least 48 px of text (300 - 20 - 48 = 232 max).
     expect(cellTextPadPx(200, 100, 300)).toBe(98);
@@ -999,7 +999,7 @@ describe('guide grid (round 2)', () => {
     expect(cellTextPadPx(500, 0, 60)).toBe(0);
   });
 
-  it('the grid fits the clipped cell to its inline-start scroll distance, in LTR and RTL, with no inherited variable', async () => {
+  it('the grid keeps a clipped title sticky without per-scroll transforms or an inherited variable', async () => {
     const now = Date.now();
     rpcMock.handlers['epg.grid'] = (a) =>
       Object.fromEntries(
@@ -1011,15 +1011,12 @@ describe('guide grid (round 2)', () => {
     renderIn('/epg', [{ path: '/epg', element: <EpgGridPage /> }]);
     const cells = await screen.findAllByRole('button', { name: /Breakfast Briefing/ });
     const text = within(cells[0]!).getByTestId('cell-text');
-    // Sticky again (L3-perf-ui-4): padding the text moved it in layout, a shift on every scroll
-    // frame. The text is capped instead, so the sticky text has room to move inside its cell.
     expect(text.className).toContain('sticky');
-    // RTL scrollers report negative scrollLeft: the cap follows the distance from the inline start.
-    Object.defineProperty(grid(), 'scrollLeft', { configurable: true, value: -420, writable: true });
+    grid().scrollLeft += 420;
     fireEvent.scroll(grid());
-    expect(text.style.maxWidth).toBe(`${cellTextMaxPx(420, Number(text.dataset.padLeft), Number(text.dataset.padWidth))}px`);
+    expect(text.style.maxWidth).toBe('');
+    expect(text.style.transform).toBe('');
     expect(text.style.paddingInlineStart).toBe('');
-    // Cells are fitted one by one: the grid publishes no variable every cell would inherit (L2-guide-library-2).
     expect(grid().style.getPropertyValue('--grid-scroll')).toBe('');
   });
 

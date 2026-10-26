@@ -17,7 +17,7 @@ import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/record
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName } from '../lib/channelName';
-import { MINUTE, canCatchUp, cellTextMaxPx, cellTextPadPx, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
+import { MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
 import type { GuideHydrator, HydrationTicket } from './hydration';
@@ -39,83 +39,61 @@ export function updateGuideClock(root: ParentNode, nowPosition: number): void {
   }
 }
 
-const fitted = new WeakMap<HTMLElement, { max: number | undefined; offset: number }>();
-
-function fitTextCell(el: HTMLElement, scroll: number, left: number, width: number) {
-  const max = scroll < left + width ? cellTextMaxPx(scroll, left, width) : undefined;
-  // Only the clipped title moves inside its programme; the horizontal track scrolls natively.
-  const pad = scroll < left + width ? cellTextPadPx(scroll, left, width) : 0;
-  const offset = el.dataset.padRtl === 'true' ? -pad : pad;
-  const previous = fitted.get(el);
-  if (previous?.max !== max) el.style.maxWidth = max === undefined ? '' : `${max}px`;
-  if ((previous?.offset ?? 0) !== offset) el.style.transform = offset ? `translateX(${offset}px)` : '';
-  fitted.set(el, { max, offset });
-}
-
 /**
- * Keeps a clipped programme's title readable beside the channel column. Only that title gets
- * a local transform and width cap; programme cells themselves scroll entirely natively.
- * Giving every offscreen title position:sticky creates thousands of compositor constraints,
- * making layer updates dominate scrolling. This fitter reads stored times, never layout.
+ * Keep the titles at and beside the viewport edge native-sticky. The next and previous
+ * programmes are primed before they cross the edge, so one wheel step needs no JS position
+ * update. Offscreen titles remain ordinary text; making all of them sticky was costly.
+ * Cached cell positions are used only to switch this small set when the edge changes.
  */
-export function fitCellText(root: ParentNode, scroll: number): void {
-  for (const el of root.querySelectorAll<HTMLElement>('[data-pad-left]')) {
-    fitTextCell(el, scroll, Number(el.dataset.padLeft), Number(el.dataset.padWidth));
-  }
-}
-
-/** Keep row text positions for fitting at rest, without changing title styles during scrolling. */
-export function createCellTextFitter() {
+export function createStickyTitleManager() {
   type Cell = { el: HTMLElement; left: number; width: number };
-  const rows = new Map<HTMLElement, { cells: Cell[]; at: number }>();
-  const fit = (cell: Cell, at: number) => {
-    fitTextCell(cell.el, at, cell.left, cell.width);
+  type Row = { cells: Cell[]; sticky: Cell[] };
+  // A wheel notch may cross a nearby programme boundary before the next frame runs.
+  const primePx = 160;
+  const rows = new Map<HTMLElement, Row>();
+  const updateRow = (row: Row, scroll: number) => {
+    // Programme cells are in time order and do not overlap. Find the first one whose
+    // end reaches the visible edge, then prime its immediate neighbours too.
+    let lo = 0;
+    let hi = row.cells.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const cell = row.cells[mid]!;
+      if (cell.left + cell.width <= scroll) lo = mid + 1;
+      else hi = mid;
+    }
+    const covering = lo < row.cells.length && row.cells[lo]!.left <= scroll;
+    const next = row.cells
+      .slice(Math.max(0, lo - 1), Math.min(row.cells.length, lo + 2))
+      .filter((cell) => {
+        // A neighbouring programme can live in another two-hour chunk. Prime it as far
+        // as its own width, while short offscreen cells keep only a wheel-step margin.
+        const reach = Math.max(primePx, cell.width);
+        return covering || (cell.left <= scroll + reach && cell.left + cell.width >= scroll - reach);
+      });
+    if (row.sticky.length === next.length && row.sticky.every((cell, i) => cell === next[i])) return;
+    for (const cell of row.sticky) if (!next.includes(cell)) cell.el.classList.remove('sticky');
+    for (const cell of next) if (!row.sticky.includes(cell)) cell.el.classList.add('sticky');
+    row.sticky = next;
   };
-  let scrolling = false;
-  const fitter = {
+  return {
     register(row: HTMLElement, scroll: number) {
       const cells = Array.from(row.querySelectorAll<HTMLElement>('[data-pad-left]'), (el) => ({
         el,
         left: Number(el.dataset.padLeft),
         width: Number(el.dataset.padWidth),
       }));
-      const at = scrolling ? 0 : scroll;
-      cells.forEach((cell) => fit(cell, at));
-      rows.set(row, { cells, at });
+      const entry: Row = { cells, sticky: [] };
+      rows.set(row, entry);
+      updateRow(entry, scroll);
       return () => {
         rows.delete(row);
       };
     },
     update(scroll: number) {
-      if (scrolling) return;
-      const at = scroll;
-      for (const row of rows.values()) {
-        const low = Math.min(row.at, at);
-        const high = Math.max(row.at, at);
-        row.at = at;
-        if (low === high) continue;
-        // layoutBlocks yields cells in time order without overlap, so their ends are ordered too.
-        let lo = 0;
-        let hi = row.cells.length;
-        while (lo < hi) {
-          const mid = (lo + hi) >>> 1;
-          const cell = row.cells[mid]!;
-          if (cell.left + cell.width < low) lo = mid + 1;
-          else hi = mid;
-        }
-        for (let i = lo; i < row.cells.length && row.cells[i]!.left <= high; i++) fit(row.cells[i]!, at);
-      }
-    },
-    setScrolling(active: boolean, scroll: number) {
-      if (active === scrolling) return;
-      scrolling = false;
-      // During a gesture labels travel with their cells, with no per-frame layout or paint
-      // mutations. Fit the clipped title once the native viewport has settled.
-      fitter.update(active ? 0 : scroll);
-      scrolling = active;
+      for (const row of rows.values()) updateRow(row, scroll);
     },
   };
-  return fitter;
 }
 
 /** The row's UI strings are translated once by the page. */
@@ -133,8 +111,8 @@ export interface GuideRowHandlers {
   open(row: number, channel: Channel, program: EpgProgram, el: HTMLElement): void;
   focusCell(row: number, program: EpgProgram): void;
   menu(channel: Channel, x: number, y: number, program?: EpgProgram): void;
-  /** Fits the text of the row's cells to the grid's current scroll (fitCellText). */
-  fitText(row: HTMLElement): () => void;
+  /** Tracks the few programme titles that should stick at the visible edge. */
+  trackTitles(row: HTMLElement): () => void;
   /** A press on a cell, before its click opens the detail: the detail's data can be fetched ahead. */
   press(channel: Channel, program: EpgProgram): void;
   /** The pointer is over a cell (undefined: it left the row): the preview band follows it. */
@@ -350,6 +328,7 @@ export const GuideRow = memo(function GuideRow({
                 initialPopulation={initialPopulation}
                 base={base}
                 index={index}
+                channelCol={channelCol}
                 channel={ch}
                 kind={kind}
                 now={now}
@@ -391,7 +370,7 @@ function sameRow(prev: GuideRowProps, next: GuideRowProps): boolean {
 }
 
 type ProgrammeChunkProps = Pick<GuideRowProps,
-  'index' | 'channel' | 'kind' | 'now' | 'lang' | 'genreFilter' | 'genreNames' |
+  'index' | 'channelCol' | 'channel' | 'kind' | 'now' | 'lang' | 'genreFilter' | 'genreNames' |
   'labels' | 'playing' | 'playingProgramStart' | 'cursorStart' | 'rtl' | 'schedule' | 'handlers'> & {
   chunk: ProgrammeChunk;
   base: number;
@@ -400,7 +379,7 @@ type ProgrammeChunkProps = Pick<GuideRowProps,
 
 /** Buffer edges mount independently; the overlapping hours do not rebuild their cell trees. */
 const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
-  chunk, base, initialPopulation, index, channel: ch, kind, now, lang, genreFilter, genreNames, labels,
+  chunk, base, initialPopulation, index, channelCol, channel: ch, kind, now, lang, genreFilter, genreNames, labels,
   playing, playingProgramStart, cursorStart, rtl, schedule, handlers,
 }: ProgrammeChunkProps) {
   const { onNow, playingNow } = labels;
@@ -431,7 +410,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
   useLayoutEffect(() => () => granted.current?.cancel(), []);
   useLayoutEffect(() => {
     if (!renderReady || !ref.current) return;
-    const unregister = handlers.fitText(ref.current);
+    const unregister = handlers.trackTitles(ref.current);
     granted.current?.committed();
     granted.current = null;
     return unregister;
@@ -528,14 +507,14 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
                   style={{ insetInlineStart: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 2}px))` }}
                 />
               ) : null}
-              {/* The clipped title is shifted inside its fixed programme cell and capped before
-                  its end. Offscreen titles stay ordinary text with no sticky constraints. */}
+              {/* Only titles near the visible edge receive the sticky class. The browser moves
+                  those titles with native scrolling, and the cell clips them at its end. */}
               <span
                 data-testid="cell-text"
                 className="block w-max max-w-full"
+                style={{ insetInlineStart: channelCol + 8 }}
                 data-pad-left={b.left + base}
                 data-pad-width={b.width}
-                data-pad-rtl={rtl || undefined}
               >
                 <span className={cn('flex items-center gap-1 truncate text-body-sm', b.when === 'now' && !muted ? 'font-semibold' : 'font-medium')}>
                   {b.when === 'past' && catchupOk ? <History className="size-3.5 shrink-0" aria-hidden /> : null}

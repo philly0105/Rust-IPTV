@@ -51,6 +51,9 @@ export function createStickyTitleManager() {
   type Row = { cells: Cell[]; sticky: Cell[] };
   // A wheel notch may cross a nearby programme boundary before the next frame runs.
   const primePx = 160;
+  // A narrower cell cannot show a useful title at the clipped viewport edge.
+  // Sticky positioning on hundreds of such cells makes WebKit's scroll paint costly.
+  const minStickyWidth = 64;
   const rows = new Map<HTMLElement, Row>();
   const updateRow = (row: Row, scroll: number) => {
     // Programme cells are in time order and do not overlap. Find the first one whose
@@ -83,7 +86,8 @@ export function createStickyTitleManager() {
         el,
         left: Number(el.dataset.padLeft),
         width: Number(el.dataset.padWidth),
-      }));
+      })).filter((cell) => cell.width >= minStickyWidth);
+      if (cells.length === 0) return () => {};
       const entry: Row = { cells, sticky: [] };
       rows.set(row, entry);
       updateRow(entry, scroll);

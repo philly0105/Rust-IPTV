@@ -167,6 +167,17 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     unregister();
   });
 
+  it('skips sticky positioning on cells too narrow to show a clipped title', () => {
+    const row = document.createElement('div');
+    row.innerHTML = '<span data-pad-left="0" data-pad-width="25"></span><span data-pad-left="25" data-pad-width="50"></span><span data-pad-left="75" data-pad-width="300"></span>';
+    const [short, medium, long] = row.querySelectorAll<HTMLElement>('span');
+    const fitter = createStickyTitleManager();
+    fitter.register(row, 20);
+    expect(short!.classList.contains('sticky')).toBe(false);
+    expect(medium!.classList.contains('sticky')).toBe(false);
+    expect(long!.classList.contains('sticky')).toBe(true);
+  });
+
   it('keeps the current title sticky through a gesture and primes newly mounted rows', () => {
     const row = document.createElement('div');
     row.innerHTML = '<span data-pad-left="0" data-pad-width="600"></span>';

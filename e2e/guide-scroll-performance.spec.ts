@@ -7,7 +7,7 @@ import { expect, test } from './helpers/fixtures';
 // Screenshot tracing can dominate WebKit frame time; use the optional CPU/timeline profiles below.
 test.use({ serviceWorkers: 'block', video: 'off', trace: 'off' });
 
-async function openDenseGuide(page: Page, request: APIRequestContext, step = 15 * 60_000, at?: number, archive = false) {
+async function openDenseGuide(page: Page, request: APIRequestContext, step = 15 * 60_000, at?: number, archive = false, empty = false) {
   await resetApp(request);
   const source = await ensureSource(request, archive ? 'xtream' : 'm3u', 'Dense guide scroll');
   const count = 1200;
@@ -39,11 +39,11 @@ async function openDenseGuide(page: Page, request: APIRequestContext, step = 15 
       channelId: 'dense', title: `Programme ${Math.floor(start / step) + i}: a detailed title for the guide`, category: 'News',
       start: new Date(start + i * step).toISOString(), end: new Date(start + (i + 1) * step).toISOString(),
     }));
-    await route.fulfill({ json: Object.fromEntries(refs.map((ref: { sourceId: string; contentType: string; itemId: string }) => [`${ref.sourceId}|${ref.contentType}|${ref.itemId}`, programs])) });
+    await route.fulfill({ json: Object.fromEntries(refs.map((ref: { sourceId: string; contentType: string; itemId: string }) => [`${ref.sourceId}|${ref.contentType}|${ref.itemId}`, empty ? [] : programs])) });
   });
   await page.goto(`/epg?source=${source.id}${at === undefined ? '' : `&at=${at}`}`);
   const grid = page.getByTestId('epg-grid');
-  await expect(grid.locator('button[data-start]').first()).toBeVisible();
+  await expect(grid.locator(empty ? '[data-channel-row]' : 'button[data-start]').first()).toBeVisible();
   return { grid, requests: () => calls };
 }
 
@@ -440,6 +440,61 @@ test('dense guide keeps native scrolling and bounded rows across both axes', asy
   console.log('GUIDE_SCROLL_METRICS', JSON.stringify(reports));
   await writeFile(testInfo.outputPath('scroll-metrics.json'), JSON.stringify(reports, null, 2));
 });
+
+for (const empty of [false, true]) {
+  test(`sustained drag frame profile with ${empty ? 'empty' : 'populated'} guide`, async ({ page, request }) => {
+    test.setTimeout(90_000);
+    const { grid } = await openDenseGuide(page, request, 5 * 60_000, undefined, false, empty);
+    await page.waitForTimeout(3500);
+    const result = await grid.evaluate(async (root) => {
+      const cell = root.querySelector<HTMLElement>('button[data-start], [data-channel-row]')!;
+      const pointer = (type: string, x: number, y: number, buttons: number) =>
+        new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 41, pointerType: 'mouse', isPrimary: true, button: 0, buttons, clientX: x, clientY: y });
+      const frames: { dt: number; moveMs: number; added: number; removed: number; x: number; y: number }[] = [];
+      let added = 0;
+      let removed = 0;
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) if (node instanceof Element) added += Number(node.matches('button[data-start]')) + node.querySelectorAll('button[data-start]').length;
+          for (const node of record.removedNodes) if (node instanceof Element) removed += Number(node.matches('button[data-start]')) + node.querySelectorAll('button[data-start]').length;
+        }
+      });
+      root.scrollLeft += 1000;
+      root.scrollTop = 400;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      observer.observe(root, { childList: true, subtree: true });
+      cell.dispatchEvent(pointer('pointerdown', 700, 500, 1));
+      let previous = performance.now();
+      for (let i = 1; i <= 150; i++) {
+        await new Promise<void>((resolve) => requestAnimationFrame((now) => {
+          const dt = now - previous;
+          previous = now;
+          const t = performance.now();
+          window.dispatchEvent(pointer('pointermove', 700 - 25 * i, 500 - Math.round(i * 1.5), 1));
+          frames.push({ dt, moveMs: performance.now() - t, added, removed, x: root.scrollLeft, y: root.scrollTop });
+          added = 0;
+          removed = 0;
+          resolve();
+        }));
+      }
+      window.dispatchEvent(pointer('pointerup', -3050, 275, 0));
+      observer.disconnect();
+      const sampled = frames.slice(5);
+      const sorted = sampled.map((f) => f.dt).sort((a, b) => a - b);
+      const moveSorted = sampled.map((f) => f.moveMs).sort((a, b) => a - b);
+      return {
+        cells: root.querySelectorAll('button[data-start]').length,
+        p50: sorted[Math.floor(sorted.length * 0.5)], p95: sorted[Math.floor(sorted.length * 0.95)],
+        max: sorted.at(-1), framesOver24: sampled.filter((f) => f.dt > 24).length,
+        framesOver32: sampled.filter((f) => f.dt > 32).length,
+        p95Move: moveSorted[Math.floor(moveSorted.length * 0.95)], maxMove: moveSorted.at(-1),
+        slow: sampled.filter((f) => f.dt > 24).slice(0, 10),
+      };
+    });
+    expect(result.cells === 0).toBe(empty);
+    console.log('GUIDE_SUSTAINED_DRAG', JSON.stringify({ empty, ...result }));
+  });
+}
 
 
 test('clipped programme titles remain inside their cells in LTR and RTL', async ({ page, request }) => {

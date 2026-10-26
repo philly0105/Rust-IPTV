@@ -110,7 +110,7 @@ describe('Xtream programmes in the grid', () => {
     const channelCalls = () => rpc.of('catchup.table').filter((a) => (a as { ref: ItemRef }).ref.itemId === 'c0');
     expect(channelCalls()).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
     expect(await screen.findByRole('button', { name: /^Beyond initial window,/ })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '3 hours later' }));
     await new Promise((r) => setTimeout(r, SHORT_EPG_SETTLE_MS + 50));

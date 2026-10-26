@@ -8,7 +8,7 @@
  */
 
 import { AudioLines, History } from 'lucide-react';
-import { memo, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 
 import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 import { cn, Skeleton } from '@/ui';
@@ -22,6 +22,7 @@ import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
 import type { GuideHydrator, HydrationTicket } from './hydration';
 import { programmeChunks, sameProgrammeChunk, type ProgrammeChunk } from './programmeChunks';
+import type { GuideRenderWindow } from './renderWindow';
 
 export { CELL_TEXT_MIN_PX, cellTextPadPx } from '../lib/epgTime';
 
@@ -66,7 +67,7 @@ export function createStickyTitleManager() {
     const next = row.cells
       .slice(Math.max(0, lo - 1), Math.min(row.cells.length, lo + 2))
       .filter((cell) => {
-        // A neighbouring programme can live in another two-hour chunk. Prime it as far
+        // A neighbouring programme can live in another time group. Prime it as far
         // as its own width, while short offscreen cells keep only a wheel-step margin.
         const reach = Math.max(primePx, cell.width);
         return covering || (cell.left <= scroll + reach && cell.left + cell.width >= scroll - reach);
@@ -133,6 +134,8 @@ export interface GuideRowProps {
    * The time the cells are laid out from. Native scrolling does not change this prop.
    */
   origin: number;
+  /** Only mount programme cells close to this visible-time window. */
+  renderWindow?: GuideRenderWindow;
   now: number;
   pxPerMin: number;
   channelCol: number;
@@ -167,6 +170,7 @@ export const GuideRow = memo(function GuideRow({
   channel: ch,
   programs,
   origin,
+  renderWindow,
   now,
   pxPerMin,
   channelCol,
@@ -192,24 +196,24 @@ export const GuideRow = memo(function GuideRow({
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
   // Catch-up remains in the accessible name and tooltip.
   const archive = !!ch && hasUsableArchive(ch, kind);
-  const populatedChannel = useRef<string | null>(null);
   const channelKey = ch ? `${ch.ref.sourceId}|${ch.ref.contentType}|${ch.ref.itemId}` : null;
-  const initialPopulation = populatedChannel.current !== channelKey;
-  useLayoutEffect(() => {
-    if (programs?.length) populatedChannel.current = channelKey;
-  }, [programs, channelKey]);
 
   // Cells sit at their true times, from the row's first programme (or the origin, if later): one
   // that began before the window is clipped by the track, and its text sticks at the visible edge.
-  let from = origin;
-  for (const p of programs ?? []) {
-    const s = ms(p.start);
-    if (s < from) from = s;
-  }
-  const blocks = programs && programs.length > 0 ? layoutBlocks(programs, from, Infinity, pxPerMin, now) : [];
+  const { from, chunks } = useMemo(() => {
+    let from = origin;
+    for (const p of programs ?? []) {
+      const s = ms(p.start);
+      if (s < from) from = s;
+    }
+    const blocks = programs?.length ? layoutBlocks(programs, from, Infinity, pxPerMin, now) : [];
+    return { from, chunks: programmeChunks(blocks) };
+  }, [programs, origin, pxPerMin, now]);
   /** px from the origin to `from` (0 or less): where the row's cell layer starts. */
   const base = ((from - origin) / MINUTE) * pxPerMin;
   const layer = `${base}px`;
+  const renderLeft = renderWindow ? (renderWindow[0] - origin) / MINUTE * pxPerMin : Number.NEGATIVE_INFINITY;
+  const renderRight = renderWindow ? (renderWindow[1] - origin) / MINUTE * pxPerMin : Number.POSITIVE_INFINITY;
   return (
     <div
       role="row"
@@ -321,11 +325,14 @@ export const GuideRow = memo(function GuideRow({
               if (ch) handlers.hover(index, ch, undefined);
             }}
           >
-            {programmeChunks(blocks).map((chunk) => (
+            {chunks.filter((chunk) => {
+              const left = base + chunk.left;
+              const right = left + chunk.width;
+              return left < renderRight && right > renderLeft;
+            }).map((chunk) => (
               <GuideProgrammeChunk
                 key={`${channelKey}:${chunk.key}`}
                 chunk={chunk}
-                initialPopulation={initialPopulation}
                 base={base}
                 index={index}
                 channelCol={channelCol}
@@ -374,12 +381,11 @@ type ProgrammeChunkProps = Pick<GuideRowProps,
   'labels' | 'playing' | 'playingProgramStart' | 'cursorStart' | 'rtl' | 'schedule' | 'handlers'> & {
   chunk: ProgrammeChunk;
   base: number;
-  initialPopulation: boolean;
 };
 
 /** Buffer edges mount independently; the overlapping hours do not rebuild their cell trees. */
 const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
-  chunk, base, initialPopulation, index, channelCol, channel: ch, kind, now, lang, genreFilter, genreNames, labels,
+  chunk, base, index, channelCol, channel: ch, kind, now, lang, genreFilter, genreNames, labels,
   playing, playingProgramStart, cursorStart, rtl, schedule, handlers,
 }: ProgrammeChunkProps) {
   const { onNow, playingNow } = labels;
@@ -387,14 +393,14 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
   const hydration = handlers.hydration;
   const left = base + chunk.left;
   const right = left + chunk.width;
-  const [ready, setReady] = useState(() => initialPopulation || !hydration || cursorStart !== null || hydration.isVisible({ left, right, row: index }));
+  const [ready, setReady] = useState(() => !hydration || cursorStart !== null || hydration.isVisible({ left, right, row: index }));
   // A keyboard target must exist in this commit: the page's focus effect runs before a
   // child-only ready update could make it visible, and would otherwise remain pending.
-  const renderReady = ready || initialPopulation || cursorStart !== null || !hydration;
+  const renderReady = ready || cursorStart !== null || !hydration;
   const granted = useRef<HydrationTicket | null>(null);
   useLayoutEffect(() => {
     if (ready) return;
-    if (!hydration || initialPopulation || cursorStart !== null) {
+    if (!hydration || cursorStart !== null) {
       setReady(true);
       return;
     }
@@ -406,7 +412,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
       // The granted group releases the global budget only after its DOM has committed.
       if (granted.current !== ticket) ticket.cancel();
     };
-  }, [ready, hydration, initialPopulation, cursorStart, left, right, index]);
+  }, [ready, hydration, cursorStart, left, right, index]);
   useLayoutEffect(() => () => granted.current?.cancel(), []);
   useLayoutEffect(() => {
     if (!renderReady || !ref.current) return;
@@ -536,7 +542,7 @@ const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
 
 function sameChunk(prev: ProgrammeChunkProps, next: ProgrammeChunkProps): boolean {
   for (const key of Object.keys(next) as (keyof ProgrammeChunkProps)[]) {
-    if (key !== 'chunk' && key !== 'now' && key !== 'schedule' && key !== 'initialPopulation' && prev[key] !== next[key]) return false;
+    if (key !== 'chunk' && key !== 'now' && key !== 'schedule' && prev[key] !== next[key]) return false;
   }
   if (!sameProgrammeChunk(prev.chunk, next.chunk)) return false;
   for (const { program } of next.chunk.blocks) {

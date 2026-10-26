@@ -103,6 +103,8 @@ import { findChannelIndex, groupForHit } from '../guide/search';
 import { isGuideHitState } from '../guide/programmeSearch';
 import { createStickyTitleManager, updateGuideClock, GuideRow, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
 import { createGuideHydrator } from '../guide/hydration';
+import { attachGuideDragPan } from '../guide/dragPan';
+import { nextGuideRenderWindow } from '../guide/renderWindow';
 import { createGuideWheelScroller, guideWheelMotionAllowed, isWheelStep } from '../guide/wheelScroll';
 import { GENRES, genreColor, genreOf, storedGenreFilter, storeGenreFilter, type Genre } from '../guide/genre';
 import { GuidePreview, storedPreviewOpen, storePreviewOpen } from '../guide/GuidePreview';
@@ -544,6 +546,9 @@ export function EpgGridPage() {
   const start = trackBase - GRID_TRACK_BEFORE;
   const end = trackBase + GRID_TRACK_AFTER;
   const [shownTime, setShownTime] = useState<Span>([baseStart, baseStart + baseWindowMs]);
+  const [renderWindow, setRenderWindow] = useState(() => nextGuideRenderWindow(baseStart, baseStart + baseWindowMs));
+  const renderWindowRef = useRef(renderWindow);
+  const renderWindowGeometry = useRef<{ width: number; pxPerMin: number; channelCol: number } | null>(null);
   // Every row, slot and marker uses one fixed position on the native horizontal track.
   // Data may change while scrolling, but neither the track width nor its origin changes.
   const origin = start;
@@ -1181,6 +1186,18 @@ export function EpgGridPage() {
     const time = start + x / pxPerMin * MINUTE;
     viewAtRef.current = time;
     root.dataset.viewAt = String(time);
+    const visibleMs = width > channelCol ? (width - channelCol) / pxPerMin * MINUTE : baseWindowMs;
+    // Replace the initial planning span on measurement, and recenter after a resize or zoom.
+    // Ordinary scrolls reuse the same window until they enter its guard band.
+    const geometry = renderWindowGeometry.current;
+    const sameGeometry = geometry?.width === width && geometry.pxPerMin === pxPerMin && geometry.channelCol === channelCol;
+    const nextRenderWindow = nextGuideRenderWindow(time, time + visibleMs,
+      sameGeometry ? renderWindowRef.current : undefined);
+    if (width > channelCol && !sameGeometry) renderWindowGeometry.current = { width, pxPerMin, channelCol };
+    if (nextRenderWindow !== renderWindowRef.current) {
+      renderWindowRef.current = nextRenderWindow;
+      setRenderWindow(nextRenderWindow);
+    }
     const publish = () => {
       const visibleWidth = width > channelCol ? width : channelCol + baseWindowMs / MINUTE * pxPerMin;
       const next = visibleGuideTime(start, x, visibleWidth, channelCol, pxPerMin, end);
@@ -1375,6 +1392,10 @@ export function EpgGridPage() {
       cancelWheel();
     };
   }, [gridMounted, zoomBy, rtl, observeHorizontalInput, channelCol, trackWidth, pageWidth]);
+  useEffect(() => {
+    const root = scroller.current;
+    if (root) return attachGuideDragPan(root);
+  }, [gridMounted]);
 
   /** Put a time measured from the fixed track origin at the visible edge. */
   const scrollTrackTo = (root: HTMLElement, x: number) => {
@@ -1533,9 +1554,10 @@ export function EpgGridPage() {
     cursorRef.current = { row, time };
     focusPending.current = true;
     virtualizer.scrollToIndex(row, { align: 'auto' });
-    // Past the queried slice there is no cell for the focus effect to scroll to. Move the
-    // viewport first; its rolling data request then draws the next programme in place.
-    if ((time < dataStart || time >= dataEnd) && scroller.current) {
+    // A keyboard target beyond the mounted time window has no cell for the focus effect to
+    // measure. Move the viewport first so that the target mounts in the same update.
+    if ((time < renderWindowRef.current[0] || time >= renderWindowRef.current[1] ||
+      time < dataStart || time >= dataEnd) && scroller.current) {
       const view = (viewWidth.current || scroller.current.clientWidth) - channelCol;
       scrollTrackTo(scroller.current, ((time - start) / MINUTE) * pxPerMin - Math.max(0, view / 3));
     }
@@ -2090,7 +2112,7 @@ export function EpgGridPage() {
             // The ring shows only once the grid has held focus for 150 ms: the brief holds of a
             // window shift (16-98 ms) would otherwise flash a frame around the whole grid. It goes
             // at once when a cell takes focus (no delay out of the focused state).
-            className="relative min-h-0 flex-1 overflow-auto overscroll-x-none overscroll-y-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:delay-150"
+            className="relative min-h-0 flex-1 cursor-grab overflow-auto overscroll-x-none overscroll-y-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:delay-150"
             style={{ overflowAnchor: 'none' }}
           >
             <div
@@ -2156,6 +2178,7 @@ export function EpgGridPage() {
                     channel={ch}
                     programs={programs}
                     origin={origin}
+                    renderWindow={renderWindow}
                     now={now}
                     pxPerMin={pxPerMin}
                     channelCol={channelCol}

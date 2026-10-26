@@ -47,8 +47,8 @@ interface Job {
  * is not a sufficient budget: React could collect several callbacks into one large commit.
  * The mounted group acknowledges its layout effect before another frame is scheduled.
  *
- * This queue is only for new offscreen groups. The caller renders initial rows, existing groups,
- * and keyboard targets immediately. A native scroll immediately promotes newly visible work.
+ * This queue is only for new offscreen groups. The caller renders visible groups,
+ * existing groups, and keyboard targets immediately. A native scroll promotes newly visible work.
  */
 export function createGuideHydrator(clock: HydrationClock = {}): GuideHydrator {
   const requestFrame = clock.requestFrame ?? ((callback) => requestAnimationFrame(callback));

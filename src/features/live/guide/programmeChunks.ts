@@ -1,9 +1,9 @@
 import type { EpgProgram } from '@/api/types';
 
-import { HOUR, ms, type Block } from '../lib/epgTime';
+import { MINUTE, ms, type Block } from '../lib/epgTime';
 
 /** Small, fixed time groups survive a rolling guide-buffer replacement. */
-export const PROGRAMME_CHUNK_MS = 2 * HOUR;
+export const PROGRAMME_CHUNK_MS = 30 * MINUTE;
 
 export interface ProgrammeChunk {
   key: number;

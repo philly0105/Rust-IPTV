@@ -254,11 +254,11 @@ describe('native horizontal scrolling', () => {
     const left = cellTrackLeft(cell);
     rpc.handlers['epg.grid'] = () => new Promise(() => undefined);
     const width = content.style.width;
-    act(() => { for (let i = 0; i < 8; i++) { grid.scrollLeft -= 300; fireEvent.scroll(grid); } });
-    expect(Number(grid.dataset.viewAt)).toBe(at - 2400 / 5 * MINUTE);
+    act(() => { for (let i = 0; i < 4; i++) { grid.scrollLeft -= 300; fireEvent.scroll(grid); } });
+    expect(Number(grid.dataset.viewAt)).toBe(at - 1200 / 5 * MINUTE);
     expect(content.style.width).toBe(width);
-    expect(screen.getByRole('button', { name: /^c1 P0,/ })).toBe(cell);
-    expect(cellTrackLeft(cell)).toBe(left);
+    const visible = await screen.findByRole('button', { name: /^c1 P-4,/ });
+    expect(cellTrackLeft(visible)).toBe(left - 4 * HOUR / MINUTE * 5);
     expect(grid.querySelector('[data-slot]')).toBeTruthy();
   });
 });

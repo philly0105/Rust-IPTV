@@ -131,10 +131,10 @@ describe('genre buckets (CB-GUIDE-GENRE)', () => {
   it('stripes the cells by genre, and a filter chip leaves the others plain', async () => {
     renderGuide({ path: '/epg?source=src1', routes: GRID });
     const movie = await screen.findByRole('button', { name: /^c0 P0,/ });
-    const sports = screen.getByRole('button', { name: /^c1 P0,/ });
+    const sports = await screen.findByRole('button', { name: /^c1 P0,/ });
     expect(movie.dataset.genre).toBe('movie');
     expect(within(movie).getByTestId('cell-genre').style.background).toBe('var(--color-genre-movie)');
-    expect(within(screen.getByRole('button', { name: /^c4 P0,/ })).queryByTestId('cell-genre')).toBeNull();
+    expect(within(await screen.findByRole('button', { name: /^c4 P0,/ })).queryByTestId('cell-genre')).toBeNull();
 
     const chips = screen.getByRole('group', { name: 'Filter by genre' });
     fireEvent.click(within(chips).getByRole('button', { name: 'Sports' }));
@@ -154,8 +154,8 @@ describe('genre buckets (CB-GUIDE-GENRE)', () => {
     const sports = await screen.findByRole('button', { name: /^c1 P0,/ });
     // The dimming is visual only: the names carry the genre, so a filtered guide reads as it looks.
     expect(sports.getAttribute('aria-label')).toMatch(/, Sports$/);
-    expect(screen.getByRole('button', { name: /^c0 P0,/ }).getAttribute('aria-label')).toMatch(/, Movies$/);
-    expect(screen.getByRole('button', { name: /^c4 P0,/ }).getAttribute('aria-label')).not.toMatch(/, (Movies|Sports|News|Kids|Series & shows)$/);
+    expect((await screen.findByRole('button', { name: /^c0 P0,/ })).getAttribute('aria-label')).toMatch(/, Movies$/);
+    expect((await screen.findByRole('button', { name: /^c4 P0,/ })).getAttribute('aria-label')).not.toMatch(/, (Movies|Sports|News|Kids|Series & shows)$/);
     const note = screen.getByTestId('guide-genre-note');
     expect(note.getAttribute('role')).toBe('status');
     expect(note.textContent).toBe('');
@@ -187,10 +187,10 @@ describe('what is playing (LG-01)', () => {
   });
 
   it('moves the playing mark between catch-up programmes on the same channel', async () => {
-    renderGuide({ path: '/epg?source=src1', routes: GRID });
-    const first = await screen.findByRole('button', { name: /^c2 P-2,/ });
-    const second = screen.getByRole('button', { name: /^c2 P-1,/ });
-    const otherChannel = screen.getByRole('button', { name: /^c1 P-2,/ });
+    renderGuide({ path: `/epg?source=src1&at=${defaultStart(Date.now() - 2 * HOUR)}`, routes: GRID });
+    const first = await screen.findByRole('button', { name: /^c2 P-3,/ });
+    const second = await screen.findByRole('button', { name: /^c2 P-2,/ });
+    const otherChannel = await screen.findByRole('button', { name: /^c1 P-3,/ });
     const source = { url: 'http://archive/first', kind: 'hls', title: 'Channel 2', ref: makeChannel(2).ref, isLive: false, isRadio: false };
 
     act(() => fakes.usePlayerStore.setState({ source: { ...source, catchupProgramStart: first.dataset.start } } as never));
@@ -199,7 +199,7 @@ describe('what is playing (LG-01)', () => {
     expect(first.getAttribute('aria-label')).toContain('playing');
     expect(second.hasAttribute('data-playing')).toBe(false);
     expect(otherChannel.hasAttribute('data-playing')).toBe(false);
-    expect(screen.getByRole('button', { name: /^c2 P0,/ }).hasAttribute('data-playing')).toBe(false);
+    expect(document.querySelectorAll('button[data-cell-row][data-playing]')).toHaveLength(1);
 
     act(() => fakes.usePlayerStore.setState({ source: { ...source, url: 'http://archive/second', catchupProgramStart: second.dataset.start } } as never));
     expect(first.hasAttribute('data-playing')).toBe(false);
@@ -350,7 +350,7 @@ describe('the preview band (CB-GUIDE-PREVIEW)', () => {
     expect(within(band).getByRole('button', { name: 'Watch live' })).toBeTruthy();
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    fireEvent.mouseEnter(screen.getByRole('button', { name: /^c3 P1,/ }));
+    fireEvent.mouseEnter(await screen.findByRole('button', { name: /^c3 P1,/ }));
     act(() => vi.advanceTimersByTime(PREVIEW_HOVER_MS + 10));
     expect(within(band).getByTestId('guide-preview-title').textContent).toBe('c3 P1');
     vi.useRealTimers();
@@ -600,7 +600,7 @@ describe('the preview band and the pointer (LG-06)', () => {
     const title = () => within(band).getByTestId('guide-preview-title').textContent;
     await waitFor(() => expect(title()).toBe('c0 P0'));
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const cell = screen.getByRole('button', { name: /^c3 P1,/ });
+    const cell = await screen.findByRole('button', { name: /^c3 P1,/ });
     fireEvent.mouseEnter(cell);
     act(() => vi.advanceTimersByTime(PREVIEW_HOVER_MS + 10));
     expect(title()).toBe('c3 P1');

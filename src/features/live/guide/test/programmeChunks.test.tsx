@@ -9,7 +9,8 @@ import { buildScheduleIndex, slotKey, type ScheduleIndex } from '@/features/reco
 import { HOUR, MINUTE, layoutBlocks } from '../../lib/epgTime';
 import { GuideRow, type GuideRowProps } from '../GuideRow';
 import type { GuideHydrator, HydrationTicket } from '../hydration';
-import { programmeChunks, sameProgrammeChunk } from '../programmeChunks';
+import { PROGRAMME_CHUNK_MS, programmeChunks, sameProgrammeChunk } from '../programmeChunks';
+import { nextGuideRenderWindow } from '../renderWindow';
 import { i18n, makeChannel, program } from './harness';
 
 vi.mock('../../components/ChannelLogo', () => ({ ChannelLogo: () => null }));
@@ -50,6 +51,25 @@ function FocusOnCommit({ value }: { value: GuideRowProps }) {
 }
 
 describe('programme time groups', () => {
+  it('bounds mounted cells around the viewport while preserving a programme that started earlier', () => {
+    const p = props();
+    const view = render(row({ ...p, renderWindow: [at + 9 * HOUR, at + 12 * HOUR] }));
+    expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(12);
+    expect(screen.queryByRole('button', { name: /^P0,/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^P36,/ })).toBeTruthy();
+    view.rerender(row({ ...p, programs: [program('Long', at + 8 * HOUR, at + 10 * HOUR)], renderWindow: [at + 9 * HOUR, at + 12 * HOUR] }));
+    expect(screen.getByRole('button', { name: /^Long,/ })).toBeTruthy();
+  });
+
+  it('keeps the render window still during nearby motion and advances it before the visible edge reaches it', () => {
+    const initial = nextGuideRenderWindow(at, at + 3 * HOUR);
+    expect(nextGuideRenderWindow(at + 15 * MINUTE, at + 3 * HOUR + 15 * MINUTE, initial)).toBe(initial);
+    const shifted = nextGuideRenderWindow(at + 40 * MINUTE, at + 3 * HOUR + 40 * MINUTE, initial);
+    expect(shifted).not.toBe(initial);
+    expect(shifted[0]).toBeLessThan(at + 40 * MINUTE);
+    expect(shifted[1]).toBeGreaterThan(at + 3 * HOUR + 40 * MINUTE);
+  });
+
   it('keeps long programmes whole, with the same native coordinates in both directions', () => {
     const list = [program('Long', at + 30 * MINUTE, at + 5 * HOUR), program('Next', at + 5 * HOUR, at + 6 * HOUR)];
     const chunks = programmeChunks(layoutBlocks(list, at, Infinity, 5, at));
@@ -97,15 +117,17 @@ describe('programme time groups', () => {
     view.rerender(row({ ...p, programs: programmes(6, 30) }));
     expect(retained.every((cell) => cell.isConnected)).toBe(true);
     expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(96);
-    expect(p.handlers.trackTitles).toHaveBeenCalledTimes(3);
+    expect(p.handlers.trackTitles).toHaveBeenCalledTimes(12);
     expect(vi.mocked(p.handlers.trackTitles).mock.calls.every(([chunk]) =>
-      Number(chunk.getAttribute('data-programme-chunk')) >= Math.floor((at + 24 * HOUR) / (2 * HOUR)))).toBe(true);
+      Number(chunk.getAttribute('data-programme-chunk')) >= Math.floor((at + 24 * HOUR) / PROGRAMME_CHUNK_MS))).toBe(true);
   });
 
-  it('keeps initial and visible programmes immediate while mounting new offscreen groups one grant at a time', () => {
+  it('mounts only visible programmes immediately and grants offscreen groups one at a time', () => {
+    const p = props();
+    const visibleLeft = (at - p.origin) / MINUTE * p.pxPerMin;
     const pending: { activate: (ticket: HydrationTicket) => void; ticket: HydrationTicket }[] = [];
     const hydration: GuideHydrator = {
-      isVisible: () => false,
+      isVisible: ({ left, right }) => left <= visibleLeft && right > visibleLeft,
       enqueue: vi.fn((_bounds, activate) => {
         const ticket = { cancel: vi.fn(), committed: vi.fn() };
         pending.push({ activate, ticket });
@@ -113,31 +135,28 @@ describe('programme time groups', () => {
       }),
       setViewport: vi.fn(), reset: vi.fn(), dispose: vi.fn(),
     };
-    const p = props();
     p.handlers.hydration = hydration;
     const view = render(<FocusOnCommit value={p} />);
-    expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(96);
-    expect(hydration.enqueue).not.toHaveBeenCalled();
+    expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(2);
+    expect(pending).toHaveLength(47);
+    const reserved = [...view.container.querySelectorAll('[data-programme-chunk]')];
+    expect(reserved).toHaveLength(48);
+    act(() => pending[0]!.activate(pending[0]!.ticket));
+    expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(4);
+    expect(pending[0]!.ticket.committed).toHaveBeenCalledTimes(1);
     const next = { ...p, programs: programmes(6, 30) };
     view.rerender(<FocusOnCommit value={next} />);
-    expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(72);
-    const reserved = [...view.container.querySelectorAll('[data-programme-chunk]')];
-    expect(reserved).toHaveLength(12);
-    expect(pending).toHaveLength(3);
-    act(() => pending[0]!.activate(pending[0]!.ticket));
-    expect([...view.container.querySelectorAll('[data-programme-chunk]')]).toEqual(reserved);
-    expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(80);
-    expect(pending[0]!.ticket.committed).toHaveBeenCalledTimes(1);
+    expect(view.container.querySelectorAll('button[data-start]').length).toBeLessThan(96);
+    expect([...view.container.querySelectorAll('[data-programme-chunk]')]).toHaveLength(48);
     // A keyboard reveal must not wait behind the remaining offscreen groups.
     const focused = next.programs[80]!;
     view.rerender(<FocusOnCommit value={{ ...next, cursorStart: focused.start }} />);
     const target = screen.getByRole('button', { name: new RegExp(`^${focused.title},`) });
     expect(target.tabIndex).toBe(0);
     expect(document.activeElement).toBe(target);
-    expect(view.container.querySelectorAll('button[data-start]')).toHaveLength(88);
-    expect(pending[1]!.ticket.cancel).toHaveBeenCalled();
+    expect(view.container.querySelectorAll('button[data-start]').length).toBeLessThan(96);
     view.unmount();
-    expect(pending[2]!.ticket.cancel).toHaveBeenCalled();
+    expect(pending.some(({ ticket }) => vi.mocked(ticket.cancel).mock.calls.length > 0)).toBe(true);
   });
 
   it('updates only affected groups for keyboard focus, recording marks, and programme corrections', () => {

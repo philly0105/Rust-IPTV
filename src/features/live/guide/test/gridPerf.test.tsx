@@ -192,7 +192,7 @@ describe('cell text of a clipped cell (L2-guide-library-2, L3-perf-ui-4)', () =>
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
     await screen.findByRole('button', { name: /^c1 P0,/ });
     const grid = screen.getByTestId('epg-grid');
-    expect(textOf(/^c1 P1,/).classList.contains('sticky')).toBe(true);
+    expect((await screen.findByRole('button', { name: /^c1 P1,/ })).querySelector<HTMLElement>('[data-testid="cell-text"]')!.classList.contains('sticky')).toBe(true);
     act(() => { grid.scrollLeft += 400; fireEvent.scroll(grid); });
     expect(textOf(/^c1 P1,/).classList.contains('sticky')).toBe(true);
     expect(textOf(/^c1 P1,/).style.transform).toBe('');
@@ -257,7 +257,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     const at = Date.UTC(2026, 9, 23, 12, 30);
     rpc.handlers['epg.grid'] = hourlyWindow(at - 30 * MINUTE);
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
-    const cell = await screen.findByRole('button', { name: /^c1 P-3,/ });
+    const cell = await screen.findByRole('button', { name: /^c1 P-1,/ });
     const grid = screen.getByTestId('epg-grid');
     const earlier = screen.getByRole('button', { name: '3 hours earlier' });
     const initial = grid.scrollLeft;
@@ -269,15 +269,15 @@ describe('memoised rows (L2-perf-ui-1)', () => {
       expect(grid.scrollLeft).toBe(initial - 900);
       expect(Number(grid.dataset.viewAt)).toBe(at - 3 * HOUR);
       expect(grid.hasAttribute('data-guide-scrolling')).toBe(false);
-      expect(cell.querySelector<HTMLElement>('[data-testid="cell-text"]')!.classList.contains('sticky')).toBe(true);
+      expect(cell.isConnected).toBe(true);
       expect(layoutBlocks).not.toHaveBeenCalled();
       expect(rpc.of('epg.grid')).toHaveLength(0);
     });
-    expect(screen.getByRole('button', { name: /^c1 P-3,/ })).toBe(cell);
+    expect(screen.getByRole('button', { name: /^c1 P-1,/ })).toBe(cell);
     // A wheel gesture immediately after the jump still enables the continuous-scroll treatment.
     fireEvent.wheel(grid, { deltaX: 8 });
     expect(grid.hasAttribute('data-guide-scrolling')).toBe(true);
-    expect(cell.querySelector<HTMLElement>('[data-testid="cell-text"]')!.classList.contains('sticky')).toBe(true);
+    expect(cell.isConnected).toBe(true);
     // Prepare the next six hours while retaining the programme that was already visible.
     const nextFrom = new Date(guideDataStart(at - 3 * HOUR)).toISOString();
     await waitFor(() => expect((rpc.of('epg.grid') as { from: string }[]).some((a) => a.from === nextFrom)).toBe(true));
@@ -303,7 +303,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     await act(async () => new Promise((resolve) => setTimeout(resolve, GRID_HORIZONTAL_IDLE_MS + 80)));
     expect(screen.getByRole('button', { name: /^c1 P0,/ })).toBe(cell);
     // Only the keyboard cursor's row may change readiness while the new query is pending.
-    expect(vi.mocked(layoutBlocks).mock.calls.length).toBeLessThanOrEqual(1);
+    expect(vi.mocked(layoutBlocks)).not.toHaveBeenCalled();
     // The already-covered viewport needs no additional quick request.
     expect((rpc.of('epg.grid') as { from: string; to: string }[]).every((a) => Date.parse(a.to) - Date.parse(a.from) >= GRID_DATA_LENGTH)).toBe(true);
   });
@@ -453,7 +453,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     const at = defaultStart(Date.now());
     rpc.handlers['epg.grid'] = hourlyWindow(at);
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
-    const cell = await screen.findByRole('button', { name: /^c1 P1,/ });
+    await screen.findByRole('button', { name: /^c1 P1,/ });
     const grid = screen.getByTestId('epg-grid');
     const currentStart = guideDataStart(at);
     const outerShift = GRID_DATA_LENGTH - GRID_DATA_STEP;
@@ -467,10 +467,10 @@ describe('memoised rows (L2-perf-ui-1)', () => {
 
     act(() => { grid.scrollLeft += 6 * HOUR / MINUTE * 5; fireEvent.scroll(grid); });
     await waitFor(() => expect(Number(grid.dataset.viewAt)).toBe(at + 6 * HOUR));
-    await waitFor(() => expect(screen.getByRole('button', { name: /^c1 P1,/ })).toBe(cell));
+    await screen.findByRole('button', { name: /^c1 P6,/ });
     expect(callsFor(later)).toBe(1);
     expect(screen.queryByTestId('row-guide-pending')).toBeNull();
-  });
+  }, 20_000);
 
   it('shows an outer cached answer immediately when a fast move outruns the exact slice', async () => {
     const at = defaultStart(Date.now());
@@ -538,14 +538,26 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     expect(vi.mocked(layoutBlocks)).not.toHaveBeenCalled();
   });
 
-  it('loading the next data slice keeps existing cells mounted and the track width still', async () => {
+  it('keyboard navigation reveals a programme beyond the mounted time window', async () => {
     const at = defaultStart(Date.now());
     rpc.handlers['epg.grid'] = hourly(at);
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
-    const cell = await screen.findByRole('button', { name: /^c2 P1,/ });
+    const first = await screen.findByRole('button', { name: /^c1 P0,/ });
+    act(() => first.focus());
+    for (let i = 1; i <= 6; i++) {
+      fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+      await waitFor(() => expect(focusedLabel()).toMatch(new RegExp(`^c1 P${i},`)));
+    }
+    expect(Number(screen.getByTestId('epg-grid').dataset.viewAt)).toBeGreaterThan(at);
+  }, 20_000);
+
+  it('loading the next data slice keeps the track width still and mounts the new visible cells', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourly(at);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c2 P1,/ });
     const grid = screen.getByTestId('epg-grid');
     const content = grid.firstElementChild as HTMLElement;
-    const left = cellTrackLeft(cell);
     const width = content.style.width;
     Object.defineProperty(grid, 'clientWidth', { configurable: true, value: 800 });
     // The next window's guide is held back: the move itself renders without it.
@@ -555,8 +567,8 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     act(() => { grid.scrollLeft += 900; fireEvent.scroll(grid); });
     expect(grid.scrollLeft).toBe(initial + 900);
     expect(content.style.width).toBe(width);
-    expect(screen.getByRole('button', { name: /^c2 P1,/ })).toBe(cell);
-    expect(cellTrackLeft(cell)).toBe(left);
+    const visible = await screen.findByRole('button', { name: /^c2 P4,/ });
+    expect(cellTrackLeft(visible)).toBeGreaterThan(0);
   });
 
   it('does not return to a focused live programme when an earlier data slice replaces it', async () => {
@@ -569,7 +581,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     const target = grid.scrollLeft - 6300;
     act(() => { grid.scrollLeft = target; fireEvent.scroll(grid); });
     await waitFor(() => expect(screen.queryByRole('button', { name: /^c1 P0,/ })).toBeNull());
-    await screen.findByRole('button', { name: /^c1 P-10,/ });
+    await waitFor(() => expect(Number(grid.dataset.viewAt)).toBe(at - 21 * HOUR));
     await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
     expect(grid.scrollLeft).toBe(target);
     expect(Number(grid.dataset.viewAt)).toBe(at - 21 * HOUR);

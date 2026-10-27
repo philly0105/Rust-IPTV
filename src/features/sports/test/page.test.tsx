@@ -522,6 +522,8 @@ describe('sports page', () => {
     rows = within(list).getAllByTestId('sports-stream');
     expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide', 'event', 'network', 'network', 'network']);
     expect(within(rows[0]!).getByText('In guide')).toBeTruthy();
+    // The reason is quiet text, not a badge: only the regional warning is one.
+    expect(within(rows[0]!).getByTestId('sports-reason').getAttribute('class')).toBeNull();
     expect(within(rows[1]!).getByText('Event channel')).toBeTruthy();
     expect(within(rows[2]!).getByText('Network')).toBeTruthy();
     expect(within(rows[2]!).getByTestId('sports-regional').textContent).toBe('Regional');
@@ -569,9 +571,10 @@ describe('sports page', () => {
     // With nothing to do yet, the best row says when Watch comes.
     const from = within(card(later)).getByTestId('sports-watch-from');
     const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
-    // A play mark and the time on screen; the sentence is what it reads and its tooltip.
+    // A clock and the time on screen, nothing that looks like a button; the sentence is what it reads and its tooltip.
     expect(from.getAttribute('title')).toBe(`Watch from ${at}`);
     expect(within(from).getByText(`Watch from ${at}`).className).toContain('sr-only');
+    expect(from.querySelector('svg')?.getAttribute('class')).toContain('lucide-clock');
     expect(within(card(soon)).queryByTestId('sports-watch-from')).toBeNull();
     fireEvent.click(within(card(soon)).getByTestId('sports-watch'));
     await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't play ESPN HD"));

@@ -6,7 +6,7 @@
  * channel's archive once it is over, Record before it starts. The player loads on the press.
  */
 
-import { Circle, History, Play } from 'lucide-react';
+import { Circle, Clock, History, Play } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -171,9 +171,10 @@ export function streamAction(game: Game, m: StreamMatch, now: number, canRecord:
 function WatchFrom({ time }: { time: string }) {
   const { t } = useTranslation('sports');
   const label = t('watchFrom', { time });
+  // A clock, not a play mark: nothing here can be pressed yet, and a play mark beside a time read as a button.
   return (
     <span className="inline-flex shrink-0 items-center gap-1 text-caption text-fg-subtle tabular-nums" title={label} data-testid="sports-watch-from">
-      <Play aria-hidden size={12} />
+      <Clock aria-hidden size={12} />
       <span aria-hidden>{time}</span>
       <span className="sr-only">{label}</span>
     </span>
@@ -252,9 +253,11 @@ function StreamRow({ game, match, title, ctx, first }: { game: Game; match: Stre
         <MetaLine
           as="span"
           items={[
-            <Badge key="reason" variant={match.reason === 'guide' ? 'success' : 'neutral'}>
+            // Why it matched is quiet text: a badge on every card made status green the page's loudest
+            // colour. Only the regional warning stays a badge, since it may be the wrong game.
+            <span key="reason" data-testid="sports-reason">
               {t(REASON_KEYS[match.reason])}
-            </Badge>,
+            </span>,
             match.regional ? (
               <Badge key="regional" variant="warning" title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')} data-testid="sports-regional">
                 {t('regional')}
@@ -275,8 +278,8 @@ function StreamRow({ game, match, title, ctx, first }: { game: Game; match: Stre
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
       {!button && first && watchesLater(game, ctx.now) ? (
-        // Where nothing can be done yet (no recording here), the best row says when Watch comes: a play
-        // mark and the time, small enough to leave the channel's name its room; the sentence is its name.
+        // Where nothing can be done yet (no recording here), the best row says when Watch comes: a clock
+        // and the time, small enough to leave the channel's name its room; the sentence is its name.
         <WatchFrom time={formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language)} />
       ) : null}
     </li>

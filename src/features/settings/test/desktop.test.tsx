@@ -143,6 +143,18 @@ describe('tray wording (desktop)', () => {
   });
 });
 
+describe('Stream format (desktop)', () => {
+  it('says Auto uses MPEG-TS in the built-in player and HLS in mpv and VLC', async () => {
+    renderAt(settingsRoutes, '/settings/playback');
+    await screen.findByTestId('settings-playback');
+    expect(
+      screen.getByText(
+        'Xtream live channels. Auto uses MPEG-TS in the built-in player, which starts faster, and HLS in mpv and VLC. Choose HLS if channels freeze or you need subtitles.',
+      ),
+    ).toBeTruthy();
+  });
+});
+
 describe('Window at startup (desktop)', () => {
   it('offers normal, maximized and fullscreen and saves the choice', async () => {
     rpcMock.handlers['settings.update'] = (a) => {

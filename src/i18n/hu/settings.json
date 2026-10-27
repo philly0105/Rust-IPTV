@@ -86,7 +86,8 @@
   "playerNotFound": "A lejátszó nem található: {{player}}. Adja meg az elérési útját a Külső lejátszók részben.",
   "streamFormat": "Adatfolyam formátuma",
   "playbackStreamsGroup": "Adatfolyamok és lejátszás",
-  "streamFormatHint": "Xtream élő csatornák. Az automatikus mód lejátszónként azt választja, ami a leggyorsabban indul. Válassza a HLS-t, ha a csatornák lefagynak, vagy feliratra van szüksége.",
+  "streamFormatHint": "Xtream élő csatornák. Az automatikus mód a beépített lejátszóban MPEG-TS-t használ, mert az gyorsabban indul, az mpv-ben és a VLC-ben pedig HLS-t. Válassza a HLS-t, ha a csatornák lefagynak, vagy feliratra van szüksége.",
+  "streamFormatHintServer": "Xtream élő csatornák. Az automatikus mód MPEG-TS-t használ, mert az gyorsabban indul, ha a böngésző le tudja játszani. Válassza a HLS-t, ha a csatornák lefagynak, vagy feliratra van szüksége.",
   "streamFormatAuto": "Automatikus",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +104,7 @@
   "zapBanner": "Csatornainfó megjelenítése csatornaváltáskor",
   "zapBannerHint": "Minden csatornaváltás után néhány másodpercig mutatja a logót, a számot, valamint az aktuális és a következő műsort.",
   "showCaptions": "Feliratok megjelenítése",
-  "showCaptionsHint": "Bekapcsolja a feliratokat, ha az adatfolyam tartalmaz ilyet. A beépített lejátszó MPEG-TS adatfolyamokban nem mutat feliratot; a külső lejátszók a saját beállításukat követik.",
+  "showCaptionsHint": "Bekapcsolja a feliratokat, ha az adatfolyam tartalmaz ilyet. A beépített lejátszó MPEG-TS adatfolyamokban nem tudja megjeleníteni őket; a külső lejátszók a saját beállításukat követik.",
   "doubleClick": "Lejátszás dupla kattintással",
   "doubleClickHint": "Egy kattintással kijelöli a csatornát, dupla kattintással lejátssza.",
 

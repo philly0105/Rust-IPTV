@@ -175,7 +175,9 @@ export function PlaybackSection({ settings, update }: SectionProps) {
       </SettingsGroup>
 
       <SettingsGroup title={t('playbackStreamsGroup')}>
-        <SettingsRow label={t('streamFormat')} description={t('streamFormatHint')}>
+        {/* Auto's rule differs by host: the desktop app also has mpv and VLC, which keep HLS; a
+            browser has only the built-in player, which gets MPEG-TS where it can play it. */}
+        <SettingsRow label={t('streamFormat')} description={isDesktop ? t('streamFormatHint') : t('streamFormatHintServer')}>
           {({ id }) => (
             <Segmented<StreamFormat>
               id={id}

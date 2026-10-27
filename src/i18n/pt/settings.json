@@ -86,7 +86,8 @@
   "playerNotFound": "O {{player}} não foi encontrado. Defina o caminho em Reprodutores externos.",
   "streamFormat": "Formato do stream",
   "playbackStreamsGroup": "Streams e reprodução",
-  "streamFormatHint": "Canais ao vivo do Xtream. Automático escolhe o que inicia mais rápido em cada reprodutor. Escolha HLS se os canais congelarem ou se precisar de legendas.",
+  "streamFormatHint": "Canais ao vivo do Xtream. Automático usa MPEG-TS no reprodutor integrado, que inicia mais rápido, e HLS no mpv e no VLC. Escolha HLS se os canais congelarem ou se precisar de legendas.",
+  "streamFormatHintServer": "Canais ao vivo do Xtream. Automático usa MPEG-TS, que inicia mais rápido, quando o navegador consegue reproduzi-lo. Escolha HLS se os canais congelarem ou se precisar de legendas.",
   "streamFormatAuto": "Automático",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +104,7 @@
   "zapBanner": "Mostrar informações do canal ao trocar de canal",
   "zapBannerHint": "Mostra o logotipo, o número e o que está passando agora e a seguir por alguns segundos após cada troca de canal.",
   "showCaptions": "Mostrar legendas",
-  "showCaptionsHint": "Ativa as legendas quando o stream as tiver. O reprodutor integrado não as mostra em streams MPEG-TS; os reprodutores externos seguem a própria configuração.",
+  "showCaptionsHint": "Ativa as legendas quando o stream as tiver. O reprodutor integrado não consegue mostrá-las em streams MPEG-TS; os reprodutores externos seguem a própria configuração.",
   "doubleClick": "Clique duplo para reproduzir",
   "doubleClickHint": "Um clique seleciona o canal; um clique duplo o reproduz.",
 

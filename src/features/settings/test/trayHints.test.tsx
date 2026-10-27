@@ -1,4 +1,7 @@
-/** Settings in server (PWA) mode: hints that speak of the tray belong to the desktop app only. */
+/**
+ * Settings in server (PWA) mode: hints that speak of the tray, or of mpv and VLC, belong to the
+ * desktop app only.
+ */
 
 import { cleanup, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,5 +42,16 @@ describe('tray wording (server mode)', () => {
     await screen.findByTestId('reminders-enabled');
     expect(screen.getByText('Alerts you before a programme you picked in the guide, while the app is open.')).toBeTruthy();
     expect(screen.queryByText(/tray/)).toBeNull();
+  });
+});
+
+describe('Stream format (server mode)', () => {
+  it("says Auto's rule for the built-in player alone, without mpv and VLC", async () => {
+    renderAt(settingsRoutes, '/settings/playback');
+    await screen.findByTestId('settings-playback');
+    expect(
+      screen.getByText('Xtream live channels. Auto uses MPEG-TS, which starts faster, when the browser can play it. Choose HLS if channels freeze or you need subtitles.'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/HLS in mpv and VLC/)).toBeNull();
   });
 });

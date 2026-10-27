@@ -86,7 +86,8 @@
   "playerNotFound": "{{player}} wurde nicht gefunden. Legen Sie den Pfad unter „Externe Player“ fest.",
   "streamFormat": "Stream-Format",
   "playbackStreamsGroup": "Streams und Wiedergabe",
-  "streamFormatHint": "Xtream-Livesender. Automatisch wählt, was im jeweiligen Player am schnellsten startet. Wählen Sie HLS, wenn Sender einfrieren oder Sie Untertitel brauchen.",
+  "streamFormatHint": "Xtream-Livesender. Automatisch nutzt im integrierten Player MPEG-TS, das schneller startet, und in mpv und VLC HLS. Wählen Sie HLS, wenn Sender einfrieren oder Sie Untertitel brauchen.",
+  "streamFormatHintServer": "Xtream-Livesender. Automatisch nutzt MPEG-TS, das schneller startet, wenn der Browser es abspielen kann. Wählen Sie HLS, wenn Sender einfrieren oder Sie Untertitel brauchen.",
   "streamFormatAuto": "Automatisch",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +104,7 @@
   "zapBanner": "Senderinfo beim Umschalten anzeigen",
   "zapBannerHint": "Zeigt nach jedem Senderwechsel einige Sekunden lang Logo, Nummer sowie die aktuelle und die nächste Sendung.",
   "showCaptions": "Untertitel anzeigen",
-  "showCaptionsHint": "Schaltet Untertitel ein, wenn ein Stream welche hat. Der integrierte Player zeigt in MPEG-TS-Streams keine; externe Player folgen ihrer eigenen Einstellung.",
+  "showCaptionsHint": "Schaltet Untertitel ein, wenn ein Stream welche hat. Der integrierte Player kann sie in MPEG-TS-Streams nicht anzeigen; externe Player folgen ihrer eigenen Einstellung.",
   "doubleClick": "Doppelklick zum Abspielen",
   "doubleClickHint": "Ein einfacher Klick wählt einen Sender aus, ein Doppelklick spielt ihn ab.",
 

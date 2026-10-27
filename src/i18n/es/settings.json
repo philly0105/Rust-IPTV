@@ -86,7 +86,8 @@
   "playerNotFound": "No se encontró {{player}}. Indica su ruta en Reproductores externos.",
   "streamFormat": "Formato de stream",
   "playbackStreamsGroup": "Streams y reproducción",
-  "streamFormatHint": "Canales en directo de Xtream. Automático elige lo que arranca antes en cada reproductor. Elige HLS si los canales se congelan o necesitas subtítulos.",
+  "streamFormatHint": "Canales en directo de Xtream. Automático usa MPEG-TS en el reproductor integrado, que arranca antes, y HLS en mpv y VLC. Elige HLS si los canales se congelan o necesitas subtítulos.",
+  "streamFormatHintServer": "Canales en directo de Xtream. Automático usa MPEG-TS, que arranca antes, cuando el navegador puede reproducirlo. Elige HLS si los canales se congelan o necesitas subtítulos.",
   "streamFormatAuto": "Automático",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +104,7 @@
   "zapBanner": "Mostrar información del canal al cambiar de canal",
   "zapBannerHint": "Muestra el logotipo, el número y lo que se emite ahora y a continuación durante unos segundos tras cada cambio de canal.",
   "showCaptions": "Mostrar subtítulos",
-  "showCaptionsHint": "Activa los subtítulos cuando un stream los tiene. El reproductor integrado no los muestra en streams MPEG-TS; los reproductores externos usan su propia configuración.",
+  "showCaptionsHint": "Activa los subtítulos cuando un stream los tiene. El reproductor integrado no puede mostrarlos en streams MPEG-TS; los reproductores externos usan su propia configuración.",
   "doubleClick": "Doble clic para reproducir",
   "doubleClickHint": "Un clic selecciona un canal; un doble clic lo reproduce.",
 

@@ -86,7 +86,8 @@
   "playerNotFound": "{{player}} wasn't found. Set its path under External players.",
   "streamFormat": "Stream format",
   "playbackStreamsGroup": "Streams and playback",
-  "streamFormatHint": "Xtream live channels. Auto picks what starts fastest in each player. Choose HLS if channels freeze or you need subtitles.",
+  "streamFormatHint": "Xtream live channels. Auto uses MPEG-TS in the built-in player, which starts faster, and HLS in mpv and VLC. Choose HLS if channels freeze or you need subtitles.",
+  "streamFormatHintServer": "Xtream live channels. Auto uses MPEG-TS, which starts faster, when the browser can play it. Choose HLS if channels freeze or you need subtitles.",
   "streamFormatAuto": "Auto",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +104,7 @@
   "zapBanner": "Show channel info when switching channels",
   "zapBannerHint": "Shows the logo, number and what's on now and next for a few seconds after each channel change.",
   "showCaptions": "Show captions",
-  "showCaptionsHint": "Turns on subtitles when a stream has them. The built-in player has none in MPEG-TS streams; external players use their own setting.",
+  "showCaptionsHint": "Turns on subtitles when a stream has them. The built-in player can't show them in MPEG-TS streams; external players use their own setting.",
   "doubleClick": "Double-click to play",
   "doubleClickHint": "A single click selects a channel; a double click plays it.",
 

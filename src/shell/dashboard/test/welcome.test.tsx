@@ -85,6 +85,17 @@ describe('Home welcome', () => {
     expect(screen.queryByText(/stay on your Tsrust server|stay on this computer/)).toBeNull();
   });
 
+  it("lays the tiles right under the lead: the Sources page's full-window height and centring are cancelled", async () => {
+    renderRoutes([{ path: '/', element: <Welcome /> }], '/');
+    const section = await screen.findByTestId('sources-onboarding');
+    // The block fills the window and centres itself on the Sources page (an @2xl min-height and
+    // justify-center); inside the welcome that left a 250 px band above the tiles.
+    const wrapper = section.parentElement!;
+    expect(wrapper.className).toContain('[&>section]:min-h-0');
+    expect(wrapper.className).toContain('[&>section]:justify-start');
+    expect(wrapper.className).toContain('[&>section]:py-0');
+  });
+
   it('holds the shell import toasts while its add dialog is open: no progress over it, no second success', async () => {
     renderRoutes([{ path: '/dashboard', element: <EventsLayout />, children: [{ index: true, element: <Welcome /> }] }], '/dashboard');
     queryClient.setQueryData(rpcKey('sources.list'), [makeSource('s1', { name: 'Night Portal', kind: 'm3u' })]);

@@ -3,6 +3,8 @@ import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 
 import { useTranslation } from 'react-i18next';
 
 import type { ParentalMode } from '@/api/types';
+import { glassButton } from '@/features/player/components/glassButton';
+import { GLASS_FOCUS } from '@/ui/focus';
 
 import { cn, Tooltip } from '../deps';
 import { classifyTileFault, retriesWhenOnline, tileFaultCopy } from '../errors';
@@ -85,6 +87,7 @@ function TilePanel({
       data-error-class={errorClass}
       className={cn(
         GLASS_BLUR,
+        GLASS_FOCUS,
         'pointer-events-auto flex max-w-[24rem] flex-col items-center gap-1 rounded-md px-3 py-1.5 text-center motion-safe:animate-fade-in',
         '@[20rem]/tile:gap-1.5 @[20rem]/tile:px-4 @[20rem]/tile:py-2.5 @[26rem]/tile:py-3',
       )}
@@ -99,7 +102,10 @@ function TilePanel({
   );
 }
 
-const PANEL_BUTTON = cn(GLASS_BUTTON, 'border border-[color:var(--color-glass-border,rgb(255_255_255/0.14))]');
+/** A panel's first action, as the player's error screen draws Retry: the solid accent on glass. */
+const PANEL_PRIMARY = glassButton('primary', 'xs');
+/** Its other action: the player's see-through glass button. */
+const PANEL_SECONDARY = glassButton('secondary', 'xs');
 
 /**
  * One channel on the wall: its own <video> and engine (useTilePlayback), and the chrome a
@@ -207,10 +213,10 @@ export const Tile = memo(function Tile({
         title={t('sourceMissingTitle')}
         hint={t('sourceMissing')}
       >
-        <button type="button" className={PANEL_BUTTON} onClick={() => onReplace(tile.key)}>
+        <button type="button" className={PANEL_PRIMARY} onClick={() => onReplace(tile.key)}>
           {t('replace')}
         </button>
-        <button type="button" className={GLASS_BUTTON} onClick={() => onClose(tile.key)}>
+        <button type="button" className={PANEL_SECONDARY} onClick={() => onClose(tile.key)}>
           {t('common:close')}
         </button>
       </TilePanel>
@@ -223,10 +229,10 @@ export const Tile = memo(function Tile({
         title={t(parentalMode === 'hide' ? 'hiddenTitle' : 'lockedTitle')}
         hint={t(parentalMode === 'hide' ? 'hiddenBody' : 'lockedBody')}
       >
-        <button type="button" className={PANEL_BUTTON} onClick={() => onUnlock(tile)}>
+        <button type="button" className={PANEL_PRIMARY} onClick={() => onUnlock(tile)}>
           {t('unlock')}
         </button>
-        <button type="button" className={GLASS_BUTTON} onClick={() => onClose(tile.key)}>
+        <button type="button" className={PANEL_SECONDARY} onClick={() => onClose(tile.key)}>
           {t('common:close')}
         </button>
       </TilePanel>
@@ -240,8 +246,8 @@ export const Tile = memo(function Tile({
         title={t('lockCheckFailedTitle')}
         hint={t('lockCheckFailed')}
       >
-        <button type="button" className={PANEL_BUTTON} onClick={onRecheck}>
-          <RotateCw aria-hidden className="size-3.5" />
+        <button type="button" className={PANEL_PRIMARY} onClick={onRecheck}>
+          <RotateCw aria-hidden />
           {t('common:retry')}
         </button>
       </TilePanel>
@@ -264,11 +270,11 @@ export const Tile = memo(function Tile({
         title={t(copy.title)}
         hint={t(copy.hint)}
       >
-        <button type="button" data-testid="multiview-tile-retry" className={PANEL_BUTTON} onClick={retry}>
-          <RotateCw aria-hidden className="size-3.5" />
+        <button type="button" data-testid="multiview-tile-retry" className={PANEL_PRIMARY} onClick={retry}>
+          <RotateCw aria-hidden />
           {t('common:retry')}
         </button>
-        <button type="button" className={GLASS_BUTTON} onClick={() => onReplace(tile.key)}>
+        <button type="button" className={PANEL_SECONDARY} onClick={() => onReplace(tile.key)}>
           {t('replace')}
         </button>
       </TilePanel>

@@ -954,6 +954,18 @@ describe('tile panels', () => {
     expect(within(tileEl(1)).getByTestId('multiview-tile-centre').className.split(/\s+/)).toContain('inset-0');
   });
 
+  it("draws a failed tile's actions as the player draws its error screen's", async () => {
+    h.failUrls.add('http://mock/c2.m3u8');
+    seed([1, 2]);
+    renderPage();
+    const panel = await waitFor(() => within(tileEl(2)).getByTestId('multiview-tile-error'));
+    // Retry is the solid accent, Replace the see-through glass button (glassButton in the player).
+    expect(within(panel).getByTestId('multiview-tile-retry').className).toContain('bg-accent-solid');
+    const replace = within(panel).getByRole('button', { name: 'Replace' });
+    expect(replace.className).toContain('ring-white/20');
+    expect(replace.className).not.toContain('bg-accent-solid');
+  });
+
   it("aligns the channel name to the strip's start edge in either direction (L2-visual-7)", async () => {
     seed([1]);
     renderPage();

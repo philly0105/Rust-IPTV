@@ -658,10 +658,17 @@ describe('empty wall', () => {
     expect(line.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', '@[45rem]/stage:block']));
     const hint = screen.getByTestId('multiview-empty-hint');
     expect(hint.textContent).toBe(body);
-    expect(hint.className.split(/\s+/)).toContain('sr-only');
+    expect(hint.className.split(/\s+/)).toContain('@[45rem]/stage:sr-only');
     const slots = screen.getAllByTestId('multiview-empty-slot');
     expect(slots[0]!.getAttribute('aria-describedby')).toBe(hint.id);
     expect(slots).toHaveLength(4);
+    // Nothing recent or favorite (a new user): stacked, the first slot is not a short row but
+    // says how the wall works above its plus, since the phone toolbar has no room for it.
+    const own = slots[0]!.className.split(/\s+/);
+    expect(own).toContain('@max-2xl:aspect-auto');
+    expect(own).not.toContain('@max-2xl:h-14');
+    expect(own).not.toContain('@max-2xl:flex-row');
+    expect(hint.compareDocumentPosition(within(slots[0]!).getByText('Add channel')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The same layout control as with tiles up, and only one of it.
     expect(screen.getAllByRole('radiogroup', { name: 'Layout' })).toHaveLength(1);
     fireEvent.click(within(screen.getByTestId('multiview-toolbar')).getByTestId('multiview-layout-1x2'));

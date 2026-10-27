@@ -92,7 +92,10 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
   if (!next || (!picksLoading && picks.length === 0)) {
     // Stacked (a wall under 42rem, a phone), the slots after the next one are left out and the
     // next one is a short row: N full-width 16:9 frames were screens of dashes to scroll past.
-    // The toolbar's Add channel and the next slot still reach the picker.
+    // The toolbar's Add channel and the next slot still reach the picker. On an empty wall the
+    // row grows to say how the wall works above the plus: with nothing recent or favorite yet
+    // (a new user), it is the only place a phone says it.
+    const stacked = explains ? '@max-2xl:aspect-auto @max-2xl:py-3' : '@max-2xl:aspect-auto @max-2xl:h-14 @max-2xl:flex-row @max-2xl:gap-3';
     return (
       <button
         type="button"
@@ -106,7 +109,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
         className={cn(
           FRAME,
           '@container/slot group/slot flex flex-col items-center justify-center gap-2 p-2 text-fg-muted outline-none',
-          next ? '@max-2xl:aspect-auto @max-2xl:h-14 @max-2xl:flex-row @max-2xl:gap-3' : 'hidden @2xl:flex',
+          next ? stacked : 'hidden @2xl:flex',
           'hover:border-accent hover:bg-surface hover:text-fg active:bg-surface-2',
           'focus-visible:border-solid focus-visible:border-focus focus-visible:text-fg',
           'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-divider disabled:hover:bg-surface/50',
@@ -115,8 +118,8 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
         )}
       >
         <SlotNumber number={number} />
+        {hint('px-12 @[45rem]/stage:sr-only')}
         <AddFace label={t('addChannel')} />
-        {hint('sr-only')}
       </button>
     );
   }

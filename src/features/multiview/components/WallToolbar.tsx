@@ -110,63 +110,66 @@ export function WallToolbar({
         <span>{full ? t('wallFull') : t('addChannel')}</span>
       </button>
 
-      <div className="ms-auto flex items-center gap-1">
-        <Tooltip content={muted ? t('unmuteAll') : t('muteAll')} tone={overlay ? 'glass' : 'default'} describe={false}>
-          <button
-            type="button"
-            className={toolButton(overlay, 'px-0')}
-            aria-label={muted ? t('unmuteAll') : t('muteAll')}
-            aria-pressed={muted}
-            onClick={onToggleMute}
-            data-testid="multiview-mute"
-          >
-            <VolumeIcon aria-hidden className="size-4" />
-          </button>
-        </Tooltip>
-        <label htmlFor={volumeId} className="sr-only">
-          {t('volume')}
-        </label>
-        <input
-          id={volumeId}
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={muted ? 0 : percent}
-          aria-valuetext={`${muted ? 0 : percent}%`}
-          onChange={(e) => onVolume(Number(e.currentTarget.value) / 100)}
-          className={cn(
-            'h-9 w-20 cursor-pointer rounded-sm outline-none focus-visible:ring-2 sm:w-28',
-            overlay
-              ? 'accent-[color:var(--color-glass-accent,var(--color-accent,#f5b544))] focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]'
-              : // A neutral fill: amber marks the sound tally on the layout glyph, not a setting's level.
-                'accent-[color:var(--color-fg-muted,#c8cfdc)] focus-visible:ring-focus',
-          )}
-          data-testid="multiview-volume"
-        />
-        <Tooltip content={fullscreenSupported ? (fullscreen ? t('exitFullscreen') : t('fullscreen')) : t('fullscreenUnavailable')} tone={overlay ? 'glass' : 'default'} describe={!fullscreenSupported}>
-          <button
-            type="button"
-            className={toolButton(overlay, 'px-0')}
-            aria-label={fullscreen ? t('exitFullscreen') : t('fullscreen')}
-            // A disabled button gets no pointer events in every browser, so its reason stays a native title.
-            title={fullscreenSupported ? undefined : t('fullscreenUnavailable')}
-            aria-pressed={fullscreen}
-            disabled={!fullscreenSupported}
-            onClick={onToggleFullscreen}
-            data-testid="multiview-fullscreen"
-          >
-            {fullscreen ? <Minimize2 aria-hidden className="size-4" /> : <Maximize2 aria-hidden className="size-4" />}
-          </button>
-        </Tooltip>
-        {!overlay ? (
-          <button type="button" className={toolButton(false)} onClick={onClear} disabled={count === 0} data-testid="multiview-clear">
-            <Eraser aria-hidden className="size-4" />
-            <span className="hidden sm:inline">{t('clearWall')}</span>
-            <span className="sr-only sm:hidden">{t('clearWall')}</span>
-          </button>
-        ) : null}
-      </div>
+      {/* Sound, full screen and clear act on tiles: an empty wall leaves them out. */}
+      {count > 0 ? (
+        <div className="ms-auto flex items-center gap-1">
+          <Tooltip content={muted ? t('unmuteAll') : t('muteAll')} tone={overlay ? 'glass' : 'default'} describe={false}>
+            <button
+              type="button"
+              className={toolButton(overlay, 'px-0')}
+              aria-label={muted ? t('unmuteAll') : t('muteAll')}
+              aria-pressed={muted}
+              onClick={onToggleMute}
+              data-testid="multiview-mute"
+            >
+              <VolumeIcon aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
+          <label htmlFor={volumeId} className="sr-only">
+            {t('volume')}
+          </label>
+          <input
+            id={volumeId}
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={muted ? 0 : percent}
+            aria-valuetext={`${muted ? 0 : percent}%`}
+            onChange={(e) => onVolume(Number(e.currentTarget.value) / 100)}
+            className={cn(
+              'h-9 w-20 cursor-pointer rounded-sm outline-none focus-visible:ring-2 sm:w-28',
+              overlay
+                ? 'accent-[color:var(--color-glass-accent,var(--color-accent,#f5b544))] focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]'
+                : // A neutral fill: amber marks the sound tally on the layout glyph, not a setting's level.
+                  'accent-[color:var(--color-fg-muted,#c8cfdc)] focus-visible:ring-focus',
+            )}
+            data-testid="multiview-volume"
+          />
+          <Tooltip content={fullscreenSupported ? (fullscreen ? t('exitFullscreen') : t('fullscreen')) : t('fullscreenUnavailable')} tone={overlay ? 'glass' : 'default'} describe={!fullscreenSupported}>
+            <button
+              type="button"
+              className={toolButton(overlay, 'px-0')}
+              aria-label={fullscreen ? t('exitFullscreen') : t('fullscreen')}
+              // A disabled button gets no pointer events in every browser, so its reason stays a native title.
+              title={fullscreenSupported ? undefined : t('fullscreenUnavailable')}
+              aria-pressed={fullscreen}
+              disabled={!fullscreenSupported}
+              onClick={onToggleFullscreen}
+              data-testid="multiview-fullscreen"
+            >
+              {fullscreen ? <Minimize2 aria-hidden className="size-4" /> : <Maximize2 aria-hidden className="size-4" />}
+            </button>
+          </Tooltip>
+          {!overlay ? (
+            <button type="button" className={toolButton(false)} onClick={onClear} data-testid="multiview-clear">
+              <Eraser aria-hidden className="size-4" />
+              <span className="hidden sm:inline">{t('clearWall')}</span>
+              <span className="sr-only sm:hidden">{t('clearWall')}</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -36,6 +36,8 @@ export interface FreeSlotProps {
   disabled: boolean;
   /** The slot the next channel goes into (tiles fill the slots in order): it offers the quick picks. */
   next: boolean;
+  /** The wall is empty: the next slot also says what the wall does, where there is room. */
+  intro: boolean;
   picks: readonly QuickPick[];
   picksLoading: boolean;
   /** Key of the pick being put up, while its parental check runs. */
@@ -49,9 +51,18 @@ export interface FreeSlotProps {
  * with one click, and "More channels" for the picker; the others, and the next one when there is
  * nothing to offer, are one button that opens the picker.
  */
-export function FreeSlot({ slot, className, disabled, next, picks, picksLoading, pending, onAdd, onPick }: FreeSlotProps) {
+export function FreeSlot({ slot, className, disabled, next, intro, picks, picksLoading, pending, onAdd, onPick }: FreeSlotProps) {
   const { t } = useTranslation('multiview');
   const number = slot + 1;
+  const hintId = `multiview-slot-hint-${number}`;
+  // A slot's width also sets its height, so the line shows only in a large slot (a 2x2 slot on a
+  // desktop window, the large 1+3 slot); the header says what the page is for in any case.
+  const hint = (extra: string) =>
+    next && intro ? (
+      <span id={hintId} data-testid="multiview-empty-hint" className={cn('hidden max-w-[28rem] text-center text-sm font-normal text-pretty text-fg-muted @[32rem]/slot:block', extra)}>
+        {t('emptyBody')}
+      </span>
+    ) : null;
 
   if (!next || (!picksLoading && picks.length === 0)) {
     return (
@@ -62,10 +73,11 @@ export function FreeSlot({ slot, className, disabled, next, picks, picksLoading,
         data-slot={number}
         disabled={disabled}
         aria-label={t('slotEmptyLabel', { slot: number })}
+        aria-describedby={next && intro ? hintId : undefined}
         onClick={() => onAdd(slot)}
         className={cn(
           FRAME,
-          'group/slot flex flex-col items-center justify-center gap-2 p-2 text-fg-muted outline-none',
+          '@container/slot group/slot flex flex-col items-center justify-center gap-2 p-2 text-fg-muted outline-none',
           'hover:border-accent hover:bg-surface hover:text-fg active:bg-surface-2',
           'focus-visible:border-solid focus-visible:border-focus focus-visible:text-fg',
           'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-divider disabled:hover:bg-surface/50',
@@ -78,6 +90,7 @@ export function FreeSlot({ slot, className, disabled, next, picks, picksLoading,
           <Plus className="size-5" />
         </span>
         <span className="text-center text-sm font-medium">{t('addChannel')}</span>
+        {hint('mt-1')}
       </button>
     );
   }
@@ -91,6 +104,7 @@ export function FreeSlot({ slot, className, disabled, next, picks, picksLoading,
       className={cn(FRAME, '@container/slot flex flex-col items-center justify-center p-3', className)}
     >
       <SlotNumber number={number} />
+      {hint('mb-3')}
       {/* Clear of the slot number on either side, so a narrow slot never runs a row under it. */}
       <div className="flex w-[calc(100%-4.5rem)] max-w-[18rem] min-w-0 flex-col gap-1.5">
         {picksLoading ? (

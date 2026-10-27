@@ -645,20 +645,27 @@ describe('full screen focus (L1-live-18)', () => {
 // ---------------------------------------------------------------------------
 
 describe('empty wall', () => {
-  it('explains multi-view, offers layouts and the picker', async () => {
+  it('explains multi-view, and has the one toolbar from the start', async () => {
     renderPage();
-    expect(await screen.findByRole('heading', { name: 'Watch up to four channels at once' })).toBeTruthy();
+    expect((await screen.findByTestId('multiview-empty-hint')).textContent).toBe(
+      'Pick two to four live channels. Every tile plays; the one you click has the sound.',
+    );
     expect(screen.getAllByTestId('multiview-empty-slot')).toHaveLength(4);
-    fireEvent.click(screen.getByTestId('multiview-empty-layout-1x2'));
+    // The same layout control as with tiles up, and only one of it.
+    expect(screen.getAllByRole('radiogroup', { name: 'Layout' })).toHaveLength(1);
+    fireEvent.click(within(screen.getByTestId('multiview-toolbar')).getByTestId('multiview-layout-1x2'));
     expect(useMultiviewStore.getState().layout).toBe('1x2');
     expect(screen.getAllByTestId('multiview-empty-slot')).toHaveLength(2);
-    fireEvent.click(screen.getByTestId('multiview-pick'));
+    // Sound, full screen and clear wait for tiles.
+    expect(screen.queryByTestId('multiview-mute')).toBeNull();
+    expect(screen.queryByTestId('multiview-clear')).toBeNull();
+    fireEvent.click(screen.getByTestId('multiview-add'));
     expect(await screen.findByRole('dialog', { name: 'Add channels' })).toBeTruthy();
   });
 
   it('adds channels from the picker through the parental gate', async () => {
     renderPage();
-    fireEvent.click(await screen.findByTestId('multiview-pick'));
+    fireEvent.click(await screen.findByTestId('multiview-add'));
     const rows = await screen.findAllByTestId('multiview-picker-row');
     fireEvent.click(rows[0]!);
     await waitFor(() => expect(useMultiviewStore.getState().tiles).toHaveLength(1));
@@ -671,7 +678,7 @@ describe('empty wall', () => {
   it('adds nothing when the PIN prompt is cancelled', async () => {
     h.ensureUnlocked = vi.fn(async () => false);
     renderPage();
-    fireEvent.click(await screen.findByTestId('multiview-pick'));
+    fireEvent.click(await screen.findByTestId('multiview-add'));
     fireEvent.click((await screen.findAllByTestId('multiview-picker-row'))[0]!);
     await waitFor(() => expect(h.ensureUnlocked).toHaveBeenCalled());
     expect(useMultiviewStore.getState().tiles).toHaveLength(0);
@@ -775,22 +782,21 @@ describe('empty wall', () => {
 
   it('drops the skeleton without a row when there is nothing recent or favorite', async () => {
     renderPage();
-    await screen.findByTestId('multiview-empty');
+    await screen.findByTestId('multiview-wall');
     await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
     expect(screen.queryByTestId('multiview-quick-picks')).toBeNull();
   });
 
   it('names the layouts for screen readers while they show only their glyphs', async () => {
     renderPage();
-    await screen.findByTestId('multiview-empty');
-    // The visible name is hidden below the intro's 42rem width, never dropped.
+    const toolbar = await screen.findByTestId('multiview-toolbar');
+    // The visible name is left out on narrow windows, never the accessible one.
     for (const name of ['Side by side', 'Grid of four', 'One large, three small']) {
-      const button = screen.getByRole('button', { name });
+      const radio = within(toolbar).getByRole('radio', { name });
       // Hovering a glyph shows its name in the kit tooltip.
-      fireEvent.mouseEnter(button);
+      fireEvent.mouseEnter(radio);
       expect((await screen.findByRole('tooltip')).textContent).toBe(name);
-      fireEvent.mouseLeave(button);
-      expect(within(button).getByTestId('multiview-empty-layout-label').className).toContain('sr-only');
+      fireEvent.mouseLeave(radio);
     }
   });
 });
@@ -857,7 +863,7 @@ describe('main player', () => {
     const player = usePlayerStore as unknown as { setState(s: { source: unknown; mode: string }): void; getState(): { source: unknown } };
     player.setState({ source: { url: 'http://main' }, mode: 'html5' });
     renderPage();
-    await screen.findByTestId('multiview-empty');
+    await screen.findByTestId('multiview-toolbar');
     expect(player.getState().source).toBeNull();
   });
 
@@ -866,7 +872,7 @@ describe('main player', () => {
     const player = usePlayerStore as unknown as { setState(s: { source: unknown; mode: string }): void; getState(): { source: unknown } };
     player.setState({ source: { url: 'http://main' }, mode: 'external' });
     renderPage();
-    await screen.findByTestId('multiview-empty');
+    await screen.findByTestId('multiview-toolbar');
     expect(player.getState().source).not.toBeNull();
     player.setState({ source: null, mode: 'html5' });
   });
@@ -917,7 +923,7 @@ describe('picker browsing (LG-19)', () => {
         : { items: [1, 2, 3, 4, 5, 6].map((i) => channel(i, 'm3u1')), total: 6 };
     handlers['epg.nowNext'] = () => ({ 'm3u1|live|c5': { now: { title: 'Cup final', start: '2026-10-20T10:00:00Z', end: '2026-10-20T12:00:00Z' } } });
     renderPage();
-    fireEvent.click(await screen.findByTestId('multiview-pick'));
+    fireEvent.click(await screen.findByTestId('multiview-add'));
     const dialog = await screen.findByRole('dialog', { name: 'Add channels' });
     fireEvent.change(within(dialog).getByLabelText('Source'), { target: { value: 'm3u1' } });
     fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));

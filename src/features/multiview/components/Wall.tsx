@@ -104,6 +104,7 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
               className={className}
               disabled={swapFrom !== null}
               next={slot === tiles.length}
+              intro={tiles.length === 0}
               picks={picks}
               picksLoading={picksLoading}
               pending={pendingPick}

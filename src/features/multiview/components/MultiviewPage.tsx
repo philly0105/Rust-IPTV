@@ -20,7 +20,6 @@ import { focusSlot, useWallKeyboard } from '../useWallKeyboard';
 import { useWallFullscreen } from '../useWallFullscreen';
 import { LimitBanners, loadKey, MainPlayingBanner } from './Banners';
 import { ChannelPicker, type PickerMode } from './ChannelPicker';
-import { EmptyIntro } from './EmptyIntro';
 import { LAYOUT_LABEL_KEYS, WallToolbar } from './WallToolbar';
 import { Wall } from './Wall';
 
@@ -61,13 +60,13 @@ function useIdleChrome(active: boolean) {
   return { visible: !active || visible, poke, hold };
 }
 
-/** The page while the sources list loads with nothing on the wall: the frames, without text. */
+/** The page while the sources list loads with nothing on the wall: the toolbar and frames, without text. */
 function WallSkeleton({ layout }: { layout: MultiviewLayout }) {
   return (
     <div aria-hidden className="flex min-h-0 flex-1 flex-col" data-testid="multiview-loading">
-      <div className="flex flex-col gap-3 border-b border-divider bg-surface px-4 py-5 sm:px-6">
-        <Skeleton className="h-6 w-72 max-w-full" />
-        <Skeleton className="h-4 w-[28rem] max-w-full" />
+      <div className="flex items-center gap-3 border-b border-divider bg-surface px-(--page-gutter) py-2">
+        <Skeleton className="h-8 w-40 rounded-md" />
+        <Skeleton className="h-8 w-28 rounded-md" />
       </div>
       <div className="relative flex min-h-0 flex-1 overflow-y-auto p-1 [container-type:size] @2xl:p-2">
         <div className={cn(WALL_BASE, WALL_CLASSES['2x2'])}>
@@ -85,7 +84,8 @@ function WallSkeleton({ layout }: { layout: MultiviewLayout }) {
  *
  * Pieces: the toolbar (layout, add, the wall's sound, full screen, clear), banners (accounts
  * over their connection limit, the main player playing), the wall (Wall and Tile), the
- * channel picker. An empty wall shows what multi-view does above its free frames.
+ * channel picker. The toolbar is there from the first visit; an empty wall says what multi-view
+ * does in the header and its first free frame.
  *
  * Sound: exactly one tile holds it (the store's `audioKey`); clicking a tile or pressing its
  * number moves it there. The wall's mute silences all of them; the main player playing does
@@ -129,8 +129,9 @@ export function MultiviewPage() {
   const silent = muted || mainPlaying;
 
   const title = t('title');
-  const subtitle = count > 0 ? t('subtitle', { n: count, max: MAX_TILES }) : undefined;
-  useShellHeader(subtitle ? { title, subtitle } : { title }, [title, subtitle]);
+  // An empty wall says what the page is for where the count will go.
+  const subtitle = count > 0 ? t('subtitle', { n: count, max: MAX_TILES }) : t('emptyTitle');
+  useShellHeader({ title, subtitle }, [title, subtitle]);
 
   // A swap whose tile went away (closed, cleared, replaced from elsewhere) ends.
   useEffect(() => {
@@ -448,7 +449,6 @@ export function MultiviewPage() {
   } else {
     body = (
       <>
-        {count === 0 ? <EmptyIntro layout={layout} onLayout={setLayout} onPick={() => openPicker(ADD)} /> : null}
         <div
           ref={stageRef}
           data-testid="multiview-stage"
@@ -458,7 +458,9 @@ export function MultiviewPage() {
           onKeyDownCapture={fsActive ? chrome.poke : undefined}
           className={cn('relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
         >
-          {count > 0 && !fsActive ? <div inert={limitOver}>{toolbar(false)}</div> : null}
+          {/* One toolbar from the first visit on, so the layout choice never moves or changes look
+              when the first tile goes up. */}
+          {!fsActive ? <div inert={limitOver}>{toolbar(false)}</div> : null}
           {!fsActive ? (
             <div
               data-testid="multiview-limit-layer"

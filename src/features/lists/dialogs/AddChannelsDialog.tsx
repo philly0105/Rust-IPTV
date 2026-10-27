@@ -280,7 +280,11 @@ export function AddChannelsDialog({ listId, onClose }: { listId: string; onClose
           {t('errorListFull', { max: MAX_ITEMS })}
         </p>
       ) : null}
-      <div className="max-h-[min(26rem,55dvh)] min-h-40 overflow-y-auto">{body}</div>
+      {/* One height whatever the search finds: a sheet on a phone grows from its top edge, so a
+          box that shrank with the results would carry the search field down under the keyboard. */}
+      <div className="h-[min(26rem,55dvh)] overflow-y-auto" data-testid="add-channels-results">
+        {body}
+      </div>
       <p className="sr-only" role="status" aria-live="polite">
         {announce}
       </p>

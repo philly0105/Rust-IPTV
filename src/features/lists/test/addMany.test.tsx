@@ -161,6 +161,10 @@ describe('Add channels on a list', () => {
     );
     // The group's matches, not the catalog search's News One.
     await within(dialog).findByRole('button', { name: /^Match 59,/ });
+    // The results keep one height while the search narrows them, so a phone sheet holds the field still.
+    const results = within(dialog).getByTestId('add-channels-results');
+    expect(results.className).toContain('h-[min(26rem,55dvh)]');
+    expect(results.className).not.toContain('max-h-');
     expect(within(dialog).queryByRole('button', { name: /^News One,/ })).toBeNull();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Show more' }));
     await within(dialog).findByRole('button', { name: /^Match 119,/ });

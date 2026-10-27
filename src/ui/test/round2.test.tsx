@@ -396,7 +396,24 @@ describe('SegmentedControl: compact size and segments that say why they are out'
 
   it('the compact size tightens the track and the segments', () => {
     render(<SegmentedControl label="View" value="b" onChange={() => {}} options={options.slice(1)} size="sm" testId="view" />);
-    expect(screen.getByTestId('view').className.split(' ')).toEqual(expect.arrayContaining(['p-0.5', 'gap-0.5', 'rounded-md', 'border-edge']));
+    expect(screen.getByTestId('view').className.split(' ')).toEqual(expect.arrayContaining(['p-0.5', 'gap-0.5', 'rounded-md', 'ring-edge']));
     expect(screen.getByRole('radio', { name: 'Grid' }).className.split(' ')).toEqual(expect.arrayContaining(['min-h-7', 'px-2', 'rounded-sm', 'bg-raised']));
+  });
+
+  it('draws the track edge as an inset ring, so md and sm stand as tall as md and sm buttons', () => {
+    render(
+      <>
+        <SegmentedControl label="View" value="b" onChange={() => {}} options={options.slice(1)} testId="md" />
+        <SegmentedControl label="Compact" value="b" onChange={() => {}} options={options.slice(1)} size="sm" testId="sm" />
+      </>,
+    );
+    for (const id of ['md', 'sm']) {
+      const track = screen.getByTestId(id).className.split(' ');
+      // A border would add 2 px to the 30 px segment and its padding (h-10 for md, h-8 for sm).
+      expect(track).toEqual(expect.arrayContaining(['ring-1', 'ring-inset', 'ring-edge']));
+      expect(track.some((c) => /^border(-|$)/.test(c)), id).toBe(false);
+    }
+    expect(screen.getByTestId('md').className.split(' ')).toContain('p-1');
+    expect(screen.getAllByRole('radio', { name: 'Grid' })[0]!.className.split(' ')).toContain('min-h-8');
   });
 });

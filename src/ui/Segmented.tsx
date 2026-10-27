@@ -17,7 +17,7 @@ export type SegmentedTone = 'default' | 'glass';
  */
 export const SEGMENT_TONES = {
   default: {
-    track: 'border-edge bg-surface-2',
+    track: 'ring-edge bg-surface-2',
     thumb: 'bg-raised text-fg shadow-1 ring-1 ring-border',
     rest: 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
     focus: '',
@@ -38,14 +38,18 @@ const SEGMENT_FORCED = 'forced-color-adjust-none forced-colors:bg-[Highlight] fo
 
 /**
  * The segmented look, shared with the pill Tabs: a recessed track and one raised, neutral thumb
- * for the chosen segment (SEGMENT_TONES).
+ * for the chosen segment (SEGMENT_TONES). The track's edge is an inset ring rather than a border,
+ * so it adds nothing to the height: a 30 px segment in the track's padding makes the control as
+ * tall as an `md` button or field (h-10), and the compact size as tall as an `sm` one (h-8), so
+ * a segmented control lines up with the select, search field or button beside it. With a border
+ * it stood 2 px taller than both.
  */
 export const SEGMENT_TRACK: Record<SegmentedTone, string> = {
-  default: `flex gap-1 rounded-md border p-1 ${SEGMENT_TONES.default.track}`,
+  default: `flex gap-1 rounded-md p-1 ring-1 ring-inset ${SEGMENT_TONES.default.track}`,
   glass: `flex gap-1 rounded-md p-0.5 ${SEGMENT_TONES.glass.track}`,
 };
 
-/** `md` (default) for forms and toolbars; `sm` for a compact header row beside `sm` buttons (about 32 px tall). */
+/** `md` (default) for forms and toolbars, as tall as an `md` button; `sm` for a compact header row beside `sm` buttons, as tall as them (h-8). */
 export type SegmentedSize = 'sm' | 'md';
 
 const SM_TRACK = 'gap-0.5 p-0.5';

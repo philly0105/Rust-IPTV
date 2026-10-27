@@ -165,7 +165,6 @@
   "watchedFailed": "시청 상태를 업데이트할 수 없습니다",
   "markEpisodeWatched": "{{code}} 시청함으로 표시",
   "markEpisodeUnwatched": "{{code}} 시청 안 함으로 표시",
-  "episodeActions": "{{code}} 작업 더 보기",
   "markSeasonWatched": "시즌 시청함으로 표시",
   "markSeasonUnwatched": "시즌 시청 안 함으로 표시",
   "ratingFilterNote": "평점 {{rating}} 이상인 작품 표시 중",

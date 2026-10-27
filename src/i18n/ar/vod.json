@@ -189,7 +189,6 @@
   "watchedFailed": "تعذّر تحديث حالة المشاهدة",
   "markEpisodeWatched": "تعليم {{code}} كمُشاهَد",
   "markEpisodeUnwatched": "تعليم {{code}} كغير مُشاهَد",
-  "episodeActions": "إجراءات أخرى لـ {{code}}",
   "markSeasonWatched": "تعليم الموسم كمُشاهَد",
   "markSeasonUnwatched": "تعليم الموسم كغير مُشاهَد",
   "ratingFilterNote": "تُعرض العناوين ذات التقييم {{rating}} أو أعلى",

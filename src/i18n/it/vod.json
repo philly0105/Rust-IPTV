@@ -171,7 +171,6 @@
   "watchedFailed": "Impossibile aggiornare lo stato di visione",
   "markEpisodeWatched": "Segna {{code}} come visto",
   "markEpisodeUnwatched": "Segna {{code}} come non visto",
-  "episodeActions": "Altre azioni per {{code}}",
   "markSeasonWatched": "Segna stagione come vista",
   "markSeasonUnwatched": "Segna stagione come non vista",
   "ratingFilterNote": "Titoli con valutazione {{rating}} o più",

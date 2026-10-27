@@ -177,7 +177,6 @@
   "watchedFailed": "Nie udało się zmienić stanu obejrzenia",
   "markEpisodeWatched": "Oznacz {{code}} jako obejrzany",
   "markEpisodeUnwatched": "Oznacz {{code}} jako nieobejrzany",
-  "episodeActions": "Więcej akcji dla {{code}}",
   "markSeasonWatched": "Oznacz sezon jako obejrzany",
   "markSeasonUnwatched": "Oznacz sezon jako nieobejrzany",
   "ratingFilterNote": "Wyświetlane są tytuły z oceną {{rating}} lub wyższą",

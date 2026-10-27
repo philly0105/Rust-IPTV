@@ -316,7 +316,7 @@ describe('U4-fix3: watched state', () => {
     expect(isResumable({ ref: sref, positionSeconds: 1500, durationSeconds: 3000, watched: true })).toBe(false);
   });
 
-  it('checks watched episodes, marks one from its row menu, and marks a season', async () => {
+  it('checks watched episodes, marks one with one press on its row, and marks a season', async () => {
     rpcMock.handlers['userstate.setWatched'] = () => null;
     rpcMock.handlers['positions.forSeries'] = () => [
       { ref: sref, episodeId: 'e11', positionSeconds: 3000, durationSeconds: 3000, updatedAt: '2026-10-10T00:00:00Z', watched: true },
@@ -327,8 +327,10 @@ describe('U4-fix3: watched state', () => {
     // Play starts after the watched episode.
     expect(screen.getByRole('button', { name: 'Play S01E02' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'More actions for S01E02' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark S01E02 as watched' }));
+    // The watched episode's own button offers the way back; the next one's marks it, no menu in between.
+    expect(screen.getByRole('button', { name: 'Mark S01E01 as unwatched' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /More actions for/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark S01E02 as watched' }));
     // L1-vod-1: e12 is the last unwatched episode, so the series row is marked too.
     await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(2));
     expect(callsOf('userstate.setWatched').map((c) => c.args)).toEqual([

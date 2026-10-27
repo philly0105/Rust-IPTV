@@ -165,7 +165,6 @@
   "watchedFailed": "視聴状態を更新できませんでした",
   "markEpisodeWatched": "{{code}}を視聴済みにする",
   "markEpisodeUnwatched": "{{code}}を未視聴にする",
-  "episodeActions": "{{code}}のその他の操作",
   "markSeasonWatched": "シーズンを視聴済みにする",
   "markSeasonUnwatched": "シーズンを未視聴にする",
   "ratingFilterNote": "評価{{rating}}以上の作品を表示中",

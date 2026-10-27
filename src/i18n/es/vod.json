@@ -171,7 +171,6 @@
   "watchedFailed": "No se pudo actualizar el estado de visto",
   "markEpisodeWatched": "Marcar {{code}} como visto",
   "markEpisodeUnwatched": "Marcar {{code}} como no visto",
-  "episodeActions": "Más acciones para {{code}}",
   "markSeasonWatched": "Marcar temporada como vista",
   "markSeasonUnwatched": "Marcar temporada como no vista",
   "ratingFilterNote": "Se muestran títulos con calificación de {{rating}} o más",

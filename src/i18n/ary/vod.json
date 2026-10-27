@@ -189,7 +189,6 @@
   "watchedFailed": "ما قدرناش نحدّثو حالة المشاهدة",
   "markEpisodeWatched": "علّم {{code}} بلي تشاف",
   "markEpisodeUnwatched": "علّم {{code}} بلي ما تشافش",
-  "episodeActions": "إجراءات أخرى لـ {{code}}",
   "markSeasonWatched": "علّم الموسم بلي تشاف",
   "markSeasonUnwatched": "علّم الموسم بلي ما تشافش",
   "ratingFilterNote": "كنورّيو العناوين اللي تقييمها {{rating}} ولا كثر",

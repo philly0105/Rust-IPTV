@@ -165,7 +165,6 @@
   "watchedFailed": "İzlenme durumu güncellenemedi",
   "markEpisodeWatched": "{{code}} izlendi olarak işaretle",
   "markEpisodeUnwatched": "{{code}} izlenmedi olarak işaretle",
-  "episodeActions": "{{code}} için diğer işlemler",
   "markSeasonWatched": "Sezonu izlendi olarak işaretle",
   "markSeasonUnwatched": "Sezonu izlenmedi olarak işaretle",
   "ratingFilterNote": "Puanı {{rating}} ve üzeri olan içerikler gösteriliyor",

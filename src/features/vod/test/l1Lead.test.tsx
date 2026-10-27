@@ -135,8 +135,7 @@ describe('SeriesDetailPage watched marks (L1-vod-1, L1-vod-14)', () => {
   it('unmarking an episode of a watched series clears the series mark', async () => {
     rpcMock.handlers['positions.forSeries'] = () => [pos(undefined, true), pos('e11', true), pos('e12', true), pos('e21', true)];
     renderAt('/s/src1/series/s1', seriesRoute);
-    fireEvent.click(await screen.findByRole('button', { name: 'More actions for S01E01' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Mark S01E01 as unwatched' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Mark S01E01 as unwatched' }));
     await waitFor(() => expect(callsOf('userstate.setWatched')).toHaveLength(2));
     expect(callsOf('userstate.setWatched')).toEqual([
       { ref: sref, episodeId: 'e11', watched: false },

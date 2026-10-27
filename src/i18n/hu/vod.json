@@ -165,7 +165,6 @@
   "watchedFailed": "Nem sikerült frissíteni a megtekintési állapotot",
   "markEpisodeWatched": "{{code}} megjelölése megtekintettként",
   "markEpisodeUnwatched": "{{code}} megjelölése nem megtekintettként",
-  "episodeActions": "További műveletek – {{code}}",
   "markSeasonWatched": "Évad megjelölése megtekintettként",
   "markSeasonUnwatched": "Évad megjelölése nem megtekintettként",
   "ratingFilterNote": "{{rating}} vagy magasabb értékelésű tartalmak láthatók",

@@ -106,7 +106,7 @@ When the grid comes back empty, the reason is checked in this order: the rating 
 
 ### Series detail
 
-The hero actions include a series-level `WatchedButton` (labels `markSeriesWatched` / `markSeriesUnwatched`). It writes the item-level row, and the page reads it back from `positions.forSeries`. The season button is separate and still marks episodes. Next to it, Download season queues every episode of the selected season that has no download yet, or only a failed, cancelled or missing one (downloads.md).
+The hero actions include a series-level `WatchedButton` (labels `markSeriesWatched` / `markSeriesUnwatched`). It writes the item-level row, and the page reads it back from `positions.forSeries`. The season button is separate and still marks episodes. Each episode row has its own watched button beside Download (one press, named for what it does, "Mark S01E02 as watched" or "as unwatched", with the tick green once watched), in place of a More menu that held only that action. Next to it, Download season queues every episode of the selected season that has no download yet, or only a failed, cancelled or missing one (downloads.md).
 
 ### Preferred source
 

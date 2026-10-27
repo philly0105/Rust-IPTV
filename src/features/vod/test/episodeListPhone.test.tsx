@@ -74,7 +74,7 @@ describe('episode rows on a phone (L3-visual-7)', () => {
     expect(thumb.className.split(' ')).not.toContain('w-40');
   });
 
-  it('wraps the menu and download onto their own line below sm, at the end, and keeps both reachable', async () => {
+  it('wraps the watched and download buttons onto their own line below sm, at the end, and keeps both reachable', async () => {
     renderList();
     const row = (await screen.findAllByTestId('episode-row'))[0]!;
     expect(row.className.split(' ')).toEqual(expect.arrayContaining(['flex-wrap', 'sm:flex-nowrap']));
@@ -82,7 +82,7 @@ describe('episode rows on a phone (L3-visual-7)', () => {
     expect(play.className.split(' ')).toContain('max-sm:basis-full');
     const actions = within(row).getByTestId('episode-actions');
     expect(actions.className.split(' ')).toContain('max-sm:ms-auto');
-    expect(within(actions).getByRole('button', { name: /actions/i })).toBeTruthy();
+    expect(within(actions).getByRole('button', { name: /^Mark S\d+E\d+ as watched$/ })).toBeTruthy();
     expect(within(actions).getAllByRole('button').length).toBe(2);
   });
 

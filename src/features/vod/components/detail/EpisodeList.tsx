@@ -1,4 +1,4 @@
-import { CircleCheck, CircleDashed, HardDriveDownload, Play } from 'lucide-react';
+import { CircleCheck, HardDriveDownload, Play } from 'lucide-react';
 import { useRef, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -9,7 +9,7 @@ import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { episodeCode, isResumable, isWatched, progressFraction } from '../../lib/format';
 import { handleGridKeyDown } from '../../lib/gridNav';
 import { useMediaQuery } from '@/shell/useMediaQuery';
-import { MetaLine, Menu, Poster, PosterCellWidthContext, ProgressBar, Tabs, WatchedChip, cn, useListVirtualizer, usePosterWidthBox, useScaledPx } from '@/ui';
+import { IconButton, MetaLine, Poster, PosterCellWidthContext, ProgressBar, Tabs, WatchedChip, cn, useListVirtualizer, usePosterWidthBox, useScaledPx } from '@/ui';
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
@@ -224,17 +224,16 @@ export function EpisodeList({
               </button>
               {hasActions && (
                 <div className="flex shrink-0 items-center gap-1 max-sm:ms-auto sm:gap-2" data-testid="episode-actions">
+                  {/* One press marks the episode, as the hero's round button does for the title: a menu
+                      with this one item cost a second press for the only thing in it. The tick is green
+                      while watched, and the name says what a press does. */}
                   {onToggleWatched && (
-                    <Menu
-                      label={t('episodeActions', { code })}
-                      items={[
-                        {
-                          id: 'watched',
-                          label: t(watched ? 'markEpisodeUnwatched' : 'markEpisodeWatched', { code }),
-                          icon: watched ? <CircleDashed aria-hidden size={16} /> : <CircleCheck aria-hidden size={16} />,
-                          onSelect: () => onToggleWatched(ep),
-                        },
-                      ]}
+                    <IconButton
+                      size="sm"
+                      label={t(watched ? 'markEpisodeUnwatched' : 'markEpisodeWatched', { code })}
+                      icon={<CircleCheck aria-hidden size={16} className={cn(watched && 'text-success')} />}
+                      onClick={() => onToggleWatched(ep)}
+                      data-testid="episode-watched-toggle"
                     />
                   )}
                   {canDownload && (

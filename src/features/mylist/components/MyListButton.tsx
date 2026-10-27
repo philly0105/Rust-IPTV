@@ -35,7 +35,8 @@ export interface MyListButtonProps {
   snapshot: ItemSnapshot;
   /**
    * `button`: the labelled detail-page button. `icon`: the frosted poster corner. `round`: the
-   * detail hero's round icon button (VL-hero-actions), with the state as its tooltip.
+   * detail hero's icon button (VL-hero-actions), with the state as its tooltip. It keeps the kit's
+   * rounded square, as the hero's other icon buttons and Play beside them do.
    */
   variant?: 'icon' | 'button' | 'round';
   /** Height of the `button` variant, matching the detail page's other actions. Default `lg`. */
@@ -166,7 +167,7 @@ function MyListButtonBody({
         data-state={status}
         data-in-list={inList || undefined}
         // A saved title reads as pressed (the neutral selected fill), not amber: saved is a state, not an action.
-        className={cn('rounded-full', inList && 'bg-selected text-fg', (pending || loading) && 'cursor-progress', className)}
+        className={cn(inList && 'bg-selected text-fg', (pending || loading) && 'cursor-progress', className)}
       />
     );
   }

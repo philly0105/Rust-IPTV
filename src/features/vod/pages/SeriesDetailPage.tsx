@@ -486,7 +486,6 @@ export function SeriesDetailPage() {
                 <IconButton
                   size="lg"
                   variant="secondary"
-                  className="rounded-full"
                   label={t('previousEpisode')}
                   tooltip={t('previousEpisodeCode', { code: episodeCode(previous.season, previous.episode) })}
                   shortcut="shift+p"

@@ -252,7 +252,8 @@ describe('the movie page', () => {
     expect(buttons.slice(1).map((b) => b.getAttribute('aria-label'))).toEqual(['Favorite', 'Mark as watched', 'Download']);
     for (const b of buttons) {
       expect(b.textContent?.trim()).toBe('');
-      expect(b.className).toContain('rounded-full');
+      expect(b.className).toContain('rounded-md');
+      expect(b.className).not.toContain('rounded-full');
     }
     // The title is named once on the page: the stage's bar; the header names the section.
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual(['Dune: Part Two']);

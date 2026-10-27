@@ -213,8 +213,10 @@ describe('the header search slot', () => {
     const slot = field.parentElement!.parentElement!;
     expect(slot.textContent).toContain('Ctrl');
     expect(screen.queryByTestId('open-palette')).toBeNull();
-    // The palette button comes before the field, so the slot keeps its place.
+    // The palette button comes before the field, so the slot keeps its place. It stands in for
+    // the "Search everything" box (the rail has no Search row), so it carries that name.
     const palette = screen.getByTestId('header-palette');
+    expect(palette).toBe(screen.getByRole('button', { name: 'Search everything' }));
     expect(palette.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(palette);
     expect(useShellStore.getState().paletteOpen).toBe(true);

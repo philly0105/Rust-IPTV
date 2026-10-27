@@ -200,6 +200,13 @@ async function refreshSource(sourceId: string, failedTitle: string): Promise<voi
   await replayFromRef(from);
 }
 
+/** The first `max` actions; with `keepRetry` and room for two, Retry takes the last place if it was cut. */
+export function firstActions(ids: ErrorActionId[], max: number, keepRetry: boolean): ErrorActionId[] {
+  const head = ids.slice(0, max);
+  if (!keepRetry || max < 2 || head.includes('retry') || !ids.includes('retry')) return head;
+  return [...head.slice(0, max - 1), 'retry'];
+}
+
 export interface ErrorActionsProps {
   view: StreamErrorView;
   source: PlayerSource | undefined;
@@ -212,10 +219,10 @@ export interface ErrorActionsProps {
   /** At most this many buttons (a short player, the mpv strip); the primary always stays. */
   max?: number;
   /**
-   * The control bar's play button is Retry already (it is over a failed stream): a short player
-   * leaves Retry out when something better leads, to keep its room for that.
+   * Retry stays among the `max` buttons, in the last place when better steps lead: this panel is
+   * the only place it is offered (the overlay's bar leaves it to the panel).
    */
-  barRetry?: boolean;
+  keepRetry?: boolean;
   /** Raw MPEG-TS the browser cannot play (no MSE). */
   rawTs?: boolean;
   /** The bar under this has Playback options (default): Other sources opens it. */
@@ -235,7 +242,7 @@ export function ErrorActions({
   onCopyLink,
   size,
   max,
-  barRetry = false,
+  keepRetry = false,
   rawTs = false,
   menu = true,
   primaryRef,
@@ -248,8 +255,7 @@ export function ErrorActions({
     // A launcher the caller does not wire up is not offered.
     external: (ctx.external === 'app' && !onOpenExternal) || (ctx.external === 'link' && !onCopyLink) ? 'none' : ctx.external,
   });
-  if (barRetry && ids[0] !== 'retry') ids = ids.filter((id) => id !== 'retry');
-  const shown = max === undefined ? ids : ids.slice(0, max);
+  const shown = max === undefined ? ids : firstActions(ids, max, keepRetry);
   return (
     <div data-testid="error-actions" className={className}>
       {shown.map((id, i) =>

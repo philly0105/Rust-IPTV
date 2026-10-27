@@ -1,26 +1,26 @@
-import { PanelLeftOpen, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 import { itemKey, type Channel } from '@/api/types';
+import { monogramFill, monogramText } from '@/features/live/lib/monogram';
 import { useImageChain } from '@/ui/image';
 import { gateImage } from '@/ui/imageGate';
 import { useListVirtualizer } from '@/ui/virtualizer';
 import { Tooltip } from '@/ui/Tooltip';
 
 import { cn } from '../cn';
-import { focusIsLost, pressKeepsFocus, safeImageUrl } from '../format';
+import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
 import { playChannel, usePlayerStore } from '../store';
-import { useStreamInfoStore } from '../streamInfo';
 import { fetchChannelInfo } from '../zapBanner';
 import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
 import { locateChannel } from './channelPanelLocate';
 
 /**
  * A row's channel logo through the image cache (C3), then its own URL once and the cache again,
- * then a blank tile.
+ * then the channel's coloured monogram, the tile the Live list, the guide and the zap banner draw.
  * Fetched through the shared image gate (ui/imageGate.ts), as ChannelLogo's: at most `maxActive()`
  * at once (4 in server mode, 6 on desktop), the rows in view first, and a row that leaves before
  * its turn asks nothing. `defer` (the list is scrolling) is RowLogo's own latch on top of the gate:
@@ -28,7 +28,7 @@ import { locateChannel } from './channelPanelLocate';
  * rest before it reaches the gate, and one already showing stays, since its <img> is kept while the
  * address is the same.
  */
-function RowLogo({ url, sourceId, defer = false }: { url?: string | null; sourceId: string; defer?: boolean }) {
+function RowLogo({ url, name, sourceId, defer = false }: { url?: string | null; name: string; sourceId: string; defer?: boolean }) {
   const image = useImageChain([safeImageUrl(url ?? undefined)], sourceId, 32);
   const src = image.url;
   // The address last allowed to load: a reused row that shows another channel while `defer` holds waits.
@@ -37,6 +37,18 @@ function RowLogo({ url, sourceId, defer = false }: { url?: string | null; source
   const waiting = defer && allowed !== src;
   // One <img> per address (keyed below): React renders no `src`, the gate sets it.
   const imgRef = useCallback((el: HTMLImageElement | null) => (el && src ? gateImage(el, src) : undefined), [src]);
+  if (!src && name.trim()) {
+    return (
+      <span
+        aria-hidden
+        data-monogram=""
+        className="flex size-8 shrink-0 items-center justify-center rounded-sm font-display text-xs leading-none font-semibold tracking-tight text-white ring-1 ring-white/10"
+        style={{ background: monogramFill(name) }}
+      >
+        {monogramText(name)}
+      </span>
+    );
+  }
   return (
     <span aria-hidden className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-white/5">
       {src && !waiting && (
@@ -163,15 +175,13 @@ function useListPages(listId: string | undefined, search: string, enabled: boole
 
 /**
  * Slide-in channel list inside the fullscreen player. Opens with C, a dwell on the left
- * edge, a tap there, or the Channel list button that shows with the player's controls
- * (`chromeVisible`; touch screens have no edge to dwell on); closes on pointer leave (with
- * grace), Escape, C, or a click on the video.
+ * edge, a tap there, or the control bar's Channel list button (`Controls` `channelPanel`; touch
+ * screens have no edge to dwell on); closes on pointer leave (with grace), Escape, C, or a click
+ * on the video.
  */
-export function FullscreenChannelPanel({ available, chromeVisible = false }: { available: boolean; chromeVisible?: boolean }) {
+export function FullscreenChannelPanel({ available }: { available: boolean }) {
   const { t } = useTranslation('player');
   const open = useMediaStore((s) => s.channelPanelOpen);
-  // The stream info panel takes the same edge: the button gives it the room.
-  const statsOpen = useStreamInfoStore((s) => s.open);
   const zap = usePlayerStore((s) => s.zapContext);
   const current = usePlayerStore((s) => s.source?.ref);
   const sourceId = zap?.sourceId ?? current?.sourceId;
@@ -446,30 +456,6 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
           }}
         />
       )}
-      {!open && !statsOpen && (
-        <Tooltip content={t('openChannelPanel')} shortcut="c" tone="glass" describe={false}>
-          <button
-            type="button"
-            aria-label={t('openChannelPanel')}
-            aria-keyshortcuts="C"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(true);
-            }}
-            onDoubleClick={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseDown={pressKeepsFocus}
-            // Fades with the controls; hidden, it lets the pointer through like the rest of the chrome.
-            className={cn(
-              'player-glass player-glass-edge glass-blur absolute start-4 top-1/2 z-30 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border text-on-glass hover:bg-white/12 pointer-coarse:size-11',
-              'motion-safe:transition-opacity motion-safe:duration-200',
-              !chromeVisible && 'pointer-events-none opacity-0',
-            )}
-          >
-            <PanelLeftOpen className="size-5 rtl:-scale-x-100" aria-hidden />
-          </button>
-        </Tooltip>
-      )}
       {open && (
         <div
           aria-hidden
@@ -592,7 +578,7 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
                         <span className="w-10 shrink-0 text-end font-numeric text-body-sm text-on-glass-muted tabular-nums">
                           {c.number ?? ''}
                         </span>
-                        <RowLogo url={c.logoUrl} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />
+                        <RowLogo url={c.logoUrl} name={c.name} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />
                         {/* guide: name over the programme on now. */}
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span dir="auto" className={cn('truncate text-body-sm text-match-parent', isCurrent(c) && 'font-medium')}>{c.name}</span>

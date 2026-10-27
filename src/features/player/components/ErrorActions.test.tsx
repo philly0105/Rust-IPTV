@@ -28,7 +28,7 @@ const { rpc } = await import('@/api/transport');
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');
 const { resetMedia } = await import('../media');
 const { useAlternatesStore } = await import('../failover');
-const { errorActionIds } = await import('./ErrorActions');
+const { errorActionIds, firstActions } = await import('./ErrorActions');
 const { InlinePlayer } = await import('./InlinePlayer');
 const { Controls } = await import('./Controls');
 type Ctx = Parameters<typeof errorActionIds>[0];
@@ -100,6 +100,16 @@ describe('errorActionIds', () => {
     expect(errorActionIds({ ...base, cls: 'unsupported', external: 'app' })).toEqual(['openMpv', 'openVlc', 'retry']);
     expect(errorActionIds({ ...base, cls: 'unsupported', external: 'link', live: true, alternates: true })).toEqual(['otherSources', 'copyLink', 'retry']);
     expect(errorActionIds({ ...base, cls: 'media', external: 'link' })).toEqual(['retry', 'copyLink']);
+  });
+
+  it('a short panel keeps Retry in its last place when better steps lead (the bar has none over an error)', () => {
+    const ids = errorActionIds({ ...base, cls: 'notFound', live: true, alternates: true, zappable: true });
+    expect(firstActions(ids, 2, true)).toEqual(['otherSources', 'retry']);
+    expect(firstActions(ids, 2, false)).toEqual(['otherSources', 'nextChannel']);
+    // One button: the primary stays alone.
+    expect(firstActions(ids, 1, true)).toEqual(['otherSources']);
+    // Nothing to keep where Retry cannot help.
+    expect(firstActions(['playAsHls', 'playbackSettings'], 2, true)).toEqual(['playAsHls', 'playbackSettings']);
   });
 
   it('parental controls, offline, raw TS on Xtream', () => {
@@ -339,12 +349,12 @@ describe('the error overlay', () => {
     expect(copied).not.toContain('secret');
   });
 
-  it('a short player leaves Retry to the bar when something better leads', () => {
+  it('a short player keeps Retry after the step that leads: the bar leaves it to the panel', () => {
     const source: PlayerSource = { url: 'http://h/live/7.mp4', kind: 'direct', title: 'News', isLive: true, isRadio: false, ref: live };
     render(<InlinePlayer short />);
     fail(source, 'HTTP 404');
     const actions = screen.getByTestId('error-actions');
-    expect(Array.from(actions.querySelectorAll('button')).map((b) => b.dataset['action'])).toEqual(['nextChannel']);
+    expect(Array.from(actions.querySelectorAll('button')).map((b) => b.dataset['action'])).toEqual(['nextChannel', 'retry']);
   });
 });
 

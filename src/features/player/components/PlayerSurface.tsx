@@ -1092,10 +1092,17 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
             onPointerEnter={() => setOnBar(true)}
             onPointerLeave={() => setOnBar(false)}
           >
-            <Controls variant="overlay" visible={chromeVisible} compact={compact} short={shortPlayer} onMenuOpenChange={setMenuOpen} />
+            <Controls
+              variant="overlay"
+              visible={chromeVisible}
+              compact={compact}
+              short={shortPlayer}
+              onMenuOpenChange={setMenuOpen}
+              channelPanel={channelPanelAvailable && isFullscreen && !compact}
+            />
           </div>
 
-          <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} chromeVisible={chromeVisible} />
+          <FullscreenChannelPanel available={channelPanelAvailable && isFullscreen && !compact} />
           {menuAt && <VideoContextMenu at={menuAt} onClose={closeMenu} />}
         </>
       )}

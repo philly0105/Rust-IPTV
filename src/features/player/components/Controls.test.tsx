@@ -419,11 +419,31 @@ describe('Controls live status', () => {
     expect(screen.queryByRole('button', { name: 'Jump to live' })).toBeNull();
   });
 
-  it('a failed movie offers Retry in the play spot too', () => {
+  it('a failed movie offers Retry in the play spot of the dock bar too', () => {
     act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 500' }));
-    render(<Controls variant="overlay" visible />);
+    render(<Controls variant="dock" visible />);
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(commands.retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('over the error panel, the overlay bar keeps only what still works: options and fullscreen', () => {
+    act(() => {
+      usePlayerStore.setState({ source: live, status: 'error', error: 'HTTP 404', durationSeconds: undefined });
+      useMediaStore.setState({ canPip: true });
+    });
+    render(<Controls variant="overlay" visible />);
+    // The panel has Retry; the bar has no second one, no volume for nothing, no "No signal" under "did not play".
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /mute/i })).toBeNull();
+    expect(screen.queryByTestId('live-badge')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Playback options' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+    // Trying again brings the whole bar back.
+    act(() => usePlayerStore.setState({ status: 'loading', error: undefined }));
+    expect(screen.getByTestId('live-badge')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Picture in picture' })).toBeTruthy();
   });
 });
 
@@ -471,6 +491,39 @@ describe('Controls menu focus', () => {
   });
 });
 
+describe('Controls for fullscreen live TV', () => {
+  const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+
+  it('puts channel up, channel down and the channel list on the bar, with their keys', () => {
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: true, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible channelPanel />);
+    expect(screen.getByRole('button', { name: 'Previous channel' }).getAttribute('aria-keyshortcuts')).toBe('PageUp');
+    expect(screen.getByRole('button', { name: 'Next channel' }).getAttribute('aria-keyshortcuts')).toBe('PageDown');
+    const list = screen.getByRole('button', { name: 'Open channel list' });
+    expect(list.getAttribute('aria-keyshortcuts')).toBe('C');
+    fireEvent.click(list);
+    expect(useMediaStore.getState().channelPanelOpen).toBe(true);
+  });
+
+  it('keeps them over a failed stream, where zapping away is the way out', () => {
+    act(() => usePlayerStore.setState({ source: channel, status: 'error', error: 'HTTP 404', isFullscreen: true, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible channelPanel />);
+    expect(screen.getByRole('button', { name: 'Next channel' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open channel list' })).toBeTruthy();
+  });
+
+  it('not outside fullscreen, nor for a movie: the page has its list beside the stage', () => {
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: false, durationSeconds: undefined }));
+    const { unmount } = render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open channel list' })).toBeNull();
+    unmount();
+    act(() => usePlayerStore.setState({ source: { url: 'http://v/movie.mp4', kind: 'direct', title: 'Movie', isLive: false, isRadio: false }, isFullscreen: true }));
+    render(<Controls variant="overlay" visible />);
+    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
+  });
+});
+
 describe('Controls in a narrow player', () => {
   let restore: () => void = () => undefined;
   beforeEach(() => {
@@ -496,6 +549,59 @@ describe('Controls in a narrow player', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Picture in picture' }));
     expect(commands.togglePip).toHaveBeenCalledTimes(1);
     expect(menu()).toBeNull();
+  });
+
+  it('a narrow fullscreen bar keeps the channel list and moves channel up and down into the menu when they do not fit', () => {
+    const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: true, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible channelPanel />);
+    expect(screen.getByRole('button', { name: 'Open channel list' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Next channel' })).toBeNull();
+    openMenu();
+    const names = Array.from(screen.getByTestId('moved-controls').querySelectorAll('[role="menuitem"]')).map((b) => b.getAttribute('aria-label'));
+    expect(names.slice(0, 2)).toEqual(['Previous channel', 'Next channel']);
+  });
+
+  it("a narrow fullscreen bar's channel list steps aside while the volume slider is out, from right of the volume", () => {
+    const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: true, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible channelPanel />);
+    const list = screen.getByRole('button', { name: 'Open channel list' });
+    // The spares' yield class: hidden while the row's volume is hovered or holds focus.
+    expect(list.className).toContain('[[data-ctl-row]:has([data-vol]:hover)_&]:hidden');
+    expect(list.className).toContain('[[data-ctl-row]:has([data-vol]:focus-within)_&]:hidden');
+    // After the volume in the row, so hiding it does not move the volume button.
+    const mute = screen.getByRole('button', { name: 'Mute' });
+    expect(mute.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('over an error a narrow fullscreen bar keeps channel up and down beside the channel list, at the start', async () => {
+    restore();
+    // A row with 100 px to spare: room for the channel pair.
+    const spares = (row: Element): number => row.querySelectorAll('[data-ctl="channel-up"], [data-ctl="channel-down"]').length;
+    const spies = [
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        if (this.hasAttribute('data-player-controls')) return 358;
+        if (this.hasAttribute('data-row-free')) return Math.max(0, 100 - 44 * spares(this.parentElement!));
+        return 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute('data-ctl-row') ? 330 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute('data-ctl-row') ? 330 + Math.max(0, 44 * spares(this) - 100) : 0;
+      }),
+    ];
+    restore = () => spies.forEach((s) => s.mockRestore());
+    const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
+    const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+    act(() => usePlayerStore.setState({ source: channel, status: 'error', error: 'HTTP 404', isFullscreen: true, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible channelPanel />);
+    await frame();
+    await frame();
+    const row = document.querySelector('[data-ctl-row]')!;
+    const order = Array.from(row.children, (el) => el.getAttribute('data-ctl') ?? (el.hasAttribute('data-row-free') ? 'free' : el.querySelector('[data-ctl]')?.getAttribute('data-ctl')));
+    expect(order.slice(0, 4)).toEqual(['channels', 'channel-up', 'channel-down', 'free']);
   });
 
   it('keeps the spare buttons the row has room for, most useful first', () => {

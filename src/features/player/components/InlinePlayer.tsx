@@ -686,10 +686,19 @@ function ErrorOverlay({
     >
       <div className={cn('m-auto flex w-full max-w-md flex-col items-center text-center', tight ? 'gap-2' : 'gap-4')}>
         {tight ? (
-          <h2 className="flex max-w-full items-center gap-2 text-body-sm font-medium" title={message ? `${view.title}: ${message}` : undefined}>
-            <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
-            <span className="truncate">{view.title}</span>
-          </h2>
+          <>
+            {/* A short player hides its title bar over an error: name what failed here, which
+                matters most after an automatic switch to another copy. */}
+            {source?.title && (
+              <p dir="auto" data-testid="error-item" className="-mb-1 max-w-full truncate text-caption text-on-glass-muted" title={source.title}>
+                {source.title}
+              </p>
+            )}
+            <h2 className="flex max-w-full items-center gap-2 text-body-sm font-medium" title={message ? `${view.title}: ${message}` : undefined}>
+              <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
+              <span className="truncate">{view.title}</span>
+            </h2>
+          </>
         ) : (
           <>
             <span aria-hidden className="flex size-14 items-center justify-center rounded-full bg-white/8 ring-1 ring-white/15">
@@ -708,7 +717,7 @@ function ErrorOverlay({
           rawTs={isRawTs}
           size={tight ? 'xs' : 'md'}
           max={tight ? 2 : 4}
-          barRetry={tight}
+          keepRetry
           primaryRef={primaryRef}
           className={cn('flex flex-wrap justify-center', tight ? 'gap-1.5' : 'mt-1 gap-2')}
         />

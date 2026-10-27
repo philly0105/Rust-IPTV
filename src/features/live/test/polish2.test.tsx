@@ -398,12 +398,26 @@ describe('groups sidebar', () => {
   });
 });
 
+/** A window `width` px wide: min-width queries up to it match. */
+function windowWidth(width: number) {
+  return vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) =>
+      ({
+        matches: Number(/min-width:\s*(\d+)/.exec(query)?.[1] ?? Infinity) <= width,
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  );
+}
+
 describe('groups drawer below 1024 px', () => {
   it('moves focus in on open, traps Tab, and gives focus back to the toggle on Escape', async () => {
-    const narrow = vi.spyOn(window, 'matchMedia').mockImplementation(
-      (query: string) =>
-        ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as unknown as MediaQueryList,
-    );
+    const narrow = windowWidth(900);
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
     const toggle = screen.getByRole('button', { name: 'Show groups' });
@@ -419,6 +433,33 @@ describe('groups drawer below 1024 px', () => {
     await waitFor(() => expect(screen.queryByTestId('groups-drawer')).toBeNull());
     expect(document.activeElement).toBe(toggle);
     narrow.mockRestore();
+  });
+
+  it('names the group on the groups button below 768 px, where the header has no room for it', async () => {
+    const phone = windowWidth(390);
+    rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: 200 }), cat(2, { name: 'US| SPORTS', itemCount: 200 })];
+    renderIn('/s/src1/live/g2', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
+    await screen.findByText('Channel 0');
+    const toggle = await screen.findByRole('button', { name: /^Groups:\s*US\| SPORTS$/ });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    // The button names the group, so the search field beside it no longer repeats it.
+    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search channels');
+    fireEvent.click(toggle);
+    const drawer = await screen.findByTestId('groups-drawer');
+    expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    phone.mockRestore();
+  });
+
+  it('keeps the groups button an icon from 768 px, where the header names the group', async () => {
+    const tablet = windowWidth(900);
+    rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: 200 }), cat(2, { name: 'US| SPORTS', itemCount: 200 })];
+    renderIn('/s/src1/live/g2', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
+    await screen.findByText('Channel 0');
+    expect(screen.getByRole('button', { name: 'Show groups' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Groups:/ })).toBeNull();
+    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in US| SPORTS');
+    tablet.mockRestore();
   });
 });
 

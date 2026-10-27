@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Heart, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Tv } from 'lucide-react';
+import { CalendarClock, ChevronDown, Heart, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Tv } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -391,6 +391,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const pageRef = useRef<HTMLDivElement>(null);
   const roomForGroups = useFitsWidth(pageRef, GROUPS_COLUMN_MIN_REM);
   const wide = useMediaQuery('(min-width: 1024px)') && roomForGroups;
+  // Below md the header has no room for its subtitle, so the group is named on the toolbar's
+  // groups button instead (on a phone it showed nowhere but the search field's placeholder).
+  const groupOnToolbar = !useMediaQuery('(min-width: 768px)');
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_KEY) === '1';
@@ -923,13 +926,34 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         onFocus={onListFocus}
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
-          <IconButton
-            size="sm"
-            label={sidebarVisible || drawerOpen ? t('hideGroups') : t('showGroupsPanel')}
-            aria-expanded={sidebarVisible || drawerOpen}
-            icon={<ListTree className="size-4" />}
-            onClick={toggleSidebar}
-          />
+          {groupOnToolbar ? (
+            // The group being browsed, as the button that changes it: one press opens the groups.
+            <Button
+              variant="ghost"
+              size="sm"
+              className="max-w-[45%] min-w-0 shrink gap-1.5 px-2"
+              icon={<ListTree className="size-4" />}
+              aria-expanded={drawerOpen}
+              aria-haspopup="dialog"
+              onClick={toggleSidebar}
+              data-testid="live-groups-toggle"
+            >
+              <span className="sr-only">{`${t('groups')}: `}</span>
+              <span dir="auto" className="truncate">
+                {subtitle}
+              </span>
+              <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
+            </Button>
+          ) : (
+            <IconButton
+              size="sm"
+              label={sidebarVisible || drawerOpen ? t('hideGroups') : t('showGroupsPanel')}
+              aria-expanded={sidebarVisible || drawerOpen}
+              icon={<ListTree className="size-4" />}
+              onClick={toggleSidebar}
+              data-testid="live-groups-toggle"
+            />
+          )}
           <SearchInput
             size="sm"
             className="min-w-0 flex-1"
@@ -955,7 +979,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               }
             }}
             ref={searchRef}
-            placeholder={category ? t('searchInGroup', { group: category.name }) : t(isRadio ? 'searchStations' : 'searchChannels')}
+            // The groups button beside it names the group on a narrow page.
+            placeholder={category && !groupOnToolbar ? t('searchInGroup', { group: category.name }) : t(isRadio ? 'searchStations' : 'searchChannels')}
             label={t(isRadio ? 'searchStations' : 'searchChannels')}
           />
           {/* Radio has no picture: its stations are never filtered by quality. */}

@@ -49,6 +49,8 @@ function routes() {
         { path: 'dashboard', element: <Page>home page</Page> },
         { path: 'favorites', element: <Page>favorites page</Page> },
         { path: 'my-list', element: <Page>my list page</Page> },
+        { path: 'downloads', element: <Page>downloads page</Page> },
+        { path: 'stats', element: <Page>stats page</Page> },
         { path: 'sources', element: <Page>sources page</Page> },
         { path: 'search', element: <Page>search page</Page> },
         { path: 'epg', element: <Page>guide page</Page> },
@@ -106,6 +108,9 @@ describe('rail (SH-rail-ia)', () => {
       'Sports',
       'Multi-view',
     ]);
+    // On Favorites the less used pages stay folded under More, which opens them in place.
+    expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual(['My List', 'Favorites', 'Lists', 'Recently watched']);
+    fireEvent.click(within(group('Library')).getByRole('button', { name: 'More' }));
     expect(within(group('Library')).getAllByRole('link').map((l) => l.textContent)).toEqual([
       'My List',
       'Favorites',
@@ -168,58 +173,60 @@ describe('rail (SH-rail-ia)', () => {
 });
 
 describe('rail at laptop heights (stage 2)', () => {
-  it('Library folds away from its label, stays folded next launch, and opens again for one of its pages', async () => {
+  it("Library's less used pages fold under More, which remembers a press and opens for one of its pages", async () => {
     renderRoutes(routes(), '/dashboard');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
     const library = within(nav).getByRole('group', { name: 'Library' });
-    const toggle = within(library).getByRole('button', { name: 'Library' });
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBeTruthy();
-    // The label truncates inside the button; the heading around it does not clip, which cut the
-    // button's focus ring off on three sides.
-    expect(toggle.closest('h2')!.className).not.toMatch(/\btruncate\b|overflow-(hidden|clip)/);
-    expect(toggle.querySelector('span')!.className).toContain('truncate');
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(within(library).queryByRole('link', { name: 'My List' })).toBeNull();
-    // The group keeps its name; the Watch links and the sources are untouched.
-    expect(within(nav).getByRole('link', { name: 'TV guide' })).toBeTruthy();
+    // The label is a plain heading again: the group no longer folds as a whole.
+    expect(within(library).queryByRole('button', { name: 'Library' })).toBeNull();
+    const more = within(library).getByRole('button', { name: 'More' });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(within(library).getByRole('link', { name: 'My List' })).toBeTruthy();
+    expect(within(library).queryByRole('link', { name: 'Downloads' })).toBeNull();
+    fireEvent.click(more);
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    const list = document.getElementById(more.getAttribute('aria-controls')!)!;
+    expect(within(list).getAllByRole('link').map((l) => l.textContent)).toEqual(['Downloads', 'My videos', 'Scheduled', 'Watch stats']);
     cleanup();
 
+    // The press is kept for the next launch.
     renderRoutes(routes(), '/dashboard');
     const again = await screen.findByRole('navigation', { name: 'Main navigation' });
-    expect(within(again).getByRole('button', { name: 'Library' }).getAttribute('aria-expanded')).toBe('false');
+    const moreAgain = within(again).getByRole('button', { name: 'More' });
+    expect(moreAgain.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(moreAgain);
     cleanup();
 
-    // A Library page opens it (from a card or the palette), so the current page is never a hidden link.
+    // One of its pages opens it (from a card or the palette), so the current page is never a hidden link.
     const { router } = renderRoutes(routes(), '/dashboard');
     const nav2 = await screen.findByRole('navigation', { name: 'Main navigation' });
-    const toggle2 = within(nav2).getByRole('button', { name: 'Library' });
-    expect(toggle2.getAttribute('aria-expanded')).toBe('false');
-    await act(() => router.navigate('/favorites'));
-    expect(toggle2.getAttribute('aria-expanded')).toBe('true');
-    expect(within(nav2).getByRole('link', { name: 'Favorites' }).getAttribute('aria-current')).toBe('page');
-    // Leaving keeps it open: only a press folds it.
+    const more2 = within(nav2).getByRole('button', { name: 'More' });
+    expect(more2.getAttribute('aria-expanded')).toBe('false');
+    await act(() => router.navigate('/downloads'));
+    expect(more2.getAttribute('aria-expanded')).toBe('true');
+    expect(within(nav2).getByRole('link', { name: 'Downloads' }).getAttribute('aria-current')).toBe('page');
+    // Leaving keeps it open: only a press folds it, and the reopening is not saved.
     await act(() => router.navigate('/dashboard'));
-    expect(toggle2.getAttribute('aria-expanded')).toBe('true');
+    expect(more2.getAttribute('aria-expanded')).toBe('true');
+    expect(localStorage.getItem('tsrust.railLibraryMore')).toBe('0');
   });
 
-  // library-navigation-stays-folded: the group tracked "a Library page is open", which stayed
-  // true from one Library page to the next, so a fold on Favorites hid My List's link on My List.
-  it('folded on one Library page, it opens again when another Library page opens', async () => {
-    const { router } = renderRoutes(routes(), '/favorites');
+  // library-navigation-stays-folded: tracked by page, not by "one of them is open", so a fold on
+  // one of the folded pages does not hide the next one's link.
+  it('folded on one of its pages, More opens again when another of them opens', async () => {
+    const { router } = renderRoutes(routes(), '/downloads');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
-    const toggle = within(nav).getByRole('button', { name: 'Library' });
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    await act(() => router.navigate('/my-list'));
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(within(nav).getByRole('link', { name: 'My List' }).getAttribute('aria-current')).toBe('page');
+    const more = within(nav).getByRole('button', { name: 'More' });
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.click(more);
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    await act(() => router.navigate('/stats'));
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+    expect(within(nav).getByRole('link', { name: 'Watch stats' }).getAttribute('aria-current')).toBe('page');
     // Folding there stays a choice: a page inside the same entry does not undo it.
-    fireEvent.click(toggle);
-    await act(() => router.navigate('/my-list?sort=title'));
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(more);
+    await act(() => router.navigate('/stats?days=7'));
+    expect(more.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('remembers which sources the user opened or closed', async () => {
@@ -253,9 +260,14 @@ describe('rail at laptop heights (stage 2)', () => {
     const current = nav.querySelectorAll('[data-rail-current]');
     expect(current).toHaveLength(1);
     expect(within(current[0] as HTMLElement).getByRole('button', { name: 'Backup' })).toBeTruthy();
-    // No group toggles in the icon-only rail: every link shows.
-    expect(nav.querySelector('[data-rail-group-toggle]')).toBeNull();
+    // The icon-only rail folds the same pages: More is an icon named by its tooltip, and opens them in place.
     expect(within(nav).getByRole('link', { name: 'My List' })).toBeTruthy();
+    expect(within(nav).queryByRole('link', { name: 'Downloads' })).toBeNull();
+    const more = within(nav).getByRole('button', { name: 'More' });
+    expect(more.textContent).toBe('');
+    fireEvent.click(more);
+    expect(within(nav).getByRole('link', { name: 'Downloads' })).toBeTruthy();
+    expect(within(nav).getByRole('link', { name: 'Watch stats' })).toBeTruthy();
   });
 });
 

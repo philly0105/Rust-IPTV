@@ -53,6 +53,8 @@ export interface NavLinkDef {
    * it on every page from sm up, and Ctrl+F opens the page (Search). Phones have their Search tab.
    */
   notInRail?: boolean;
+  /** One of Library's less used pages: the rail folds it under the group's More row. */
+  more?: boolean;
 }
 
 /** Where Live TV, Movies and Series lead with no sources: the Sources page, as the phone tab's Live TV. */
@@ -83,11 +85,12 @@ export const LIBRARY_LINKS: readonly NavLinkDef[] = [
   // Run 2: custom channel lists and watch stats reuse their pages' titles.
   { to: '/lists', labelKey: 'lists:title', icon: ListOrdered },
   { to: '/recent', labelKey: 'navRecent', icon: History },
-  { to: '/downloads', labelKey: 'navDownloads', icon: Download },
-  { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive },
+  // The rest are visited now and then, not every evening: the rail folds them under More.
+  { to: '/downloads', labelKey: 'navDownloads', icon: Download, more: true },
+  { to: '/my-videos', labelKey: 'navMyVideos', icon: HardDrive, more: true },
   // recording:
-  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock },
-  { to: '/stats', labelKey: 'stats:title', icon: ChartColumn },
+  { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock, more: true },
+  { to: '/stats', labelKey: 'stats:title', icon: ChartColumn, more: true },
 ];
 
 /** The Watch links the rail and its boot skeleton show. */

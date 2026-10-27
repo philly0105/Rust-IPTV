@@ -188,7 +188,7 @@ Custom lists hold live channels from any of your sources. Press L on a channel o
 
 ### Watch stats
 
-Watch stats (`/stats`, in the side rail) show time watched per day over the last 7 or 30 days (7 and 3 switch), split into live TV and movies and series, with the most watched channels and titles. The log stays on this device, keeps 90 days, and Clear stats empties it.
+Watch stats (`/stats`, under More in the side rail's Library) show time watched per day over the last 7 or 30 days (7 and 3 switch), split into live TV and movies and series, with the most watched channels and titles. The log stays on this device, keeps 90 days, and Clear stats empties it.
 
 ## Parental controls
 

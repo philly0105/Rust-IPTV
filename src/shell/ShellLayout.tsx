@@ -377,7 +377,8 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
             {/* Every Watch link the rail shows, Live TV, Movies and Series included: most sources have movies and series. */}
             {rows(RAIL_WATCH_LINKS.length)}
             {label()}
-            {rows(LIBRARY_LINKS.length)}
+            {/* Library's everyday links and its More row, folded as it is unless the user opened it. */}
+            {rows(LIBRARY_LINKS.filter((l) => !l.more).length + 1)}
           </div>
           {/* The footer row: Settings, and beside it (expanded) the shortcuts and collapse buttons. */}
           <div className={cn('flex shrink-0 items-center gap-0.5 border-t border-divider p-2', collapsed && 'flex-col')}>

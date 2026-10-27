@@ -4,11 +4,11 @@
  * Add to multi-view, Add to list…, Rename… and Hide, as in Live's menu.
  */
 
-import { configure, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, configure, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useLocation } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { FavoriteEntry, RecentEntry } from '@/api/types';
+import { itemKey, type Channel, type CustomList, type CustomListEntry, type EpgNowNext, type FavoriteEntry, type RecentEntry } from '@/api/types';
 
 import { installDomStubs, makeSource, Page, playerMock, renderRoutes, rpcMock, settings } from '../../test/harness';
 
@@ -33,15 +33,29 @@ vi.mock('@/features/player', () => ({
   restorePlayback: async () => false,
   PlayerDock: () => <div data-testid="player-dock" />,
   ExternalPlaybackFooter: () => null,
+  // A list rail's play sets the list's zapping on the store once the channel plays.
+  usePlayerStore: { setState: () => undefined },
 }));
 
 const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');
 const { queryClient } = await import('@/api/query');
+const { ChannelCard, SourceKindContext } = await import('../cards');
+const { useToastStore } = await import('@/ui');
 
-/** A source's pages: where a live card's Play lands. */
+/** Clicks on the source page's row, which sits where a card was: the second click of a double click must not land here. */
+const rowClicks = { count: 0 };
+
+/** A source's pages: where a live card's Play lands, with a row under the pointer. */
 function SourcePage() {
-  return <Page>{`source page ${useLocation().pathname}`}</Page>;
+  return (
+    <Page>
+      <p>{`source page ${useLocation().pathname}`}</p>
+      <button type="button" onClick={() => rowClicks.count++}>
+        Row
+      </button>
+    </Page>
+  );
 }
 
 function routes() {
@@ -56,6 +70,26 @@ function routes() {
 
 const newsRef = { sourceId: 's1', contentType: 'live' as const, itemId: 'c1' };
 const radioRef = { sourceId: 's1', contentType: 'radio' as const, itemId: 'r1' };
+const sportRef = { sourceId: 's1', contentType: 'live' as const, itemId: 'c2' };
+const sport: Channel = { ref: sportRef, name: 'Sport 1', categoryId: 'g-sport', categoryName: 'Sport', isRadio: false };
+
+/** Now ± 30 minutes, so the programme is on air whatever the clock says. */
+function onAir(title: string): EpgNowNext {
+  const now = Date.now();
+  return { now: { channelId: title, title, start: new Date(now - 30 * 60_000).toISOString(), end: new Date(now + 30 * 60_000).toISOString() } };
+}
+
+/** `channel` on air in On now: the source's own channels fill it (News 24 has the favourites rail). */
+function onNowHome(channel: Channel = sport) {
+  const h = rpcMock.handlers;
+  h['catalog.channels'] = () => ({ items: [channel], total: 1 });
+  h['epg.nowNext'] = () => ({ [itemKey(channel.ref)]: onAir('Match Day') });
+}
+
+async function onNowCard(name = 'Sport 1') {
+  const rail = await screen.findByTestId('dashboard-rail-on-now');
+  return within(rail).findByRole('button', { name: new RegExp(`Play ${name}`) });
+}
 
 function dashboard() {
   rpcMock.reset();
@@ -97,9 +131,17 @@ beforeEach(() => {
   queryClient.clear();
   localStorage.clear();
   playerMock.playItem.mockClear();
+  rowClicks.count = 0;
+  useToastStore.setState({ toasts: [] });
   dashboard();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // A card that opened Live TV keeps eating the rest of its double click for half a second: spend
+  // that on the window, not on the next test's first click.
+  fireEvent.click(window);
+  fireEvent.dblClick(window);
+});
 
 describe('dashboard channel card menu', () => {
   it('right click opens the channel menu with the Live entries, and Hide hides the channel', async () => {
@@ -117,7 +159,7 @@ describe('dashboard channel card menu', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
-  it('Shift+F10 and the context-menu key open it from the keyboard; Escape returns focus and Play plays in Live TV', async () => {
+  it('Shift+F10 and the context-menu key open it from the keyboard; Escape returns focus and Play plays', async () => {
     renderRoutes(routes(), '/dashboard');
     const card = await newsCard();
     card.focus();
@@ -132,15 +174,93 @@ describe('dashboard channel card menu', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play' }));
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledTimes(1));
     expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: newsRef, title: 'News 24', isLive: true }));
-    // As the card itself: the channel's Live TV opens, whose stage takes the player.
+    // A favourite's card passes no page to open: it plays in the mini player over Home.
+    expect(document.activeElement).toBe(card);
+    expect(screen.queryByText(/^source page/)).toBeNull();
+  });
+
+  it('an On now card plays its channel and opens Live TV in one press, not the mini player over Home', async () => {
+    onNowHome();
+    renderRoutes(routes(), '/dashboard');
+    fireEvent.click(await onNowCard());
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: sportRef, isLive: true })));
     expect(await screen.findByText('source page /s/s1/live')).toBeTruthy();
   });
 
-  it('a live card plays its channel and opens Live TV in one press, not the mini player over Home', async () => {
+  it("an On now card's menu Play opens Live TV as the card does", async () => {
+    onNowHome();
     renderRoutes(routes(), '/dashboard');
-    fireEvent.click(await newsCard());
-    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: newsRef, isLive: true })));
+    fireEvent.contextMenu(await onNowCard(), { clientX: 40, clientY: 60 });
+    const menu = await screen.findByRole('menu', { name: 'Sport 1' });
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play' }));
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: sportRef, isLive: true })));
     expect(await screen.findByText('source page /s/s1/live')).toBeTruthy();
+  });
+
+  it('the second click of a double click lands nowhere on the Live TV the first one opened', async () => {
+    onNowHome();
+    renderRoutes(routes(), '/dashboard');
+    fireEvent.click(await onNowCard(), { detail: 1 });
+    await screen.findByText('source page /s/s1/live');
+    // The rest of the double click reaches what Live TV drew under the pointer.
+    const row = screen.getByRole('button', { name: 'Row' });
+    fireEvent.click(row, { detail: 2 });
+    fireEvent.dblClick(row, { detail: 2 });
+    expect(rowClicks.count).toBe(0);
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('source page /s/s1/live')).toBeTruthy();
+    // Only for the double-click time: a click after it is the user's own.
+    await act(() => new Promise((r) => setTimeout(r, 600)));
+    fireEvent.click(row, { detail: 1 });
+    expect(rowClicks.count).toBe(1);
+    expect(playerMock.playItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('a card of a source Home no longer lists says the source is gone and stays on Home', async () => {
+    onNowHome({ ...sport, ref: { ...sportRef, sourceId: 'gone' } });
+    renderRoutes(routes(), '/dashboard');
+    fireEvent.click(await onNowCard());
+    expect(await screen.findByText('That source is gone')).toBeTruthy();
+    expect(playerMock.playItem).not.toHaveBeenCalled();
+    expect(screen.getByTestId('dashboard-rail-on-now')).toBeTruthy();
+    expect(screen.queryByText(/^source page/)).toBeNull();
+  });
+
+  it("a list's rail plays its channel in the mini player and stays on Home, where zapping walks the list", async () => {
+    const h = rpcMock.handlers;
+    const list: CustomList = { id: 'L1', name: 'Game day', position: 0, onDashboard: true, itemCount: 1, createdAt: '2026-10-13T09:00:00Z', updatedAt: '2026-10-13T09:00:00Z' };
+    const entry: CustomListEntry = { ref: sportRef, snapshot: { title: 'Sport 1', contentType: 'live' }, channel: sport, available: true, position: 0, addedAt: '2026-10-13T09:00:00Z' };
+    h['lists.list'] = () => [list];
+    h['lists.items'] = () => [entry];
+    h['sources.get'] = () => makeSource('s1', { name: 'Night Portal' });
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-list-L1');
+    fireEvent.click(await within(rail).findByRole('button', { name: 'Play Sport 1' }));
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: sportRef, isLive: true })));
+    expect(screen.getByTestId('dashboard-rail-list-L1')).toBeTruthy();
+    expect(screen.queryByText(/^source page/)).toBeNull();
+  });
+
+  it('a channel card opens the page its rail gives it, such as a list page', async () => {
+    const onPlay = vi.fn();
+    const card = (
+      <SourceKindContext.Provider value={new Map([['s1', 'xtream']])}>
+        <ChannelCard rail={{ tabIndex: 0, 'data-rail-card': '' }} name="Sport 1" ariaLabel="Play Sport 1" channel={sport} onPlay={onPlay} watchPath="/lists/L1" />
+      </SourceKindContext.Provider>
+    );
+    function ListProbe() {
+      return <p>{`list page ${useLocation().pathname}`}</p>;
+    }
+    renderRoutes(
+      [
+        { path: '/dashboard', element: card },
+        { path: '/lists/:listId', element: <ListProbe /> },
+      ],
+      '/dashboard',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Play Sport 1' }));
+    expect(onPlay).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('list page /lists/L1')).toBeTruthy();
   });
 
   it('a radio card plays the station in the dock and stays on Home', async () => {

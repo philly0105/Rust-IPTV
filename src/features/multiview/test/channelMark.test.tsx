@@ -47,6 +47,20 @@ describe('ChannelMark', () => {
     expect(new URL(img(container)!.getAttribute('src')!, 'http://app.test').searchParams.get('url')).toBe(good);
   });
 
+  it('keeps the deep stops by default and takes the theme tint where asked (the picker, the quick picks)', () => {
+    const { container, rerender } = render(<ChannelMark name="Sky News" />);
+    const mark = container.firstElementChild as HTMLElement;
+    // The wall's tiles sit over video: deep in every theme.
+    expect(mark.dataset['tint']).toBe('dark');
+    expect(mark.className).not.toContain('var(--tint-light)');
+    rerender(<ChannelMark name="Sky News" tint="theme" />);
+    // Pale with the hue's ink in the light theme, as Live's monograms are.
+    expect(mark.dataset['tint']).toBe('theme');
+    expect(mark.className).toContain('light:not-in-data-player-stage:[background-image:var(--tint-light)]');
+    expect(mark.style.getPropertyValue('--tint-light')).toContain('linear-gradient');
+    expect(mark.textContent).toBe('SN');
+  });
+
   it('shows initials without a logo', () => {
     const { container } = render(<ChannelMark name="Sky News" />);
     expect(img(container)).toBeNull();

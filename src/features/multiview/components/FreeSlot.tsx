@@ -211,7 +211,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
                           TOUCH_TARGET,
                         )}
                       >
-                        <ChannelMark src={p.logo} sourceId={p.ref.sourceId} name={p.title} className="size-6.5" />
+                        <ChannelMark src={p.logo} sourceId={p.ref.sourceId} name={name} tint="theme" className="size-6.5" />
                         <ChannelName name={p.title} strip={stripCountryPrefix} className="min-w-0 flex-1 truncate" />
                         {busy ? (
                           <LoaderCircle aria-hidden className="size-4 shrink-0 text-fg-muted motion-safe:animate-spin" />

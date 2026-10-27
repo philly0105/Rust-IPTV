@@ -241,7 +241,7 @@ export function ChannelPicker({ open, mode, onClose }: ChannelPickerProps) {
                     'motion-safe:transition-colors motion-safe:duration-100',
                   )}
                 >
-                  <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={name} className="size-9 rounded-md" />
+                  <ChannelMark src={ch.logoUrl} sourceId={ch.ref.sourceId} name={name} tint="theme" className="size-9 rounded-md" />
                   <span className="flex min-w-0 flex-1 flex-col">
                     {/* Named as Live TV's rows name it: the place tag after the name, quiet. */}
                     <span className={cn('flex min-w-0 items-baseline text-start text-sm font-medium', disabled && !onWall ? 'text-fg-muted' : 'text-fg')}>

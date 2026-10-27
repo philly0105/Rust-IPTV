@@ -199,9 +199,10 @@ export function MyVideosPage() {
         title={t('libraryEmptyTitle')}
         description={t('libraryEmptyBody')}
         action={
-          // While something downloads, the queue is where it shows; otherwise the catalogue, where
-          // downloads start (the queue would be empty too).
-          active.active > 0 ? (
+          // While the queue holds anything (downloading, waiting, paused, or failed and waiting to
+          // be retried), it is where that shows: the page's toolbar with its queue link is hidden
+          // while the library is empty. Otherwise the catalogue, where downloads start.
+          active.active + active.paused + active.attention > 0 ? (
             <Link to="/downloads" className={buttonClass('primary', 'md')} data-testid="library-empty-queue">
               {t('openQueue')}
             </Link>

@@ -287,6 +287,19 @@ describe('MyVideosPage', () => {
     expect(screen.queryByTestId('page-search')).toBeNull();
   });
 
+  it('leads an empty library to the queue while a download is paused or failed', async () => {
+    rpc.handlers['myvideos.list'] = () => [];
+    rpc.handlers['recordings.library'] = () => [];
+    for (const status of ['paused', 'failed'] as const) {
+      rpc.handlers['downloads.list'] = () => [makeDownload({ id: 40, status, title: 'Waiting' })];
+      renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
+      expect(await screen.findByText('No offline videos yet')).toBeTruthy();
+      expect((await screen.findByRole('link', { name: 'Open download queue' })).getAttribute('href')).toBe('/downloads');
+      expect(screen.queryByRole('link', { name: 'Browse movies' })).toBeNull();
+      cleanup();
+    }
+  });
+
   it('keeps its search in the header once something is offline', async () => {
     rpc.handlers['myvideos.list'] = () => library;
     rpc.handlers['recordings.library'] = () => [];

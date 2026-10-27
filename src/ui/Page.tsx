@@ -90,8 +90,18 @@ export interface SectionHeaderProps {
 }
 
 /**
+ * The "See all" link at the end of a section's heading row, for a row that builds its own heading
+ * (a dashboard rail with a meta line beside the title). On a touch screen an invisible band
+ * around the 19 px link takes its target to 44 px (a "See all" was a 59 x 19 tap), without
+ * changing how the row looks.
+ */
+export const SEE_ALL_LINK =
+  'relative inline-flex items-center gap-0.5 rounded-sm text-sm font-medium text-fg-muted hover:text-fg active:text-accent-pressed motion-safe:transition-colors ' +
+  'pointer-coarse:after:absolute pointer-coarse:after:-inset-x-2 pointer-coarse:after:-inset-y-[calc(12.5rem/15)]';
+
+/**
  * The heading row of a section or rail: an h2 in text-title-sm with an optional count, and on
- * the inline end any controls and a "See all" link with a chevron.
+ * the inline end any controls and a "See all" link with a chevron (SEE_ALL_LINK).
  */
 export function SectionHeader({ title, count, seeAll, action, as: Heading = 'h2', id, className }: SectionHeaderProps) {
   const { t } = useTranslation('common');
@@ -105,15 +115,7 @@ export function SectionHeader({ title, count, seeAll, action, as: Heading = 'h2'
         <div className="flex shrink-0 items-center gap-2">
           {action}
           {seeAll && (
-            <Link
-              to={seeAll.to}
-              // On a touch screen an invisible band around the 19 px link takes its target to
-              // 44 px (a "See all" was a 59 x 19 tap), without changing how the row looks.
-              className={cn(
-                'relative inline-flex items-center gap-0.5 rounded-sm text-sm font-medium text-fg-muted hover:text-fg active:text-accent-pressed motion-safe:transition-colors',
-                'pointer-coarse:after:absolute pointer-coarse:after:-inset-x-2 pointer-coarse:after:-inset-y-[calc(12.5rem/15)]',
-              )}
-            >
+            <Link to={seeAll.to} className={SEE_ALL_LINK}>
               {seeAll.label ?? t('seeAll')}
               <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
             </Link>

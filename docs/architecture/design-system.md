@@ -132,7 +132,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 
 - `Page`: side padding from `--page-gutter`, `py-6`, and a width cap: `narrow` 56rem (settings, forms), `default` 80rem (lists, stats), `wide` 120rem (grids, rails), `full` (the guide, the player). It starts at the gutter, on the header title's line, and is not centred. A page root that pads itself (`px-6`) or centres itself (`mx-auto max-w-…`) leaves that line, so the title and the content no longer share a left edge; a full-height page passes its own height and padding (`className="flex h-[calc(100dvh-var(--header-height))] flex-col pt-4 pb-4"`).
 - `PageHeader`: h1 in `text-title`, optional `count` (muted, formatted by the caller), `subtitle` and `actions`. Most pages set their title in the shell header with `usePageHeader` and keep a visually hidden h1; use PageHeader when the title belongs in the content.
-- `SectionHeader`: h2 in `text-title-sm` with optional `count`, `action` (rail arrows, a sort menu) and `seeAll={{ to, label? }}` ("See all" and a chevron; on touch an invisible band takes the link's target to 44 px).
+- `SectionHeader`: h2 in `text-title-sm` with optional `count`, `action` (rail arrows, a sort menu) and `seeAll={{ to, label? }}` ("See all" and a chevron; on touch an invisible band takes the link's target to 44 px). A row that builds its own heading (a Home rail with a meta line beside the title) styles its link with `SEE_ALL_LINK`, so it gets the same band.
 - `BackButton`: `<BackButton to="/movies" label={t('movies')} />`, or `onClick={goBack}` (with `to` as well, the link still shows where back is and opens in a new tab). `tone="glass"` over artwork.
 
 ### Buttons and links

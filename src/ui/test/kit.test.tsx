@@ -26,6 +26,7 @@ import {
   Page,
   PageHeader,
   RadioGroup,
+  SEE_ALL_LINK,
   SearchInput,
   SectionHeader,
   SegmentedControl,
@@ -429,9 +430,11 @@ describe('page scaffold', () => {
     expect(screen.getByRole('heading', { level: 2 }).className).toContain('text-title-sm');
     const seeAll = screen.getByRole('link', { name: 'See all' });
     expect(seeAll.getAttribute('href')).toBe('/recent');
-    // A 44 px touch target around the 19 px link, drawn by nothing.
-    expect(seeAll.className).toContain('relative');
-    expect(seeAll.className).toContain('pointer-coarse:after:-inset-y-[calc(12.5rem/15)]');
+    // A 44 px touch target around the 19 px link, drawn by nothing. The classes are the exported
+    // SEE_ALL_LINK, which a rail that builds its own heading row uses too.
+    expect(seeAll.className).toBe(SEE_ALL_LINK);
+    expect(SEE_ALL_LINK).toContain('relative');
+    expect(SEE_ALL_LINK).toContain('pointer-coarse:after:-inset-y-[calc(12.5rem/15)]');
   });
 
   it('BackButton names its destination and can go back in history while showing the link', () => {

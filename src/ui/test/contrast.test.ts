@@ -15,6 +15,7 @@ import { ACCENTS } from '@/api/types';
 
 import { SWITCH_TONES } from '../Field';
 import { GLASS_FOCUS } from '../focus';
+import { MENU_DANGER } from '../Menu';
 import { PROGRESS_TRACK } from '../Misc';
 import { SEGMENT_TONES, segmentClass } from '../Segmented';
 
@@ -370,6 +371,21 @@ describe('state layers (DS-STATE-FILLS)', () => {
         expect(contrast(line, cell), `now line through the airing cell on ${s}`).toBeGreaterThanOrEqual(3);
         expect(contrast(cell, c['surface-2']!), `airing cell against a future cell on ${s}`).toBeGreaterThanOrEqual(1.08);
       }
+    });
+  }
+});
+
+describe('destructive menu items', () => {
+  // The red text over the strongest of its red washes (pressed), on the menu's panel.
+  const washes = [...MENU_DANGER.matchAll(/:bg-danger\/(\d+)/g)].map((m) => Number(m[1]) / 100);
+  it('carry red washes for hover, focus and press', () => {
+    expect(MENU_DANGER.split(' ')).toContain('text-danger');
+    expect(washes.length).toBe(3);
+  });
+  for (const [name, c] of Object.entries(THEMES)) {
+    it(`${name}: Remove stays readable on its strongest wash`, () => {
+      const fill = over(c.danger!, Math.max(...washes), c.surface!);
+      expect(contrast(c.danger!, fill)).toBeGreaterThanOrEqual(4.5);
     });
   }
 });

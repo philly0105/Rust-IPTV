@@ -396,7 +396,28 @@ describe('SegmentedControl: compact size and segments that say why they are out'
 
   it('the compact size tightens the track and the segments', () => {
     render(<SegmentedControl label="View" value="b" onChange={() => {}} options={options.slice(1)} size="sm" testId="view" />);
-    expect(screen.getByTestId('view').className.split(' ')).toEqual(expect.arrayContaining(['p-0.5', 'gap-0.5', 'rounded-md', 'border-edge']));
+    expect(screen.getByTestId('view').className.split(' ')).toEqual(expect.arrayContaining(['p-0.5', 'gap-0.5', 'rounded-md', 'outline-edge']));
     expect(screen.getByRole('radio', { name: 'Grid' }).className.split(' ')).toEqual(expect.arrayContaining(['min-h-7', 'px-2', 'rounded-sm', 'bg-raised']));
+  });
+
+  it('draws the track edge as an outline inside it, so md and sm stand as tall as md and sm buttons and keep their frame in forced colours', () => {
+    render(
+      <>
+        <SegmentedControl label="View" value="b" onChange={() => {}} options={options.slice(1)} testId="md" />
+        <SegmentedControl label="Compact" value="b" onChange={() => {}} options={options.slice(1)} size="sm" testId="sm" />
+      </>,
+    );
+    for (const id of ['md', 'sm']) {
+      const track = screen.getByTestId(id).className.split(' ');
+      // A border would add 2 px to the 30 px segment and its padding (h-10 for md, h-8 for sm).
+      expect(track).toEqual(expect.arrayContaining(['outline-1', '-outline-offset-1', 'outline-edge']));
+      expect(track.some((c) => /^border(-|$)/.test(c)), id).toBe(false);
+      // Forced colours drop box-shadow, so a ring would leave the unchosen segments as loose text;
+      // they repaint an outline in the system's text colour instead.
+      expect(track.some((c) => /^ring(-|$)/.test(c)), id).toBe(false);
+      expect(track.some((c) => c.startsWith('forced-color-adjust')), id).toBe(false);
+    }
+    expect(screen.getByTestId('md').className.split(' ')).toContain('p-1');
+    expect(screen.getAllByRole('radio', { name: 'Grid' })[0]!.className.split(' ')).toContain('min-h-8');
   });
 });

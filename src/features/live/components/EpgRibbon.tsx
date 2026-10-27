@@ -399,7 +399,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       mode === 'list' ? (
         <div className="flex flex-col" aria-busy="true" aria-label={t('loadingGuide')}>
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center gap-3 border-b border-divider px-4" style={{ height: LIST_ROW }}>
+            <div key={i} className="flex items-center gap-3 px-4" style={{ height: LIST_ROW }}>
               <Skeleton className="h-3 w-24 shrink-0" />
               <Skeleton className="h-3 flex-1" />
             </div>
@@ -847,7 +847,7 @@ function ProgramList(props: ViewProps) {
                 tabIndex={v.index === (nowIndex >= 0 ? nowIndex : 0) ? 0 : -1}
                 onClick={() => props.onActivate(p)}
                 onFocus={() => props.onFocusProgram(p)}
-                className={`flex h-full w-full items-center gap-3 border-b border-divider px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset ${
+                className={`flex h-full w-full items-center gap-3 px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset ${
                   when === 'now' ? 'tuning-tick bg-selected' : 'hover:bg-hover'
                 } ${when === 'past' && !catchup ? 'text-fg-subtle' : 'text-fg'}`}
               >

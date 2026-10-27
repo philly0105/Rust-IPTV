@@ -162,12 +162,13 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
                 <span className="sr-only">{t('minutesLeft', { count: minutesLeft })}</span>
               </span>
             </span>
-            {/* Quiet, as on Live TV's rows that are not playing: a list of amber bars read as stripes. */}
+            {/* Quiet, as on Live TV's rows that are not playing: a hairline track with a neutral fill,
+                since a list of amber bars read as stripes and 3 px grey ones as ruled paper. */}
             <ProgressBar
               value={Math.round(now.progress * 100)}
               max={100}
               size="xs"
-              className="mt-1 [&>div]:bg-fg-subtle/55"
+              className="mt-1 h-0.5 bg-fg/7 [&>div]:bg-fg-subtle/50"
               label={t('nowProgress', { title: now.title })}
             />
           </span>

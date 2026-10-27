@@ -196,7 +196,10 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
       className={cn(
         // `group/row` for the floating actions; the list is `group/list`, so the keyboard cursor's
         // row is marked only while the list has focus (a phantom "selected" first row otherwise).
-        'group/row relative flex h-full touch-manipulation items-stretch border-b border-divider select-none [-webkit-touch-callout:none]',
+        // No rule between rows: the 60 px rhythm, the logo column and the hover and selected fills
+        // keep them apart. A divider under each row on top of its progress track drew two lines
+        // per channel, and a screen of channels read as ruled paper, more so in light.
+        'group/row relative flex h-full touch-manipulation items-stretch select-none [-webkit-touch-callout:none]',
         playing ? 'tuning-tick bg-selected' : cn('hover:bg-hover', active && 'group-focus-within/list:bg-hover'),
       )}
       onContextMenu={(e) => props.onContextMenu(e, channel, index)}
@@ -271,12 +274,21 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
                 </span>
               </span>
               {props.station ? null : (
-                <span className={cn('relative mt-1 h-[3px] w-full overflow-hidden rounded-full bg-surface-3', playing && 'max-md:hidden')} aria-hidden data-testid="channel-progress-track">
+                <span
+                  className={cn(
+                    'relative mt-1 w-full overflow-hidden rounded-full',
+                    // A hairline on every row and a firmer bar on the one playing: a 3 px grey bar
+                    // under each name was the darkest mark in the list after the text.
+                    playing ? 'h-[3px] bg-surface-3 max-md:hidden' : 'h-0.5 bg-fg/7',
+                  )}
+                  aria-hidden
+                  data-testid="channel-progress-track"
+                >
                   {/* Quiet on every row, the accent on the one playing: a list of bright bars read as
                       stripes, and red ones as "all live, all alerting". */}
                   <span
                     data-testid="channel-progress"
-                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent-mark' : 'bg-fg-subtle/55')}
+                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent-mark' : 'bg-fg-subtle/50')}
                     style={{ width: `${progress * 100}%` }}
                   />
                 </span>

@@ -4,12 +4,15 @@ import {
   CaptionsOff,
   CircleDot,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   History,
   Lock,
   Maximize,
   Minimize,
+  PanelLeftOpen,
   Pause,
   PictureInPicture2,
   Play,
@@ -55,7 +58,7 @@ import { useMediaStore, type TimeRange } from '../media';
 import { noteMenuDismissed } from '../menuDismiss';
 import { ASPECTS, setPicture, usePictureStore, ZOOMS, type PictureAspect, type PictureZoom } from '../picture';
 import { usePipStore } from '../pip';
-import { nextInQueue, prevInQueue, replay, reportStatus, retryResolve, selectEnded, usePlayerStore, type PlayerState } from '../store';
+import { canZap, nextInQueue, prevInQueue, replay, reportStatus, retryResolve, selectEnded, usePlayerStore, zap, type PlayerState } from '../store';
 import { toggleStreamInfo, useStreamInfoStore } from '../streamInfo';
 import { canEnterFullscreen } from '../fullscreen';
 import { InlineSpinner } from './InlineSpinner';
@@ -94,6 +97,9 @@ const KEYS = {
   skipForward: { combo: 'l', aria: 'L' },
   screenshot: { combo: 's', aria: 'S' },
   streamInfo: { combo: 'i', aria: 'I' },
+  channelUp: { combo: 'pageup', aria: 'PageUp' },
+  channelDown: { combo: 'pagedown', aria: 'PageDown' },
+  channelPanel: { combo: 'c', aria: 'C' },
 } as const;
 export type CtlShortcut = keyof typeof KEYS;
 
@@ -220,6 +226,9 @@ const ICON = {
   muted: <VolumeX />,
   quiet: <Volume1 />,
   loud: <Volume2 />,
+  channelUp: <ChevronUp />,
+  channelDown: <ChevronDown />,
+  channels: <PanelLeftOpen className="rtl:-scale-x-100" />,
 };
 
 /** Memoized with the row's icons (P2-PLAYER-4): it follows the volume itself. */
@@ -946,6 +955,8 @@ export interface ControlsProps {
   onMenuOpenChange?(open: boolean): void;
   /** Dock bar: a lasting status (embedded mpv buffering) shown in the readout when no transient one is up. */
   readoutIdle?: ReactNode;
+  /** The fullscreen channel panel can open here (`FullscreenChannelPanel`): the bar gets its button. */
+  channelPanel?: boolean;
 }
 
 export { InlineSpinner };
@@ -1204,7 +1215,7 @@ function RecordMenuAction({ onDone }: { onDone(): void }) {
 const NARROW_YIELD_TO_VOLUME = '[[data-ctl-row]:has([data-vol]:hover)_&]:hidden [[data-ctl-row]:has([data-vol]:focus-within)_&]:hidden';
 
 /** The buttons a narrow row can do without (the options menu takes them), by group. */
-type Spare = 'jump' | 'captions' | 'pip' | 'skip';
+type Spare = 'zap' | 'jump' | 'captions' | 'pip' | 'skip';
 /** A spare button's room in the row: 40 px and the row's 4 px gap. */
 const SPARE_SLOT_PX = 44;
 /** What the dock's readout keeps for itself (typed channel digits, the volume level). */
@@ -1302,7 +1313,7 @@ function jump(seconds: number): void {
  * what the bar does not show (the pointer resting on it, the chrome's idle timer, a stall), which
  * re-rendered every button, tooltip and icon with it (P2-PLAYER-3).
  */
-export const Controls = memo(function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle }: ControlsProps) {
+export const Controls = memo(function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle, channelPanel = false }: ControlsProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
@@ -1458,6 +1469,11 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const big = scale === 'big';
   // The 10 s skips (PL-BAR-HIERARCHY): VOD with a known length, outside the mini player.
   const canJump = isVod && !!duration && !compact && !ended && !failed;
+  // Fullscreen live TV (C5): channel up and down on the bar, and the channel list's button (it
+  // replaced a lone disc at the screen's edge), so changing channel needs no keyboard. Over a
+  // failed stream too: zapping away is often the way out. Elsewhere the page's own list is beside
+  // the stage.
+  const canZapHere = variant === 'overlay' && big && canZap({ source });
 
   const store = usePlayerStore.getState();
   // Overlay: controls laid on an edge-to-edge scrim over the picture, no pane. Dock: a strong glass
@@ -1468,6 +1484,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const kept = narrow
     ? keepSpares<Spare>(
         [
+          ['zap', canZapHere ? 2 : 0],
           ['jump', canJump ? 2 : 0],
           ['captions', tracks.text.length > 0 ? 1 : 0],
           ['pip', showPip && !windowPip ? 1 : 0],
@@ -1478,7 +1495,8 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
     : undefined;
   const inRow = (spare: Spare): boolean => !kept || kept.has(spare);
   spareRoom.showing.current = kept
-    ? (kept.has('jump') && canJump ? 2 : 0) +
+    ? (kept.has('zap') && canZapHere ? 2 : 0) +
+      (kept.has('jump') && canJump ? 2 : 0) +
       (kept.has('captions') && tracks.text.length > 0 ? 1 : 0) +
       (kept.has('pip') ? 1 : 0) +
       (kept.has('skip') ? (prev ? 1 : 0) + (next ? 1 : 0) : 0)
@@ -1507,6 +1525,22 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
     </>
   );
 
+  const zapButtons = canZapHere && (
+    <>
+      <CtlButton id="channel-up" className={spareClass} shortcut="channelUp" label={t('previousChannel')} onClick={() => void zap('up').catch(() => undefined)}>
+        {ICON.channelUp}
+      </CtlButton>
+      <CtlButton id="channel-down" className={spareClass} shortcut="channelDown" label={t('nextChannel')} onClick={() => void zap('down').catch(() => undefined)}>
+        {ICON.channelDown}
+      </CtlButton>
+    </>
+  );
+  const channelsButton = channelPanel && (
+    <CtlButton id="channels" shortcut="channelPanel" label={t('openChannelPanel')} onClick={() => useMediaStore.setState({ channelPanelOpen: true })}>
+      {ICON.channels}
+    </CtlButton>
+  );
+
   /** A moved control did its job: close the menu, focus back on its trigger. */
   const done = (): void => setMenuView(null);
   const closeThen =
@@ -1515,12 +1549,23 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
       done();
       run();
     };
+  const movedZap = canZapHere && !inRow('zap');
   const movedJump = canJump && !inRow('jump');
   const movedPip = showPip && !windowPip && !inRow('pip');
   const movedSkip = (prev || next) && !inRow('skip');
   const moved =
-    narrow && (movedJump || movedPip || movedSkip) ? (
+    narrow && (movedZap || movedJump || movedPip || movedSkip) ? (
       <>
+        {movedZap && (
+          <>
+            <CtlButton role="menuitem" label={t('previousChannel')} shortcut="channelUp" onClick={closeThen(() => void zap('up').catch(() => undefined))}>
+              {ICON.channelUp}
+            </CtlButton>
+            <CtlButton role="menuitem" label={t('nextChannel')} shortcut="channelDown" onClick={closeThen(() => void zap('down').catch(() => undefined))}>
+              {ICON.channelDown}
+            </CtlButton>
+          </>
+        )}
         {movedJump && (
           <>
             <CtlButton role="menuitem" label={t('seekBack', { count: SEEK_STEP_JL })} shortcut="skipBack" onClick={() => jump(-SEEK_STEP_JL)}>
@@ -1654,6 +1699,8 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
               {!panelOwnsError && playButton}
               {!compact && !narrow && nextButton}
               {!narrow && jumpButtons}
+              {channelsButton}
+              {!narrow && zapButtons}
               {!panelOwnsError && <VolumeControl compact={compact || narrow} />}
 
               {panelOwnsError ? null : isLive ? (
@@ -1690,6 +1737,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
               <div data-row-free="" className="flex-1" />
               {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
               {/* A narrow row keeps its spares right of the volume, so they can step aside when it opens. */}
+              {narrow && inRow('zap') && zapButtons}
               {narrow && inRow('jump') && jumpButtons}
               {narrow && inRow('skip') && prevButton}
               {narrow && inRow('skip') && nextButton}

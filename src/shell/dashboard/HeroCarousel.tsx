@@ -48,7 +48,7 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, tintOf, useImageChain, whenIdle } from '@/ui';
 import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
@@ -257,10 +257,14 @@ function useRotation(
   }, [activeKey, running, dwell, dial, fill]);
 }
 
-/** Background tint for a slide with no usable artwork: the title's hue, like the poster fallback. */
+/**
+ * Background for a slide with no usable artwork: the title's tint (src/ui/tint.ts), the colour its
+ * poster tile has, glowing from the far corner into the tint's deepest stop. The hero is glass in
+ * every theme, so it takes the deep stops in light too.
+ */
 function tint(title: string): string {
-  const hue = hueOf(title);
-  return `radial-gradient(120% 140% at 85% 10%, hsl(${hue} 45% 34%), transparent 60%), linear-gradient(150deg, hsl(${(hue + 40) % 360} 40% 16%), hsl(${hue} 30% 8%))`;
+  const t = tintOf(title);
+  return `radial-gradient(120% 140% at 85% 10%, ${t.dark[0]}, transparent 60%), linear-gradient(160deg, ${t.dark[1]}, ${t.deep})`;
 }
 
 interface BackdropProps {

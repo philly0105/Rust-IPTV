@@ -6,7 +6,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ItemRef, VodDetail } from '@/api/types';
-import { hueOf, useToastStore } from '@/ui';
+import { tintOf, useToastStore } from '@/ui';
 
 import { heroWash } from '../components/detail/DetailHero';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
@@ -70,11 +70,12 @@ describe('a detail hero without artwork', () => {
     await screen.findByRole('heading', { level: 1, name: 'Harbor Lights' });
     const backdrop = screen.getByTestId('vod-detail-backdrop');
     const wash = within(backdrop).getByTestId('vod-detail-wash');
-    const hue = hueOf('Harbor Lights');
+    const tint = tintOf('Harbor Lights');
     expect(wash.style.getPropertyValue('--wash-dark')).toBe(heroWash('Harbor Lights', true));
     expect(wash.style.getPropertyValue('--wash-light')).toBe(heroWash('Harbor Lights', false));
-    expect(heroWash('Harbor Lights', true)).toContain(`hsl(${hue} 45% 34%`);
-    expect(heroWash('Harbor Lights', false)).toContain(`hsl(${hue} 55% 84%`);
+    // The poster tile's own tint: its deep stops in dark, its pale ones in light.
+    expect(heroWash('Harbor Lights', true)).toContain(tint.dark[0]);
+    expect(heroWash('Harbor Lights', false)).toContain(tint.light[1]);
     expect(wash.className).toContain('dark:[background-image:var(--wash-dark)]');
     // Under the two fades to the page, so the title and the buttons keep their contrast.
     const layers = Array.from(backdrop.children);

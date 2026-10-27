@@ -44,7 +44,8 @@ export { ToastProvider, ToastViewport, dismissToast, focusToasts, toast, useToas
 export type { ToastOptions, ToastRecord, ToastVariant } from './Toast';
 export { Badge, FilterChip, Kbd, LivePill, MetaLine, ProgressBar, TEXT_LINK, WatchedChip, comboKeys, filterChipClass } from './Misc';
 export type { BadgeProps, BadgeVariant, FilterChipProps, KbdProps, LivePillProps, MetaLineProps, ProgressBarProps, WatchedChipProps } from './Misc';
-export { Poster, PosterCellWidthContext, PosterWidthContext, hueOf, initialsOf, usePosterWidthBox } from './Poster';
+export { Poster, PosterCellWidthContext, PosterWidthContext, initialsOf, usePosterWidthBox } from './Poster';
+export { hueOf, nameHue, oklchHex, tintFill, tintOf, withAlpha, type Tint, type TintScheme } from './tint';
 export type { PosterAspect, PosterProps } from './Poster';
 export { SourceMonogram } from './SourceMonogram';
 export type { SourceMonogramProps } from './SourceMonogram';

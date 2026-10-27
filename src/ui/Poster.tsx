@@ -7,6 +7,7 @@ import { cn } from './cn';
 import { useImageChain } from './image';
 import { gateImage, imageLoadedBefore, noteImageLoaded, resetImageGate } from './imageGate';
 import { pauseWhenOffscreen, releaseOffscreen } from './offscreen';
+import { tintFill } from './tint';
 
 export type PosterAspect = 'poster' | 'wide' | 'square';
 
@@ -55,12 +56,7 @@ const ASPECTS: Record<PosterAspect, string> = {
   square: 'aspect-square',
 };
 
-/** Deterministic hue from a string, so fallback tiles differ per title. */
-export function hueOf(text: string): number {
-  let h = 0;
-  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
+export { hueOf } from './tint';
 
 /** Quality, codec and copy markers, and "the": never what a name's initials stand for. */
 const NAME_MARKERS = /^(?:sd|hd|fhd|uhd|qhd|4k|8k|hevc|hdr|raw|\d{3,4}[pi]|\d+fps|backup|bkp|the)$/i;
@@ -241,7 +237,6 @@ export function Poster({
   );
 
   const fallbackText = label ?? alt;
-  const hue = hueOf(fallbackText);
   const Glyph = kind === 'live' ? Tv : kind === 'radio' ? Radio : Clapperboard;
   const radius = { sm: 'rounded-sm', md: 'rounded-md', lg: 'rounded-lg' }[rounded];
 
@@ -272,7 +267,7 @@ export function Poster({
           aria-hidden
           data-poster-fallback=""
           className="absolute inset-0 flex flex-col items-center justify-center gap-1 [container-type:size]"
-          style={{ background: `linear-gradient(150deg, hsl(${hue} 45% 32%), hsl(${(hue + 40) % 360} 50% 18%))` }}
+          style={{ background: tintFill(fallbackText) }}
         >
           <span
             className={cn(

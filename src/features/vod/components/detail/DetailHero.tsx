@@ -9,7 +9,7 @@ import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
-import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, hueOf, useImageChain } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, tintOf, useImageChain, withAlpha } from '@/ui';
 import { formatList } from '@/lib/intl';
 import { CastRow } from './CastRow';
 
@@ -230,16 +230,14 @@ export const HERO_BACK = 'border border-edge bg-surface/80 text-fg shadow-1 glas
 
 /**
  * The title's tint as two soft washes from the top edge, for a hero with no artwork at all: one
- * in the poster fallback's hue towards the far side, one in its second hue at the leading corner.
- * Pale in the light theme, deep in the dark one. The hue is the Poster fallback's (`hueOf` of the
- * same title), so the page reads as the title the poster tile stands for.
+ * in the tint's top stop towards the far side, one in its second stop at the leading corner.
+ * Pale in the light theme, deep in the dark one. It is the poster tile's tint (src/ui/tint.ts, from
+ * the same title), so the page reads as the title the poster tile stands for.
  */
 export function heroWash(title: string, dark: boolean): string {
-  const hue = hueOf(title);
-  const second = (hue + 40) % 360;
-  return dark
-    ? `radial-gradient(60% 100% at 78% 0%, hsl(${hue} 45% 34% / 0.75), transparent 72%), radial-gradient(50% 80% at 8% 0%, hsl(${second} 50% 24% / 0.6), transparent 70%)`
-    : `radial-gradient(60% 100% at 78% 0%, hsl(${hue} 55% 84% / 0.9), transparent 72%), radial-gradient(50% 80% at 8% 0%, hsl(${second} 45% 88% / 0.8), transparent 70%)`;
+  const tint = tintOf(title);
+  const [far, lead] = dark ? [withAlpha(tint.dark[0], 0.75), withAlpha(tint.dark[1], 0.6)] : [withAlpha(tint.light[1], 0.9), withAlpha(tint.light[0], 0.8)];
+  return `radial-gradient(60% 100% at 78% 0%, ${far}, transparent 72%), radial-gradient(50% 80% at 8% 0%, ${lead}, transparent 70%)`;
 }
 
 function Backdrop({ backdropUrl, posterUrl, sourceId, title }: { backdropUrl?: string; posterUrl?: string; sourceId: string; title: string }) {

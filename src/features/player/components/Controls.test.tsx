@@ -562,6 +562,48 @@ describe('Controls in a narrow player', () => {
     expect(names.slice(0, 2)).toEqual(['Previous channel', 'Next channel']);
   });
 
+  it("a narrow fullscreen bar's channel list steps aside while the volume slider is out, from right of the volume", () => {
+    const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+    act(() => usePlayerStore.setState({ source: channel, status: 'playing', isFullscreen: true, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible channelPanel />);
+    const list = screen.getByRole('button', { name: 'Open channel list' });
+    // The spares' yield class: hidden while the row's volume is hovered or holds focus.
+    expect(list.className).toContain('[[data-ctl-row]:has([data-vol]:hover)_&]:hidden');
+    expect(list.className).toContain('[[data-ctl-row]:has([data-vol]:focus-within)_&]:hidden');
+    // After the volume in the row, so hiding it does not move the volume button.
+    const mute = screen.getByRole('button', { name: 'Mute' });
+    expect(mute.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('over an error a narrow fullscreen bar keeps channel up and down beside the channel list, at the start', async () => {
+    restore();
+    // A row with 100 px to spare: room for the channel pair.
+    const spares = (row: Element): number => row.querySelectorAll('[data-ctl="channel-up"], [data-ctl="channel-down"]').length;
+    const spies = [
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        if (this.hasAttribute('data-player-controls')) return 358;
+        if (this.hasAttribute('data-row-free')) return Math.max(0, 100 - 44 * spares(this.parentElement!));
+        return 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute('data-ctl-row') ? 330 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.hasAttribute('data-ctl-row') ? 330 + Math.max(0, 44 * spares(this) - 100) : 0;
+      }),
+    ];
+    restore = () => spies.forEach((s) => s.mockRestore());
+    const frame = () => act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
+    const channel = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '7' } };
+    act(() => usePlayerStore.setState({ source: channel, status: 'error', error: 'HTTP 404', isFullscreen: true, durationSeconds: undefined }));
+    render(<Controls variant="overlay" visible channelPanel />);
+    await frame();
+    await frame();
+    const row = document.querySelector('[data-ctl-row]')!;
+    const order = Array.from(row.children, (el) => el.getAttribute('data-ctl') ?? (el.hasAttribute('data-row-free') ? 'free' : el.querySelector('[data-ctl]')?.getAttribute('data-ctl')));
+    expect(order.slice(0, 4)).toEqual(['channels', 'channel-up', 'channel-down', 'free']);
+  });
+
   it('keeps the spare buttons the row has room for, most useful first', () => {
     restore();
     // A row with 100 px to spare, laid out like a flex row: each spare shown takes 44 px of it.

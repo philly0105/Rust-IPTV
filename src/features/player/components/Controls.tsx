@@ -226,8 +226,9 @@ const ICON = {
   muted: <VolumeX />,
   quiet: <Volume1 />,
   loud: <Volume2 />,
-  channelUp: <ChevronUp />,
-  channelDown: <ChevronDown />,
+  // A chevron is a small glyph in its box: a heavier stroke matches the weight of the icons beside it.
+  channelUp: <ChevronUp strokeWidth={2.25} />,
+  channelDown: <ChevronDown strokeWidth={2.25} />,
   channels: <PanelLeftOpen className="rtl:-scale-x-100" />,
 };
 
@@ -1536,7 +1537,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
     </>
   );
   const channelsButton = channelPanel && (
-    <CtlButton id="channels" shortcut="channelPanel" label={t('openChannelPanel')} onClick={() => useMediaStore.setState({ channelPanelOpen: true })}>
+    <CtlButton id="channels" className={spareClass} shortcut="channelPanel" label={t('openChannelPanel')} onClick={() => useMediaStore.setState({ channelPanelOpen: true })}>
       {ICON.channels}
     </CtlButton>
   );
@@ -1699,9 +1700,14 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
               {!panelOwnsError && playButton}
               {!compact && !narrow && nextButton}
               {!narrow && jumpButtons}
-              {channelsButton}
-              {!narrow && zapButtons}
+              {/* Over an error a narrow row has no volume, so nothing makes the channel buttons step aside:
+                  they stay together at the start, as on a wide bar. */}
+              {(!narrow || panelOwnsError) && channelsButton}
+              {(!narrow || (panelOwnsError && inRow('zap'))) && zapButtons}
               {!panelOwnsError && <VolumeControl compact={compact || narrow} />}
+              {/* With the volume, the channel list steps aside while its slider is out. Right of it, like
+                  the spares, so the volume button does not move under the finger that opened it. */}
+              {narrow && !panelOwnsError && channelsButton}
 
               {panelOwnsError ? null : isLive ? (
                 <LiveEdge
@@ -1737,7 +1743,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
               <div data-row-free="" className="flex-1" />
               {variant === 'dock' && !compact && <BarReadout fallback={readoutIdle} />}
               {/* A narrow row keeps its spares right of the volume, so they can step aside when it opens. */}
-              {narrow && inRow('zap') && zapButtons}
+              {narrow && !panelOwnsError && inRow('zap') && zapButtons}
               {narrow && inRow('jump') && jumpButtons}
               {narrow && inRow('skip') && prevButton}
               {narrow && inRow('skip') && nextButton}

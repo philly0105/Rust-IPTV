@@ -25,7 +25,7 @@ import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { usePlayerStore } from '@/features/player';
 import { canShareSource, isShareableUrl } from '@/features/player/shareable';
 
-import { ChannelLogo } from '../components/ChannelLogo';
+import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import type { MenuEntry, MenuHeader, MenuItem } from '../components/ContextMenu';
 import { archivePath, canBrowseArchive } from '../lib/archive';
 import { displayChannelName } from '../lib/channelName';
@@ -152,10 +152,14 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
   }, [channel, source, favorite, name, live, t, navigate, onPlay, onToggleFavorite, onMapGuide, organize, editHints, multiviewItem, addToListItem, editItems, lockItems]);
 }
 
-/** The menu's header for a channel: its logo, its name and what is on (LG-16). */
+/**
+ * The menu's header for a channel: its logo, its name and what is on (LG-16). `name` is the name
+ * the row shows (the strip setting applied); the header draws it as the row does, with a place's
+ * tag after it, quiet, so "ESPN2 FHD US" beside the row is not headed "US| ESPN2 FHD".
+ */
 export function channelMenuHeader(channel: Channel, name: string, nowTitle?: string): MenuHeader {
   return {
-    title: name,
+    title: <ChannelName name={name} className="block truncate" />,
     subtitle: nowTitle,
     media: <ChannelLogo src={channel.logoUrl} name={name} size={28} sourceId={channel.ref.sourceId} />,
   };

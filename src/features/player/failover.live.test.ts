@@ -1,3 +1,4 @@
+import i18next from 'i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_SETTINGS, type ItemRef, type LiveAlternate, type PlayerSource, type Settings } from '@/api/types';
@@ -97,6 +98,32 @@ describe('live failover', () => {
     const toast = useToastStore.getState().toasts.at(-1);
     expect(toast?.id).toBe('live-failover');
     expect(toast?.action).toBeDefined();
+  });
+
+  it('names the channels in the toast with a place tag after the name, or none with the strip setting', async () => {
+    const t = vi.spyOn(i18next, 't');
+    handlers['live.alternates'] = () => ({ key: 'sky sports 1', quality: 'hd', alternates: [alt('s2', '20', 'UK| Sky Sports 1 HD')] });
+    // Other channels than the one beforeEach played: its copies are cached already.
+    await usePlayerStore.getState().play({ ...origin, url: 'http://s1/live/5.m3u8', title: 'UK| Sky Sports 1', ref: ref('s1', '5') });
+    reportStatus('playing');
+    await settle();
+    reportStatus('error', 'HTTP 404');
+    await vi.waitFor(() => expect(sourceIdNow()).toBe('s2'));
+    expect(t).toHaveBeenCalledWith('player:liveFailoverSwitched', { channel: 'Sky Sports 1 HD (UK)', source: 'Source s2' });
+    expect(t).toHaveBeenCalledWith('player:liveFailoverSwitchedDetail', { channel: 'Sky Sports 1 (UK)' });
+
+    // With the setting on, the player holds the stripped names and the toast says just those.
+    failover.__resetFailover();
+    t.mockClear();
+    settings({ stripCountryPrefix: true });
+    handlers['live.alternates'] = () => ({ key: 'sky sports 1', quality: 'hd', alternates: [alt('s3', '30', 'UK| Sky Sports 1 HD')] });
+    await usePlayerStore.getState().play({ ...origin, url: 'http://s1/live/6.m3u8', title: 'Sky Sports 1', ref: ref('s1', '6') });
+    reportStatus('playing');
+    await settle();
+    reportStatus('error', 'HTTP 404');
+    await vi.waitFor(() => expect(sourceIdNow()).toBe('s3'));
+    expect(t).toHaveBeenCalledWith('player:liveFailoverSwitched', { channel: 'Sky Sports 1 HD', source: 'Source s3' });
+    expect(t).toHaveBeenCalledWith('player:liveFailoverSwitchedDetail', { channel: 'Sky Sports 1' });
   });
 
   it('tries the next copy when one fails before playing, and never loops back', async () => {

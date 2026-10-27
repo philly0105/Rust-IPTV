@@ -86,6 +86,19 @@ export function stripCountryPrefix(name: string): string {
   return splitCountryTag(name).name;
 }
 
+/**
+ * A channel's name for plain text (a toast, a dialog's title), as ChannelName draws it: a place's
+ * tag after the name in brackets, "ABC (Backup) (US)" for "US| ABC (Backup)", and the bare name
+ * with the strip setting on. Text has no quiet style for the tag, and in front it is what a reader
+ * meets first while the rows beside the message lead with the name.
+ */
+export function plainChannelName(name: string | null | undefined, strip: boolean | undefined): string {
+  const raw = name ?? '';
+  if (strip) return stripCountryPrefix(raw);
+  const split = splitPlaceTag(raw);
+  return split.tag ? `${split.name} (${split.tag})` : raw;
+}
+
 /** Display name for a channel under the current setting. */
 export function displayChannelName(name: string | null | undefined, strip: boolean | undefined): string {
   const raw = name ?? '';

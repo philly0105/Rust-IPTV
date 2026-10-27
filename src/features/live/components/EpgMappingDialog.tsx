@@ -5,13 +5,13 @@ import { useTranslation } from 'react-i18next';
 import { invalidate, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
+import { plainChannelName } from '@/lib/channelName';
 import { parseGuideShift } from '@/lib/guideShift';
 
 import { Button, Dialog, ErrorState, SearchInput, Skeleton, cn, fieldClass, useToast, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
-import { displayChannelName } from '../lib/channelName';
 import { ChannelLogo } from './ChannelLogo';
 
 /** Strips quality and country decorations so the first search is useful. */
@@ -91,7 +91,8 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
     <Dialog
       open={open}
       onClose={onClose}
-      title={t('epgMappingTitle', { name: displayChannelName(channel?.name, prefs.stripCountryPrefix) })}
+      // Plain text, so the tag goes after the name in brackets, as the toasts write it.
+      title={t('epgMappingTitle', { name: plainChannelName(channel?.name, prefs.stripCountryPrefix) })}
       size="md"
       // What the channel's guide comes from now, under the title. Every choice below applies at
       // once, so there is no footer: the close button, Escape and the scrim leave without a change.

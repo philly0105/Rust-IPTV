@@ -43,11 +43,11 @@ afterEach(() => {
   rpcMock.calls.length = 0;
 });
 
-function renderDialog() {
+function renderDialog(channel = makeChannel(1)) {
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <EpgMappingDialog channel={makeChannel(1)} onClose={() => undefined} />
+        <EpgMappingDialog channel={channel} onClose={() => undefined} />
       </I18nextProvider>
     </QueryClientProvider>,
   );
@@ -68,6 +68,13 @@ describe('epg mapping dialog: the choice first', () => {
     // Every choice applies at once: no footer with a Cancel beside the close button.
     expect(within(dialog).queryByRole('button', { name: 'Cancel' })).toBeNull();
     expect(dialog.querySelector('[data-dialog-close]')).not.toBeNull();
+  });
+
+  it('names the channel in its title with the country tag after the name, as the row reads', () => {
+    rpcMock.handlers['epg.channelsSearch'] = () => [];
+    rpcMock.handlers['epg.resolve'] = () => ({ via: 'name', epgChannelId: 'espn2.us' });
+    renderDialog({ ...makeChannel(1), name: 'US| ESPN2 FHD' });
+    expect(screen.getByRole('dialog', { name: 'Guide data for ESPN2 FHD (US)' })).toBeTruthy();
   });
 
   it('selects the suggested search, so typing replaces it', async () => {

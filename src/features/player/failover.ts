@@ -17,6 +17,7 @@ import { create } from 'zustand';
 import { rpc } from '@/api/transport';
 import { itemKey, type ItemKey, type ItemRef, type LiveAlternate, type LiveAlternates, type PlayerSource } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
+import { plainChannelName } from '@/lib/channelName';
 import { liveQualityKey } from '@/lib/liveQuality';
 import { dismissToast, toast } from '@/ui';
 
@@ -230,6 +231,15 @@ function channelTitle(name: string): string {
   return displayChannelName(name, peekSettings()?.stripCountryPrefix) || name;
 }
 
+/**
+ * A channel's name in a toast, from the title the player holds (already under the strip setting):
+ * a place's tag after the name, "Switched to ABC (Backup) (US)", as the rows beside it read, not
+ * "US| ABC (Backup)".
+ */
+function toastName(title: string): string {
+  return peekSettings()?.stripCountryPrefix ? title : plainChannelName(title, false);
+}
+
 function argsForAlternate(alt: LiveAlternate, like: PlayerSource): PlayItemArgs {
   const args: PlayItemArgs = {
     ref: alt.channel.ref,
@@ -370,8 +380,8 @@ export async function failoverLive(failed: PlayerSource, cls?: StreamErrorClass)
   if (!res) return false;
   toast({
     id: LIVE_FAILOVER_TOAST,
-    title: i18next.t('player:liveFailoverSwitched', { channel: res.to.title, source: res.alternate.sourceName }),
-    description: i18next.t('player:liveFailoverSwitchedDetail', { channel: chain?.origin.title ?? failed.title }),
+    title: i18next.t('player:liveFailoverSwitched', { channel: toastName(res.to.title), source: res.alternate.sourceName }),
+    description: i18next.t('player:liveFailoverSwitchedDetail', { channel: toastName(chain?.origin.title ?? failed.title) }),
     variant: 'info',
     action: { label: i18next.t('player:undo'), onClick: res.undo },
   });
@@ -413,7 +423,7 @@ async function maybeRedirectToPin(ref: ItemRef, data: LiveAlternates): Promise<v
   const pinnedKey = itemKey(target.channel.ref);
   toast({
     id: LIVE_FAILOVER_TOAST,
-    title: i18next.t('player:livePinnedSwitched', { channel: to.title, source: target.sourceName }),
+    title: i18next.t('player:livePinnedSwitched', { channel: toastName(to.title), source: target.sourceName }),
     variant: 'info',
     action: {
       label: i18next.t('player:undo'),

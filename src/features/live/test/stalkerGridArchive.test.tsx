@@ -131,7 +131,10 @@ describe('EpgGridPage on a Stalker portal without XMLTV', () => {
   it('asks the portal about the rows a fling stops on, not the rows it passes (LV-4)', async () => {
     TOTAL = 600;
     renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
-    expect(await screen.findByRole('button', { name: /^Now c5,/ })).toBeTruthy();
+    // The first screen only sets the fling up. Finding a cell by its name walks every row, and
+    // jsdom works out each channel name's dir="auto" on the way, which on a loaded machine ran
+    // past the default second; the fling's own checks below keep their timing.
+    expect(await screen.findByRole('button', { name: /^Now c5,/ }, { timeout: 5000 })).toBeTruthy();
     const rows = () => rpcMock.calls.filter((c) => c.cmd === 'stalker.epg').map((c) => Number((c.args as EpgArgs).ref.itemId.slice(1)));
     // Let the first screen's queue drain, so its workers are free when the fling starts.
     for (let seen = -1; seen !== rows().length; ) {

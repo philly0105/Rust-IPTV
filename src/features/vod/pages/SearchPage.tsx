@@ -11,6 +11,7 @@ import { rpcRaw } from '@/api/transport';
 import { itemKey, type Channel, type GuideSearchHit, type Page as PageOf, type RecentEntry, type SeriesItem, type Source, type VodItem } from '@/api/types';
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { displayChannelName } from '@/features/live/lib/channelName';
 import { ms } from '@/features/live/lib/epgTime';
@@ -545,7 +546,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
             className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             {activeGroup.kind === 'live' ? (
-              <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} onPlayChannel={playChannel} scrollRef={scrollRef} />
+              <ChannelGrid hits={activeGroup.hits} showBadges={showBadges} strip={prefs.stripCountryPrefix} onPlayChannel={playChannel} scrollRef={scrollRef} />
             ) : (
               <PosterGrid
                 key={activeGroup.kind}
@@ -746,10 +747,31 @@ const ProgrammeList = memo(function ProgrammeList({
     setOpened(next);
   };
   const now = Date.now();
-  const channelOf = (hit: GuideSearchHit) => {
+  // The channel as Live TV's list names it (the country tag after the name, quiet), then its
+  // source when more than one is searched.
+  const sourceOf = (hit: GuideSearchHit) => (showSource ? names.get(hit.ref.sourceId) : undefined);
+  /** The same line as plain text, for a link's name: name computation drops a separator's spaces. */
+  const channelLabel = (hit: GuideSearchHit) => {
     const channel = displayChannelName(hit.channelName, stripCountryPrefix);
-    const source = showSource ? names.get(hit.ref.sourceId) : undefined;
+    const source = sourceOf(hit);
     return source ? `${channel} · ${source}` : channel;
+  };
+  const channelOf = (hit: GuideSearchHit) => {
+    const source = sourceOf(hit);
+    return (
+      <>
+        <ChannelName name={hit.channelName} strip={stripCountryPrefix} className="min-w-0 truncate" />
+        {source ? (
+          <>
+            {/* Spaces kept (a flex item drops its edge spaces), so the row reads and is named as before. */}
+            <span className="shrink-0 whitespace-pre">{' · '}</span>
+            <span dir="auto" className="min-w-0 shrink-[2] truncate">
+              {source}
+            </span>
+          </>
+        ) : null}
+      </>
+    );
   };
   const open = (hit: GuideSearchHit) => {
     const link = guideHitLink(hit);
@@ -800,7 +822,7 @@ const ProgrammeList = memo(function ProgrammeList({
                           </span>
                           {airing && <LivePill size="sm" dot="none" className="shrink-0" />}
                         </span>
-                        <span dir="auto" className="block truncate text-xs text-fg-muted">
+                        <span className="flex min-w-0 items-baseline text-xs text-fg-muted" data-testid="search-programme-channel">
                           {channelOf(hit)}
                         </span>
                       </span>
@@ -818,10 +840,11 @@ const ProgrammeList = memo(function ProgrammeList({
                             type="button"
                             data-grid-index={a.index}
                             onClick={() => open(a.hit)}
+                            aria-label={channelLabel(a.hit)}
                             dir="auto"
                             className={cn('inline-flex max-w-full items-center rounded-xs px-1 text-xs text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus', TOUCH_TARGET)}
                           >
-                            <span className="truncate">{channelOf(a.hit)}</span>
+                            <span className="flex min-w-0 items-baseline">{channelOf(a.hit)}</span>
                           </button>
                         ))}
                         {also.length > ALSO_SHOWN && (
@@ -1232,11 +1255,14 @@ const PosterHitCell = memo(function PosterHitCell({
 const ChannelGrid = memo(function ChannelGrid({
   hits,
   showBadges,
+  strip,
   onPlayChannel,
   scrollRef,
 }: {
   hits: SearchHit[];
   showBadges: boolean;
+  /** `settings.stripCountryPrefix`. */
+  strip: boolean;
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
@@ -1248,7 +1274,7 @@ const ChannelGrid = memo(function ChannelGrid({
       rowHeight={() => CHANNEL_ROW_HEIGHT}
       scrollRef={scrollRef}
       testId="vod-search-channels"
-      renderCell={(h, i) => <ChannelHitButton hit={h} index={i} showBadges={showBadges} onPlayChannel={onPlayChannel} />}
+      renderCell={(h, i) => <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={strip} onPlayChannel={onPlayChannel} />}
     />
   );
 });
@@ -1261,11 +1287,13 @@ function ChannelHitButton({
   hit: h,
   index,
   showBadges,
+  strip,
   onPlayChannel,
 }: {
   hit: SearchHit;
   index: number;
   showBadges: boolean;
+  strip: boolean;
   onPlayChannel: (c: Channel, hit: SearchHit) => void;
 }) {
   const c = h.item as Channel;
@@ -1283,9 +1311,8 @@ function ChannelHitButton({
         <Poster src={h.imageUrl} sourceId={c.ref.sourceId} width={logoWidth} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
       </div>
       <div className="min-w-0 flex-1">
-        <div dir="auto" title={h.title} className="truncate text-body-sm font-medium text-fg text-match-parent">
-          {h.title}
-        </div>
+        {/* As Live TV's list names it: the country tag after the name, quiet, or none with the setting. */}
+        <ChannelName name={h.title} strip={strip} title={h.title} className="block truncate text-body-sm font-medium text-fg text-match-parent" />
         {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
         <div className="flex min-w-0 gap-1.5 text-caption text-fg-subtle">
           {h.meta && <span className="tabular shrink-0">{h.meta}</span>}
@@ -1415,7 +1442,7 @@ function TopResults({
           <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CHANNEL_MIN_WIDTH}px, 1fr))` }} role="list">
             {live.hits.slice(0, TOP_CHANNELS).map((h, i) => (
               <div key={h.key} role="listitem" className="min-w-0">
-                <ChannelHitButton hit={h} index={i} showBadges={showBadges} onPlayChannel={onPlayChannel} />
+                <ChannelHitButton hit={h} index={i} showBadges={showBadges} strip={stripCountryPrefix} onPlayChannel={onPlayChannel} />
               </div>
             ))}
           </div>

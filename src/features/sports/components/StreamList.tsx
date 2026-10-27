@@ -11,6 +11,8 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { sameRef, type EpgProgram, type ItemRef, type Settings } from '@/api/types';
+// Straight from its module (sports/deps.ts re-exports only ChannelLogo from it), the same chunk.
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 
 import {
   Badge,
@@ -268,9 +270,8 @@ function StreamRow({
     <li className="flex min-w-0 items-center gap-3 py-2" data-testid="sports-stream" data-reason={match.reason}>
       <ChannelLogo src={match.channel.logoUrl} name={name} size={32} sourceId={match.sourceId} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span dir="auto" className="truncate text-body-sm font-medium text-fg">
-          {name}
-        </span>
+        {/* Named as Live TV's list names it: the country tag after the name, quiet. */}
+        <ChannelName name={match.channel.name} strip={ctx.strip} className="truncate text-body-sm font-medium text-fg" testId="sports-stream-name" />
         {/* Wraps as a whole: where the details and the toggle don't fit beside an action, the toggle
             goes under them rather than the details breaking in two. */}
         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">

@@ -217,6 +217,20 @@ describe('what the banner shows', () => {
     expect(screen.getByTestId('zap-logo-fallback')).toBeTruthy();
   });
 
+  it("names the channel as the player's titles do, as the provider writes it, so the name holds when the banner hides (round 5)", async () => {
+    tune(channel('101', 'US| CBS HD'));
+    render(
+      <>
+        <ZapBanner />
+        <ZapHeaderLine title="US| CBS HD" />
+      </>,
+    );
+    await advance(0);
+    expect(screen.getByTestId('zap-title').textContent).toBe('US| CBS HD');
+    expect(screen.getByTestId('mini-zap-line').textContent).toContain('US| CBS HD');
+    expect(screen.queryByTestId('channel-name-tag')).toBeNull();
+  });
+
   it('shows the compact one-line version with time left', async () => {
     tune(news);
     render(<ZapBanner compact />);

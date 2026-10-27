@@ -20,7 +20,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 import { cn, Skeleton } from '@/ui';
 import { ScheduleMarkView, type ScheduleIndex } from '@/features/recording';
 
-import { ChannelLogo } from '../components/ChannelLogo';
+import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName } from '../lib/channelName';
 import { MINUTE, canCatchUp, cellTextMaxPx, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
@@ -230,7 +230,13 @@ export const GuideRow = memo(function GuideRow({
                 {/* Playing: the tick and the playing mark are the amber; the number steps up to the text colour. */}
                 <span className={cn('w-7 shrink-0 text-end font-numeric text-sm tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
-                <span className={cn('min-w-0 flex-1 truncate text-body-sm text-fg', playing && 'font-semibold')}>{chName}</span>
+                {/* Named as Live TV's list names it: the country tag after the name, quiet, so a
+                    narrow column cuts the tag, not what tells ESPN2 from ESPNU. */}
+                <ChannelName
+                  name={ch.name}
+                  strip={stripCountryPrefix}
+                  className={cn('min-w-0 flex-1 truncate text-body-sm text-match-parent text-fg', playing && 'font-semibold')}
+                />
                 {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
                 {playing ? (
                   <span className="inline-flex shrink-0 text-accent-mark" data-testid="guide-playing-mark">

@@ -288,7 +288,7 @@ describe('search programmes on several channels', () => {
     await waitFor(() => expect(within(list).getAllByTestId('search-programme')).toHaveLength(2));
     const [first, second] = within(list).getAllByTestId('search-programme');
     // The first channel names the row; the others are links under it (with their source, as there are two).
-    expect(within(first!).getByText('Starling 1 · Northwind')).toBeTruthy();
+    expect(within(first!).getByTestId('search-programme-channel').textContent).toBe('Starling 1 · Northwind');
     const also = within(first!).getByTestId('search-programme-also');
     expect(within(also).getAllByRole('button').map((b) => b.textContent)).toEqual(['Starling 2 · Northwind', 'Starling 3 · Northwind']);
     // On the air now: LIVE beside its title, so the row keeps its height; the later airing has none.
@@ -296,6 +296,8 @@ describe('search programmes on several channels', () => {
     expect(second!.querySelector('[data-live-pill]')).toBeNull();
     // Under a finger each channel link is a full touch target, not a line of small text.
     for (const link of within(also).getAllByRole('button')) expect(link.className).toContain('pointer-coarse:min-h-');
+    // Each link is named by its channel and source as the line reads.
+    expect(within(also).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Starling 2 · Northwind', 'Starling 3 · Northwind']);
     // Past eight other channels the rest wait behind Show all (covered below).
     expect(within(also).queryByRole('button', { name: /Show all/ })).toBeNull();
     fireEvent.click(within(also).getByRole('button', { name: 'Starling 3 · Northwind' }));
@@ -447,5 +449,37 @@ describe('the landing reaches every category from the top', () => {
     await waitFor(() => expect(document.activeElement).toBe(toggle));
     expect(await screen.findByRole('list', { name: 'Categories' })).toBeTruthy();
     expect(localStorage.getItem(CATEGORY_INDEX_KEY)).toBe('1');
+  });
+});
+
+describe('Search names a channel as Live TV does (round 5)', () => {
+  /** The name part and the quiet tag ChannelName draws inside `el`. */
+  const drawn = (el: HTMLElement) => {
+    const tag = within(el).getByTestId('channel-name-tag');
+    return [tag.previousElementSibling!.textContent, tag.textContent];
+  };
+
+  it('a channel result and a programme row put the country tag after the name, quiet', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 1, 'US| Harbor News HD')], movies: [], series: [] });
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : [{ ...programme(1, 0, 23, 0), channelName: 'US| Harbor News HD' }]);
+    renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
+    const top = await screen.findByTestId('search-top');
+    const result = await within(top).findByRole('button', { name: /^US\| Harbor News HD/ });
+    expect(drawn(result)).toEqual(['Harbor News HD', 'US']);
+    expect(within(result).getByTestId('channel-name-tag').className).toContain('text-fg-subtle');
+    const line = await screen.findByTestId('search-programme-channel');
+    expect(drawn(line)).toEqual(['Harbor News HD', 'US']);
+    // Two sources here: the source follows the name as before.
+    expect(line.textContent).toContain(' · Northwind');
+  });
+
+  it('with "Hide country tags" on, a channel result leaves the tag out', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ stripCountryPrefix: true });
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 1, 'US| Harbor News HD')], movies: [], series: [] });
+    renderAt('/search?q=harbor', [{ path: '/search', element: <SearchPage /> }]);
+    // Only channels match: the channel grid shows on its own.
+    const result = await screen.findByRole('button', { name: /^Harbor News HD/ });
+    expect(result.textContent).not.toContain('US');
+    expect(within(result).queryByTestId('channel-name-tag')).toBeNull();
   });
 });

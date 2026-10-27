@@ -287,6 +287,9 @@ function ZapChip({
             {number}
           </span>
         )}
+        {/* The provider's name as written, as the stage's title bar and the mini player's header show
+            it once the banner hides. With ChannelName here alone the name reordered a few seconds
+            after every zap, so the player's titles move to ChannelName together. */}
         <span data-testid="zap-title" className="max-w-[60%] shrink-0 truncate text-body-sm leading-tight font-medium" title={title}>
           {title}
         </span>

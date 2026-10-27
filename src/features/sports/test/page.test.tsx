@@ -744,6 +744,20 @@ describe('sports page', () => {
     expect(end).toBeLessThanOrEqual(Date.now());
   });
 
+  it("names a stream's channel as Live TV does: the country tag after the name, quiet (round 5)", async () => {
+    rpc.handlers['settings.get'] = () => ({ stripCountryPrefix: false });
+    const g = h.liveGame('1');
+    setDay([g]);
+    setStreams(g, [h.match(ESPN, { reason: 'event' })]);
+    await openReady();
+    const row = within(card(g)).getByTestId('sports-stream');
+    const tag = within(row).getByTestId('channel-name-tag');
+    expect([tag.previousElementSibling!.textContent, tag.textContent]).toEqual(['ESPN HD', 'US']);
+    expect(tag.className).toContain('text-fg-subtle');
+    // Screen readers get the provider's name as it is.
+    expect(within(row).getByTestId('sports-stream-name').querySelector('.sr-only')!.textContent).toBe('US| ESPN HD');
+  });
+
   it("puts the rows that can act first: a final game's one archived copy is not hidden behind Show all", async () => {
     const g = h.finalGame('1');
     const guide = { start: new Date(g.startMs - 10 * h.MINUTE).toISOString(), end: new Date(g.startMs + 3 * h.HOUR).toISOString(), title: 'NBA Basketball' };

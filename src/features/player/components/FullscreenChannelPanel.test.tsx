@@ -25,7 +25,7 @@ vi.mock('@/api/transport', () => {
 });
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 
-const { usePlayerStore, __resetPlayerForTests } = await import('../store');
+const { usePlayerStore, __resetPlayerForTests, setSettingsCache } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
 const { __resetZapBannerForTests } = await import('../zapBanner');
 const { FullscreenChannelPanel } = await import('./FullscreenChannelPanel');
@@ -298,5 +298,37 @@ describe('fullscreen channel panel empty states (PL-COPY-I18N)', () => {
     expect(await screen.findByText('No channels to show')).toBeTruthy();
     fireEvent.change(search(), { target: { value: 'zzz' } });
     expect(await screen.findByText('No channels match “zzz”')).toBeTruthy();
+  });
+});
+
+describe('fullscreen channel panel names (round 5)', () => {
+  beforeEach(() => {
+    const base = rpcMock.handlers['catalog.channels']!;
+    rpcMock.handlers['catalog.channels'] = (a) => {
+      const page = base(a) as { items: Channel[] };
+      return { ...page, items: page.items.map((c) => ({ ...c, name: `US| ${c.name}` })) };
+    };
+  });
+  afterEach(() => setSettingsCache(null));
+
+  it('draws the country tag after the name, quiet on the glass, as the channel lists do', async () => {
+    play(3);
+    mount();
+    await waitFor(() => expect(screen.getAllByTestId('channel-name-tag').length).toBeGreaterThan(0));
+    const tag = screen.getAllByTestId('channel-name-tag')[0]!;
+    expect(tag.textContent).toBe('US');
+    expect(tag.previousElementSibling!.textContent).toMatch(/^Channel \d+$/);
+    expect(tag.className).toContain('text-on-glass-muted');
+    // The option is still named by the provider's name.
+    expect(tag.closest('[role=option]')!.textContent).toContain('US| Channel');
+  });
+
+  it('leaves the tag out with "Hide country tags" on', async () => {
+    setSettingsCache({ ...DEFAULT_SETTINGS, stripCountryPrefix: true });
+    play(3);
+    mount();
+    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(0));
+    expect(screen.queryAllByTestId('channel-name-tag')).toEqual([]);
+    expect(screen.getAllByRole('option')[0]!.textContent).not.toContain('US|');
   });
 });

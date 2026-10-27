@@ -22,7 +22,7 @@ import { intlLocale } from '@/lib/intl';
 import { useDebounced } from '../hooks/useDebounced';
 import { displayChannelName } from '../lib/channelName';
 import { formatClock, formatDay, localDayDiff, ms, programWhen } from '../lib/epgTime';
-import { ChannelLogo } from '../components/ChannelLogo';
+import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { displayHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchWindow } from './search';
 import { useStable } from './useStable';
 
@@ -455,9 +455,7 @@ const HitRow = memo(function HitRow({
           </span>
           <span className="flex min-w-0 gap-1.5 text-xs text-fg-muted">
             {hit.channelNumber !== undefined ? <span className="shrink-0 tabular-nums text-fg-subtle">{hit.channelNumber}</span> : null}
-            <span dir="auto" className="truncate">
-              {name}
-            </span>
+            <ChannelName name={hit.channelName} strip={strip} className="min-w-0 truncate" />
           </span>
         </span>
       </button>

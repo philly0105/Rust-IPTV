@@ -70,7 +70,7 @@
   "settingsAbout": "アプリについて",
   "settingsParental": "ペアレンタルコントロール",
   "settingsGeneralKeywords": "言語, アラビア語, 英語, スタートページ, 起動, ホーム, ダウンロード, 国名プレフィックス, 評価, 更新, ウィンドウ, 全画面, 最低評価, 国タグ, サブスクリプション, 有効期限",
-  "settingsPlaybackKeywords": "プレーヤー, 内蔵, 埋め込み, mpv, VLC, ストリーム形式, HLS, 字幕, キャプション, 自動再生, 次のエピソード, 再接続, 全画面, チャンネル一覧",
+  "settingsPlaybackKeywords": "プレーヤー, 内蔵, 埋め込み, mpv, VLC, ストリーム形式, HLS, 字幕, キャプション, 自動再生, 次のエピソード, 再接続, 全画面",
   "settingsPlayersKeywords": "mpv, VLC, パス, 引数, 外部プレーヤー",
   "settingsEpgKeywords": "番組表, ガイド, EPG, XMLTV, 番組, 時差, タイムライン, リスト, タイムゾーン",
   "settingsRecordingKeywords": "録画, マージン, リマインダー, 通知, 録画フォルダー",

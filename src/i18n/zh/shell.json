@@ -70,7 +70,7 @@
   "settingsAbout": "关于",
   "settingsParental": "家长控制",
   "settingsGeneralKeywords": "语言, 阿拉伯语, 英语, 起始页, 启动, 主页, 下载, 国家前缀, 评分, 刷新, 窗口, 全屏, 最低评分, 国家标签, 订阅, 到期",
-  "settingsPlaybackKeywords": "播放器, 内置, 嵌入式, mpv, VLC, 流格式, HLS, 字幕, 自动播放, 下一集, 重新连接, 全屏, 频道列表",
+  "settingsPlaybackKeywords": "播放器, 内置, 嵌入式, mpv, VLC, 流格式, HLS, 字幕, 自动播放, 下一集, 重新连接, 全屏",
   "settingsPlayersKeywords": "mpv, VLC, 路径, 参数, 外部播放器",
   "settingsEpgKeywords": "节目指南, 节目单, EPG, XMLTV, 节目, 时间偏移, 时间轴, 列表, 时区",
   "settingsRecordingKeywords": "录制, 录像, 余量, 提醒, 通知, 录制文件夹",

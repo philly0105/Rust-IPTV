@@ -139,6 +139,15 @@ describe('settings words (L3-app-8)', () => {
     await waitFor(() => expect(shown(palette).some((s) => s.includes('Use dark theme'))).toBe(true));
   });
 
+  it("a bare 'channel' finds the channels and Live TV, not settings sections", async () => {
+    // Each typed word is checked against all of an item's keywords, so a phrase such as
+    // "switch channel" answered the single word "channel", the most common thing typed in an
+    // IPTV app, and four settings sections pushed Live TV and the search row down.
+    const { palette } = await openPaletteWith('channel');
+    await waitFor(() => expect(shown(palette).some((s) => s.includes('Live TV'))).toBe(true));
+    expect(shown(palette).filter((s) => s.includes('Settings:'))).toEqual([]);
+  });
+
   it('the browser has no External players section to offer', async () => {
     const { palette } = await openPaletteWith('settings');
     await waitFor(() => expect(shown(palette).some((s) => s.includes('Settings: Playback'))).toBe(true));

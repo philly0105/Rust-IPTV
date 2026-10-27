@@ -70,7 +70,7 @@
   "settingsAbout": "À propos",
   "settingsParental": "Contrôle parental",
   "settingsGeneralKeywords": "langue, arabe, anglais, accueil, démarrage, téléchargements, préfixe de pays, note, actualiser, fenêtre, plein écran, note minimale, codes pays, abonnement, expiration",
-  "settingsPlaybackKeywords": "lecteur, intégré, mpv, VLC, format du flux, HLS, sous-titres, lecture automatique, épisode suivant, reconnexion, plein écran, liste des chaînes",
+  "settingsPlaybackKeywords": "lecteur, intégré, mpv, VLC, format du flux, HLS, sous-titres, lecture automatique, épisode suivant, reconnexion, plein écran",
   "settingsPlayersKeywords": "mpv, VLC, chemin, arguments, lecteur externe",
   "settingsEpgKeywords": "guide, EPG, XMLTV, programmes, grille, décalage horaire, chronologie, liste, fuseau horaire",
   "settingsRecordingKeywords": "enregistrer, enregistrement, marge, rappels, notifications, dossier des enregistrements",

@@ -5,6 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
 
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
+import { displayChannelName } from '@/lib/channelName';
 import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
 import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from '@/features/mylist/components/MyListButton';
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
@@ -572,19 +575,21 @@ export function ChannelCard({
   watchPath,
 }: ChannelCardProps) {
   const { t } = useTranslation('shell');
+  const { stripCountryPrefix: strip } = useDisplayPrefs();
   const openMenu = useContext(ChannelMenuContext);
   const watch = useWatchChannel(onPlay, channel, watchPath);
   const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
   return (
     <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
       <div className={cn(CARD_ART, 'aspect-video w-full')}>
-        <LogoArt name={name} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
+        {/* The name Live TV's row gives its logo, so the card's tint matches the channel's there. */}
+        <LogoArt name={displayChannelName(name, strip)} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
         <PlayGlyph />
         {nowProgress !== undefined && <EdgeProgress value={nowProgress} tone="quiet" />}
       </div>
-      <span dir="auto" title={name} className={CAPTION_TITLE}>
-        {name}
-      </span>
+      {/* As every list names a channel: "CBS HD" with a quiet "US" after it, or no tag with the
+          setting that hides them. */}
+      <ChannelName name={name} strip={strip} title={name} className={CAPTION_TITLE} />
       {now && showSourceWithNow && sourceName ? (
         // Programme first; the source keeps up to half the line, so it never truncates away.
         <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
@@ -804,6 +809,12 @@ export interface OnNowCardProps {
  * programme title and the channel under it, and how far it has run along the bottom edge.
  */
 export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
+  const { stripCountryPrefix: strip } = useDisplayPrefs();
+  // With several sources Home names the source after the channel ("US| CBS HD, Northwind"): the
+  // channel's own name is drawn as every list draws it, the source follows as written.
+  const lead = channel && [channel.name, isolate(channel.name)].find((part) => channelName.startsWith(part));
+  const shownName = lead ? channel.name : channelName;
+  const afterName = lead ? channelName.slice(lead.length) : '';
   const openMenu = useContext(ChannelMenuContext);
   // On now is only ever Home's own rail, so its cards open the channel's Live TV. Played in the mini
   // player over Home, the pressed card left On now (its channel joins Recently watched) and the
@@ -824,7 +835,7 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
             )}
           </>
         ) : (
-          <LogoArt name={channelName} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
+          <LogoArt name={displayChannelName(shownName, strip)} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
         )}
         <PlayGlyph />
         {progress !== undefined && <EdgeProgress value={progress} tone={programmeArt ? 'glass-quiet' : 'quiet'} />}
@@ -833,8 +844,13 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
         {programme}
       </span>
       <span className="flex min-w-0 items-baseline gap-1.5 text-caption text-fg-muted">
-        <span dir="auto" title={channelName} className="min-w-0 truncate text-match-parent">
-          {channelName}
+        <span title={channelName} className="flex min-w-0 items-baseline">
+          <ChannelName name={shownName} strip={strip} className="min-w-0 truncate text-match-parent" />
+          {afterName ? (
+            <span dir="auto" className="min-w-0 shrink-[2] truncate text-match-parent">
+              {afterName}
+            </span>
+          ) : null}
         </span>
         {left && (
           <>

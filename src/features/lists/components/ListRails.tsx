@@ -76,7 +76,8 @@ function ListRail({ list, sourceName }: { list: CustomList; sourceName: Map<stri
         return (
           <ChannelCard
             rail={rail}
-            name={name}
+            // The provider's name: the card draws its country tag quietly, or hides it by the setting.
+            name={c.name}
             logoUrl={c.logoUrl}
             now={nn?.now?.title}
             nowProgress={progress(nn?.now?.start, nn?.now?.end, offset)}

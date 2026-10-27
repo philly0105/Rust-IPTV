@@ -153,7 +153,7 @@ With embedded mpv, the app window itself shrinks to a small always-on-top player
 
 ## Multi-view
 
-Multi-view plays two to four live channels at once: right-click a channel and choose "Add to multi-view". Pick side by side, a grid of four, or one large and three small. Only the tile you click has sound. When a source would play on more tiles than its account allows connections, the page warns. The [multi-view keys](#multi-view-page) are listed with the other shortcuts.
+Multi-view plays two to four live channels at once: right-click a channel and choose "Add to multi-view", or open Multi-view and click one of the recent or favorite channels in the next free frame ("More channels…" opens the full list). Pick side by side, a grid of four, or one large and three small. Only the tile you click has sound. When a source would play on more tiles than its account allows connections, the page warns. The [multi-view keys](#multi-view-page) are listed with the other shortcuts.
 
 ## Recording and reminders
 

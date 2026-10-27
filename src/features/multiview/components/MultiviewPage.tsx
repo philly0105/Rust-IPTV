@@ -5,20 +5,21 @@ import { Link, useLocation } from 'react-router';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
+import { itemKey } from '@/api/types';
 
-import { gateItem } from '../addChannel';
+import { addToWall, gateItem } from '../addChannel';
 import { buttonClass, cn, EmptyState, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
 import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
-import type { MultiviewLayout, MultiviewTile } from '../types';
+import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../types';
 import { focusTileOf } from '../paths';
+import { useQuickPicks, type QuickPick } from '../quickPicks';
 import { useMainPlayerHandoff } from '../useMainPlayerHandoff';
 import { overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
 import { focusSlot, useWallKeyboard } from '../useWallKeyboard';
 import { useWallFullscreen } from '../useWallFullscreen';
 import { LimitBanners, loadKey, MainPlayingBanner } from './Banners';
 import { ChannelPicker, type PickerMode } from './ChannelPicker';
-import { EmptyIntro } from './EmptyIntro';
 import { LAYOUT_LABEL_KEYS, WallToolbar } from './WallToolbar';
 import { Wall } from './Wall';
 
@@ -59,13 +60,13 @@ function useIdleChrome(active: boolean) {
   return { visible: !active || visible, poke, hold };
 }
 
-/** The page while the sources list loads with nothing on the wall: the frames, without text. */
+/** The page while the sources list loads with nothing on the wall: the toolbar and frames, without text. */
 function WallSkeleton({ layout }: { layout: MultiviewLayout }) {
   return (
     <div aria-hidden className="flex min-h-0 flex-1 flex-col" data-testid="multiview-loading">
-      <div className="flex flex-col gap-3 border-b border-divider bg-surface px-4 py-5 sm:px-6">
-        <Skeleton className="h-6 w-72 max-w-full" />
-        <Skeleton className="h-4 w-[28rem] max-w-full" />
+      <div className="flex items-center gap-3 border-b border-divider bg-surface px-(--page-gutter) py-2">
+        <Skeleton className="h-8 w-40 rounded-md" />
+        <Skeleton className="h-8 w-28 rounded-md" />
       </div>
       <div className="relative flex min-h-0 flex-1 overflow-y-auto p-1 [container-type:size] @2xl:p-2">
         <div className={cn(WALL_BASE, WALL_CLASSES['2x2'])}>
@@ -83,7 +84,8 @@ function WallSkeleton({ layout }: { layout: MultiviewLayout }) {
  *
  * Pieces: the toolbar (layout, add, the wall's sound, full screen, clear), banners (accounts
  * over their connection limit, the main player playing), the wall (Wall and Tile), the
- * channel picker. An empty wall shows what multi-view does above its free frames.
+ * channel picker. The toolbar is there from the first visit; an empty wall says what multi-view
+ * does in the header and its first free frame.
  *
  * Sound: exactly one tile holds it (the store's `audioKey`); clicking a tile or pressing its
  * number moves it there. The wall's mute silences all of them; the main player playing does
@@ -119,14 +121,17 @@ export function MultiviewPage() {
     () => (sources.loaded ? new Set(tiles.map((x) => x.ref.sourceId).filter((id) => !sources.byId.has(id))) : new Set<string>()),
     [sources.loaded, sources.byId, tiles],
   );
+  const quick = useQuickPicks(tiles);
+  const [pendingPick, setPendingPick] = useState<string | null>(null);
   const programmes = useNowPlaying(tiles);
   useTileLogoBackfill(tiles);
   const soundSlot = tiles.findIndex((x) => x.key === audioKey);
   const silent = muted || mainPlaying;
 
   const title = t('title');
-  const subtitle = count > 0 ? t('subtitle', { n: count, max: MAX_TILES }) : undefined;
-  useShellHeader(subtitle ? { title, subtitle } : { title }, [title, subtitle]);
+  // An empty wall says what the page is for where the count will go.
+  const subtitle = count > 0 ? t('subtitle', { n: count, max: MAX_TILES }) : t('emptyTitle');
+  useShellHeader({ title, subtitle }, [title, subtitle]);
 
   // A swap whose tile went away (closed, cleared, replaced from elsewhere) ends.
   useEffect(() => {
@@ -257,6 +262,27 @@ export function MultiviewPage() {
 
   const replace = useCallback((key: string) => openPicker({ kind: 'replace', key }), [openPicker]);
 
+  // A quick pick goes up in the slot that offered it (the next free one), through the same checks
+  // and parental gate as the picker; focus follows it, since the button that was pressed is gone.
+  const pickBusy = useRef(false);
+  const quickAdd = useCallback(
+    async (p: QuickPick, slot: number) => {
+      if (pickBusy.current) return;
+      pickBusy.current = true;
+      setPendingPick(itemKey(p.ref));
+      try {
+        const ch: MultiviewChannelInput = p.logo ? { ref: p.ref, title: p.title, logo: p.logo } : { ref: p.ref, title: p.title };
+        const r = await addToWall(ch);
+        if (r === 'added') focusSlot(wallRef.current, slot);
+        else if (r === 'gateFailed') toast({ variant: 'error', title: t('toastGateFailed'), description: t('toastGateFailedHint') });
+      } finally {
+        pickBusy.current = false;
+        setPendingPick(null);
+      }
+    },
+    [t],
+  );
+
   const unlock = useCallback(
     (tile: MultiviewTile) => {
       if (fsActive) void fsExit();
@@ -385,7 +411,11 @@ export function MultiviewPage() {
       missingSources={missingSources}
       programmes={programmes}
       swapFrom={swapFrom}
+      picks={quick.picks}
+      picksLoading={quick.loading}
+      pendingPick={pendingPick}
       onAdd={() => openPicker(ADD)}
+      onPick={(p, slot) => void quickAdd(p, slot)}
       onListen={listen}
       onClose={close}
       onReplace={replace}
@@ -419,7 +449,6 @@ export function MultiviewPage() {
   } else {
     body = (
       <>
-        {count === 0 ? <EmptyIntro layout={layout} onLayout={setLayout} onPick={() => openPicker(ADD)} /> : null}
         <div
           ref={stageRef}
           data-testid="multiview-stage"
@@ -427,9 +456,11 @@ export function MultiviewPage() {
           onPointerMove={fsActive ? chrome.poke : undefined}
           onPointerDown={fsActive ? chrome.poke : undefined}
           onKeyDownCapture={fsActive ? chrome.poke : undefined}
-          className={cn('relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
+          className={cn('@container/stage relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
         >
-          {count > 0 && !fsActive ? <div inert={limitOver}>{toolbar(false)}</div> : null}
+          {/* One toolbar from the first visit on, so the layout choice never moves or changes look
+              when the first tile goes up. */}
+          {!fsActive ? <div inert={limitOver}>{toolbar(false)}</div> : null}
           {!fsActive ? (
             <div
               data-testid="multiview-limit-layer"
@@ -439,7 +470,7 @@ export function MultiviewPage() {
             </div>
           ) : null}
           {!fsActive ? banners : null}
-          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size]', fsActive ? 'p-0' : 'px-(--page-gutter) py-3 sm:py-4')}>{wall}</div>
+          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size] [container-name:wall]', fsActive ? 'p-0' : 'px-(--page-gutter) py-3 sm:py-4')}>{wall}</div>
           {fsActive ? (
             <div
               ref={overlayRef}

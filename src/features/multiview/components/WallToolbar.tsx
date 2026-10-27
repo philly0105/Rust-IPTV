@@ -84,89 +84,111 @@ export function WallToolbar({
       )}
     >
       {/* Layout: the kit segmented control, each segment drawn as its monitor wall. A layout that
-          cannot hold the tiles stays focusable and hoverable, so its tooltip can say why. */}
-      <SegmentedControl<MultiviewLayout>
-        size="sm"
-        tone={overlay ? 'glass' : 'default'}
-        label={t('layoutLabel')}
-        value={layout}
-        onChange={onLayout}
-        options={LAYOUTS.map((l) => ({
-          value: l,
-          label: t(LAYOUT_LABEL_KEYS[l]),
-          content: (
-            <>
-              <LayoutGlyph layout={l} tally={l === layout && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
-              <span className="hidden lg:inline">{t(LAYOUT_LABEL_KEYS[l])}</span>
-            </>
-          ),
-          disabledReason: layoutFits(l, count) ? undefined : t('layout1x2Disabled'),
-          testId: `multiview-layout-${l}`,
-        }))}
-      />
+          cannot hold the tiles stays focusable and hoverable, so its tooltip can say why. On a
+          stacked wall (under 42rem, which the stage passes at 45rem with its gutters) every layout
+          is the same column of tiles, so the choice waits for a wider window; L still cycles. */}
+      <div className="hidden @[45rem]/stage:flex">
+        <SegmentedControl<MultiviewLayout>
+          size="sm"
+          tone={overlay ? 'glass' : 'default'}
+          label={t('layoutLabel')}
+          value={layout}
+          onChange={onLayout}
+          options={LAYOUTS.map((l) => ({
+            value: l,
+            label: t(LAYOUT_LABEL_KEYS[l]),
+            content: (
+              <>
+                <LayoutGlyph layout={l} tally={l === layout && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
+                {/* Named only where the whole toolbar still fits one row with the names (a 64rem
+                    stage); narrower, the glyphs keep their names in tooltips. */}
+                <span data-testid="multiview-layout-name" className="hidden @[64rem]/stage:inline">
+                  {t(LAYOUT_LABEL_KEYS[l])}
+                </span>
+              </>
+            ),
+            disabledReason: layoutFits(l, count) ? undefined : t('layout1x2Disabled'),
+            testId: `multiview-layout-${l}`,
+          }))}
+        />
+      </div>
 
       <button type="button" className={toolButton(overlay)} onClick={onAdd} disabled={full} data-testid="multiview-add">
         <Plus aria-hidden className="size-4" />
         <span>{full ? t('wallFull') : t('addChannel')}</span>
       </button>
 
-      <div className="ms-auto flex items-center gap-1">
-        <Tooltip content={muted ? t('unmuteAll') : t('muteAll')} tone={overlay ? 'glass' : 'default'} describe={false}>
-          <button
-            type="button"
-            className={toolButton(overlay, 'px-0')}
-            aria-label={muted ? t('unmuteAll') : t('muteAll')}
-            aria-pressed={muted}
-            onClick={onToggleMute}
-            data-testid="multiview-mute"
-          >
-            <VolumeIcon aria-hidden className="size-4" />
-          </button>
-        </Tooltip>
-        <label htmlFor={volumeId} className="sr-only">
-          {t('volume')}
-        </label>
-        <input
-          id={volumeId}
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={muted ? 0 : percent}
-          aria-valuetext={`${muted ? 0 : percent}%`}
-          onChange={(e) => onVolume(Number(e.currentTarget.value) / 100)}
-          className={cn(
-            'h-9 w-20 cursor-pointer rounded-sm outline-none focus-visible:ring-2 sm:w-28',
-            overlay
-              ? 'accent-[color:var(--color-glass-accent,var(--color-accent,#f5b544))] focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]'
-              : // A neutral fill: amber marks the sound tally on the layout glyph, not a setting's level.
-                'accent-[color:var(--color-fg-muted,#c8cfdc)] focus-visible:ring-focus',
-          )}
-          data-testid="multiview-volume"
-        />
-        <Tooltip content={fullscreenSupported ? (fullscreen ? t('exitFullscreen') : t('fullscreen')) : t('fullscreenUnavailable')} tone={overlay ? 'glass' : 'default'} describe={!fullscreenSupported}>
-          <button
-            type="button"
-            className={toolButton(overlay, 'px-0')}
-            aria-label={fullscreen ? t('exitFullscreen') : t('fullscreen')}
-            // A disabled button gets no pointer events in every browser, so its reason stays a native title.
-            title={fullscreenSupported ? undefined : t('fullscreenUnavailable')}
-            aria-pressed={fullscreen}
-            disabled={!fullscreenSupported}
-            onClick={onToggleFullscreen}
-            data-testid="multiview-fullscreen"
-          >
-            {fullscreen ? <Minimize2 aria-hidden className="size-4" /> : <Maximize2 aria-hidden className="size-4" />}
-          </button>
-        </Tooltip>
-        {!overlay ? (
-          <button type="button" className={toolButton(false)} onClick={onClear} disabled={count === 0} data-testid="multiview-clear">
-            <Eraser aria-hidden className="size-4" />
-            <span className="hidden sm:inline">{t('clearWall')}</span>
-            <span className="sr-only sm:hidden">{t('clearWall')}</span>
-          </button>
-        ) : null}
-      </div>
+      {/* Sound, full screen and clear act on tiles: an empty wall leaves them out, and says how
+          the wall works in their place. The first free slot carries the same line for screen
+          readers, and shows it on a stacked wall, where this line is left out (FreeSlot). */}
+      {count === 0 ? (
+        <p
+          aria-hidden
+          data-testid="multiview-toolbar-hint"
+          className="ms-auto hidden min-w-[14rem] flex-1 text-end text-caption text-balance text-fg-muted @[45rem]/stage:block"
+        >
+          {t('emptyBody')}
+        </p>
+      ) : null}
+      {count > 0 ? (
+        <div className="ms-auto flex items-center gap-1">
+          <Tooltip content={muted ? t('unmuteAll') : t('muteAll')} tone={overlay ? 'glass' : 'default'} describe={false}>
+            <button
+              type="button"
+              className={toolButton(overlay, 'px-0')}
+              aria-label={muted ? t('unmuteAll') : t('muteAll')}
+              aria-pressed={muted}
+              onClick={onToggleMute}
+              data-testid="multiview-mute"
+            >
+              <VolumeIcon aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
+          <label htmlFor={volumeId} className="sr-only">
+            {t('volume')}
+          </label>
+          <input
+            id={volumeId}
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={muted ? 0 : percent}
+            aria-valuetext={`${muted ? 0 : percent}%`}
+            onChange={(e) => onVolume(Number(e.currentTarget.value) / 100)}
+            className={cn(
+              'h-9 w-20 cursor-pointer rounded-sm outline-none focus-visible:ring-2 sm:w-28',
+              overlay
+                ? 'accent-[color:var(--color-glass-accent,var(--color-accent,#f5b544))] focus-visible:ring-[color:var(--color-glass-accent,var(--color-focus,#ffc865))]'
+                : // A neutral fill: amber marks the sound tally on the layout glyph, not a setting's level.
+                  'accent-[color:var(--color-fg-muted,#c8cfdc)] focus-visible:ring-focus',
+            )}
+            data-testid="multiview-volume"
+          />
+          <Tooltip content={fullscreenSupported ? (fullscreen ? t('exitFullscreen') : t('fullscreen')) : t('fullscreenUnavailable')} tone={overlay ? 'glass' : 'default'} describe={!fullscreenSupported}>
+            <button
+              type="button"
+              className={toolButton(overlay, 'px-0')}
+              aria-label={fullscreen ? t('exitFullscreen') : t('fullscreen')}
+              // A disabled button gets no pointer events in every browser, so its reason stays a native title.
+              title={fullscreenSupported ? undefined : t('fullscreenUnavailable')}
+              aria-pressed={fullscreen}
+              disabled={!fullscreenSupported}
+              onClick={onToggleFullscreen}
+              data-testid="multiview-fullscreen"
+            >
+              {fullscreen ? <Minimize2 aria-hidden className="size-4" /> : <Maximize2 aria-hidden className="size-4" />}
+            </button>
+          </Tooltip>
+          {!overlay ? (
+            <button type="button" className={toolButton(false)} onClick={onClear} data-testid="multiview-clear">
+              <Eraser aria-hidden className="size-4" />
+              <span className="hidden sm:inline">{t('clearWall')}</span>
+              <span className="sr-only sm:hidden">{t('clearWall')}</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

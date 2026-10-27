@@ -1,4 +1,3 @@
-import { Plus } from 'lucide-react';
 import { forwardRef, memo, type KeyboardEventHandler } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -7,7 +6,9 @@ import { itemKey, type ItemKey, type ParentalMode } from '@/api/types';
 import { cn } from '../deps';
 import { capacityOf, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import type { MultiviewLayout, MultiviewTile } from '../types';
+import type { QuickPick } from '../quickPicks';
 import { useTileLock } from '../useWallData';
+import { FreeSlot } from './FreeSlot';
 import { Tile, type TileProps } from './Tile';
 
 type TileHandlers = Pick<
@@ -31,7 +32,13 @@ export interface WallProps extends TileHandlers {
   missingSources: ReadonlySet<string>;
   programmes: ReadonlyMap<ItemKey, string>;
   swapFrom: string | null;
+  /** Recent and favorite live channels not on the wall, offered in the next free slot. */
+  picks: readonly QuickPick[];
+  picksLoading: boolean;
+  /** Key of the quick pick being put up. */
+  pendingPick: string | null;
   onAdd(slot: number): void;
+  onPick(p: QuickPick, slot: number): void;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
 }
 
@@ -43,41 +50,8 @@ const LockedTile = memo(function LockedTile({ parentalActive, ...props }: Locked
   return <Tile {...props} lock={gate} onRecheck={recheck} />;
 });
 
-/** A free slot: the frame of a monitor waiting for a channel. */
-function EmptySlot({ slot, className, disabled, onAdd }: { slot: number; className: string; disabled: boolean; onAdd(slot: number): void }) {
-  const { t } = useTranslation('multiview');
-  const number = slot + 1;
-  return (
-    <button
-      type="button"
-      data-slot-focus={slot}
-      data-testid="multiview-empty-slot"
-      data-slot={number}
-      disabled={disabled}
-      aria-label={t('slotEmptyLabel', { slot: number })}
-      onClick={() => onAdd(slot)}
-      className={cn(
-        'group/slot relative flex flex-col items-center justify-center gap-2 rounded-sm border-2 border-dashed border-divider bg-surface/50 p-2 text-fg-muted outline-none',
-        'hover:border-accent hover:bg-surface hover:text-fg active:bg-surface-2',
-        'focus-visible:border-solid focus-visible:border-focus focus-visible:text-fg',
-        'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-divider disabled:hover:bg-surface/50',
-        'motion-safe:transition-colors motion-safe:duration-150',
-        className,
-      )}
-    >
-      <span aria-hidden className="absolute start-2 top-2 flex size-6 items-center justify-center rounded-sm bg-surface-3 font-numeric text-sm tabular-nums text-fg-muted">
-        {number}
-      </span>
-      <span aria-hidden className="flex size-10 items-center justify-center rounded-full border border-edge bg-surface-2 group-hover/slot:border-border group-hover/slot:text-fg">
-        <Plus className="size-5" />
-      </span>
-      <span className="text-center text-sm font-medium">{t('addChannel')}</span>
-    </button>
-  );
-}
-
 /**
- * The monitor wall: one slot per place in the layout, tiles in slot order, the rest free.
+ * The monitor wall: one slot per place in the layout, tiles in slot order, the rest free (FreeSlot).
  * Geometry is in layout.ts; the host around it is a size container.
  */
 export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
@@ -93,7 +67,11 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
     missingSources,
     programmes,
     swapFrom,
+    picks,
+    picksLoading,
+    pendingPick,
     onAdd,
+    onPick,
     onKeyDown,
     ...handlers
   },
@@ -118,7 +96,23 @@ export const Wall = forwardRef<HTMLDivElement, WallProps>(function Wall(
       {Array.from({ length: slots }, (_, slot) => {
         const tile = tiles[slot];
         const className = slotClass(layout, slot);
-        if (!tile) return <EmptySlot key={`free-${slot}`} slot={slot} className={className} disabled={swapFrom !== null} onAdd={onAdd} />;
+        if (!tile) {
+          return (
+            <FreeSlot
+              key={`free-${slot}`}
+              slot={slot}
+              className={className}
+              disabled={swapFrom !== null}
+              next={slot === tiles.length}
+              intro={tiles.length === 0}
+              picks={picks}
+              picksLoading={picksLoading}
+              pending={pendingPick}
+              onAdd={onAdd}
+              onPick={onPick}
+            />
+          );
+        }
         const hasSound = tile.key === audioKey;
         return (
           <LockedTile

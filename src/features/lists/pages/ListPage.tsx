@@ -1,6 +1,6 @@
 /**
  * `/lists/:listId`: a custom list laid out like Live. Lists on the side (a
- * drawer below 1024 px), the list's channels in the Live `ChannelList`, and
+ * drawer on a page under 66rem), the list's channels in the Live `ChannelList`, and
  * the player with the guide ribbon. Playing a row zaps within the list.
  * Channels the provider dropped sit under the list, greyed, with Remove.
  */
@@ -19,6 +19,7 @@ import { EpgMappingDialog } from '@/features/live/components/EpgMappingDialog';
 import { EpgRibbon } from '@/features/live/components/EpgRibbon';
 import { LiveStageColumn } from '@/features/live/components/LiveStageColumn';
 import { StageIdle } from '@/features/live/components/StageIdle';
+import { useFitsWidth } from '@/features/live/hooks/useFitsWidth';
 import { useLastChannel } from '@/features/live/hooks/useLastChannel';
 import { useListEngaged } from '@/features/live/hooks/useListEngaged';
 import { intlLocale } from '@/lib/intl';
@@ -66,6 +67,14 @@ import { LISTS_PATH } from '../paths';
 import { openAddChannels, openEditListItems, openManageLists } from '../store';
 
 const SIDEBAR_KEY = 'lists.sidebarCollapsed';
+/**
+ * The page width, in rem, under which the lists leave their column for the drawer: Live TV's rule
+ * for its groups (GROUPS_COLUMN_MIN_REM), since this page has the same three columns beside the
+ * rail. Below it, beside the expanded rail in a 1024 px window, the stage ran off the page's end
+ * and cut its idle card, Resume and the ribbon's view toggle. Not imported from LivePage, which
+ * would pull Live's page into this chunk.
+ */
+const LISTS_COLUMN_MIN_REM = 66;
 
 /** The index of the channel row `el` is in, if any. */
 function rowIndexOf(el: EventTarget | null): number | null {
@@ -245,7 +254,11 @@ export function ListPage() {
   }, [menu, locks, paged, prefs.stripCountryPrefix]);
 
   // ---- sidebar ------------------------------------------------------------
-  const wide = useMediaQuery('(min-width: 1024px)');
+  // The lists are a column only where the page has room for it beside the channels and the stage;
+  // on a narrower window, or a page under LISTS_COLUMN_MIN_REM, they open as a drawer from the bar.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const roomForLists = useFitsWidth(pageRef, LISTS_COLUMN_MIN_REM);
+  const wide = useMediaQuery('(min-width: 1024px)') && roomForLists;
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_KEY) === '1';
@@ -329,9 +342,12 @@ export function ListPage() {
       ...(subtitle ? { subtitle } : {}),
       actions: list ? (
         // On a phone the list's name needs the room (L3-app-pages-x1): Edit channels leaves the header
-        // there, since the channels bar right below has the same button, and Manage lists is a bare icon.
+        // there, since the channels bar right below has the same button.
         // Manage lists is also the lists column's gear: while the column is on screen the header
-        // leaves it out, so it shows once; folded away or in the drawer, the header keeps it.
+        // leaves it out, so it shows once; folded away or in the drawer, the header keeps it. Folded
+        // away on a wide page it keeps its label. With the lists in the drawer (a page under 66rem,
+        // a phone included) it is a bare gear, so the list's channel count keeps its room beside the
+        // title, as Live TV's does at the same width.
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -343,22 +359,23 @@ export function ListPage() {
           >
             {t('editChannels')}
           </Button>
-          {sidebarVisible ? null : (
+          {sidebarVisible ? null : wide ? (
             <Button
               variant="ghost"
               size="sm"
               icon={<Settings2 className="size-4" />}
               onClick={() => openManageLists(list.id)}
               title={t('manageLists')}
-              className="max-sm:w-8 max-sm:px-0"
             >
-              <span className="max-sm:sr-only">{t('manageLists')}</span>
+              {t('manageLists')}
             </Button>
+          ) : (
+            <IconButton size="sm" label={t('manageLists')} icon={<Settings2 className="size-4" />} onClick={() => openManageLists(list.id)} />
           )}
         </div>
       ) : undefined,
     });
-  }, [title, subtitle, list?.id, sidebarVisible, i18n.language]);
+  }, [title, subtitle, list?.id, sidebarVisible, wide, i18n.language]);
 
   useEffect(
     () =>
@@ -460,7 +477,7 @@ export function ListPage() {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid="list-page">
+    <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid="list-page">
       <h1 className="sr-only">{title}</h1>
       {sidebarVisible ? <aside className="flex w-60 shrink-0 flex-col border-e border-divider bg-surface">{sidebar}</aside> : null}
       {!wide && drawerOpen ? (
@@ -480,10 +497,11 @@ export function ListPage() {
         </>
       ) : null}
 
-      {/* channels: beside the stage from 768 px, under it on a phone */}
+      {/* channels: beside the stage from 768 px, under it on a phone. A share of the page with
+          Live's bounds, so the two pages leave the stage the same room at every width. */}
       <section
         aria-label={tl('channels')}
-        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:flex-none md:shrink-0 md:border-e"
+        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(300px,32%,400px)] md:min-w-60 md:flex-initial md:border-e"
         onFocus={onListFocus}
       >
         {/* The list's name is in the header (and on its sidebar row): the bar holds the tools. */}

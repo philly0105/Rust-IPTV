@@ -22,7 +22,7 @@
   "nextPage": "Next page",
   "pageN": "Page {{page}}",
   "pageNotFound": "Page not found",
-  "pageNotFoundHint": "This address does not match any page. Use the rail or go back home.",
+  "pageNotFoundHint": "This address does not match any page. Go back home or pick another page.",
 
   "errorTitleNetwork": "Couldn't reach the server",
   "errorTitleTimeout": "The request took too long",

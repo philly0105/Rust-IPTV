@@ -21,6 +21,7 @@ import {
   IconButton,
   Input,
   LivePill,
+  MENU_SHEET_QUERY,
   Menu,
   MetaLine,
   Page,
@@ -383,6 +384,83 @@ describe('overlay exits (usePresence)', () => {
       expect(cls.some((c) => c.startsWith('focus-visible:bg-'))).toBe(true);
     }
     expect(within(first!).getByText('mod+r').className).toContain('pointer-coarse:hidden');
+  });
+
+  describe('Menu on a phone', () => {
+    const original = window.matchMedia;
+    const answer = (phone: boolean) => {
+      window.matchMedia = ((query: string) => ({
+        matches: phone && query === MENU_SHEET_QUERY,
+        media: query,
+        onchange: null,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent: () => false,
+      })) as unknown as typeof window.matchMedia;
+    };
+    afterEach(() => {
+      window.matchMedia = original;
+    });
+    const items = [
+      { id: 'play', label: 'Play', onSelect: vi.fn() },
+      { id: 'sep', type: 'separator' as const },
+      { id: 'remove', label: 'Remove from history', danger: true, onSelect: vi.fn() },
+    ];
+
+    it('opens as a bottom sheet over a scrim, headed by its row, with the same items and keys', () => {
+      answer(true);
+      render(<Menu label="Actions for ESPN HD" items={items} sheetHeader={{ title: 'ESPN HD', subtitle: 'NFL Live' }} />);
+      const trigger = screen.getByRole('button', { name: 'Actions for ESPN HD' });
+      fireEvent.click(trigger);
+      const menu = screen.getByRole('menu', { name: 'Actions for ESPN HD' });
+      expect(menu.hasAttribute('data-sheet')).toBe(true);
+      expect(menu.className).toContain('bottom-0');
+      expect(menu.className).toContain('rounded-t-xl');
+      // Not placed at the trigger: no measured top or left.
+      expect(menu.style.top).toBe('');
+      expect(document.querySelector('[data-menu-scrim]')).not.toBeNull();
+      // The sheet names the row it covers.
+      const header = within(menu).getByTestId('menu-sheet-header');
+      expect(header.textContent).toContain('ESPN HD');
+      expect(header.textContent).toContain('NFL Live');
+      // The sheet takes focus itself, so no item looks chosen before a tap; the arrows start at the first.
+      expect(document.activeElement).toBe(menu);
+      fireEvent.keyDown(menu, { key: 'ArrowDown' });
+      expect(document.activeElement?.textContent).toBe('Play');
+      // A tap on the scrim closes it and leaves focus on the trigger.
+      fireEvent.mouseDown(document.querySelector('[data-menu-scrim]')!);
+      expect(screen.queryByRole('menu')).toBeNull();
+      expect(document.activeElement).toBe(trigger);
+      // An item still runs from the sheet.
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from history' }));
+      expect(items[2]!.onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts ArrowUp at the last item while the sheet itself has focus', () => {
+      answer(true);
+      render(<Menu label="Actions for ESPN HD" items={items} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for ESPN HD' }));
+      const menu = screen.getByRole('menu');
+      expect(document.activeElement).toBe(menu);
+      // With no item focused, Up wraps to the end as it does from the first item.
+      fireEvent.keyDown(menu, { key: 'ArrowUp' });
+      expect(document.activeElement?.textContent).toBe('Remove from history');
+    });
+
+    it('stays a popover beside its trigger elsewhere, without the sheet header', () => {
+      answer(false);
+      render(<Menu label="Actions for ESPN HD" items={items} sheetHeader={{ title: 'ESPN HD' }} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for ESPN HD' }));
+      const menu = screen.getByRole('menu');
+      expect(menu.hasAttribute('data-sheet')).toBe(false);
+      expect(menu.className).toContain('rounded-lg');
+      expect(document.querySelector('[data-menu-scrim]')).toBeNull();
+      expect(within(menu).queryByTestId('menu-sheet-header')).toBeNull();
+      expect(document.activeElement?.textContent).toBe('Play');
+    });
   });
 });
 

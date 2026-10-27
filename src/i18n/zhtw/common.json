@@ -22,7 +22,7 @@
   "nextPage": "下一頁",
   "pageN": "第 {{page}} 頁",
   "pageNotFound": "找不到頁面",
-  "pageNotFoundHint": "此位址沒有對應的頁面。請使用側邊欄，或返回首頁。",
+  "pageNotFoundHint": "此位址沒有對應的頁面。請返回首頁，或選擇其他頁面。",
 
   "errorTitleNetwork": "無法連線到伺服器",
   "errorTitleTimeout": "要求逾時",

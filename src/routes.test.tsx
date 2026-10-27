@@ -177,6 +177,8 @@ describe('not-found page', () => {
   it('keeps the visible hint, the way home, and the shell header title', () => {
     renderNotFound();
     expect(screen.getByText(i18n.t('common:pageNotFoundHint'))).toBeTruthy();
+    // A phone has a tab bar and no rail: the hint names neither.
+    expect(i18n.t('common:pageNotFoundHint')).not.toMatch(/\brail\b|sidebar/i);
     expect(screen.getByRole('link', { name: i18n.t('shell:navDashboard') }).getAttribute('href')).toBe('/dashboard');
     expect(useShellStore.getState().header?.title).toBe(i18n.t('common:errorTitleNotFound'));
   });

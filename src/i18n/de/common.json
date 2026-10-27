@@ -22,7 +22,7 @@
   "nextPage": "Nächste Seite",
   "pageN": "Seite {{page}}",
   "pageNotFound": "Seite nicht gefunden",
-  "pageNotFoundHint": "Diese Adresse gehört zu keiner Seite. Nutzen Sie die Seitenleiste oder gehen Sie zurück zur Startseite.",
+  "pageNotFoundHint": "Diese Adresse gehört zu keiner Seite. Gehen Sie zurück zur Startseite oder wählen Sie eine andere Seite.",
 
   "errorTitleNetwork": "Server konnte nicht erreicht werden",
   "errorTitleTimeout": "Die Anfrage hat zu lange gedauert",

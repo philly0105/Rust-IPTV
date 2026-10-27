@@ -22,7 +22,7 @@
   "nextPage": "Page suivante",
   "pageN": "Page {{page}}",
   "pageNotFound": "Page introuvable",
-  "pageNotFoundHint": "Cette adresse ne correspond à aucune page. Utilisez la barre latérale ou revenez à l'accueil.",
+  "pageNotFoundHint": "Cette adresse ne correspond à aucune page. Revenez à l'accueil ou choisissez une autre page.",
 
   "errorTitleNetwork": "Impossible de joindre le serveur",
   "errorTitleTimeout": "La requête a pris trop de temps",

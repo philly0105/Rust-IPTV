@@ -22,7 +22,7 @@
   "nextPage": "Następna strona",
   "pageN": "Strona {{page}}",
   "pageNotFound": "Nie znaleziono strony",
-  "pageNotFoundHint": "Ten adres nie pasuje do żadnej strony. Użyj paska bocznego lub wróć na stronę główną.",
+  "pageNotFoundHint": "Ten adres nie pasuje do żadnej strony. Wróć na stronę główną lub wybierz inną stronę.",
 
   "errorTitleNetwork": "Nie udało się połączyć z serwerem",
   "errorTitleTimeout": "Żądanie trwało zbyt długo",

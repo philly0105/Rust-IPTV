@@ -419,11 +419,11 @@ describe('list page', () => {
     expect(screen.queryByTestId('lists-section')).toBeNull();
     await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[title="Manage lists"]')).toBeTruthy());
     const folded = render(<>{useShellStore.getState().header!.actions}</>).container;
-    // On a phone it shrinks to its icon, keeping its name for screen readers and the tooltip.
+    // Folded away on a wide page it keeps its label (on a phone the lists are a drawer, where it
+    // is a bare gear: see the narrow-page test below).
     const manage = within(folded).getByRole('button', { name: 'Manage lists' });
-    expect(manage.getAttribute('title')).toBe('Manage lists');
-    expect(manage.className).toContain('max-sm:w-8');
-    expect(within(manage).getByText('Manage lists').className).toContain('max-sm:sr-only');
+    expect(manage.textContent).toBe('Manage lists');
+    expect(manage.className.split(' ')).not.toContain('w-8');
     fireEvent.click(manage);
     expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
   });
@@ -457,6 +457,79 @@ describe('list page', () => {
     fireEvent.keyDown(rows()[1]!, { key: 'F2', code: 'F2' });
     expect(useRenameStore.getState().request?.channel.ref).toEqual(CNN.ref);
     unregister();
+  });
+});
+
+describe('lists drawer on a narrow page (beside the expanded rail)', () => {
+  // The page's width reaches the hook through its ResizeObserver, as the browser reports it after
+  // layout; the harness's own stub reports nothing. These observers record what they watch, so a
+  // test can report a width for the list page alone.
+  const original = globalThis.ResizeObserver;
+  let observed: { cb: ResizeObserverCallback; ro: ResizeObserver; el: Element }[] = [];
+  beforeEach(() => {
+    observed = [];
+    globalThis.ResizeObserver = class {
+      constructor(private cb: ResizeObserverCallback) {}
+      observe(el: Element) {
+        observed.push({ cb: this.cb, ro: this as unknown as ResizeObserver, el });
+      }
+      unobserve() {}
+      disconnect() {
+        observed = observed.filter((o) => o.ro !== (this as unknown as ResizeObserver));
+      }
+    } as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    globalThis.ResizeObserver = original;
+  });
+  const reportPageWidth = (width: number) =>
+    act(() => {
+      for (const o of observed.filter((x) => (x.el as HTMLElement).dataset.testid === 'list-page')) {
+        o.cb([{ target: o.el, contentRect: { width } } as unknown as ResizeObserverEntry], o.ro);
+      }
+    });
+
+  it('keeps the lists out of a page narrower than 66rem, behind the bar toggle, even on a wide window', async () => {
+    // The harness answers every min-width query as matching (a wide window); the page itself is
+    // 776 px wide, as beside the expanded rail in a 1024 px window, where three columns pushed the
+    // stage off the page's end.
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN]), h.coreList('L2', 'Kids', [CNN])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.getByTestId('lists-section')).toBeTruthy();
+    reportPageWidth(776);
+    expect(screen.queryByTestId('lists-section')).toBeNull();
+    // With the column gone the header carries Manage lists again, as a bare gear at any window
+    // size (a phone's too), so the list's channel count keeps its room beside the title. It keeps
+    // its name for screen readers and the kit tooltip, not a native title box.
+    await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[aria-label="Manage lists"]')).toBeTruthy());
+    const header = render(<>{useShellStore.getState().header!.actions}</>).container;
+    const manage = within(header).getByRole('button', { name: 'Manage lists' });
+    expect(manage.textContent).toBe('');
+    expect(manage.hasAttribute('title')).toBe(false);
+    expect(manage.className.split(' ')).toContain('w-8');
+    fireEvent.click(manage);
+    expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
+    act(() => useListsDialogs.setState({ dialog: null }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show lists' }));
+    const drawer = await screen.findByTestId('lists-drawer');
+    expect(within(drawer).getByRole('link', { name: /Kids/ })).toBeTruthy();
+    // Escape closes it.
+    fireEvent.keyDown(drawer, { key: 'Escape' });
+    expect(screen.queryByTestId('lists-drawer')).toBeNull();
+  });
+
+  it('shows the lists as a column once the page has room for them', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    // jsdom's root is 16 px, so 66rem is 1056 px (990 px at the app's 15 px root).
+    reportPageWidth(1100);
+    expect(screen.getByTestId('lists-section')).toBeTruthy();
+    expect(screen.queryByTestId('lists-drawer')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Hide lists' })).toBeTruthy();
   });
 });
 

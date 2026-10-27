@@ -22,7 +22,7 @@
   "nextPage": "次のページ",
   "pageN": "{{page}}ページ",
   "pageNotFound": "ページが見つかりません",
-  "pageNotFoundHint": "このアドレスに該当するページはありません。サイドバーを使うか、ホームに戻ってください。",
+  "pageNotFoundHint": "このアドレスに該当するページはありません。ホームに戻るか、別のページを選んでください。",
 
   "errorTitleNetwork": "サーバーに接続できませんでした",
   "errorTitleTimeout": "リクエストがタイムアウトしました",

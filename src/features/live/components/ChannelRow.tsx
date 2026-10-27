@@ -15,17 +15,19 @@ import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNo
 import { ChannelLogo } from './ChannelLogo';
 
 /**
- * Three lines with room around them (LG-03): the name, the programme on now with its time left,
- * and the progress bar. What comes next is in the stage column's Up next for the channel the
- * stage follows; the old fourth line crammed four lines into 64 px and ran into the dividers.
+ * Three lines (LG-03): the name, the programme on now with its time left, and the progress bar.
+ * What comes next is in the stage column's Up next for the channel the stage follows; the old
+ * fourth line crammed four lines into 64 px and ran into the dividers. The three lines take about
+ * 45 px, so 60 px leaves them 7 px above and below: at 68 px a 900 px window listed under twelve
+ * channels, at 60 px over thirteen, and a 57k-channel list is mostly scrolling.
  */
-export const CHANNEL_ROW_HEIGHT = 68;
+export const CHANNEL_ROW_HEIGHT = 60;
 /**
  * The part of {@link CHANNEL_ROW_HEIGHT} made of Tailwind spacing at 100 %, which compact
- * density tightens: py-3 (22.5 px at the 15 px root) plus the two gaps between name,
- * programme and progress bar (gap-0.5 and mt-1, 3.75 px each).
+ * density tightens: py-2 (15 px at the 15 px root) plus the gaps between name, programme and
+ * progress bar (gap-0.5 and mt-1).
  */
-export const CHANNEL_ROW_SPACING = 30;
+export const CHANNEL_ROW_SPACING = 22;
 
 export interface ChannelRowProps {
   index: number;
@@ -217,7 +219,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
           .join(props.separator)}
         onClick={() => props.onActivate(index, 'click')}
         onDoubleClick={() => props.onActivate(index, 'double')}
-        className="flex min-w-0 flex-1 items-center gap-3 py-3 ps-2.5 pe-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+        className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-2.5 pe-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       >
         {/* The playing row's number steps up to the text colour: the tick and the progress are
             its amber marks, a third amber mark in the number read as noise. */}

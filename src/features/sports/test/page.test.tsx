@@ -438,6 +438,19 @@ describe('sports page', () => {
     expect(within(card(noted)).getByTestId('sports-notes').className).toContain('row-start-3');
   });
 
+  it('pins the toolbar on a tablet or desktop window that is tall enough, and keeps focused controls clear of it', async () => {
+    const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([g]);
+    setStreams(g, [h.match(ESPN)]);
+    await openReady();
+    const pinned = '[@media(min-width:48rem)_and_(min-height:40rem)]';
+    const toolbar = screen.getByTestId('sports-toolbar').className.split(' ');
+    expect(toolbar).toEqual(expect.arrayContaining([`${pinned}:sticky`, `${pinned}:top-0`, 'bg-bg', 'z-10']));
+    // Not pinned on a phone: no bare sticky.
+    expect(toolbar).not.toContain('sticky');
+    expect(screen.getByTestId('sports-grid').className).toContain(`${pinned}:[&_button]:scroll-mt-32`);
+  });
+
   it('splits the day into Live now, Upcoming and Final, so no game shows twice', async () => {
     const early = h.finalGame('1');
     const playing = h.liveGame('2');

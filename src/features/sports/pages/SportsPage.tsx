@@ -27,7 +27,7 @@ import { GameCard } from '../components/GameCard';
 import { LeagueFilter } from '../components/LeagueFilter';
 import { SportsSkeleton } from '../components/SportsSkeleton';
 import { useStreamContext, type StreamContext } from '../components/StreamList';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, buttonClass, useNow, useShell, useVisibleSources } from '../deps';
+import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, buttonClass, cn, useNow, useShell, useVisibleSources } from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -48,6 +48,16 @@ import {
 } from '../paths';
 
 const DAY_PANEL = 'sports-day';
+
+/**
+ * From a tablet up, on a window at least 40rem tall, the toolbar stays at the top of the page's
+ * scroller while the cards scroll under it, so a 15-game day never needs a scroll back up to change
+ * day or league. Not on a phone or a short window, where its three rows would hold a fifth of the
+ * screen for good. Written out whole, so Tailwind finds the classes.
+ */
+const PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:sticky [@media(min-width:48rem)_and_(min-height:40rem)]:top-0';
+/** A control focused from the keyboard scrolls clear of the pinned toolbar, not under it. */
+const CLEAR_PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:[&_button]:scroll-mt-32';
 
 interface StreamsOf {
   (game: Game): { streams: readonly StreamMatch[] | undefined; streamsLoading: boolean };
@@ -72,7 +82,7 @@ function GameGrid({
   // two of them around its empty track: the cards' bottom margin spaces the rows instead, and the
   // list takes the last one back.
   return (
-    <ul className="-mb-3 grid gap-x-3 md:grid-cols-2 xl:grid-cols-3" data-testid="sports-grid">
+    <ul className={cn('-mb-3 grid gap-x-3 md:grid-cols-2 xl:grid-cols-3', CLEAR_PINNED)} data-testid="sports-grid">
       {games.map((g) => (
         <GameCard key={g.key} game={g} {...streamsOf(g)} showStreams={showStreams} showLeague={showLeague} ctx={ctx} />
       ))}
@@ -256,7 +266,10 @@ export function SportsPage() {
     <Page width="wide" className="flex min-w-0 flex-col gap-6 pb-10" data-testid="sports-page">
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
-      <div className="flex min-w-0 flex-col gap-3" data-testid="sports-toolbar">
+      {/* Pinned, it covers the cards under it with the page's own colour, and keeps a strip of it above
+          the league tabs (the margin takes back the padding where it is not pinned). The day tabs'
+          rule is its bottom edge. */}
+      <div className={cn('z-10 -mt-3 flex min-w-0 flex-col gap-3 bg-bg pt-3', PINNED)} data-testid="sports-toolbar">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
           <LeagueFilter value={league} onChange={pickLeague} counts={counts} live={liveLeagues} />
           <div className="flex flex-wrap items-center gap-2">

@@ -195,7 +195,8 @@ export function sectionTarget(section: SourceSection, sources: readonly Source[]
  * Whether the page on show belongs to a section link, in any source: Live TV stands for the live
  * pages and the archive (isLiveRoute without radio, which has its own row), Movies and Series for what
  * railLinkCurrent counts for a source's own link (a movie's detail and player beside Movies). With
- * no sources, the Sources page the link led to (`search` holds its `for`).
+ * no sources, the Sources page the link led to (`search` holds its `for`). Callers pass `search`
+ * only while there are no sources: `for` outlives the first add, and then the page is the sources'.
  */
 export function sectionCurrent(section: SourceSection, pathname: string, search = ''): boolean {
   if (sourcesFor(pathname, search) === section) return true;

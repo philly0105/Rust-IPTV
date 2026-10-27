@@ -198,6 +198,7 @@ function RailGroup({
   collapsed,
   dim,
   first,
+  noSources,
 }: {
   id: string;
   label: string;
@@ -206,6 +207,11 @@ function RailGroup({
   dim?: boolean;
   /** The first group sits straight under the brand row: no rule above it when collapsed. */
   first?: boolean;
+  /**
+   * There are no sources, so the row that led to the Sources page (its `for`) is current there.
+   * The query outlives the first add, and from then on the page is the sources' own again.
+   */
+  noSources?: boolean;
 }) {
   const { pathname, search } = useLocation();
   const moreId = useId();
@@ -235,7 +241,7 @@ function RailGroup({
         collapsed={collapsed}
         // `dim` is the group's: with no sources, the rows whose pages need one.
         dim={(dim && !l.noSourceNeeded) || l.dim}
-        current={l.section ? sectionCurrent(l.section, pathname, search) : undefined}
+        current={l.section ? sectionCurrent(l.section, pathname, noSources ? search : '') : undefined}
       />
     </li>
   );
@@ -877,7 +883,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           style={railFadeMask(primaryFade.top, primaryFade.bottom)}
           className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2 pb-1', RAIL_PRIMARY_MAX)}
         >
-          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={watch} collapsed={collapsed} first />
+          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={watch} collapsed={collapsed} first noSources={noSources} />
         </div>
 
         <div
@@ -908,7 +914,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
                 collapsed={collapsed}
                 end
                 // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.
-                current={sourcesFor(location.pathname, location.search) ? false : undefined}
+                current={noSources && sourcesFor(location.pathname, location.search) ? false : undefined}
               />
             )}
           </div>

@@ -380,6 +380,12 @@ describe('phone tab bar with no sources', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
     expect(live.getAttribute('aria-current')).toBe('page');
     expect(within(bar).getByRole('button', { name: 'More' }).getAttribute('aria-current')).toBeNull();
+    // Nor does the sheet's Manage sources row say it is current, as it is not drawn so.
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    const manage = within(sheet).getByRole('link', { name: 'Manage sources' });
+    expect(manage.getAttribute('aria-current')).toBeNull();
+    expect(manage.className).not.toContain('bg-selected');
   });
 });
 
@@ -418,6 +424,52 @@ describe('phone More sheet with one source', () => {
     expect(movies.className).toContain('bg-selected');
     expect(movies.getAttribute('aria-current')).toBe('page');
     expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('aria-current')).toBeNull();
+  });
+});
+
+describe('the Sources page a Watch row led to, once a source exists', () => {
+  // `for` outlives the first add (the Sources page keeps it when its dialog closes), but once there
+  // is a source the page is the sources' own again: one current row, never two.
+  const currentLinks = (el: HTMLElement) => within(el).queryAllByRole('link').filter((l) => l.getAttribute('aria-current') === 'page');
+
+  it("marks only the lone source's row in the rail", async () => {
+    handlers([makeSource('s1', { name: 'Night Portal' })]);
+    renderRoutes(routes(), '/sources?for=live');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const row = await within(nav).findByRole('link', { name: /^Night Portal/ });
+    expect(currentLinks(nav)).toEqual([row]);
+  });
+
+  it('marks Manage sources, not Movies, with two sources', async () => {
+    renderRoutes(routes(), '/sources?for=movies');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await within(nav).findByText('Backup');
+    expect(currentLinks(nav)).toEqual([within(nav).getByRole('link', { name: 'Manage sources' })]);
+  });
+
+  it("marks only the lone source's row on a phone, under More", async () => {
+    media(...PHONE);
+    handlers([makeSource('s1', { name: 'Night Portal' })]);
+    renderRoutes(routes(), '/sources?for=live');
+    const bar = await screen.findByTestId('tab-bar');
+    await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live'));
+    expect(currentLinks(bar)).toEqual([]);
+    const more = within(bar).getByRole('button', { name: 'More' });
+    expect(more.getAttribute('aria-current')).toBe('true');
+    fireEvent.click(more);
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    expect(currentLinks(sheet)).toEqual([within(sheet).getByRole('link', { name: 'Night Portal, Manage sources' })]);
+  });
+
+  it('marks Manage sources in the sheet, not the Movies tile, with two sources', async () => {
+    media(...PHONE);
+    renderRoutes(routes(), '/sources?for=movies');
+    const bar = await screen.findByTestId('tab-bar');
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    await within(sheet).findByRole('list', { name: 'Backup' });
+    expect(currentLinks(sheet)).toEqual([within(sheet).getByRole('link', { name: 'Manage sources' })]);
+    expect(within(within(sheet).getByRole('region', { name: 'Watch' })).getByRole('link', { name: 'Movies' }).className).not.toContain('bg-selected');
   });
 });
 

@@ -89,6 +89,9 @@ export const TabBar = memo(function TabBar() {
   // The source on show first: the remembered one is written in an effect after this render, so
   // reading only that left the tab on the previous source until the next navigation.
   const live = liveTabTarget(sources.data, routeSourceId(pathname) ?? readLastSource());
+  // The query as far as `for` goes: with no sources the row that led to the Sources page stays
+  // current there. The query outlives the first add, and from then on the page is the sources' own.
+  const forSearch = sources.data?.length === 0 ? search : '';
   const tabs: Tab[] = [
     { id: 'home', to: '/dashboard', label: t('tabHome'), icon: House, active: pathname === '/dashboard' },
     // No sources yet: the tab leads to adding one, as Home does, and stays current there.
@@ -97,7 +100,7 @@ export const TabBar = memo(function TabBar() {
       to: live ?? noSourcesTarget('live'),
       label: t('tabLive'),
       icon: Tv,
-      active: isLiveRoute(pathname) || sourcesFor(pathname, search) === 'live',
+      active: isLiveRoute(pathname) || sourcesFor(pathname, forSearch) === 'live',
       tour: 'live',
     },
     { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
@@ -135,7 +138,7 @@ export const TabBar = memo(function TabBar() {
           </button>
         </li>
       </ul>
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} search={search} />
+      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} search={forSearch} />
     </nav>
   );
 });
@@ -220,6 +223,7 @@ function MoreSheet({
   onClose: () => void;
   sources: readonly Source[] | undefined;
   pathname: string;
+  /** The query only while there are no sources (TabBar's forSearch), else empty. */
   search: string;
 }) {
   const { t } = useTranslation('shell');
@@ -336,11 +340,12 @@ function MoreSheet({
           ] as const
         ).map(({ to, label, icon: Icon }) => (
           <li key={to}>
-            <NavLink to={to} className={rowClass(current(to))}>
+            {/* A plain Link, as the tiles: NavLink would call Manage sources current on the Sources page Live TV, Movies or Series led to. */}
+            <Link to={to} aria-current={current(to) ? 'page' : undefined} className={rowClass(current(to))}>
               <Icon aria-hidden size={18} className={cn('shrink-0', current(to) ? 'text-accent' : 'text-fg-muted')} />
               <span className="min-w-0 flex-1 truncate">{label}</span>
               <ChevronRight aria-hidden size={16} className="shrink-0 text-fg-subtle rtl:rotate-180" />
-            </NavLink>
+            </Link>
           </li>
         ))}
       </ul>

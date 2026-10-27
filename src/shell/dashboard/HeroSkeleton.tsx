@@ -4,9 +4,14 @@ import { Skeleton, cn } from '@/ui';
  * The hero's outer frame: full-bleed across the content column, straight under the header, on
  * the dark glass (C8 tokens, dark in every theme). Shared with the skeleton so nothing jumps, and
  * so a light theme never loads the hero as a white card that then turns dark (L3-visual-8). No
- * border and no inset: the boxed card with a 1px edge read as a widget, not a stage.
+ * border: the boxed card with a 1px edge read as a widget, not a stage. In the dark themes the
+ * stage melts into the page (HERO_PAGE_FADE). The light page is no colour it can fade to, and a
+ * full-width dark band with a hard foot was the heaviest thing on it, so there the hero is a
+ * rounded card inset by the page gutter with a raised shadow, a picture placed on the page like
+ * every other card in the light theme.
  */
-export const HERO_FRAME = 'relative isolate overflow-hidden bg-glass-strong';
+export const HERO_FRAME =
+  'relative isolate overflow-hidden bg-glass-strong light:mx-(--page-gutter) light:mt-6 light:rounded-xl light:shadow-2';
 /**
  * The hero's content box: about two fifths of the window from sm up, capped by the width, so the
  * first rail starts in the top half of a 900 px window rather than at its foot (at half the
@@ -23,7 +28,7 @@ export const HERO_BODY =
 
 /**
  * The fade from the hero into the page under it. In the dark themes the stage melts into the
- * page; the light page is no colour the dark stage can fade to, so there it simply ends.
+ * page; the light page is no colour the dark stage can fade to, so there the hero is a card (HERO_FRAME).
  */
 export const HERO_PAGE_FADE = 'pointer-events-none absolute inset-x-0 bottom-0 z-[2] hidden h-24 bg-gradient-to-t from-bg to-transparent dark:block';
 

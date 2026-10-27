@@ -1,8 +1,11 @@
 /**
  * Round 4 of the UI refine pass on Home: channel cards without a logo show a logo-sized mark
- * instead of a full-frame colour block, and a programme's progress is quiet (amber stays on the
- * user's own resume progress).
+ * instead of a full-frame colour block, a programme's progress is quiet (amber stays on the
+ * user's own resume progress), and in the light theme the hero is an inset card.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -26,6 +29,7 @@ vi.mock('@/api/events', () => ({
 
 const { queryClient } = await import('@/api/query');
 const { ChannelCard, ContinueCard, OnNowCard } = await import('../cards');
+const { HERO_FRAME, HERO_PAGE_FADE, HeroSkeleton } = await import('../HeroSkeleton');
 
 function wrap(node: React.ReactNode) {
   queryClient.clear();
@@ -95,5 +99,21 @@ describe('progress on Home cards (round 4)', () => {
     const resume = screen.getByRole('button', { name: 'Resume Harbor Lights' });
     expect(fill(resume).className).toContain('bg-glass-accent');
     for (const card of [screen.getByRole('button', { name: 'Play Sport 1' }), art, resume]) expect(bar(card).closest('[aria-hidden]')).not.toBeNull();
+  });
+});
+
+describe('the hero in the light theme (round 4)', () => {
+  it('is a rounded card inset by the page gutter, while the dark themes keep the full-bleed stage and its fade', () => {
+    const light = HERO_FRAME.split(' ').filter((c) => c.startsWith('light:'));
+    expect(light).toEqual(expect.arrayContaining(['light:mx-(--page-gutter)', 'light:mt-6', 'light:rounded-xl', 'light:shadow-2']));
+    // Only the light theme: unprefixed, the frame has no margin, corner or shadow.
+    expect(HERO_FRAME).not.toMatch(/(^| )(mx-|mt-|rounded-|shadow-)/);
+    expect(HERO_PAGE_FADE).toContain('dark:block');
+    // The variant follows the theme provider, as dark: does.
+    const css = readFileSync(join(__dirname, '..', '..', '..', 'styles', 'globals.css'), 'utf8');
+    expect(css).toContain("@custom-variant light (&:where([data-theme='light'], [data-theme='light'] *));");
+    // The skeleton has the same frame, so nothing jumps when the hero loads.
+    wrap(<HeroSkeleton />);
+    for (const c of light) expect(screen.getByTestId('hero-skeleton').classList.contains(c), c).toBe(true);
   });
 });

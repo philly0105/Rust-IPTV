@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { displayChannelName, splitCountryTag, splitPlaceTag, stripCountryPrefix } from './channelName';
+import { displayChannelName, plainChannelName, splitCountryTag, splitPlaceTag, stripCountryPrefix } from './channelName';
 
 describe('splitCountryTag', () => {
   it('splits a provider tag from the name by the strip rules', () => {
@@ -58,5 +58,25 @@ describe('splitPlaceTag', () => {
   it('leaves the strip setting its own wider rule', () => {
     expect(stripCountryPrefix('Sky Sports | Main Event')).toBe('Main Event');
     expect(stripCountryPrefix('NBA: Lakers vs Celtics')).toBe('Lakers vs Celtics');
+  });
+});
+
+describe('plainChannelName', () => {
+  it('puts a place tag after the name in brackets, as ChannelName draws it', () => {
+    expect(plainChannelName('US| ABC (Backup)', false)).toBe('ABC (Backup) (US)');
+    expect(plainChannelName('[FR] TF1', undefined)).toBe('TF1 (FR)');
+    expect(plainChannelName('LATAM| FOX SPORTS 1', false)).toBe('FOX SPORTS 1 (LATAM)');
+  });
+
+  it('keeps names whose prefix is not a place as written', () => {
+    expect(plainChannelName('NBA: Lakers vs Celtics', false)).toBe('NBA: Lakers vs Celtics');
+    expect(plainChannelName('Sky Sports | Main Event', false)).toBe('Sky Sports | Main Event');
+    expect(plainChannelName('ESPN HD', false)).toBe('ESPN HD');
+    expect(plainChannelName(undefined, false)).toBe('');
+  });
+
+  it('leaves the tag out with the strip setting on', () => {
+    expect(plainChannelName('US| ABC (Backup)', true)).toBe('ABC (Backup)');
+    expect(plainChannelName('NBA: Lakers vs Celtics', true)).toBe('Lakers vs Celtics');
   });
 });

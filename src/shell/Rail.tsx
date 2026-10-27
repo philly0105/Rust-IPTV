@@ -9,7 +9,7 @@ import type { Source } from '@/api/types';
 import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
 import { useOffline } from './connection';
-import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, watchLinks, type NavLinkDef } from './navigation';
+import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
@@ -207,7 +207,7 @@ function RailGroup({
   /** The first group sits straight under the brand row: no rule above it when collapsed. */
   first?: boolean;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const moreId = useId();
   const main = links.filter((l) => !l.more);
   const more = links.filter((l) => l.more);
@@ -233,8 +233,9 @@ function RailGroup({
         end={l.end}
         tour={l.tour}
         collapsed={collapsed}
-        dim={dim || l.dim}
-        current={l.section ? sectionCurrent(l.section, pathname) : undefined}
+        // `dim` is the group's: with no sources, the rows whose pages need one.
+        dim={(dim && !l.noSourceNeeded) || l.dim}
+        current={l.section ? sectionCurrent(l.section, pathname, search) : undefined}
       />
     </li>
   );
@@ -886,7 +887,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           style={railFadeMask(false, fade.bottom, '3rem')}
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
         >
-          {/* With no sources every Library page opens empty: the group steps back (SH-welcome-generic). */}
+          {/* With no sources Library's pages open empty, but for Lists: they step back (SH-welcome-generic). */}
           <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} />
           <div role="group" aria-labelledby="rail-sources-heading" className="flex flex-col gap-0.5">
             <GroupLabel
@@ -897,7 +898,17 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
             />
             {sourceList}
             {/* One source: its own row leads to the Sources page. */}
-            {!lone && <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />}
+            {!lone && (
+              <RailNavLink
+                to="/sources"
+                labelKey="manageSources"
+                icon={ListVideo}
+                collapsed={collapsed}
+                end
+                // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.
+                current={sourcesFor(location.pathname, location.search) ? false : undefined}
+              />
+            )}
           </div>
         </div>
       </div>

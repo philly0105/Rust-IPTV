@@ -23,7 +23,18 @@ import { Link, NavLink, useLocation } from 'react-router';
 import type { Source } from '@/api/types';
 import { cn, Dialog, SourceMonogram } from '@/ui';
 
-import { isLiveRoute, LIBRARY_LINKS, liveTabTarget, loneSourceRadio, readLastSource, sectionCurrent, watchLinks, type NavLinkDef } from './navigation';
+import {
+  isLiveRoute,
+  LIBRARY_LINKS,
+  liveTabTarget,
+  loneSourceRadio,
+  noSourcesTarget,
+  readLastSource,
+  sectionCurrent,
+  sourcesFor,
+  watchLinks,
+  type NavLinkDef,
+} from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { useVisibleSources } from './useVisibleSources';
@@ -56,7 +67,7 @@ const tabClass = (active: boolean) =>
 export const TabBar = memo(function TabBar() {
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();
-  const { pathname, key } = useLocation();
+  const { pathname, search, key } = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreOpenRef = useRef(moreOpen);
   moreOpenRef.current = moreOpen;
@@ -80,8 +91,15 @@ export const TabBar = memo(function TabBar() {
   const live = liveTabTarget(sources.data, routeSourceId(pathname) ?? readLastSource());
   const tabs: Tab[] = [
     { id: 'home', to: '/dashboard', label: t('tabHome'), icon: House, active: pathname === '/dashboard' },
-    // No sources yet: the tab leads to adding one, as Home does.
-    { id: 'live', to: live ?? '/sources', label: t('tabLive'), icon: Tv, active: isLiveRoute(pathname), tour: 'live' },
+    // No sources yet: the tab leads to adding one, as Home does, and stays current there.
+    {
+      id: 'live',
+      to: live ?? noSourcesTarget('live'),
+      label: t('tabLive'),
+      icon: Tv,
+      active: isLiveRoute(pathname) || sourcesFor(pathname, search) === 'live',
+      tour: 'live',
+    },
     { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
     { id: 'search', to: '/search', label: t('navSearch'), icon: Search, active: pathname === '/search', tour: 'search' },
   ];
@@ -117,7 +135,7 @@ export const TabBar = memo(function TabBar() {
           </button>
         </li>
       </ul>
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} />
+      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} search={search} />
     </nav>
   );
 });
@@ -151,12 +169,12 @@ const TAB_PAGES = new Set(['/dashboard', '/epg', '/search']);
  * rail puts it, after Live TV. Movies and Series lead the sheet because the bar has no room for
  * them: before, they were 30 px chips in the source's card under eight Library tiles.
  */
-function sheetWatchLinks(sources: readonly Source[] | undefined, pathname: string): { link: NavLinkDef; active: boolean }[] {
+function sheetWatchLinks(sources: readonly Source[] | undefined, pathname: string, search: string): { link: NavLinkDef; active: boolean }[] {
   const radio = loneSourceRadio(sources);
   const under = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
   return watchLinks(sources, routeSourceId(pathname) ?? readLastSource()).flatMap((l) => {
     if (l.section === 'live') return radio ? [{ link: radio, active: under(radio.to) }] : [];
-    if (l.section) return [{ link: l, active: sectionCurrent(l.section, pathname) }];
+    if (l.section) return [{ link: l, active: sectionCurrent(l.section, pathname, search) }];
     return TAB_PAGES.has(l.to) ? [] : [{ link: l, active: under(l.to) }];
   });
 }
@@ -187,9 +205,22 @@ function SheetTile({ to, label, icon: Icon, active }: { to: string; label: strin
  * The More sheet: the kit Dialog as a bottom sheet (`sheet`), so it keeps the dialog's focus trap,
  * Escape, scroll lock and focus return. Below sm only, like the bar, which unmounts it above.
  */
-function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClose: () => void; sources: readonly Source[] | undefined; pathname: string }) {
+function MoreSheet({
+  open,
+  onClose,
+  sources,
+  pathname,
+  search,
+}: {
+  open: boolean;
+  onClose: () => void;
+  sources: readonly Source[] | undefined;
+  pathname: string;
+  search: string;
+}) {
   const { t } = useTranslation('shell');
-  const current = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+  // On the Sources page a Movies or Series tile led to, that tile is current, not Manage sources.
+  const current = (to: string) => !sourcesFor(pathname, search) && (pathname === to || pathname.startsWith(`${to}/`));
   const list = sources ?? [];
   // One source is one row to the Sources page, as in the rail: its Live TV has a tab and its
   // Radio, Movies and Series are Watch tiles, so a card of chips would repeat them.
@@ -209,7 +240,7 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
           {t('navGroupWatch')}
         </h3>
         <ul className="grid grid-cols-4 gap-2">
-          {sheetWatchLinks(sources, pathname).map(({ link, active }) => (
+          {sheetWatchLinks(sources, pathname, search).map(({ link, active }) => (
             <SheetTile key={link.labelKey} to={link.to} label={t(link.labelKey)} icon={link.icon} active={active} />
           ))}
         </ul>

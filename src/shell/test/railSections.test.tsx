@@ -117,10 +117,15 @@ describe('section targets', () => {
     expect(sectionTarget('live', [imported('v', { channelCount: 0, movieCount: 3 })], null)).toBe('/s/v/movies');
     expect(sectionTarget('movies', [night, backup], 's2')).toBe('/s/s1/movies');
     expect(sectionTarget('series', [night], null)).toBeNull();
+    // The Sources page, saying which row led there, so that row stays current on it.
     for (const section of ['live', 'movies', 'series'] as const) {
-      expect(sectionTarget(section, [], null)).toBe('/sources');
-      expect(sectionTarget(section, undefined, null)).toBe('/sources');
+      expect(sectionTarget(section, [], null)).toBe(`/sources?for=${section}`);
+      expect(sectionTarget(section, undefined, null)).toBe(`/sources?for=${section}`);
+      expect(sectionCurrent(section, '/sources', `?for=${section}`)).toBe(true);
     }
+    expect(sectionCurrent('live', '/sources', '?for=movies')).toBe(false);
+    expect(sectionCurrent('live', '/sources', '')).toBe(false);
+    expect(sectionCurrent('live', '/favorites', '?for=live')).toBe(false);
   });
 
   it("sectionCurrent: a section's pages in any source, with the pages beside them", () => {
@@ -150,12 +155,14 @@ describe('section targets', () => {
     expect(labels(watchLinks([night], 's1'))).not.toContain('railSeries');
     const none = watchLinks([], null).filter((l) => l.section);
     expect(none.map((l) => [l.to, l.dim])).toEqual([
-      ['/sources', true],
-      ['/sources', true],
-      ['/sources', true],
+      ['/sources?for=live', true],
+      ['/sources?for=movies', true],
+      ['/sources?for=series', true],
     ]);
+    // One rule for the rest: a page that needs a source steps back, Home, Search and Sports do not.
+    expect(watchLinks([], null).filter((l) => l.dim).map((l) => l.labelKey)).toEqual(['railLive', 'navGuide', 'railMovies', 'railSeries', 'navMultiview']);
     // Still loading: every row holds its place, at full strength.
-    expect(watchLinks(undefined, null).filter((l) => l.section).map((l) => l.dim)).toEqual([false, false, false]);
+    expect(watchLinks(undefined, null).some((l) => l.dim)).toBe(false);
   });
 });
 

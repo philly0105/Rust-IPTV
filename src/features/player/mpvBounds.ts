@@ -208,7 +208,8 @@ export function measureMpvBounds(surface: Element): Bounds | null {
 export function measureMpvLayout(surface: Element): MpvLayout {
   const { surfaceRect, clip, reserved, overlays, modals } = measureParts(surface);
   const layer = topLayer();
-  return computeMpvLayout(surfaceRect, { clip, reserved, overlays, modals, float: !!layer && layer.contains(surface) });
+  const windowLayer = document.querySelector('[data-player-window-layer]:not([hidden])');
+  return computeMpvLayout(surfaceRect, { clip, reserved, overlays, modals, float: (!!layer && layer.contains(surface)) || (!!windowLayer && windowLayer.contains(surface)) });
 }
 
 /**
@@ -250,7 +251,7 @@ function measureParts(surface: Element): Parts {
     // A fullscreen element sits in the top layer: the ancestors it left behind (the docked
     // stage, the page scroller) no longer clip it, so their rects would pin the video to the
     // old docked rectangle.
-    if (el === layer) break;
+    if (el === layer || el === windowLayer) break;
   }
   /** The on-screen rect of chrome that may overlap the surface, or null when it cannot. */
   const visible = (node: Element): Rect | null => {

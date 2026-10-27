@@ -514,8 +514,9 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
     hideTimer.current = setTimeout(() => setIdle(true), HIDE_AFTER_MS);
   }, []);
 
-  // The native window swallows mouse moves over the video, so the cursor is polled instead;
-  // only movement inside the player counts (not on another monitor or over another app).
+  // Windows' native video window swallows DOM mouse moves, so poll the desktop cursor there.
+  // macOS passes moves through to the webview; the root's pointer handler reacts at once.
+  // The poll only counts movement inside the player, not on another monitor or app.
   useEffect(() => {
     if (!overlay) return;
     poke();
@@ -579,6 +580,7 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
       data-testid="mpv-player"
       data-player-focus=""
       className={cn('relative h-full w-full bg-black outline-none', !overlay && 'flex flex-col')}
+      onPointerMove={overlay ? poke : undefined}
       onFocus={(e) => {
         focusInside.current = true;
         if (e.target !== e.currentTarget) lastCtl.current = e.target.closest('[data-ctl]')?.getAttribute('data-ctl') ?? null;

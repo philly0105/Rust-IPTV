@@ -720,6 +720,21 @@ describe('fullscreen overlay chrome', () => {
     expect(chrome()).toBeTruthy();
   });
 
+  it('shows window-fill controls when the pointer moves over the macOS video view', async () => {
+    vi.useFakeTimers();
+    cursor = { x: 300, y: 200 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isWindowFilled: true, status: 'playing' }));
+    render(surfaceTree);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeNull();
+
+    fireEvent.pointerMove(document.querySelector('[data-mpv-surface]')!);
+    expect(screen.getByTestId('mpv-overlay-chrome')).toBeTruthy();
+  });
+
   const startFullscreen = async (): Promise<(ms: number) => Promise<void>> => {
     vi.useFakeTimers();
     cursor = { x: 10, y: 10 };

@@ -72,7 +72,7 @@
   "guideNoMatch": "这些频道都未匹配到已加载的节目指南。请从频道菜单中将其匹配到节目指南频道。",
   "guideBackToNow": "回到现在",
   "guideNoSources": "暂无播放源",
-  "guideNoSourcesHint": "添加播放列表或门户后即可查看其节目指南。",
+  "guideNoSourcesHint": "添加播放源后即可查看其节目指南。",
   "previousDay": "前一天",
   "nextDay": "后一天",
   "earlier": "提前 3 小时",

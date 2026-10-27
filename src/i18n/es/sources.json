@@ -3,6 +3,7 @@
   "listLabel": "Tus fuentes",
   "add": "Añadir fuente",
   "addSource": "Añadir una fuente",
+  "noSourcesAdd": "Añadir una fuente",
   "addSourceSubmit": "Añadir fuente",
   "adding": "Añadiendo…",
   "addFailed": "No se pudo añadir esta fuente",

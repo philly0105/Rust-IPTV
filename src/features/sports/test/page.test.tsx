@@ -838,14 +838,15 @@ describe('sports page', () => {
     expect(screen.getAllByTestId('sports-game')).toHaveLength(1);
   });
 
-  it('with no source, links to adding one and lists the games without streams', async () => {
+  it('with no source, offers adding one in place and lists the games without streams', async () => {
     rpc.handlers['sources.list'] = () => [];
     const g = h.liveGame('1');
     setDay([g]);
     open();
-    const link = await screen.findByTestId('sports-add-source');
-    expect(link.getAttribute('href')).toBe('/sources?add=1');
+    const add = await screen.findByTestId('sports-add-source');
+    expect(add.tagName).toBe('BUTTON');
     expect(screen.getByText('No sources yet')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
     expect(within(card(g)).queryByTestId('sports-no-streams')).toBeNull();
     expect(within(card(g)).queryByTestId('sports-streams-loading')).toBeNull();
     expect(data.streamCalls.at(-1)?.enabled).toBe(false);

@@ -702,11 +702,12 @@ describe('empty wall', () => {
     expect(useMultiviewStore.getState().tiles).toHaveLength(0);
   });
 
-  it('points to Sources when there is none', async () => {
+  it('offers adding a source in place when there is none', async () => {
     handlers['sources.list'] = () => [];
     renderPage();
     expect(await screen.findByText('No sources yet')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Add a source' }).getAttribute('href')).toBe('/sources');
+    expect(screen.getByRole('button', { name: 'Add a source' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
   });
 
   it('shows the sources error with a retry', async () => {

@@ -1,14 +1,15 @@
 import { LayoutGrid } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation } from 'react-router';
+import { useLocation } from 'react-router';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey } from '@/api/types';
+import { NoSourcesState } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
-import { buttonClass, cn, EmptyState, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
+import { cn, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
 import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
 import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../types';
@@ -435,16 +436,7 @@ export function MultiviewPage() {
     body = <ErrorState error={sources.error} onRetry={sources.refetch} />;
   } else if (count === 0 && sources.byId.size === 0) {
     body = (
-      <EmptyState
-        icon={<LayoutGrid aria-hidden size={28} />}
-        title={t('noSourcesTitle')}
-        description={t('noSources')}
-        action={
-          <Link to="/sources" className={buttonClass('primary')}>
-            {t('noSourcesAction')}
-          </Link>
-        }
-      />
+      <NoSourcesState icon={<LayoutGrid />} title={t('noSourcesTitle')} description={t('noSources')} stay />
     );
   } else {
     body = (

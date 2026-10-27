@@ -72,7 +72,7 @@
   "guideNoMatch": "這些頻道都未對應到已載入的節目表。請從頻道選單將其對應到節目表頻道。",
   "guideBackToNow": "回到現在",
   "guideNoSources": "尚無播放來源",
-  "guideNoSourcesHint": "新增播放清單或入口網站後，即可查看其節目表。",
+  "guideNoSourcesHint": "新增播放來源後，即可查看其節目表。",
   "previousDay": "上一天",
   "nextDay": "下一天",
   "earlier": "往前 3 小時",

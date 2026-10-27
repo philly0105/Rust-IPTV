@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Source } from '@/api/types';
+import { NoSourcesState } from '@/features/sources/components/NoSourcesState';
 import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { buttonClass, cn } from '../deps';
@@ -34,14 +35,14 @@ export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
   const series = sources ? browseTarget(sources, 'series') : undefined;
   const noVod = sources !== undefined && !movies && !series;
 
-  let actions = null;
+  // With no source the page says what every page says then; the numbered slots would only push it
+  // down the window.
   if (sources && sources.length === 0) {
-    actions = (
-      <Link to="/sources" className={buttonClass('primary', 'md')} data-testid="mylist-empty-add-source">
-        {t('emptyAddSource')}
-      </Link>
-    );
-  } else if (sources && !noVod) {
+    return <NoSourcesState icon={<BookmarkPlus />} title={t('emptyTitle')} description={t('emptyNoSources')} testId="mylist-empty-add-source" stateTestId="mylist-empty" />;
+  }
+
+  let actions = null;
+  if (sources && !noVod) {
     // The filter in effect decides the shelf; with none, movies first and series beside them.
     const primaryKind = kind ?? (movies ? 'movie' : 'series');
     const primary = primaryKind === 'movie' ? movies : series;
@@ -86,7 +87,7 @@ export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
       </div>
       <h2 className="text-center text-title text-fg">{t('emptyTitle')}</h2>
       <p className="mt-2 max-w-md text-center text-sm text-fg-muted">
-        {sources && sources.length === 0 ? t('emptyNoSources') : noVod ? t('emptyNoVod') : t('emptyBody')}
+        {noVod ? t('emptyNoVod') : t('emptyBody')}
       </p>
       {actions && <div className="mt-6 flex flex-wrap items-center justify-center gap-3">{actions}</div>}
     </div>

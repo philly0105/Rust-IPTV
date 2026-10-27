@@ -3,6 +3,7 @@
   "listLabel": "내 소스",
   "add": "소스 추가",
   "addSource": "소스 추가",
+  "noSourcesAdd": "소스 추가",
   "addSourceSubmit": "소스 추가",
   "adding": "추가하는 중…",
   "addFailed": "이 소스를 추가할 수 없습니다",

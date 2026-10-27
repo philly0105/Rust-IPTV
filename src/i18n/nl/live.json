@@ -72,7 +72,7 @@
   "guideNoMatch": "Geen van deze kanalen komt overeen met een geladen gids. Koppel een kanaal via het menu aan zijn gidskanaal.",
   "guideBackToNow": "Terug naar nu",
   "guideNoSources": "Nog geen bronnen",
-  "guideNoSourcesHint": "Voeg een afspeellijst of portaal toe om de programmagids te zien.",
+  "guideNoSourcesHint": "Voeg een bron toe om de programmagids te zien.",
   "previousDay": "Vorige dag",
   "nextDay": "Volgende dag",
   "earlier": "3 uur eerder",

@@ -91,6 +91,8 @@ import { QualityEmptyState, useLiveQuality } from './QualityFilterButton';
 import { EpgMappingDialog } from './EpgMappingDialog';
 // recording:
 import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/features/recording';
+// sources: the state every page shows until a source exists.
+import { NoSourcesState } from '@/features/sources/components/NoSourcesState';
 // guide (Run 2 C5): jump to a date and time, guide search.
 import { GuideSearch } from '../guide/GuideSearchPanel';
 import { JumpToDialog } from '../guide/JumpToDialog';
@@ -1492,16 +1494,7 @@ export function EpgGridPage() {
     return (
       <>
       {heading}
-      <EmptyState
-        icon={<CalendarClock className="size-8" />}
-        title={t('guideNoSources')}
-        description={t('guideNoSourcesHint')}
-        action={
-          <Link to="/sources" className={buttonClass('primary', 'sm')}>
-            {t('openSources')}
-          </Link>
-        }
-      />
+      <NoSourcesState icon={<CalendarClock />} title={t('guideNoSources')} description={t('guideNoSourcesHint')} stay />
       </>
     );
   }

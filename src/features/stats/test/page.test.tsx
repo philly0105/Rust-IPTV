@@ -138,12 +138,14 @@ describe('stats page', () => {
     expect(screen.queryByRole('tablist', { name: 'Range' })).toBeNull();
   });
 
-  it('with nothing watched and no sources, offers Home', async () => {
+  it('with nothing watched and no sources, offers adding a source as every page does', async () => {
     rpc.handlers['sources.list'] = () => [];
     rpc.handlers['stats.summary'] = (raw) => h.summary((raw as { days: 7 | 30 }).days);
     open('/stats?range=30');
     expect(await screen.findByText('Time spent on live TV, movies and series shows up here.')).toBeTruthy();
-    await waitFor(() => expect(screen.getByTestId('stats-go-home').getAttribute('href')).toBe('/dashboard'));
+    await waitFor(() => expect(screen.getByTestId('stats-add-source').textContent).toBe('Add a source'));
+    expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
+    expect(screen.queryByTestId('stats-watch-live')).toBeNull();
     expect(screen.queryByTestId('stats-show-month')).toBeNull();
     expect(screen.queryByRole('tablist', { name: 'Range' })).toBeNull();
   });

@@ -11,7 +11,7 @@ import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 import { SourceMonogram as Monogram } from '@/ui/SourceMonogram';
 
-import { Badge, Button, Dialog, SectionHeader, railLinkIds } from '../deps';
+import { Badge, Button, Dialog, NoSourcesActions, SectionHeader, railLinkIds } from '../deps';
 
 /**
  * Source provenance: the rail's monogram (same hue, so a source is recognised at a glance) and
@@ -140,7 +140,8 @@ export function SectionHeading({ title, count, hint, action }: { title: string; 
 /**
  * Empty-state action for Favorites and History: points at where items come
  * from. Inside a source (or when any source exists) it opens that source's
- * channels; with no sources at all it leads to adding one. Renders nothing
+ * channels; with no sources at all it offers the shared Add a source and
+ * Import a backup, as every page without a source does. Renders nothing
  * while sources are still loading so the button never flips.
  */
 export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string | undefined; sources: ReadonlyMap<string, Source>; loading?: boolean }) {
@@ -154,11 +155,7 @@ export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string
       </Link>
     );
   }
-  return (
-    <Link to="/sources" className={buttonClass('primary', 'md')} data-testid="library-empty-add-source">
-      {t('addSourceAction')}
-    </Link>
-  );
+  return <NoSourcesActions testId="library-empty-add-source" />;
 }
 
 /**

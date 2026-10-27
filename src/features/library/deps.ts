@@ -35,6 +35,8 @@ export { useShell, useShortcut } from '@/shell';
 export { useSettings } from '@/shell/useSettings';
 // The rail's rule for which sections a source has, so an empty page links only to one the rail shows.
 export { railLinkIds } from '@/shell/railLinks';
+// sources: the one set of actions a page offers while there is no source (adds in place, or restores a backup).
+export { NoSourcesActions } from '@/features/sources/components/NoSourcesState';
 export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 // live: a channel's logo tile (or monogram), so Favorites and Recently watched draw a channel as Live TV does.
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';

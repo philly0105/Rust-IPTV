@@ -450,11 +450,13 @@ describe('Guide ribbon and guide page states', () => {
     expect(new Set(asked)).toEqual(new Set(['c6']));
   });
 
-  it('guide page: no sources links to Sources; a failed channel list offers Retry', async () => {
+  it('guide page: no sources offers adding one; a failed channel list offers Retry', async () => {
     rpcMock.handlers['sources.list'] = () => [];
     renderAt('/epg', [{ path: '/epg', element: <EpgGridPage /> }]);
     expect(await screen.findByText('No sources yet')).toBeTruthy();
-    expect(screen.getByRole('link', { name: /sources/i }).getAttribute('href')).toBe('/sources');
+    expect(screen.getByText('Add a source to see its TV guide.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add a source' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
     cleanup();
 
     baseHandlers();

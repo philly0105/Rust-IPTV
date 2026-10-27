@@ -3,6 +3,7 @@
   "listLabel": "Je bronnen",
   "add": "Bron toevoegen",
   "addSource": "Een bron toevoegen",
+  "noSourcesAdd": "Bron toevoegen",
   "addSourceSubmit": "Bron toevoegen",
   "adding": "Toevoegen…",
   "addFailed": "Kan deze bron niet toevoegen",

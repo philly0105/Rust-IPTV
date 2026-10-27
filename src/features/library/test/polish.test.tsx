@@ -130,13 +130,27 @@ describe('library empty states point to where items come from', () => {
     expect(link.getAttribute('href')).toBe('/s/portal%2F1%20x/live');
   });
 
-  it('Favorites with no sources: add one', async () => {
+  it('Favorites with no sources: the shared add-a-source state, which adds in place', async () => {
     rpc.handlers['sources.list'] = () => [];
     rpc.handlers['favorites.list'] = () => [];
     renderAt('/favorites', favoritesRoute);
-    const link = await screen.findByTestId('library-empty-add-source');
-    expect(link.getAttribute('href')).toBe('/sources');
-    expect(screen.getByText(/Add a playlist or portal first/)).toBeTruthy();
+    const add = await screen.findByTestId('library-empty-add-source');
+    expect(add.tagName).toBe('BUTTON');
+    expect(add.textContent).toBe('Add a source');
+    expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
+    expect(screen.getByText(/add to your favorites then show up here/)).toBeTruthy();
+    fireEvent.click(add);
+    expect(await screen.findByTestId('add-source-dialog')).toBeTruthy();
+  });
+
+  it('Recently watched with no sources: its own line, not the favorites one', async () => {
+    rpc.handlers['sources.list'] = () => [];
+    rpc.handlers['recent.list'] = () => [];
+    rpc.handlers['positions.continueWatching'] = () => [];
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+    expect(await screen.findByTestId('library-empty-add-source')).toBeTruthy();
+    expect(screen.getByText(/episodes you open then show up here/)).toBeTruthy();
+    expect(screen.queryByText(/favorites/)).toBeNull();
   });
 
   it('Recent per source: browse that source', async () => {

@@ -256,7 +256,7 @@ export function RecentPage() {
       <EmptyState
         icon={<History size={28} aria-hidden />}
         title={t('recentEmptyTitle')}
-        description={!sourceId && sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('recentEmptyBody')}
+        description={!sourceId && sources.size === 0 && !sourcesLoading ? t('recentNoSourcesBody') : t('recentEmptyBody')}
         action={
           <>
             <BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />

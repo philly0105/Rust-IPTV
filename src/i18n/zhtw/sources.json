@@ -3,6 +3,7 @@
   "listLabel": "您的播放來源",
   "add": "新增播放來源",
   "addSource": "新增播放來源",
+  "noSourcesAdd": "新增來源",
   "addSourceSubmit": "新增播放來源",
   "adding": "正在新增…",
   "addFailed": "無法新增此播放來源",

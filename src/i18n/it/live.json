@@ -76,7 +76,7 @@
   "guideNoMatch": "Nessuno di questi canali corrisponde a una guida caricata. Associa un canale al suo canale della guida dal suo menu.",
   "guideBackToNow": "Torna a ora",
   "guideNoSources": "Ancora nessuna sorgente",
-  "guideNoSourcesHint": "Aggiungi una playlist o un portale per vederne la guida TV.",
+  "guideNoSourcesHint": "Aggiungi una sorgente per vederne la guida TV.",
   "previousDay": "Giorno precedente",
   "nextDay": "Giorno successivo",
   "earlier": "3 ore prima",

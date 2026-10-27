@@ -3,6 +3,7 @@
   "listLabel": "مصادرك",
   "add": "إضافة مصدر",
   "addSource": "إضافة مصدر",
+  "noSourcesAdd": "أضف مصدرًا",
   "addSourceSubmit": "إضافة المصدر",
   "adding": "جارٍ الإضافة…",
   "addFailed": "تعذّرت إضافة هذا المصدر",

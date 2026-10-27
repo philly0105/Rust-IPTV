@@ -3,6 +3,7 @@
   "listLabel": "Saját források",
   "add": "Forrás hozzáadása",
   "addSource": "Forrás hozzáadása",
+  "noSourcesAdd": "Forrás hozzáadása",
   "addSourceSubmit": "Forrás hozzáadása",
   "adding": "Hozzáadás…",
   "addFailed": "Nem sikerült hozzáadni a forrást",

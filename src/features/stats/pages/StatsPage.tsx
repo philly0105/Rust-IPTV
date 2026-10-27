@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router';
 
 import type { WatchStatsTop } from '@/api/types';
+import { NoSourcesState } from '@/features/sources/components/NoSourcesState';
 
 import { DayChart, LIVE_FILL, VOD_FILL } from '../components/DayChart';
 import { StatsSkeleton } from '../components/StatsSkeleton';
@@ -103,28 +104,28 @@ export function StatsPage() {
   } else if (data.totalSeconds === 0) {
     // "Show 30 days" only when that range has something; with nothing watched at all, point at something to watch.
     const olderData = range === 7 && monthHasData === true;
-    body = (
-      <EmptyState
-        icon={<ChartColumn size={28} aria-hidden />}
-        title={t('emptyTitle')}
-        description={olderData ? t('emptyWeek') : t('emptyMonth')}
-        action={
-          olderData ? (
-            <Button onClick={() => setRange(30)} data-testid="stats-show-month">
-              {t('showMonth')}
-            </Button>
-          ) : firstSource ? (
-            <Link to={`/s/${encodeURIComponent(firstSource.id)}/live`} className={buttonClass('primary')} data-testid="stats-watch-live">
-              {t('watchLive')}
-            </Link>
-          ) : (
-            <Link to="/dashboard" className={buttonClass('secondary')} data-testid="stats-go-home">
-              {t('goHome')}
-            </Link>
-          )
-        }
-      />
-    );
+    body =
+      !olderData && sources.data?.length === 0 ? (
+        // Nothing to watch yet either: the state every page shows until a source exists.
+        <NoSourcesState icon={<ChartColumn />} title={t('emptyTitle')} description={t('emptyMonth')} testId="stats-add-source" />
+      ) : (
+        <EmptyState
+          icon={<ChartColumn size={28} aria-hidden />}
+          title={t('emptyTitle')}
+          description={olderData ? t('emptyWeek') : t('emptyMonth')}
+          action={
+            olderData ? (
+              <Button onClick={() => setRange(30)} data-testid="stats-show-month">
+                {t('showMonth')}
+              </Button>
+            ) : firstSource ? (
+              <Link to={`/s/${encodeURIComponent(firstSource.id)}/live`} className={buttonClass('primary')} data-testid="stats-watch-live">
+                {t('watchLive')}
+              </Link>
+            ) : null
+          }
+        />
+      );
   } else {
     const split = rangeTotals(data.days);
     // KPI tiles (critique: stats): the total leads, then the split (which doubles as the chart's

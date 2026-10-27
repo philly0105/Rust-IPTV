@@ -156,9 +156,13 @@ describe('MyListPage: designed states', () => {
     h.installCore(rpc, []);
     rpc.handlers['sources.list'] = () => [];
     open();
+    // The state every page shows without a source: Add a source opens the dialog right here.
     const add = await screen.findByTestId('mylist-empty-add-source');
-    expect(add.getAttribute('href')).toBe('/sources');
+    expect(add.tagName).toBe('BUTTON');
     expect(screen.getByText(/Add a source first/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
+    fireEvent.click(add);
+    expect(await screen.findByTestId('add-source-dialog')).toBeTruthy();
   });
 
   it('says when a type filter empties the list, and Show all clears it', async () => {

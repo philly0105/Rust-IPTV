@@ -116,7 +116,7 @@ describe('the toolbar at narrow widths', () => {
     expect(screen.queryByRole('searchbox', { name: 'Search the guide' })).toBeNull();
     const toggle = screen.getByTestId('guide-search-toggle');
     expect(toggle.getAttribute('aria-label')).toBe('Search the guide');
-    expect(toggle.closest('.grid')).toBe(screen.getByTestId('guide-source').closest('.grid'));
+    expect(toggle.closest('.grid')).toBe(screen.getByTestId('guide-group').closest('.grid'));
     fireEvent.click(toggle);
     const field = await screen.findByRole('searchbox', { name: 'Search the guide' });
     await waitFor(() => expect(document.activeElement).toBe(field));
@@ -125,6 +125,28 @@ describe('the toolbar at narrow widths', () => {
     fireEvent.keyDown(field, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('searchbox', { name: 'Search the guide' })).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('guide-search-toggle')));
+  });
+
+  it('shows the source picker only when there is another source to choose', async () => {
+    await preloadScopePickerList();
+    pageWidth(318);
+    await openGuide();
+    // One source with channels, on show: no picker of one entry; the group picker takes the phone's row.
+    expect(screen.queryByRole('combobox', { name: 'Source' })).toBeNull();
+    expect(screen.getByTestId('guide-group').closest('.grid')!.className).toContain('grid-cols-[1fr_auto]');
+    cleanup();
+
+    const src = (id: string, name: string) => ({ id, kind: 'm3u', name, channelCount: CHANNELS.length, epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
+    rpc.handlers['sources.list'] = () => [src('src1', 'Demo'), src('src2', 'Second')];
+    // A second spy over the first would call itself.
+    vi.restoreAllMocks();
+    pageWidth(318);
+    await openGuide();
+    const picker = screen.getByRole('combobox', { name: 'Source' });
+    expect(picker.textContent).toBe('Demo');
+    expect(picker.closest('.grid')!.className).toContain('grid-cols-[1fr_1fr_auto]');
+    fireEvent.click(picker);
+    expect(await screen.findByRole('option', { name: /^Second/ })).toBeTruthy();
   });
 
   it("the genre chips' row fades out at its end, so a chip cut at the edge reads as more to come", async () => {

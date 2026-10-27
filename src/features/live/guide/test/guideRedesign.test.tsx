@@ -236,6 +236,18 @@ describe('the ruler', () => {
   });
 });
 
+describe('programme cells', () => {
+  it('set the title at the dense-row size and the times at caption size, not 11 px', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c0 P0,/ });
+    const [title, times] = Array.from(within(cell).getByTestId('cell-text').children) as HTMLElement[];
+    expect(title!.className).toContain('text-body-sm');
+    expect(title!.className).not.toContain('text-xs');
+    expect(times!.className).toContain('text-caption');
+    expect(times!.className).not.toContain('11rem');
+  });
+});
+
 describe('the preview band (CB-GUIDE-PREVIEW)', () => {
   it('is hidden on short or narrow windows', async () => {
     renderGuide({ path: '/epg?source=src1', routes: GRID });

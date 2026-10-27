@@ -372,15 +372,18 @@ export const GuideRow = memo(function GuideRow({
                     data-pad-left={b.left + base}
                     data-pad-width={b.width}
                   >
-                    <span className="flex items-center gap-1 truncate text-xs font-medium">
-                      {b.when === 'past' && catchupOk ? <History className="size-3 shrink-0" aria-hidden /> : null}
+                    {/* The title at the dense-row size (13.5 px) and the times at caption size: at 11 px
+                        a desktop guide was the smallest text in the app. Both lines fit the row in
+                        compact density too (20 + 16 px of the cell's 41). */}
+                    <span className="flex items-center gap-1 truncate text-body-sm font-medium">
+                      {b.when === 'past' && catchupOk ? <History className="size-3.5 shrink-0" aria-hidden /> : null}
                       <span dir="auto" className="truncate text-match-parent">
                         {p.title}
                       </span>
                       {/* recording: */}
                       <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
                     </span>
-                    <span className={`block truncate text-[calc(11rem/15)] tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{range}</span>
+                    <span className={`block truncate text-caption tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{range}</span>
                   </span>
                 </button>
               );

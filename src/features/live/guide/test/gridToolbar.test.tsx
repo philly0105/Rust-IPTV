@@ -235,6 +235,11 @@ describe('the toolbar at narrow widths', () => {
     expect(time.className).toContain('ms-auto');
     expect(screen.getByTestId('guide-window').className).toContain('whitespace-nowrap');
     expect(within(time).getByRole('button', { name: 'Next day' })).toBeTruthy();
+    // The group picker starts at 9rem and grows to 12rem with the room the time controls leave,
+    // so a touch tablet's 44 px time controls stay on its row instead of wrapping onto their own.
+    const group = screen.getByTestId('guide-group');
+    expect(group.className.split(' ')).toEqual(expect.arrayContaining(['basis-36', 'grow', 'max-w-48', 'min-w-0']));
+    expect(group.className.split(' ')).not.toContain('w-48');
   });
 });
 

@@ -2043,6 +2043,9 @@ const GuideToolbar = memo(function GuideToolbar({
   // the list loads the picker holds its place, so the toolbar does not shift for two sources.
   const sourcePicker = !sources || sources.length > 1 || (sources[0] !== undefined && sources[0].id !== sourceId);
   const oneRow = phone && !sourcePicker;
+  // Wider pages: a picker starts at 9rem and grows to 12rem with the room the time controls leave.
+  // At a fixed 12rem the 44 px touch controls of a 1024 px tablet wrapped onto a row of their own.
+  const pickerWidth = 'min-w-0 max-w-48 grow basis-36';
   const range = formatTimeRange(start, end, lang);
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
@@ -2058,7 +2061,7 @@ const GuideToolbar = memo(function GuideToolbar({
             sections={sourceSections}
             onChange={(v) => onQuery('source', v)}
             filterLabel={t('filterSources')}
-            className={bar === 'phone' ? 'h-9' : 'w-48'}
+            className={phone ? 'h-9' : pickerWidth}
             testId="guide-source"
           />
         ) : null}
@@ -2067,7 +2070,7 @@ const GuideToolbar = memo(function GuideToolbar({
           value={view ? `${VIEW_OPTION}${guideViewParam(view)}` : (categoryId ?? '')}
           sections={groupSections}
           onChange={(v) => (v.startsWith(VIEW_OPTION) ? onQuery('view', v.slice(VIEW_OPTION.length)) : onQuery('category', v || undefined))}
-          className={phone ? (sourcePicker ? 'h-9' : 'h-9 min-w-24 flex-1') : 'w-48'}
+          className={phone ? (sourcePicker ? 'h-9' : 'h-9 min-w-24 flex-1') : pickerWidth}
           // Sharing a phone's row with the time controls, the group's name gets the icon's room.
           optionIcon={!oneRow}
           testId="guide-group"

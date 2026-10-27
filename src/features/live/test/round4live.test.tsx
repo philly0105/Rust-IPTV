@@ -89,3 +89,21 @@ describe('the country tag after the name (review round 4)', () => {
     expect(tag.className).not.toContain('text-fg-subtle');
   });
 });
+
+describe('channel rows on touch (review round 4)', () => {
+  it('steps the name and the programme up a size under a coarse pointer and keeps the number quiet', () => {
+    row();
+    const button = screen.getByRole('button', { name: /US\| ESPN HD/ });
+    const drawnName = within(button).getByTestId('channel-name-tag').parentElement!.parentElement!;
+    expect(drawnName.className).toContain('text-body-sm');
+    expect(drawnName.className).toContain('pointer-coarse:text-body');
+    expect(screen.getByTestId('row-now').className).toContain('pointer-coarse:text-body-sm');
+    expect(within(button).getByText('1').className).toContain('text-fg-subtle');
+  });
+
+  it('keeps the playing row number in the text colour', () => {
+    row({ playing: true });
+    const number = within(screen.getByRole('button', { name: /US\| ESPN HD/ })).getByText('1');
+    expect(number.className).toMatch(/\btext-fg\b(?!-)/);
+  });
+});

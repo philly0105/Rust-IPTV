@@ -226,11 +226,12 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-2.5 pe-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       >
         {/* The playing row's number steps up to the text colour: the tick and the progress are
-            its amber marks, a third amber mark in the number read as noise. */}
+            its amber marks, a third amber mark in the number read as noise. The others are quiet,
+            so the logo and the name lead the row. */}
         <span
           className={cn(
             'w-7 shrink-0 text-end font-numeric text-sm tabular-nums',
-            playing ? 'text-fg' : 'text-fg-muted',
+            playing ? 'text-fg' : 'text-fg-subtle',
           )}
         >
           {channel.number ?? ''}
@@ -241,7 +242,9 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             <ChannelName
               name={channel.name}
               strip={props.stripPrefix}
-              className={cn('truncate text-body-sm text-match-parent text-fg', playing ? 'font-semibold' : 'font-medium')}
+              // A step up on touch, held at arm's length: the desktop's dense 13.5 px name and 12 px
+              // programme fit the same 60 px row at 15 and 13.5.
+              className={cn('truncate text-body-sm text-match-parent text-fg pointer-coarse:text-body', playing ? 'font-semibold' : 'font-medium')}
             />
             {/* Marks, not slots: an empty row gives their room to the title. */}
             {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
@@ -266,7 +269,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
               {/* Only the title truncates, in its own direction; the remaining time is a sibling in
                   compact "38m" form, so narrow lists keep the title readable (and RTL titles put the
                   ellipsis at their own end, not before the clock). */}
-              <span className="flex min-w-0 items-baseline gap-2 text-caption text-fg-muted" data-testid="row-now">
+              <span className="flex min-w-0 items-baseline gap-2 text-caption text-fg-muted pointer-coarse:text-body-sm" data-testid="row-now">
                 <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" data-testid="row-now-title" title={cur.title}>
                   {cur.title}
                 </span>

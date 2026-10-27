@@ -147,9 +147,9 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-start">
         {/* A channel's provider tag trails its name, quiet, as in Live TV's rows. */}
         {playable ? (
-          <ChannelName name={title} className="w-full truncate text-match-parent text-body-sm font-medium text-fg" />
+          <ChannelName name={title} className="w-full truncate text-match-parent text-body-sm font-medium text-fg pointer-coarse:text-body" />
         ) : (
-          <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg">
+          <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg pointer-coarse:text-body">
             {title}
           </span>
         )}
@@ -157,7 +157,8 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           // What is on now, as Live TV's rows say it: a guide answers "what is this?" better than
           // "Live channel" under a heading that already says so.
           <span className="flex w-full min-w-0 flex-col" data-testid="entry-now">
-            <span className="flex w-full min-w-0 items-baseline gap-2 text-caption text-fg-muted">
+            {/* A step up on touch, as Live's rows. */}
+            <span className="flex w-full min-w-0 items-baseline gap-2 text-caption text-fg-muted pointer-coarse:text-body-sm">
               <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">
                 {now.title}
               </span>
@@ -179,7 +180,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
             />
           </span>
         ) : (
-          <span className="flex w-full min-w-0 items-center gap-1.5 text-caption text-fg-muted">
+          <span className="flex w-full min-w-0 items-center gap-1.5 text-caption text-fg-muted pointer-coarse:text-body-sm">
             <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
             <span className="shrink-0">{t(k('type', type))}</span>
             {snapshot.subtitle && (

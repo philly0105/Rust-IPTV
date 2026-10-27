@@ -378,7 +378,11 @@ describe('HeroCarousel', () => {
     // Top 8 % plus 56 % leaves the bottom 36 % to the controls (lg:bottom-14, level with the buttons).
     expect(poster.className).toContain('top-[8%]');
     expect(poster.className).toContain('h-[56%]');
-    expect(screen.getByTestId('hero-controls').className).toContain('lg:bottom-14');
+    const controls = screen.getByTestId('hero-controls');
+    expect(controls.className).toContain('lg:bottom-14');
+    // Both end on the page gutter, so the poster stands flush over the controls' pill.
+    expect(poster.className).toMatch(/(^| )end-\(--page-gutter\)( |$)/);
+    expect(controls.className).toMatch(/(^| )lg:end-\(--page-gutter\)( |$)/);
   });
 
   it('never rotates under reduced motion, and the controls still move by hand', () => {

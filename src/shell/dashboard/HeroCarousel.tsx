@@ -292,10 +292,12 @@ function DetailedBackdrop(props: BackdropProps) {
 
 /**
  * The upright poster at the hero's inline end (lg up): from near the top to above the slide
- * controls, which sit level with the button row at the same end.
+ * controls, which sit level with the button row at the same end. It shares the controls' end
+ * inset (the page gutter), so the two stack on one edge the way the copy and the buttons share
+ * their start edge.
  */
 const HERO_UPRIGHT =
-  'absolute end-[max(var(--page-gutter),6%)] top-[8%] z-[3] hidden aspect-[2/3] h-[56%] w-auto rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block';
+  'absolute end-(--page-gutter) top-[8%] z-[3] hidden aspect-[2/3] h-[56%] w-auto rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block';
 
 function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlide }) {
   const image = useImageChain([s.backdropUrl, s.posterUrl], s.ref.sourceId);

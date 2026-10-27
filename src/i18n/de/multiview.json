@@ -35,6 +35,8 @@
   "emptyBody": "Wählen Sie zwei bis vier Live-Sender. Alle Kacheln laufen; die angeklickte hat den Ton.",
   "pickChannels": "Sender auswählen",
   "quickPicksTitle": "Zuletzt gesehene und Lieblingssender",
+  "moreChannels": "Weitere Sender…",
+  "slotMoreLabel": "Weitere Sender für Platz {{slot}}",
   "noSourcesTitle": "Noch keine Quellen",
   "noSources": "Multi-View zeigt Live-Sender aus Ihren Quellen. Fügen Sie zuerst eine Quelle hinzu.",
   "noSourcesAction": "Quelle hinzufügen",

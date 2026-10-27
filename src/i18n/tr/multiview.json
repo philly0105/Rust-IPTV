@@ -35,6 +35,8 @@
   "emptyBody": "İki ila dört canlı kanal seçin. Tüm kutucuklar oynar; ses, tıkladığınız kutucuktadır.",
   "pickChannels": "Kanal seç",
   "quickPicksTitle": "Son izlenen ve favori kanallar",
+  "moreChannels": "Diğer kanallar…",
+  "slotMoreLabel": "{{slot}}. yer için diğer kanallar",
   "noSourcesTitle": "Henüz kaynak yok",
   "noSources": "Çoklu izleme, kaynaklarınızdaki canlı kanalları oynatır. Önce bir kaynak ekleyin.",
   "noSourcesAction": "Kaynak ekle",

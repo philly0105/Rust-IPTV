@@ -699,7 +699,7 @@ describe('empty wall', () => {
     expect(engineFor(1)).toHaveLength(0);
   });
 
-  it('holds the quick picks in place with a chip-height skeleton while Recent and Favorites load (L2-visual-2)', async () => {
+  it('holds the quick picks in place with a row-height skeleton while Recent and Favorites load (L2-visual-2)', async () => {
     let answer!: (entries: unknown[]) => void;
     handlers['recent.list'] = () => new Promise((r) => (answer = r));
     handlers['favorites.list'] = () => [{ ref: channel(3, 'm3u1').ref, addedAt: '2026-10-13T00:00:00Z', position: 0, snapshot: { title: 'Channel 3', contentType: 'live' } }];
@@ -708,21 +708,52 @@ describe('empty wall', () => {
     const skeleton = await screen.findByTestId('multiview-quick-picks-skeleton');
     expect(skeleton.getAttribute('aria-hidden')).toBe('true');
     expect(skeleton.className).toContain('motion-safe:animate-pulse');
-    // Chips at the real chips' height, on the real chips' surface.
-    const chips = [...skeleton.querySelectorAll<HTMLElement>('.h-10')];
-    expect(chips.length).toBeGreaterThan(0);
-    for (const c of chips) expect(c.className).toContain('bg-surface-2');
-    // Favorites alone have answered: still the skeleton, not a partial row.
+    // Rows at the real rows' height, on the real rows' surface.
+    const rows = [...skeleton.querySelectorAll<HTMLElement>('.h-8')];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.className).toContain('bg-surface-2');
+    // Favorites alone have answered: still the skeleton, not a partial list.
     expect(screen.queryByTestId('multiview-quick-picks')).toBeNull();
+    // The picker is a click away while they load.
+    expect(screen.getByRole('button', { name: 'More channels for slot 1' })).toBeTruthy();
 
     act(() => answer([{ ref: channel(1, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'Channel 1', contentType: 'live' } }]));
-    const row = await screen.findByTestId('multiview-quick-picks');
+    const list = await screen.findByTestId('multiview-quick-picks');
     expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull();
-    expect(within(row).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Add Channel 1 to the wall', 'Add Channel 3 to the wall']);
-    for (const b of within(row).getAllByRole('button')) expect(b.className).toContain('h-10');
-    // One row whatever the count, so the skeleton's height is the row's: no wrapping.
-    expect(row.className.split(/\s+/)).not.toContain('flex-wrap');
-    expect(row.className).toContain('overflow-x-auto');
+    expect(within(list).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Add Channel 1 to the wall', 'Add Channel 3 to the wall']);
+    for (const b of within(list).getAllByRole('button')) expect(b.className).toContain('h-8');
+  });
+
+  it('offers the picks in the next free slot whatever the wall holds, and puts one up with a click', async () => {
+    const recent = (i: number) => ({ ref: channel(i, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: `Channel ${i}`, contentType: 'live' } });
+    handlers['recent.list'] = () => [1, 2, 3, 4, 5].map(recent);
+    seed([1, 2]);
+    renderPage();
+    const slot = await screen.findByRole('group', { name: 'Slot 3: add a channel' });
+    expect(slot.getAttribute('data-slot')).toBe('3');
+    // Channels already on the wall are not offered again; three at most.
+    const list = await within(slot).findByTestId('multiview-quick-picks');
+    expect(within(list).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Add Channel 3 to the wall',
+      'Add Channel 4 to the wall',
+      'Add Channel 5 to the wall',
+    ]);
+    // Only the next slot offers them; the one after stays a plain frame.
+    expect(screen.getByRole('button', { name: 'Slot 4: add a channel' })).toBeTruthy();
+
+    fireEvent.click(within(list).getByRole('button', { name: 'Add Channel 4 to the wall' }));
+    await waitFor(() => expect(useMultiviewStore.getState().tiles.map((x) => x.title)).toEqual(['Channel 1', 'Channel 2', 'Channel 4']));
+    expect(h.ensureUnlocked).toHaveBeenCalledTimes(1);
+    // Focus lands on the new tile, and slot 4 now offers what is left.
+    await waitFor(() => expect(document.activeElement?.getAttribute('data-slot-focus')).toBe('2'));
+    const next = await screen.findByRole('group', { name: 'Slot 4: add a channel' });
+    expect(within(next).getAllByRole('button', { name: /^Add Channel/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Add Channel 3 to the wall',
+      'Add Channel 5 to the wall',
+    ]);
+    // "More channels" opens the picker.
+    fireEvent.click(within(next).getByRole('button', { name: 'More channels for slot 4' }));
+    expect(await screen.findByRole('dialog', { name: 'Add channels' })).toBeTruthy();
   });
 
   it('shows a channel name once when two sources carry it, keeping the most recent (L3-visual-13)', async () => {
@@ -735,8 +766,8 @@ describe('empty wall', () => {
       { ref: { sourceId: 'xt9', contentType: 'live', itemId: '78' }, addedAt: '2026-10-12T00:00:00Z', position: 0, snapshot: { title: 'FRANCE 24 ENGLISH', contentType: 'live' } },
     ];
     renderPage();
-    const row = await screen.findByTestId('multiview-quick-picks');
-    expect(within(row).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+    const list = await screen.findByTestId('multiview-quick-picks');
+    expect(within(list).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
       'Add France 24 English to the wall',
       'Add Channel 2 to the wall',
     ]);

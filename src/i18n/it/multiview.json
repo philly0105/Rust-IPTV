@@ -35,6 +35,8 @@
   "emptyBody": "Scegli da due a quattro canali in diretta. Tutti i riquadri vanno in riproduzione; quello che clicchi ha l'audio.",
   "pickChannels": "Scegli i canali",
   "quickPicksTitle": "Canali recenti e preferiti",
+  "moreChannels": "Altri canali…",
+  "slotMoreLabel": "Altri canali per la posizione {{slot}}",
   "noSourcesTitle": "Ancora nessuna sorgente",
   "noSources": "La multivisione riproduce i canali in diretta delle tue sorgenti. Aggiungi prima una sorgente.",
   "noSourcesAction": "Aggiungi una sorgente",

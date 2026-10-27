@@ -35,6 +35,8 @@
   "emptyBody": "Elige de dos a cuatro canales en vivo. Todos los mosaicos se reproducen; el que pulses tiene el sonido.",
   "pickChannels": "Elegir canales",
   "quickPicksTitle": "Canales recientes y favoritos",
+  "moreChannels": "Más canales…",
+  "slotMoreLabel": "Más canales para la posición {{slot}}",
   "noSourcesTitle": "Aún no hay fuentes",
   "noSources": "La multivista reproduce canales en vivo de tus fuentes. Añade una fuente primero.",
   "noSourcesAction": "Añadir una fuente",

@@ -5,13 +5,15 @@ import { Link, useLocation } from 'react-router';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
+import { itemKey } from '@/api/types';
 
-import { gateItem } from '../addChannel';
+import { addToWall, gateItem } from '../addChannel';
 import { buttonClass, cn, EmptyState, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
 import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
-import type { MultiviewLayout, MultiviewTile } from '../types';
+import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../types';
 import { focusTileOf } from '../paths';
+import { useQuickPicks, type QuickPick } from '../quickPicks';
 import { useMainPlayerHandoff } from '../useMainPlayerHandoff';
 import { overLimit, useNowPlaying, useParentalState, useSourceLoads, useSources, useTileLogoBackfill } from '../useWallData';
 import { focusSlot, useWallKeyboard } from '../useWallKeyboard';
@@ -119,6 +121,8 @@ export function MultiviewPage() {
     () => (sources.loaded ? new Set(tiles.map((x) => x.ref.sourceId).filter((id) => !sources.byId.has(id))) : new Set<string>()),
     [sources.loaded, sources.byId, tiles],
   );
+  const quick = useQuickPicks(tiles);
+  const [pendingPick, setPendingPick] = useState<string | null>(null);
   const programmes = useNowPlaying(tiles);
   useTileLogoBackfill(tiles);
   const soundSlot = tiles.findIndex((x) => x.key === audioKey);
@@ -257,6 +261,27 @@ export function MultiviewPage() {
 
   const replace = useCallback((key: string) => openPicker({ kind: 'replace', key }), [openPicker]);
 
+  // A quick pick goes up in the slot that offered it (the next free one), through the same checks
+  // and parental gate as the picker; focus follows it, since the button that was pressed is gone.
+  const pickBusy = useRef(false);
+  const quickAdd = useCallback(
+    async (p: QuickPick, slot: number) => {
+      if (pickBusy.current) return;
+      pickBusy.current = true;
+      setPendingPick(itemKey(p.ref));
+      try {
+        const ch: MultiviewChannelInput = p.logo ? { ref: p.ref, title: p.title, logo: p.logo } : { ref: p.ref, title: p.title };
+        const r = await addToWall(ch);
+        if (r === 'added') focusSlot(wallRef.current, slot);
+        else if (r === 'gateFailed') toast({ variant: 'error', title: t('toastGateFailed'), description: t('toastGateFailedHint') });
+      } finally {
+        pickBusy.current = false;
+        setPendingPick(null);
+      }
+    },
+    [t],
+  );
+
   const unlock = useCallback(
     (tile: MultiviewTile) => {
       if (fsActive) void fsExit();
@@ -385,7 +410,11 @@ export function MultiviewPage() {
       missingSources={missingSources}
       programmes={programmes}
       swapFrom={swapFrom}
+      picks={quick.picks}
+      picksLoading={quick.loading}
+      pendingPick={pendingPick}
       onAdd={() => openPicker(ADD)}
+      onPick={(p, slot) => void quickAdd(p, slot)}
       onListen={listen}
       onClose={close}
       onReplace={replace}

@@ -35,6 +35,8 @@
   "emptyBody": "Kies twee tot vier livezenders. Elke tegel speelt; de tegel waarop je klikt heeft het geluid.",
   "pickChannels": "Zenders kiezen",
   "quickPicksTitle": "Recente en favoriete zenders",
+  "moreChannels": "Meer zenders…",
+  "slotMoreLabel": "Meer zenders voor plek {{slot}}",
   "noSourcesTitle": "Nog geen bronnen",
   "noSources": "Multiview speelt livezenders uit je bronnen. Voeg eerst een bron toe.",
   "noSourcesAction": "Bron toevoegen",

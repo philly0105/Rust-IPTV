@@ -35,6 +35,8 @@
   "emptyBody": "選擇兩到四個直播頻道。每個畫面都會播放，你點選的那個畫面出聲。",
   "pickChannels": "選擇頻道",
   "quickPicksTitle": "最近觀看和我的最愛頻道",
+  "moreChannels": "更多頻道…",
+  "slotMoreLabel": "第 {{slot}} 格的更多頻道",
   "noSourcesTitle": "還沒有播放來源",
   "noSources": "多畫面會播放你的播放來源中的直播頻道。請先新增播放來源。",
   "noSourcesAction": "新增播放來源",

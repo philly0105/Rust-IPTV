@@ -35,6 +35,8 @@
   "emptyBody": "라이브 채널을 2~4개 고르세요. 모든 타일이 재생되고, 클릭한 타일에서 소리가 납니다.",
   "pickChannels": "채널 고르기",
   "quickPicksTitle": "최근 채널과 즐겨찾기",
+  "moreChannels": "다른 채널…",
+  "slotMoreLabel": "{{slot}}번 자리의 다른 채널",
   "noSourcesTitle": "아직 소스가 없습니다",
   "noSources": "멀티뷰는 소스의 라이브 채널을 재생합니다. 먼저 소스를 추가하세요.",
   "noSourcesAction": "소스 추가",

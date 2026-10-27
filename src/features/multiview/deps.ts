@@ -22,6 +22,7 @@ export {
   Skeleton,
   SkeletonList,
   Tooltip,
+  TOUCH_TARGET,
   toast,
   useImageChain,
 } from '@/ui';

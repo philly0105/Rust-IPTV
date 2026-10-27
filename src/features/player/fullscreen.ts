@@ -6,6 +6,8 @@
  * and the store's flag stays off; where neither works, the button is not offered.
  */
 
+import { PHONE_QUERY } from '@/shell/navigation';
+
 type IosVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void; webkitSupportsFullscreen?: boolean };
 
 /** The player's video element, when one is mounted. */
@@ -47,4 +49,59 @@ export function enterVideoFullscreen(): boolean {
     // Refused (no user gesture): nothing changes.
   }
   return true;
+}
+
+/** `ScreenOrientation.lock` is missing from some DOM typings and from most engines. */
+type LockableOrientation = ScreenOrientation & { lock?: (orientation: 'landscape') => Promise<void>; unlock?: () => void };
+
+function screenOrientation(): LockableOrientation | null {
+  return typeof screen === 'undefined' ? null : ((screen.orientation as LockableOrientation | undefined) ?? null);
+}
+
+/** A phone, or a tablet held in the hand: the screens that turn and that fullscreen fills. */
+function handheld(): boolean {
+  if (typeof matchMedia !== 'function') return false;
+  return matchMedia(PHONE_QUERY).matches || matchMedia('(pointer: coarse)').matches;
+}
+
+/** This player asked for landscape, so leaving fullscreen hands the turn back. */
+let locked = false;
+
+/** The picture is taller than wide (a portrait clip), which landscape would shrink. */
+function portraitPicture(): boolean {
+  const v = playerVideo();
+  return !!v && v.videoWidth > 0 && v.videoHeight > v.videoWidth;
+}
+
+/**
+ * Fullscreen video on a phone held upright would fill a quarter of the screen, so once the host is
+ * fullscreen the screen turns to landscape, as a phone's own video player does. Radio has no
+ * picture to fill and keeps the screen as held. Engines that refuse (iOS Safari, desktop browsers,
+ * a webview without the permission) reject the lock, and nothing changes.
+ */
+export function lockLandscapeForVideo(mode: string): void {
+  if (mode === 'radio' || !handheld() || portraitPicture()) return;
+  const lock = screenOrientation()?.lock;
+  if (typeof lock !== 'function') return;
+  try {
+    void lock.call(screenOrientation(), 'landscape').then(
+      () => {
+        locked = true;
+      },
+      () => undefined,
+    );
+  } catch {
+    // Some engines throw instead of rejecting.
+  }
+}
+
+/** Lets the screen turn freely again once fullscreen ends. */
+export function unlockOrientation(): void {
+  if (!locked) return;
+  locked = false;
+  try {
+    screenOrientation()?.unlock?.();
+  } catch {
+    // An engine that lost the lock with fullscreen may throw here.
+  }
 }

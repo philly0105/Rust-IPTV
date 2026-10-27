@@ -1,4 +1,4 @@
-import { ArrowLeftRight, CircleSlash, LoaderCircle, Lock, Replace, RotateCw, ShieldAlert, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, CircleSlash, Ellipsis, LoaderCircle, Lock, Replace, RotateCw, ShieldAlert, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import { memo, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -6,7 +6,7 @@ import type { ParentalMode } from '@/api/types';
 import { glassButton } from '@/features/player/components/glassButton';
 import { GLASS_FOCUS } from '@/ui/focus';
 
-import { cn, Tooltip } from '../deps';
+import { cn, Kbd, Menu, Tooltip } from '../deps';
 import { classifyTileFault, retriesWhenOnline, tileFaultCopy } from '../errors';
 import { GLASS, GLASS_ACCENT_BORDER, GLASS_ACCENT_FILL, GLASS_ACCENT_TEXT, GLASS_BLUR, GLASS_BUTTON, GLASS_STRONG, ON_GLASS_MUTED } from '../styles';
 import type { MultiviewTile } from '../types';
@@ -108,11 +108,20 @@ const PANEL_PRIMARY = glassButton('primary', 'xs');
 const PANEL_SECONDARY = glassButton('secondary', 'xs');
 
 /**
+ * Swap, Replace and Remove fold into one menu beside Listen where a tile is narrow or has no
+ * hover (a touch screen keeps its tools on all the time, so four of them crowded the label strip);
+ * a wide tile under a mouse shows them as buttons. S, R and Delete act on the focused tile either way.
+ */
+const TOOL_WIDE = '[@media(hover:hover)]:@[24rem]/tile:inline-flex';
+const TOOL_NARROW = '[@media(hover:hover)]:@[24rem]/tile:hidden';
+
+/**
  * One channel on the wall: its own <video> and engine (useTilePlayback), and the chrome a
  * broadcast multiviewer gives a monitor. The label strip along the bottom (the UMD) names
  * the slot, the channel and what is on; the tile with sound carries the tally, an accent
- * edge, and its slot plate lights up. Tools for the tile sit at the top end and show on
- * hover and focus (always on touch screens).
+ * edge, and its slot plate lights up. Tools for the tile sit at the end of the strip's row,
+ * as the player's controls sit along its bottom, and show on hover and focus (always on
+ * touch screens).
  *
  * The whole tile is a button that gives it the sound (`data-tile-main`), drawn under the
  * chrome so the tool buttons are its siblings, never nested controls.
@@ -343,15 +352,15 @@ export const Tile = memo(function Tile({
         )}
       />
 
-      {/* A panel is centred in the band above the label strip (bottom-2 plus its 2rem, or about
-          2.7rem once the programme line shows), so the strip, drawn over everything, never covers
-          its buttons; a status pill uses the whole tile. */}
+      {/* A panel is centred in the band above the bottom row (bottom-2 plus the tools' 2.4rem, or
+          about 2.7rem once the programme line shows), so the strip and the tools, drawn over
+          everything, never cover its buttons; a status pill uses the whole tile. */}
       {centre ? (
         <div
           data-testid="multiview-tile-centre"
           className={cn(
             'pointer-events-none absolute z-10 flex items-center justify-center',
-            panel ? cn('inset-x-0 top-0 bottom-11 px-2 pt-2', programme && '@[18rem]/tile:bottom-14') : 'inset-0 p-3',
+            panel ? cn('inset-x-0 top-0 bottom-12 px-2 pt-2', programme && '@[18rem]/tile:bottom-14') : 'inset-0 p-3',
           )}
         >
           {centre}
@@ -392,69 +401,10 @@ export const Tile = memo(function Tile({
       ) : null}
       {dropTarget ? <div aria-hidden className={cn('pointer-events-none absolute inset-0 z-20 rounded-md border-2', GLASS_ACCENT_BORDER)} /> : null}
 
-      {/* Tools: top end; shown on hover and focus, always where there is no hover. */}
-      <div
-        className={cn(
-          GLASS_BLUR,
-          'absolute end-2 top-2 z-30 flex items-center gap-0.5 rounded-lg p-0.5',
-          'opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100',
-          'motion-safe:transition-opacity motion-safe:duration-150',
-          swapping && 'hidden',
-        )}
-      >
-        <Tooltip content={hasSound ? t('hasSound', { name }) : t('listen', { name })} tone="glass" describe={false}>
-          <button
-            type="button"
-            className={cn(GLASS_BUTTON, 'px-0', hasSound && GLASS_ACCENT_TEXT)}
-            aria-label={hasSound ? t('hasSound', { name }) : t('listen', { name })}
-            aria-pressed={hasSound}
-            data-testid="multiview-tile-listen"
-            onClick={listen}
-          >
-            {hasSound ? <Volume2 aria-hidden className="size-4" /> : <VolumeX aria-hidden className="size-4" />}
-          </button>
-        </Tooltip>
-        <Tooltip content={t('swapLabel', { name })} shortcut="s" tone="glass" describe={false}>
-          <button
-            type="button"
-            className={cn(GLASS_BUTTON, 'px-0')}
-            aria-label={t('swapLabel', { name })}
-            aria-keyshortcuts="S"
-            data-testid="multiview-tile-swap"
-            onClick={() => onSwapStart(tile.key)}
-          >
-            <ArrowLeftRight aria-hidden className="size-4" />
-          </button>
-        </Tooltip>
-        <Tooltip content={t('replaceLabel', { slot: number, name })} shortcut="r" tone="glass" describe={false}>
-          <button
-            type="button"
-            className={cn(GLASS_BUTTON, 'px-0')}
-            aria-label={t('replaceLabel', { slot: number, name })}
-            aria-keyshortcuts="R"
-            data-testid="multiview-tile-replace"
-            onClick={() => onReplace(tile.key)}
-          >
-            <Replace aria-hidden className="size-4" />
-          </button>
-        </Tooltip>
-        <Tooltip content={t('closeLabel', { name })} shortcut="delete" tone="glass" describe={false}>
-          <button
-            type="button"
-            className={cn(GLASS_BUTTON, 'px-0')}
-            aria-label={t('closeLabel', { name })}
-            aria-keyshortcuts="Delete"
-            data-testid="multiview-tile-close"
-            onClick={() => onClose(tile.key)}
-          >
-            <X aria-hidden className="size-4" />
-          </button>
-        </Tooltip>
-      </div>
-
-      {/* The label strip (UMD): slot plate, logo, name, programme. */}
-      <div className="pointer-events-none absolute inset-x-2 bottom-2 z-30 flex min-w-0 justify-start">
-        <div data-testid="multiview-tile-strip" className={cn(GLASS, 'flex min-w-0 max-w-full items-center gap-2 rounded-md py-1 ps-1 pe-2.5')}>
+      {/* The bottom row: the label strip (UMD) at the start, the tile's tools at the end. On the
+          strip's row the tools never meet a centred panel, which sits above the row. */}
+      <div className="pointer-events-none absolute inset-x-2 bottom-2 z-30 flex min-w-0 items-end justify-between gap-2">
+        <div data-testid="multiview-tile-strip" className={cn(GLASS, 'flex min-w-0 items-center gap-2 rounded-md py-1 ps-1 pe-2.5')}>
           <span
             aria-hidden
             data-testid="multiview-slot-plate"
@@ -478,6 +428,81 @@ export const Tile = memo(function Tile({
                 {programme}
               </span>
             ) : null}
+          </span>
+        </div>
+
+        {/* Tools: shown on hover and focus, always where there is no hover. */}
+        <div
+          data-testid="multiview-tile-tools"
+          className={cn(
+            GLASS_BLUR,
+            'pointer-events-auto flex shrink-0 items-center gap-0.5 rounded-md p-0.5',
+            'opacity-0 group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 [@media(hover:none)]:opacity-100',
+            'motion-safe:transition-opacity motion-safe:duration-150',
+            swapping && 'hidden',
+          )}
+        >
+          <Tooltip content={hasSound ? t('hasSound', { name }) : t('listen', { name })} tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(GLASS_BUTTON, 'px-0', hasSound && GLASS_ACCENT_TEXT)}
+              aria-label={hasSound ? t('hasSound', { name }) : t('listen', { name })}
+              aria-pressed={hasSound}
+              data-testid="multiview-tile-listen"
+              onClick={listen}
+            >
+              {hasSound ? <Volume2 aria-hidden className="size-4" /> : <VolumeX aria-hidden className="size-4" />}
+            </button>
+          </Tooltip>
+          <Tooltip content={t('swapLabel', { name })} shortcut="s" tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(GLASS_BUTTON, 'hidden px-0', TOOL_WIDE)}
+              aria-label={t('swapLabel', { name })}
+              aria-keyshortcuts="S"
+              data-testid="multiview-tile-swap"
+              onClick={() => onSwapStart(tile.key)}
+            >
+              <ArrowLeftRight aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
+          <Tooltip content={t('replaceLabel', { slot: number, name })} shortcut="r" tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(GLASS_BUTTON, 'hidden px-0', TOOL_WIDE)}
+              aria-label={t('replaceLabel', { slot: number, name })}
+              aria-keyshortcuts="R"
+              data-testid="multiview-tile-replace"
+              onClick={() => onReplace(tile.key)}
+            >
+              <Replace aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
+          <Tooltip content={t('closeLabel', { name })} shortcut="delete" tone="glass" describe={false}>
+            <button
+              type="button"
+              className={cn(GLASS_BUTTON, 'hidden px-0', TOOL_WIDE)}
+              aria-label={t('closeLabel', { name })}
+              aria-keyshortcuts="Delete"
+              data-testid="multiview-tile-close"
+              onClick={() => onClose(tile.key)}
+            >
+              <X aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
+          <span data-testid="multiview-tile-more" className={cn('flex', TOOL_NARROW)}>
+            <Menu
+              label={t('tileMenuLabel', { name })}
+              tooltip={t('tileMenuLabel', { name })}
+              trigger={<Ellipsis aria-hidden className="size-4" />}
+              triggerClassName={cn(GLASS_BUTTON, 'px-0')}
+              align="end"
+              items={[
+                { id: 'swap', label: t('swapShort'), icon: <ArrowLeftRight aria-hidden className="size-4" />, hint: <Kbd combo="s" size="sm" />, onSelect: () => onSwapStart(tile.key) },
+                { id: 'replace', label: t('replace'), icon: <Replace aria-hidden className="size-4" />, hint: <Kbd combo="r" size="sm" />, onSelect: () => onReplace(tile.key) },
+                { id: 'close', label: t('common:close'), icon: <X aria-hidden className="size-4" />, hint: <Kbd combo="delete" size="sm" />, onSelect: () => onClose(tile.key) },
+              ]}
+            />
           </span>
         </div>
       </div>

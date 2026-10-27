@@ -16,6 +16,7 @@ export {
   IconButton,
   isTypingTarget,
   Kbd,
+  Menu,
   SearchInput,
   SegmentedControl,
   Select,

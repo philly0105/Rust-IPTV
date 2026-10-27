@@ -944,8 +944,8 @@ describe('tile panels', () => {
     renderPage();
     await waitFor(() => expect(within(tileEl(2)).getByTestId('multiview-tile-error')).toBeTruthy());
     const centre = within(tileEl(2)).getByTestId('multiview-tile-centre').className.split(/\s+/);
-    // bottom-11 clears the strip (bottom-2 plus its 2rem): the strip never covers Retry.
-    expect(centre).toContain('bottom-11');
+    // bottom-12 clears the bottom row (bottom-2 plus the tools' 2.4rem): neither covers Retry.
+    expect(centre).toContain('bottom-12');
     expect(centre).not.toContain('inset-0');
     // The panel steps up with the tile: the help line only from 26rem.
     const hint = within(tileEl(2)).getByTestId('multiview-tile-error').querySelector('p.text-xs')!;
@@ -964,6 +964,41 @@ describe('tile panels', () => {
     const replace = within(panel).getByRole('button', { name: 'Replace' });
     expect(replace.className).toContain('ring-white/20');
     expect(replace.className).not.toContain('bg-accent-solid');
+  });
+
+  it("puts the tools on the label strip's row, folded into one menu where the tile is narrow or touched", async () => {
+    seed([1, 2]);
+    renderPage();
+    const strip = await waitFor(() => within(tileEl(2)).getByTestId('multiview-tile-strip'));
+    const tools = within(tileEl(2)).getByTestId('multiview-tile-tools');
+    // One row along the bottom: the tools never sit over the centred panel.
+    expect(tools.parentElement).toBe(strip.parentElement);
+    expect(tools.parentElement!.className).toContain('bottom-2');
+    // Wide tiles under a mouse show Swap, Replace and Remove as buttons; elsewhere the menu does.
+    for (const id of ['multiview-tile-swap', 'multiview-tile-replace', 'multiview-tile-close']) {
+      expect(within(tools).getByTestId(id).className).toContain('[@media(hover:hover)]:@[24rem]/tile:inline-flex');
+    }
+    expect(within(tools).getByTestId('multiview-tile-more').className).toContain('[@media(hover:hover)]:@[24rem]/tile:hidden');
+
+    fireEvent.click(within(tools).getByRole('button', { name: 'More actions for Channel 2' }));
+    const menu = await screen.findByRole('menu');
+    // Each item carries its key as a cap after the label.
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      expect.stringMatching(/^Move to another slot/),
+      expect.stringMatching(/^Replace/),
+      expect.stringMatching(/^Close/),
+    ]);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /Close/ }));
+    expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1']);
+  });
+
+  it('starts a swap from the menu as S does', async () => {
+    seed([1, 2]);
+    renderPage();
+    const tools = await waitFor(() => within(tileEl(1)).getByTestId('multiview-tile-tools'));
+    fireEvent.click(within(tools).getByRole('button', { name: 'More actions for Channel 1' }));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: /Move to another slot/ }));
+    expect(within(tileEl(2)).getByTestId('multiview-tile-main').getAttribute('aria-label')).toBe('Swap with Channel 2 in slot 2');
   });
 
   it("aligns the channel name to the strip's start edge in either direction (L2-visual-7)", async () => {

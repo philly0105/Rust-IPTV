@@ -24,6 +24,7 @@
   "collapseRail": "Σύμπτυξη πλαϊνής στήλης",
   "hideRail": "Απόκρυψη πλαϊνής στήλης",
   "showRail": "Εμφάνιση πλαϊνής στήλης",
+  "backToSection": "Πίσω σε «{{section}}»",
 
   "railLive": "Ζωντανή TV",
   "railRadio": "Ραδιόφωνο",

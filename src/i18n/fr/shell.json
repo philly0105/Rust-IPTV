@@ -24,6 +24,7 @@
   "collapseRail": "Réduire la barre latérale",
   "hideRail": "Masquer la barre latérale",
   "showRail": "Afficher la barre latérale",
+  "backToSection": "Retour à {{section}}",
 
   "railLive": "TV en direct",
   "railRadio": "Radio",

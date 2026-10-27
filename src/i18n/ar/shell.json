@@ -24,6 +24,7 @@
   "collapseRail": "طيّ الشريط الجانبي",
   "hideRail": "إخفاء الشريط الجانبي",
   "showRail": "إظهار الشريط الجانبي",
+  "backToSection": "العودة إلى {{section}}",
 
   "railLive": "البث المباشر",
   "railRadio": "راديو",

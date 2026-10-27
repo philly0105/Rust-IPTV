@@ -24,6 +24,7 @@
   "collapseRail": "사이드바 접기",
   "hideRail": "사이드바 숨기기",
   "showRail": "사이드바 표시",
+  "backToSection": "{{section}}(으)로 돌아가기",
 
   "railLive": "라이브 TV",
   "railRadio": "라디오",

@@ -24,6 +24,7 @@
   "collapseRail": "サイドバーを折りたたむ",
   "hideRail": "サイドバーを隠す",
   "showRail": "サイドバーを表示",
+  "backToSection": "{{section}}に戻る",
 
   "railLive": "ライブTV",
   "railRadio": "ラジオ",

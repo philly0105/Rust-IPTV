@@ -24,6 +24,7 @@
   "collapseRail": "Collapse sidebar",
   "hideRail": "Hide sidebar",
   "showRail": "Show sidebar",
+  "backToSection": "Back to {{section}}",
 
   "railLive": "Live TV",
   "railRadio": "Radio",

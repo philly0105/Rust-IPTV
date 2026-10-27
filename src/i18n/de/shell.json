@@ -24,6 +24,7 @@
   "collapseRail": "Seitenleiste einklappen",
   "hideRail": "Seitenleiste ausblenden",
   "showRail": "Seitenleiste einblenden",
+  "backToSection": "Zurück zu „{{section}}“",
 
   "railLive": "Live-TV",
   "railRadio": "Radio",

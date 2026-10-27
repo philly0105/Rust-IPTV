@@ -24,6 +24,7 @@
   "collapseRail": "Zijbalk inklappen",
   "hideRail": "Zijbalk verbergen",
   "showRail": "Zijbalk tonen",
+  "backToSection": "Terug naar {{section}}",
 
   "railLive": "Live tv",
   "railRadio": "Radio",

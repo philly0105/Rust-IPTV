@@ -195,6 +195,29 @@ describe('detail pages: Back in the header, the title once its h1 scrolls away',
     expect(screen.queryByTestId('header-back')).toBeNull();
   });
 
+  it('on a phone Back names the section and the title waits for the h1 to scroll away', async () => {
+    vi.stubGlobal('IntersectionObserver', FakeObserver);
+    media(...PHONE);
+    renderRoutes(routes(), '/detail');
+    const header = await screen.findByTestId('shell-header');
+    await screen.findByRole('heading', { level: 1, name: 'The Copper Meridian' });
+    // One control, "<- Movies", named so it still reads as Back; no section line beside it.
+    const back = within(header).getByRole('button', { name: 'Back to Movies' });
+    expect(back).toBe(screen.getByTestId('header-back'));
+    expect(back.textContent).toContain('Movies');
+    expect(screen.queryByTestId('page-title')).toBeNull();
+    fireEvent.click(back);
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(document.title).toBe('The Copper Meridian · Tsrust IPTV');
+
+    // Scrolled away: the title comes in after Back, which keeps naming the section.
+    report(false, -20);
+    expect(screen.getByTestId('page-title').textContent).toBe('The Copper Meridian');
+    expect(within(header).getByRole('button', { name: 'Back to Movies' })).toBeTruthy();
+    report(true, 300);
+    expect(screen.queryByTestId('page-title')).toBeNull();
+  });
+
   it('without IntersectionObserver the header keeps the section', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     renderRoutes(routes(), '/detail');

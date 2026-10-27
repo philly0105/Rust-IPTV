@@ -1,7 +1,6 @@
 /**
- * Round 4 of the UI pass on the detail pages: a hero without artwork paints the title's tint,
- * the hero's icon buttons share the text buttons' shape, and on a phone the title is the largest
- * type on the page.
+ * Round 4 of the UI pass on the detail pages: a hero without artwork paints the title's tint, and
+ * on a phone the title is the largest type on the page.
  */
 import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -90,5 +89,14 @@ describe('a detail hero without artwork', () => {
     const backdrop = screen.getByTestId('vod-detail-backdrop');
     expect(backdrop.querySelector('img')).not.toBeNull();
     expect(within(backdrop).queryByTestId('vod-detail-wash')).toBeNull();
+  });
+});
+
+describe('the hero title on a phone', () => {
+  it('is set at the headline size, a step over the header, which names the section on Back', async () => {
+    renderAt('/s/src1/movie/m7', detailRoute);
+    const h1 = await screen.findByRole('heading', { level: 1, name: 'Harbor Lights' });
+    expect(h1.className).toContain('text-display');
+    expect(h1.className).toContain('max-sm:text-headline');
   });
 });

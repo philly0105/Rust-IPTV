@@ -107,7 +107,7 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
         </div>
         <div className="flex min-w-0 flex-col gap-2 self-end">
           {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
-          <h1 ref={titleRef} id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-title">
+          <h1 ref={titleRef} id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-headline">
             {model.titleBase ?? model.title}
           </h1>
           <MetaLine

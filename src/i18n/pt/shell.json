@@ -24,6 +24,7 @@
   "collapseRail": "Recolher barra lateral",
   "hideRail": "Ocultar barra lateral",
   "showRail": "Mostrar barra lateral",
+  "backToSection": "Voltar para {{section}}",
 
   "railLive": "TV ao vivo",
   "railRadio": "Rádio",

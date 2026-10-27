@@ -24,6 +24,7 @@
   "collapseRail": "Свернуть боковую панель",
   "hideRail": "Скрыть боковую панель",
   "showRail": "Показать боковую панель",
+  "backToSection": "Назад в «{{section}}»",
 
   "railLive": "Прямой эфир",
   "railRadio": "Радио",

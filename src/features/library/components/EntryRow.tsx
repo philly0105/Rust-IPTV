@@ -77,6 +77,14 @@ const LOGO_PX = 40;
 const HOVER_ACTIONS =
   'absolute inset-y-0 end-1 my-auto hidden h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 shadow-2 opacity-0 group-hover:opacity-100 in-focus-visible:opacity-100 focus-within:opacity-100 not-pointer-coarse:flex';
 
+/**
+ * The time hides while the strip shows over it (on the same hover, keyboard focus or focused strip
+ * button), as Live's row hides its marks: a strip of two buttons is narrower than "4 minutes ago"
+ * and left a cut-off "4 m" beside it. Invisible, not removed, so the row does not reflow.
+ */
+const HIDE_UNDER_ACTIONS =
+  'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible';
+
 function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, busy, now, onOpen, onRemove, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
@@ -166,8 +174,18 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
       {/* A fixed column, so the monograms line up down the list. */}
       {showSource && <SourceBadge source={source} className="hidden w-40 shrink-0 md:inline-flex" />}
       {/* One line at any length ("Added 2 minutes ago"): rows keep one height. A fixed width, so a
-          longer date ("Added 2 weeks ago") never pushes the source column left on its row. */}
-      <span className="hidden w-36 shrink-0 truncate whitespace-nowrap text-end text-caption tabular-nums text-fg-subtle sm:block" title={time} data-testid="entry-time">
+          longer date ("Added 2 weeks ago") never pushes the source column left on its row. With the
+          move arrows and the grip the strip is five controls wide, so the column is wider there and
+          the strip stays over it, clear of the programme line and its time left. */}
+      <span
+        className={cn(
+          'hidden shrink-0 truncate whitespace-nowrap text-end text-caption tabular-nums text-fg-subtle sm:block',
+          reorder ? 'w-40' : 'w-36',
+          HIDE_UNDER_ACTIONS,
+        )}
+        title={time}
+        data-testid="entry-time"
+      >
         {time}
       </span>
       <div className={HOVER_ACTIONS} data-testid="entry-actions">

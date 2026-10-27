@@ -107,6 +107,13 @@ describe('Favorites rows say what is on air', () => {
     expect(strip.className).toContain('not-pointer-coarse:flex');
     expect(strip.querySelector('[data-action="open"]')).toBeTruthy();
     expect(strip.lastElementChild?.getAttribute('draggable')).toBe('true');
+    // The time hides while the strip covers it (invisible, so the row keeps its layout), on the
+    // strip's own conditions; with the moves and the grip its column holds the whole strip.
+    const time = within(row).getByTestId('entry-time');
+    expect(time.className).toContain('not-pointer-coarse:group-hover:invisible');
+    expect(time.className).toContain('not-pointer-coarse:in-focus-visible:invisible');
+    expect(time.className).toContain('not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible');
+    expect(time.className).toMatch(/(^|\s)w-40(\s|$)/);
     // Touch: one menu button, hidden on a fine pointer, holding Play, the moves and remove.
     const trigger = within(row).getByRole('button', { name: /Actions for/ });
     expect(trigger.className).toContain('not-pointer-coarse:hidden');

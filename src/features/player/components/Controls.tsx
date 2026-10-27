@@ -450,12 +450,14 @@ function MenuHint({ combo }: { combo: string }) {
 
 /** An on/off row (shared with the video's context menu). `hint`: the key, as `aria-keyshortcuts` writes it. */
 export function MenuToggle({ label, checked, hint, onClick }: { label: string; checked: boolean; hint?: string; onClick(): void }) {
-  // The tick at the end, so the row starts on the same edge as the rows around it.
+  // The tick at the end, so the row starts on the same edge as the rows around it. The key goes
+  // after it: the row then ends on its key cap, in the column the action rows' caps and the
+  // submenu chevrons end in, rather than a tick's width short of them.
   return (
     <button type="button" role="menuitemcheckbox" aria-checked={checked} aria-keyshortcuts={hint} onClick={onClick} className={cn(MENU_ITEM, 'gap-2')}>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {hint && <MenuHint combo={hint.toLowerCase()} />}
       <Check className={cn('size-4 shrink-0 text-accent', !checked && 'invisible')} aria-hidden />
+      {hint && <MenuHint combo={hint.toLowerCase()} />}
     </button>
   );
 }

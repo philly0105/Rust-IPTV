@@ -398,6 +398,13 @@ describe('PL-BAR-HIERARCHY: the redesigned bar', () => {
     expect(caps('Take screenshot')).toEqual(['S']);
     expect(caps('Channel history')).toEqual(['Shift', 'B']);
     expect(screen.getByRole('menuitem', { name: 'Take screenshot' }).querySelector('kbd')!.className).toContain('bg-white/10');
+    // A toggle's tick comes before its key, so every row with a key ends on its cap and the caps
+    // share the menu's end edge with each other and with the submenu chevrons.
+    const streamInfo = screen.getByRole('menuitemcheckbox', { name: 'Stream info' });
+    expect(Array.from(streamInfo.querySelectorAll('[data-menu-hint] kbd')).map((k) => k.textContent)).toEqual(['I']);
+    for (const row of [streamInfo, screen.getByRole('menuitem', { name: 'Take screenshot' }), screen.getByRole('menuitem', { name: 'Channel history' })]) {
+      expect(row.lastElementChild!.hasAttribute('data-menu-hint')).toBe(true);
+    }
     fireEvent.click(screen.getByRole('menuitem', { name: 'Stop' }));
     expect(usePlayerStore.getState().source).toBeUndefined();
   });

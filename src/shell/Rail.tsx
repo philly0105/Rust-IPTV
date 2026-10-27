@@ -177,7 +177,12 @@ function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; co
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1 truncate">{label}</span>
-            <ChevronDown aria-hidden size={14} className={cn('shrink-0 motion-safe:transition-transform', open && 'rotate-180')} />
+            {/* Turned like a source entry's chevron (inline end folded, down open), so the rail's two disclosures read alike. */}
+            <ChevronDown
+              aria-hidden
+              size={14}
+              className={cn('shrink-0 text-fg-subtle motion-safe:transition-transform', open ? 'rotate-0' : '-rotate-90 rtl:rotate-90')}
+            />
           </>
         )}
       </button>

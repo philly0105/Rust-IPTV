@@ -1,4 +1,4 @@
-import { ChevronDown, Keyboard, ListVideo, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Settings as SettingsIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp, Ellipsis, Keyboard, ListVideo, PanelLeftClose, PanelLeftOpen, Plus, RotateCw, Settings as SettingsIcon } from 'lucide-react';
 import { type CSSProperties, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -96,22 +96,8 @@ function RailNavLink({
 /**
  * A group's small label (Watch, Library, Sources). Collapsed, the rail has no room for words:
  * the label stays for screen readers and a short rule marks the break between the groups.
- * `disclosure`: the label is also the button that folds the group away (Library), inside the
- * heading, so the group keeps its name and the button says whether it is open.
  */
-function GroupLabel({
-  id,
-  label,
-  collapsed,
-  action,
-  disclosure,
-}: {
-  id: string;
-  label: string;
-  collapsed: boolean;
-  action?: ReactNode;
-  disclosure?: { open: boolean; controls: string; onToggle(): void };
-}) {
+function GroupLabel({ id, label, collapsed, action }: { id: string; label: string; collapsed: boolean; action?: ReactNode }) {
   if (collapsed) {
     return (
       <>
@@ -129,42 +115,12 @@ function GroupLabel({
     // A short fade under it softens the row coming out from beneath it.
     <div
       className={cn(
-        'sticky top-0 z-[1] flex h-8 items-center justify-between bg-surface pe-1 pt-2',
+        'sticky top-0 z-[1] flex h-8 items-center justify-between bg-surface ps-3 pe-1 pt-2',
         'after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1.5 after:bg-linear-to-b after:from-surface after:to-transparent',
-        disclosure ? 'ps-1' : 'ps-3',
       )}
     >
-      {/*
-        With a disclosure the button's label truncates, not the heading: the heading's overflow
-        clip cut the button's focus ring off on three sides.
-      */}
-      <h2 id={id} className={cn('text-caption font-medium text-fg-subtle', disclosure ? 'min-w-0 flex-1' : 'truncate')}>
-        {disclosure ? (
-          <button
-            type="button"
-            aria-expanded={disclosure.open}
-            aria-controls={disclosure.controls}
-            onClick={disclosure.onToggle}
-            data-rail-group-toggle=""
-            // At least 24 CSS px tall at every UI scale (WCAG 2.5.8 target size); h-6 is 22.5 px at the 15 px root.
-            className="group/label flex h-[max(1.5rem,24px)] max-w-full items-center gap-1 rounded-sm px-2 text-match-parent hover:text-fg-muted motion-safe:transition-colors"
-          >
-            <span className="truncate">{label}</span>
-            {/* Shown while folded (the state), and on hover or focus (the way to fold it). */}
-            <ChevronDown
-              aria-hidden
-              size={12}
-              className={cn(
-                'shrink-0 motion-safe:transition-[transform,opacity]',
-                disclosure.open
-                  ? 'opacity-0 group-hover/label:opacity-100 group-focus-visible/label:opacity-100 pointer-coarse:opacity-100'
-                  : '-rotate-90 rtl:rotate-90',
-              )}
-            />
-          </button>
-        ) : (
-          label
-        )}
+      <h2 id={id} className="truncate text-caption font-medium text-fg-subtle">
+        {label}
       </h2>
       {action}
     </div>
@@ -172,25 +128,66 @@ function GroupLabel({
 }
 
 /**
- * Whether the Library group is open, kept across launches: folded, it hands its room to the
- * sources on a laptop-height window. A UI preference, in localStorage like the rail's collapse.
+ * Whether Library's less used pages (`more` in LIBRARY_LINKS: Downloads, My videos, Scheduled,
+ * Watch stats) show under its More row, kept across launches. Folded until the user opens it:
+ * with all eight open, the rail ran past the fold on a 768 px window and hid the sources. A UI
+ * preference, in localStorage like the rail's collapse.
  */
-const RAIL_LIBRARY_KEY = 'tsrust.railLibrary';
+const RAIL_LIBRARY_MORE_KEY = 'tsrust.railLibraryMore';
 
-function readLibraryOpen(): boolean {
+function readLibraryMore(): boolean {
   try {
-    return localStorage.getItem(RAIL_LIBRARY_KEY) !== '0';
+    return localStorage.getItem(RAIL_LIBRARY_MORE_KEY) === '1';
   } catch {
-    return true;
+    return false;
   }
 }
 
-function writeLibraryOpen(open: boolean): void {
+function writeLibraryMore(open: boolean): void {
   try {
-    localStorage.setItem(RAIL_LIBRARY_KEY, open ? '1' : '0');
+    localStorage.setItem(RAIL_LIBRARY_MORE_KEY, open ? '1' : '0');
   } catch {
-    // storage blocked: the group still folds, until the next launch
+    // storage blocked: the row still folds, until the next launch
   }
+}
+
+/**
+ * The More row: a disclosure in the shape of a link row, quieter at rest (it opens links, it is
+ * not a page), with a chevron that says which way it goes. Icon-only in the collapsed rail, where
+ * the tooltip names it.
+ */
+function MoreToggle({ open, controls, collapsed, onToggle }: { open: boolean; controls: string; collapsed: boolean; onToggle(): void }) {
+  const { t } = useTranslation('shell');
+  // The phone tab bar's More: the same word, already short in every language.
+  const label = t('tabMore');
+  return (
+    <Tooltip content={collapsed ? label : null} side="inline-end" describe={false}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={controls}
+        aria-label={collapsed ? label : undefined}
+        onClick={onToggle}
+        data-rail-more=""
+        className={cn(itemClass(false, collapsed, true), 'w-full text-start')}
+      >
+        <span aria-hidden className={RAIL_GLYPH}>
+          {collapsed && open ? <ChevronUp size={18} /> : <Ellipsis size={18} />}
+        </span>
+        {!collapsed && (
+          <>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {/* Turned like a source entry's chevron (inline end folded, down open), so the rail's two disclosures read alike. */}
+            <ChevronDown
+              aria-hidden
+              size={14}
+              className={cn('shrink-0 text-fg-subtle motion-safe:transition-transform', open ? 'rotate-0' : '-rotate-90 rtl:rotate-90')}
+            />
+          </>
+        )}
+      </button>
+    </Tooltip>
+  );
 }
 
 /** A labelled group of rail links (Watch, Library). */
@@ -201,7 +198,6 @@ function RailGroup({
   collapsed,
   dim,
   first,
-  foldable,
 }: {
   id: string;
   label: string;
@@ -210,34 +206,38 @@ function RailGroup({
   dim?: boolean;
   /** The first group sits straight under the brand row: no rule above it when collapsed. */
   first?: boolean;
-  /** The label folds the group away (Library). The icon-only rail always shows every link. */
-  foldable?: boolean;
 }) {
   const { pathname } = useLocation();
-  const listId = useId();
-  // The group's link for the page that is open, if any.
-  const current = links.find((l) => pathname === l.to || pathname.startsWith(`${l.to}/`))?.to ?? null;
-  const [unfolded, setUnfolded] = useState(() => !foldable || readLibraryOpen() || current !== null);
-  // Folded, the group opens again when one of its pages opens (from a card, the palette, a
-  // shortcut), so the current page is never a hidden link; in the same render, as a source's
-  // entry does. Only a press is remembered. Tracked by page, not by "one of them is open": going
-  // from one Library page to another with the group folded opens it too.
+  const moreId = useId();
+  const main = links.filter((l) => !l.more);
+  const more = links.filter((l) => l.more);
+  // The folded link for the page that is open, if any.
+  const current = more.find((l) => pathname === l.to || pathname.startsWith(`${l.to}/`))?.to ?? null;
+  const [unfolded, setUnfolded] = useState(() => readLibraryMore() || current !== null);
+  // Folded, More opens again when one of its pages opens (from a card, the palette, a shortcut),
+  // so the current page is never a hidden link; in the same render, as a source's entry does.
+  // Only a press is remembered. Tracked by page, so going from one of them to another with the
+  // row folded opens it too.
   const [wasCurrent, setWasCurrent] = useState(current);
   if (current !== wasCurrent) {
     setWasCurrent(current);
     if (current !== null && !unfolded) setUnfolded(true);
   }
-  const open = collapsed || unfolded;
-  const disclosure = foldable
-    ? {
-        open,
-        controls: listId,
-        onToggle: () => {
-          writeLibraryOpen(!unfolded);
-          setUnfolded(!unfolded);
-        },
-      }
-    : undefined;
+  const item = (l: NavLinkDef) => (
+    // Keyed by section too: with no sources, Live TV, Movies and Series share one path.
+    <li key={l.section ?? l.to}>
+      <RailNavLink
+        to={l.to}
+        labelKey={l.labelKey}
+        icon={l.icon}
+        end={l.end}
+        tour={l.tour}
+        collapsed={collapsed}
+        dim={dim || l.dim}
+        current={l.section ? sectionCurrent(l.section, pathname) : undefined}
+      />
+    </li>
+  );
   return (
     <div role="group" aria-labelledby={id} data-rail-group={id} className="flex flex-col">
       {collapsed && first ? (
@@ -245,27 +245,29 @@ function RailGroup({
           {label}
         </h2>
       ) : (
-        <GroupLabel id={id} label={label} collapsed={collapsed} disclosure={collapsed ? undefined : disclosure} />
+        <GroupLabel id={id} label={label} collapsed={collapsed} />
       )}
-      {open && (
-        <ul id={listId} className="flex flex-col gap-0.5">
-          {links.map((l) => (
-            // Keyed by section too: with no sources, Live TV, Movies and Series share one path.
-            <li key={l.section ?? l.to}>
-              <RailNavLink
-                to={l.to}
-                labelKey={l.labelKey}
-                icon={l.icon}
-                end={l.end}
-                tour={l.tour}
-                collapsed={collapsed}
-                dim={dim || l.dim}
-                current={l.section ? sectionCurrent(l.section, pathname) : undefined}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="flex flex-col gap-0.5">
+        {main.map(item)}
+        {more.length > 0 && (
+          <li>
+            <MoreToggle
+              open={unfolded}
+              controls={moreId}
+              collapsed={collapsed}
+              onToggle={() => {
+                writeLibraryMore(!unfolded);
+                setUnfolded(!unfolded);
+              }}
+            />
+            {unfolded && (
+              <ul id={moreId} className="mt-0.5 flex flex-col gap-0.5">
+                {more.map(item)}
+              </ul>
+            )}
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
@@ -681,7 +683,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const sourceCount = sources.data?.length ?? 0;
   const noSources = sources.isSuccess && sourceCount === 0;
   // Live TV, Movies and Series open the source on show, else the one last opened.
-  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource());
+  // Search is left out: the header's search box is the way in (notInRail).
+  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource()).filter((l) => !l.notInRail);
   // With two or more sources, the source of the page on show opens. A lone source stays as the
   // user left it: the Watch links already lead to its sections and mark its pages.
   const pageSource = sourceCount > 1 ? activeSourceId : undefined;
@@ -833,7 +836,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
         >
           {/* With no sources every Library page opens empty: the group steps back (SH-welcome-generic). */}
-          <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} foldable />
+          <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} />
           <div role="group" aria-labelledby="rail-sources-heading" className="flex flex-col gap-0.5">
             <GroupLabel
               id="rail-sources-heading"

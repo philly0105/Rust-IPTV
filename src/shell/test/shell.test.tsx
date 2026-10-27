@@ -281,6 +281,10 @@ describe('ShellLayout', () => {
     const palette = await screen.findByTestId('command-palette');
     const input = within(palette).getByPlaceholderText('Type a command or search');
     fireEvent.change(input, { target: { value: 'zzqx nothing' } });
+    // Nothing else matches: one quiet line says so, just above the search row (not a tall block).
+    const empty = await within(palette).findByTestId('palette-empty');
+    expect(empty.textContent).toBe('No matching commands');
+    expect(empty.className).not.toMatch(/\bpy-10\b/);
     fireEvent.click(await within(palette).findByText('Search for "zzqx nothing"'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
     expect(router.state.location.search).toBe('?q=zzqx%20nothing');
@@ -1411,7 +1415,8 @@ describe('Run 3 onboarding wiring', () => {
       expect(search).toHaveLength(1);
       expect(screen.getByTestId('shell-header').contains(search[0]!)).toBe(true);
       const nav = screen.getByRole('navigation', { name: 'Main navigation' });
-      expect(within(nav).getByRole('link', { name: 'Search' }).hasAttribute('data-tour')).toBe(false);
+      // The rail has no Search row of its own (the header's box is the way in), so nothing else can hold it.
+      expect(within(nav).queryByRole('link', { name: 'Search' })).toBeNull();
     });
 
     it('on a phone the tab bar Search tab holds it, and the header has no search, palette or theme button', async () => {

@@ -213,8 +213,10 @@ describe('the header search slot', () => {
     const slot = field.parentElement!.parentElement!;
     expect(slot.textContent).toContain('Ctrl');
     expect(screen.queryByTestId('open-palette')).toBeNull();
-    // The palette button comes before the field, so the slot keeps its place.
+    // The palette button comes before the field, so the slot keeps its place. It stands in for
+    // the "Search everything" box (the rail has no Search row), so it carries that name.
     const palette = screen.getByTestId('header-palette');
+    expect(palette).toBe(screen.getByRole('button', { name: 'Search everything' }));
     expect(palette.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(palette);
     expect(useShellStore.getState().paletteOpen).toBe(true);
@@ -297,7 +299,7 @@ describe('the rail', () => {
     expect(defaultOpenSource(two, null)).toBeNull();
   });
 
-  it('group labels stay in view while their links scroll, and the Library toggle is a 24 px target', async () => {
+  it("group labels stay in view while their links scroll, and Library's More is a whole row", async () => {
     renderRoutes(routes(), '/dashboard');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
     for (const name of ['Library', 'Sources']) {
@@ -305,7 +307,9 @@ describe('the rail', () => {
       expect(label.className, name).toMatch(/\bsticky\b/);
       expect(label.className, name).toContain('bg-surface');
     }
-    expect(within(nav).getByRole('button', { name: 'Library' }).className).toContain('h-[max(1.5rem,24px)]');
+    // The Library label folds nothing now; its More row is as tall as a link.
+    expect(within(nav).queryByRole('button', { name: 'Library' })).toBeNull();
+    expect(within(nav).getByRole('button', { name: 'More' }).className).toContain('h-(--rail-item-height)');
     // The sources block fades a row's height at its foot, and has no top fade over the sticky label.
     const scroll = screen.getByTestId('rail-scroll');
     expect(scroll.style.maskImage ?? '').not.toContain('transparent, #000');

@@ -1,4 +1,4 @@
-import { Command, ListTree, Moon, PanelLeftOpen, Search, Sun } from 'lucide-react';
+import { ListTree, Moon, PanelLeftOpen, Search, Sun, TextSearch } from 'lucide-react';
 import { memo, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -154,10 +154,12 @@ export const Header = memo(function Header({
           {searchField && (
             // The page's field takes the trigger's place; the palette keeps a small button before
             // it, so the slot itself stays put (the same box and edges as on every other page).
+            // It stands in for "Search everything", which the rail no longer repeats, so it carries
+            // that name and a search glyph unlike the field's magnifier; Ctrl+F focuses the field.
             <IconButton
-              label={t('commandPalette')}
+              label={t('searchEverything')}
               shortcut="mod+k"
-              icon={<Command size={18} />}
+              icon={<TextSearch size={18} />}
               aria-haspopup="dialog"
               onClick={() => setPaletteOpen(true)}
               data-testid="header-palette"

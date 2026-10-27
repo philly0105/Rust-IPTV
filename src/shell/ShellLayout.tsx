@@ -18,7 +18,7 @@ import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
 import { focusSearchWhenReady } from './focusSearch';
 import { Header, HEADER_SEARCH_WIDTH } from './Header';
-import { LIBRARY_LINKS, PHONE_QUERY, rememberRouteSource, WATCH_LINKS } from './navigation';
+import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
@@ -374,10 +374,11 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
           <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden px-2">
             {/* The Watch label, which the expanded rail shows above Home (the icon rail has no rule there). */}
             {!collapsed && label()}
-            {/* Every Watch link, Live TV, Movies and Series included: most sources have movies and series. */}
-            {rows(WATCH_LINKS.length)}
+            {/* Every Watch link the rail shows, Live TV, Movies and Series included: most sources have movies and series. */}
+            {rows(RAIL_WATCH_LINKS.length)}
             {label()}
-            {rows(LIBRARY_LINKS.length)}
+            {/* Library's everyday links and its More row, folded as it is unless the user opened it. */}
+            {rows(LIBRARY_LINKS.filter((l) => !l.more).length + 1)}
           </div>
           {/* The footer row: Settings, and beside it (expanded) the shortcuts and collapse buttons. */}
           <div className={cn('flex shrink-0 items-center gap-0.5 border-t border-divider p-2', collapsed && 'flex-col')}>

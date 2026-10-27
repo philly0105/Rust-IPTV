@@ -217,3 +217,53 @@ describe('palette guide programmes (F-SEARCH-PROGRAMMES)', () => {
     expect((router.state.location.state as { guideHit: { program: { title: string } } }).guideHit.program.title).toBe('Café Society');
   });
 });
+
+describe('palette library matches', () => {
+  const fox: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '21' };
+  const foxMovie: ItemRef = { sourceId: 's2', contentType: 'movie', itemId: '31' };
+  beforeEach(() => {
+    rpcMock.handlers['catalog.search'] = (a) => {
+      const { query } = a as { query: string };
+      if (query !== 'fox' && query !== 'bbc') return { live: [], movies: [], series: [] };
+      const channel = (ref: ItemRef, name: string) => ({ ref, name, categoryId: 'c1', categoryName: 'US| SPORTS', isRadio: false });
+      return {
+        live: query === 'fox' ? [channel(fox, 'US| FOX HD'), ...Array.from({ length: 6 }, (_, i) => channel({ ...fox, itemId: `f${i}` }, `FOX ${i}`))] : [channel(bbcNews, 'BBC News')],
+        movies: query === 'fox' ? [{ ref: foxMovie, title: 'The Fox Hunt', year: 2019, categoryId: 'm1' }] : [],
+        series: [],
+      };
+    };
+  });
+
+  it("'fox' finds a channel nobody favourited and plays it, with the Search page's own request", async () => {
+    const { palette } = await openPaletteWith('fox');
+    const row = await within(palette).findByText('US| FOX HD');
+    expect(within(palette).getByText('Channels')).toBeTruthy();
+    expect(within(palette).getByText('Movies and series')).toBeTruthy();
+    expect(within(palette).getByText('The Fox Hunt')).toBeTruthy();
+    // A few per type, whatever the core sends; the channel's group names its feed.
+    const channels = within(palette).getByText('Channels').closest('[cmdk-group]') as HTMLElement;
+    expect(channels.querySelectorAll('[cmdk-item]')).toHaveLength(4);
+    expect(within(row.closest('[cmdk-item]') as HTMLElement).getByText('US| SPORTS')).toBeTruthy();
+    // The Search page's first page (every source, 60 and the probe row), so "Search for" opens warm.
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toContainEqual({ query: 'fox', limit: 61 });
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: fox, title: 'US| FOX HD', isLive: true, categoryId: 'c1', sourceKind: 'xtream' })),
+    );
+  });
+
+  it('a library movie opens its detail page', async () => {
+    const { palette, router } = await openPaletteWith('fox');
+    fireEvent.click(await within(palette).findByText('The Fox Hunt'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/s/s2/movie/31'));
+  });
+
+  it('a favourite the library also finds is listed once, under Favorites and recent', async () => {
+    const { palette } = await openPaletteWith('bbc');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'catalog.search' && (c.args as { query: string }).query === 'bbc')).toBe(true));
+    // Give the answer a moment to land, then count.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(within(palette).getAllByText('BBC News')).toHaveLength(1);
+    expect(within(palette).queryByText('Channels')).toBeNull();
+  });
+});

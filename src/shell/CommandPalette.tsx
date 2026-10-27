@@ -35,11 +35,13 @@ import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { displayChannelName } from '@/features/live/lib/channelName';
 import { formatClock, formatDay, ms } from '@/features/live/lib/epgTime';
+// Pure helpers (no React): the Search page's first-page arguments and detail paths.
+import { detailHref, normalizeQuery, SEARCH_LIMIT, searchRequestLimit } from '@/features/vod/lib/search';
 // The openers only: the store has no UI imports, so the tour and What's new stay in their own chunks.
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
 import { snapshotTitle } from '@/lib/title';
-import { cn, Dialog, Kbd, Poster, toast, errorDescription } from '@/ui';
+import { Dialog, Kbd, Poster, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
 import { LIBRARY_LINKS, readLastSource, watchLinks } from './navigation';
@@ -198,6 +200,88 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
       };
     });
   }, [q, sources.data, favorites.data, recent.data, t, navigate]);
+}
+
+/** Most library channels, and most library movies and series, the palette lists for one query. */
+const CATALOG_LIMIT = 4;
+/** Pause after the last keystroke before the library is searched (the Search page waits 100 ms). */
+const CATALOG_DEBOUNCE_MS = 120;
+
+/**
+ * Channels, movies and series from the whole library (`catalog.search`), so the palette that the
+ * header calls "Search everything" finds a channel nobody has favourited or watched yet. It asks
+ * with the Search page's own first-page arguments, so "Search for" opens on an answer already in
+ * the cache, after a pause in typing and only while the palette is open. The core caps every type
+ * at that limit (57k channels or not); the palette shows the first few that still match what is
+ * typed, skipping items the favourites and recent group already lists (`skip`, by `itemKey`).
+ * A channel plays in the dock, a movie or series opens its detail page, where a parental lock
+ * still asks for the PIN.
+ */
+function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>): PaletteItem[] {
+  const { t } = useTranslation(['shell', 'vod']);
+  const navigate = useNavigate();
+  const sources = useVisibleSources();
+  const debounced = normalizeQuery(useDebounced(query, CATALOG_DEBOUNCE_MS));
+  // While a newer query waits, the last answer stays and narrows by the filter below, so the
+  // groups do not blink out between keystrokes.
+  const catalog = useRpcQuery('catalog.search', { query: debounced, limit: searchRequestLimit(SEARCH_LIMIT) }, { enabled: open && !!debounced, staleTime: 30_000, keepPrevious: true });
+  const q = query.trim();
+
+  return useMemo(() => {
+    const data = catalog.data;
+    if (!q || !data) return [];
+    const sourceById = new Map((sources.data ?? []).map((s) => [s.id, s]));
+    const many = sourceById.size > 1;
+    // The core matched words with diacritics folded and renamed channels by their provider name,
+    // which the palette's own filter does not: the query an answer is for counts as its keyword,
+    // so an answer for "fo" still narrows to the titles holding "fox".
+    const answered = (catalog.isPlaceholderData ? '' : debounced) || undefined;
+    const keywords = answered ? [answered] : undefined;
+    const pick = <T extends { ref: ItemRef }>(list: readonly T[], title: (x: T) => string) =>
+      list.filter((x) => sourceById.has(x.ref.sourceId) && !skip.has(itemKey(x.ref)) && paletteFilter(title(x), q, keywords) > 0).slice(0, CATALOG_LIMIT);
+
+    const channels = t('vod:group_live');
+    const items: PaletteItem[] = pick(data.live, (c) => c.name).map((c): PaletteItem => {
+      const source = sourceById.get(c.ref.sourceId)!;
+      return {
+        id: `catalog.${itemKey(c.ref)}`,
+        title: c.name,
+        group: channels,
+        icon: c.isRadio ? Radio : Tv,
+        image: c.logoUrl ? { src: c.logoUrl, sourceId: c.ref.sourceId } : undefined,
+        keywords,
+        // The channel's group tells two feeds of one name apart ("FOX HD" in Sports and in Backup).
+        detail: [c.categoryName, many ? source.name : ''].filter(Boolean),
+        run: () =>
+          void playFromShell({
+            ref: c.ref,
+            title: c.name,
+            posterUrl: c.logoUrl,
+            isLive: true,
+            isRadio: c.isRadio,
+            sourceKind: source.kind,
+            ...(c.categoryId ? { categoryId: c.categoryId } : {}),
+          }).catch((err: unknown) => toast({ variant: 'error', title: t('playFailed', { title: c.name }), description: errorDescription(err) })),
+      };
+    });
+    const titles = t('vod:group_titles');
+    const vod = [...pick(data.movies, (m) => m.title), ...pick(data.series, (s) => s.title)];
+    for (const v of vod) {
+      const source = sourceById.get(v.ref.sourceId)!;
+      const kind = t(CONTENT_KIND_KEYS[v.ref.contentType]);
+      items.push({
+        id: `catalog.${itemKey(v.ref)}`,
+        title: v.title,
+        group: titles,
+        icon: CONTENT_ICONS[v.ref.contentType],
+        image: v.posterUrl ? { src: v.posterUrl, sourceId: v.ref.sourceId, poster: true } : undefined,
+        keywords,
+        detail: [[kind, v.year].filter(Boolean).join(' · '), many ? source.name : ''].filter(Boolean),
+        run: () => void navigate(detailHref(v.ref) ?? '/search'),
+      });
+    }
+    return items;
+  }, [q, debounced, catalog.data, catalog.isPlaceholderData, sources.data, skip, t, navigate]);
 }
 
 /** Recent channels the palette opens with. */
@@ -488,6 +572,9 @@ export function CommandPalette() {
   const start = useStartItems(query, open);
   const suggested = useSuggestedItems(query);
   const content = useContentItems(query, open);
+  // A favourite or recent item the library also finds is listed once, in the group above.
+  const contentKeys = useMemo(() => new Set(content.map((it) => it.id.slice('content.'.length))), [content]);
+  const catalog = useCatalogItems(query, open, contentKeys);
   const programmes = useProgrammeItems(query, open);
   // Every way of closing (Esc, the scrim, Ctrl+K again, Back) leaves the next open empty: the
   // query resets as the palette opens, during render, so no frame shows the old filter.
@@ -502,7 +589,7 @@ export function CommandPalette() {
   // destinations; sources and settings come with a query.
   const groups = useMemo(() => {
     const empty = !query.trim();
-    const all = empty ? [...start, ...suggested, ...items.filter((it) => EMPTY_GROUP_IDS.some((p) => it.id.startsWith(p)))] : [...content, ...programmes, ...items];
+    const all = empty ? [...start, ...suggested, ...items.filter((it) => EMPTY_GROUP_IDS.some((p) => it.id.startsWith(p)))] : [...content, ...catalog, ...programmes, ...items];
     const map = new Map<string, PaletteItem[]>();
     for (const it of all) {
       const list = map.get(it.group) ?? [];
@@ -510,7 +597,7 @@ export function CommandPalette() {
       map.set(it.group, list);
     }
     return [...map.entries()];
-  }, [query, start, suggested, content, programmes, items]);
+  }, [query, start, suggested, content, catalog, programmes, items]);
 
   // cmdk 1.1 sorts items inside a group but never moves the groups themselves (it looks a
   // group up by its value while tracking it by an internal id), so "Go to" always led. Order
@@ -633,8 +720,9 @@ export function CommandPalette() {
                     <span dir="auto" title={it.title} className="min-w-0 flex-1 truncate text-match-parent">
                       {it.title}
                     </span>
+                    {/* Capped, so a long channel group or source name never squeezes the title. */}
                     {it.detail?.map((d, i) => (
-                      <span key={i} dir="auto" title={i > 0 ? d : undefined} className={cn('shrink-0 text-xs text-fg-subtle', i > 0 && 'max-w-40 truncate')}>
+                      <span key={i} dir="auto" title={d} className="max-w-40 shrink-0 truncate text-xs text-fg-subtle">
                         {d}
                       </span>
                     ))}

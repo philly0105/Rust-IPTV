@@ -17,7 +17,7 @@ export type SegmentedTone = 'default' | 'glass';
  */
 export const SEGMENT_TONES = {
   default: {
-    track: 'ring-edge bg-surface-2',
+    track: 'outline-edge bg-surface-2',
     thumb: 'bg-raised text-fg shadow-1 ring-1 ring-border',
     rest: 'text-fg-muted hover:bg-hover hover:text-fg active:bg-active',
     focus: '',
@@ -38,14 +38,17 @@ const SEGMENT_FORCED = 'forced-color-adjust-none forced-colors:bg-[Highlight] fo
 
 /**
  * The segmented look, shared with the pill Tabs: a recessed track and one raised, neutral thumb
- * for the chosen segment (SEGMENT_TONES). The track's edge is an inset ring rather than a border,
- * so it adds nothing to the height: a 30 px segment in the track's padding makes the control as
- * tall as an `md` button or field (h-10), and the compact size as tall as an `sm` one (h-8), so
- * a segmented control lines up with the select, search field or button beside it. With a border
- * it stood 2 px taller than both.
+ * for the chosen segment (SEGMENT_TONES). The track's edge is an outline drawn just inside it
+ * rather than a border, so it adds nothing to the height: a 30 px segment in the track's padding
+ * makes the control as tall as an `md` button or field (h-10), and the compact size as tall as an
+ * `sm` one (h-8), so a segmented control lines up with the select, search field or button beside
+ * it. With a border it stood 2 px taller than both. Not an inset ring: that is a box-shadow, which
+ * forced colours drop, leaving the unchosen segments as loose text; they repaint an outline in the
+ * system's text colour instead. The track itself never takes focus, so the focus outline does not
+ * replace this one.
  */
 export const SEGMENT_TRACK: Record<SegmentedTone, string> = {
-  default: `flex gap-1 rounded-md p-1 ring-1 ring-inset ${SEGMENT_TONES.default.track}`,
+  default: `flex gap-1 rounded-md p-1 outline-1 -outline-offset-1 ${SEGMENT_TONES.default.track}`,
   glass: `flex gap-1 rounded-md p-0.5 ${SEGMENT_TONES.glass.track}`,
 };
 

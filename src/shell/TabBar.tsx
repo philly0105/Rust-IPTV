@@ -183,9 +183,13 @@ function sheetWatchLinks(sources: readonly Source[] | undefined, pathname: strin
 function SheetTile({ to, label, icon: Icon, active }: { to: string; label: string; icon: LucideIcon; active: boolean }) {
   return (
     <li className="min-w-0">
-      <NavLink
+      {/*
+        A plain Link: NavLink sets aria-current by its own prefix match whatever it is given, so a
+        movie's detail page drew the Movies tile as current without saying so. Movies and Series
+        are current by their section, and every tile says what it draws.
+      */}
+      <Link
         to={to}
-        // Movies and Series are current by their section, not by NavLink's own prefix match.
         aria-current={active ? 'page' : undefined}
         className={cn(
           'flex h-full flex-col items-center gap-1.5 rounded-lg px-1 py-2.5 text-center text-caption font-medium',
@@ -196,7 +200,7 @@ function SheetTile({ to, label, icon: Icon, active }: { to: string; label: strin
           <Icon size={20} className={cn(active ? 'text-accent' : 'text-fg')} />
         </span>
         <span className="line-clamp-2 break-words">{label}</span>
-      </NavLink>
+      </Link>
     </li>
   );
 }

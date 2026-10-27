@@ -403,6 +403,22 @@ describe('phone More sheet with one source', () => {
     fireEvent.click(row);
     await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
   });
+
+  it("says the Movies tile is current on a movie's detail page, as it draws it", async () => {
+    media(...PHONE);
+    handlers([makeSource('s1', { name: 'Night Portal' })]);
+    renderRoutes(routes(), '/s/s1/movie/9');
+    const bar = await screen.findByTestId('tab-bar');
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    const watch = within(sheet).getByRole('region', { name: 'Watch' });
+    const movies = await within(watch).findByRole('link', { name: 'Movies' });
+    expect(movies.getAttribute('href')).toBe('/s/s1/movies');
+    // The path is not under /s/s1/movies: only the section's own rule makes the tile current.
+    expect(movies.className).toContain('bg-selected');
+    expect(movies.getAttribute('aria-current')).toBe('page');
+    expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('aria-current')).toBeNull();
+  });
 });
 
 describe('palette and shortcut reference polish', () => {

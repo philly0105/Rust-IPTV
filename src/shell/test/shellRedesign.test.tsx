@@ -321,7 +321,7 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     expect(readLastSource()).toBe('b');
   });
 
-  it('follows the source the user opened, and More holds the Library, the sources and Settings', async () => {
+  it('follows the source the user opened, and More holds the Watch pages without a tab, the Library, the sources and Settings', async () => {
     media(...PHONE);
     const { router } = renderRoutes(routes(), '/s/s2/movies');
     const bar = await screen.findByTestId('tab-bar');
@@ -332,9 +332,19 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     fireEvent.click(more);
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     expect(more.getAttribute('aria-expanded')).toBe('true');
+    // The Watch pages the bar has no tab for lead the sheet: Movies and Series of the source on
+    // show, marked current as in the rail, then Sports and Multi-view.
+    const watch = within(sheet).getByRole('region', { name: 'Watch' });
+    const tiles = within(watch).getAllByRole('link');
+    expect(tiles.map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Movies', '/s/s2/movies'],
+      ['Series', '/s/s2/series'],
+      ['Sports', '/sports'],
+      ['Multi-view', '/multiview'],
+    ]);
+    expect(tiles.map((l) => l.getAttribute('aria-current'))).toEqual(['page', null, null, null]);
     expect(within(sheet).getByRole('link', { name: 'My List' })).toBeTruthy();
-    // Sports is a Watch page the bar has no tab for: phones reach it here.
-    expect(within(sheet).getByRole('link', { name: 'Sports' }).getAttribute('href')).toBe('/sports');
+    expect(within(sheet).getByRole('link', { name: 'Manage sources' }).getAttribute('href')).toBe('/sources');
     expect(within(sheet).getByRole('link', { name: 'Settings' })).toBeTruthy();
     const backup = within(sheet).getByRole('list', { name: 'Backup' });
     // What the source holds; its favourites and history are in Library above.
@@ -343,6 +353,28 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     fireEvent.click(within(sheet).getByRole('link', { name: 'My List' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/my-list'));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull());
+  });
+});
+
+describe('phone More sheet with one source', () => {
+  it("is one row to the Sources page, its Radio, Movies and Series Watch tiles, and no chips", async () => {
+    media(...PHONE);
+    handlers([makeSource('s1', { name: 'Night Portal', radioCount: 4 })]);
+    const { router } = renderRoutes(routes(), '/s/s1/series');
+    const bar = await screen.findByTestId('tab-bar');
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    const watch = within(sheet).getByRole('region', { name: 'Watch' });
+    await waitFor(() => expect(within(watch).getAllByRole('link').map((l) => l.textContent)).toEqual(['Radio', 'Movies', 'Series', 'Sports', 'Multi-view']));
+    expect(within(watch).getByRole('link', { name: 'Radio' }).getAttribute('href')).toBe('/s/s1/radio');
+    expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('aria-current')).toBe('page');
+    // The source's row stands for Manage sources; a card of chips would repeat the tiles and the Live TV tab.
+    const row = within(sheet).getByRole('link', { name: 'Night Portal, Manage sources' });
+    expect(row.getAttribute('href')).toBe('/sources');
+    expect(within(sheet).queryByRole('list', { name: 'Night Portal' })).toBeNull();
+    expect(within(sheet).getAllByRole('link', { name: /Manage sources/ })).toEqual([row]);
+    fireEvent.click(row);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
   });
 });
 

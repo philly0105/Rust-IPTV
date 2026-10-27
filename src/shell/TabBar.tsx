@@ -2,7 +2,8 @@
  * Phones (below sm, CB-PHONE-NAV): a bottom tab bar instead of the rail. The collapsed rail took
  * 72 px, a fifth of a 390 px screen, for nineteen unlabelled icons, and every page under it
  * truncated or wrapped. The bar holds Home, Live TV, the guide, Search and More; More opens a
- * sheet with the Library pages, the sources and Settings.
+ * sheet with the Watch pages the bar has no tab for (Movies and Series first), the Library pages,
+ * the sources and Settings.
  *
  * The bar sits in the shell's column under the outlet, not over it, so no page needs bottom
  * padding for it. Overlays that float over the page read its height from --shell-bottom-inset on
@@ -14,7 +15,7 @@
  * off in German, Greek, Polish and Belarusian.
  */
 
-import { CalendarRange, ChevronRight, House, LayoutGrid, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Trophy, Tv, type LucideIcon } from 'lucide-react';
+import { CalendarRange, ChevronRight, House, ListVideo, Menu as MenuIcon, Plus, Search, Settings as SettingsIcon, Tv, type LucideIcon } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation } from 'react-router';
@@ -22,7 +23,7 @@ import { Link, NavLink, useLocation } from 'react-router';
 import type { Source } from '@/api/types';
 import { cn, Dialog, SourceMonogram } from '@/ui';
 
-import { isLiveRoute, LIBRARY_LINKS, liveTabTarget, readLastSource } from './navigation';
+import { isLiveRoute, LIBRARY_LINKS, liveTabTarget, loneSourceRadio, readLastSource, sectionCurrent, watchLinks, type NavLinkDef } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { useVisibleSources } from './useVisibleSources';
@@ -116,7 +117,7 @@ export const TabBar = memo(function TabBar() {
           </button>
         </li>
       </ul>
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data ?? []} pathname={pathname} />
+      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} sources={sources.data} pathname={pathname} />
     </nav>
   );
 });
@@ -141,13 +142,58 @@ const rowClass = (active: boolean) =>
     active ? 'tuning-tick bg-selected text-fg' : 'text-fg hover:bg-hover active:bg-active',
   );
 
+/** The Watch rows the bar has a tab for (Live TV is the one with a section, handled apart). */
+const TAB_PAGES = new Set(['/dashboard', '/epg', '/search']);
+
+/**
+ * The sheet's Watch tiles: the rail's Watch rows that have no tab (Movies, Series, Sports,
+ * Multi-view), each marked current by the rail's rule, and the only source's Radio where the
+ * rail puts it, after Live TV. Movies and Series lead the sheet because the bar has no room for
+ * them: before, they were 30 px chips in the source's card under eight Library tiles.
+ */
+function sheetWatchLinks(sources: readonly Source[] | undefined, pathname: string): { link: NavLinkDef; active: boolean }[] {
+  const radio = loneSourceRadio(sources);
+  const under = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+  return watchLinks(sources, routeSourceId(pathname) ?? readLastSource()).flatMap((l) => {
+    if (l.section === 'live') return radio ? [{ link: radio, active: under(radio.to) }] : [];
+    if (l.section) return [{ link: l, active: sectionCurrent(l.section, pathname) }];
+    return TAB_PAGES.has(l.to) ? [] : [{ link: l, active: under(l.to) }];
+  });
+}
+
+/** One square tile of the sheet's Watch and Library grids. */
+function SheetTile({ to, label, icon: Icon, active }: { to: string; label: string; icon: LucideIcon; active: boolean }) {
+  return (
+    <li className="min-w-0">
+      <NavLink
+        to={to}
+        // Movies and Series are current by their section, not by NavLink's own prefix match.
+        aria-current={active ? 'page' : undefined}
+        className={cn(
+          'flex h-full flex-col items-center gap-1.5 rounded-lg px-1 py-2.5 text-center text-caption font-medium',
+          active ? 'bg-selected text-fg' : 'text-fg-muted hover:bg-hover active:bg-active',
+        )}
+      >
+        <span aria-hidden className="flex size-11 items-center justify-center rounded-lg border border-edge bg-surface-2">
+          <Icon size={20} className={cn(active ? 'text-accent' : 'text-fg')} />
+        </span>
+        <span className="line-clamp-2 break-words">{label}</span>
+      </NavLink>
+    </li>
+  );
+}
+
 /**
  * The More sheet: the kit Dialog as a bottom sheet (`sheet`), so it keeps the dialog's focus trap,
  * Escape, scroll lock and focus return. Below sm only, like the bar, which unmounts it above.
  */
-function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClose: () => void; sources: readonly Source[]; pathname: string }) {
+function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClose: () => void; sources: readonly Source[] | undefined; pathname: string }) {
   const { t } = useTranslation('shell');
   const current = (to: string) => pathname === to || pathname.startsWith(`${to}/`);
+  const list = sources ?? [];
+  // One source is one row to the Sources page, as in the rail: its Live TV has a tab and its
+  // Radio, Movies and Series are Watch tiles, so a card of chips would repeat them.
+  const lone = list.length === 1 ? list[0] : undefined;
   return (
     <Dialog
       open={open}
@@ -158,30 +204,25 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
       className="max-sm:max-h-[85dvh]"
       bodyClassName="flex flex-col gap-6"
     >
+      <section aria-labelledby="more-watch" className="flex flex-col gap-2">
+        <h3 id="more-watch" className="text-caption font-medium text-fg-subtle">
+          {t('navGroupWatch')}
+        </h3>
+        <ul className="grid grid-cols-4 gap-2">
+          {sheetWatchLinks(sources, pathname).map(({ link, active }) => (
+            <SheetTile key={link.labelKey} to={link.to} label={t(link.labelKey)} icon={link.icon} active={active} />
+          ))}
+        </ul>
+      </section>
+
       <section aria-labelledby="more-library" className="flex flex-col gap-2">
         <h3 id="more-library" className="text-caption font-medium text-fg-subtle">
           {t('navGroupLibrary')}
         </h3>
         <ul className="grid grid-cols-4 gap-2">
-          {LIBRARY_LINKS.map(({ to, labelKey, icon: Icon }) => {
-            const active = current(to);
-            return (
-              <li key={to} className="min-w-0">
-                <NavLink
-                  to={to}
-                  className={cn(
-                    'flex h-full flex-col items-center gap-1.5 rounded-lg px-1 py-2.5 text-center text-caption font-medium',
-                    active ? 'bg-selected text-fg' : 'text-fg-muted hover:bg-hover active:bg-active',
-                  )}
-                >
-                  <span aria-hidden className="flex size-11 items-center justify-center rounded-lg border border-edge bg-surface-2">
-                    <Icon size={20} className={cn(active ? 'text-accent' : 'text-fg')} />
-                  </span>
-                  <span className="line-clamp-2 break-words">{t(labelKey)}</span>
-                </NavLink>
-              </li>
-            );
-          })}
+          {LIBRARY_LINKS.map(({ to, labelKey, icon }) => (
+            <SheetTile key={to} to={to} label={t(labelKey)} icon={icon} active={current(to)} />
+          ))}
         </ul>
       </section>
 
@@ -189,14 +230,32 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
         <h3 id="more-sources" className="text-caption font-medium text-fg-subtle">
           {t('sources')}
         </h3>
-        {sources.length === 0 ? (
+        {list.length === 0 ? (
           <Link to="/sources?add=1" className={cn(rowClass(false), 'border border-dashed border-edge')}>
             <Plus aria-hidden size={18} className="shrink-0 text-fg-muted" />
             <span className="min-w-0 flex-1 truncate">{t('addSource')}</span>
           </Link>
+        ) : lone ? (
+          <NavLink
+            to="/sources"
+            end
+            // The row stands for Manage sources, which has no row of its own with one source.
+            aria-label={`${lone.name}, ${t('manageSources')}`}
+            className={({ isActive }) => cn(rowClass(isActive), 'border border-edge py-2', !isActive && 'bg-surface-2')}
+          >
+            <SourceMonogram name={lone.name} className="size-9 rounded-md text-sm" />
+            <span className="flex min-w-0 flex-1 flex-col">
+              {/* text-match-parent: a Latin name in an RTL layout stays beside its monogram (as in the rail). */}
+              <span dir="auto" className="truncate text-match-parent">
+                {lone.name}
+              </span>
+              <span className="truncate text-caption font-normal text-fg-muted">{t('manageSources')}</span>
+            </span>
+            <ChevronRight aria-hidden size={16} className="shrink-0 text-fg-subtle rtl:rotate-180" />
+          </NavLink>
         ) : (
           <ul className="flex flex-col gap-1">
-            {sources.map((s) => (
+            {list.map((s) => (
               <li key={s.id} className="flex flex-col gap-2 rounded-lg border border-edge bg-surface-2 p-3">
                 <div className="flex min-w-0 items-center gap-3">
                   <SourceMonogram name={s.name} className="size-9 rounded-md text-sm" />
@@ -237,9 +296,7 @@ function MoreSheet({ open, onClose, sources, pathname }: { open: boolean; onClos
       <ul className="flex flex-col gap-0.5 border-t border-divider pt-3">
         {(
           [
-            { to: '/sports', label: t('sports:title'), icon: Trophy },
-            { to: '/multiview', label: t('navMultiview'), icon: LayoutGrid },
-            { to: '/sources', label: t('manageSources'), icon: ListVideo },
+            ...(lone ? [] : [{ to: '/sources', label: t('manageSources'), icon: ListVideo }]),
             { to: '/settings', label: t('navSettings'), icon: SettingsIcon },
           ] as const
         ).map(({ to, label, icon: Icon }) => (

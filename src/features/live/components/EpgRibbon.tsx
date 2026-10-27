@@ -278,8 +278,16 @@ export function EpgRibbon(props: EpgRibbonProps) {
               ) : null}
             </>
           ) : (
-            <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg" data-testid="ribbon-channel-name">
-              {channelName || t('guide')}
+            // Without a guide (or while it loads) the channel's name heads the card, drawn as the
+            // stage above and the list draw it.
+            <p className="text-sm font-semibold text-fg" data-testid="ribbon-channel-name">
+              {channelName ? (
+                <ChannelName name={channel?.name} strip={prefs.stripCountryPrefix} className="block truncate text-match-parent" />
+              ) : (
+                <span dir="auto" className="block truncate text-match-parent">
+                  {t('guide')}
+                </span>
+              )}
             </p>
           )}
         </div>

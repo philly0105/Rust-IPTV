@@ -30,7 +30,6 @@ import {
 } from '@/api/types';
 
 import { Button, buttonClass, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
-import { ChannelName } from '@/ui/ChannelName';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canZap, isPendingZap } from '@/features/player/store';
 import { hideZapBanner } from '@/features/player/zapBanner';
@@ -941,7 +940,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               data-testid="live-groups-toggle"
             >
               <span className="sr-only">{`${t('groups')}: `}</span>
-              <ChannelName name={subtitle} className="truncate" />
+              <span dir="auto" className="truncate">
+                {subtitle}
+              </span>
               <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
             </Button>
           ) : (

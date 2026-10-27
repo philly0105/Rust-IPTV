@@ -1,4 +1,4 @@
-import { splitCountryTag } from '@/lib/channelName';
+import { splitPlaceTag, stripCountryPrefix } from '@/lib/channelName';
 
 import { cn } from './cn';
 
@@ -16,32 +16,41 @@ export interface ChannelNameProps {
 }
 
 /**
- * A channel's or group's name with the provider's tag after it, quiet: "ESPN HD US" for
- * "US| ESPN HD". The tag led every name in the same weight as the name, so the most repeated
- * string on screen was "US|", and a narrow column cut "US| ESPN..." four rows running before it
- * reached what tells ESPN2 from ESPNU. After the name, in the caption size and the subtle tone, it
- * is the first thing a narrow column cuts.
+ * A channel's name with the provider's place tag after it, quiet: "ESPN HD US" for "US| ESPN HD".
+ * The tag led every name in the same weight, so "US|" was the most repeated string on screen and a
+ * narrow column cut "US| ESPN..." before it reached what tells ESPN2 from ESPNU. After the name, in
+ * the caption size and the subtle tone, the tag is what a narrow column drops first, whole and
+ * without an ellipsis, so an ellipsis always means the name itself is cut.
  *
- * Only the look changes. Assistive tech reads the provider's name as it is (the drawn parts are
- * hidden, the raw name is there for screen readers), so it matches the row's accessible name,
- * search and menus. With the strip setting on, the tag is gone as before. A name without a tag
- * renders as plain text.
+ * Only a place's code moves (`splitPlaceTag`): "NBA: Lakers vs Celtics" and "Sky Sports | Main
+ * Event" are drawn as the provider wrote them. Screen readers get the provider's name as it is (the
+ * drawn parts are hidden), which matches the row's accessible name, search and menus. With the
+ * strip setting on, the tag is gone as before. Callers truncate through `className`: this span has
+ * `dir="auto"`, which puts an RTL name's ellipsis at its own end.
  */
 export function ChannelName({ name, strip, className, tagClassName, title, testId }: ChannelNameProps) {
   const raw = name ?? '';
-  const split = splitCountryTag(raw);
-  if (!split.tag || strip) {
+  const split = strip ? undefined : splitPlaceTag(raw);
+  if (!split?.tag) {
     return (
       <span dir="auto" className={className} title={title} data-testid={testId}>
-        {strip ? split.name : raw}
+        {strip ? stripCountryPrefix(raw) : raw}
       </span>
     );
   }
   return (
     <span dir="auto" className={className} title={title} data-testid={testId}>
-      <span aria-hidden>
-        {split.name}
-        <span className={cn('ms-1.5 text-caption font-medium tracking-wide text-fg-subtle', tagClassName)} data-testid="channel-name-tag">
+      {/* One line tall: a tag that does not fit beside the name wraps to a second line, out of
+          sight, so it goes whole (a clipped "U" read as part of the name). The name never shrinks
+          below its own width (up to the whole line), so its ellipsis means it is cut; shrinking
+          the tag first by flex-shrink weights also took a fraction of a pixel from the name, and
+          that was enough to draw an ellipsis on a complete one. */}
+      <span aria-hidden className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
+        <span className="max-w-full shrink-0 truncate">{split.name}</span>
+        <span
+          className={cn('ms-1.5 whitespace-nowrap text-caption font-medium tracking-wide text-fg-subtle', tagClassName)}
+          data-testid="channel-name-tag"
+        >
           {split.tag}
         </span>
       </span>

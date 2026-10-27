@@ -34,7 +34,8 @@ function findTagSeparator(name: string): { index: number; length: number } | nul
  * A channel or group name split into the provider's leading tag and the name after it, by the
  * rules above: "US| ESPN HD" is `{ tag: 'US', name: 'ESPN HD' }`, "[FR] TF1" is `{ tag: 'FR',
  * name: 'TF1' }`, and a name without a tag ("NCIS: LA", "Sky - Sports F1") comes back trimmed
- * with no `tag`. ChannelName draws the tag as a quiet suffix; the strip setting drops it.
+ * with no `tag`. The strip setting drops the tag; ChannelName draws a place's tag after the name
+ * (`splitPlaceTag`).
  */
 export function splitCountryTag(name: string): { name: string; tag?: string } {
   const trimmed = name.trim();
@@ -53,6 +54,32 @@ export function splitCountryTag(name: string): { name: string; tag?: string } {
   if (!rest) return { name: trimmed };
   // A leading separator ("|DE| ARD") strips nothing by itself: retry on the remainder.
   return prefix ? { name: rest, tag: prefix } : splitCountryTag(rest);
+}
+
+/**
+ * Words a playlist files names under in capitals that are kinds of content or quality, not places
+ * ("NBA: Lakers vs Celtics", "PPV| UFC 300", "MOVIES | ACTION"). The groups' region picker offers no
+ * region for them, and a channel's name keeps them in front.
+ */
+export const CATEGORY_TAGS: ReadonlySet<string> = new Set([
+  'MOVIES', 'MOVIE', 'FILMS', 'FILM', 'VOD', 'SERIES', 'SHOWS', 'TV', 'SPORT', 'SPORTS', 'NEWS', 'KIDS', 'MUSIC', 'DOCU',
+  'DOCS', 'ADULT', 'XXX', 'PPV', 'EVENT', 'EVENTS', 'RADIO', 'LIVE', 'LOCAL', 'NFL', 'NBA', 'MLB', 'NHL', 'NCAA', 'NCAAF',
+  'UFC', 'WWE', '24/7', 'HD', 'FHD', 'UHD', 'SD', 'VIP', 'RAW',
+]);
+
+/**
+ * `splitCountryTag` for drawing the tag after the name (ChannelName), which every user sees, so it
+ * moves only a tag shaped like a place's code: capitals, no spaces, 2 to 8 characters ("US",
+ * "LATAM", "4K-DE"), and no kind of content. Anything else is part of the name and stays where the
+ * provider put it: "Sky Sports | Main Event", "ESPN HD | Backup" and "NBA: Lakers vs Celtics" come
+ * back whole, with no `tag`. The strip setting keeps its own wider rule.
+ */
+export function splitPlaceTag(name: string): { name: string; tag?: string } {
+  const split = splitCountryTag(name);
+  if (!split.tag) return split;
+  const code = split.tag.normalize('NFKC');
+  const placeLike = code.length >= 2 && code.length <= 8 && !/\s/.test(code) && code === code.toUpperCase() && !CATEGORY_TAGS.has(code);
+  return placeLike ? split : { name: name.trim() };
 }
 
 export function stripCountryPrefix(name: string): string {

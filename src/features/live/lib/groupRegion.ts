@@ -4,14 +4,7 @@
  * and the group list's region picker narrows them to one.
  */
 
-import { stripCountryPrefix } from './channelName';
-
-/** Words a playlist files groups under in capitals that are kinds of content, not places ("MOVIES | ACTION"). */
-const CATEGORY_TAGS = new Set([
-  'MOVIES', 'MOVIE', 'FILMS', 'FILM', 'VOD', 'SERIES', 'SHOWS', 'TV', 'SPORT', 'SPORTS', 'NEWS', 'KIDS', 'MUSIC', 'DOCU',
-  'DOCS', 'ADULT', 'XXX', 'PPV', 'EVENT', 'EVENTS', 'RADIO', 'LIVE', 'LOCAL', 'NFL', 'NBA', 'MLB', 'NHL', 'NCAA', 'NCAAF',
-  'UFC', 'WWE', '24/7', 'HD', 'FHD', 'UHD', 'SD', 'VIP', 'RAW',
-]);
+import { CATEGORY_TAGS, stripCountryPrefix } from './channelName';
 
 /**
  * The group's tag ("US" for "US| SPORT ᴴᴰ", "CANADA" for "CANADA | NEWS"), or null when its name has

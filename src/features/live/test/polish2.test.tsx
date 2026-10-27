@@ -338,12 +338,9 @@ describe('groups sidebar', () => {
         regionScope="src1:live"
       />
     );
-    // A row's name as the provider gives it: the drawn name puts the tag after it, the hidden
-    // one for screen readers keeps it as it is (ChannelName).
+    // A row reads its name, then its channel count.
     const names = () =>
-      [...document.querySelectorAll<HTMLElement>('[data-cat-index]')]
-        .map((l) => l.querySelector('.sr-only')?.textContent ?? l.textContent?.replace(/\d+$/, ''))
-        .filter((n) => n?.includes('|'));
+      [...document.querySelectorAll<HTMLElement>('[data-cat-index]')].map((l) => l.textContent?.replace(/\d+$/, '')).filter((n) => n?.includes('|'));
     renderIn('/', [{ path: '/', element: withScope() }]);
     const picker = screen.getByRole('combobox', { name: 'Region' }) as HTMLSelectElement;
     // Most groups first; a tag on one group only (DE) is not offered.

@@ -10,6 +10,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { ChannelName } from '@/ui/ChannelName';
 
 import { ChannelRow } from '../components/ChannelRow';
+import { StageIdle } from '../components/StageIdle';
 import { MINUTE } from '../lib/epgTime';
 import { i18n, installDomStubs, makeChannel, program } from './harness';
 
@@ -82,6 +83,27 @@ describe('the country tag after the name (review round 4)', () => {
     expect(screen.queryByTestId('channel-name-tag')).toBeNull();
   });
 
+  it('drops the tag first, whole, so an ellipsis only shows when the name itself is cut', () => {
+    render(<ChannelName name="US| MLB Network HD" className="truncate" />);
+    const tag = screen.getByTestId('channel-name-tag');
+    const name = tag.previousElementSibling as HTMLElement;
+    // The name holds its own width up to the whole line.
+    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['shrink-0', 'max-w-full', 'truncate']));
+    // A tag without room wraps to a second line that the one-line box hides; it never gets an ellipsis.
+    expect(tag.parentElement!.className.split(' ')).toEqual(expect.arrayContaining(['flex', 'flex-wrap', 'h-[1lh]', 'overflow-hidden']));
+    expect(tag.className).toContain('whitespace-nowrap');
+    expect(tag.className).not.toMatch(/\btruncate\b|text-ellipsis/);
+  });
+
+  it('moves only a place code: event and content prefixes and names with a pipe stay as written', () => {
+    for (const n of ['NBA: Lakers vs Celtics', 'PPV: UFC 300', 'Sky Sports | Main Event', 'beIN SPORTS 1 | HD', 'ESPN HD | Backup']) {
+      render(<ChannelName name={n} testId="n" />);
+      expect(screen.getByTestId('n').textContent).toBe(n);
+      expect(screen.queryByTestId('channel-name-tag')).toBeNull();
+      cleanup();
+    }
+  });
+
   it('takes a tone for the tag where the theme tone does not apply', () => {
     render(<ChannelName name="UK| BBC One" tagClassName="text-on-glass-muted" />);
     const tag = screen.getByTestId('channel-name-tag');
@@ -105,5 +127,30 @@ describe('channel rows on touch (review round 4)', () => {
     row({ playing: true });
     const number = within(screen.getByRole('button', { name: /US\| ESPN HD/ })).getByText('1');
     expect(number.className).toMatch(/\btext-fg\b(?!-)/);
+  });
+});
+
+describe('the idle stage names its channel in its own direction (review round 4)', () => {
+  function idle(name: string) {
+    const now = Date.now();
+    return render(
+      <I18nextProvider i18n={i18n}>
+        <StageIdle kind="live" now={now} last={{ channel: { ...makeChannel(2), name }, nowNext: {} }} />
+      </I18nextProvider>,
+    );
+  }
+
+  it('truncates on the dir="auto" span, so an RTL name gets its ellipsis at its own end', () => {
+    idle('قناة الرياضية');
+    const name = screen.getByText('قناة الرياضية');
+    expect(name.getAttribute('dir')).toBe('auto');
+    expect(name.className).toContain('truncate');
+    cleanup();
+    idle('US| ESPN HD');
+    const tag = screen.getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    const outer = tag.parentElement!.parentElement!;
+    expect(outer.getAttribute('dir')).toBe('auto');
+    expect(outer.className).toContain('truncate');
   });
 });

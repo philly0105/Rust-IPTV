@@ -7,7 +7,6 @@ import type { Category } from '@/api/types';
 import { useRouteIntent } from '@/shell/routeIntent';
 
 import { Button, cn, ErrorState, IconButton, SearchInput, Select, Skeleton, useListVirtualizer, useRowHeight } from '@/ui';
-import { ChannelName } from '@/ui/ChannelName';
 import { intlLocale } from '@/lib/intl';
 import { useLongPress } from '../hooks/useLongPress';
 import { groupRegion, groupRegions, readRegion, writeRegion } from '../lib/groupRegion';
@@ -466,7 +465,7 @@ function GroupLink({
         className={cn(linkClass(active), 'min-w-0 flex-1', onMenu && 'touch-manipulation select-none [-webkit-touch-callout:none]')}
         title={locked ? `${c.name} (${lockedLabel})` : c.name}
       >
-        <ChannelName name={c.name} className="flex-1 truncate text-match-parent" />
+        <span dir="auto" className="flex-1 truncate text-match-parent">{c.name}</span>
         {locked ? <Lock data-testid="group-locked" className="size-3.5 shrink-0 text-fg-subtle" role="img" aria-label={lockedLabel} /> : null}
         <span className={countClass(active)}>{count}</span>
       </Link>

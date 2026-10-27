@@ -44,13 +44,11 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-function renderRibbon(details: boolean) {
+function renderRibbon(details: boolean, channel = makeChannel(0)) {
   renderAt('/', [
     {
       path: '/',
-      element: (
-        <EpgRibbon channel={makeChannel(0)} sourceKind="m3u" watchingLive={false} onPlayLive={() => undefined} onMapEpg={() => undefined} details={details} />
-      ),
+      element: <EpgRibbon channel={channel} sourceKind="m3u" watchingLive={false} onPlayLive={() => undefined} onMapEpg={() => undefined} details={details} />,
     },
   ]);
 }
@@ -86,5 +84,18 @@ describe('the Now card order (review round 4)', () => {
     renderRibbon(false);
     const title = await headerTitle('Morning Mix');
     expect(follows(screen.getByTestId('ribbon-time'), title)).toBe(true);
+  });
+});
+
+describe('the Now card without a guide (review round 4)', () => {
+  it('names the channel as the stage and the list draw it, the place tag after the name', async () => {
+    rpcMock.handlers['epg.programs'] = () => [];
+    renderRibbon(true, { ...makeChannel(0), name: 'US| ESPN (Backup)' });
+    await screen.findByTestId('ribbon-no-guide');
+    const heading = screen.getByTestId('ribbon-channel-name');
+    const tag = within(heading).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.previousElementSibling?.textContent).toBe('ESPN (Backup)');
+    expect(within(heading).getByText('US| ESPN (Backup)').className).toContain('sr-only');
   });
 });

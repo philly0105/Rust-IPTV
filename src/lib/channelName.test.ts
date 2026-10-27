@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { displayChannelName, splitCountryTag, stripCountryPrefix } from './channelName';
+import { displayChannelName, splitCountryTag, splitPlaceTag, stripCountryPrefix } from './channelName';
 
 describe('splitCountryTag', () => {
   it('splits a provider tag from the name by the strip rules', () => {
@@ -29,5 +29,34 @@ describe('splitCountryTag', () => {
     }
     expect(displayChannelName('US| ESPN HD', true)).toBe('ESPN HD');
     expect(displayChannelName('US| ESPN HD', false)).toBe('US| ESPN HD');
+  });
+});
+
+describe('splitPlaceTag', () => {
+  it('moves a tag shaped like a place code', () => {
+    expect(splitPlaceTag('US| ESPN HD')).toEqual({ tag: 'US', name: 'ESPN HD' });
+    expect(splitPlaceTag('LATAM | DEPORTES')).toEqual({ tag: 'LATAM', name: 'DEPORTES' });
+    expect(splitPlaceTag('4K-DE - Das Erste')).toEqual({ tag: '4K-DE', name: 'Das Erste' });
+    expect(splitPlaceTag('[FR] TF1')).toEqual({ tag: 'FR', name: 'TF1' });
+  });
+
+  it('keeps a prefix with lowercase letters or spaces as part of the name', () => {
+    expect(splitPlaceTag('Sky Sports | Main Event')).toEqual({ name: 'Sky Sports | Main Event' });
+    expect(splitPlaceTag('beIN SPORTS 1 | HD')).toEqual({ name: 'beIN SPORTS 1 | HD' });
+    expect(splitPlaceTag('ESPN HD | Backup')).toEqual({ name: 'ESPN HD | Backup' });
+    expect(splitPlaceTag('NBA 01 | Celtics @ Lakers')).toEqual({ name: 'NBA 01 | Celtics @ Lakers' });
+    expect(splitPlaceTag('NORTHAMERICA| News')).toEqual({ name: 'NORTHAMERICA| News' });
+  });
+
+  it('keeps a kind of content or quality in front of what it names', () => {
+    expect(splitPlaceTag('NBA: Lakers vs Celtics')).toEqual({ name: 'NBA: Lakers vs Celtics' });
+    expect(splitPlaceTag('PPV: UFC 300')).toEqual({ name: 'PPV: UFC 300' });
+    expect(splitPlaceTag('24/7| Friends')).toEqual({ name: '24/7| Friends' });
+    expect(splitPlaceTag('VIP | Sky Cinema')).toEqual({ name: 'VIP | Sky Cinema' });
+  });
+
+  it('leaves the strip setting its own wider rule', () => {
+    expect(stripCountryPrefix('Sky Sports | Main Event')).toBe('Main Event');
+    expect(stripCountryPrefix('NBA: Lakers vs Celtics')).toBe('Lakers vs Celtics');
   });
 });

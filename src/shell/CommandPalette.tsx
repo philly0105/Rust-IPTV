@@ -607,7 +607,14 @@ export function CommandPalette() {
           // Tall enough on a 900 px window for the first suggested action to show whole.
           className="max-h-[min(64vh,32rem)] overflow-y-auto overscroll-contain p-2"
         >
-          <Cmdk.Empty className="px-4 py-10 text-center text-sm text-fg-muted">{t('paletteEmpty')}</Cmdk.Empty>
+          {/*
+            Only shows with a query, and then "Search for …" is always right under it: one quiet
+            line on the group headings' inset, not a 7rem block that pushed the one row left to
+            press halfway down the list.
+          */}
+          <Cmdk.Empty data-testid="palette-empty" className="px-[calc(14rem/15)] pt-3 pb-1 text-sm text-fg-muted">
+            {t('paletteEmpty')}
+          </Cmdk.Empty>
           {ranked.map(([group, list]) => (
             <Cmdk.Group key={group} heading={group}>
               {list.map((it) => {

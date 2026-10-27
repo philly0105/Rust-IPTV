@@ -247,7 +247,7 @@ describe('the idle card and the ribbon tell one story (review round 2)', () => {
     await screen.findByText('Channel 0');
     expect(await screen.findByTestId('stage-idle-caption')).toHaveProperty('textContent', 'Last watched');
     await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain('Channel 7'));
-    expect(screen.getByTestId('stage-resume').textContent).toContain('Resume Channel 7');
+    expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe('Resume Channel 7');
     expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();
   });
 
@@ -259,7 +259,7 @@ describe('the idle card and the ribbon tell one story (review round 2)', () => {
     first.focus();
     fireEvent.keyDown(first, { key: 'ArrowDown' });
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
-    await waitFor(() => expect(screen.getByTestId('stage-resume').textContent).toContain('Play Channel 2'));
+    await waitFor(() => expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe('Play Channel 2'));
     expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
     await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain('Channel 2'));
     expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();

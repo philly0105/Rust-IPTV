@@ -342,7 +342,7 @@ describe('list page', () => {
       rpc.handlers['catalog.item'] = () => CNN;
       h.renderAt('/lists/L1', routes);
       const card = await screen.findByTestId('stage-idle');
-      await waitFor(() => expect(within(card).getByTestId('stage-resume').textContent).toContain('CNN'));
+      await waitFor(() => expect(within(card).getByTestId('stage-resume').getAttribute('aria-label')).toContain('CNN'));
       await waitFor(() => expect(within(card).queryByTestId('stage-idle-locked')).toBeTruthy());
       expect(card.textContent).not.toContain('CNN Tonight');
     });

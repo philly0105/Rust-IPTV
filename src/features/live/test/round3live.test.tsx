@@ -57,7 +57,7 @@ describe('the idle stage and a locked channel (review round 3)', () => {
     expect(screen.queryByTestId('stage-idle-now')).toBeNull();
     expect(screen.queryByText(/Late Match/)).toBeNull();
     expect(screen.getByTestId('stage-idle-locked').textContent).toBe('Locked');
-    expect(screen.getByTestId('stage-resume').textContent).toContain('Resume Channel 2');
+    expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe('Resume Channel 2');
   });
 
   describe('on Live', () => {
@@ -105,7 +105,7 @@ describe('the idle stage and a locked channel (review round 3)', () => {
           </I18nextProvider>
         </QueryClientProvider>,
       );
-      await waitFor(() => expect(screen.getByTestId('stage-resume').textContent).toContain('Resume Channel 7'));
+      await waitFor(() => expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe('Resume Channel 7'));
       expect(await screen.findByTestId('stage-idle-locked')).toBeTruthy();
       expect(screen.queryByTestId('stage-idle-now')).toBeNull();
 

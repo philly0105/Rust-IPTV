@@ -1148,7 +1148,7 @@ describe('guide ribbon follows the list it came from (round 3)', () => {
     // ribbon leaves its own Watch live out.
     await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain(`Channel ${row}`));
     expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
-    expect(screen.getByTestId('stage-resume').textContent).toContain(`Play Channel ${row}`);
+    expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe(`Play Channel ${row}`);
     expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();
   };
 

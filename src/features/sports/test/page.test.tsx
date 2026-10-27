@@ -593,6 +593,71 @@ describe('sports page', () => {
     expect(screen.getAllByTestId('sports-game')).toHaveLength(2);
   });
 
+  it('turns the quality filter to 1080p and up from its chip, and off again', async () => {
+    rpc.handlers['settings.update'] = (args) => ({ stripCountryPrefix: true, ...(args as { patch: object }).patch });
+    setDay([h.game('1')]);
+    await openReady();
+    const chip = screen.getByTestId('sports-quality');
+    expect(chip.getAttribute('aria-pressed')).toBe('false');
+    expect(chip.getAttribute('title')).toBe('Hide streams whose channel name marks a quality below 1080p. Live TV and the TV guide use the same filter.');
+    // On a phone it is its icon, its label hidden but still its name.
+    expect(chip.querySelector('svg')).toBeTruthy();
+    expect(within(chip).getByText('1080p+').className.split(' ')).toContain('max-sm:sr-only');
+    fireEvent.click(chip);
+    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'));
+    expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: 'fhd' } }]);
+    fireEvent.click(chip);
+    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('false'));
+    expect(rpc.callsOf('settings.update').at(-1)).toEqual({ patch: { liveMinQuality: null } });
+  });
+
+  it('shows the quality chip pressed while the filter hides everything below 1080p, whatever set it', async () => {
+    rpc.handlers['settings.update'] = (args) => ({ stripCountryPrefix: true, ...(args as { patch: object }).patch });
+    // 720p and up, picked on Live TV, still shows 720p streams: the chip is off, and tightens it to 1080p.
+    rpc.handlers['settings.get'] = () => ({ liveMinQuality: 'hd' });
+    setDay([h.game('1')]);
+    await openReady();
+    // The game has no stream, so its card says the filter may be why once the settings are in.
+    await within(card(h.game('1'))).findByTestId('sports-quality-note');
+    const chip = screen.getByTestId('sports-quality');
+    expect(chip.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(chip);
+    await waitFor(() => expect(chip.getAttribute('aria-pressed')).toBe('true'));
+    expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: 'fhd' } }]);
+    // Its name stays "1080p+" pressed or not.
+    expect(within(chip).getByText('1080p+')).toBeTruthy();
+    cleanup();
+
+    // 4K only hides everything below 1080p too: pressed, and a press turns the filter off.
+    h.resetShared();
+    rpc.calls.length = 0;
+    rpc.handlers['settings.get'] = () => ({ liveMinQuality: 'uhd' });
+    await openReady();
+    const uhd = screen.getByTestId('sports-quality');
+    await waitFor(() => expect(uhd.getAttribute('aria-pressed')).toBe('true'));
+    expect(within(uhd).getByText('1080p+')).toBeTruthy();
+    fireEvent.click(uhd);
+    await waitFor(() => expect(rpc.callsOf('settings.update')).toEqual([{ patch: { liveMinQuality: null } }]));
+  });
+
+  it('tags each stream with the quality its name gives, and lists a name a source repeats once', async () => {
+    const g = h.liveGame('1');
+    setDay([g]);
+    setStreams(g, [
+      h.match(h.channel('4', '4K: ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ')),
+      h.match(ESPN),
+      h.match(h.channel('5', 'CA: TSN 1 ⁽ᴮᴷ⁾ ᴿᴬᵂ')),
+      h.match(h.channel('6', 'CA: TSN 1 ⁽ᴮᴷ⁾ ᴿᴬᵂ')),
+      h.match(h.channel('7', 'NBA: BOSTON CELTICS SD'), { reason: 'team', regional: true }),
+    ]);
+    await openReady();
+    const list = within(card(g)).getByTestId('sports-streams');
+    fireEvent.click(within(list).getByRole('button', { name: 'Show all 4 streams' }));
+    const rows = within(list).getAllByTestId('sports-stream');
+    expect(rows.map((r) => within(r).getByTestId('sports-stream-name').textContent)).toEqual(['ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ', 'ESPN HD', 'TSN 1 ⁽ᴮᴷ⁾ ᴿᴬᵂ', 'BOSTON CELTICS SD']);
+    expect(rows.map((r) => within(r).queryByTestId('sports-stream-quality')?.textContent ?? null)).toEqual(['4K', '720p', null, 'SD']);
+  });
+
   it('lists matched streams with their reason, the best one first', async () => {
     const g = h.liveGame('1');
     const fourth = h.channel('4', 'NBA League Pass 1');
@@ -861,7 +926,7 @@ describe('sports page', () => {
     h.resetShared();
     rpc.handlers['settings.get'] = () => ({ liveMinQuality: 'hd' });
     await openReady();
-    await waitFor(() => expect(within(card(g)).getByTestId('sports-quality-note').textContent).toBe(' The Live TV quality filter may be hiding channels.'));
+    await waitFor(() => expect(within(card(g)).getByTestId('sports-quality-note').textContent).toBe(' The quality filter may be hiding streams.'));
   });
 
   it('says streams are being looked for while matching runs', async () => {

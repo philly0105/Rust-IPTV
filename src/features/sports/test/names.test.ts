@@ -10,6 +10,7 @@ import {
   hasMatchup,
   isBackupFeed,
   isSportsGroup,
+  isStationSpinOff,
   mentionsBoth,
   mentionsTeam,
   nameTokens,
@@ -160,6 +161,19 @@ describe('foreignFeed', () => {
     expect(foreignFeed('US| ESPN', 'BR| SPORTS')).toBe(false);
     expect(foreignFeed('ESPN', 'USA SPORTS')).toBe(false);
     expect(foreignFeed('ESPN', 'In Demand PPV')).toBe(false);
+  });
+
+  it("reads the country tags a real provider writes besides ISO codes", () => {
+    for (const n of [
+      'SR: ARENA PREMIUM 2 ᴿᴬᵂ', 'BH: ARENA PREMIUM 1 ᴿᴬᵂ', 'ME: MNE SOPRT 1 ᴿᴬᵂ', 'CG: NBA TV ᴿᴬᵂ', 'KU: NRT SPORTS', 'AF: SUPER FOOTBALL ᴿᴬᵂ',
+      'FL: MTV URHEILU 1 ᴿᴬᵂ', 'LV: BEST4 SPORT TV ᴿᴬᵂ', 'LA: TNT HD', 'CHL: TNT SPORT HD',
+    ]) {
+      expect(foreignFeed(n), n).toBe(true);
+    }
+    // North America's own tags stay home, and so do a lineup's ("TV:", "RK:", "NF:").
+    for (const n of ['CA EN: TSN 1', 'CA: TSN 1 ᴿᴬᵂ', 'TV: ESPN ᴿᴬᵂ', 'RK: NBC 4 NEW YORK NEWS ᴿᴬᵂ', 'NF: NETFLIX 01 (FHD@30FPS) EVENTS ONLY']) {
+      expect(foreignFeed(n), n).toBe(false);
+    }
   });
 
   it('reads a LATINO group as home: it holds the US Spanish-language networks', () => {
@@ -612,6 +626,20 @@ describe('network aliases', () => {
     expect(id('ESPN 2 HD')).toBe('espn2');
   });
 
+  it('keeps the channels one real account files beside the networks apart from them', () => {
+    for (const n of [
+      'TV: ESPN OCHO ᴿᴬᵂ', 'ESPN 8 The Ocho', 'US: CBS SPORTS GALAZO NETWORK 4K', 'TV: MSG SPORTSZONE ᴿᴬᵂ', 'RK: MSG SPORTS ZONE ᴿᴬᵂ',
+      'TV: NESN NATION ᴿᴬᵂ', 'TV: PAC-12 INSIDER ᴿᴬᵂ', 'US: NBC E! (EAST) ᴿᴬᵂ', 'US: NBC E! (WEST) ᴿᴬᵂ', 'US: ABC 20/20 ᴿᴬᵂ', 'US: ABC LOCALISH',
+    ]) {
+      expect(id(n), n).toBeNull();
+    }
+    // On Prime's lineup they are Prime's own channels, which never match by network alone.
+    expect(id('PRIME: ESPN OCHO ᴿᴬᵂ')).toBe('prime-video');
+    expect(id('US: NBC (E)')).toBe('nbc');
+    expect(id('TV: MSG SPORTSNET ᴿᴬᵂ')).toBe('msg');
+    expect(id('TV: NESN PLUS ᴿᴬᵂ')).toBe('nesn');
+  });
+
   it("maps ESPN's broadcast names", () => {
     const want: Record<string, string | null> = {
       ESPN: 'espn', ESPN2: 'espn2', ESPNU: 'espnu', ESPNEWS: 'espnews', 'ESPN+': 'espn-plus', 'ESPN Unlmtd': 'espn-plus',
@@ -731,6 +759,32 @@ describe('broadcast network stations', () => {
     expect(teamMarkets({ location: 'Green Bay' })).toEqual([['green', 'bay'], ['milwaukee']]);
     expect(teamMarkets({ location: 'New England' })).toEqual([['new', 'england'], ['boston']]);
     expect(teamMarkets({ location: 'Detroit' })).toEqual([['detroit']]);
+  });
+});
+
+describe("a station's spin-offs", () => {
+  it('are its news streams', () => {
+    for (const n of ['PRIME: CBS CINCINNATI NEWS (WKRC) ᴿᴬᵂ', 'US: NBC NEW YORK NEWS (PC) ᴿᴬᵂ', 'US: ABC TAMPA NEWS (WFTS)', 'NBC 4 New York News']) {
+      expect(isStationSpinOff('cbs', n), n).toBe(true);
+    }
+    // Newport News is a place.
+    expect(isStationSpinOff('nbc', 'US: NBC 10 (WAVY) NORFOLK/PORTSMOUTH/NEWPORT NEWS (H) ᴿᴬᵂ')).toBe(false);
+    expect(isStationSpinOff('fox', 'US: FOX 5 (WNYW) NEW YORK HD')).toBe(false);
+  });
+
+  it('are its channels on a free streaming lineup, by the name or its group', () => {
+    expect(isStationSpinOff('fox', 'PRIME: FOX 5 NEW YORK ᴿᴬᵂ')).toBe(true);
+    expect(isStationSpinOff('fox', 'RK: FOX 26 HOUSTON ᴿᴬᵂ')).toBe(true);
+    expect(isStationSpinOff('cw', 'PRIME: CW GOLD ᴿᴬᵂ')).toBe(true);
+    expect(isStationSpinOff('ktrk', 'RK: KTRK ABC13 HOUSTON ᴿᴬᵂ')).toBe(true);
+    expect(isStationSpinOff('fox', 'US: FOX 26 HOUSTON', 'US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ')).toBe(true);
+    expect(isStationSpinOff('fox', 'US: FOX 26 (KRIV) HOUSTON HD', 'US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ')).toBe(false);
+  });
+
+  it('are only broadcast stations: other networks on a lineup are the networks', () => {
+    expect(isStationSpinOff('mlb-network', 'US: PRIME MLB NETWORK ᴿᴬᵂ')).toBe(false);
+    expect(isStationSpinOff('fdsn-detroit', 'PRIME: FANDUEL SPORTS NETWORK DETROIT ᴿᴬᵂ', 'US| PRIME ᴿᴬᵂ ⁶⁰ᶠᵖˢ')).toBe(false);
+    expect(isStationSpinOff('espnews', 'US: ESPN NEWS HD')).toBe(false);
   });
 });
 

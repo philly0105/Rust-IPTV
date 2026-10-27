@@ -1,18 +1,20 @@
 /**
  * The streams matched to one game (lib/match.ts): the best one, rows with an action ahead of rows
  * without, and a small "+2" at the end of its metadata that shows the rest, so a card stays one
- * stream tall. Each row names the channel, why it matched (the guide, an event channel's name, a team's own channel, or a network carrying the game)
- * and offers what fits the game's phase: Watch from 15 minutes before the start, Replay from the
- * channel's archive once it is over, Record before it starts. The player loads on the press.
+ * stream tall. Each row names the channel, the picture quality its name gives, why it matched (the
+ * guide, an event channel's name, a team's own channel, or a network carrying the game) and offers
+ * what fits the game's phase: Watch from 15 minutes before the start, Replay from the channel's
+ * archive once it is over, Record before it starts. The player loads on the press.
  */
 
 import { ChevronDown, ChevronUp, Circle, Clock, History, Play } from 'lucide-react';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { sameRef, type EpgProgram, type ItemRef, type Settings } from '@/api/types';
+import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type Settings } from '@/api/types';
 // Straight from its module (sports/deps.ts re-exports only ChannelLogo from it), the same chunk.
 import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { channelQuality } from '@/lib/channelQuality';
 
 import {
   Badge,
@@ -49,6 +51,17 @@ const LEAD_MS = 10 * MINUTE;
 export const STREAMS_SHOWN = 1;
 
 const REASON_KEYS: Record<MatchReason, string> = { guide: 'reasonGuide', event: 'reasonEvent', team: 'reasonTeam', network: 'reasonNetwork' };
+
+/** The sizes the quality filter's choices name ("HD (720p) and up"), so a row's tag reads against the "1080p+" chip. */
+export const QUALITY_LABEL: Record<ChannelQuality, string> = { sd: 'SD', hd: '720p', fhd: '1080p', uhd: '4K' };
+
+function QualityTag({ quality }: { quality: ChannelQuality }) {
+  return (
+    <span className="rounded-xs border border-edge px-1 text-2xs leading-4 font-semibold text-fg-muted tabular-nums" data-testid="sports-stream-quality">
+      {QUALITY_LABEL[quality]}
+    </span>
+  );
+}
 
 /** What every stream row reads, built once per page by {@link useStreamContext}. */
 export interface StreamContext {
@@ -261,6 +274,7 @@ function StreamRow({
   }
 
   const program = match.program;
+  const quality = channelQuality(match.channel.name);
   // The guide slot's times say what the card doesn't: when a live game's broadcast runs, which slot a
   // replay plays, or that coverage starts before the game. A slot that starts with an upcoming game
   // only repeats the start time above, the third time on the card with the Watch clock, so it goes.
@@ -278,6 +292,9 @@ function StreamRow({
           <MetaLine
             as="span"
             items={[
+              // First, so the rows' qualities line up down the list; the name's own marker is often cut
+              // off or a superscript ("ᴴᴰ").
+              quality ? <QualityTag key="quality" quality={quality} /> : null,
               // Why it matched is quiet text: a badge on every card made status green the page's loudest
               // colour. Only the regional warning stays a badge, since it may be the wrong game.
               <span key="reason" data-testid="sports-reason">
@@ -331,10 +348,18 @@ export function StreamList({
   const [all, setAll] = useState(false);
   // Rows that can act now (Watch, Replay, Record) come first, in matchGame's order within each
   // group, so a final game's one archived copy never hides behind "Show all" under rows with no button.
+  // A name a source lists twice ("CA: TSN 1 (BK)" three times) is one row, the first of them: the
+  // player's failover and its Alternate sources menu reach the other copies.
   const list = useMemo(() => {
     const l = streams ?? [];
     const acts = (m: StreamMatch) => streamAction(game, m, ctx.now, ctx.canRecord, title) !== null;
-    return [...l.filter(acts), ...l.filter((m) => !acts(m))];
+    const seen = new Set<string>();
+    return [...l.filter(acts), ...l.filter((m) => !acts(m))].filter((m) => {
+      const name = `${m.sourceId}\n${m.channel.name.trim()}`;
+      if (seen.has(name)) return false;
+      seen.add(name);
+      return true;
+    });
   }, [streams, game, ctx.now, ctx.canRecord, title]);
   if (list.length === 0) {
     if (loading) {

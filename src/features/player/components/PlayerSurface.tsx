@@ -486,6 +486,7 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   const title = usePlayerStore((s) => s.source?.title);
   const pip = usePipStore((s) => s.active);
   const [idle, setIdle] = useState(false);
+  const [volumeDragging, setVolumeDragging] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [onBar, setOnBar] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -542,7 +543,7 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   }, [overlay, poke]);
 
   // A stall keeps the chrome up, like a pause: its readout is the only sign of it over the video.
-  const chromeShown = !overlay || !idle || onBar || menuOpen || focusPin.pinned || buffering || status !== 'playing';
+  const chromeShown = !overlay || !idle || onBar || volumeDragging || menuOpen || focusPin.pinned || buffering || status !== 'playing';
   // The PiP bar's title, while it is drawn (hiding it sends no pointerleave).
   const titleHover = useZapHover(overlay && pip && chromeShown && !buffering);
 
@@ -671,6 +672,7 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
                     visible
                     compact={small}
                     onMenuOpenChange={setMenuOpen}
+                    onVolumeDragChange={setVolumeDragging}
                     readoutIdle={buffering ? <BufferingLabel /> : undefined}
                   />
                 </div>
@@ -678,7 +680,7 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
             )
           ) : (
             <>
-              <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} readoutIdle={buffering ? <BufferingLabel /> : undefined} />
+              <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} onVolumeDragChange={setVolumeDragging} readoutIdle={buffering ? <BufferingLabel /> : undefined} />
             </>
           )}
         </>
@@ -804,6 +806,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const [idle, setIdle] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [onBar, setOnBar] = useState(false);
+  const [volumeDragging, setVolumeDragging] = useState(false);
   /** The video's own right-click menu (PL-NATIVE-CONTEXT-MENU), where it was opened. */
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const closeMenu = useCallback(() => setMenuAt(null), []);
@@ -839,7 +842,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   // The bar comes back when the chip goes, the stream fails, or the pointer moves over the
   // picture, which takes the chip down (see `onPointerActivity`).
   const zapChip = smallPlayer && !compact && !pip && zapShown;
-  const inUse = menuOpen || focusPin.pinned || onBar || panelOpen;
+  const inUse = menuOpen || focusPin.pinned || onBar || volumeDragging || panelOpen;
   const chromeVisible = inUse || (zapChip ? !playing && status !== 'loading' : !idle || !playing);
   // The title takes the pointer only while the chrome shows it.
   const titleHover = useZapHover(chromeVisible);
@@ -1124,6 +1127,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
               compact={compact}
               short={shortPlayer}
               onMenuOpenChange={setMenuOpen}
+              onVolumeDragChange={setVolumeDragging}
               channelPanel={channelPanelAvailable && isFullscreen && !compact}
             />
           </div>

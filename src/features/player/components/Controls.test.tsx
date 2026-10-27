@@ -372,6 +372,29 @@ describe('Controls volume', () => {
     render(<Controls variant="dock" visible compact />);
     expect(screen.queryByTestId('volume-readout')).toBeNull();
   });
+
+  it('keeps the slider expanded until a drag ends outside it', () => {
+    act(() => usePlayerStore.setState({ volume: 0.42, muted: false }));
+    const onDragChange = vi.fn();
+    render(<Controls variant="dock" visible onVolumeDragChange={onDragChange} />);
+    const slider = screen.getByRole('slider', { name: 'Volume' }) as HTMLInputElement;
+    const group = slider.closest('[data-vol]')!;
+    slider.setPointerCapture = vi.fn();
+
+    fireEvent.pointerDown(slider, { button: 0, pointerId: 7 });
+    fireEvent.blur(slider);
+    fireEvent.pointerLeave(group);
+    expect(group.hasAttribute('data-dragging')).toBe(true);
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.42, muted: false });
+    expect(onDragChange).toHaveBeenCalledWith(true);
+    expect(slider.setPointerCapture).not.toHaveBeenCalled();
+
+    fireEvent.change(slider, { target: { value: '62' } });
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.62, muted: false });
+    fireEvent.pointerUp(window, { pointerId: 7 });
+    expect(group.hasAttribute('data-dragging')).toBe(false);
+    expect(onDragChange).toHaveBeenLastCalledWith(false);
+  });
 });
 
 describe('Controls live status', () => {

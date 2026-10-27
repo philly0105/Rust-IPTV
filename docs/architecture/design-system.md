@@ -140,7 +140,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 <Link to="/sources" className={TEXT_LINK}>{t('addSource')}</Link>
 ```
 
-- `Button` variants: `primary` (one per view), `secondary` (filled surface with an edge), `ghost`, `danger`. Sizes `sm` (h-8), `md` (h-10), `lg` (h-12). `buttonClass(variant, size, extra)` styles a Link as a button. `loading` keeps focus (aria-disabled).
+- `Button` variants: `primary` (one per view), `secondary` (filled surface with an edge), `ghost` (no fill at rest, its label in the full text tone so it reads as something to press; an icon-only ghost `IconButton` rests in the muted tone, `GHOST_ICON`), `danger`. Sizes `sm` (h-8), `md` (h-10), `lg` (h-12). `buttonClass(variant, size, extra)` styles a Link as a button. `loading` keeps focus (aria-disabled).
 - `IconButton`: `label` is the accessible name and the tooltip. `tooltip` replaces the tooltip text (the state behind a toggle) or turns it off (`false`); `shortcut` adds key caps; `tooltipSide`, `tooltipTone="glass"`; `pressed` for toggles. It has no `title` prop: no native tooltips on icon buttons.
 - `TEXT_LINK`: the one inline link style.
 

@@ -50,6 +50,27 @@ describe('pressed states', () => {
     expect(buttonClass()).toContain('disabled:active:translate-y-0');
   });
 
+  it('a labelled ghost button is text in the full tone; an icon-only one rests muted', () => {
+    render(
+      <>
+        <Button variant="ghost">Cancel</Button>
+        <IconButton label="Close" icon={<span />} />
+        <IconButton label="Pinned" icon={<span />} pressed />
+      </>,
+    );
+    const words = screen.getByRole('button', { name: 'Cancel' }).className.split(' ');
+    expect(words).toContain('text-fg');
+    expect(words).not.toContain('text-fg-muted');
+    expect(buttonClass('ghost', 'sm').split(' ')).toContain('text-fg');
+    const icon = screen.getByRole('button', { name: 'Close' }).className.split(' ');
+    expect(icon).toEqual(expect.arrayContaining(['text-fg-muted', 'hover:text-fg']));
+    expect(icon).not.toContain('text-fg');
+    // A pressed toggle shows its state in the full tone.
+    const pinned = screen.getByRole('button', { name: 'Pinned' }).className.split(' ');
+    expect(pinned).toEqual(expect.arrayContaining(['bg-selected', 'text-fg']));
+    expect(pinned).not.toContain('text-fg-muted');
+  });
+
   it('menu items press darker than their hover and focus fills', () => {
     render(<Menu label="Row actions" items={[{ id: 'a', label: 'Rename', onSelect: () => {} }]} />);
     const trigger = screen.getByRole('button', { name: 'Row actions' });

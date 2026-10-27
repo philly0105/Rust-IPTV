@@ -38,7 +38,10 @@ export const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
     'focus-visible:shadow-[0_0_0_4px_var(--color-glow)] disabled:bg-surface-3 disabled:text-fg-subtle disabled:shadow-none disabled:opacity-100',
   // A filled surface with the quiet container edge; the 3:1 border belongs to form controls only.
   secondary: 'bg-surface-2 text-fg border border-edge hover:bg-surface-3 active:bg-pressed',
-  ghost: 'bg-transparent text-fg-muted hover:bg-hover hover:text-fg active:bg-active active:text-fg',
+  // A labelled ghost button (Cancel, Clear history, Take the tour) is text in the full text tone:
+  // in the muted tone, with no fill at rest, it read as a caption or a disabled control rather than
+  // something to press. An icon-only ghost button keeps the quieter icon tone (GHOST_ICON).
+  ghost: 'bg-transparent text-fg hover:bg-hover active:bg-active',
   danger: 'bg-danger-solid text-white hover:bg-danger-solid-hover active:bg-danger-solid-pressed',
 };
 const variants = BUTTON_VARIANTS;
@@ -119,6 +122,13 @@ export interface IconButtonProps extends Omit<ComponentPropsWithRef<'button'>, '
   tooltipTone?: TooltipTone;
 }
 
+/**
+ * An icon-only ghost button's tone: a bare glyph in the full text tone outweighs the labels around
+ * it (a row of card actions, the header's toggles), so it rests muted and lights up under the
+ * pointer, as it did before labelled ghost buttons took the text tone.
+ */
+export const GHOST_ICON = 'text-fg-muted hover:text-fg active:text-fg';
+
 const iconSizes: Record<ButtonSize, string> = {
   sm: cn('h-8 w-8', TOUCH_TARGET_SQUARE),
   md: cn('h-10 w-10', TOUCH_TARGET_SQUARE),
@@ -163,6 +173,7 @@ export function IconButton({
         className={cn(
           base,
           variants[variant],
+          variant === 'ghost' && GHOST_ICON,
           iconSizes[size],
           'px-0',
           pressed && 'bg-selected text-fg',

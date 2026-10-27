@@ -276,6 +276,37 @@ describe('programme cells', () => {
   });
 });
 
+describe('the channel column names a channel as Live TV does (round 5)', () => {
+  const tagged = (i: number): Channel => ({ ...makeChannel(i), name: `US| Channel ${i}` });
+  beforeEach(() => {
+    rpc.handlers['catalog.channels'] = (a) => {
+      const { query: q } = a as { query: PageQuery };
+      return { items: CHANNELS.slice(q.offset, q.offset + q.limit).map((_, k) => tagged(q.offset + k)), total: CHANNELS.length, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
+    };
+  });
+
+  it('draws the country tag after the name, quiet, and keeps the provider name in the tooltip', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    const row = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
+    const tag = within(row).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.previousElementSibling!.textContent).toBe('Channel 0');
+    expect(tag.className).toContain('text-fg-subtle');
+    expect(row.title).toBe('Play US| Channel 0');
+  });
+
+  it('leaves the tag out with "Hide country tags" on', async () => {
+    rpc.handlers['settings.get'] = () => settings({ stripCountryPrefix: true });
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    const row = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
+    await waitFor(() => expect(row.title).toBe('Play Channel 0'));
+    expect(within(row).queryByTestId('channel-name-tag')).toBeNull();
+    expect(row.textContent).not.toContain('US|');
+  });
+});
+
 describe('the preview band (CB-GUIDE-PREVIEW)', () => {
   it('is hidden on short or narrow windows', async () => {
     renderGuide({ path: '/epg?source=src1', routes: GRID });

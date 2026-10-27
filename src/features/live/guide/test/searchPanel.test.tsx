@@ -359,3 +359,29 @@ describe("GuideHeaderSearch: the guide's field in the header's search slot", () 
     expect(screen.queryByTestId('guide-search-panel')).toBeNull();
   });
 });
+
+describe('guide search hits name a channel as Live TV does (round 5)', () => {
+  const tagged = [hit('Evening News', NOW_PLUS(-12 * MINUTE), NOW_PLUS(18 * MINUTE), { channelName: 'US| Alpha HD', channelNumber: 1, ref: { sourceId: 'src1', contentType: 'live', itemId: 'a' } })];
+
+  it('draws the country tag after the name, quiet, and keeps the provider name for screen readers', async () => {
+    rpc.handlers['epg.search'] = () => tagged;
+    panel();
+    await waitFor(() => expect(state()).toBe('results'));
+    const row = screen.getByTestId('guide-search-hit');
+    const tag = within(row).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.previousElementSibling!.textContent).toBe('Alpha HD');
+    expect(tag.className).toContain('text-fg-subtle');
+    expect(within(row).getAllByRole('button', { name: /US\| Alpha HD/ }).length).toBeGreaterThan(0);
+  });
+
+  it('leaves the tag out with "Hide country tags" on', async () => {
+    rpc.handlers['epg.search'] = () => tagged;
+    panel({ stripCountryPrefix: true });
+    await waitFor(() => expect(state()).toBe('results'));
+    const row = screen.getByTestId('guide-search-hit');
+    expect(within(row).queryByTestId('channel-name-tag')).toBeNull();
+    expect(within(row).getByText('Alpha HD')).toBeTruthy();
+    expect(row.textContent).not.toContain('US|');
+  });
+});

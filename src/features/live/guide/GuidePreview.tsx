@@ -22,7 +22,7 @@ import { Button, cn, LivePill, MetaLine, Skeleton, useScaledPx } from '@/ui';
 // recording:
 import { ProgramActions } from '@/features/recording';
 
-import { ChannelLogo } from '../components/ChannelLogo';
+import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { displayChannelName } from '../lib/channelName';
 import { canCatchUp, formatClock, formatDay, formatRange, localDayKey, minutesLeft, ms, programProgress, programWhen } from '../lib/epgTime';
 import { genreColor, genreOf } from './genre';
@@ -168,9 +168,7 @@ function PreviewDetails(props: GuidePreviewProps & { channel: Channel; program: 
       <p className="flex min-w-0 shrink-0 items-center gap-2 text-caption text-fg-muted">
         <ChannelLogo src={channel.logoUrl} name={name} size={20} sourceId={channel.ref.sourceId} />
         {channel.number !== undefined ? <span className="font-numeric tabular-nums">{channel.number}</span> : null}
-        <span dir="auto" className="min-w-0 truncate">
-          {name}
-        </span>
+        <ChannelName name={channel.name} strip={props.stripPrefix} className="min-w-0 truncate" />
       </p>
       <div className="mt-1 flex min-w-0 shrink-0 items-center gap-3" data-testid="guide-preview-title-row">
         <h2 dir="auto" title={program.title} className="min-w-0 flex-1 truncate text-title-sm text-match-parent text-fg" data-testid="guide-preview-title">

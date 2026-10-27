@@ -22,7 +22,7 @@
   "nextPage": "Sonraki sayfa",
   "pageN": "Sayfa {{page}}",
   "pageNotFound": "Sayfa bulunamadı",
-  "pageNotFoundHint": "Bu adres hiçbir sayfayla eşleşmiyor. Kenar çubuğunu kullanın veya ana sayfaya dönün.",
+  "pageNotFoundHint": "Bu adres hiçbir sayfayla eşleşmiyor. Ana sayfaya dönün veya başka bir sayfa seçin.",
 
   "errorTitleNetwork": "Sunucuya ulaşılamadı",
   "errorTitleTimeout": "İstek çok uzun sürdü",

@@ -22,7 +22,7 @@
   "nextPage": "Volgende pagina",
   "pageN": "Pagina {{page}}",
   "pageNotFound": "Pagina niet gevonden",
-  "pageNotFoundHint": "Dit adres hoort bij geen enkele pagina. Gebruik de zijbalk of ga terug naar Start.",
+  "pageNotFoundHint": "Dit adres hoort bij geen enkele pagina. Ga terug naar Start of kies een andere pagina.",
 
   "errorTitleNetwork": "De server was niet bereikbaar",
   "errorTitleTimeout": "Het verzoek duurde te lang",

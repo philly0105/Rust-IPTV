@@ -22,7 +22,7 @@
   "nextPage": "Pagina successiva",
   "pageN": "Pagina {{page}}",
   "pageNotFound": "Pagina non trovata",
-  "pageNotFoundHint": "Questo indirizzo non corrisponde a nessuna pagina. Usa la barra laterale o torna alla home.",
+  "pageNotFoundHint": "Questo indirizzo non corrisponde a nessuna pagina. Torna alla home o scegli un'altra pagina.",
 
   "errorTitleNetwork": "Impossibile raggiungere il server",
   "errorTitleTimeout": "La richiesta ha impiegato troppo tempo",

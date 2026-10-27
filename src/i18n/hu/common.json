@@ -22,7 +22,7 @@
   "nextPage": "Következő oldal",
   "pageN": "{{page}}. oldal",
   "pageNotFound": "Az oldal nem található",
-  "pageNotFoundHint": "Ez a cím egyetlen oldalnak sem felel meg. Használja az oldalsávot, vagy térjen vissza a kezdőlapra.",
+  "pageNotFoundHint": "Ez a cím egyetlen oldalnak sem felel meg. Térjen vissza a kezdőlapra, vagy válasszon másik oldalt.",
 
   "errorTitleNetwork": "Nem sikerült elérni a kiszolgálót",
   "errorTitleTimeout": "A kérés túl sokáig tartott",

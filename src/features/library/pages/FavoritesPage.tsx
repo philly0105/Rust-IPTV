@@ -18,7 +18,7 @@ import { Button, EmptyState, ErrorState, Page, QualityFilterNote, SkeletonList, 
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
-import { usePending, useSourcesById } from '../hooks/useLibraryData';
+import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
 import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
@@ -68,7 +68,10 @@ export function FavoritesPage() {
   const entries = useMemo(() => sortFavorites(query.data ?? []), [query.data]);
   const rows = useMemo(() => buildFavoriteRows(entries, search), [entries, search]);
   const source = sourceId ? sources.get(sourceId) : undefined;
-  const nowOn = useNowOn(useMemo(() => entries.map((e) => e.ref), [entries]));
+  const refs = useMemo(() => entries.map((e) => e.ref), [entries]);
+  const nowOn = useNowOn(refs);
+  // Read from every favorite, not the search's matches, so the column does not come and go while typing.
+  const namesSources = useNamesSources(refs, sources);
 
   const commitOrder = useCallback(
     async (next: FavoriteEntry[]) => {
@@ -201,7 +204,7 @@ export function FavoritesPage() {
           entryRef={e.ref}
           snapshot={e.snapshot}
           source={sources.get(e.ref.sourceId)}
-          showSource={!sourceId}
+          showSource={!sourceId && namesSources}
           now={nowOn.get(itemKey(e.ref))}
           time={t('addedAgo', { time: relativeTime(e.addedAt, i18n.language) })}
           removeLabel={t('removeFavorite', { title: e.snapshot.title })}

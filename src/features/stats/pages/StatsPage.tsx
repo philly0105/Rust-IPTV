@@ -87,6 +87,12 @@ export function StatsPage() {
     });
 
   const time = (s: number) => formatWatchTime(s, lang);
+  // With nothing watched in either range, 7 days and 30 days would only switch between two empty
+  // pages, so the range goes. It goes only once both are known to be empty, in the same frame the
+  // skeleton turns into the empty state: it stays while the page loads and while an empty week
+  // waits to hear about the month (a failed probe counts as something), so it never shows, hides
+  // and comes back.
+  const nothingToRange = data?.totalSeconds === 0 && (range !== 7 || monthHasData === false);
 
   let headline = null;
   let body;
@@ -184,20 +190,22 @@ export function StatsPage() {
       {/* The range sets everything below it, so it leads on its own line, and the KPI row keeps
           the page's full width and one right edge (it used to sit at the row's end, half as tall
           as the tiles beside it). */}
-      <div className="flex flex-col gap-4">
-        <Tabs
-          className="self-start"
-          variant="pill"
-          label={t('range')}
-          value={String(range)}
-          onChange={(id) => setRange(readRange(id))}
-          items={[
-            { id: '7', label: t('week') },
-            { id: '30', label: t('month') },
-          ]}
-        />
-        {headline}
-      </div>
+      {nothingToRange ? null : (
+        <div className="flex flex-col gap-4">
+          <Tabs
+            className="self-start"
+            variant="pill"
+            label={t('range')}
+            value={String(range)}
+            onChange={(id) => setRange(readRange(id))}
+            items={[
+              { id: '7', label: t('week') },
+              { id: '30', label: t('month') },
+            ]}
+          />
+          {headline}
+        </div>
+      )}
       {body}
       <Dialog
         open={confirming}

@@ -6,7 +6,7 @@
  * state pointing at the guide) goes last.
  */
 
-import { AlarmClock, Bell, CalendarRange, LoaderCircle, Square, Trash2, X } from 'lucide-react';
+import { AlarmClock, Bell, CalendarRange, Info, LoaderCircle, Square, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -224,8 +224,11 @@ export function ScheduledPage() {
     <Page width="default" className="flex min-w-0 flex-col gap-6 pb-8">
       <PageTitle>{title}</PageTitle>
       {caps.data && !caps.data.supported ? (
-        <p role="note" className="rounded-lg border border-edge bg-surface px-4 py-3 text-body-sm text-fg-muted" data-testid="scheduled-no-recording">
-          {t('scheduledServerNoMpv')}
+        // One quiet line with an info mark, not a page-wide card: it explains why Record is missing
+        // and needs no action, so it should not outweigh the reminders and the empty state below.
+        <p role="note" className="flex items-start gap-2 text-body-sm text-fg-muted" data-testid="scheduled-no-recording">
+          <Info size={16} aria-hidden className="mt-0.5 shrink-0 text-fg-subtle" />
+          <span className="min-w-0">{t('scheduledServerNoMpv')}</span>
         </p>
       ) : null}
       {body}

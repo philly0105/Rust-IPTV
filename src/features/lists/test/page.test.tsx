@@ -37,6 +37,7 @@ const { CustomListRails } = await import('../rails');
 const { ChannelMenuHost } = await import('@/shell/dashboard/ChannelCardMenu');
 const { usePlayerStore } = await import('../deps');
 const { useShellStore } = await import('@/shell/store');
+const { useListsDialogs } = await import('../store');
 const { resetPendingRemovalsForTests, usePendingRemovals } = await import('@/features/sources/lib/pendingRemoval');
 
 const BBC = h.channel('1', 'BBC One');
@@ -410,11 +411,21 @@ describe('list page', () => {
     const edit = within(header).getByRole('button', { name: 'Edit channels' });
     expect(edit.className).toContain('max-sm:hidden');
     expect(bar.className).not.toContain('max-sm:hidden');
-    // Manage lists shrinks to its icon there, keeping its name for screen readers and the tooltip.
-    const manage = within(header).getByRole('button', { name: 'Manage lists' });
+    // Manage lists shows once: while the lists column is on screen it is the column's gear alone.
+    expect(within(header).queryByRole('button', { name: 'Manage lists' })).toBeNull();
+    expect(within(screen.getByTestId('lists-section')).getByRole('button', { name: 'Manage lists' })).toBeTruthy();
+    // With the column folded away (or a drawer, below 1024 px) the header carries it.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide lists' }));
+    expect(screen.queryByTestId('lists-section')).toBeNull();
+    await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[title="Manage lists"]')).toBeTruthy());
+    const folded = render(<>{useShellStore.getState().header!.actions}</>).container;
+    // On a phone it shrinks to its icon, keeping its name for screen readers and the tooltip.
+    const manage = within(folded).getByRole('button', { name: 'Manage lists' });
     expect(manage.getAttribute('title')).toBe('Manage lists');
     expect(manage.className).toContain('max-sm:w-8');
     expect(within(manage).getByText('Manage lists').className).toContain('max-sm:sr-only');
+    fireEvent.click(manage);
+    expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
   });
 
   it('L3-live-ch-x2: PageUp/PageDown on a list row are left to channel up/down while a live channel plays', async () => {

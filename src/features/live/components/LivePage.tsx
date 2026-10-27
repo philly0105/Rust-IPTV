@@ -39,6 +39,7 @@ import { requestPin } from '@/features/parental/gate';
 import { useLockMenuItems } from '@/features/parental/lockMenu';
 import { applyStatus, hidesContent, useParentalStatus } from '@/features/parental/status';
 import { registerCommands, useShell, useShortcut } from '@/shell';
+import { useVisibleSources } from '@/shell/useVisibleSources';
 import { intlLocale } from '@/lib/intl';
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { useDigitEntry } from '../hooks/useDigitEntry';
@@ -503,30 +504,40 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- header -------------------------------------------------------------
   const shell = useShell();
-  const title = source.data?.name ?? '';
-  const allGroup = liveView !== 'favorites' && liveView !== 'recent' && !category;
-  const subtitle =
-    liveView === 'favorites'
-      ? t('favoritesGroup')
-      : liveView === 'recent'
-        ? t('recentGroup')
-        : (category?.name ?? (isRadio ? t('allStations') : t('allChannels')));
-  const countText = paged.total !== undefined ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
-  // The group and its count once, in the header: the list no longer repeats them over its rows.
-  // "All channels · 140": that group's name already says what is counted ("All channels · 140
-  // channels" said it twice). A named group keeps the unit ("Sports · 18 channels").
-  const headerCount = allGroup && paged.total !== undefined ? fmt.format(paged.total) : countText;
-  const headerSubtitle = headerCount ? t('groupWithCount', { group: subtitle, count: headerCount }) : subtitle;
+  // The section names the page, as Movies, Series and the TV guide do: the rail and the tab bar
+  // light Live TV (or Radio) here, and the title is there from the first frame instead of waiting
+  // for the source to load.
+  const title = isRadio ? t('radio') : t('liveTv');
+  // The source is named only when there are others to tell it from (as vod's useShowSourceName).
+  const sourceName = (useVisibleSources().data?.length ?? 0) > 1 ? source.data?.name : undefined;
+  const groupName =
+    liveView === 'favorites' ? t('favoritesGroup') : liveView === 'recent' ? t('recentGroup') : category?.name;
+  // The phone's groups button names the group being browsed, All channels included.
+  const groupLabel = groupName ?? (isRadio ? t('allStations') : t('allChannels'));
+  // The count always says what it counts ("106 channels"); All channels is the page with no group,
+  // so it shows the count alone rather than "All channels · 106 channels". An empty list says so in
+  // its own empty state, so "0 stations" over "No radio stations in this source" is left out.
+  const countText = paged.total ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
+  // The scope under the section, once: the source (with several), the group and the count. The
+  // list no longer repeats them over its rows.
+  const scope = groupName && countText ? t('groupWithCount', { group: groupName, count: countText }) : groupName || countText;
+  const headerSubtitle = sourceName && scope ? t('groupWithCount', { group: sourceName, count: scope }) : sourceName || scope;
   useEffect(() => {
-    if (!title) return;
     shell.setHeader({
       title,
-      subtitle: headerSubtitle,
+      ...(headerSubtitle ? { subtitle: headerSubtitle } : {}),
       actions: (
         <Link
           to={guideHref}
           aria-label={t('openGuide')}
-          className="inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
+          // The kit's small ghost button, like every other page's header actions (a hand-built muted
+          // link read as a caption beside them). On a phone it is the icon alone, in an icon
+          // button's square, quieter tone and 44 px touch target.
+          className={buttonClass(
+            'ghost',
+            'sm',
+            'max-sm:w-8 max-sm:px-0 max-sm:text-fg-muted max-sm:hover:text-fg max-sm:pointer-coarse:min-w-[calc(44rem/15)]',
+          )}
         >
           <CalendarClock className="size-4" aria-hidden />
           {/* Icon only on a phone, so the label does not squeeze the page title. */}
@@ -729,7 +740,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- render -------------------------------------------------------------
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
-  const heading = <h1 className="sr-only">{title || (isRadio ? t('stations') : t('channels'))}</h1>;
+  const heading = <h1 className="sr-only">{title}</h1>;
   if (source.error) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -941,7 +952,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             >
               <span className="sr-only">{`${t('groups')}: `}</span>
               <span dir="auto" className="truncate">
-                {subtitle}
+                {groupLabel}
               </span>
               <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
             </Button>

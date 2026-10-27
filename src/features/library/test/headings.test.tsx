@@ -96,7 +96,7 @@ const cases: Case[] = [
     data: () => [makeDownload({ id: 7, status: 'downloading' })],
     title: 'Downloads',
   },
-  { name: 'my videos', path: '/my-videos', route: '/my-videos', element: <MyVideosPage />, cmd: 'myvideos.list', data: () => library, title: 'My Videos' },
+  { name: 'my videos', path: '/my-videos', route: '/my-videos', element: <MyVideosPage />, cmd: 'myvideos.list', data: () => library, title: 'My videos' },
   { name: 'favorites', path: '/favorites', route: '/favorites', element: <FavoritesPage />, cmd: 'favorites.list', data: favorites, title: 'Favorites' },
   {
     name: 'per-source favorites',
@@ -169,20 +169,20 @@ describe('my video detail page has one h1', () => {
   it('while loading', async () => {
     rpc.handlers['myvideos.list'] = never;
     at(1);
-    await expectSingleH1('My Videos');
+    await expectSingleH1('My videos');
   });
 
   it('on error', async () => {
     rpc.handlers['myvideos.list'] = fail;
     at(1);
     await screen.findByRole('button', { name: /retry/i });
-    await expectSingleH1('My Videos');
+    await expectSingleH1('My videos');
   });
 
   it('not found', async () => {
     rpc.handlers['myvideos.list'] = () => library;
     at(99);
     await screen.findByText('This video is not in your library');
-    await expectSingleH1('My Videos');
+    await expectSingleH1('My videos');
   });
 });

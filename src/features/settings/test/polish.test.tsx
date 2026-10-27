@@ -109,9 +109,9 @@ describe('Shortcuts section matches the ? overlay', () => {
     expect(headings).toEqual(expect.arrayContaining(['Everywhere', 'Live TV', 'Movies and series', 'Playback', 'Lists and dialogs']));
     expect(headings).not.toContain('Global');
     expect(headings).toContain('Seek bar (when focused)');
-    expect(headings).toContain('My Videos');
+    // The My videos area is named through library:myVideosTitle, the header's own title.
+    expect(headings).toContain('My videos');
     expect(headings).not.toContain('Seek bar');
-    expect(headings).not.toContain('My videos');
     expect(headings.indexOf('Everywhere')).toBeLessThan(headings.indexOf('Playback'));
     // Bound only on other screens, yet still documented here.
     expect(within(section).getByText('Back 10 seconds')).toBeTruthy();

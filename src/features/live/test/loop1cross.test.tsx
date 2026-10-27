@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Channel, ItemRef, Page, PageQuery, ParentalLock } from '@/api/types';
 import parental from '@/i18n/en/parental.json';
+import { buttonClass } from '@/ui';
 
 import { resetChannelListMemory } from '../components/ChannelList';
 import { EpgGridPage } from '../components/EpgGridPage';
@@ -124,5 +125,9 @@ describe('Live header guide link', () => {
     const link = screen.getByRole('link', { name: 'TV guide' });
     expect(link.getAttribute('aria-label')).toBe('TV guide');
     expect(within(link).getByText('TV guide').className).toContain('max-sm:sr-only');
+    // Built as the kit's small ghost button, like the other pages' header actions, not a muted
+    // hand-built link; on a phone it keeps an icon button's 44 px touch square.
+    for (const c of buttonClass('ghost', 'sm').split(' ')) expect(link.classList.contains(c), c).toBe(true);
+    expect(link.className).toContain('max-sm:pointer-coarse:min-w-[calc(44rem/15)]');
   });
 });

@@ -96,7 +96,7 @@ The filter applies wherever live channels appear: the channel list and the group
 
 ## Catch-up
 
-Right-click a channel with catch-up and choose "Browse catch-up" (also in the fullscreen channel list and the guide's programme dialog). Pick a day, then play any past programme, or "Watch from start" on the one airing now. A day with no guide at all lists the archive's hours instead, so you can still watch from a time. The download button next to a finished programme saves it (My Videos lists it under the channel).
+Right-click a channel with catch-up and choose "Browse catch-up" (also in the fullscreen channel list and the guide's programme dialog). Pick a day, then play any past programme, or "Watch from start" on the one airing now. A day with no guide at all lists the archive's hours instead, so you can still watch from a time. The download button next to a finished programme saves it (My videos lists it under the channel).
 
 ## Sports
 
@@ -165,7 +165,7 @@ Scheduled recordings and reminders:
 - In the TV guide, the programme dialog and the now/next ribbon offer "Remind me" and "Record". The ribbon's record menu can also record the channel for 30 minutes to 3 hours. A bell or a red dot marks those programmes in the grid and list views.
 - Reminders fire a few minutes before the start (Settings > Recording) while the app runs, including when it is hidden in the tray. They show a Windows notification and a toast with "Watch now", or switch to the channel with Undo.
 - Recordings run without the player, as a direct copy for plain MPEG-TS streams (and Xtream live channels) or through a headless mpv for HLS and DASH, with 1 minute of padding before and 5 after by default. Files are named `<Channel> - <Programme> - <YYYY-MM-DD HHmm>.ts`. A dropped stream is retried into part files. A recording that was due while the app was closed is marked missed.
-- Library > Scheduled lists what is recording now, what is coming up, and recent results. My Videos > Recordings plays, shows and deletes the files. A delete waits eight seconds for Undo; closing the app or the page in that time carries it out. On Windows the file goes to the Recycle Bin; on Linux, as in the Docker image, it is deleted for good. Show in folder is in the desktop app only.
+- Library > Scheduled lists what is recording now, what is coming up, and recent results. My videos > Recordings plays, shows and deletes the files. A delete waits eight seconds for Undo; closing the app or the page in that time carries it out. On Windows the file goes to the Recycle Bin; on Linux, as in the Docker image, it is deleted for good. Show in folder is in the desktop app only.
 - Series recording rules come from the guide search; see [TV guide](#tv-guide).
 - In the browser (server mode), recording needs mpv on the server. The Docker image includes it; elsewhere, install mpv on the server's `PATH`. Without it Record is hidden. The server records only plain MPEG-TS streams and Xtream live channels; it refuses HLS, DASH and other streams when you schedule them, so record those in the desktop app. Reminders show in the app with "Watch now". The app never asks for permission to show browser notifications. If you allowed notifications for the site in the browser's site settings, a browser notification appears as well; browsers allow that only over HTTPS or on localhost.
 
@@ -176,7 +176,7 @@ See [recording.md](architecture/recording.md).
 - Movies and episodes download from every kind of source, and "Download season" on a series page queues every episode of the season not downloaded yet. An M3U movie that streams as an HLS playlist cannot be saved as a file and says so.
 - Finished catch-up programmes download from the archive page (see [Catch-up](#catch-up)).
 - Downloads go to `downloads/` in the app data folder unless you choose another downloads folder. In the browser they always go to `<data dir>/downloads` on the server.
-- My Videos plays what you downloaded, also offline. The Downloads page and My Videos have their own keys; see [Keyboard shortcuts](#keyboard-shortcuts).
+- My videos plays what you downloaded, also offline. The Downloads page and My videos have their own keys; see [Keyboard shortcuts](#keyboard-shortcuts).
 
 ## My List, custom lists and watch stats
 
@@ -265,9 +265,9 @@ Press `?` in the app for the full list. The main ones:
 | 7 / 3 | Show the last 7 / 30 days (Watch stats) |
 | S | Add or remove the title under the cursor in My List (movie and series groups) |
 | Shift+F10 or the context-menu key | Open the poster menu for the title under the cursor (movie and series groups) |
-| Delete | Remove the focused title (My List), favorite (Favorites), item (Recently watched), or episode (a title's page in My Videos; the My Videos grid has no Delete) |
+| Delete | Remove the focused title (My List), favorite (Favorites), item (Recently watched), or episode (a title's page in My videos; the My videos grid has no Delete) |
 | P / R / X / Delete / O | Pause or resume / retry / cancel / remove / show in its folder the focused download (Downloads; O in the desktop app) |
-| Backspace | Back to My Videos from a video's page |
+| Backspace | Back to My videos from a video's page |
 | Esc | Close the open dialog or overlay; leave picture-in-picture; on a movie or series page, go back to where you came from (a grid returns to the title you opened) |
 
 Space, the arrows and Page Up / Page Down control the player while it is expanded on a page, fullscreen, in picture-in-picture, or focused. While only the mini player shows and focus is on the page, they scroll the page and move through its lists and radio buttons as usual. Over an open dialog the app's shortcuts are off except Esc, F11, Ctrl+Shift+L, and Ctrl+K inside the command palette (it closes it). Ctrl+F, and Ctrl+R in the desktop app, also do nothing in a text field, so they never throw away what you typed.

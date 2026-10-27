@@ -304,6 +304,7 @@ export function ListPage() {
 
   // ---- header and commands ------------------------------------------------
   const shell = useShell();
+  const sidebarVisible = wide && !collapsed;
   const title = list?.name ?? t('title');
   const composition = useMemo(() => {
     const counts = new Map<string, number>();
@@ -329,6 +330,8 @@ export function ListPage() {
       actions: list ? (
         // On a phone the list's name needs the room (L3-app-pages-x1): Edit channels leaves the header
         // there, since the channels bar right below has the same button, and Manage lists is a bare icon.
+        // Manage lists is also the lists column's gear: while the column is on screen the header
+        // leaves it out, so it shows once; folded away or in the drawer, the header keeps it.
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -340,20 +343,22 @@ export function ListPage() {
           >
             {t('editChannels')}
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Settings2 className="size-4" />}
-            onClick={() => openManageLists(list.id)}
-            title={t('manageLists')}
-            className="max-sm:w-8 max-sm:px-0"
-          >
-            <span className="max-sm:sr-only">{t('manageLists')}</span>
-          </Button>
+          {sidebarVisible ? null : (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Settings2 className="size-4" />}
+              onClick={() => openManageLists(list.id)}
+              title={t('manageLists')}
+              className="max-sm:w-8 max-sm:px-0"
+            >
+              <span className="max-sm:sr-only">{t('manageLists')}</span>
+            </Button>
+          )}
         </div>
       ) : undefined,
     });
-  }, [title, subtitle, list?.id, i18n.language]);
+  }, [title, subtitle, list?.id, sidebarVisible, i18n.language]);
 
   useEffect(
     () =>
@@ -370,7 +375,6 @@ export function ListPage() {
 
   // ---- body ---------------------------------------------------------------
   const sidebar = <ListsSidebarSection variant="page" activeListId={listId} onNavigate={() => setDrawerOpen(false)} />;
-  const sidebarVisible = wide && !collapsed;
   const listGone = lists.isSuccess && !list;
 
   let listBody;

@@ -202,7 +202,7 @@
   "scListJump": "Jump to the first or last item",
   "scListPage": "Move one page up or down",
   "scChannelListPage": "Page through the focused channel list",
-  "scListRemove": "Remove the focused item (favorites, recently watched, an episode in My Videos)",
+  "scListRemove": "Remove the focused item (favorites, recently watched, an episode in My videos)",
   "scGridMove": "Move between cards in a grid",
   "areaSeekBar": "Seek bar (when focused)",
   "scSeekBarPageBack": "Back 1 minute",

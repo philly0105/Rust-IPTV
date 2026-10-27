@@ -144,7 +144,7 @@ describe('Back from a My Videos detail page (L1-guide-library-13)', () => {
     expect((await screen.findByRole('tab', { name: /Movies/ })).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(await screen.findByTestId('library-card'));
     expect(await screen.findByTestId('play-offline')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('link', { name: 'Back to My Videos' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Back to My videos' }));
     expect((await screen.findByRole('tab', { name: /Movies/ })).getAttribute('aria-selected')).toBe('true');
   });
 });

@@ -84,7 +84,7 @@ describe('Back to My Videos lands on the opened card (L1-guide-library-13 carry-
     expect(cards.map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Heat']);
     fireEvent.click(cards[1]!);
     expect(await screen.findByTestId('play-offline')).toBeTruthy();
-    fireEvent.click(await screen.findByRole('link', { name: 'Back to My Videos' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Back to My videos' }));
     await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Heat'));
     // The opened card is the grid's tab stop again.
     expect(screen.getByRole('listitem', { name: 'Heat' }).tabIndex).toBe(0);
@@ -108,7 +108,7 @@ describe('My Videos All includes recordings (L2-guide-library-8)', () => {
     // Recordings are TV: a section of wide cards of their own above the poster grid, newest first in each.
     const recordings = within(grid).getByRole('list', { name: 'Recordings' });
     expect(within(recordings).getAllByRole('button').map((c) => c.getAttribute('aria-label'))).toEqual(['Evening News, Recording']);
-    const titles = within(grid).getByRole('list', { name: 'My Videos' });
+    const titles = within(grid).getByRole('list', { name: 'My videos' });
     expect(within(titles).getAllByRole('listitem').map((c) => c.getAttribute('aria-label'))).toEqual(['Ronin', 'Heat']);
     expect(screen.getByRole('tab', { name: /All/ }).textContent).toContain('3');
     expect(screen.getByRole('tab', { name: /Movies/ }).textContent).toContain('2');

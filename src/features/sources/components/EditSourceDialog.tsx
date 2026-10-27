@@ -234,6 +234,8 @@ export function EditSourceDialog({
         dismissible={!dirty}
         title={t('editSourceTitle', { name: source.name })}
         size="lg"
+        // As tall as the window allows on a phone, so the Details and Guide tabs stay put between them.
+        className="max-sm:h-[calc(100dvh-1.5rem)]"
         testId="edit-source-dialog"
         footer={
           <>

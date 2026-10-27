@@ -270,7 +270,11 @@ export function AddSourceDialog({
     cancelIdRef.current = null;
     const named = draft.name.trim() ? draft : { ...draft, name: defaultName(draft, t('originPasted')) };
     const built = buildAddArgs(named, { isDesktop });
-    setErrors(built.errors);
+    // An empty Name is optional: it takes the address's name. With no address yet there is none to
+    // take, and the address's own error already says what is missing, so Name is not marked too.
+    const { name: nameError, ...otherErrors } = built.errors;
+    const nameFromAddress = !draft.name.trim() && nameError === 'errorRequired' && Object.keys(otherErrors).length > 0;
+    setErrors(nameFromAddress ? otherErrors : built.errors);
     if (!built.ok) {
       focusFirstInvalid();
       return;
@@ -552,6 +556,9 @@ export function AddSourceDialog({
         title={t('addSource')}
         description={t('addSourceLead')}
         size="lg"
+        // As tall as the window allows on a phone, whatever the kind: a sheet as tall as its form
+        // moved the kind and origin choices under the finger at every switch.
+        className="max-sm:h-[calc(100dvh-1.5rem)]"
         testId="add-source-dialog"
         footer={
           <>

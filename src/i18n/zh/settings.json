@@ -86,7 +86,7 @@
   "playerNotFound": "未找到 {{player}}。请在“外部播放器”中设置其路径。",
   "streamFormat": "流格式",
   "playbackStreamsGroup": "流与播放",
-  "streamFormatHint": "Xtream 直播频道。自动模式在内置播放器中使用启动更快的 MPEG-TS，其他情况使用 HLS。如果频道卡住或需要字幕，请选择 HLS。",
+  "streamFormatHint": "Xtream 直播频道。自动模式为每个播放器选择启动最快的格式。如果频道卡住或需要字幕，请选择 HLS。",
   "streamFormatAuto": "自动",
   "streamFormatHls": "HLS（m3u8）",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "切换频道时显示频道信息",
   "zapBannerHint": "每次切换频道后，显示几秒钟台标、频道号以及当前和下一个节目。",
   "showCaptions": "显示字幕",
-  "showCaptionsHint": "流中有字幕时，在内置播放器和嵌入式 mpv 中自动开启。内置播放器无法显示 MPEG-TS 流中的字幕，外部播放器使用各自的设置。",
+  "showCaptionsHint": "流中有字幕时自动开启。内置播放器无法显示 MPEG-TS 流中的字幕，外部播放器使用各自的设置。",
   "doubleClick": "双击播放",
   "doubleClickHint": "单击选择频道，双击播放。",
 

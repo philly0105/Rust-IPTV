@@ -86,7 +86,7 @@
   "playerNotFound": "找不到 {{player}}。請在「外部播放器」中設定其路徑。",
   "streamFormat": "串流格式",
   "playbackStreamsGroup": "串流與播放",
-  "streamFormatHint": "Xtream 直播頻道。自動模式在內建播放器中使用啟動較快的 MPEG-TS，其他情況使用 HLS。若頻道凍結或需要字幕，請選擇 HLS。",
+  "streamFormatHint": "Xtream 直播頻道。自動模式會為每個播放器選擇啟動最快的格式。若頻道凍結或需要字幕，請選擇 HLS。",
   "streamFormatAuto": "自動",
   "streamFormatHls": "HLS（m3u8）",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "切換頻道時顯示頻道資訊",
   "zapBannerHint": "每次切換頻道後，顯示幾秒鐘台標、頻道號碼以及目前和下一個節目。",
   "showCaptions": "顯示字幕",
-  "showCaptionsHint": "串流有字幕時，在內建播放器和內嵌 mpv 中自動開啟。內建播放器無法顯示 MPEG-TS 串流中的字幕，外部播放器使用各自的設定。",
+  "showCaptionsHint": "串流有字幕時自動開啟。內建播放器無法顯示 MPEG-TS 串流中的字幕，外部播放器使用各自的設定。",
   "doubleClick": "按兩下播放",
   "doubleClickHint": "按一下選取頻道，按兩下播放。",
 

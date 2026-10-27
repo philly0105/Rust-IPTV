@@ -86,7 +86,7 @@
   "playerNotFound": "{{player}}が見つかりませんでした。「外部プレーヤー」でパスを設定してください。",
   "streamFormat": "ストリーム形式",
   "playbackStreamsGroup": "ストリームと再生",
-  "streamFormatHint": "Xtreamのライブチャンネル。自動では内蔵プレーヤーで起動の速いMPEG-TSを使い、それ以外ではHLSを使います。チャンネルが固まる場合や字幕が必要な場合はHLSを選んでください。",
+  "streamFormatHint": "Xtreamのライブチャンネル。自動ではプレーヤーごとに最も速く起動する形式を使います。チャンネルが固まる場合や字幕が必要な場合はHLSを選んでください。",
   "streamFormatAuto": "自動",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "チャンネル切り替え時にチャンネル情報を表示",
   "zapBannerHint": "チャンネルを切り替えるたびに、ロゴ、番号、現在と次の番組を数秒間表示します。",
   "showCaptions": "字幕を表示",
-  "showCaptionsHint": "ストリームに字幕がある場合、内蔵プレーヤーと埋め込みmpvで字幕をオンにします。内蔵プレーヤーはMPEG-TSストリームの字幕を表示できません。外部プレーヤーはそれぞれの設定に従います。",
+  "showCaptionsHint": "ストリームに字幕がある場合に字幕をオンにします。内蔵プレーヤーはMPEG-TSストリームの字幕を表示できず、外部プレーヤーはそれぞれの設定に従います。",
   "doubleClick": "ダブルクリックで再生",
   "doubleClickHint": "シングルクリックでチャンネルを選択し、ダブルクリックで再生します。",
 

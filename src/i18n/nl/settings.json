@@ -86,7 +86,7 @@
   "playerNotFound": "{{player}} is niet gevonden. Stel het pad in onder Externe spelers.",
   "streamFormat": "Streamformaat",
   "playbackStreamsGroup": "Streams en afspelen",
-  "streamFormatHint": "Xtream-livezenders. Automatisch gebruikt MPEG-TS in de ingebouwde speler, dat sneller start, en elders HLS. Kies HLS als zenders bevriezen of als je hun ondertiteling nodig hebt.",
+  "streamFormatHint": "Xtream-livezenders. Automatisch kiest per speler wat het snelst start. Kies HLS als zenders bevriezen of als je ondertiteling nodig hebt.",
   "streamFormatAuto": "Automatisch",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "Kanaalinfo tonen bij het zappen",
   "zapBannerHint": "Toont na elke kanaalwissel een paar seconden het logo, het nummer en wat er nu en straks op is.",
   "showCaptions": "Ondertiteling tonen",
-  "showCaptionsHint": "Zet ondertiteling aan als een stream die heeft, in de ingebouwde speler en in ingebouwde mpv. De ingebouwde speler kan geen ondertiteling tonen in MPEG-TS-streams, en externe spelers volgen hun eigen instellingen.",
+  "showCaptionsHint": "Zet ondertiteling aan als een stream die heeft. De ingebouwde speler toont die niet in MPEG-TS-streams; externe spelers volgen hun eigen instelling.",
   "doubleClick": "Dubbelklikken om af te spelen",
   "doubleClickHint": "Met één klik selecteer je een kanaal, met een dubbelklik speel je het af.",
 

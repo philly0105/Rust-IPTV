@@ -86,7 +86,7 @@
   "playerNotFound": "{{player}} bulunamadı. Yolunu Harici oynatıcılar bölümünde ayarlayın.",
   "streamFormat": "Yayın biçimi",
   "playbackStreamsGroup": "Yayınlar ve oynatma",
-  "streamFormatHint": "Xtream canlı kanalları. Otomatik, yerleşik oynatıcıda daha hızlı açılan MPEG-TS'yi, diğer yerlerde HLS'yi kullanır. Kanallar donuyorsa veya altyazılarına ihtiyacınız varsa HLS'yi seçin.",
+  "streamFormatHint": "Xtream canlı kanalları. Otomatik, her oynatıcıda en hızlı açılanı seçer. Kanallar donuyorsa veya altyazıya ihtiyacınız varsa HLS'yi seçin.",
   "streamFormatAuto": "Otomatik",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "Kanal değiştirirken kanal bilgisini göster",
   "zapBannerHint": "Her kanal değişiminden sonra birkaç saniye boyunca logoyu, numarayı, şimdiki ve sonraki programı gösterir.",
   "showCaptions": "Altyazıları göster",
-  "showCaptionsHint": "Yayında altyazı varsa yerleşik oynatıcıda ve gömülü mpv'de altyazıları açar. Yerleşik oynatıcı MPEG-TS yayınlarında altyazı gösteremez; harici oynatıcılar kendi ayarlarını kullanır.",
+  "showCaptionsHint": "Yayında altyazı varsa açar. Yerleşik oynatıcı MPEG-TS yayınlarında altyazı gösteremez; harici oynatıcılar kendi ayarlarını kullanır.",
   "doubleClick": "Oynatmak için çift tıkla",
   "doubleClickHint": "Tek tıklama kanalı seçer, çift tıklama oynatır.",
 

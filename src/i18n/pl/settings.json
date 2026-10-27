@@ -86,7 +86,7 @@
   "playerNotFound": "Nie znaleziono {{player}}. Ustaw ścieżkę w sekcji Zewnętrzne odtwarzacze.",
   "streamFormat": "Format strumienia",
   "playbackStreamsGroup": "Strumienie i odtwarzanie",
-  "streamFormatHint": "Kanały na żywo Xtream. Tryb automatyczny używa we wbudowanym odtwarzaczu MPEG-TS, który startuje szybciej, a w pozostałych przypadkach HLS. Wybierz HLS, jeśli kanały się zawieszają lub potrzebujesz ich napisów.",
+  "streamFormatHint": "Kanały na żywo Xtream. Tryb automatyczny wybiera to, co najszybciej startuje w danym odtwarzaczu. Wybierz HLS, jeśli kanały się zawieszają lub potrzebujesz napisów.",
   "streamFormatAuto": "Automatycznie",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "Pokazuj informacje o kanale przy przełączaniu",
   "zapBannerHint": "Po każdej zmianie kanału przez kilka sekund pokazuje logo, numer oraz bieżący i następny program.",
   "showCaptions": "Pokazuj napisy",
-  "showCaptionsHint": "Włącza napisy, gdy strumień je zawiera, we wbudowanym odtwarzaczu i w osadzonym mpv. Wbudowany odtwarzacz nie wyświetla napisów w strumieniach MPEG-TS, a zewnętrzne odtwarzacze korzystają z własnych ustawień.",
+  "showCaptionsHint": "Włącza napisy, gdy strumień je zawiera. Wbudowany odtwarzacz nie wyświetla ich w strumieniach MPEG-TS; zewnętrzne odtwarzacze korzystają z własnych ustawień.",
   "doubleClick": "Odtwarzaj podwójnym kliknięciem",
   "doubleClickHint": "Pojedyncze kliknięcie zaznacza kanał, podwójne go odtwarza.",
 

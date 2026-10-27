@@ -86,7 +86,7 @@
   "playerNotFound": "{{player}} non trovato. Impostane il percorso in Lettori esterni.",
   "streamFormat": "Formato dello stream",
   "playbackStreamsGroup": "Stream e riproduzione",
-  "streamFormatHint": "Canali in diretta Xtream. Automatico usa MPEG-TS nel lettore interno, che parte prima, e HLS negli altri casi. Scegli HLS se i canali si bloccano o ti servono i loro sottotitoli.",
+  "streamFormatHint": "Canali in diretta Xtream. Automatico sceglie ciò che parte prima in ogni lettore. Scegli HLS se i canali si bloccano o ti servono i sottotitoli.",
   "streamFormatAuto": "Automatico",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "Mostra le info del canale quando cambi canale",
   "zapBannerHint": "Dopo ogni cambio di canale mostra per qualche secondo il logo, il numero e il programma in onda e quello successivo.",
   "showCaptions": "Mostra sottotitoli",
-  "showCaptionsHint": "Attiva i sottotitoli quando lo stream li include, nel lettore interno e in mpv integrato. Il lettore interno non può mostrare i sottotitoli degli stream MPEG-TS, e i lettori esterni seguono le proprie impostazioni.",
+  "showCaptionsHint": "Attiva i sottotitoli quando lo stream li include. Il lettore interno non li mostra negli stream MPEG-TS; i lettori esterni seguono la propria impostazione.",
   "doubleClick": "Doppio clic per riprodurre",
   "doubleClickHint": "Un clic seleziona il canale, un doppio clic lo riproduce.",
 

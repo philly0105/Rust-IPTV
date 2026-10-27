@@ -86,7 +86,7 @@
   "playerNotFound": "{{player}} est introuvable. Définissez son chemin dans Lecteurs externes.",
   "streamFormat": "Format du flux",
   "playbackStreamsGroup": "Flux et lecture",
-  "streamFormatHint": "Chaînes en direct Xtream. Auto utilise MPEG-TS dans le lecteur intégré, qui démarre plus vite, et HLS ailleurs. Choisissez HLS si les chaînes se figent ou si vous avez besoin de leurs sous-titres.",
+  "streamFormatHint": "Chaînes en direct Xtream. Auto choisit ce qui démarre le plus vite dans chaque lecteur. Choisissez HLS si les chaînes se figent ou s'il vous faut des sous-titres.",
   "streamFormatAuto": "Auto",
   "streamFormatHls": "HLS (m3u8)",
   "streamFormatTs": "MPEG-TS",
@@ -103,7 +103,7 @@
   "zapBanner": "Afficher les infos de la chaîne au changement de chaîne",
   "zapBannerHint": "Affiche le logo, le numéro et les programmes en cours et à suivre pendant quelques secondes après chaque changement de chaîne.",
   "showCaptions": "Afficher les sous-titres",
-  "showCaptionsHint": "Active les sous-titres lorsqu'un flux en propose, dans le lecteur intégré et dans mpv embarqué. Le lecteur intégré ne peut pas afficher les sous-titres des flux MPEG-TS, et les lecteurs externes suivent leurs propres réglages.",
+  "showCaptionsHint": "Active les sous-titres lorsqu'un flux en propose. Le lecteur intégré n'en affiche pas dans les flux MPEG-TS ; les lecteurs externes suivent leur propre réglage.",
   "doubleClick": "Double-clic pour lire",
   "doubleClickHint": "Un simple clic sélectionne une chaîne ; un double-clic la lit.",
 

@@ -381,13 +381,24 @@ export function EpgSection({ settings, update }: SectionProps) {
         />
       </SettingsGroup>
 
-      <SettingsGroup title={t('epgClearTitle')} tone="danger">
-        <div className="flex flex-col gap-3 px-4 py-4 @2xl:flex-row @2xl:items-center @2xl:justify-between">
-          <p className="max-w-xl text-sm text-fg-muted">{t('epgClearHint')}</p>
-          <Button variant="danger" icon={<Eraser aria-hidden className="size-4" />} onClick={() => setClearOpen(true)} data-testid="epg-clear-all">
-            {t('epgClearButton')}
-          </Button>
-        </div>
+      {/* The same danger zone as Reset settings in Backup and storage: one name, one row, and a
+          secondary button that opens the danger confirm. The solid red is kept for the confirm, so
+          the page's loudest button is never one click from losing data. */}
+      <SettingsGroup title={t('dangerZone')} tone="danger">
+        <SettingsRow label={t('epgClearButton')} description={t('epgClearHint')}>
+          {({ id, describedBy }) => (
+            <Button
+              id={id}
+              aria-describedby={describedBy}
+              variant="secondary"
+              icon={<Eraser aria-hidden className="size-4" />}
+              onClick={() => setClearOpen(true)}
+              data-testid="epg-clear-all"
+            >
+              {t('epgClearButton')}
+            </Button>
+          )}
+        </SettingsRow>
       </SettingsGroup>
 
       <Dialog

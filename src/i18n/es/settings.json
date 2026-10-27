@@ -346,7 +346,6 @@
   "epgOffsetUnit": "minutos",
   "errorOffsetNumber": "Introduce un número entero de minutos, por ejemplo 60 o -30.",
   "errorOffsetRange": "Usa un desfase entre -720 y 720 minutos (12 horas).",
-  "epgClearTitle": "Datos de la guía",
   "epgClearHint": "Elimina todos los programas descargados. Las guías se vuelven a descargar en su próxima actualización.",
   "epgClearButton": "Borrar todos los datos de la guía",
   "epgClearConfirmTitle": "¿Borrar todos los datos de la guía?",

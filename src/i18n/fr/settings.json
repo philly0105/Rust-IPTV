@@ -346,7 +346,6 @@
   "epgOffsetUnit": "minutes",
   "errorOffsetNumber": "Saisissez un nombre entier de minutes, par exemple 60 ou -30.",
   "errorOffsetRange": "Utilisez un décalage compris entre -720 et 720 minutes (12 heures).",
-  "epgClearTitle": "Données du guide",
   "epgClearHint": "Supprime tous les programmes téléchargés. Les guides sont de nouveau téléchargés lors de leur prochaine actualisation.",
   "epgClearButton": "Effacer toutes les données du guide",
   "epgClearConfirmTitle": "Effacer toutes les données du guide ?",

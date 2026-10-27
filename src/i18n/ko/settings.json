@@ -341,7 +341,6 @@
   "epgOffsetUnit": "분",
   "errorOffsetNumber": "분 단위 정수를 입력하세요(예: 60 또는 -30).",
   "errorOffsetRange": "-720~720분(12시간) 사이로 입력하세요.",
-  "epgClearTitle": "가이드 데이터",
   "epgClearHint": "다운로드한 모든 프로그램을 삭제합니다. 가이드는 다음 새로 고침 때 다시 다운로드됩니다.",
   "epgClearButton": "모든 가이드 데이터 삭제",
   "epgClearConfirmTitle": "모든 가이드 데이터를 삭제할까요?",

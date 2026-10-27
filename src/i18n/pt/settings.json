@@ -346,7 +346,6 @@
   "epgOffsetUnit": "minutos",
   "errorOffsetNumber": "Informe um número inteiro de minutos, por exemplo 60 ou -30.",
   "errorOffsetRange": "Use um ajuste entre -720 e 720 minutos (12 horas).",
-  "epgClearTitle": "Dados do guia",
   "epgClearHint": "Exclui todos os programas baixados. Os guias são baixados novamente na próxima atualização.",
   "epgClearButton": "Limpar todos os dados do guia",
   "epgClearConfirmTitle": "Limpar todos os dados do guia?",

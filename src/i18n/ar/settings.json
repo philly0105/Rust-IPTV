@@ -361,7 +361,6 @@
   "epgOffsetUnit": "دقيقة",
   "errorOffsetNumber": "أدخل عددًا صحيحًا من الدقائق، مثل 60 أو -30.",
   "errorOffsetRange": "استخدم إزاحة بين -720 و720 دقيقة (12 ساعة).",
-  "epgClearTitle": "بيانات الدليل",
   "epgClearHint": "يحذف كل البرامج المنزّلة. تُنزَّل الأدلة مجددًا عند تحديثها التالي.",
   "epgClearButton": "مسح كل بيانات الدليل",
   "epgClearConfirmTitle": "مسح كل بيانات الدليل؟",

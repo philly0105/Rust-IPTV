@@ -341,7 +341,6 @@
   "epgOffsetUnit": "Minuten",
   "errorOffsetNumber": "Geben Sie eine ganze Zahl an Minuten ein, zum Beispiel 60 oder -30.",
   "errorOffsetRange": "Verwenden Sie eine Verschiebung zwischen -720 und 720 Minuten (12 Stunden).",
-  "epgClearTitle": "Programmführerdaten",
   "epgClearHint": "Löscht alle heruntergeladenen Sendungen. Programmführer werden bei der nächsten Aktualisierung erneut heruntergeladen.",
   "epgClearButton": "Alle Programmführerdaten löschen",
   "epgClearConfirmTitle": "Alle Programmführerdaten löschen?",

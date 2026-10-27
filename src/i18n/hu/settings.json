@@ -341,7 +341,6 @@
   "epgOffsetUnit": "perc",
   "errorOffsetNumber": "Adjon meg egész számú percet, például 60 vagy -30.",
   "errorOffsetRange": "Az eltolás -720 és 720 perc (12 óra) között lehet.",
-  "epgClearTitle": "Műsorújság-adatok",
   "epgClearHint": "Törli az összes letöltött műsort. A műsorújságok a következő frissítéskor újra letöltődnek.",
   "epgClearButton": "Összes műsorújság-adat törlése",
   "epgClearConfirmTitle": "Törli az összes műsorújság-adatot?",

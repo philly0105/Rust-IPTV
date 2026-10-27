@@ -346,7 +346,6 @@
   "epgOffsetUnit": "minuti",
   "errorOffsetNumber": "Inserisci un numero intero di minuti, ad esempio 60 o -30.",
   "errorOffsetRange": "Usa uno spostamento tra -720 e 720 minuti (12 ore).",
-  "epgClearTitle": "Dati della guida",
   "epgClearHint": "Elimina tutti i programmi scaricati. Le guide vengono scaricate di nuovo al prossimo aggiornamento.",
   "epgClearButton": "Cancella tutti i dati della guida",
   "epgClearConfirmTitle": "Cancellare tutti i dati della guida?",

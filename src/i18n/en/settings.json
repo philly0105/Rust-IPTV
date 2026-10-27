@@ -341,7 +341,6 @@
   "epgOffsetUnit": "minutes",
   "errorOffsetNumber": "Enter a whole number of minutes, for example 60 or -30.",
   "errorOffsetRange": "Use a shift between -720 and 720 minutes (12 hours).",
-  "epgClearTitle": "Guide data",
   "epgClearHint": "Deletes every downloaded programme. Guides download again on their next refresh.",
   "epgClearButton": "Clear all guide data",
   "epgClearConfirmTitle": "Clear all guide data?",

@@ -341,7 +341,6 @@
   "epgOffsetUnit": "minuten",
   "errorOffsetNumber": "Voer een heel aantal minuten in, bijvoorbeeld 60 of -30.",
   "errorOffsetRange": "Gebruik een verschuiving tussen -720 en 720 minuten (12 uur).",
-  "epgClearTitle": "Gidsgegevens",
   "epgClearHint": "Verwijdert alle gedownloade programma's. Gidsen worden bij de volgende vernieuwing opnieuw gedownload.",
   "epgClearButton": "Alle gidsgegevens wissen",
   "epgClearConfirmTitle": "Alle gidsgegevens wissen?",

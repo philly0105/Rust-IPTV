@@ -341,7 +341,6 @@
   "epgOffsetUnit": "分钟",
   "errorOffsetNumber": "请输入整数分钟数，例如 60 或 -30。",
   "errorOffsetRange": "偏移量须在 -720 到 720 分钟之间（12 小时）。",
-  "epgClearTitle": "节目指南数据",
   "epgClearHint": "删除所有已下载的节目。节目指南会在下次刷新时重新下载。",
   "epgClearButton": "清除所有节目指南数据",
   "epgClearConfirmTitle": "清除所有节目指南数据？",

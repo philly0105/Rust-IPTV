@@ -341,7 +341,6 @@
   "epgOffsetUnit": "分鐘",
   "errorOffsetNumber": "請輸入整數分鐘數，例如 60 或 -30。",
   "errorOffsetRange": "偏移量須介於 -720 到 720 分鐘之間（12 小時）。",
-  "epgClearTitle": "節目表資料",
   "epgClearHint": "刪除所有已下載的節目。節目表會在下次重新整理時重新下載。",
   "epgClearButton": "清除所有節目表資料",
   "epgClearConfirmTitle": "要清除所有節目表資料嗎？",

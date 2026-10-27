@@ -341,7 +341,6 @@
   "epgOffsetUnit": "分",
   "errorOffsetNumber": "分数を整数で入力してください（例：60、-30）。",
   "errorOffsetRange": "-720～720分（12時間）の範囲で指定してください。",
-  "epgClearTitle": "番組表データ",
   "epgClearHint": "ダウンロードしたすべての番組を削除します。番組表は次回の更新時に再ダウンロードされます。",
   "epgClearButton": "すべての番組表データを削除",
   "epgClearConfirmTitle": "すべての番組表データを削除しますか？",

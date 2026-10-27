@@ -341,7 +341,6 @@
   "epgOffsetUnit": "dakika",
   "errorOffsetNumber": "Tam sayı olarak dakika girin, örneğin 60 veya -30.",
   "errorOffsetRange": "-720 ile 720 dakika (12 saat) arasında bir kaydırma kullanın.",
-  "epgClearTitle": "Rehber verileri",
   "epgClearHint": "İndirilen tüm programları siler. Rehberler bir sonraki yenilemede yeniden indirilir.",
   "epgClearButton": "Tüm rehber verilerini temizle",
   "epgClearConfirmTitle": "Tüm rehber verileri temizlensin mi?",

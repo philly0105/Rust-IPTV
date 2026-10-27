@@ -351,7 +351,6 @@
   "epgOffsetUnit": "minut",
   "errorOffsetNumber": "Podaj całkowitą liczbę minut, np. 60 lub -30.",
   "errorOffsetRange": "Użyj przesunięcia od -720 do 720 minut (12 godzin).",
-  "epgClearTitle": "Dane przewodnika",
   "epgClearHint": "Usuwa wszystkie pobrane programy. Przewodniki zostaną pobrane ponownie przy następnym odświeżeniu.",
   "epgClearButton": "Wyczyść wszystkie dane przewodnika",
   "epgClearConfirmTitle": "Wyczyścić wszystkie dane przewodnika?",

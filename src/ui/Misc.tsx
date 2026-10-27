@@ -385,7 +385,9 @@ export function WatchedChip({ className, testId }: WatchedChipProps) {
  *
  * On a touch screen a chip grows to 36 px, and an invisible band above and below takes its target
  * to the buttons' 44 px: a row of 44 px pills was heavy, a 30 px one a small target beside the
- * 44 px buttons there. (A chip row that scrolls sideways clips the band to the row.)
+ * 44 px buttons there. A chip row that scrolls sideways clips the band to its padding box, so
+ * such a row keeps `py-1.5` (with `-my-1.5` to stay the same height), as VodFilterBar does;
+ * without it the target stays 36 px.
  */
 export function filterChipClass(on: boolean, className?: string): string {
   return cn(

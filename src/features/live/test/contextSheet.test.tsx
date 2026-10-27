@@ -48,6 +48,9 @@ describe('channel context menu on a phone', () => {
     // No cursor position: the sheet is placed by its classes alone.
     expect(menu.style.left).toBe('');
     expect(document.activeElement).toBe(menu);
+    // Focused as a whole, it draws no focus ring around the entire sheet.
+    expect(menu.className).toContain('focus-visible:outline-none');
+    expect(menu.className).toContain('focus-visible:shadow-3');
     expect(screen.getAllByRole('menuitem').map((b) => b.textContent)).toEqual(['Play', 'Rename…F2']);
     expect(document.querySelector('[data-context-scrim]')).not.toBeNull();
     // The arrows still start at the first item.

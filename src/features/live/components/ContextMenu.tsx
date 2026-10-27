@@ -199,8 +199,10 @@ export function ContextMenu({
         style={sheet ? undefined : { left: place.left, top: place.top, ['--pop-from' as string]: place.above ? '-6px' : '6px' }}
         className={cn(
           'fixed z-[60] overflow-y-auto overscroll-contain border-edge bg-surface text-fg',
+          // The sheet takes focus as a whole; as on the kit Dialog's panel, a ring around all of it
+          // would read as a stray highlight, so the global focus-visible outline is turned off here.
           sheet
-            ? 'inset-x-0 bottom-0 max-h-[calc(100dvh-3rem)] rounded-t-xl border-t px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] text-body shadow-3'
+            ? 'inset-x-0 bottom-0 max-h-[calc(100dvh-3rem)] rounded-t-xl border-t px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] text-body shadow-3 outline-none focus-visible:shadow-3 focus-visible:outline-none'
             : 'max-h-[calc(100dvh-1rem)] min-w-56 max-w-80 rounded-lg border p-1 text-sm shadow-2',
           closing
             ? cn('pointer-events-none', sheet ? 'motion-safe:animate-sheet-out' : 'motion-safe:animate-pop-out')

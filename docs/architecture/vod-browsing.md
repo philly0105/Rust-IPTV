@@ -51,7 +51,7 @@ A source's Movies and Series pages (`VodLandingPage`) open with rails, the way a
 
 Typing in the header's search field opens the source's search page with the text so far.
 
-The source is named only when more than one is set up (`useShowSourceName`): then the header subtitles of the landing, a category grid and a detail page, the landing's line below md, the movie's watch stage and the search placeholder ("Search Northwind Premium") name it. With one source they show the count alone, the detail header has no subtitle, and the search field reads "Search channels, movies, and series" (not "Search everything", the name of the palette button beside it). A detail page's About facts always name it.
+The source is named only when more than one is set up (`useShowSourceName`): then the header subtitles of the landing, a category grid and a detail page, the landing's line below md, the movie's watch stage and the search placeholder ("Search Northwind Premium") name it. With one source they show the count alone, the detail header has no subtitle, and the search field reads "Search this source" (short enough for the field on a 1024 px tablet, and not "Search everything", the name of the palette button beside it). A detail page's About facts always name it.
 
 ### Detail pages
 

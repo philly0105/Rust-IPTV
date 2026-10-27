@@ -119,7 +119,7 @@ describe('round 3: the landing names its source only beside others', () => {
     expect(screen.queryByText(/Alpha IPTV/)).toBeNull();
     const { useShellStore } = await import('@/shell/store');
     await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('42 titles'));
-    expect(useShellStore.getState().header?.search?.placeholder).toBe(i18n.t('vod:searchEverything'));
+    expect(useShellStore.getState().header?.search?.placeholder).toBe('Search this source');
   });
 });
 

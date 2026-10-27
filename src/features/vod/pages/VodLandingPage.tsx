@@ -177,9 +177,10 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // VOD starts here: warm hls.js and mpegts.js once the browser is idle (preloadEngines waits for
   // it), so the first movie or episode play does not fetch them after the click.
   useEffect(() => preloadEngines(), []);
-  // With one source, searching it is searching everything it has: the field says what that is, not
-  // "Search everything", the name of the palette's button right beside it.
-  const searchPlaceholder = sourceName ? t('searchInSource', { source: sourceName }) : showSource ? t('searchSource') : t('searchEverything');
+  // With one source the field says "Search this source": short enough for the field on a 1024 px
+  // tablet, where "Search channels, movies, and series" was cut off, and not "Search everything",
+  // the name of the palette's button right beside it.
+  const searchPlaceholder = sourceName ? t('searchInSource', { source: sourceName }) : t('searchSource');
   usePageHeader(
     {
       title,

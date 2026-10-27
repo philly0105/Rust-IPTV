@@ -173,17 +173,20 @@ describe('the playing row (review round 2)', () => {
     );
   }
 
-  it('keeps amber for the tick and the progress: the number is the text colour and the star is neutral', () => {
+  it('keeps amber for the tick and the progress: the number is the text colour and the heart is neutral', () => {
     row();
     const button = screen.getByRole('button', { name: /^1, Channel 0/ });
     const number = within(button).getByText('1');
     expect(number.className).toContain('text-fg');
     expect(number.className).not.toMatch(/text-accent/);
-    const star = screen.getByTestId('row-favorite');
-    expect(star.getAttribute('class')).toContain('text-fg-subtle');
-    expect(star.getAttribute('class')).not.toMatch(/text-(warning|accent)/);
-    // The inline star steps aside while the floating actions show their own.
-    expect(star.getAttribute('class')).toContain('not-pointer-coarse:group-hover/row:invisible');
+    const heart = screen.getByTestId('row-favorite');
+    // A favourite is the rail's heart here too; the star is left to ratings.
+    expect(heart.getAttribute('class')).toContain('lucide-heart');
+    expect(heart.getAttribute('class')).toContain('text-fg-subtle');
+    expect(heart.getAttribute('class')).not.toMatch(/text-(warning|accent)/);
+    // The inline heart steps aside while the floating actions show their own.
+    expect(heart.getAttribute('class')).toContain('not-pointer-coarse:group-hover/row:invisible');
+    expect(within(screen.getByTestId('row-actions')).getByRole('button', { name: 'Favorite' }).querySelector('.lucide-heart')).not.toBeNull();
     expect(screen.getByTestId('channel-progress').className).toContain('bg-accent-mark');
   });
 

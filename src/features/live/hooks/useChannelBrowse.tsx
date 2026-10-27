@@ -7,7 +7,7 @@
  */
 
 import { useQueries } from '@tanstack/react-query';
-import { History, LayoutList, ListVideo, Star } from 'lucide-react';
+import { Heart, History, LayoutList, ListVideo } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -221,7 +221,7 @@ export function useBrowseSections(sourceId: string, enabled: boolean, opts: { re
         id: 'views',
         heading: t('pickerViews'),
         options: [
-          { value: SCOPE_FAVORITES, label: t('favoritesGroup'), icon: <Star size={14} /> },
+          { value: SCOPE_FAVORITES, label: t('favoritesGroup'), icon: <Heart size={14} /> },
           ...(withRecent ? [{ value: SCOPE_RECENT, label: t('recentGroup'), icon: <History size={14} /> }] : []),
           ...(lists.data ?? []).map((l) => ({ value: scopeOfList(l.id), label: l.name, count: l.itemCount, icon: <ListVideo size={14} /> })),
         ],

@@ -45,7 +45,7 @@ Amber marks, and only marks: the primary action (one per view), focus, the activ
 | `bg-accent-solid text-accent-solid-fg` (+ `hover:bg-accent-solid-hover`, `active:bg-accent-solid-pressed`) | every filled accent control: the primary Button, the on Switch, checked Checkbox, CTA pills in the player. The bright dial tone with ink text in both themes, for every accent |
 | `ring-focus`, `outline-focus` | focus styles. Never `ring-accent` |
 
-A chosen filter chip is inverted (`bg-fg text-bg`), not amber. A favourite is a state too: its star is neutral (`fill-current text-fg-subtle` inline, `text-fg` on a pressed toggle), never amber and never `text-warning`, which is a status tone (olive in light). On artwork the star beside a rating takes the glass accent.
+A chosen filter chip is inverted (`bg-fg text-bg`), not amber. A favourite is a state too: its mark is the heart, as in the rail, and it is neutral (`fill-current text-fg-subtle` inline, `text-fg` on a pressed toggle), never amber and never `text-warning`, which is a status tone (olive in light). The star is for ratings: on artwork the star beside a rating takes the glass accent.
 
 ### Status
 

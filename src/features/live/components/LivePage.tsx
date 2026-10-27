@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Star, Tv } from 'lucide-react';
+import { CalendarClock, Heart, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Tv } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -559,7 +559,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   });
 
   // ---- favorites & menu -----------------------------------------------------
-  // The star flips at once; the core's answer (or a failure) settles it. One toggle per channel is
+  // The heart flips at once; the core's answer (or a failure) settles it. One toggle per channel is
   // in flight at a time, so a double click cannot add and remove in a race.
   const [favOverrides, setFavOverrides] = useState<ReadonlyMap<ItemKey, boolean>>(() => new Map());
   const favInFlight = useRef(new Set<ItemKey>());
@@ -658,7 +658,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // LG-12: Favorites and Recently watched sit above All channels (one array, so the memoised sidebar stays put).
   const pinnedViews = useMemo(
     () => [
-      { id: LIVE_VIEW_ID.favorites, label: t('favoritesGroup'), icon: <Star size={14} /> },
+      { id: LIVE_VIEW_ID.favorites, label: t('favoritesGroup'), icon: <Heart size={14} /> },
       { id: LIVE_VIEW_ID.recent, label: t('recentGroup'), icon: <History size={14} /> },
     ],
     [t],
@@ -798,7 +798,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   } else if (listEmpty && liveView) {
     listBody = (
       <EmptyState
-        icon={liveView === 'favorites' ? <Star className="size-6" /> : <History className="size-6" />}
+        icon={liveView === 'favorites' ? <Heart className="size-6" /> : <History className="size-6" />}
         title={liveView === 'favorites' ? t(isRadio ? 'favoritesEmptyStations' : 'favoritesEmpty') : t('recentEmpty')}
         description={liveView === 'favorites' ? t('favoritesEmptyHint') : t('recentEmptyHint')}
         action={

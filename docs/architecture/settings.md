@@ -54,7 +54,7 @@ A section is a heading and groups of rows (`SettingsGroup`). The heading is `tex
 Where rows live:
 
 - General: language, on startup and window at startup, how sources refresh and how early a subscription warns (`sourceRefreshIntervalHours`, `accountExpiryWarnDays`), the catalog filters (country prefix, English only, minimum rating) and the downloads folder.
-- Appearance: theme (three cards side by side at every width; under `@md` the previews are shorter and the hint lines go), with OLED black, the accent color group (its title and hint describe the swatches; the live preview sits under them), size and spacing (density, interface size, poster size, `coverSize`), and the Home screen group (`showDashboard`, `dashboardRails`).
+- Appearance: theme (three cards side by side at every width; under `@md` the previews are shorter and the hint lines go), with OLED black, the accent color group (its title and hint describe the swatches; the live preview sits under them), size and spacing (density, interface size on one line like Minimum rating, with Reset, the slider and its step ticks, and the value; poster size, `coverSize`), and the Home screen group (`showDashboard`, `dashboardRails`).
 - Playback: the player, then Streams and playback (stream format and the playback switches), then subtitles.
 - Guide: the global XMLTV addresses, then one status row per guide source, led by the source, with its refresh button beside the switch; then Display (the view, time shift and short-guide fallback).
 - Recording: Recordings (the folder, the padding before and after as one row), and Reminders.

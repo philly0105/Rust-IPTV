@@ -168,6 +168,22 @@ describe('Backup file checks match the core (D10)', () => {
 });
 
 describe('Interface size slider', () => {
+  it('sits on one line like Minimum rating: the value at body size, Reset holding its place at 100 %', async () => {
+    renderAt(settingsRoutes, '/settings/appearance');
+    const slider = (await screen.findByTestId('ui-scale')) as HTMLInputElement;
+    const value = screen.getByTestId('ui-scale-value');
+    // Not a 2xl display readout over the slider, which made this row half again as tall as Density.
+    expect(value.className).toContain('text-body-sm');
+    expect(value.className).not.toContain('text-2xl');
+    expect(value.parentElement).toBe(screen.getByTestId('ui-scale-reset').parentElement);
+    // Hidden, not removed, at 100 %, so a drag that brings it up never moves the slider.
+    expect(screen.getByTestId('ui-scale-reset').className).toContain('invisible');
+    fireEvent.pointerDown(slider);
+    fireEvent.change(slider, { target: { value: '110' } });
+    expect(screen.getByTestId('ui-scale-reset').className).not.toContain('invisible');
+    expect(value.textContent).toBe('110%');
+  });
+
   it('does not resize the app under the pointer mid-drag, and previews on release', async () => {
     const { useAppearanceStore } = await import('@/shell/theme');
     useAppearanceStore.setState({ preview: null });

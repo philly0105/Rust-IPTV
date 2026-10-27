@@ -11,10 +11,10 @@ import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, SkeletonList, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
-import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
+import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
 import { useNowOn } from '../hooks/useNowOn';
@@ -248,7 +248,7 @@ export function RecentPage() {
   };
 
   let body;
-  if (query.isLoading) body = <SkeletonList rows={8} className="pt-2" />;
+  if (query.isLoading) body = <EntryRowsSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   else if (count === 0 && !rail)
     body = (

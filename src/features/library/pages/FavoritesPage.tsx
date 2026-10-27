@@ -14,9 +14,9 @@ import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, SkeletonList, useLiveQuality, useShortcut, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, useLiveQuality, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
-import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
+import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
 import { useNowOn } from '../hooks/useNowOn';
@@ -235,7 +235,7 @@ export function FavoritesPage() {
   };
 
   let body;
-  if (query.isLoading) body = <SkeletonList rows={8} className="pt-2" />;
+  if (query.isLoading) body = <EntryRowsSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   else if (entries.length === 0)
     body = (

@@ -24,7 +24,7 @@ import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
-import { ChannelLogo, IconButton, Menu, Poster, PosterCellWidthContext, ProgressBar, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
+import { ChannelLogo, IconButton, Menu, Poster, PosterCellWidthContext, ProgressBar, Skeleton, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
 import type { NowOn } from '../hooks/useNowOn';
 import { ContentIcon, SourceBadge } from './bits';
 
@@ -246,3 +246,31 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
 const REORDER_ARROW = 'disabled:hidden';
 
 export const EntryRow = memo(EntryRowImpl);
+
+/**
+ * The loading stand-in for a page of these rows (Favorites, Recently watched): the first
+ * heading's row, then rows of the real height with the 40 px art column, two text lines and the
+ * time at the end, in the list's box (-mx-2, the reading width), so nothing moves when the rows
+ * arrive. The kit's SkeletonList ran the full page width with shorter rows and smaller art.
+ */
+export function EntryRowsSkeleton({ rows = 8 }: { rows?: number }) {
+  const { t } = useTranslation('common');
+  return (
+    <div role="status" aria-busy="true" className="-mx-2 flex max-w-4xl flex-col" data-testid="entry-rows-skeleton">
+      <span className="sr-only">{t('loading')}</span>
+      <div className="flex h-9 items-end px-2 pb-2" aria-hidden>
+        <Skeleton className="h-4 w-32" />
+      </div>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-2" style={{ height: ENTRY_ROW_HEIGHT }} aria-hidden>
+          <Skeleton className="size-10 shrink-0 rounded-md" />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <Skeleton className="h-3.5 w-2/5" />
+            <Skeleton className="h-3 w-3/5 opacity-70" />
+          </div>
+          <Skeleton className="hidden h-3 w-24 shrink-0 opacity-70 sm:block" />
+        </div>
+      ))}
+    </div>
+  );
+}

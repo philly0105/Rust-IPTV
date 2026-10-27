@@ -70,6 +70,51 @@ describe('epg mapping dialog: the choice first', () => {
     expect(dialog.querySelector('[data-dialog-close]')).not.toBeNull();
   });
 
+  it('selects the suggested search, so typing replaces it', async () => {
+    rpcMock.handlers['epg.channelsSearch'] = () => [];
+    rpcMock.handlers['epg.resolve'] = () => ({ via: 'none' });
+    renderDialog();
+    const search = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search guide channels' });
+    expect(search.value).toBe('Channel 1');
+    expect(document.activeElement).toBe(search);
+    expect([search.selectionStart, search.selectionEnd]).toEqual([0, search.value.length]);
+    // What a keystroke does in a browser: the typed text takes the selection's place.
+    const v = search.value;
+    fireEvent.change(search, { target: { value: v.slice(0, search.selectionStart!) + 'fox' + v.slice(search.selectionEnd!) } });
+    expect(search.value).toBe('fox');
+    await waitFor(() => expect(rpcMock.calls).toContainEqual({ cmd: 'epg.channelsSearch', args: { query: 'fox', limit: 50 } }));
+  });
+
+  it('keeps one check on Match automatically when the automatic match is among the results', async () => {
+    rpcMock.handlers['epg.channelsSearch'] = () => [{ channelId: 'one.uk', displayName: 'One UK', epgUrl: 'https://guide.example/epg.xml' }];
+    rpcMock.handlers['epg.resolve'] = () => ({ via: 'name', epgChannelId: 'one.uk' });
+    renderDialog();
+    const auto = screen.getByRole('button', { name: /^Match automatically/ });
+    await waitFor(() => expect(within(auto).queryByLabelText('Selected')).not.toBeNull());
+    const row = await screen.findByRole('button', { name: /^One UK/ });
+    expect(within(row).queryByLabelText('Selected')).toBeNull();
+    expect(screen.getAllByLabelText('Selected')).toHaveLength(1);
+  });
+
+  it('checks the result row of a channel matched by hand, and nothing else', async () => {
+    rpcMock.handlers['epg.channelsSearch'] = () => [{ channelId: 'one.uk', displayName: 'One UK', epgUrl: 'https://guide.example/epg.xml' }];
+    rpcMock.handlers['epg.resolve'] = () => ({ via: 'manual', epgChannelId: 'one.uk' });
+    renderDialog();
+    const row = await screen.findByRole('button', { name: /^One UK/ });
+    await waitFor(() => expect(within(row).queryByLabelText('Selected')).not.toBeNull());
+    expect(screen.getAllByLabelText('Selected')).toHaveLength(1);
+  });
+
+  it('gives the results one fixed height, found or not, so the sheet keeps the search in place', async () => {
+    rpcMock.handlers['epg.channelsSearch'] = () => [];
+    rpcMock.handlers['epg.resolve'] = () => ({ via: 'none' });
+    renderDialog();
+    const box = screen.getByTestId('epg-mapping-results');
+    expect(box.className).toContain('h-[min(320px,45vh)]');
+    expect(box.className).not.toContain('max-h-');
+    await waitFor(() => expect(within(box).getByText(/No guide channels match/)).toBeTruthy());
+  });
+
   it('checks the choice in force, and a tap on another applies it', async () => {
     rpcMock.handlers['epg.channelsSearch'] = () => [];
     rpcMock.handlers['epg.resolve'] = () => ({ via: 'name', epgChannelId: 'one.uk' });

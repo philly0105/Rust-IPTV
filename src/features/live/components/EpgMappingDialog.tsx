@@ -1,5 +1,5 @@
 import { Check } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { invalidate, useRpcQuery } from '@/api/query';
@@ -34,9 +34,18 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
   const [busy, setBusy] = useState(false);
   /** The channel's own guide shift as typed; blank = the playlist's tvg-shift. */
   const [shiftText, setShiftText] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  // The channel's cleaned-up name is the first search. Set while rendering, so the field holds it
+  // when the Dialog focuses the field, then selected (this layout effect runs after the Dialog's),
+  // so the first keystroke replaces the suggestion instead of adding to it, as Rename does.
+  const [queryFor, setQueryFor] = useState<Channel | null>(null);
+  if (channel !== queryFor) {
+    setQueryFor(channel);
     if (channel) setQuery(mappingQuery(channel.name));
+  }
+  useLayoutEffect(() => {
+    if (channel) searchRef.current?.select();
   }, [channel]);
 
   const resolution = useRpcQuery('epg.resolve', { ref: channel?.ref ?? { sourceId: '', contentType: 'live', itemId: '' } }, { enabled: open });
@@ -89,7 +98,7 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
       description={current ? (current.epgChannelId ? t('mappingCurrent', { id: current.epgChannelId, via: viaLabel }) : viaLabel) : ' '}
     >
       {/* The task first: finding the guide channel. Typing goes straight into the search. */}
-      <SearchInput data-autofocus="" className="mb-2" value={query} onChange={setQuery} placeholder={t('mappingSearch')} label={t('mappingSearch')} />
+      <SearchInput ref={searchRef} data-autofocus="" className="mb-2" value={query} onChange={setQuery} placeholder={t('mappingSearch')} label={t('mappingSearch')} />
       <ul className="flex flex-col">
         <li>
           <ChoiceRow
@@ -111,43 +120,49 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
         </li>
       </ul>
       <div role="separator" className="my-1 h-px bg-divider" />
-      {results.error ? (
-        <ErrorState error={results.error} onRetry={() => void results.refetch()} />
-      ) : debounced && results.isLoading ? (
-        <div className="flex flex-col gap-2">
-          {Array.from({ length: 5 }, (_, i) => (
-            <Skeleton key={i} className="h-10" />
-          ))}
-        </div>
-      ) : results.data && results.data.length === 0 ? (
-        <p className="py-6 text-center text-sm text-fg-muted">{t('mappingNoResults', { query: debounced })}</p>
-      ) : (
-        <ul className="flex max-h-[min(320px,45vh)] flex-col overflow-y-auto" aria-label={t('mappingResults')}>
-          {(results.data ?? []).map((m) => {
-            const selected = current?.epgChannelId === m.channelId;
-            return (
-              <li key={`${m.epgUrl}|${m.channelId}`}>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    channel &&
-                    void apply(() => rpc('epg.setMapping', { ref: channel.ref, epgChannelId: m.channelId }), t('mappingSaved', { name: m.displayName }))
-                  }
-                  className={RESULT_ROW}
-                >
-                  <ChannelLogo src={m.icon} name={m.displayName} size={28} sourceId={channel?.ref.sourceId} />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm text-fg">{m.displayName}</span>
-                    <span className="truncate text-xs text-fg-subtle">{joinList([m.channelId, hostOf(m.epgUrl)], i18n.language)}</span>
-                  </span>
-                  {selected ? <Check className="size-4 text-accent" aria-label={t('mappingSelected')} /> : null}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      {/* One height whatever the search finds: a sheet on a phone grows from its top edge, so a
+          box that shrank with the results would move the search field while typing. */}
+      <div className="h-[min(320px,45vh)] overflow-y-auto overscroll-contain" data-testid="epg-mapping-results">
+        {results.error ? (
+          <ErrorState error={results.error} onRetry={() => void results.refetch()} />
+        ) : debounced && results.isLoading ? (
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 5 }, (_, i) => (
+              <Skeleton key={i} className="h-10" />
+            ))}
+          </div>
+        ) : results.data && results.data.length === 0 ? (
+          <p className="py-6 text-center text-sm text-fg-muted">{t('mappingNoResults', { query: debounced })}</p>
+        ) : (
+          <ul className="flex flex-col" aria-label={t('mappingResults')}>
+            {(results.data ?? []).map((m) => {
+              // Only a match made by hand checks its row: an automatic one is checked on Match
+              // automatically, and one choice carries the check.
+              const selected = current?.via === 'manual' && current.epgChannelId === m.channelId;
+              return (
+                <li key={`${m.epgUrl}|${m.channelId}`}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      channel &&
+                      void apply(() => rpc('epg.setMapping', { ref: channel.ref, epgChannelId: m.channelId }), t('mappingSaved', { name: m.displayName }))
+                    }
+                    className={RESULT_ROW}
+                  >
+                    <ChannelLogo src={m.icon} name={m.displayName} size={28} sourceId={channel?.ref.sourceId} />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm text-fg">{m.displayName}</span>
+                      <span className="truncate text-xs text-fg-subtle">{joinList([m.channelId, hostOf(m.epgUrl)], i18n.language)}</span>
+                    </span>
+                    {selected ? <Check className="size-4 text-accent" aria-label={t('mappingSelected')} /> : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
       {/* The time shift corrects a guide that runs early or late: after the choice, ruled off. */}
       <form
         className="mt-4 flex flex-col gap-1.5 border-t border-divider pt-4"

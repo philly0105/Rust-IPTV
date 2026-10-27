@@ -636,6 +636,25 @@ describe('sports page', () => {
     fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Show fewer' }));
     expect(within(list).getAllByTestId('sports-stream')).toHaveLength(1);
     expect(within(list).getByRole('button', { name: 'Show all 5 streams' })).toBeTruthy();
+    // A live game shows no start time, so its broadcast's slot says when it runs.
+    expect(within(list).getByTestId('sports-stream-slot').textContent).toMatch(/\d.*–.*\d/);
+  });
+
+  it("leaves out a guide slot that starts with an upcoming game, and keeps one that starts before it", async () => {
+    const at = Date.now() + 2 * h.HOUR;
+    const sameStart = h.game('1', { startMs: at });
+    const earlier = h.game('2', { startMs: at, home: h.team('CHI', 'Chicago Bulls'), away: h.team('MIA', 'Miami Heat') });
+    const slot = (start: number) => ({ channelId: '2', start: new Date(start).toISOString(), end: new Date(at + 3 * h.HOUR).toISOString(), title: 'NBA Basketball' });
+    setDay([sameStart, earlier]);
+    setStreams(sameStart, [h.match(EVENT, { reason: 'guide', program: slot(at) })]);
+    setStreams(earlier, [h.match(EVENT, { reason: 'guide', program: slot(at - 30 * h.MINUTE) })]);
+    await openReady();
+    // The start time is on the card's first line already: the slot would only say it again.
+    expect(within(card(sameStart)).getByTestId('sports-start')).toBeTruthy();
+    expect(within(card(sameStart)).getByText('In guide')).toBeTruthy();
+    expect(within(card(sameStart)).queryByTestId('sports-stream-slot')).toBeNull();
+    // Coverage that starts half an hour early is news.
+    expect(within(card(earlier)).getByTestId('sports-stream-slot').textContent).toMatch(/\d.*–.*\d/);
   });
 
   it('names the source of each stream when there are several', async () => {

@@ -259,6 +259,11 @@ function StreamRow({
   }
 
   const program = match.program;
+  // The guide slot's times say what the card doesn't: when a live game's broadcast runs, which slot a
+  // replay plays, or that coverage starts before the game. A slot that starts with an upcoming game
+  // only repeats the start time above, the third time on the card with the Watch clock, so it goes.
+  const slotRepeatsStart =
+    program !== null && game.phase === 'scheduled' && game.timeValid && !game.timeNote && Math.abs(ms(program.start) - game.startMs) < MINUTE;
   return (
     <li className="flex min-w-0 items-center gap-3 py-2" data-testid="sports-stream" data-reason={match.reason}>
       <ChannelLogo src={match.channel.logoUrl} name={name} size={32} sourceId={match.sourceId} />
@@ -287,8 +292,8 @@ function StreamRow({
                   {match.sourceName}
                 </span>
               ) : null,
-              program ? (
-                <span key="time" className="tabular-nums">
+              program && !slotRepeatsStart ? (
+                <span key="time" className="tabular-nums" data-testid="sports-stream-slot">
                   {formatTimeRange(ms(program.start), ms(program.end), i18n.language)}
                 </span>
               ) : null,

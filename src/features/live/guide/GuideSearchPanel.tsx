@@ -8,7 +8,7 @@
 
 import type { TFunction } from 'i18next';
 import { CalendarOff, Radio, SearchX, X } from 'lucide-react';
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -88,6 +88,8 @@ export interface GuideHeaderSearchProps extends SharedProps {
   disabled?: boolean;
   /** False: the header has no field (no sources, or they failed to load: nothing to search). */
   field?: boolean;
+  /** The header's actions (a phone's genre filter); left out with the field. */
+  actions?: ReactNode;
 }
 
 /**
@@ -96,7 +98,7 @@ export interface GuideHeaderSearchProps extends SharedProps {
  * the header (title, subtitle and the field) and the query, so typing re-renders this and the
  * header, not the grid. Renders the panel only; place it inside the page (SEARCH_BOUNDS_ATTR).
  */
-export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtitle, inputRef, onSelect, onWatch, disabled, field = true, ...rest }: GuideHeaderSearchProps) {
+export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtitle, inputRef, onSelect, onWatch, disabled, field = true, actions, ...rest }: GuideHeaderSearchProps) {
   const { t } = useTranslation('guide');
   const { setHeader } = useShell();
   const [query, setQuery] = useState('');
@@ -160,6 +162,7 @@ export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtit
     setHeader({
       title,
       subtitle,
+      actions,
       search: {
         value: query,
         onChange: (v) => {
@@ -189,7 +192,7 @@ export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtit
         disabled,
       },
     });
-  }, [setHeader, title, subtitle, query, shown, placeholder, label, inputRef, panelId, disabled, field]);
+  }, [setHeader, title, subtitle, actions, query, shown, placeholder, label, inputRef, panelId, disabled, field]);
 
   return shown ? (
     <GuideSearchPanel

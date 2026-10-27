@@ -11,7 +11,7 @@ import type { Category, Channel, Page, PageQuery } from '@/api/types';
 import { registerRenameHost, useRenameStore } from '@/features/channeledit/store';
 import { useToastStore } from '@/ui';
 
-import { defaultStart, EpgGridPage } from '../../components/EpgGridPage';
+import { defaultStart, EpgGridPage, shortDay } from '../../components/EpgGridPage';
 import { preloadScopePickerList } from '../../components/ScopePicker';
 import { formatClockBare, formatDay } from '../../lib/epgTime';
 import { HeaderSlot, lastHeader } from '../../test/fakes';
@@ -93,28 +93,35 @@ async function openGuide(at = defaultStart(Date.now())) {
 }
 
 describe('the toolbar at narrow widths', () => {
-  it('a phone-width page (390 px beside the rail) keeps Now and the window label, and drops the day buttons', async () => {
+  it('a phone-width page (390 px beside the rail) is one row: the group picker, the time steps, the day and Now (round 4)', async () => {
     pageWidth(318);
     const at = await openGuide();
     expect(screen.getByTestId('epg-grid-page').dataset.guideBar).toBe('phone');
     const time = screen.getByTestId('guide-time');
-    // Its own full-width row, not pushed to the end of the search row.
-    expect(time.className).toContain('w-full');
-    expect(time.className).not.toContain('ms-auto');
+    // Beside the group picker on one row: the picker takes the room the controls leave.
+    expect(time.className).toContain('shrink-0');
+    expect(time.className).not.toContain('w-full');
+    // The pickers' wrapper is `contents`, so the group picker and the time controls share the toolbar's row.
+    expect(screen.getByTestId('guide-group').parentElement!.className).toBe('contents');
+    expect(screen.getByTestId('guide-group').parentElement!.parentElement).toBe(time.parentElement);
+    expect(screen.getByTestId('guide-group').className).toContain('flex-1');
     expect(within(time).queryByRole('button', { name: 'Previous day' })).toBeNull();
     expect(within(time).queryByRole('button', { name: 'Next day' })).toBeNull();
     expect(within(time).getByRole('button', { name: '3 hours earlier' })).toBeTruthy();
     expect(within(time).getByRole('button', { name: '3 hours later' })).toBeTruthy();
     const now = within(time).getByRole('button', { name: 'Now' });
     expect(now.className).toContain('shrink-0');
-    // The label grows into the row and truncates its lines instead of overflowing an h-8 box;
-    // what it says (and announces) is unchanged.
+    // The group's name gets the room of its icon.
+    expect(screen.getByTestId('guide-group').querySelector('svg:not(.lucide-chevron-down)')).toBeNull();
+    // The label names the day ("Today"); the times are on the ruler right under it, and the date
+    // and times are read out.
     const label = screen.getByTestId('guide-window');
-    expect(label.className).toContain('flex-1');
-    expect(label.className).toContain('min-w-0');
+    const [day, spoken] = [...label.querySelectorAll('[aria-live] > span')];
+    expect(day!.textContent).toBe(shortDay(at, Date.now(), 'en'));
+    expect(day!.getAttribute('aria-hidden')).toBe('true');
+    expect(spoken!.className).toContain('sr-only');
     // The window's start (its AM/PM named once, at the range's end, when both ends share it).
     expect(label.textContent).toContain(`${formatDay(at, 'en')} ${formatClockBare(at, 'en')}`);
-    expect(label.querySelectorAll('.truncate')).toHaveLength(2);
     // Every day is still reachable: the label opens Jump to date and time.
     fireEvent.click(label);
     expect(await screen.findByTestId('guide-jump')).toBeTruthy();
@@ -146,13 +153,22 @@ describe('the toolbar at narrow widths', () => {
     expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
+  it("a phone's day label says Today, Tomorrow or Yesterday, else the date", () => {
+    const now = new Date(2026, 9, 27, 10, 40).getTime();
+    expect(shortDay(now - 30 * 60_000, now, 'en')).toBe('Today');
+    expect(shortDay(now + 24 * 3_600_000, now, 'en')).toBe('Tomorrow');
+    expect(shortDay(now - 24 * 3_600_000, now, 'en')).toBe('Yesterday');
+    expect(shortDay(now + 3 * 24 * 3_600_000, now, 'en')).toBe(formatDay(now + 3 * 24 * 3_600_000, 'en'));
+    expect(shortDay(now, now, 'de')).toBe('Heute');
+  });
+
   it('shows the source picker only when there is another source to choose', async () => {
     await preloadScopePickerList();
     pageWidth(318);
     await openGuide();
-    // One source with channels, on show: no picker of one entry; the group picker takes the phone's row.
+    // One source with channels, on show: no picker of one entry; the group picker shares the time row.
     expect(screen.queryByRole('combobox', { name: 'Source' })).toBeNull();
-    expect(screen.getByTestId('guide-group').closest('.grid')!.className).toContain('grid-cols-1');
+    expect(screen.getByTestId('guide-group').closest('.grid')).toBeNull();
     cleanup();
 
     const src = (id: string, name: string) => ({ id, kind: 'm3u', name, channelCount: CHANNELS.length, epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
@@ -163,7 +179,9 @@ describe('the toolbar at narrow widths', () => {
     await openGuide();
     const picker = screen.getByRole('combobox', { name: 'Source' });
     expect(picker.textContent).toBe('Demo');
+    // Two pickers keep a row of their own, side by side, over a full row of time controls.
     expect(picker.closest('.grid')!.className).toContain('grid-cols-2');
+    expect(screen.getByTestId('guide-time').className).toContain('w-full');
     fireEvent.click(picker);
     expect(await screen.findByRole('option', { name: /^Second/ })).toBeTruthy();
   });
@@ -176,14 +194,15 @@ describe('the toolbar at narrow widths', () => {
     expect(chips.className).toContain('[mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)]');
   });
 
-  it('a phone puts the genre filter on the time row as a picker, so two rows of controls lead the grid (review round 2)', async () => {
+  it("a phone's genre filter is a picker among the header's actions, so one row of controls leads the grid (round 4)", async () => {
     await preloadScopePickerList();
     localStorage.removeItem('guide.genreFilter');
     pageWidth(318);
     await openGuide();
-    // No row of chips: the picker ends the time row.
+    // No row of chips, and nothing of the genre filter in the toolbar.
     expect(screen.queryByTestId('guide-genres')).toBeNull();
-    const time = screen.getByTestId('guide-time');
+    expect(within(screen.getByTestId('guide-time').parentElement!).queryByRole('combobox', { name: 'Filter by genre' })).toBeNull();
+    const time = await screen.findByTestId('header-actions');
     const picker = within(time).getByRole('combobox', { name: 'Filter by genre' });
     expect(picker.textContent).toBe('All genres');
     expect(picker.className).not.toContain('bg-fg');

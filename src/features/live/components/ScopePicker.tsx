@@ -56,6 +56,8 @@ export interface ScopePickerProps {
    * option (`''`, "All …") inverts the trigger, as a chosen filter chip does.
    */
   triggerIcon?: ReactNode;
+  /** False: the trigger leaves out the current option's icon, so its name gets the room (a phone's toolbar row). */
+  optionIcon?: boolean;
   className?: string;
   testId?: string;
 }
@@ -102,6 +104,7 @@ export function ScopePicker({
   filterFrom = 9,
   disabled,
   triggerIcon,
+  optionIcon = true,
   className,
   testId,
 }: ScopePickerProps) {
@@ -236,7 +239,7 @@ export function ScopePicker({
           </>
         ) : (
           <>
-            {current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
+            {optionIcon && current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
             <span dir="auto" className={cn('min-w-0 flex-1 truncate', !current && 'text-fg-subtle')}>
               {current?.label ?? placeholder ?? ''}
             </span>

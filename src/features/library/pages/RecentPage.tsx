@@ -16,7 +16,7 @@ import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../compo
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
-import { usePending, useSourcesById } from '../hooks/useLibraryData';
+import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
 import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
@@ -78,7 +78,10 @@ export function RecentPage() {
   const continuing = useMemo(() => continueForSource(cont.data ?? [], sourceId), [cont.data, sourceId]);
   const source = sourceId ? sources.get(sourceId) : undefined;
   const count = query.data?.length ?? 0;
-  const nowOn = useNowOn(useMemo(() => (query.data ?? []).map((e) => e.ref), [query.data]));
+  const refs = useMemo(() => (query.data ?? []).map((e) => e.ref), [query.data]);
+  const nowOn = useNowOn(refs);
+  // From the whole history, not the search's matches, so the column does not come and go while typing.
+  const namesSources = useNamesSources(refs, sources);
 
   const remove = useCallback(
     (e: RecentEntry) => {
@@ -230,7 +233,7 @@ export function RecentPage() {
         entryRef={e.ref}
         snapshot={e.snapshot}
         source={sources.get(e.ref.sourceId)}
-        showSource={!sourceId}
+        showSource={!sourceId && namesSources}
         now={nowOn.get(itemKey(e.ref))}
         time={relativeTime(e.viewedAt, i18n.language)}
         removeLabel={t('removeRecent', { title: snapshotTitle(e.ref, e.snapshot.title).title })}

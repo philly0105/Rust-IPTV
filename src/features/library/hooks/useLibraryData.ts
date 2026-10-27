@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useRpcQuery } from '@/api/query';
-import type { Source } from '@/api/types';
+import type { ItemRef, Source } from '@/api/types';
 
 import { progressStore } from '../lib/progress';
 
@@ -32,6 +32,15 @@ export function useSourcesById(): { byId: Map<string, Source>; isLoading: boolea
   const q = useRpcQuery('sources.list', undefined, { staleTime: 60_000 });
   const byId = useMemo(() => new Map((q.data ?? []).map((s) => [s.id, s])), [q.data]);
   return { byId, isLoading: q.isLoading };
+}
+
+/**
+ * Whether a page's rows should name their source. With one source set up and every row from it,
+ * the same name on each row says nothing and takes room the title and the programme need. With
+ * more than one source set up, or rows from several (a removed source among them), it says which.
+ */
+export function useNamesSources(refs: readonly ItemRef[], sources: ReadonlyMap<string, Source>): boolean {
+  return useMemo(() => sources.size > 1 || new Set(refs.map((r) => r.sourceId)).size > 1, [refs, sources]);
 }
 
 /** Tracks in-flight actions per key so a second click cannot dispatch twice. */

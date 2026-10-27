@@ -14,8 +14,9 @@ import { DownloadsPage } from '../pages/DownloadsPage';
 import { FavoritesPage } from '../pages/FavoritesPage';
 import { MyVideoDetailPage } from '../pages/MyVideoDetailPage';
 import { MyVideosPage } from '../pages/MyVideosPage';
+import { RecentPage } from '../pages/RecentPage';
 import { ScheduledPage, commonPadding } from '../pages/ScheduledPage';
-import { makeDownload, makeFavorite } from './fixtures';
+import { makeDownload, makeFavorite, makeRecent } from './fixtures';
 import { installDomStubs, renderAt } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -101,6 +102,39 @@ describe('Favorites rows say what is on air', () => {
     // The artwork leads the row, on the headings' line; the drag handle comes last.
     expect(row.firstElementChild?.getAttribute('data-testid')).toBe('entry-artwork');
     expect(row.lastElementChild?.getAttribute('draggable')).toBe('true');
+  });
+});
+
+describe('Favorites and Recently watched name a source only when there is more than one', () => {
+  it('leaves the source column out with one source set up, and shows it on each row with two', async () => {
+    rpc.handlers['sources.list'] = () => [sources[0]];
+    rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('movie', 'm1', 1)];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    await screen.findAllByTestId('entry-row');
+    await waitFor(() => expect(rpc.callsOf('sources.list').length).toBeGreaterThan(0));
+    expect(screen.queryAllByTestId('source-badge')).toHaveLength(0);
+    cleanup();
+
+    rpc.handlers['sources.list'] = () => sources;
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    await waitFor(() => expect(screen.getAllByTestId('source-badge')).toHaveLength(2));
+  });
+
+  it('does the same on Recently watched', async () => {
+    rpc.handlers['sources.list'] = () => [sources[0]];
+    rpc.handlers['recent.list'] = () => [makeRecent('m1', new Date().toISOString()), makeRecent('m2', new Date().toISOString())];
+    rpc.handlers['positions.continueWatching'] = () => [];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+    await screen.findAllByTestId('entry-row');
+    await waitFor(() => expect(rpc.callsOf('sources.list').length).toBeGreaterThan(0));
+    expect(screen.queryAllByTestId('source-badge')).toHaveLength(0);
+    cleanup();
+
+    rpc.handlers['sources.list'] = () => sources;
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+    await waitFor(() => expect(screen.getAllByTestId('source-badge')).toHaveLength(2));
   });
 });
 

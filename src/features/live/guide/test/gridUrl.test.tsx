@@ -69,7 +69,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const GRID = [{ path: '/epg', element: <EpgGridPage /> }];
+// The guide's search field is in the shell header's search slot.
+const GRID = [
+  {
+    path: '/epg',
+    element: (
+      <>
+        <fakes.HeaderSlot />
+        <EpgGridPage />
+      </>
+    ),
+  },
+];
 const gridFroms = () => rpc.of('epg.grid').map((a) => Date.parse((a as { from: string }).from));
 /** The window the toolbar shows starts at `s`. */
 // The window's start: its AM/PM is named once, at the range's end, when both ends share it.

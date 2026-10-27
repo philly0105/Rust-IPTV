@@ -2,7 +2,7 @@
  * Test doubles for the live feature's imports from @/ui, @/shell, @/features/player and @/features/player/remote.
  * Signatures follow C8, C11 and C16; `playItem` and `playSource` are spies-friendly no-ops.
  */
-import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useRef, type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref } from 'react';
 import { create } from 'zustand';
 
 import { rpc } from '@/api/transport';
@@ -172,7 +172,18 @@ export interface ShellHeader {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
-  search?: { value: string; onChange: (v: string) => void; placeholder?: string };
+  search?: {
+    value: string;
+    onChange: (v: string) => void;
+    placeholder?: string;
+    onSubmit?: (v: string) => void;
+    onKeyDown?: (e: ReactKeyboardEvent<HTMLInputElement>) => void;
+    label?: string;
+    inputRef?: Ref<HTMLInputElement>;
+    onFocus?: () => void;
+    controls?: string;
+    disabled?: boolean;
+  };
 }
 
 const headers: ShellHeader[] = [];
@@ -180,7 +191,53 @@ const headers: ShellHeader[] = [];
 export function lastHeader(): ShellHeader | undefined {
   return [...headers].reverse().find((h) => h.title);
 }
-const recordHeader = (h: ShellHeader) => void headers.push(h);
+/** The header now on show, for HeaderSlot. */
+const useHeaderStore = create<{ header: ShellHeader | null }>(() => ({ header: null }));
+const recordHeader = (h: ShellHeader) => {
+  headers.push(h);
+  useHeaderStore.setState({ header: h });
+};
+
+/**
+ * The shell header's search slot and actions, for a test that renders a page whose field or
+ * actions live there (the guide's search): the field as the real header's SearchInput draws it
+ * (its name, ref, focus and keys, Escape clearing a query), and the actions as given.
+ */
+export function HeaderSlot() {
+  const header = useHeaderStore((s) => s.header);
+  // The next test starts without this one's header (the real shell clears it with the page).
+  useEffect(() => () => useHeaderStore.setState({ header: null }), []);
+  const search = header?.search;
+  return (
+    <div data-testid="shell-header">
+      {header?.actions ? <div data-testid="header-actions">{header.actions}</div> : null}
+      {search ? (
+        <input
+          ref={search.inputRef}
+          type="search"
+          role="searchbox"
+          data-shell-search=""
+          value={search.value}
+          placeholder={search.placeholder}
+          aria-label={search.label ?? search.placeholder}
+          aria-controls={search.controls}
+          disabled={search.disabled}
+          onFocus={search.onFocus}
+          onChange={(e) => search.onChange(e.target.value)}
+          onKeyDown={(e) => {
+            search.onKeyDown?.(e);
+            if (e.defaultPrevented) return;
+            if (e.key === 'Enter') search.onSubmit?.(search.value);
+            if (e.key === 'Escape' && search.value) {
+              e.stopPropagation();
+              search.onChange('');
+            }
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
 
 export function useShell(): { setHeader(h: ShellHeader): void; setContextPanel(node: ReactNode | null): void } {
   return { setHeader: recordHeader, setContextPanel: () => undefined };

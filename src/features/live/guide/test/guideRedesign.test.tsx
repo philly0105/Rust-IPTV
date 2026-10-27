@@ -457,6 +457,41 @@ describe('focus links, Go to playing and views (LG-01)', () => {
     expect(await screen.findByTestId('guide-go-to-playing')).toBeTruthy();
   });
 
+  it("a phone offers Go to playing among the header's actions, beside the genre filter", async () => {
+    rpc.handlers['catalog.categories'] = () => groups;
+    fakes.usePlayerStore.setState({ source: { url: 'x', kind: 'hls', title: 'Channel 25', ref: makeChannel(25).ref, isLive: true, isRadio: false } } as never);
+    // jsdom has no layout: a 318 px guide page is the phone's layout.
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === 'epg-grid-page' ? new DOMRect(0, 0, 318, 844) : original.call(this);
+    });
+    renderGuide({
+      path: '/epg?source=src1&category=g1',
+      routes: [
+        {
+          path: '/epg',
+          element: (
+            <>
+              <fakes.HeaderSlot />
+              <EpgGridPage />
+            </>
+          ),
+        },
+      ],
+    });
+    const actions = await screen.findByTestId('header-actions');
+    const go = await within(actions).findByTestId('guide-go-to-playing');
+    expect(go.getAttribute('aria-label')).toBe('Go to playing');
+    expect(within(actions).getByRole('combobox', { name: 'Filter by genre' })).toBeTruthy();
+    // Not in the toolbar as well.
+    expect(screen.getAllByTestId('guide-go-to-playing')).toHaveLength(1);
+    // A press scrolls the grid to the playing row (jsdom needs room to scroll, or it is clamped to the top).
+    vi.spyOn(Element.prototype, 'scrollHeight', 'get').mockReturnValue(100_000);
+    const scrolls = vi.spyOn(Element.prototype, 'scrollTo');
+    fireEvent.click(go);
+    await waitFor(() => expect(scrolls.mock.calls.some(([o]) => typeof o === 'object' && ((o as ScrollToOptions).top ?? 0) > 0)).toBe(true));
+  });
+
   it('the Favorites view finds a favorite far down its list: a focus link opens there, a typed number stays in the view', async () => {
     const many = Array.from({ length: 60 }, (_, i) => makeChannel(i));
     rpc.handlers['favorites.list'] = () => many.map((c, i) => ({ ref: c.ref, position: i, addedAt: '', snapshot: { title: c.name, contentType: 'live' } }));

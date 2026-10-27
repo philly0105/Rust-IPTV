@@ -88,7 +88,7 @@ The filter applies wherever live channels appear: the channel list and the group
 ## TV guide
 
 - The time window is part of the URL, so Back and Forward step through it and a link opens the same window. T, or the window label, jumps to a date and time.
-- / searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. Global search (Ctrl+F) and the command palette find programmes too, and open the guide at the one you pick.
+- The search box in the header (/ or Ctrl+F; on a phone, the search icon at the top) searches programme titles for the next 14 days, grouped by day; picking a hit moves the grid to it and marks the channel. Global search (Ctrl+F) and the command palette find programmes too, and open the guide at the one you pick.
 - "Record series" on a search hit records every airing of that title on that channel (XMLTV programmes only: the provider's own guide cannot feed a rule). Library > Scheduled lists the rules, which can be paused or removed.
 - The group menu also shows your favorites or a custom list, the zoom buttons (or Ctrl+scroll over the grid) change the time scale, and a row's right-click menu has "Match guide channel" and the favorite toggle.
 - When an Xtream channel has nothing in the XMLTV guide, the app shows the provider's own now and next, marked "From the provider's guide". Turn it off in Settings > Guide.

@@ -56,6 +56,14 @@ export interface ScopePickerProps {
    * option (`''`, "All …") inverts the trigger, as a chosen filter chip does.
    */
   triggerIcon?: ReactNode;
+  /** False: the trigger leaves out the current option's icon, so its name gets the room (a phone's toolbar row). */
+  optionIcon?: boolean;
+  /**
+   * The current option's name wraps onto a second line instead of being cut to one, so a long
+   * group name ("US| SPORTS BACKUP") reads whole where the trigger is narrow (a phone's toolbar).
+   * The trigger's height has to allow two lines (`h-auto`).
+   */
+  wrapLabel?: boolean;
   className?: string;
   testId?: string;
 }
@@ -102,6 +110,8 @@ export function ScopePicker({
   filterFrom = 9,
   disabled,
   triggerIcon,
+  optionIcon = true,
+  wrapLabel,
   className,
   testId,
 }: ScopePickerProps) {
@@ -236,8 +246,8 @@ export function ScopePicker({
           </>
         ) : (
           <>
-            {current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
-            <span dir="auto" className={cn('min-w-0 flex-1 truncate', !current && 'text-fg-subtle')}>
+            {optionIcon && current?.icon ? <span aria-hidden className="flex shrink-0 text-fg-muted">{current.icon}</span> : null}
+            <span dir="auto" className={cn('min-w-0 flex-1', wrapLabel ? 'line-clamp-2 break-words leading-tight' : 'truncate', !current && 'text-fg-subtle')}>
               {current?.label ?? placeholder ?? ''}
             </span>
             <ChevronDown aria-hidden size={16} className={cn('shrink-0 text-fg-muted motion-safe:transition-transform', open && 'rotate-180')} />

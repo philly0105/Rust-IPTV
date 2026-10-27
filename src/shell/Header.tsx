@@ -245,6 +245,11 @@ function HeaderField({ search, phone }: { search: NonNullable<HeaderState['searc
       onSubmit={search.onSubmit}
       onKeyDown={search.onKeyDown}
       placeholder={search.placeholder}
+      label={search.label}
+      ref={search.inputRef}
+      onFocus={search.onFocus}
+      aria-controls={search.controls}
+      disabled={search.disabled}
       data-shell-search=""
       // On a phone the tab bar's Search tab is the tour's search step.
       data-tour={phone ? undefined : 'search'}

@@ -14,7 +14,6 @@ import {
   PanelTopOpen,
   Play,
   Radio,
-  Search,
   Star,
   Tv,
   X,
@@ -32,7 +31,6 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
-  type RefObject,
 } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -43,10 +41,11 @@ import { invalidate, queryClient as appQueryClient, rpcKey, useRpcQuery } from '
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Settings, type Source, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
+import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
-import { useShell, useShortcut } from '@/shell';
+import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
@@ -72,6 +71,7 @@ import {
   formatDay,
   formatRange,
   formatTimeRange,
+  localDayDiff,
   localDayKey,
   ms,
   nowRestLeft,
@@ -94,7 +94,7 @@ import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/feature
 // sources: the state every page shows until a source exists.
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 // guide (Run 2 C5): jump to a date and time, guide search.
-import { GuideSearch } from '../guide/GuideSearchPanel';
+import { GuideHeaderSearch } from '../guide/GuideSearchPanel';
 import { JumpToDialog } from '../guide/JumpToDialog';
 import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
@@ -240,6 +240,23 @@ export const GUIDE_BAR_DAYS_PX = 440;
 export function guideBarLayout(width: number): 'full' | 'stacked' | 'phone' {
   if (!(width > 0) || width >= GUIDE_BAR_STACK_PX) return 'full';
   return width >= GUIDE_BAR_DAYS_PX ? 'stacked' : 'phone';
+}
+
+/** "Yesterday", "Today" or "Tomorrow" in the UI language, capitalised. */
+function relativeDay(diff: -1 | 0 | 1, lang: string): string {
+  const rel = relativeTimeFormat(intlLocale(lang), { numeric: 'auto' }).format(diff, 'day');
+  return `${rel.charAt(0).toLocaleUpperCase(lang)}${rel.slice(1)}`;
+}
+
+/**
+ * A phone's window label: "Today", "Tomorrow" or "Yesterday" in the UI language, else the month
+ * and day ("Oct 29"), which is no wider than those words, so the label keeps its width from day
+ * to day. The ruler right under the toolbar shows the times, so the label only needs to name the day.
+ */
+export function shortDay(at: number, now: number, lang: string): string {
+  const diff = localDayDiff(at, now);
+  if (diff < -1 || diff > 1) return dateTimeFormat(intlLocale(lang), { month: 'short', day: 'numeric' }).format(at);
+  return relativeDay(diff as -1 | 0 | 1, lang);
 }
 
 /** The programme after `program` in a channel's sorted list, if the guide has it. */
@@ -519,11 +536,6 @@ export function EpgGridPage() {
   const count = paged.total ?? 0;
   // The Live TV quality filter applies here too; a guide it empties says so (Live sets it).
   const quality = useLiveQuality();
-
-  const shell = useShell();
-  useEffect(() => {
-    shell.setHeader({ title: t('guide'), subtitle: source?.name });
-  }, [source?.name, i18n.language]);
 
   // ---- what plays, the genre filter, the preview band ----------------------------
   // LG-01: the channel playing in the app is marked in its row.
@@ -1221,9 +1233,8 @@ export function EpgGridPage() {
   const [jumpOpen, setJumpOpen] = useState(false);
   const openJump = useCallback(() => setJumpOpen(true), []);
   const closeJump = useCallback(() => setJumpOpen(false), []);
+  // The guide's search field, in the header's search slot (GuideHeaderSearch).
   const searchRef = useRef<HTMLInputElement>(null);
-  // A phone's toolbar folds the search field into a button on the pickers' row until it is used.
-  const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [highlight, setHighlight] = useState<ItemKey | null>(null);
   const guideArea = tg('shortcutArea');
@@ -1231,8 +1242,7 @@ export function EpgGridPage() {
     '/',
     (e) => {
       e.preventDefault();
-      // Folded on a phone: unfold it, and it takes focus as it opens.
-      if (!searchRef.current) setPhoneSearchOpen(true);
+      // On a phone the header's field is folded into an icon; focus unfolds it.
       searchRef.current?.focus();
       searchRef.current?.select();
     },
@@ -1483,8 +1493,48 @@ export function EpgGridPage() {
   const nowInWindow = now >= start && now < end;
   const nowX = ((now - start) / MINUTE) * pxPerMin;
 
+  const bar = guideBarLayout(pageWidth);
+  // LG-01: "Go to playing" while the playing channel's row is in this list but off screen. Only
+  // then: offered for a channel of another group, a press read every page of this one for nothing.
+  const playingRow = playingKey ? (paged.loaded.find((l) => itemKey(l.channel.ref) === playingKey)?.index ?? (playingRef ? paged.indexOf?.(playingRef) : undefined)) : undefined;
+  const playingOnScreen = playingRow !== undefined && playingRow >= first && playingRow <= last;
+  const playingInList = playingHere && (view ? playingRow !== undefined : !!playingChannel && (!categoryId || playingChannel.categoryId === categoryId));
+  const goToPlaying =
+    playingKey && playingRef && playingInList && !playingOnScreen
+      ? () => {
+          setReveal({ key: playingKey, ref: playingRef, number: playingChannel?.number, time: Date.now(), channelName: '', categoryId, quiet: true });
+          if (playingRow !== undefined) virtualizer.scrollToIndex(playingRow, { align: 'center' });
+        }
+      : undefined;
+  // A phone's genre filter and Go to playing are header actions, so the toolbar is one row.
+  const goToPlayingStable = useStable(() => goToPlaying?.());
+  const canGoToPlaying = !!goToPlaying;
+  const phoneActions = useMemo(
+    () => (bar === 'phone' ? <GuidePhoneActions genre={genreFilter} onGenre={setGenreFilter} onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined} /> : undefined),
+    [bar, genreFilter, setGenreFilter, canGoToPlaying, goToPlayingStable],
+  );
+
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
-  const heading = <h1 className="sr-only">{t('guide')}</h1>;
+  // GuideHeaderSearch sets the header (and its search field, when there is anything to search).
+  const heading = (
+    <>
+      <h1 className="sr-only">{t('guide')}</h1>
+      <GuideHeaderSearch
+        title={t('guide')}
+        subtitle={source?.name}
+        inputRef={searchRef}
+        sourceId={sourceId}
+        disabled={!sourceId}
+        field={!sources.error && !(sources.data && sources.data.length === 0)}
+        actions={phoneActions}
+        offsetMinutes={prefs.epgOffsetMinutes}
+        now={now}
+        stripCountryPrefix={prefs.stripCountryPrefix}
+        onSelect={selectHit}
+        onWatch={watchHit}
+      />
+    </>
+  );
   if (sources.error) {
     return (
       <>
@@ -1502,24 +1552,11 @@ export function EpgGridPage() {
     );
   }
 
-  const bar = guideBarLayout(pageWidth);
   const cursorProg = cursorProgram(cursor.row, cursor.time);
   const cursorStart = cursorProg?.start ?? '';
   const lang = i18n.language;
   // The band describes the hovered cell, else the open popover's, else the keyboard cursor's.
   const previewSubject = hovered ?? (selection ? { channel: selection.channel, program: selection.program } : null) ?? (paged.getChannel(cursor.row) && cursorProg ? { channel: paged.getChannel(cursor.row)!, program: cursorProg } : null);
-  // LG-01: "Go to playing" while the playing channel's row is in this list but off screen. Only
-  // then: offered for a channel of another group, a press read every page of this one for nothing.
-  const playingRow = playingKey ? (paged.loaded.find((l) => itemKey(l.channel.ref) === playingKey)?.index ?? (playingRef ? paged.indexOf?.(playingRef) : undefined)) : undefined;
-  const playingOnScreen = playingRow !== undefined && playingRow >= first && playingRow <= last;
-  const playingInList = playingHere && (view ? playingRow !== undefined : !!playingChannel && (!categoryId || playingChannel.categoryId === categoryId));
-  const goToPlaying =
-    playingKey && playingRef && playingInList && !playingOnScreen
-      ? () => {
-          setReveal({ key: playingKey, ref: playingRef, number: playingChannel?.number, time: Date.now(), channelName: '', categoryId, quiet: true });
-          if (playingRow !== undefined) virtualizer.scrollToIndex(playingRow, { align: 'center' });
-        }
-      : undefined;
 
   return (
     // data-guide-search-bounds (SEARCH_BOUNDS_ATTR): the search panel stays inside the page, clear of the rail.
@@ -1540,18 +1577,11 @@ export function EpgGridPage() {
         end={end}
         nowInWindow={nowInWindow}
         now={now}
-        offsetMinutes={prefs.epgOffsetMinutes}
-        stripCountryPrefix={prefs.stripCountryPrefix}
-        searchRef={searchRef}
-        phoneSearchOpen={phoneSearchOpen}
-        onPhoneSearchOpen={setPhoneSearchOpen}
         onQuery={setQuery}
         onShift={shift}
         onShiftDay={shiftDay}
         onNow={toNow}
         onJump={openJump}
-        onSelectHit={selectHit}
-        onWatchHit={watchHit}
         zoom={zoom}
         onZoom={zoomBy}
         genre={genreFilter}
@@ -1933,18 +1963,11 @@ const GuideToolbar = memo(function GuideToolbar({
   end,
   nowInWindow,
   now,
-  offsetMinutes,
-  stripCountryPrefix,
-  searchRef,
-  phoneSearchOpen,
-  onPhoneSearchOpen,
   onQuery,
   onShift,
   onShiftDay,
   onNow,
   onJump,
-  onSelectHit,
-  onWatchHit,
   zoom,
   onZoom,
   genre,
@@ -1963,20 +1986,13 @@ const GuideToolbar = memo(function GuideToolbar({
   start: number;
   end: number;
   nowInWindow: boolean;
+  /** For the phone's day label ("Today"). */
   now: number;
-  offsetMinutes: number;
-  stripCountryPrefix: boolean;
-  searchRef: RefObject<HTMLInputElement | null>;
-  /** The phone layout's search field is unfolded over the pickers' row. */
-  phoneSearchOpen: boolean;
-  onPhoneSearchOpen(open: boolean): void;
   onQuery(key: string, value: string | undefined): void;
   onShift(delta: number): void;
   onShiftDay(days: number): void;
   onNow(): void;
   onJump(): void;
-  onSelectHit(hit: GuideSearchHit): void;
-  onWatchHit(hit: GuideSearchHit): void;
   /** The time scale's step (GUIDE_ZOOM_SLOT_PX). */
   zoom: number;
   onZoom(delta: 1 | -1): void;
@@ -2022,49 +2038,25 @@ const GuideToolbar = memo(function GuideToolbar({
     ],
     [categories, lists, t, tg],
   );
-  const genreSections = useMemo(
-    (): PickerSection[] => [
-      { id: 'all', options: [{ value: '', label: tg('allGenres') }] },
-      {
-        id: 'genres',
-        options: GENRES.map((g) => ({ value: g, label: tg(`genre_${g}`), icon: <span className="size-2 rounded-full" style={{ background: genreColor(g) }} /> })),
-      },
-    ],
-    [tg],
-  );
   const stacked = bar !== 'full';
   const phone = bar === 'phone';
   // One source with channels and it is on show (most accounts): a picker with one entry chose
   // nothing and took a phone's row from the group picker. The header names the source. While
   // the list loads the picker holds its place, so the toolbar does not shift for two sources.
   const sourcePicker = !sources || sources.length > 1 || (sources[0] !== undefined && sources[0].id !== sourceId);
+  const oneRow = phone && !sourcePicker;
+  // Wider pages: a picker starts at 9rem and grows to 12rem with the room the time controls leave.
+  // At a fixed 12rem the 44 px touch controls of a 1024 px tablet wrapped onto a row of their own.
+  const pickerWidth = 'min-w-0 max-w-48 grow basis-36';
   const range = formatTimeRange(start, end, lang);
-  // The phone's folded field takes focus as it unfolds; it folds again once left empty.
-  const searchToggle = useRef<HTMLButtonElement>(null);
-  const searchUnfolded = phone && phoneSearchOpen;
-  useEffect(() => {
-    if (searchUnfolded) searchRef.current?.focus();
-  }, [searchUnfolded, searchRef]);
-  const search = (
-    <GuideSearch
-      inputRef={searchRef}
-      sourceId={sourceId}
-      disabled={!sourceId}
-      offsetMinutes={offsetMinutes}
-      now={now}
-      stripCountryPrefix={stripCountryPrefix}
-      onSelect={onSelectHit}
-      onWatch={onWatchHit}
-      // Narrow pages: the field fills what the selects leave on their row, or a row of its own.
-      className={phone ? 'w-full' : stacked ? 'min-w-48 flex-1' : 'w-60'}
-    />
-  );
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
-      {/* A phone puts the two pickers side by side on one row, of equal width, with the search
-          folded into a button at its end: unfolded, the field covers the row (as the header's
-          search does), so the guide starts two rows lower, not three. */}
-      <div className={phone ? cn('relative grid w-full items-center gap-2', sourcePicker ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]') : 'contents'}>
+      {/* A phone with a source to choose puts the two pickers side by side on a row of their own,
+          of equal width. With one source the group picker shares the time controls' row when the
+          group's name fits beside them, so a single row of controls leads the grid; the search is
+          the header's field, and the genre filter and Go to playing are header actions
+          (GuidePhoneActions). */}
+      <div className={phone && sourcePicker ? 'grid w-full grid-cols-2 items-center gap-2' : 'contents'}>
         {sourcePicker ? (
           <ScopePicker
             label={t('guideSource')}
@@ -2072,7 +2064,7 @@ const GuideToolbar = memo(function GuideToolbar({
             sections={sourceSections}
             onChange={(v) => onQuery('source', v)}
             filterLabel={t('filterSources')}
-            className={bar === 'phone' ? 'h-9' : 'w-48'}
+            className={phone ? 'h-9' : pickerWidth}
             testId="guide-source"
           />
         ) : null}
@@ -2081,70 +2073,55 @@ const GuideToolbar = memo(function GuideToolbar({
           value={view ? `${VIEW_OPTION}${guideViewParam(view)}` : (categoryId ?? '')}
           sections={groupSections}
           onChange={(v) => (v.startsWith(VIEW_OPTION) ? onQuery('view', v.slice(VIEW_OPTION.length)) : onQuery('category', v || undefined))}
-          className={bar === 'phone' ? 'h-9' : 'w-48'}
+          // Sharing a phone's row with the time controls, the picker is never narrower than the
+          // group's name (fit-content, at most the row): a name that does not fit beside them pushes
+          // them onto a row of their own rather than being cut ("US| SPORTS …" read as "US| SPORTS").
+          // A name longer than the row wraps onto a second line. The group's name gets the icon's room.
+          className={phone ? (sourcePicker ? 'h-9' : 'h-auto min-h-9 w-auto min-w-fit grow py-1') : pickerWidth}
+          optionIcon={!oneRow}
+          wrapLabel={oneRow}
           testId="guide-group"
         />
-        {phone ? (
-          <IconButton
-            ref={searchToggle}
-            size="sm"
-            label={tg('searchLabel')}
-            icon={<Search className="size-4" />}
-            aria-expanded={phoneSearchOpen}
-            disabled={!sourceId}
-            onClick={() => onPhoneSearchOpen(true)}
-            className="size-9"
-            data-testid="guide-search-toggle"
-          />
-        ) : null}
-        {searchUnfolded ? (
-          <div
-            className="absolute inset-0 z-10 flex items-center bg-surface"
-            data-testid="guide-search-unfolded"
-            onBlur={(e) => {
-              if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) && !searchRef.current?.value) onPhoneSearchOpen(false);
-            }}
-            onKeyDown={(e) => {
-              // Escape in an empty field folds it back (the first one clears what was typed).
-              if (e.key === 'Escape' && !searchRef.current?.value) {
-                onPhoneSearchOpen(false);
-                requestAnimationFrame(() => searchToggle.current?.focus());
-              }
-            }}
-          >
-            {search}
-          </div>
-        ) : null}
       </div>
-      {/* While the sources load the field holds its place, disabled, so the toolbar does not shift (L2-visual-2). */}
-      {phone ? null : search}
-      {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
-      <div className={stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'} role="group" aria-label={t('guideTime')} data-testid="guide-time">
+      {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave.
+          On a phone's one row they take what the group picker leaves (nearly all of the free room
+          goes to them, so the picker stays at its name's width), and a row of their own when they
+          wrap under a long group name. */}
+      <div
+        className={oneRow ? 'flex min-w-0 grow-[999] items-center gap-1' : stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'}
+        role="group"
+        aria-label={t('guideTime')}
+        data-testid="guide-time"
+      >
         {bar !== 'phone' ? (
           <IconButton size="sm" icon={<ChevronsLeft className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(-1)} label={t('previousDay')} />
         ) : null}
         <IconButton size="sm" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => onShift(-3 * HOUR)} label={t('earlier')} />
         {/* The window's span; pressing it opens Jump to date and time (`t`). The text is the same in
-            both layouts (day, space, times); stacked, the day sits small over the times. */}
-        <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            onClick={onJump}
-            data-testid="guide-window"
-            className={cn(
-              'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-              stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
-            )}
-          >
-            {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-            <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
-              <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
-              <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
-            </span>
-            <span className="sr-only">, {tg('jumpTitle')}</span>
-          </button>
-        </Tooltip>
+            wide and stacked layouts (day, space, times; stacked, the day sits small over the times). */}
+        {oneRow ? (
+          <GuideWindowDay start={start} end={end} now={now} lang={lang} onJump={onJump} />
+        ) : (
+          <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              onClick={onJump}
+              data-testid="guide-window"
+              className={cn(
+                'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
+                stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+              )}
+            >
+              {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
+              <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
+                <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
+                <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
+              </span>
+              <span className="sr-only">, {tg('jumpTitle')}</span>
+            </button>
+          </Tooltip>
+        )}
         <IconButton size="sm" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => onShift(3 * HOUR)} label={t('later')} />
         {bar !== 'phone' ? (
           <IconButton size="sm" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(1)} label={t('nextDay')} />
@@ -2159,21 +2136,6 @@ const GuideToolbar = memo(function GuideToolbar({
             <IconButton size="sm" icon={<ZoomOut className="size-4" />} disabled={zoom <= 0} onClick={() => onZoom(-1)} label={tg('zoomOut')} data-testid="guide-zoom-out" className="h-7 w-7" />
             <IconButton size="sm" icon={<ZoomIn className="size-4" />} disabled={zoom >= GUIDE_ZOOM_SLOT_PX.length - 1} onClick={() => onZoom(1)} label={tg('zoomIn')} data-testid="guide-zoom-in" className="h-7 w-7" />
           </div>
-        ) : null}
-        {phone ? (
-          // A phone's genre filter is a picker at the end of this row, not a row of chips of its
-          // own, so the grid starts two rows down; inverted while a genre is chosen, as a chip is.
-          <>
-            <ScopePicker
-              label={tg('genreFilter')}
-              value={genre ?? ''}
-              sections={genreSections}
-              onChange={(v) => onGenre((v || null) as Genre | null)}
-              triggerIcon={<ListFilter className="size-4" />}
-              testId="guide-genre-picker"
-            />
-            {onGoToPlaying ? <IconButton size="sm" label={tg('goToPlaying')} icon={<LocateFixed className="size-4" />} onClick={onGoToPlaying} className="size-9 shrink-0" data-testid="guide-go-to-playing" /> : null}
-          </>
         ) : null}
       </div>
       {/* CB-GUIDE-GENRE: filter chips, one per bucket, with the bucket's stripe colour. One at a
@@ -2218,6 +2180,114 @@ const GuideToolbar = memo(function GuideToolbar({
   );
 });
 
+
+/**
+ * The window label on a phone's one-row toolbar; pressing it opens Jump to date and time (`t`).
+ * Its narrowest width is the widest of "Yesterday", "Today", "Tomorrow" and the day it shows
+ * (hidden copies under it), and that is what the toolbar counts when it decides whether the time
+ * controls fit beside the group picker. So stepping across midnight neither moves the picker or
+ * the buttons nor sends the time controls to another row. Sharing the row, it shows the day alone
+ * (the ruler right under it has the times) and reads out the date and times after it. On a row of
+ * its own, under a group name too long to share the row, it has the room for the date over the
+ * times, as the stacked layout shows them.
+ */
+const GuideWindowDay = memo(function GuideWindowDay({
+  start,
+  end,
+  now,
+  lang,
+  onJump,
+}: {
+  start: number;
+  end: number;
+  now: number;
+  lang: string;
+  onJump(): void;
+}) {
+  const { t: tg } = useTranslation('guide');
+  const day = shortDay(start, now, lang);
+  const date = formatDay(start, lang);
+  const range = formatTimeRange(start, end, lang);
+  const sizes = [...new Set([relativeDay(-1, lang), relativeDay(0, lang), relativeDay(1, lang), day])];
+  return (
+    <span className="grid min-w-0 grow">
+      {sizes.map((text) => (
+        <span key={text} aria-hidden className="invisible col-start-1 row-start-1 truncate px-2.5 text-sm font-medium">
+          {text}
+        </span>
+      ))}
+      <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={onJump}
+          data-testid="guide-window"
+          className={cn(
+            '@container col-start-1 row-start-1 inline-flex h-8 min-w-0 items-center justify-center rounded-md bg-surface-2 px-2.5 tabular-nums text-fg outline-none hover:bg-surface-3 active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
+            TOUCH_TARGET,
+          )}
+        >
+          <span aria-live="polite" className="flex max-w-full min-w-0 justify-center">
+            {/* The visible day leads the spoken name, so "Today" is what voice control hears it called. */}
+            <span className="truncate text-sm font-medium @min-[11rem]:hidden">
+              {day}
+              <span className="sr-only">
+                , {date} {range}
+              </span>
+            </span>
+            <span className="hidden max-w-full min-w-0 flex-col items-center leading-tight @min-[11rem]:flex">
+              <span className="max-w-full truncate text-[calc(11rem/15)] text-fg-muted">{date}</span>{' '}
+              <span className="max-w-full truncate text-[calc(13rem/15)] font-medium">{range}</span>
+            </span>
+          </span>
+          <span className="sr-only">, {tg('jumpTitle')}</span>
+        </button>
+      </Tooltip>
+    </span>
+  );
+});
+
+/**
+ * A phone's header actions on the guide (round 4): the genre filter as a picker, inverted while a
+ * genre is chosen as a chosen chip is, and Go to playing while the playing row is off screen. In
+ * the header they leave the toolbar a single row for the group and the time.
+ */
+const GuidePhoneActions = memo(function GuidePhoneActions({
+  genre,
+  onGenre,
+  onGoToPlaying,
+}: {
+  genre: Genre | null;
+  onGenre(genre: Genre | null): void;
+  onGoToPlaying?: () => void;
+}) {
+  const { t: tg } = useTranslation('guide');
+  const genreSections = useMemo(
+    (): PickerSection[] => [
+      { id: 'all', options: [{ value: '', label: tg('allGenres') }] },
+      {
+        id: 'genres',
+        options: GENRES.map((g) => ({ value: g, label: tg(`genre_${g}`), icon: <span className="size-2 rounded-full" style={{ background: genreColor(g) }} /> })),
+      },
+    ],
+    [tg],
+  );
+  return (
+    <>
+      {onGoToPlaying ? <IconButton label={tg('goToPlaying')} icon={<LocateFixed size={18} />} onClick={onGoToPlaying} className="shrink-0" data-testid="guide-go-to-playing" /> : null}
+      <ScopePicker
+        label={tg('genreFilter')}
+        value={genre ?? ''}
+        sections={genreSections}
+        onChange={(v) => onGenre((v || null) as Genre | null)}
+        triggerIcon={<ListFilter size={18} />}
+        // At rest it sits borderless among the header's icon buttons; a chosen genre inverts it.
+        className={genre ? undefined : 'border-transparent bg-transparent hover:bg-hover'}
+        testId="guide-genre-picker"
+      />
+    </>
+  );
+});
 
 /**
  * A channel row's menu (right click on the row, the context-menu key / Shift+F10 in the grid, or

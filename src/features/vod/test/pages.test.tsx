@@ -153,6 +153,19 @@ describe('CategoryGridPage', () => {
     expect(document.querySelectorAll('[role="option"]').length).toBeLessThan(200);
   });
 
+  it('heads the grid with the source and the count, and the count alone with one source (round 3)', async () => {
+    const grid = [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }];
+    const { useShellStore } = await import('@/shell/store');
+    renderAt('/s/src1/movies/c/c1', grid);
+    await screen.findByText('Movie 0');
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('Alpha IPTV · 5,000 titles'));
+    cleanup();
+    rpcMock.handlers['sources.list'] = () => [makeSource('src1', 'xtream', 'Alpha IPTV')];
+    renderAt('/s/src1/movies/c/c1', grid);
+    await screen.findByText('Movie 0');
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('5,000 titles'));
+  });
+
   it('uses stalker.movies for stalker portals', async () => {
     baseHandlers('stalker');
     renderAt('/s/src1/movies/c/all', [{ path: '/s/:sourceId/movies/c/:categoryId', element: <CategoryGridPage kind="movie" /> }]);
@@ -383,6 +396,16 @@ describe('MovieDetailPage', () => {
     );
   });
 
+  it('names the source in the header only when there are other sources (round 3)', async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('src1', 'xtream', 'Alpha IPTV')];
+    renderAt('/s/src1/movie/m7', route);
+    await screen.findByRole('button', { name: 'Resume from 12:34' });
+    const { useShellStore } = await import('@/shell/store');
+    await waitFor(() => expect(useShellStore.getState().header).toEqual({ title: 'Dune: Part Two', section: 'Movies', back: { onClick: expect.any(Function) } }));
+    // The About facts (and the other-sources list) still name it.
+    expect(screen.getAllByText('Alpha IPTV').length).toBeGreaterThan(0);
+  });
+
   it('B4-vod-D20: a Stalker movie (not in the local catalog) never asks catalog.sameTitle and shows no other sources', async () => {
     baseHandlers('stalker');
     rpcMock.handlers['stalker.vodDetail'] = rpcMock.handlers['xtream.vodDetail']!;
@@ -427,7 +450,8 @@ describe('SeriesDetailPage', () => {
     await screen.findByRole('heading', { name: 'Severance', level: 1 });
     expect(await screen.findByRole('button', { name: 'Resume S01E02' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Season 1/ })).toBeTruthy();
-    expect(screen.getByText('20% watched')).toBeTruthy();
+    // Phone-sized here: the row's facts leave the percent to the thumbnail's bar, and its play button says it.
+    expect(screen.getByRole('button', { name: 'Resume S01E02 Episode 1.2, 20% watched' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: /Season 2/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Play S02E01 Episode 2.1' }));
     await waitFor(() => expect(played).toHaveLength(1));

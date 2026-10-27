@@ -100,6 +100,7 @@ beforeEach(() => {
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   h['sources.get'] = () => makeSource('src1', 'xtream', 'Alpha IPTV');
+  h['sources.list'] = () => [makeSource('src1', 'xtream', 'Alpha IPTV')];
   h['settings.get'] = () => settings({});
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: false, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['parental.locks'] = () => [];

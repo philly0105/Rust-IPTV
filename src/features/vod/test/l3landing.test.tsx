@@ -2,7 +2,7 @@
  * L3-app-4 and L3-perf-desktop-7: the VOD landing counts what the user can open (the shown
  * categories, after parental Hide mode), not the raw import, and asks for the categories once.
  */
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Category, Source } from '@/api/types';
@@ -76,7 +76,8 @@ const landing = () => renderAt('/s/src1/movies', [{ path: '/s/:sourceId/movies',
 describe('L3-app-4: the landing counts the titles the user can open', () => {
   it('sums the shown categories, leaving out hidden ones and the raw import count', async () => {
     landing();
-    expect(await screen.findByText('Alpha IPTV · 42 titles')).toBeTruthy();
+    // One source: the count alone, its name says nothing to choose between (round 3).
+    expect(await screen.findByText('42 titles')).toBeTruthy();
     expect(screen.queryByText(/5,000/)).toBeNull();
     const all = screen.getByRole('link', { name: new RegExp(i18n.t('vod:allMovies')) });
     expect(within(all).getByText('42')).toBeTruthy();
@@ -89,7 +90,7 @@ describe('L3-app-4: the landing counts the titles the user can open', () => {
     cats = cats.map((c) => ({ ...c, hidden: true }));
     landing();
     expect(await screen.findAllByRole('button', { name: i18n.t('vod:manageCategoriesHidden', { count: 3 }) })).toHaveLength(2);
-    expect(screen.getByText('Alpha IPTV')).toBeTruthy();
+    expect(screen.queryByTestId('vod-landing-source')).toBeNull();
     expect(screen.queryByText(/titles/)).toBeNull();
   });
 
@@ -97,7 +98,28 @@ describe('L3-app-4: the landing counts the titles the user can open', () => {
     source = makeSource('src1', 'stalker', 'Portal');
     cats = [cat('c1', 'Action', 0), cat('c2', 'Drama', 0, false, 1)];
     landing();
-    expect(await screen.findByText('Portal · 5,000 titles')).toBeTruthy();
+    expect(await screen.findByText('5,000 titles')).toBeTruthy();
+  });
+});
+
+describe('round 3: the landing names its source only beside others', () => {
+  it('leads with the source and searches it by name when there are several', async () => {
+    rpcMock.handlers['sources.list'] = () => [source, makeSource('src2', 'm3u', 'Beta TV')];
+    landing();
+    expect(await screen.findByText('Alpha IPTV · 42 titles')).toBeTruthy();
+    const { useShellStore } = await import('@/shell/store');
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('Alpha IPTV · 42 titles'));
+    expect(useShellStore.getState().header?.search?.placeholder).toBe(i18n.t('vod:searchInSource', { source: 'Alpha IPTV' }));
+  });
+
+  it('leaves the name out of the line, the header and the search field with one source', async () => {
+    rpcMock.handlers['sources.list'] = () => [source];
+    landing();
+    expect(await screen.findByText('42 titles')).toBeTruthy();
+    expect(screen.queryByText(/Alpha IPTV/)).toBeNull();
+    const { useShellStore } = await import('@/shell/store');
+    await waitFor(() => expect(useShellStore.getState().header?.subtitle).toBe('42 titles'));
+    expect(useShellStore.getState().header?.search?.placeholder).toBe('Search this source');
   });
 });
 

@@ -224,7 +224,10 @@ describe('a downloaded episode says so in its row (VL-offline-play, per episode)
     );
     const rows = await screen.findAllByTestId('episode-row');
     expect(within(rows[0]!).queryByTestId('episode-offline')).toBeNull();
-    expect(within(rows[1]!).getByTestId('episode-offline').textContent).toBe('Downloaded');
+    // Phone-sized here, where the mark is the icon alone (the word is there from sm up, episodeListPhone.test).
+    const offline = within(rows[1]!).getByTestId('episode-offline');
+    expect(offline.querySelector('svg')).toBeTruthy();
+    expect(offline.textContent).toBe('');
     const play = within(rows[1]!).getByRole('button', { name: /^Play S01E02 Episode 2, Downloaded$/ });
     fireEvent.click(play);
     expect(played).toEqual(['e2']);

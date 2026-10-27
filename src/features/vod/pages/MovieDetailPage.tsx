@@ -41,6 +41,7 @@ import {
 } from '../hooks/queries';
 import { useFormatRuntime } from '../hooks/useFormatRuntime';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useShowSourceName } from '../hooks/useShowSourceName';
 import { useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useSourcePin } from '../hooks/useSourcePin';
@@ -151,10 +152,13 @@ export function MovieDetailPage() {
   // the hero shows the title large; the title fades into the header once the hero's h1 scrolls
   // away (section). Watching, the stage's own bar names the title and the source right under the
   // header, so the header names the section and the window keeps the title (documentTitle).
+  // The source is named only when there are others (useShowSourceName); the About facts always name it.
+  const showSource = useShowSourceName();
+  const headerSource = showSource ? source.data?.name : undefined;
   const header = watching
     ? { title: t('movies'), documentTitle: pageTitle }
-    : { title: pageTitle, subtitle: source.data?.name, section: t('movies'), back: { onClick: goBack } };
-  usePageHeader(header, [watching, pageTitle, source.data?.name, t]);
+    : { title: pageTitle, subtitle: headerSource, section: t('movies'), back: { onClick: goBack } };
+  usePageHeader(header, [watching, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'movie'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
@@ -359,7 +363,11 @@ export function MovieDetailPage() {
     <div ref={detailScrollRef} className="isolate h-full overflow-x-hidden overflow-y-auto pb-12" data-testid="vod-movie-detail">
       {watching ? (
         <>
-          <WatchStage title={model.titleBase ?? model.title} subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : sourceName} onClose={playback.stop} />
+          <WatchStage
+            title={model.titleBase ?? model.title}
+            subtitle={pinnedOther ? t('playsFrom', { source: sources.get(pinnedOther.ref.sourceId)?.name ?? '' }) : headerSource}
+            onClose={playback.stop}
+          />
           <section className="mt-4 flex w-full max-w-[120rem] flex-col gap-4 px-(--page-gutter)" aria-label={t('about')}>
             <HeroIconGroup>{iconActions}</HeroIconGroup>
             {model.plot && <p dir="auto" className="max-w-[72ch] text-body leading-relaxed text-fg-muted text-match-parent">{model.plot}</p>}

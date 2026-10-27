@@ -8,13 +8,16 @@ import { Skeleton, cn } from '@/ui';
  */
 export const HERO_FRAME = 'relative isolate overflow-hidden bg-glass-strong';
 /**
- * The hero's content box. Tall enough to be the page's opening shot (about half the window),
- * capped by the width so a short, wide window still shows the rails under it; taller on phones,
- * where the artwork takes the top and the copy the bottom, with room under the buttons for the
- * slide dots (HeroCarousel). The copy starts on the page gutter, on the header title's line.
+ * The hero's content box: about two fifths of the window from sm up, capped by the width, so the
+ * first rail starts in the top half of a 900 px window rather than at its foot (at half the
+ * window a 1440 x 900 Home showed one rail under a stage that was mostly empty colour). The
+ * copy sets the height where it needs more. Taller on phones, where the artwork takes the top and
+ * the copy the bottom, with room under the buttons for the slide dots (HeroCarousel). From lg the
+ * slide controls sit beside the buttons, so the copy needs less room above it. The copy starts
+ * on the page gutter, on the header title's line.
  */
 export const HERO_BODY =
-  'relative flex min-h-[clamp(26rem,70vh,34rem)] items-end px-(--page-gutter) pt-20 pb-14 sm:min-h-[clamp(22rem,min(56vh,44vw),38rem)] sm:pb-12';
+  'relative flex min-h-[clamp(22rem,56vh,28rem)] items-end px-(--page-gutter) pt-20 pb-14 sm:min-h-[clamp(18rem,min(40vh,32vw),30rem)] sm:pb-12 lg:pt-12';
 
 /**
  * The fade from the hero into the page under it. In the dark themes the stage melts into the

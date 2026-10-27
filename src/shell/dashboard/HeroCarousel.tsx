@@ -289,6 +289,13 @@ function DetailedBackdrop(props: BackdropProps) {
   return <BackdropView {...props} s={useSlideDetails(props.slide, true)} />;
 }
 
+/**
+ * The upright poster at the hero's inline end (lg up): from near the top to above the slide
+ * controls, which sit level with the button row at the same end.
+ */
+const HERO_UPRIGHT =
+  'absolute end-[max(var(--page-gutter),6%)] top-[8%] z-[3] hidden aspect-[2/3] h-[56%] w-auto rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block';
+
 function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlide }) {
   const image = useImageChain([s.backdropUrl, s.posterUrl], s.ref.sourceId);
   const [loaded, setLoaded] = useState<string | null>(null);
@@ -335,7 +342,8 @@ function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlid
       {/*
         A poster standing in for the backdrop also stands upright at the inline end, from lg
         up, so the wide frame is not an empty colour field. Mounted once the picture has
-        loaded, so it comes from the memory cache and never shows a broken image.
+        loaded, so it comes from the memory cache and never shows a broken image. It ends above
+        the slide controls, which sit level with the buttons in that corner.
       */}
       {!wide && shown && (
         <img
@@ -345,7 +353,7 @@ function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlid
           decoding="async"
           referrerPolicy="no-referrer"
           data-hero-poster=""
-          className="absolute end-[max(var(--page-gutter),6%)] top-1/2 z-[3] hidden aspect-[2/3] h-[72%] w-auto -translate-y-1/2 rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block"
+          className={HERO_UPRIGHT}
         />
       )}
     </div>

@@ -647,7 +647,9 @@ describe('language switch', () => {
   it('the guide page header follows the new language', async () => {
     i18n.addResourceBundle('de', 'live', { guide: 'Programmführer' }, true, true);
     renderIn('/epg', [{ path: '/epg', element: <EpgGridPage /> }]);
-    await waitFor(() => expect(fakes.lastHeader()).toMatchObject({ title: 'TV guide', subtitle: 'Demo portal' }));
+    await waitFor(() => expect(fakes.lastHeader()).toMatchObject({ title: 'TV guide' }));
+    // One source: the subtitle doesn't repeat its name.
+    expect(fakes.lastHeader()?.subtitle).toBeUndefined();
     await screen.findByText('Channel 0');
     await act(async () => {
       await i18n.changeLanguage('de');

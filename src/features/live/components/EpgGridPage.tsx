@@ -1516,12 +1516,14 @@ export function EpgGridPage() {
 
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
   // GuideHeaderSearch sets the header (and its search field, when there is anything to search).
+  // The subtitle names the source only when there are several to tell apart, as Movies, Series
+  // and Live TV do; with one source its name told the user nothing.
   const heading = (
     <>
       <h1 className="sr-only">{t('guide')}</h1>
       <GuideHeaderSearch
         title={t('guide')}
-        subtitle={source?.name}
+        subtitle={(sources.data?.length ?? 0) > 1 ? source?.name : undefined}
         inputRef={searchRef}
         sourceId={sourceId}
         disabled={!sourceId}

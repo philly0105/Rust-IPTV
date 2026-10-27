@@ -1,6 +1,6 @@
 import { useQueries } from '@tanstack/react-query';
 import type { Virtualizer } from '@tanstack/react-virtual';
-import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, Tv, X } from 'lucide-react';
+import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -1271,7 +1271,7 @@ function ChannelHitButton({
         <Poster src={h.imageUrl} sourceId={c.ref.sourceId} width={logoWidth} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
       </div>
       <div className="min-w-0 flex-1">
-        <div dir="auto" className="truncate text-body-sm font-medium text-fg text-match-parent">
+        <div dir="auto" title={h.title} className="truncate text-body-sm font-medium text-fg text-match-parent">
           {h.title}
         </div>
         {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
@@ -1285,7 +1285,8 @@ function ChannelHitButton({
           )}
         </div>
       </div>
-      {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
+      {/* Only a station says what it is: a TV glyph on every channel took the width its name lost. */}
+      {c.isRadio && <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
     </button>
   );
 }

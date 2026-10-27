@@ -31,6 +31,8 @@ import { isDesktop } from '@/api/transport';
 import { itemKey, type ContentType, type ItemRef, type ItemSnapshot } from '@/api/types';
 // Light modules only (no guide page): programme hits and the guide link they open.
 import { guideHitLink, useProgrammeSearch } from '@/features/live/guide/programmeSearch';
+// Live TV's own module for a channel's name (it shares it with ChannelLogo, in Live's chunk).
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { useDebounced } from '@/features/live/hooks/useDebounced';
 import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 import { displayChannelName } from '@/features/live/lib/channelName';
@@ -117,6 +119,11 @@ interface PaletteItem {
   detail?: readonly string[];
   /** One more detail from 640 px up; a phone's row keeps that room for its title. */
   wideDetail?: string;
+  /**
+   * The title is a channel's provider name: drawn as Live TV's rows draw it (ChannelName), the
+   * place tag after the name and the strip setting applied. Matching still reads the name as it is.
+   */
+  channel?: boolean;
   run(): void;
 }
 
@@ -188,6 +195,7 @@ function useContentItems(query: string, open: boolean): PaletteItem[] {
         title,
         group,
         icon: CONTENT_ICONS[ref.contentType],
+        channel: live,
         detail: sourceById.size > 1 ? [kind, source.name] : [kind],
         run: live
           ? () =>
@@ -249,6 +257,7 @@ function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>
         id: `catalog.${itemKey(c.ref)}`,
         title: c.name,
         group: channels,
+        channel: true,
         icon: c.isRadio ? Radio : Tv,
         image: c.logoUrl ? { src: c.logoUrl, sourceId: c.ref.sourceId } : undefined,
         keywords,
@@ -326,6 +335,7 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
         id: `recent.${itemKey(r.ref)}`,
         title,
         group: channels,
+        channel: true,
         icon: isRadio ? Radio : Tv,
         image: r.snapshot.posterUrl ? { src: r.snapshot.posterUrl, sourceId: r.ref.sourceId } : undefined,
         detail: many ? [source.name] : undefined,
@@ -594,6 +604,7 @@ export function CommandPalette() {
   const open = useShellStore((s) => s.paletteOpen);
   const setOpen = useShellStore((s) => s.setPaletteOpen);
   const items = usePaletteItems();
+  const prefs = useDisplayPrefs();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const start = useStartItems(query, open);
@@ -782,9 +793,13 @@ export function CommandPalette() {
                         Icon && <Icon size={16} />
                       )}
                     </span>
-                    <span dir="auto" title={it.title} className="min-w-0 flex-1 truncate text-match-parent">
-                      {it.title}
-                    </span>
+                    {it.channel ? (
+                      <ChannelName name={it.title} strip={prefs.stripCountryPrefix} title={it.title} className="min-w-0 flex-1 truncate text-match-parent" />
+                    ) : (
+                      <span dir="auto" title={it.title} className="min-w-0 flex-1 truncate text-match-parent">
+                        {it.title}
+                      </span>
+                    )}
                     {/* Capped, so a long channel group or source name never squeezes the title. */}
                     {it.detail?.map((d, i) => (
                       <span key={i} dir="auto" title={d} className={detailText}>

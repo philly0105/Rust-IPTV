@@ -269,13 +269,27 @@ describe('palette library matches', () => {
     // A few per type, whatever the core sends; the channel's group names its feed.
     const channels = within(palette).getByText('Channels').closest('[cmdk-group]') as HTMLElement;
     expect(channels.querySelectorAll('[cmdk-item]')).toHaveLength(4);
-    expect(within(row.closest('[cmdk-item]') as HTMLElement).getByText('US| SPORTS')).toBeTruthy();
+    const item = row.closest('[cmdk-item]') as HTMLElement;
+    expect(within(item).getByText('US| SPORTS')).toBeTruthy();
+    // Named as Live TV's rows name it: the name first, the country tag after it in its own quiet
+    // span, and the provider's name for screen readers (which the row's text stays for matching).
+    expect(within(item).getByTestId('channel-name-tag').textContent).toBe('US');
+    expect(within(item).getByText('FOX HD')).toBeTruthy();
+    expect(item.getAttribute('data-value')).toContain('US| FOX HD');
     // The Search page's first page (every source, 60 and the probe row), so "Search for" opens warm.
     expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toContainEqual({ query: 'fox', limit: 61 });
     fireEvent.click(row);
     await waitFor(() =>
       expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: fox, title: 'US| FOX HD', isLive: true, categoryId: 'c1', sourceKind: 'xtream' })),
     );
+  });
+
+  it('with the strip setting on, a channel row leaves the tag out and still matches by its name', async () => {
+    rpcMock.handlers['settings.get'] = () => settings({ stripCountryPrefix: true });
+    const { palette } = await openPaletteWith('fox');
+    const item = (await within(palette).findByText('FOX HD')).closest('[cmdk-item]') as HTMLElement;
+    expect(within(item).queryByTestId('channel-name-tag')).toBeNull();
+    expect(within(item).queryByText('US| FOX HD')).toBeNull();
   });
 
   it('a library movie opens its detail page', async () => {

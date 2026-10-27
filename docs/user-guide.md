@@ -62,7 +62,7 @@ Removing a source hides it and shows an Undo toast. The source is deleted 8 seco
 
 ## Live TV
 
-- Changing live channel shows a banner for a few seconds with the channel's logo, number, and what is on now and next. Settings > Playback > "Show channel info when switching channels" turns it off.
+- Changing live channel shows a banner for a few seconds with the channel's logo, number, and what is on now and next. In the Live TV page's player beside the channel list it is one line (number, name and what is on now), since the guide strip under the player shows the rest. Settings > Playback > "Show channel info when switching channels" turns it off.
 - Type a channel number to zap to it; Enter zaps at once instead of waiting. Page Up and Page Down go to the previous and next channel.
 - B returns to the last live channel. Shift+B, or the history button in the live controls, lists the last 10 channels with what is on now.
 - A channel played from Favorites zaps through your favorites in their order.

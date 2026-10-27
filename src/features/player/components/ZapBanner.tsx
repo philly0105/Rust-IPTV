@@ -318,7 +318,7 @@ function ZapChip({
  * next. Up for 5 s on every live channel change and while the channel title is hovered; see
  * `zapBanner.ts`. Over embedded mpv it is cut out of the native video (`data-mpv-overlay`).
  * The caller places it (`className`: position and insets); `compact` is the two-line version
- * for picture-in-picture, `chip` the one-line version for a small player (`useSmallPlayer`). The mini player
+ * for picture-in-picture, `chip` the one-line version for a short player (`SHORT_PLAYER_PX`). The mini player
  * shows `ZapHeaderLine` in its header instead.
  */
 export function ZapBanner({ compact = false, chip = false, className }: { compact?: boolean; chip?: boolean; className?: string }) {

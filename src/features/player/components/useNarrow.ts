@@ -7,9 +7,11 @@ import { useEffect, useState } from 'react';
 export const NARROW_PLAYER_PX = 480;
 
 /**
- * Below this height, with the width under `NARROW_PLAYER_PX`, a player is small: the zap banner
- * becomes a one-line chip and the bar waits for it. A narrow but tall player (a desktop dock
- * beside the channel list, a phone held upright in fullscreen) has room for the full banner.
+ * Below this height a player is short: the zap banner becomes a one-line chip (the Live page's
+ * stage beside the list, where the guide ribbon under it says what airs now and next). With the
+ * width under `NARROW_PLAYER_PX` too, a player is small, and its bar also waits for the chip. A
+ * narrow but tall player (a desktop dock beside the channel list, a phone held upright in
+ * fullscreen) has room for the full banner.
  */
 export const SHORT_PLAYER_PX = 360;
 

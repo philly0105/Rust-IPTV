@@ -246,6 +246,22 @@ describe('programme cells', () => {
     expect(times!.className).toContain('text-caption');
     expect(times!.className).not.toContain('11rem');
   });
+
+  // Round 4: a History badge on nearly every logo repeated the glyph on the ended cells. The
+  // column now says catch-up in the channel's name and its tooltip only.
+  it('say catch-up in the channel cell’s name and tooltip, with no badge on its logo', async () => {
+    rpc.handlers['sources.list'] = () => [{ id: 'src1', kind: 'xtream', name: 'Demo', channelCount: CHANNELS.length, epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } }];
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    const withArchive = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
+    const without = document.querySelector<HTMLElement>('[data-channel-row="5"]')!;
+    await waitFor(() => expect(withArchive.textContent).toContain('Catch-up available'));
+    expect(withArchive.title).toBe('Play Channel 0\nCatch-up available');
+    expect(within(withArchive).getByTestId('guide-archive-mark').className).toContain('sr-only');
+    expect(withArchive.querySelector('svg')).toBeNull();
+    expect(without.textContent).not.toContain('Catch-up available');
+    expect(without.title).toBe('Play Channel 5');
+  });
 });
 
 describe('the preview band (CB-GUIDE-PREVIEW)', () => {

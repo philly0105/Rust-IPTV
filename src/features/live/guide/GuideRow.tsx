@@ -156,6 +156,9 @@ export const GuideRow = memo(function GuideRow({
   });
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
   const { onNow } = labels;
+  // Catch-up is no badge on the logo: one on nearly every row repeated the History glyph its
+  // ended cells carry. The channel's name and tooltip still say it.
+  const archive = !!ch && hasUsableArchive(ch, kind);
   // Cells this render added get their text fitted before paint.
   useLayoutEffect(() => {
     if (ref.current) handlers.fitText(ref.current);
@@ -205,7 +208,7 @@ export const GuideRow = memo(function GuideRow({
             data-highlighted={highlighted ? '' : undefined}
             tabIndex={cursorStart !== null && (!programs || programs.length === 0) ? 0 : -1}
             onClick={() => handlers.play(ch)}
-            title={labels.playChannel(chName)}
+            title={archive ? `${labels.playChannel(chName)}\n${labels.archive}` : labels.playChannel(chName)}
             aria-current={playing ? 'true' : undefined}
             data-playing={playing ? '' : undefined}
             data-compact={compact ? '' : undefined}
@@ -217,32 +220,18 @@ export const GuideRow = memo(function GuideRow({
             {compact ? (
               // Phones: the logo over the number; the name is the button's label and tooltip.
               <>
-                {/* Catch-up rides on the logo's corner, as on the wide guide. */}
-                <span className="relative shrink-0">
-                  <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
-                  {hasUsableArchive(ch, kind) ? (
-                    <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
-                      <History size={10} aria-label={labels.archive} />
-                    </span>
-                  ) : null}
-                </span>
+                <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                 <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <span className="sr-only">{playing ? `${chName}, ${labels.playingNow}` : chName}</span>
+                {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
               </>
             ) : (
               <>
                 {/* Playing: the tick and the playing mark are the amber; the number steps up to the text colour. */}
                 <span className={cn('w-7 shrink-0 text-end font-numeric text-sm tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
-                <span className="relative shrink-0">
-                  <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
-                  {/* Catch-up rides on the logo's corner, so the name keeps the column's width. */}
-                  {hasUsableArchive(ch, kind) ? (
-                    <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
-                      <History size={10} aria-label={labels.archive} />
-                    </span>
-                  ) : null}
-                </span>
+                <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                 <span className={cn('min-w-0 flex-1 truncate text-body-sm text-fg', playing && 'font-semibold')}>{chName}</span>
+                {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
                 {playing ? (
                   <span className="inline-flex shrink-0 text-accent-mark" data-testid="guide-playing-mark">
                     <AudioLines size={14} aria-label={labels.playingNow} />

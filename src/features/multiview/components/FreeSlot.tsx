@@ -2,6 +2,9 @@ import { LoaderCircle, Plus, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
+import { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
+import { displayChannelName } from '@/features/live/lib/channelName';
 
 import { Button, cn, TOUCH_TARGET } from '../deps';
 import type { QuickPick } from '../quickPicks';
@@ -76,6 +79,7 @@ export interface FreeSlotProps {
  */
 export function FreeSlot({ slot, className, disabled, next, intro, picks, picksLoading, pending, onAdd, onPick }: FreeSlotProps) {
   const { t } = useTranslation('multiview');
+  const { stripCountryPrefix } = useDisplayPrefs();
   const number = slot + 1;
   const hintId = `multiview-slot-hint-${number}`;
   // The first slot of an empty wall says how the wall works, and is described by it. On a fitted
@@ -189,12 +193,14 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
                 {picks.map((p, i) => {
                   const k = itemKey(p.ref);
                   const busy = pending === k;
+                  // The name the picker and Live TV give the channel (settings.stripCountryPrefix).
+                  const name = displayChannelName(p.title, stripCountryPrefix);
                   return (
                     <li key={k} className={ROW_ROOM[i]}>
                       <button
                         type="button"
-                        aria-label={t('pickerAddLabel', { name: p.title })}
-                        title={p.title}
+                        aria-label={t('pickerAddLabel', { name })}
+                        title={name}
                         aria-busy={busy || undefined}
                         disabled={disabled || (pending !== null && !busy)}
                         onClick={() => onPick(p, slot)}
@@ -206,9 +212,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
                         )}
                       >
                         <ChannelMark src={p.logo} sourceId={p.ref.sourceId} name={p.title} className="size-6.5" />
-                        <span dir="auto" className="min-w-0 flex-1 truncate">
-                          {p.title}
-                        </span>
+                        <ChannelName name={p.title} strip={stripCountryPrefix} className="min-w-0 flex-1 truncate" />
                         {busy ? (
                           <LoaderCircle aria-hidden className="size-4 shrink-0 text-fg-muted motion-safe:animate-spin" />
                         ) : (

@@ -7,7 +7,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-import type { PlayerSource } from '@/api/types';
+import { DEFAULT_SETTINGS, type PlayerSource } from '@/api/types';
 
 import { queryClient, rpcKey } from '@/api/query';
 
@@ -693,6 +693,16 @@ describe('empty wall', () => {
     expect(useMultiviewStore.getState().tiles.map((t) => t.title)).toEqual(['Channel 1', 'Channel 2']);
   });
 
+  it("names the picker's channels as Live TV does: the place tag after the name, quiet", async () => {
+    handlers['catalog.channels'] = () => ({ items: [{ ...channel(1, 'm3u1'), name: 'US| ESPN HD' }], total: 1 });
+    renderPage();
+    fireEvent.click(await screen.findByTestId('multiview-add'));
+    const [row] = await screen.findAllByTestId('multiview-picker-row');
+    expect(within(row!).getByTestId('channel-name-tag').textContent).toBe('US');
+    expect(within(row!).getByText('ESPN HD')).toBeTruthy();
+    expect(row!.getAttribute('aria-label')).toBe('Add US| ESPN HD to the wall');
+  });
+
   it('adds nothing when the PIN prompt is cancelled', async () => {
     h.ensureUnlocked = vi.fn(async () => false);
     renderPage();
@@ -753,6 +763,24 @@ describe('empty wall', () => {
     expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull();
     expect(within(list).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Add Channel 1 to the wall', 'Add Channel 3 to the wall']);
     for (const b of within(list).getAllByRole('button')) expect(b.className).toContain('h-8');
+  });
+
+  it('names the quick picks as Live TV does, the place tag after the name', async () => {
+    handlers['recent.list'] = () => [{ ref: channel(1, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'US| ABC HD', contentType: 'live' } }];
+    renderPage();
+    const list = await screen.findByTestId('multiview-quick-picks');
+    const pick = within(list).getByRole('button', { name: 'Add US| ABC HD to the wall' });
+    expect(within(pick).getByTestId('channel-name-tag').textContent).toBe('US');
+    expect(within(pick).getByText('ABC HD')).toBeTruthy();
+  });
+
+  it('leaves the tag out of the quick picks with the strip setting on', async () => {
+    handlers['settings.get'] = () => ({ ...DEFAULT_SETTINGS, stripCountryPrefix: true });
+    handlers['recent.list'] = () => [{ ref: channel(1, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'US| ABC HD', contentType: 'live' } }];
+    renderPage();
+    const pick = await screen.findByRole('button', { name: 'Add ABC HD to the wall' });
+    expect(within(pick).queryByTestId('channel-name-tag')).toBeNull();
+    expect(pick.getAttribute('title')).toBe('ABC HD');
   });
 
   it('offers the picks in the next free slot whatever the wall holds, and puts one up with a click', async () => {

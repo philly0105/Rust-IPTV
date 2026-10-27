@@ -230,6 +230,38 @@ describe('the idle stage (CB-AUTOPLAY-LAST)', () => {
     expect(onResume).toHaveBeenCalledWith(channel);
   });
 
+  it('leaves a TV programme to the Now card under the stage from md up, and sheds lines on a short stage', () => {
+    const now = Date.now();
+    const nowNext = { now: program('Midday Report', now - 10 * MINUTE, now + 50 * MINUTE) };
+    const view = render(
+      <I18nextProvider i18n={i18n}>
+        <StageIdle kind="live" now={now} last={{ channel: makeChannel(2), nowNext }} />
+      </I18nextProvider>,
+    );
+    // The card is a size container: its lines answer the stage's height, not the window's.
+    expect(screen.getByTestId('stage-idle').className).toContain('[container-type:size]');
+    // The ribbon's Now card right under the stage says the same programme from md up; the phone's
+    // idle bar has no ribbon under it, so it keeps the line.
+    const nowLine = screen.getByTestId('stage-idle-now').parentElement!;
+    expect(nowLine.className).toContain('md:hidden');
+    expect(nowLine.className).not.toContain('max-md:hidden');
+    // The hint goes first, then the big logo, then the caption; the name and Resume always stay.
+    expect(screen.getByTestId('stage-idle-hint').className).toContain('md:[@container_(max-height:15rem)]:hidden');
+    expect(screen.getByTestId('stage-idle-caption').className).toContain('md:[@container_(max-height:8rem)]:hidden');
+    const bigLogo = screen.getByTestId('stage-idle').querySelector('.shadow-2')!;
+    expect(bigLogo.getAttribute('class')).toContain('md:[@container_(max-height:12.5rem)]:hidden');
+    expect(screen.getByTestId('stage-resume').className).not.toContain('@container');
+    view.unmount();
+
+    // Radio has no ribbon under its stage: the card keeps what is on.
+    render(
+      <I18nextProvider i18n={i18n}>
+        <StageIdle kind="radio" now={now} last={{ channel: makeChannel(3), nowNext }} />
+      </I18nextProvider>,
+    );
+    expect(screen.getByTestId('stage-idle-now').parentElement!.className).not.toContain('md:hidden');
+  });
+
   it('without a channel to offer, asks for one (radio says station)', () => {
     render(
       <I18nextProvider i18n={i18n}>

@@ -7,7 +7,7 @@ import { rpc } from '@/api/transport';
 import type { Channel } from '@/api/types';
 import { parseGuideShift } from '@/lib/guideShift';
 
-import { Button, Dialog, ErrorState, SearchInput, Skeleton, fieldClass, useToast, errorDescription } from '@/ui';
+import { Button, Dialog, ErrorState, SearchInput, Skeleton, cn, fieldClass, useToast, errorDescription } from '@/ui';
 import { joinList } from '@/shell/dashboard/cards';
 import { useDebounced } from '../hooks/useDebounced';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
@@ -65,6 +65,10 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
   };
 
   const current = resolution.data;
+  // What the two fixed choices stand for: the automatic match (from the playlist or by name, found
+  // or not) and the guide turned off by hand. A channel matched by hand checks its result row.
+  const automatic = current !== undefined && current.via !== 'manual';
+  const noGuide = current?.via === 'manual' && !current.epgChannelId;
   const viaLabel = current
     ? {
         manual: t('mappingViaManual'),
@@ -80,31 +84,73 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
       onClose={onClose}
       title={t('epgMappingTitle', { name: displayChannelName(channel?.name, prefs.stripCountryPrefix) })}
       size="md"
-      footer={
-        <>
-          <Button
-            variant="ghost"
+      // What the channel's guide comes from now, under the title. Every choice below applies at
+      // once, so there is no footer: the close button, Escape and the scrim leave without a change.
+      description={current ? (current.epgChannelId ? t('mappingCurrent', { id: current.epgChannelId, via: viaLabel }) : viaLabel) : ' '}
+    >
+      {/* The task first: finding the guide channel. Typing goes straight into the search. */}
+      <SearchInput data-autofocus="" className="mb-2" value={query} onChange={setQuery} placeholder={t('mappingSearch')} label={t('mappingSearch')} />
+      <ul className="flex flex-col">
+        <li>
+          <ChoiceRow
+            label={t('mappingAutomatic')}
+            selected={automatic}
+            selectedLabel={t('mappingSelected')}
             disabled={busy || !channel}
             onClick={() => channel && void apply(() => rpc('epg.clearMapping', { ref: channel.ref }), t('mappingReset'))}
-          >
-            {t('mappingAutomatic')}
-          </Button>
-          <Button
-            variant="ghost"
+          />
+        </li>
+        <li>
+          <ChoiceRow
+            label={t('mappingNone')}
+            selected={noGuide}
+            selectedLabel={t('mappingSelected')}
             disabled={busy || !channel}
             onClick={() => channel && void apply(() => rpc('epg.setMapping', { ref: channel.ref, epgChannelId: null }), t('mappingCleared'))}
-          >
-            {t('mappingNone')}
-          </Button>
-          <Button onClick={onClose}>{t('cancel')}</Button>
-        </>
-      }
-    >
-      <p className="mb-3 text-sm text-fg-muted">
-        {current ? (current.epgChannelId ? t('mappingCurrent', { id: current.epgChannelId, via: viaLabel }) : viaLabel) : ' '}
-      </p>
+          />
+        </li>
+      </ul>
+      <div role="separator" className="my-1 h-px bg-divider" />
+      {results.error ? (
+        <ErrorState error={results.error} onRetry={() => void results.refetch()} />
+      ) : debounced && results.isLoading ? (
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-10" />
+          ))}
+        </div>
+      ) : results.data && results.data.length === 0 ? (
+        <p className="py-6 text-center text-sm text-fg-muted">{t('mappingNoResults', { query: debounced })}</p>
+      ) : (
+        <ul className="flex max-h-[min(320px,45vh)] flex-col overflow-y-auto" aria-label={t('mappingResults')}>
+          {(results.data ?? []).map((m) => {
+            const selected = current?.epgChannelId === m.channelId;
+            return (
+              <li key={`${m.epgUrl}|${m.channelId}`}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    channel &&
+                    void apply(() => rpc('epg.setMapping', { ref: channel.ref, epgChannelId: m.channelId }), t('mappingSaved', { name: m.displayName }))
+                  }
+                  className={RESULT_ROW}
+                >
+                  <ChannelLogo src={m.icon} name={m.displayName} size={28} sourceId={channel?.ref.sourceId} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm text-fg">{m.displayName}</span>
+                    <span className="truncate text-xs text-fg-subtle">{joinList([m.channelId, hostOf(m.epgUrl)], i18n.language)}</span>
+                  </span>
+                  {selected ? <Check className="size-4 text-accent" aria-label={t('mappingSelected')} /> : null}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {/* The time shift corrects a guide that runs early or late: after the choice, ruled off. */}
       <form
-        className="mb-4 flex flex-col gap-1.5"
+        className="mt-4 flex flex-col gap-1.5 border-t border-divider pt-4"
         onSubmit={(e) => {
           e.preventDefault();
           if (channel && shiftChanged) void apply(() => rpc('epg.setChannelShift', { ref: channel.ref, minutes: nextShift }), t('mappingShiftSaved'));
@@ -137,45 +183,34 @@ export function EpgMappingDialog({ channel, onClose }: { channel: Channel | null
           {shiftMinutes === null ? t('mappingShiftError') : t('mappingShiftHint')}
         </p>
       </form>
-      <SearchInput autoFocus className="mb-3" value={query} onChange={setQuery} placeholder={t('mappingSearch')} label={t('mappingSearch')} />
-      {results.error ? (
-        <ErrorState error={results.error} onRetry={() => void results.refetch()} />
-      ) : debounced && results.isLoading ? (
-        <div className="flex flex-col gap-2">
-          {Array.from({ length: 5 }, (_, i) => (
-            <Skeleton key={i} className="h-10" />
-          ))}
-        </div>
-      ) : results.data && results.data.length === 0 ? (
-        <p className="py-6 text-center text-sm text-fg-muted">{t('mappingNoResults', { query: debounced })}</p>
-      ) : (
-        <ul className="flex max-h-[min(320px,45vh)] flex-col overflow-y-auto" aria-label={t('mappingResults')}>
-          {(results.data ?? []).map((m) => {
-            const selected = current?.epgChannelId === m.channelId;
-            return (
-              <li key={`${m.epgUrl}|${m.channelId}`}>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    channel &&
-                    void apply(() => rpc('epg.setMapping', { ref: channel.ref, epgChannelId: m.channelId }), t('mappingSaved', { name: m.displayName }))
-                  }
-                  className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-start hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                >
-                  <ChannelLogo src={m.icon} name={m.displayName} size={28} sourceId={channel?.ref.sourceId} />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm text-fg">{m.displayName}</span>
-                    <span className="truncate text-xs text-fg-subtle">{joinList([m.channelId, hostOf(m.epgUrl)], i18n.language)}</span>
-                  </span>
-                  {selected ? <Check className="size-4 text-accent" aria-label={t('mappingSelected')} /> : null}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
     </Dialog>
+  );
+}
+
+const RESULT_ROW =
+  'flex w-full items-center gap-3 rounded-md px-2 py-2 text-start hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40';
+
+/** Match automatically and No guide: rows like the guide channels under them, where one tap applies. */
+function ChoiceRow({
+  label,
+  selected,
+  selectedLabel,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  selectedLabel: string;
+  disabled: boolean;
+  onClick(): void;
+}) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} className={cn(RESULT_ROW, 'min-h-11')}>
+      {/* As wide as a guide channel's logo, so the labels line up with the channel names. */}
+      <span aria-hidden className="w-7 shrink-0" />
+      <span className="min-w-0 flex-1 truncate text-sm text-fg">{label}</span>
+      {selected ? <Check className="size-4 text-accent" aria-label={selectedLabel} /> : null}
+    </button>
   );
 }
 

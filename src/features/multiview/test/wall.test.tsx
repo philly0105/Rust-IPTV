@@ -763,6 +763,44 @@ describe('empty wall', () => {
     expect(await screen.findByRole('dialog', { name: 'Add channels' })).toBeTruthy();
   });
 
+  it('keeps a narrow next slot a plain frame, and gives the rows the width past the slot number', async () => {
+    const recent = (i: number) => ({ ref: channel(i, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: `Channel ${i}`, contentType: 'live' } });
+    handlers['recent.list'] = () => [2, 3, 4].map(recent);
+    seed([1]);
+    renderPage();
+    const slot = await screen.findByRole('group', { name: 'Slot 2: add a channel' });
+    const list = await within(slot).findByTestId('multiview-quick-picks');
+    // Under 16rem of slot width a row would show a few letters of a name: the slot is a plain
+    // "Add channel" frame there, and the picks show from 16rem.
+    const plain = within(slot).getByTestId('multiview-next-slot-add');
+    expect(plain.className.split(/\s+/)).toContain('@[16rem]/slot:hidden');
+    expect(plain.getAttribute('aria-label')).toBe('Slot 2: add a channel');
+    expect(plain.getAttribute('data-slot-focus')).toBe('1');
+    expect(plain.textContent).toBe('Add channel');
+    const picks = within(slot).getByTestId('multiview-next-slot-picks').className.split(/\s+/);
+    expect(picks).toEqual(expect.arrayContaining(['hidden', '@[16rem]/slot:flex']));
+    // The rows clear the slot number on its side only, and only where they would reach it.
+    expect(picks).toEqual(expect.arrayContaining(['ps-10', '@[23rem]/slot:ps-3']));
+    expect(list.parentElement!.className.split(/\s+/)).toContain('w-full');
+    // A row waits for the height it needs: sooner with a mouse than with 44 px touch rows, and
+    // always when stacked, where the slot grows with its rows.
+    const items = within(list).getAllByRole('listitem');
+    expect(items[1]!.className.split(/\s+/)).toEqual(['hidden', '@[20rem]/slot:block', 'pointer-fine:@[16rem]/slot:block', '@max-2xl/wall:block']);
+    expect(items[2]!.className.split(/\s+/)).toEqual(['hidden', '@[26rem]/slot:block', 'pointer-fine:@[21rem]/slot:block', '@max-2xl/wall:block']);
+    // "More channels" keeps its icon whole in a tight slot.
+    expect(within(slot).getByRole('button', { name: 'More channels for slot 2' }).querySelector('svg')!.getAttribute('class')).toContain('shrink-0');
+
+    // A row puts its channel up, and only that.
+    fireEvent.click(within(list).getByRole('button', { name: 'Add Channel 2 to the wall' }));
+    await waitFor(() => expect(useMultiviewStore.getState().tiles).toHaveLength(2));
+    expect(screen.queryByRole('dialog', { name: 'Add channels' })).toBeNull();
+    // The frame around the rows lights up and opens the picker like the other free frames.
+    const next = await screen.findByRole('group', { name: 'Slot 3: add a channel' });
+    expect(next.className).toContain('hover:[&:not(:has(li:hover))]:border-accent');
+    fireEvent.click(next);
+    expect(await screen.findByRole('dialog', { name: 'Add channels' })).toBeTruthy();
+  });
+
   it('shows a channel name once when two sources carry it, keeping the most recent (L3-visual-13)', async () => {
     handlers['recent.list'] = () => [
       { ref: channel(5, 'm3u1').ref, viewedAt: '2026-10-15T00:00:00Z', snapshot: { title: 'France 24 English', contentType: 'live' } },

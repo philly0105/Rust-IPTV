@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 
+import { isDesktop } from '@/api/transport';
 import type { Settings } from '@/api/types';
 
 import { Select } from '@/ui';
@@ -39,8 +40,9 @@ export function SourceRefreshGroup({ settings, update }: { settings: Settings; u
   }));
 
   return (
-    <SettingsGroup id="sources" title={t('sourceRefreshGroup')} description={t('sourceRefreshGroupHint')}>
-      <SettingsRow label={t('refreshInterval')} description={t('refreshIntervalHint')}>
+    <SettingsGroup id="sources" title={t('sourceRefreshGroup')}>
+      {/* The tray sentence is true only of the desktop app; a server refreshes on its own. */}
+      <SettingsRow label={t('refreshInterval')} description={isDesktop ? t('refreshIntervalHint') : t('refreshIntervalHintServer')}>
         {({ id, describedBy }) => (
           <Select
             id={id}

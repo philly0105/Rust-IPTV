@@ -78,7 +78,7 @@ export function RemoteSection({ settings, update }: SectionProps) {
   };
 
   return (
-    <SettingsSection title={t('sectionRemote')} description={t('sectionRemoteLead')} testId="settings-remote">
+    <SettingsSection title={t('sectionRemote')} testId="settings-remote">
       <SettingsGroup title={t('remotePageGroup')}>
         <SwitchRow label={t('remoteEnabled')} description={t('remoteEnabledHint')} checked={enabled} disabled={busy} onChange={(v) => void setEnabled(v)} testId="toggle-remote" />
         {/* The state sits under the switch it follows, not in a group of its own. With remote

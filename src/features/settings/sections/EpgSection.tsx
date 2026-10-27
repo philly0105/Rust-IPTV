@@ -225,7 +225,7 @@ export function EpgSection({ settings, update }: SectionProps) {
   const offset = parity(settings).epgOffsetMinutes;
 
   return (
-    <SettingsSection title={t('sectionEpg')} description={t('sectionEpgLead')} testId="settings-epg">
+    <SettingsSection title={t('sectionEpg')} testId="settings-epg">
       <SettingsGroup title={t('epgGlobalUrls')} description={t('epgGlobalUrlsHint')}>
         {settings.epgUrls.length === 0 ? (
           <p className="px-4 py-4 text-sm text-fg-muted">{t('epgGlobalEmpty')}</p>
@@ -285,7 +285,6 @@ export function EpgSection({ settings, update }: SectionProps) {
 
       <SettingsGroup
         title={t('epgStatus')}
-        description={t('epgStatusHint')}
         actions={
           <Button size="sm" variant="secondary" icon={<RefreshCw aria-hidden className="size-4" />} onClick={() => void refresh()} data-testid="epg-refresh-all">
             {t('epgRefreshAll')}
@@ -382,13 +381,24 @@ export function EpgSection({ settings, update }: SectionProps) {
         />
       </SettingsGroup>
 
-      <SettingsGroup title={t('epgClearTitle')} tone="danger">
-        <div className="flex flex-col gap-3 px-4 py-4 @2xl:flex-row @2xl:items-center @2xl:justify-between">
-          <p className="max-w-xl text-sm text-fg-muted">{t('epgClearHint')}</p>
-          <Button variant="danger" icon={<Eraser aria-hidden className="size-4" />} onClick={() => setClearOpen(true)} data-testid="epg-clear-all">
-            {t('epgClearButton')}
-          </Button>
-        </div>
+      {/* The same danger zone as Reset settings in Backup and storage: one name, one row, and a
+          secondary button that opens the danger confirm. The solid red is kept for the confirm, so
+          the page's loudest button is never one click from losing data. */}
+      <SettingsGroup title={t('dangerZone')} tone="danger">
+        <SettingsRow label={t('epgClearButton')} description={t('epgClearHint')}>
+          {({ id, describedBy }) => (
+            <Button
+              id={id}
+              aria-describedby={describedBy}
+              variant="secondary"
+              icon={<Eraser aria-hidden className="size-4" />}
+              onClick={() => setClearOpen(true)}
+              data-testid="epg-clear-all"
+            >
+              {t('epgClearButton')}
+            </Button>
+          )}
+        </SettingsRow>
       </SettingsGroup>
 
       <Dialog

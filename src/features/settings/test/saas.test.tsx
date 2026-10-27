@@ -27,7 +27,7 @@ vi.mock('@/api/events', () => ({
 }));
 
 const settingsRoutes = await eagerRoutes((await import('../routes')).settingsRoutes);
-const { PHONE_QUERY } = await import('../SettingsPage');
+const { PHONE_QUERY, TOUCH_ONLY_QUERY } = await import('../SettingsPage');
 const { BUTTON_VARIANTS } = await import('@/ui/Button');
 const { useShellStore } = await import('@/shell');
 
@@ -147,6 +147,35 @@ describe('phone layout (SS-7)', () => {
     expect(lead.className).not.toContain('truncate');
   });
 
+  it('leaves Keyboard shortcuts out of the list on a touch-only phone, and still opens it by link', async () => {
+    window.matchMedia = ((query: string) => ({
+      matches: query === PHONE_QUERY || query === TOUCH_ONLY_QUERY,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    renderAt(settingsRoutes, '/settings');
+    const list = await screen.findByTestId('settings-nav-list');
+    // A phone has no keyboard for the list of keys; the rest of App is still there.
+    expect(within(list).queryByRole('link', { name: /^Keyboard shortcuts/ })).toBeNull();
+    expect(within(list).getByRole('link', { name: /^Appearance/ })).toBeTruthy();
+    cleanup();
+    // The section is still reachable (the command palette, a link, a phone with a keyboard).
+    renderAt(settingsRoutes, '/settings/shortcuts');
+    expect(await screen.findByTestId('settings-shortcuts')).toBeTruthy();
+  });
+
+  it('keeps Keyboard shortcuts in the list on a phone-width window with a mouse', async () => {
+    phoneWindow(true);
+    renderAt(settingsRoutes, '/settings');
+    const list = await screen.findByTestId('settings-nav-list');
+    expect(within(list).getByRole('link', { name: /^Keyboard shortcuts/ })).toBeTruthy();
+  });
+
   it('a wider window goes from /settings to General with the side nav', async () => {
     const view = renderAt(settingsRoutes, '/settings');
     await screen.findByTestId('settings-general');
@@ -222,6 +251,25 @@ describe('save confirmation (SS-17)', () => {
     fireEvent.click(screen.getByTestId('theme-light'));
     const header = screen.getByRole('heading', { level: 2, name: 'Appearance' }).parentElement!;
     await waitFor(() => expect(within(header).getByTestId('settings-saved-mark').dataset['state']).toBe('saved'));
+  });
+
+  it('on a phone that mark stays out of flow, so the theme cards do not move under the finger', async () => {
+    phoneWindow(true);
+    renderAt(settingsRoutes, '/settings/appearance');
+    const section = await screen.findByTestId('settings-appearance');
+    const children = Array.from(section.children);
+    fireEvent.click(screen.getByTestId('theme-light'));
+    const header = screen.getByRole('heading', { level: 2, name: 'Appearance' }).parentElement!;
+    const mark = await within(header).findByTestId('settings-saved-mark');
+    await waitFor(() => expect(mark.dataset['state']).toBe('saved'));
+    // The header is `contents` below md, so its children lay out as the section's own flex
+    // children: the mark is positioned against the section instead, on the first group's title line.
+    expect(header.className).toContain('max-md:contents');
+    expect(section.className).toContain('relative');
+    expect(mark.className).toContain('max-md:absolute');
+    expect(mark.className).toContain('max-md:top-0');
+    expect(mark.className).toContain('max-md:end-0');
+    expect(Array.from(section.children)).toEqual(children);
   });
 });
 

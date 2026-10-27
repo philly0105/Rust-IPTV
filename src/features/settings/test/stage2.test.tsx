@@ -194,6 +194,29 @@ describe('Shortcut rows (critique)', () => {
     expect(merged).toBeTruthy();
     expect(merged!.textContent).toContain('or');
   });
+
+  it('flow down two columns on a wide column, each area kept whole, with the page widened for it', async () => {
+    renderAt(settingsRoutes, '/settings/shortcuts');
+    const list = await screen.findByTestId('shortcuts-list');
+    expect(list.className).toContain('@min-[52rem]:columns-2');
+    const areas = within(list).getAllByTestId('shortcut-area');
+    expect(areas.length).toBeGreaterThan(1);
+    // An area never splits across the two columns; each still holds its own titled group.
+    for (const a of areas) {
+      expect(a.className).toContain('break-inside-avoid');
+      expect(a.querySelector('h3')).toBeTruthy();
+    }
+    // Only this reference takes the width beside the nav; other sections keep 46rem.
+    expect(list.closest('.\\@container')!.className).toContain('max-w-[72rem]');
+    // Until two columns fit, the one column stays as wide as before (at 1280 it ran 732 px, with
+    // keys even further from their labels), and only the two columns take the extra width.
+    expect(list.className).toContain('max-w-[46rem]');
+    expect(list.className).toContain('@min-[52rem]:max-w-none');
+    cleanup();
+    renderAt(settingsRoutes, '/settings/general');
+    const general = await screen.findByTestId('settings-general');
+    expect(general.closest('.\\@container')!.className).toContain('max-w-[46rem]');
+  });
 });
 
 describe('Settings controls come from the kit (SS-9)', () => {

@@ -102,10 +102,9 @@ export function PlayersSection({ settings, update }: SectionProps) {
   );
 
   return (
-    <SettingsSection title={t('sectionPlayers')} description={t('sectionPlayersLead')} testId="settings-players">
+    <SettingsSection title={t('sectionPlayers')} testId="settings-players">
       <SettingsGroup
         title={t('playerPaths')}
-        description={t('playerPathsHint')}
         actions={
           <Button
             size="sm"
@@ -138,7 +137,7 @@ export function PlayersSection({ settings, update }: SectionProps) {
         {pathRow('vlcPath', t('vlcPath'), 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe')}
       </SettingsGroup>
 
-      <SettingsGroup title={t('externalBehavior')} description={t('externalBehaviorHint')}>
+      <SettingsGroup title={t('externalBehavior')}>
         <SwitchRow
           label={t('playerReuseInstance')}
           description={t('playerReuseInstanceHint')}

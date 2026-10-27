@@ -181,7 +181,15 @@ describe('Parity settings', () => {
     rpcMock.handlers['epg.clearAll'] = () => null;
     renderAt(settingsRoutes, '/settings/epg');
     await screen.findByTestId('settings-epg');
-    fireEvent.click(screen.getByTestId('epg-clear-all'));
+    // A danger zone like Reset settings: same group name, a secondary button, the red kept for the confirm.
+    const danger = screen.getByRole('heading', { name: 'Danger zone' }).closest('[data-tone="danger"]') as HTMLElement;
+    const clear = within(danger).getByRole('button', { name: 'Clear all guide data' });
+    expect(clear).toBe(screen.getByTestId('epg-clear-all'));
+    expect(clear.className).toContain('bg-surface-2');
+    expect(clear.className).not.toContain('bg-danger-solid');
+    // The consequence stays with the button.
+    expect(document.getElementById(clear.getAttribute('aria-describedby')!.split(' ')[0]!)!.textContent).toContain('Deletes every downloaded programme');
+    fireEvent.click(clear);
     expect(screen.getByRole('dialog').textContent).toContain('Clear all guide data?');
     expect(rpcMock.callsOf('epg.clearAll')).toHaveLength(0);
     fireEvent.click(screen.getByTestId('epg-clear-confirm'));

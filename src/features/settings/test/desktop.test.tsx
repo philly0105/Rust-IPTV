@@ -131,6 +131,30 @@ describe('Backup export (desktop)', () => {
   });
 });
 
+describe('tray wording (desktop)', () => {
+  it('Refresh sources and guide reminders say they keep working from the tray', async () => {
+    renderAt(settingsRoutes, '/settings/general');
+    await screen.findByTestId('select-sourceRefreshIntervalHours');
+    expect(screen.getByText('For sources with auto refresh on. Keeps running while the app is in the tray.')).toBeTruthy();
+    cleanup();
+    renderAt(settingsRoutes, '/settings/recording');
+    await screen.findByTestId('reminders-enabled');
+    expect(screen.getByText('Alerts you before a programme you picked in the guide, while the app is open or in the tray.')).toBeTruthy();
+  });
+});
+
+describe('Stream format (desktop)', () => {
+  it('says Auto uses MPEG-TS in the built-in player and HLS in mpv and VLC', async () => {
+    renderAt(settingsRoutes, '/settings/playback');
+    await screen.findByTestId('settings-playback');
+    expect(
+      screen.getByText(
+        'Xtream live channels. Auto uses MPEG-TS in the built-in player, which starts faster, and HLS in mpv and VLC. Choose HLS if channels freeze or you need subtitles.',
+      ),
+    ).toBeTruthy();
+  });
+});
+
 describe('Window at startup (desktop)', () => {
   it('offers normal, maximized and fullscreen and saves the choice', async () => {
     rpcMock.handlers['settings.update'] = (a) => {

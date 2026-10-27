@@ -168,6 +168,42 @@ describe('Backup file checks match the core (D10)', () => {
 });
 
 describe('Interface size slider', () => {
+  it('sits on one line like Minimum rating: the value at body size, Reset holding its place at 100 %', async () => {
+    renderAt(settingsRoutes, '/settings/appearance');
+    const slider = (await screen.findByTestId('ui-scale')) as HTMLInputElement;
+    const value = screen.getByTestId('ui-scale-value');
+    // Not a 2xl display readout over the slider, which made this row half again as tall as Density.
+    expect(value.className).toContain('text-body-sm');
+    expect(value.className).not.toContain('text-2xl');
+    expect(value.parentElement).toBe(screen.getByTestId('ui-scale-reset').parentElement);
+    // Hidden, not removed, at 100 %, so a drag that brings it up never moves the slider.
+    expect(screen.getByTestId('ui-scale-reset').className).toContain('invisible');
+    fireEvent.pointerDown(slider);
+    fireEvent.change(slider, { target: { value: '110' } });
+    expect(screen.getByTestId('ui-scale-reset').className).not.toContain('invisible');
+    expect(value.textContent).toBe('110%');
+  });
+
+  it("starts the slider at the row's edge in a narrow column, and keeps the value level with the track", async () => {
+    renderAt(settingsRoutes, '/settings/appearance');
+    const slider = await screen.findByTestId('ui-scale');
+    const reset = screen.getByTestId('ui-scale-reset');
+    const value = screen.getByTestId('ui-scale-value');
+    // On a phone the control has its own line under the label: Reset's hidden slot goes after the
+    // value, not before the slider, where it left a blank about 60 px wide at 100 %.
+    expect(reset.className).toContain('@max-md:order-last');
+    // The ticks hang under the slider out of flow, so the value and Reset centre on the track
+    // itself, not on the slider and its ticks (which put the number below the track).
+    const ticks = slider.nextElementSibling!;
+    expect(ticks.getAttribute('aria-hidden')).toBe('true');
+    expect(ticks.className).toContain('absolute');
+    expect(ticks.className).toContain('top-full');
+    expect(slider.parentElement!.className).toContain('relative');
+    const line = reset.parentElement!;
+    expect(line.className).toContain('items-center');
+    expect(Array.from(line.children)).toEqual([reset, slider.parentElement, value]);
+  });
+
   it('does not resize the app under the pointer mid-drag, and previews on release', async () => {
     const { useAppearanceStore } = await import('@/shell/theme');
     useAppearanceStore.setState({ preview: null });

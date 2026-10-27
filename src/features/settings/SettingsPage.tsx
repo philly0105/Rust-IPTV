@@ -78,6 +78,14 @@ export const NAV_GROUPS: readonly { id: string; label: string; sections: readonl
 ];
 
 /**
+ * A device with touch and nothing that hovers: a phone or a tablet without a trackpad. Its nav
+ * leaves out Keyboard shortcuts, a list of keys it has no keyboard for. A tablet with a keyboard
+ * case or trackpad reports a fine pointer or hover and keeps it. The route itself stays, so a
+ * link or the command palette still opens the section.
+ */
+export const TOUCH_ONLY_QUERY = '(hover: none) and (pointer: coarse)';
+
+/**
  * Below this width Settings is a list of sections that opens one at a time (the phone layout);
  * from it up the page has a sticky section nav on the inline start, beside the section.
  */
@@ -91,7 +99,9 @@ export const PHONE_QUERY = '(max-width: 767.98px)';
  */
 export function SettingsNav({ current, variant = 'sidebar' }: { current?: SectionId; variant?: 'sidebar' | 'list' }) {
   const { t } = useTranslation('settings');
-  const groups = NAV_GROUPS.map((g) => ({ ...g, sections: g.sections.filter(sectionAvailable) })).filter((g) => g.sections.length > 0);
+  const touchOnly = useMediaQuery(TOUCH_ONLY_QUERY);
+  const listed = (id: SectionId) => sectionAvailable(id) && !(touchOnly && id === 'shortcuts' && id !== current);
+  const groups = NAV_GROUPS.map((g) => ({ ...g, sections: g.sections.filter(listed) })).filter((g) => g.sections.length > 0);
 
   if (variant === 'list') {
     return (
@@ -299,8 +309,10 @@ export function SettingsPage() {
             <SettingsNav current={current} />
           </aside>
         )}
-        {/* Its own container: rows lay out by the column's width, not the window's. */}
-        <div className="@container min-w-0 max-w-[46rem] flex-1">
+        {/* Its own container: rows lay out by the column's width, not the window's. Keyboard
+            shortcuts is a read-only reference with short rows, so it may take the width beside the
+            nav for two columns; every other section keeps a readable 46rem. */}
+        <div className={clsx('@container min-w-0 flex-1', current === 'shortcuts' ? 'max-w-[72rem]' : 'max-w-[46rem]')}>
           <SaveFeedback.Provider value={save.status}>
             {query.isPending ? (
               <SectionSkeleton />

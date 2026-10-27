@@ -130,8 +130,8 @@ export function PlaybackSection({ settings, update }: SectionProps) {
   const current: VideoPlayer = builtIn ? 'html5' : settings.player;
 
   return (
-    <SettingsSection title={t('sectionPlayback')} description={t('sectionPlaybackLead')} testId="settings-playback">
-      <SettingsGroup title={t('player')} description={t('playerHint')}>
+    <SettingsSection title={t('sectionPlayback')} testId="settings-playback">
+      <SettingsGroup title={t('player')}>
         <div className="flex flex-col p-2">
           {caps.isError ? (
             <div role="alert" className="m-2 flex flex-wrap items-center gap-3 rounded-md bg-danger/10 px-3 py-2 text-sm" data-testid="player-caps-error">
@@ -175,7 +175,9 @@ export function PlaybackSection({ settings, update }: SectionProps) {
       </SettingsGroup>
 
       <SettingsGroup title={t('playbackStreamsGroup')}>
-        <SettingsRow label={t('streamFormat')} description={t('streamFormatHint')}>
+        {/* Auto's rule differs by host: the desktop app also has mpv and VLC, which keep HLS; a
+            browser has only the built-in player, which gets MPEG-TS where it can play it. */}
+        <SettingsRow label={t('streamFormat')} description={isDesktop ? t('streamFormatHint') : t('streamFormatHintServer')}>
           {({ id }) => (
             <Segmented<StreamFormat>
               id={id}

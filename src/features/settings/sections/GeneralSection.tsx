@@ -70,7 +70,7 @@ export function GeneralSection({ settings, update }: SectionProps) {
   // SS-8: General keeps the app-wide choices. Poster size and the home screen are in Appearance,
   // the recordings folder in Recording, the image cache and Reset in Backup and storage.
   return (
-    <SettingsSection title={t('sectionGeneral')} description={t('sectionGeneralLead')} testId="settings-general">
+    <SettingsSection title={t('sectionGeneral')} testId="settings-general">
       <SettingsGroup title={t('startupGroup')}>
         <SettingsRow label={t('language')} description={t('languageHint')}>
           {({ id, describedBy }) => (
@@ -120,7 +120,7 @@ export function GeneralSection({ settings, update }: SectionProps) {
       {/* account: background refresh and subscription warnings. The source cards link here. */}
       <SourceRefreshGroup settings={settings} update={update} />
 
-      <SettingsGroup title={t('catalogGroup')} description={t('catalogGroupHint')}>
+      <SettingsGroup title={t('catalogGroup')}>
         <SwitchRow
           label={t('stripCountryPrefix')}
           description={t('stripCountryPrefixHint')}
@@ -138,7 +138,7 @@ export function GeneralSection({ settings, update }: SectionProps) {
         <MinRatingRow value={extra.vodMinRating} update={update} />
       </SettingsGroup>
 
-      <SettingsGroup title={t('downloads')} description={t('downloadsHint')}>
+      <SettingsGroup title={t('downloads')}>
         <DownloadsFolderRow custom={Boolean(settings.downloadsDir?.trim())} />
         <DownloadConnectionsRows settings={settings} update={update} />
       </SettingsGroup>

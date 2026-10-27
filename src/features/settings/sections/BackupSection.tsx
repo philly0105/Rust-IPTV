@@ -210,7 +210,7 @@ export function BackupSection({ update }: SectionProps) {
 
   const choose = () => fileRef.current?.click();
   return (
-    <SettingsSection title={t('sectionBackup')} description={t('sectionBackupLead')} testId="settings-backup">
+    <SettingsSection title={t('sectionBackup')} testId="settings-backup">
       {/* The export is one choice and one action: the action sits in the group's header. A
           secondary button: it is always there, and Import is the page's one primary once a file
           is chosen. */}

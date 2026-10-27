@@ -93,7 +93,7 @@ export function AboutSection(_props: SectionProps) {
   };
 
   return (
-    <SettingsSection title={t('sectionAbout')} description={t('sectionAboutLead')} testId="settings-about">
+    <SettingsSection title={t('sectionAbout')} testId="settings-about">
       {info.isPending ? (
         <div className="flex flex-col gap-3">
           <Skeleton className="h-28 rounded-lg" />

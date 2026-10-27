@@ -87,13 +87,32 @@ describe('Appearance', () => {
     expect(card.className).toContain('rounded-md');
     expect(card.className).not.toContain('rounded-lg');
   });
+
+  it('lays the three theme cards side by side at every width, a phone too', async () => {
+    renderAt(settingsRoutes, '/settings/appearance');
+    const dark = await screen.findByTestId('theme-dark');
+    const group = screen.getByRole('radiogroup', { name: 'Theme' });
+    // Not one column until @2xl: stacked on a phone the cards took the whole first screen.
+    expect(group.className).toMatch(/(^| )grid-cols-3( |$)/);
+    expect(group.className).not.toContain('@2xl:grid-cols-3');
+    // Narrow, the preview is shorter and the hint line goes; the card keeps its name.
+    const card = dark.closest('label')!;
+    expect(card.querySelector('[aria-hidden].h-24')!.className).toContain('@max-md:h-16');
+    expect(within(card).getByText('Dim surfaces for watching.').className).toContain('@max-md:hidden');
+    expect(within(card).getByText('Dark')).toBeTruthy();
+  });
 });
 
 describe('About', () => {
-  it('has a lead like every other section', async () => {
+  it('names itself a step under the header, with no lead line, like every other section', async () => {
     renderAt(settingsRoutes, '/settings/about');
     const section = await screen.findByTestId('settings-about');
-    expect(within(section).getByText('Version, updates, and where your data is kept.')).toBeTruthy();
+    // The lead only listed what follows; the phone's list of sections still shows it.
+    expect(within(section).queryByText('Version, updates, and where your data is kept.')).toBeNull();
+    // The shell header's "Settings" is the page title (text-title); the section heading sits under it.
+    const h2 = within(section).getByRole('heading', { level: 2, name: 'About' });
+    expect(h2.className).toContain('text-title-sm');
+    expect(h2.className).not.toMatch(/\btext-title\b(?!-)/);
   });
 
   it("keeps What's new and the tour together in one row of equal buttons", async () => {

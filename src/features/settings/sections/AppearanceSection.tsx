@@ -125,7 +125,7 @@ function ThemePreview({ mode, oled, accent }: { mode: 'light' | 'dark' | 'system
     );
   };
   return (
-    <div aria-hidden className="flex h-24 w-full overflow-hidden rounded-md border border-edge">
+    <div aria-hidden className="flex h-24 w-full overflow-hidden rounded-md border border-edge @max-md:h-16">
       {mode === 'system' ? (
         <>
           {half('light')}
@@ -313,76 +313,75 @@ function ScaleControl({
   // Where the thumb's centre sits for a value: the track minus half a (1rem) thumb at each end.
   const along = (v: number) => `calc(0.5rem + (100% - 1rem) * ${(v - UI_SCALE_MIN) / (UI_SCALE_MAX - UI_SCALE_MIN)})`;
 
+  const atDefault = Math.abs(value - 1) < 1e-9 && Math.abs(draft - 1) < 1e-9;
+
+  // One line, like Minimum rating: Reset, the slider with its tick per step, and the value at body
+  // size. Reset keeps its place while hidden at 100 %, so the slider never moves under the pointer
+  // when a drag away from 100 % brings it up. In a narrow column (a phone), where the control has a
+  // line of its own under the label, Reset goes last: the slider then starts at the row's edge like
+  // every other control there, and the hidden slot sits at the end instead of as a gap before it.
   return (
-    <div className="flex w-full flex-col gap-2 @2xl:w-80">
-      <div className="flex items-center justify-between gap-3">
-        <output htmlFor={id} aria-live="polite" className="font-display text-2xl font-semibold text-fg tabular" data-testid="ui-scale-value">
-          {pct(draft)}
-        </output>
-        {Math.abs(value - 1) > 1e-9 || Math.abs(draft - 1) > 1e-9 ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            data-testid="ui-scale-reset"
-            onClick={() => {
-              setDraft(1);
-              commit(1);
-            }}
-          >
-            {t('uiScaleReset')}
-          </Button>
-        ) : null}
+    <div className="flex w-full items-center gap-3 @md:w-auto">
+      <Button
+        variant="ghost"
+        size="sm"
+        data-testid="ui-scale-reset"
+        className={clsx('shrink-0 @max-md:order-last', atDefault && 'invisible')}
+        onClick={() => {
+          setDraft(1);
+          commit(1);
+        }}
+      >
+        {t('uiScaleReset')}
+      </Button>
+      {/* The ticks hang under the slider out of flow, so Reset, the track and the value centre on
+          one line whatever height Reset takes (44 px on a touch screen); centred on the slider and
+          its ticks, the value sat a few pixels under the track. The row's label column, or a
+          touch-size Reset, leaves room for the ticks below. */}
+      <div className="relative flex min-w-0 flex-1 flex-col @md:w-44 @md:flex-none">
+        <Slider
+          id={id}
+          min={Math.round(UI_SCALE_MIN * 100)}
+          max={Math.round(UI_SCALE_MAX * 100)}
+          step={Math.round(SCALE_STEP * 100)}
+          value={Math.round(draft * 100)}
+          aria-describedby={describedBy}
+          aria-valuetext={pct(draft)}
+          data-testid="ui-scale"
+          onValueChange={onInput}
+          onPointerDown={() => {
+            dragging.current = true;
+          }}
+          onPointerUp={() => commit(draft)}
+          onPointerCancel={() => commit(draft)}
+          onKeyUp={(e) => {
+            if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' || e.key.startsWith('Page')) commit(draft);
+          }}
+          onBlur={() => {
+            if (editing.current) commit(draft);
+          }}
+          className="w-full"
+        />
+        {/* The tuning scale: a tick per 5 % step, taller at the ends and at 100 %. The value beside
+            the slider says the number, so the ticks carry no labels. */}
+        <div aria-hidden className="absolute inset-x-0 top-full mt-1 h-2">
+          {Array.from({ length: SCALE_TICKS }, (_, i) => {
+            const v = UI_SCALE_MIN + i * SCALE_STEP;
+            const major = i === 0 || i === SCALE_TICKS - 1 || Math.abs(v - 1) < 1e-9;
+            const on = Math.abs(v - draft) < 1e-9;
+            return (
+              <span
+                key={i}
+                className={clsx('absolute top-0 w-px -translate-x-1/2 rtl:translate-x-1/2', major ? 'h-2' : 'h-1', on ? 'bg-accent-mark' : 'bg-border')}
+                style={{ insetInlineStart: along(v) }}
+              />
+            );
+          })}
+        </div>
       </div>
-      <Slider
-        id={id}
-        min={Math.round(UI_SCALE_MIN * 100)}
-        max={Math.round(UI_SCALE_MAX * 100)}
-        step={Math.round(SCALE_STEP * 100)}
-        value={Math.round(draft * 100)}
-        aria-describedby={describedBy}
-        aria-valuetext={pct(draft)}
-        data-testid="ui-scale"
-        onValueChange={onInput}
-        onPointerDown={() => {
-          dragging.current = true;
-        }}
-        onPointerUp={() => commit(draft)}
-        onPointerCancel={() => commit(draft)}
-        onKeyUp={(e) => {
-          if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' || e.key.startsWith('Page')) commit(draft);
-        }}
-        onBlur={() => {
-          if (editing.current) commit(draft);
-        }}
-        className="w-full"
-      />
-      {/* The tuning scale: a tick per 5 % step, labelled at the ends and at 100 %. */}
-      <div aria-hidden className="relative h-6">
-        {Array.from({ length: SCALE_TICKS }, (_, i) => {
-          const v = UI_SCALE_MIN + i * SCALE_STEP;
-          const major = i === 0 || i === SCALE_TICKS - 1 || Math.abs(v - 1) < 1e-9;
-          const on = Math.abs(v - draft) < 1e-9;
-          return (
-            <span
-              key={i}
-              className={clsx('absolute top-0 w-px -translate-x-1/2 rtl:translate-x-1/2', major ? 'h-2' : 'h-1', on ? 'bg-accent-mark' : 'bg-border')}
-              style={{ insetInlineStart: along(v) }}
-            />
-          );
-        })}
-        {[UI_SCALE_MIN, 1, UI_SCALE_MAX].map((v, i) => (
-          <span
-            key={v}
-            className={clsx(
-              'absolute top-2.5 text-2xs text-fg-subtle tabular',
-              i === 0 ? 'start-0' : i === 2 ? 'end-0' : '-translate-x-1/2 rtl:translate-x-1/2',
-            )}
-            style={i === 1 ? { insetInlineStart: along(v) } : undefined}
-          >
-            {pct(v)}
-          </span>
-        ))}
-      </div>
+      <output htmlFor={id} aria-live="polite" className="w-12 shrink-0 text-end text-body-sm font-medium tabular-nums text-fg" data-testid="ui-scale-value">
+        {pct(draft)}
+      </output>
     </div>
   );
 }
@@ -410,9 +409,12 @@ export function AppearanceSection({ settings, update }: SectionProps) {
   ];
 
   return (
-    <SettingsSection title={t('sectionAppearance')} description={t('sectionAppearanceLead')} testId="settings-appearance">
+    <SettingsSection title={t('sectionAppearance')} testId="settings-appearance">
       <SettingsGroup title={t('theme')}>
-        <div role="radiogroup" aria-label={t('theme')} className="grid gap-3 p-3 @2xl:grid-cols-3">
+        {/* Three across at every width: stacked on a phone, the three cards took a whole screen for a
+            three-way choice. Under @md the cards tighten and drop their hint line, which only
+            describes the picture beside it. */}
+        <div role="radiogroup" aria-label={t('theme')} className="grid grid-cols-3 gap-2 p-3 @md:gap-3">
           {options.map((o) => {
             const selected = o.value === current;
             return (
@@ -423,7 +425,7 @@ export function AppearanceSection({ settings, update }: SectionProps) {
               <label
                 key={o.value}
                 className={clsx(
-                  'relative flex cursor-pointer flex-col gap-3 rounded-md border p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
+                  'relative flex min-w-0 cursor-pointer flex-col gap-2 rounded-md border p-2 @md:gap-3 @md:p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
                   selected ? 'border-accent bg-surface-2' : 'border-edge hover:border-border hover:bg-hover active:bg-active',
                 )}
               >
@@ -453,8 +455,8 @@ export function AppearanceSection({ settings, update }: SectionProps) {
                   />
                 </span>
                 <span className="flex flex-col gap-0.5">
-                  <span className="text-body font-medium text-fg">{o.label}</span>
-                  <span className="text-body-sm text-fg-muted">{o.hint}</span>
+                  <span className="text-body font-medium break-words text-fg">{o.label}</span>
+                  <span className="text-body-sm text-fg-muted @max-md:hidden">{o.hint}</span>
                 </span>
               </label>
             );
@@ -508,8 +510,10 @@ export function AppearanceSection({ settings, update }: SectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      {/* SS-8: the home screen is something the user sees, so it sits with the other looks. */}
-      <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? t('dashboardHint') : t('railsOffHint')}>
+      {/* SS-8: the home screen is something the user sees, so it sits with the other looks. A
+          description only while its rows can't act: with the dashboard on, "choose which rows
+          appear" would only repeat the switches. */}
+      <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? undefined : t('railsOffHint')}>
         <SwitchRow
           label={t('showDashboard')}
           description={t('showDashboardHint')}

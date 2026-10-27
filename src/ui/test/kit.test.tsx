@@ -600,8 +600,22 @@ describe('artwork fallback tint (src/ui/tint.ts)', () => {
     expect(el.style.getPropertyValue('--tint-ink')).toBe(tintOf('Harbor Lights').ink);
     const classes = el.className.split(' ');
     expect(classes).toContain('[background-image:var(--tint-dark)]');
-    expect(classes).toContain('light:[background-image:var(--tint-light)]');
-    expect(classes).toContain('light:[color:var(--tint-ink)]');
+    expect(classes).toContain('light:not-in-data-player-stage:[background-image:var(--tint-light)]');
+    expect(classes).toContain('light:not-in-data-player-stage:[color:var(--tint-ink)]');
+  });
+
+  it("keeps the deep stops inside the player's stage, which is black in every theme, except as a phone's idle bar", () => {
+    const light = TINT_THEME.split(' ').filter((c) => c.startsWith('light:'));
+    // Every pale class stops at the stage's edge, or applies below md only, where Live's idle stage
+    // is a bar on the page surface: none of them reaches a tile on the black stage from md up.
+    expect(light.length).toBeGreaterThan(0);
+    for (const c of light) expect(c.startsWith('light:not-in-data-player-stage:') || c.startsWith('light:max-md:')).toBe(true);
+    for (const v of ['[background-image:var(--tint-light)]', '[color:var(--tint-ink)]']) {
+      expect(light).toContain(`light:not-in-data-player-stage:${v}`);
+      expect(light).toContain(`light:max-md:${v}`);
+    }
+    // Under them, in every theme and so on the stage, the deep stops and white initials.
+    expect(TINT_THEME.split(' ')).toEqual(expect.arrayContaining(['[background-image:var(--tint-dark)]', 'text-white/90']));
   });
 
   it('a tile on glass keeps the deep stops in every theme', () => {

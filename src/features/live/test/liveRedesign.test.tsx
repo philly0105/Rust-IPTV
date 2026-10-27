@@ -122,8 +122,8 @@ describe('channel logos (LG-14)', () => {
     // The shared tint (src/ui/tint.ts): deep stops in the dark themes, pale ones with deep ink in light.
     expect(tile.style.getPropertyValue('--tint-dark')).toBe(tintFill('Ringside Fight', 'dark'));
     expect(tile.style.getPropertyValue('--tint-light')).toBe(tintFill('Ringside Fight', 'light'));
-    expect(tile.className).toContain('light:[background-image:var(--tint-light)]');
-    expect(tile.className).toContain('light:[color:var(--tint-ink)]');
+    expect(tile.className).toContain('light:not-in-data-player-stage:[background-image:var(--tint-light)]');
+    expect(tile.className).toContain('light:not-in-data-player-stage:[color:var(--tint-ink)]');
     expect(tile.style.fontSize).toBe('23px');
     const again = render(<ChannelLogo name="Ringside Fight" size={20} />).container.querySelector<HTMLElement>('[data-monogram]')!;
     expect(again.style.getPropertyValue('--tint-dark')).toBe(tile.style.getPropertyValue('--tint-dark'));

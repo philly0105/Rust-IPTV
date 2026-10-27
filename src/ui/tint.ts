@@ -115,8 +115,17 @@ export function tintVars(name: string): CSSProperties {
  * A tile in the name's tint ({@link tintVars} on the same element) with its initials in the right
  * colour: white on the deep stops, and in the light theme the pale stops with the hue's own ink.
  * Deep slabs were the heaviest things on the light theme's pale page.
+ *
+ * Inside the player's stage (`data-player-stage`, black in every theme) the tile keeps the deep
+ * stops, as {@link TINT_DARK}'s do: a pale slab on the black stage (Live's idle card, the guide's
+ * preview picture, Radio's recent stations) was the brightest thing there, and the same channel
+ * turned deep in the zap banner once it played. Below md the idle stage is a slim bar on the page
+ * surface instead (LiveStageColumn), so there the tile follows the theme again.
  */
-export const TINT_THEME = '[background-image:var(--tint-dark)] text-white/90 light:[background-image:var(--tint-light)] light:[color:var(--tint-ink)]';
+export const TINT_THEME =
+  '[background-image:var(--tint-dark)] text-white/90 ' +
+  'light:not-in-data-player-stage:[background-image:var(--tint-light)] light:not-in-data-player-stage:[color:var(--tint-ink)] ' +
+  'light:max-md:[background-image:var(--tint-light)] light:max-md:[color:var(--tint-ink)]';
 
 /** The deep stops in every theme, for a tile on glass or over video (Home's hero). */
 export const TINT_DARK = '[background-image:var(--tint-dark)] text-white/90';

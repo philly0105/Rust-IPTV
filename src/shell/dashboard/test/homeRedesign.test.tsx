@@ -211,6 +211,41 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
     await waitFor(() => expect(useToastStore.getState().toasts.some((t) => t.title === 'Harbor Nine marked watched')).toBe(true));
   });
 
+  describe('on a phone', () => {
+    let base: typeof window.matchMedia;
+    beforeEach(() => {
+      base = window.matchMedia;
+      window.matchMedia = ((q: string) => ({ ...base(q), matches: q === '(max-width: 639px)' })) as typeof window.matchMedia;
+    });
+    afterEach(() => {
+      window.matchMedia = base;
+    });
+
+    it('leaves the titles the hero resumes out of Continue watching, and drops the rail when none are left', async () => {
+      home({ continue: cards });
+      renderRoutes(routes(), '/dashboard');
+      const hero = await screen.findByTestId('dashboard-hero');
+      // Every title in progress is a hero slide, with its Resume, Details and menu.
+      expect(within(hero).getByRole('tab', { name: 'The Long Signal' })).toBeTruthy();
+      expect(within(hero).getByRole('tab', { name: 'Harbor Nine' })).toBeTruthy();
+      expect(within(hero).getByRole('button', { name: 'Resume' })).toBeTruthy();
+      await screen.findByTestId('dashboard');
+      expect(screen.queryByTestId('dashboard-rail-continue-watching')).toBeNull();
+    });
+
+    it('keeps the titles past the hero in the rail', async () => {
+      const more = ['Paper Moons', 'Cold Harbor', 'North Light'].map((title, i) =>
+        position({ sourceId: 's1', contentType: 'movie', itemId: `x${i}` }, title, { updatedAt: `2026-10-0${i + 1}T00:00:00Z` }),
+      );
+      home({ continue: [...cards, ...more] });
+      renderRoutes(routes(), '/dashboard');
+      // The hero takes the first three (HERO_MAX_CONTINUE); the rail starts at the fourth.
+      const rail = await screen.findByTestId('dashboard-rail-continue-watching');
+      expect(within(rail).getAllByRole('button', { name: /^Resume / }).map((b) => b.getAttribute('aria-label'))).toEqual(['Resume Cold Harbor', 'Resume North Light']);
+      expect(within(rail).getByRole('link', { name: 'See all' }).getAttribute('href')).toBe('/recent');
+    });
+  });
+
   it("the hero's continue slide offers the same menu behind a third button", async () => {
     home({ continue: cards });
     rpcMock.handlers['positions.remove'] = () => null;

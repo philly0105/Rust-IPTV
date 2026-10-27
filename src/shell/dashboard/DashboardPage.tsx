@@ -34,11 +34,13 @@ import { snapshotTitle } from '@/lib/title';
 import { Badge, EmptyState, ErrorState, useToast, errorDescription, whenIdle } from '@/ui';
 
 import { useOffline } from '../connection';
+import { PHONE_QUERY } from '../navigation';
 import { playFromShell } from '../playFromShell';
 import { sourceBasePath, sourceHomePath } from '../railLinks';
 import { useShell } from '../store';
 import { useVisibleSources } from '../useVisibleSources';
 import { useSettings } from '../useSettings';
+import { useMediaQuery } from '../useMediaQuery';
 // account:
 import { AccountAlerts } from './AccountAlerts';
 import { ChannelCard, ContinueCard, OnNowCard, PosterCard, RailMyListProvider, SourceCard, SourceKindContext, itemPath, joinList, type CardMenuItem } from './cards';
@@ -332,6 +334,20 @@ function DashboardBody() {
   const recentlyAdded = useMemo(() => mergeRecentlyAdded(movieRows, seriesRows, RAIL_LIMIT), [movieRows, seriesRows]);
 
   const heroSlides = useMemo(() => buildHeroSlides(continueRows, recentlyAdded), [continueRows, recentlyAdded]);
+  // On a phone Continue watching leaves out the titles the hero already offers to resume (its
+  // first slides, with Resume, Details and the same menu), as On now leaves out the channels
+  // other rails show. There the hero fills most of the first screen and the rail starts right
+  // under it, so the same two or three titles showed twice before anything else; with no more in
+  // progress than the hero holds, the rail goes and On now moves up into the first screen. The
+  // whole list, with remove and clear, stays on Recently watched (the More tab). On a wider
+  // window the rail stays whole: it shows every title at once beside the rotating hero.
+  const phone = useMediaQuery(PHONE_QUERY);
+  const heroOn = show('hero');
+  const railContinueRows = useMemo(() => {
+    if (!heroOn || !phone) return continueRows;
+    const inHero = new Set(heroSlides.filter((s) => s.kind === 'continue').map((s) => s.key));
+    return inHero.size === 0 ? continueRows : continueRows.filter((p) => !inHero.has(continueKey(p)));
+  }, [heroOn, phone, heroSlides, continueRows]);
   // The live favourites tell same-named channels apart by source once there is more than one.
   const manySources = (sources.data?.length ?? 0) > 1;
 
@@ -603,7 +619,7 @@ function DashboardBody() {
 
         {visible('continueWatching') && (
           <ContinueWatchingRail
-            items={continueWatching.data ? continueRows : undefined}
+            items={continueWatching.data ? railContinueRows : undefined}
             loading={continueWatching.isPending}
             loaded={continueWatching.isSuccess}
             error={railError(continueWatching.error)}

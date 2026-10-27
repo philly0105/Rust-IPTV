@@ -931,8 +931,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
             <Button
               variant="ghost"
               size="sm"
-              className="max-w-[45%] min-w-0 shrink gap-1.5 px-2"
-              icon={<ListTree className="size-4" />}
+              className="max-w-[55%] min-w-0 shrink gap-1.5 px-2"
+              // A long group name shrinks the label, never the icon.
+              icon={<ListTree className="size-4 shrink-0" />}
               aria-expanded={drawerOpen}
               aria-haspopup="dialog"
               onClick={toggleSidebar}
@@ -956,7 +957,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
           )}
           <SearchInput
             size="sm"
-            className="min-w-0 flex-1"
+            // Beside the group's name the field keeps room for its whole "Search"; a long name is
+            // what gives way on a narrow phone.
+            className={groupOnToolbar ? 'min-w-32 flex-1' : 'min-w-0 flex-1'}
             value={search}
             // Clearing (the clear button) commits at once, like Escape.
             onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}
@@ -979,8 +982,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               }
             }}
             ref={searchRef}
-            // The groups button beside it names the group on a narrow page.
-            placeholder={category && !groupOnToolbar ? t('searchInGroup', { group: category.name }) : t(isRadio ? 'searchStations' : 'searchChannels')}
+            // On a narrow page the groups button beside it names the group, so the field says only
+            // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
+            placeholder={
+              groupOnToolbar
+                ? t('common:search')
+                : category
+                  ? t('searchInGroup', { group: category.name })
+                  : t(isRadio ? 'searchStations' : 'searchChannels')
+            }
             label={t(isRadio ? 'searchStations' : 'searchChannels')}
           />
           {/* Radio has no picture: its stations are never filtered by quality. */}

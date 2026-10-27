@@ -12,6 +12,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { queryClient } from '@/api/query';
+import common from '@/i18n/en/common.json';
 import { joinList } from '@/shell/dashboard/cards';
 import type { Category, Channel, EpgNowNext, Page, PageQuery } from '@/api/types';
 
@@ -437,17 +438,26 @@ describe('groups drawer below 1024 px', () => {
 
   it('names the group on the groups button below 768 px, where the header has no room for it', async () => {
     const phone = windowWidth(390);
+    // The phone's search placeholder is the shared "Search" (common.json); the harness loads live only.
+    i18n.addResourceBundle('en', 'common', common);
     rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: 200 }), cat(2, { name: 'US| SPORTS', itemCount: 200 })];
     renderIn('/s/src1/live/g2', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
     await screen.findByText('Channel 0');
     const toggle = await screen.findByRole('button', { name: /^Groups:\s*US\| SPORTS$/ });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    // The button names the group, so the search field beside it no longer repeats it.
-    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search channels');
+    // A long name truncates the label, never the icon.
+    expect(toggle.querySelector('.lucide-list-tree')?.getAttribute('class')).toContain('shrink-0');
+    // The button names the group, so the search field beside it says only "Search" and leaves the
+    // button room for a long name. Its accessible name still says what it searches.
+    const field = screen.getByRole('searchbox', { name: 'Search channels' });
+    expect(field.getAttribute('placeholder')).toBe('Search');
+    // The field keeps room for that whole word; the name is what gives way.
+    expect(field.parentElement?.className).toContain('min-w-32');
     fireEvent.click(toggle);
     const drawer = await screen.findByTestId('groups-drawer');
     expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    i18n.removeResourceBundle('en', 'common');
     phone.mockRestore();
   });
 

@@ -564,7 +564,7 @@ function SourceEntry({
  * every link it opened was a Watch or Library row already; Radio, the one that was not, joins
  * Watch (loneSourceRadio). Collapsed it is the monogram alone, no longer a menu of those links.
  * Its name ends in "Manage sources", and so does its tooltip, which also carries the full name
- * that the row may cut.
+ * that the row may cut and, after a failed refresh, what the red dot means.
  */
 function LoneSource({ source, collapsed }: { source: Source; collapsed: boolean }) {
   const { t } = useTranslation('shell');
@@ -578,6 +578,8 @@ function LoneSource({ source, collapsed }: { source: Source; collapsed: boolean 
             <span dir="auto" className="block font-medium">
               {source.name}
             </span>
+            {/* What the red dot means: to a mouse user the reason is otherwise only a colour. */}
+            {source.lastError && <span className="block text-danger">{t('sourceHasError')}</span>}
             <span className="block text-fg-muted">{t('manageSources')}</span>
           </>
         }

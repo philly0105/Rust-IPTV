@@ -112,4 +112,15 @@ describe('source names (L3-visual-12)', () => {
     const tip = await screen.findByRole('tooltip');
     expect(tip.textContent).toBe(`${name}Manage sources`);
   });
+
+  it.each([false, true])("the only source's tooltip says what its red dot means (icon rail: %s)", async (collapsed) => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name: 'Broken One', lastError: 'HTTP 404' })];
+    renderRoutes(routes(collapsed), '/dashboard');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const row = await within(nav).findByRole('link', { name: /^Broken One/ });
+    fireEvent.mouseEnter(row);
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Broken OneThe last refresh failedManage sources');
+    expect(within(tip).getByText('The last refresh failed').className).toMatch(/\btext-danger\b/);
+  });
 });

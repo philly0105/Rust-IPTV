@@ -260,6 +260,31 @@ describe('palette library matches', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/s/s2/movie/31'));
   });
 
+  it('a recent channel leads a library channel that matches better, and Enter plays it', async () => {
+    const nbaTv: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '40' };
+    rpcMock.handlers['recent.list'] = (): RecentEntry[] => [{ ref: nbaTv, viewedAt: '2026-10-11T08:00:00Z', snapshot: { title: 'US| NBA TV FHD', contentType: 'live' } }];
+    rpcMock.handlers['catalog.search'] = (a) => ({
+      live:
+        (a as { query: string }).query === 'nba'
+          ? [{ ref: { sourceId: 's1', contentType: 'live', itemId: '41' }, name: 'NBA 05', categoryId: 'c2', categoryName: 'NBA League Pass', isRadio: false }]
+          : [],
+      movies: [],
+      series: [],
+    });
+    const { palette, input } = await openPaletteWith('nba');
+    // "NBA 05" starts with the query and outscores the recent channel, yet stays under it.
+    await within(palette).findByText('NBA 05');
+    await waitFor(() => {
+      const first = palette.querySelector('[cmdk-item]');
+      expect(first?.textContent).toContain('US| NBA TV FHD');
+      expect(first?.getAttribute('data-selected')).toBe('true');
+    });
+    const headings = [...palette.querySelectorAll('[cmdk-group-heading]')].map((h) => h.textContent);
+    expect(headings.indexOf('Favorites and recent')).toBeLessThan(headings.indexOf('Channels'));
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: nbaTv, title: 'US| NBA TV FHD' })));
+  });
+
   it('a favourite the library also finds is listed once, under Favorites and recent', async () => {
     const { palette } = await openPaletteWith('bbc');
     await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'catalog.search' && (c.args as { query: string }).query === 'bbc')).toBe(true));

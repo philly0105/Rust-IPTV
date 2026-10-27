@@ -632,8 +632,14 @@ export function CommandPalette() {
     const q = query.trim();
     if (!q) return groups;
     const best = (list: PaletteItem[]) => Math.max(0, ...list.map((it) => paletteFilter(it.title, q, it.keywords)));
-    return groups
-      .map((g) => [g, best(g[1])] as const)
+    const scored = groups.map((g) => [g, best(g[1])] as const);
+    // The user's own favourites and recent items stay above the library's channels and titles:
+    // "NBA 05" from League Pass starts with "nba" and outscores the "US| NBA TV FHD" they watch,
+    // which then sat eighth and lost Enter. A library group scores at most what the content
+    // group does, and on a tie the content (listed first, the sort is stable) leads.
+    const own = scored.find(([g]) => g[1][0]?.id.startsWith('content.'))?.[1];
+    return scored
+      .map(([g, score]) => [g, own !== undefined && g[1][0]?.id.startsWith('catalog.') ? Math.min(score, own) : score] as const)
       .sort((a, b) => b[1] - a[1])
       .map(([g]) => g);
   }, [groups, query]);

@@ -17,8 +17,11 @@ import { CARD_ART } from '@/ui/card';
 
 import { IconButton, Poster, ProgressBar, WatchedChip, cn } from '../deps';
 
-/** Caption under the poster: the title and one line of facts. */
-export const CARD_CAPTION_HEIGHT = 52;
+/**
+ * Caption under the poster: up to two lines of title and one line of facts (plus the 8 px gap
+ * above it), as the posters of the VOD grids and rails caption theirs.
+ */
+export const CARD_CAPTION_HEIGHT = 64;
 
 export interface MyListCardProps {
   entry: WatchlistEntry;
@@ -83,7 +86,8 @@ function MyListCardImpl({ entry, busy, progress, progressLabel, onRemove }: MyLi
         />
       </div>
       <div className="flex min-w-0 flex-col" style={{ height: CARD_CAPTION_HEIGHT - 8 }}>
-        <span dir="auto" className="truncate text-match-parent text-body-sm font-medium text-fg" title={title} data-testid="mylist-title">
+        {/* Two lines before it is cut, so a narrow phone column shows "The Clubhouse", not "The Clubh…". */}
+        <span dir="auto" className="line-clamp-2 text-match-parent text-body-sm font-medium [overflow-wrap:anywhere] text-fg" title={title} data-testid="mylist-title">
           {title}
         </span>
         <span dir="auto" className="truncate text-match-parent text-caption text-fg-muted">

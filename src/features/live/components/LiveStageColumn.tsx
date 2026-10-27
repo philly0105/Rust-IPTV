@@ -39,7 +39,8 @@ export interface LiveStageColumnProps {
  *
  * A phone held sideways (a touch screen under 30rem tall) gets this column beside the list too,
  * but with a 330 px column the rule above left a 68 px picture under a full ribbon, and cut the
- * idle card. There the screen keeps its 16:9 and the ribbon takes what is left, scrolling.
+ * idle card. There the screen keeps its 16:9 and the ribbon, at its full height, scrolls in what
+ * is left, so its timeline and catch-up stay in reach.
  */
 export function LiveStageColumn(props: LiveStageColumnProps) {
   const { busy, Stage = PlayerStage } = props;
@@ -69,7 +70,9 @@ export function LiveStageColumn(props: LiveStageColumnProps) {
         className={cn(
           props.ribbonOnPhone ? 'max-md:contents' : 'max-md:hidden',
           'md:flex md:min-h-0 md:shrink-0 md:grow md:flex-col md:bg-surface',
-          'pointer-coarse:[@media(max-height:30rem)]:md:shrink! pointer-coarse:[@media(max-height:30rem)]:md:overflow-y-auto',
+          // Block flow there, so the ribbon keeps its full height (timeline included) and scrolls in
+          // here, instead of a flex child squeezed to what is left and its timeline cut to nothing.
+          'pointer-coarse:[@media(max-height:30rem)]:md:block pointer-coarse:[@media(max-height:30rem)]:md:shrink! pointer-coarse:[@media(max-height:30rem)]:md:overflow-y-auto',
         )}
       >
         {props.ribbon}

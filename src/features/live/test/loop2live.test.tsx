@@ -453,7 +453,7 @@ describe('phone layout (L2-live-15, L2-visual-13)', () => {
     expect(screen.getByTestId('live-stage').nextElementSibling?.className).not.toContain('max-md:hidden');
   });
 
-  it('on a phone held sideways the screen keeps its 16:9 and the ribbon under it gives way and scrolls', async () => {
+  it('on a phone held sideways the screen keeps its 16:9 and the whole ribbon scrolls under it', async () => {
     renderAt('/s/src1/live', ROUTE);
     await screen.findByText('Channel 0');
     // Under 30rem tall on a touch screen: a 330 px column left a 68 px picture under a full ribbon.
@@ -462,6 +462,8 @@ describe('phone layout (L2-live-15, L2-visual-13)', () => {
     expect(stage.className).toContain(`${short}shrink-0!`);
     expect(stage.nextElementSibling?.className).toContain(`${short}shrink!`);
     expect(stage.nextElementSibling?.className).toContain(`${short}overflow-y-auto`);
+    // In block flow, so the ribbon keeps its timeline instead of being squeezed to its header.
+    expect(stage.nextElementSibling?.className).toContain(`${short}block`);
     // Elsewhere the screen gives way first, and the ribbon keeps its height.
     expect(stage.className).toContain('md:shrink');
     expect(stage.nextElementSibling?.className).toContain('md:shrink-0');

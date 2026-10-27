@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { BookmarkCheck, EllipsisVertical, Play, Search } from 'lucide-react';
-import { createContext, useContext, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
 
@@ -483,14 +483,37 @@ function menuHandlers<E extends HTMLElement>(open: ((pos: { x: number; y: number
   };
 }
 
+/**
+ * Poster's initials tile, drawn as a logo-sized mark in the middle of the frame instead of across
+ * all of it, without its type glyph (the rail and the caption already say it is a channel). A
+ * channel with no logo, or one whose logo fails, then looks like a channel with one: a small mark
+ * on the channel's glow. Filled edge to edge, every logo-less card was a saturated block, and a
+ * rail of them (a provider without logos fills Home with them) read as a wall of colour.
+ */
+const LOGO_MARK = cn(
+  // Sized by the card's height, not fixed: a 4rem mark filled two thirds of a phone card and crowded
+  // its progress bar, while 46% keeps the room it has on a desktop card at every size.
+  '[&>[data-poster-fallback]]:m-auto [&>[data-poster-fallback]]:h-[46%] [&>[data-poster-fallback]]:w-auto [&>[data-poster-fallback]]:aspect-square',
+  '[&>[data-poster-fallback]]:rounded-[22%]',
+  '[&>[data-poster-fallback]]:shadow-1 [&>[data-poster-fallback]]:ring-1 [&>[data-poster-fallback]]:ring-white/10 [&>[data-poster-fallback]]:ring-inset',
+  '[&>[data-poster-fallback]>svg]:hidden',
+);
+
+/**
+ * The channel's glow over `surface-2`, in the channel's hue (`--logo-hue`). The dark themes take a
+ * deep tint; the light theme a pale one, because the deep tint showed on a pale card as a grey
+ * smudge in its corner.
+ */
+const LOGO_GLOW = cn(
+  'absolute inset-0 bg-surface-2',
+  'bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_35%_30%/0.55),transparent_70%)]',
+  'light:bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_45%_85%/0.6),transparent_70%)]',
+);
+
 /** A channel logo centred on the channel's own tint: the art of a channel with no programme picture. */
 function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?: string; sourceId?: string; isRadio?: boolean }) {
-  const hue = hueOf(name);
   return (
-    <div
-      className="absolute inset-0"
-      style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
-    >
+    <div className={LOGO_GLOW} style={{ '--logo-hue': hueOf(name) } as CSSProperties}>
       <Poster
         src={logoUrl}
         sourceId={sourceId}
@@ -499,20 +522,26 @@ function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?:
         aspect="wide"
         fit="contain"
         kind={isRadio ? 'radio' : 'live'}
-        className="h-full bg-transparent after:hidden"
+        className={cn('h-full bg-transparent after:hidden', LOGO_MARK)}
         rounded="sm"
       />
     </div>
   );
 }
 
-/** A thin bar flush with the artwork's bottom edge: watched share, or how far the programme on air has run. */
-function EdgeProgress({ value }: { value: number }) {
+/**
+ * A thin bar flush with the artwork's bottom edge: watched share, or how far the programme on air
+ * has run. `glass` (the default) is the bright dial amber on the dark glass track, for the user's
+ * own resume progress. A programme's progress is quiet: a neutral fill, on glass over a programme
+ * picture (`glass-quiet`) and on the theme's track over a channel's logo card (`quiet`). Four or
+ * five channel rails put about twenty amber bars on one screen, which read as stripes (Live TV's
+ * list keeps them quiet for the same reason) and left amber meaning nothing in particular.
+ */
+function EdgeProgress({ value, tone = 'glass' }: { value: number; tone?: 'glass' | 'glass-quiet' | 'quiet' }) {
   return (
     // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
     <span className="absolute inset-x-0 bottom-0" aria-hidden>
-      {/* The glass tone: the bright dial amber on the dark glass track in every theme, as everything drawn on artwork. */}
-      <ProgressBar value={Math.min(1, value) * 100} size="xs" tone="glass" className="h-1 rounded-none [&>div]:rounded-none" />
+      <ProgressBar value={Math.min(1, value) * 100} size="xs" tone={tone} className="h-1 rounded-none [&>div]:rounded-none" />
     </span>
   );
 }
@@ -520,7 +549,7 @@ function EdgeProgress({ value }: { value: number }) {
 /**
  * 16:9 channel tile with the logo centered on a per-channel tint. No LIVE pill: a channel tile
  * is live by definition, and a dozen identical red pills drowned out the programme and its
- * progress bar (SH-live-pill-noise); the bar along the bottom is the live cue.
+ * progress bar (SH-live-pill-noise); the quiet bar along the bottom is the live cue.
  */
 export function ChannelCard({
   rail,
@@ -546,7 +575,7 @@ export function ChannelCard({
       <div className={cn(CARD_ART, 'aspect-video w-full')}>
         <LogoArt name={name} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
         <PlayGlyph />
-        {nowProgress !== undefined && <EdgeProgress value={nowProgress} />}
+        {nowProgress !== undefined && <EdgeProgress value={nowProgress} tone="quiet" />}
       </div>
       <span dir="auto" title={name} className={CAPTION_TITLE}>
         {name}
@@ -797,7 +826,7 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
           <LogoArt name={channelName} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
         )}
         <PlayGlyph />
-        {progress !== undefined && <EdgeProgress value={progress} />}
+        {progress !== undefined && <EdgeProgress value={progress} tone={programmeArt ? 'glass-quiet' : 'quiet'} />}
       </div>
       <span dir="auto" title={programme} className={CAPTION_TITLE}>
         {programme}

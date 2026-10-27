@@ -363,14 +363,17 @@ function DashboardBody() {
     [liveOn, recentLiveOn, liveFavorites, recentLive, fillChannels],
   );
   // The favourites rail shows its programmes from the same answer, so it is in the list first.
-  // Only while Home's live rails are on: with them off nothing here shows a programme.
+  // Only while Home's live rails are on: with them off nothing here shows a programme. The recent
+  // channels rail reads it too, so its cards say what is on as the favourites' do (they named the
+  // source on every card); its channels come on top of On now's share, so they never crowd it out.
   const nowRefs = useMemo(() => {
     if (!liveOn) return [];
     const refs = new Map<string, ItemRef>();
     for (const f of liveFavorites) refs.set(itemKey(f.ref), f.ref);
     for (const c of candidates) if (refs.size < NOW_NEXT_LIMIT) refs.set(itemKey(c.ref), c.ref);
+    if (recentLiveOn) for (const r of recentLive) if (r.ref.contentType === 'live') refs.set(itemKey(r.ref), r.ref);
     return [...refs.values()];
-  }, [liveOn, liveFavorites, candidates]);
+  }, [liveOn, liveFavorites, candidates, recentLiveOn, recentLive]);
   const epgOffset = settings.data?.epgOffsetMinutes ?? 0;
   // One call once the lists it asks about have all answered, so it is not made again with each.
   // The cards read only the programme's title and times: no descriptions, about half the bytes
@@ -387,6 +390,10 @@ function DashboardBody() {
   const favoriteNowSig = JSON.stringify(liveFavorites.map((f) => nowNext.data?.[itemKey(f.ref)]?.now ?? null));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const favoriteNowNext = useMemo(() => nowNext.data, [favoriteNowSig]);
+  // The same for the recent channels rail.
+  const recentNowSig = JSON.stringify(recentLive.map((r) => nowNext.data?.[itemKey(r.ref)]?.now ?? null));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const recentNowNext = useMemo(() => nowNext.data, [recentNowSig]);
   // A minute tick while the window shows moves the progress bars on. The guide is asked again
   // only once a programme in the answer has ended (most change on the hour and the half hour),
   // not every minute. One timer a minute, nothing while hidden.
@@ -665,7 +672,10 @@ function DashboardBody() {
             loaded={recent.isSuccess}
             error={railError(recent.error)}
             refetch={recent.refetch}
+            nowNext={recentNowNext}
+            epgOffset={epgOffset}
             sourceById={sourceById}
+            manySources={manySources}
             play={play}
           />
         )}
@@ -991,7 +1001,8 @@ const LiveFavoritesRail = memo(function LiveFavoritesRail({
             logoUrl={f.snapshot.posterUrl}
             now={nn?.now?.title}
             nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
-            sourceName={sourceById.get(f.ref.sourceId)?.name}
+            // With one source its name under every card says nothing; the card says Live TV or Radio.
+            sourceName={manySources ? sourceById.get(f.ref.sourceId)?.name : undefined}
             showSourceWithNow={manySources}
             isRadio={f.ref.contentType === 'radio'}
             ariaLabel={t('playTitle', { title: f.snapshot.title })}
@@ -1035,15 +1046,26 @@ const SourceChannelsRail = memo(function SourceChannelsRail({ source, items, pla
   );
 });
 
+/** Recently watched channels, drawn as the favourites are: what is on and how far it has run, the source only with more than one. */
 const RecentLiveRail = memo(function RecentLiveRail({
   items,
   loading,
   loaded,
   error,
   refetch,
+  nowNext,
+  epgOffset,
   sourceById,
+  manySources,
   play,
-}: RailQueryProps & { items: readonly RecentEntry[]; sourceById: ReadonlyMap<string, Source>; play: PlayFn }) {
+}: RailQueryProps & {
+  items: readonly RecentEntry[];
+  nowNext: RpcResult<'epg.nowNext'> | undefined;
+  epgOffset: number;
+  sourceById: ReadonlyMap<string, Source>;
+  manySources: boolean;
+  play: PlayFn;
+}) {
   const { t } = useTranslation('shell');
   return (
     <DashboardRail<RecentEntry>
@@ -1059,18 +1081,24 @@ const RecentLiveRail = memo(function RecentLiveRail({
       getKey={refKey}
       cardWidth={232}
       skeletonAspect={16 / 9}
-      renderCard={(r, rail) => (
-        <ChannelCard
-          rail={rail}
-          name={r.snapshot.title}
-          logoUrl={r.snapshot.posterUrl}
-          sourceName={sourceById.get(r.ref.sourceId)?.name}
-          isRadio={r.ref.contentType === 'radio'}
-          ariaLabel={t('playTitle', { title: r.snapshot.title })}
-          onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
-          channel={snapshotChannel(r.ref, r.snapshot)}
-        />
-      )}
+      renderCard={(r, rail) => {
+        const nn = nowNext?.[itemKey(r.ref)];
+        return (
+          <ChannelCard
+            rail={rail}
+            name={r.snapshot.title}
+            logoUrl={r.snapshot.posterUrl}
+            now={nn?.now?.title}
+            nowProgress={programmeProgress(nn?.now?.start, nn?.now?.end, epgOffset)}
+            sourceName={manySources ? sourceById.get(r.ref.sourceId)?.name : undefined}
+            showSourceWithNow={manySources}
+            isRadio={r.ref.contentType === 'radio'}
+            ariaLabel={t('playTitle', { title: r.snapshot.title })}
+            onPlay={() => play({ ref: r.ref, title: r.snapshot.title, posterUrl: r.snapshot.posterUrl })}
+            channel={snapshotChannel(r.ref, r.snapshot)}
+          />
+        );
+      }}
     />
   );
 });

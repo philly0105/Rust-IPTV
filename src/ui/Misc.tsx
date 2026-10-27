@@ -296,8 +296,11 @@ export interface ProgressBarProps {
    * `accent` (default) fills in the mark tone. `glass`: for every bar drawn on artwork or video
    * (C8), a dark glass track and the bright glass accent, in every theme. A theme colour never
    * sits on a picture, so a bar inside `CARD_ART`, a thumbnail or the hero takes `glass`.
+   * `quiet` and `glass-quiet`: a neutral fill on the same two tracks, for progress that is not
+   * the user's own (how far a programme on air has run) in a row of many, where amber on every
+   * card read as stripes and stopped meaning "here".
    */
-  tone?: 'accent' | 'success' | 'danger' | 'fg' | 'glass';
+  tone?: 'accent' | 'success' | 'danger' | 'fg' | 'quiet' | 'glass' | 'glass-quiet';
   size?: 'xs' | 'sm' | 'md';
 }
 
@@ -307,6 +310,17 @@ export interface ProgressBarProps {
  * artwork is: a see-through light track left the fill at 1.3:1 on pale art.
  */
 export const PROGRESS_TRACK = { theme: 'bg-surface-3', glass: 'bg-glass-strong' } as const;
+
+/** The fill per tone, exported with the tracks so contrast.test.ts checks what the bar draws. */
+export const PROGRESS_FILL = {
+  accent: 'bg-accent-mark',
+  success: 'bg-success',
+  danger: 'bg-danger',
+  fg: 'bg-fg',
+  quiet: 'bg-fg-subtle',
+  glass: 'bg-glass-accent',
+  'glass-quiet': 'bg-on-glass-muted',
+} as const;
 
 /**
  * A determinate or indeterminate bar. It reports a percentage (0 to 100) whatever `max` is, so a
@@ -324,7 +338,7 @@ export function ProgressBar({
   size = 'sm',
 }: ProgressBarProps) {
   const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-  const toneClass = { accent: 'bg-accent-mark', success: 'bg-success', danger: 'bg-danger', fg: 'bg-fg', glass: 'bg-glass-accent' }[tone];
+  const toneClass = PROGRESS_FILL[tone];
   return (
     <div
       role="progressbar"
@@ -336,7 +350,7 @@ export function ProgressBar({
       aria-valuetext={indeterminate ? undefined : valueText}
       className={cn(
         'relative w-full overflow-hidden rounded-full',
-        tone === 'glass' ? PROGRESS_TRACK.glass : PROGRESS_TRACK.theme,
+        tone === 'glass' || tone === 'glass-quiet' ? PROGRESS_TRACK.glass : PROGRESS_TRACK.theme,
         { xs: 'h-0.75', sm: 'h-1.5', md: 'h-2.5' }[size],
         className,
       )}

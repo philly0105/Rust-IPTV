@@ -4,6 +4,8 @@
 
 /* `dark:` follows the theme provider (html[data-theme]), not the OS. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+/* `light:` the same way, for the few things the light theme draws differently (Home's hero). */
+@custom-variant light (&:where([data-theme='light'], [data-theme='light'] *));
 
 /*
  * Tailwind 4 theme mapping (SPEC C10). Values here are the dark defaults so

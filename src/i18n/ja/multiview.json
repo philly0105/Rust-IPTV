@@ -33,7 +33,6 @@
   "clearWall": "ウォールを空にする",
   "emptyTitle": "最大4チャンネルを同時に視聴",
   "emptyBody": "ライブチャンネルを2〜4つ選んでください。すべてのタイルが再生され、クリックしたタイルの音声が流れます。",
-  "pickChannels": "チャンネルを選ぶ",
   "quickPicksTitle": "最近見たチャンネルとお気に入り",
   "moreChannels": "ほかのチャンネル…",
   "slotMoreLabel": "位置 {{slot}} のほかのチャンネル",

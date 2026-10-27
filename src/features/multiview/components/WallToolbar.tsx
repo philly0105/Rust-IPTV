@@ -118,7 +118,18 @@ export function WallToolbar({
         <span>{full ? t('wallFull') : t('addChannel')}</span>
       </button>
 
-      {/* Sound, full screen and clear act on tiles: an empty wall leaves them out. */}
+      {/* Sound, full screen and clear act on tiles: an empty wall leaves them out, and says how
+          the wall works in their place. The first free slot carries the same line for screen
+          readers, and shows it on a stacked wall, where this line is left out (FreeSlot). */}
+      {count === 0 ? (
+        <p
+          aria-hidden
+          data-testid="multiview-toolbar-hint"
+          className="ms-auto hidden min-w-[14rem] flex-1 text-end text-caption text-balance text-fg-muted @[45rem]/stage:block"
+        >
+          {t('emptyBody')}
+        </p>
+      ) : null}
       {count > 0 ? (
         <div className="ms-auto flex items-center gap-1">
           <Tooltip content={muted ? t('unmuteAll') : t('muteAll')} tone={overlay ? 'glass' : 'default'} describe={false}>

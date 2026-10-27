@@ -33,7 +33,6 @@
   "clearWall": "Vaciar el muro",
   "emptyTitle": "Mira hasta cuatro canales a la vez",
   "emptyBody": "Elige de dos a cuatro canales en vivo. Todos los mosaicos se reproducen; el que pulses tiene el sonido.",
-  "pickChannels": "Elegir canales",
   "quickPicksTitle": "Canales recientes y favoritos",
   "moreChannels": "Más canales…",
   "slotMoreLabel": "Más canales para la posición {{slot}}",

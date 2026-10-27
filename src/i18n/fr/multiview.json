@@ -33,7 +33,6 @@
   "clearWall": "Vider le mur",
   "emptyTitle": "Regardez jusqu’à quatre chaînes à la fois",
   "emptyBody": "Choisissez deux à quatre chaînes en direct. Chaque vignette joue ; celle que vous cliquez a le son.",
-  "pickChannels": "Choisir des chaînes",
   "quickPicksTitle": "Chaînes récentes et favorites",
   "moreChannels": "Plus de chaînes…",
   "slotMoreLabel": "Plus de chaînes pour l’emplacement {{slot}}",

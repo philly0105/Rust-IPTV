@@ -59,7 +59,7 @@ export interface FreeSlotProps {
   disabled: boolean;
   /** The slot the next channel goes into (tiles fill the slots in order): it offers the quick picks. */
   next: boolean;
-  /** The wall is empty: the next slot also says what the wall does, where there is room. */
+  /** The wall is empty: the next slot also says how the wall works. */
   intro: boolean;
   picks: readonly QuickPick[];
   picksLoading: boolean;
@@ -78,11 +78,13 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
   const { t } = useTranslation('multiview');
   const number = slot + 1;
   const hintId = `multiview-slot-hint-${number}`;
-  // A fitted slot's width also sets its height, so the line shows only in a large slot (a 2x2
-  // slot on a desktop window, the large 1+3 slot); the header says what the page is for anyway.
-  const hint = (extra: string) =>
-    next && intro ? (
-      <span id={hintId} data-testid="multiview-empty-hint" className={cn('hidden max-w-[28rem] text-center text-sm font-normal text-pretty text-fg-muted @[32rem]/slot:block', extra)}>
+  // The first slot of an empty wall says how the wall works, and is described by it. On a fitted
+  // wall the toolbar shows the line in the room sound and clear take later (WallToolbar), so here
+  // it is for screen readers only; the same 45rem stage switches both.
+  const explains = next && intro;
+  const hint = (shown: string) =>
+    explains ? (
+      <span id={hintId} data-testid="multiview-empty-hint" className={cn('max-w-[28rem] text-center text-sm font-normal text-pretty text-fg-muted', shown)}>
         {t('emptyBody')}
       </span>
     ) : null;
@@ -99,7 +101,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
         data-slot={number}
         disabled={disabled}
         aria-label={t('slotEmptyLabel', { slot: number })}
-        aria-describedby={next && intro ? hintId : undefined}
+        aria-describedby={explains ? hintId : undefined}
         onClick={() => onAdd(slot)}
         className={cn(
           FRAME,
@@ -114,7 +116,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
       >
         <SlotNumber number={number} />
         <AddFace label={t('addChannel')} />
-        {hint('mt-1')}
+        {hint('sr-only')}
       </button>
     );
   }
@@ -125,6 +127,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
     <div
       role="group"
       aria-label={t('slotEmptyLabel', { slot: number })}
+      aria-describedby={explains ? hintId : undefined}
       data-testid="multiview-next-slot"
       data-slot={number}
       onClick={(e) => {
@@ -142,6 +145,9 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
       )}
     >
       <SlotNumber number={number} />
+      {/* Stacked, the toolbar has no room for the line, and the slot takes its content's height,
+          so it shows here at any width; the padding keeps it clear of the slot number. */}
+      {hint('self-center px-12 pt-3 @[45rem]/stage:sr-only')}
       {/* Under 16rem a row would show a few letters of a name, and IPTV names share their first
           ones ("US| NBA TV FHD", "US| NBC FHD"): the slot is a plain frame then, like the others. */}
       <button
@@ -161,9 +167,6 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
       {/* The slot number takes the start corner, so the rows start after it where they would
           reach it, and use the rest of the slot's width. */}
       <div data-testid="multiview-next-slot-picks" className="hidden flex-1 flex-col items-center justify-center p-3 ps-10 @[16rem]/slot:flex @[23rem]/slot:ps-3">
-        {/* Stacked, the slot takes its content's height, so the line fits at any width; the
-            padding keeps it clear of the slot number. */}
-        {hint('mb-3 px-9 @max-2xl/wall:block')}
         <div className="flex w-full max-w-[18rem] min-w-0 flex-col gap-1.5">
           {picksLoading ? (
             <div aria-hidden data-testid="multiview-quick-picks-skeleton" className="flex flex-col gap-1 motion-safe:animate-pulse">

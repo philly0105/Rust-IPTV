@@ -33,7 +33,6 @@
   "clearWall": "清空電視牆",
   "emptyTitle": "最多同時看四個頻道",
   "emptyBody": "選擇兩到四個直播頻道。每個畫面都會播放，你點選的那個畫面出聲。",
-  "pickChannels": "選擇頻道",
   "quickPicksTitle": "最近觀看和我的最愛頻道",
   "moreChannels": "更多頻道…",
   "slotMoreLabel": "第 {{slot}} 格的更多頻道",

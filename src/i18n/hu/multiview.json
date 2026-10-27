@@ -33,7 +33,6 @@
   "clearWall": "Fal ürítése",
   "emptyTitle": "Akár négy csatorna egyszerre",
   "emptyBody": "Válasszon két-négy élő csatornát. Minden csempe lejátszik; a hangot az kapja, amelyikre kattint.",
-  "pickChannels": "Csatornák kiválasztása",
   "quickPicksTitle": "Legutóbbi és kedvenc csatornák",
   "moreChannels": "További csatornák…",
   "slotMoreLabel": "További csatornák ({{slot}}. hely)",

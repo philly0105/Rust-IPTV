@@ -103,7 +103,7 @@ Opening the wall stops the main player, which clears its `downloads.playback` re
 | Empty | Loading | A skeleton. |
 | Empty | Load failed | `ErrorState` with retry. |
 | Empty | None | `EmptyState` linking to `/sources`. |
-| Empty | Present | The toolbar with layouts and add, and the free frames. The header's subtitle says what the page does, and the first frame, where there is room (32rem of frame width), says how the wall works above its quick picks. |
+| Empty | Present | The toolbar with layouts and add, and the free frames. The header's subtitle says what the page does, and the toolbar says how the wall works where sound, full screen and clear go once a tile is up. On a stacked wall (a stage under 45rem) the toolbar has no room for the line, so the first frame shows it above its quick picks instead; either way it is the first frame's description for screen readers. |
 | Has tiles | | The toolbar (layouts, add, mute, volume, full screen, clear), banners and the wall. |
 
 The toolbar is there from the first visit, so the layout choice keeps its place and look when the first tile goes up; mute, volume, full screen and clear join it with the first tile.

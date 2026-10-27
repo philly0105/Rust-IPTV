@@ -260,7 +260,7 @@ test.describe.serial('multi-view', () => {
     // The empty wall: free frames keep their "Add channel" label clear of the next frame.
     await page.evaluate((k) => localStorage.removeItem(k), WALL_KEY);
     await page.reload();
-    await expect(page.getByTestId('multiview-empty')).toBeVisible();
+    await expect(page.getByTestId('multiview-toolbar')).toBeVisible();
     await expectSlotsTiled(page, 4);
     // The layout choice fits the phone: no button past the viewport, no label spilling out of its pill.
     for (const l of ['1x2', '2x2', '1+3']) {
@@ -305,11 +305,17 @@ test.describe.serial('multi-view', () => {
     await page.evaluate((k) => localStorage.removeItem(k), WALL_KEY);
     await page.goto('/multiview');
 
-    const empty = page.getByTestId('multiview-empty');
-    await expect(empty).toBeVisible();
-    await expect(empty.getByRole('heading', { name: 'Watch up to four channels at once' })).toBeVisible();
+    // An empty wall: the header says what the page is for, the toolbar is there from the start
+    // and says how the wall works where sound and clear go later.
+    const toolbar = page.getByTestId('multiview-toolbar');
+    await expect(toolbar).toBeVisible();
+    await expect(page.getByTestId('page-subtitle')).toHaveText('Watch up to four channels at once');
+    await expect(toolbar.getByTestId('multiview-toolbar-hint')).toHaveText(
+      'Pick two to four live channels. Every tile plays; the one you click has the sound.',
+    );
+    await expect(page.getByTestId('multiview-tile')).toHaveCount(0);
 
-    await page.getByTestId('multiview-pick').click();
+    await toolbar.getByTestId('multiview-add').click();
     const picker = page.getByTestId('multiview-picker');
     await expect(picker).toBeVisible();
     await picker.getByRole('searchbox').or(picker.getByRole('textbox', { name: 'Search channels' })).first().fill('Wall');
@@ -323,7 +329,9 @@ test.describe.serial('multi-view', () => {
     await expect(picker).toBeHidden();
 
     await expect(page.getByTestId('multiview-tile')).toHaveCount(2);
-    await expect(page.getByTestId('multiview-empty')).toHaveCount(0);
+    await expect(page.getByTestId('page-subtitle')).toHaveText('2 of 4 on the wall');
+    await expect(toolbar.getByTestId('multiview-toolbar-hint')).toHaveCount(0);
+    await expect(toolbar.getByTestId('multiview-clear')).toBeVisible();
 
     // Two tiles fit side by side.
     await page.getByTestId('multiview-layout-1x2').click();

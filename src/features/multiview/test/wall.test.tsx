@@ -647,10 +647,21 @@ describe('full screen focus (L1-live-18)', () => {
 describe('empty wall', () => {
   it('explains multi-view, and has the one toolbar from the start', async () => {
     renderPage();
-    expect((await screen.findByTestId('multiview-empty-hint')).textContent).toBe(
-      'Pick two to four live channels. Every tile plays; the one you click has the sound.',
-    );
-    expect(screen.getAllByTestId('multiview-empty-slot')).toHaveLength(4);
+    const body = 'Pick two to four live channels. Every tile plays; the one you click has the sound.';
+    await screen.findByTestId('multiview-wall');
+    await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
+    // A fitted wall says how it works in the toolbar, where sound and clear go later, at any
+    // window size; it is the first slot's description for screen readers.
+    const line = screen.getByTestId('multiview-toolbar-hint');
+    expect(line.textContent).toBe(body);
+    expect(line.getAttribute('aria-hidden')).toBe('true');
+    expect(line.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', '@[45rem]/stage:block']));
+    const hint = screen.getByTestId('multiview-empty-hint');
+    expect(hint.textContent).toBe(body);
+    expect(hint.className.split(/\s+/)).toContain('sr-only');
+    const slots = screen.getAllByTestId('multiview-empty-slot');
+    expect(slots[0]!.getAttribute('aria-describedby')).toBe(hint.id);
+    expect(slots).toHaveLength(4);
     // The same layout control as with tiles up, and only one of it.
     expect(screen.getAllByRole('radiogroup', { name: 'Layout' })).toHaveLength(1);
     fireEvent.click(within(screen.getByTestId('multiview-toolbar')).getByTestId('multiview-layout-1x2'));
@@ -723,6 +734,11 @@ describe('empty wall', () => {
     expect(screen.queryByTestId('multiview-quick-picks')).toBeNull();
     // The picker is a click away while they load.
     expect(screen.getByRole('button', { name: 'More channels for slot 1' })).toBeTruthy();
+    // The slot is described by how the wall works: shown when stacked, for screen readers when
+    // fitted, where the toolbar shows it.
+    const hint = screen.getByTestId('multiview-empty-hint');
+    expect(screen.getByRole('group', { name: 'Slot 1: add a channel' }).getAttribute('aria-describedby')).toBe(hint.id);
+    expect(hint.className.split(/\s+/)).toContain('@[45rem]/stage:sr-only');
 
     act(() => answer([{ ref: channel(1, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'Channel 1', contentType: 'live' } }]));
     const list = await screen.findByTestId('multiview-quick-picks');
@@ -888,6 +904,9 @@ describe('stacked wall', () => {
     expect(stage.className.split(/\s+/)).toContain('@container/stage');
     const choice = within(screen.getByTestId('multiview-toolbar')).getByRole('radiogroup', { name: 'Layout' });
     expect(choice.parentElement!.className.split(/\s+/)).toEqual(['hidden', '@[45rem]/stage:flex']);
+    // With a tile up, the toolbar's how-it-works line has made way for sound and clear.
+    expect(screen.queryByTestId('multiview-toolbar-hint')).toBeNull();
+    expect(screen.queryByTestId('multiview-empty-hint')).toBeNull();
   });
 
   it('moves focus only between slots that are drawn', async () => {

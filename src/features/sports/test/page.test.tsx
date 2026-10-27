@@ -516,10 +516,15 @@ describe('sports page', () => {
     const c = card(g);
     const list = within(c).getByRole('list', { name: 'Streams for Boston Celtics at New York Knicks' });
     let rows = within(list).getAllByTestId('sports-stream');
-    // One row a card until Show all.
+    // One row a card until Show all, a small "+4" at the end of that row's metadata rather than a row of its own.
     expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide']);
-    fireEvent.click(within(c).getByRole('button', { name: 'Show all 5 streams' }));
+    const more = within(rows[0]!).getByRole('button', { name: 'Show all 5 streams' });
+    expect(more.textContent).toBe('+4');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(more);
     rows = within(list).getAllByTestId('sports-stream');
+    // The toggle stays put in the first row, so the same press closes the list again.
+    expect(within(rows[0]!).getByTestId('sports-show-all').getAttribute('aria-expanded')).toBe('true');
     expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide', 'event', 'network', 'network', 'network']);
     expect(within(rows[0]!).getByText('In guide')).toBeTruthy();
     // The reason is quiet text, not a badge: only the regional warning is one.
@@ -533,8 +538,9 @@ describe('sports page', () => {
     expect(within(rows[1]!).getByText('ESPN HD')).toBeTruthy();
     expect(within(c).queryByTestId('sports-stream-source')).toBeNull();
 
-    fireEvent.click(within(c).getByRole('button', { name: 'Show fewer' }));
+    fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Show fewer' }));
     expect(within(list).getAllByTestId('sports-stream')).toHaveLength(1);
+    expect(within(list).getByRole('button', { name: 'Show all 5 streams' })).toBeTruthy();
   });
 
   it('names the source of each stream when there are several', async () => {

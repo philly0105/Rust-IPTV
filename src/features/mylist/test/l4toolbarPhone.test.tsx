@@ -37,4 +37,30 @@ describe('MyListToolbar on phones (L4-vod-5)', () => {
     expect(wrapper).toEqual(expect.arrayContaining(['ms-auto', 'min-w-0', 'flex-1', 'sm:flex-none']));
     expect(screen.getByRole('switch', { name: 'Hide watched' })).toBeTruthy();
   });
+
+  it('draws every control at the md height of the pill tabs and the view switch', () => {
+    render(
+      <MyListToolbar
+        filter="all"
+        sort="order"
+        hideWatched={false}
+        counts={{ all: 2, movie: 1, series: 1 }}
+        watchedCount={0}
+        query=""
+        onQuery={noop}
+        onFilter={noop}
+        onSort={noop}
+        onHideWatched={noop}
+        onView={noop}
+      />,
+    );
+    const classes = (el: Element) => el.className.split(/\s+/);
+    // The field and the menu are h-10, as tall as a pill tab's track and the md segmented control.
+    expect(classes(screen.getByTestId('mylist-search'))).toContain('h-10');
+    expect(classes(screen.getByTestId('mylist-sort'))).toContain('h-10');
+    expect(classes(screen.getByTestId('mylist-sort'))).not.toContain('h-9');
+    // The view switch keeps the default (md) size: no compact track.
+    const view = screen.getByRole('radiogroup', { name: 'View' });
+    expect(classes(view)).not.toContain('p-0.5');
+  });
 });

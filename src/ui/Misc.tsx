@@ -100,12 +100,21 @@ export interface KbdProps {
   combo?: string;
   children?: ReactNode;
   className?: string;
+  /**
+   * `md` (default) for key caps in running text, lists and dialogs; `sm` for a cap inside a
+   * 30 px control (the header's search slot): 19 px with a 10 px label, the tooltip's size.
+   */
+  size?: 'sm' | 'md';
 }
 
-export function Kbd({ combo, children, className }: KbdProps) {
+const KBD_SIZES = { sm: 'h-5 min-w-5 px-1 text-2xs', md: 'h-6 min-w-6 px-1.5 text-xs' } as const;
+
+export function Kbd({ combo, children, className, size = 'md' }: KbdProps) {
   const { t } = useTranslation('common');
-  const keyClass =
-    'inline-flex h-6 min-w-6 items-center justify-center rounded-xs border border-edge border-b-2 bg-surface-2 px-1.5 font-sans text-xs font-medium text-fg-muted';
+  const keyClass = cn(
+    'inline-flex items-center justify-center rounded-xs border border-edge border-b-2 bg-surface-2 font-sans font-medium text-fg-muted',
+    KBD_SIZES[size],
+  );
   if (combo) {
     const tr: KeyTranslate = (key) => t(key);
     const keys = comboKeys(combo, tr);
@@ -367,12 +376,18 @@ export function WatchedChip({ className, testId }: WatchedChipProps) {
   );
 }
 
-/** Classes of a filter chip, for a Link or a custom element drawn as one (`FilterChip` is the button). */
+/**
+ * Classes of a filter chip, for a Link or a custom element drawn as one (`FilterChip` is the button).
+ * A chip is as tall as an `sm` button or field (h-8), so a row of chips lines up with the "All
+ * categories" button or the sort menu beside it, and its label is body text in the full text tone:
+ * a caption in the muted tone read as a disabled tag rather than something to press. A count after
+ * the label stays quiet (FilterChip).
+ */
 export function filterChipClass(on: boolean, className?: string): string {
   return cn(
-    'inline-flex h-7 min-w-0 shrink-0 items-center gap-1.5 rounded-full border px-3 text-caption font-medium motion-safe:transition-colors',
+    'inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-body-sm font-medium motion-safe:transition-colors',
     // A chosen filter is inverted, never amber: amber marks actions and progress.
-    on ? 'border-transparent bg-fg text-bg hover:bg-fg/90' : 'border-edge bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg active:bg-pressed',
+    on ? 'border-transparent bg-fg text-bg hover:bg-fg/90' : 'border-edge bg-surface-2 text-fg hover:bg-surface-3 active:bg-pressed',
     className,
   );
 }

@@ -361,6 +361,9 @@ describe('category pages', () => {
     expect(chips.at(-1)!.compareDocumentPosition(all) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(all.className).not.toContain('bg-fg');
     expect(all.nextElementSibling?.getAttribute('aria-label')).toMatch(/categories/i);
+    // One height across the row: the chips, All categories and Manage are all h-8, as tall as an sm button.
+    for (const el of [chips[0]!, all, all.nextElementSibling!]) expect(el.className.split(' ')).toContain('h-8');
+    expect(all.nextElementSibling!.className.split(' ')).not.toContain('h-10');
   });
 
   it('below md the source line leads the chip row beside All categories, and the chips and Manage take the next line', async () => {

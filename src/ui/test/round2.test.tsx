@@ -356,9 +356,13 @@ describe('FilterChip', () => {
     for (const chip of [off, on]) {
       expect(chip.className).not.toMatch(/accent/);
       expect(chip.className).toContain('rounded-full');
-      expect(chip.className).toContain('h-7');
+      // As tall as an sm button or field, so a chip row lines up with the controls beside it.
+      expect(chip.className.split(' ')).toEqual(expect.arrayContaining(['h-8', 'text-body-sm']));
     }
     expect(off.className).toContain('bg-surface-2');
+    // A resting chip's label is in the full text tone (the muted one read as a disabled tag); its count stays quiet.
+    expect(off.className.split(' ')).toContain('text-fg');
+    expect(off.className).not.toMatch(/(^| )text-fg-muted( |$)/);
     expect((off.querySelector('span[aria-hidden]') as HTMLElement).style.background).toBe('rgb(71, 189, 128)');
     fireEvent.click(off);
     expect(onClick).toHaveBeenCalledTimes(1);

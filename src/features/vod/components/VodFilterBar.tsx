@@ -141,7 +141,7 @@ export function DecadeChips({ filter, className }: { filter: YearFilter; classNa
         {t('yearAll')}
       </FilterChip>
       {loading
-        ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-7 w-16 shrink-0 rounded-full" />)
+        ? [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-18 shrink-0 rounded-full" />)
         : chips.map((c) => {
             const on = activeDecade === c.decade;
             const name = t('decade', { decade: c.decade });

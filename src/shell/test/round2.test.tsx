@@ -230,6 +230,21 @@ describe('the header search slot', () => {
     expect(trigger.className).toContain('border-border');
     expect(screen.queryByTestId('header-palette')).toBeNull();
   });
+
+  it('wears the compact key caps, so they sit inside the 30 px field with room around them', async () => {
+    renderRoutes(routes(), '/favorites');
+    await screen.findByText('favorites page');
+    const caps = [...screen.getByTestId('open-palette').querySelectorAll('kbd')];
+    expect(caps.map((k) => k.textContent)).toEqual(['Ctrl', 'K']);
+    for (const k of caps) expect(k.className.split(' ')).toEqual(expect.arrayContaining(['h-5', 'text-2xs']));
+    cleanup();
+    renderRoutes(routes(), '/searching');
+    await screen.findByText('movies page');
+    const slot = screen.getByRole('searchbox', { name: 'Search movies' }).parentElement!.parentElement!;
+    const hint = [...slot.querySelectorAll('kbd')];
+    expect(hint.map((k) => k.textContent)).toEqual(['Ctrl', 'F']);
+    for (const k of hint) expect(k.className.split(' ')).toEqual(expect.arrayContaining(['h-5', 'text-2xs']));
+  });
 });
 
 describe('the rail', () => {

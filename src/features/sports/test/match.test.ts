@@ -344,10 +344,11 @@ describe('team channels', () => {
     const index = ['NBA: BOSTON CELTICS SD', 'US: ESPN HD', 'NBA: BOSTON CELTICS ᴴᴰ', 'NBA: NEW YORK KNICKS ᴴᴰ', 'NBA 05: Knicks @ Celtics', 'NBA: MIAMI HEAT ᴴᴰ'].map(
       (n) => indexed(n),
     );
-    // ESPN carries it nationally, so the teams' own feeds may be blacked out.
+    // ESPN carries it nationally, so the teams' own feeds may be blacked out. ESPN's name says HD, the event
+    // channel's no quality.
     expect(brief(matchGame(g, index, NONE))).toEqual([
-      ['NBA 05: Knicks @ Celtics', 'event', false],
       ['US: ESPN HD', 'network', false],
+      ['NBA 05: Knicks @ Celtics', 'event', false],
       ['NBA: BOSTON CELTICS ᴴᴰ', 'team', true],
       ['NBA: NEW YORK KNICKS ᴴᴰ', 'team', true],
       ['NBA: BOSTON CELTICS SD', 'team', true],
@@ -390,6 +391,21 @@ describe('team channels', () => {
     for (const n of ['NBA: LEAGUE PASS 1', 'NBA: BOSTON CELTICS / MIAMI HEAT', 'NBA: CELTICS PREGAME', 'BOSTON CELTICS TV', 'NBA TV', 'NBA 13 :']) {
       expect(isTeamChannel(indexed(n), NBA_GAME), n).toBe(false);
     }
+  });
+
+  it('may be blacked out for a game a streaming service holds alone, unlike one MLB.TV or League Pass also carries', () => {
+    const prime = indexed('US: PRIME VIDEO 1');
+    const programs = guide([[prime, [programme('NBA on Prime', '2026-10-23T23:00Z', '2026-10-24T01:30Z', 'The New York Knicks visit the Boston Celtics.')]]]);
+    const index = [indexed('NBA: BOSTON CELTICS ᴴᴰ'), indexed('NBA: NEW YORK KNICKS ᴴᴰ'), prime, indexed('NBA 05: Knicks @ Celtics')];
+    // NBA_GAME is on Prime Video only: the teams' feeds come after the streams sure to show it, whatever their names say.
+    expect(brief(matchGame(NBA_GAME, index, programs))).toEqual([
+      ['US: PRIME VIDEO 1', 'guide', false],
+      ['NBA 05: Knicks @ Celtics', 'event', false],
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', true],
+      ['NBA: NEW YORK KNICKS ᴴᴰ', 'team', true],
+    ]);
+    const mlbTv = { ...MLB_GAME, broadcasts: [{ name: 'MLB.TV', market: 'national', kind: 'streaming' }] } satisfies Game;
+    expect(brief(matchGame(mlbTv, [indexed('US: MLB BOSTON RED SOX ᴿᴬᵂ')], NONE))).toEqual([['US: MLB BOSTON RED SOX ᴿᴬᵂ', 'team', false]]);
   });
 
   it('give way to a guide match', () => {
@@ -487,8 +503,8 @@ describe('network channels', () => {
   it('takes ESPN, not ESPN2, ESPNU, ESPNews, ESPN+ or ESPN Deportes', () => {
     const index = ['ESPN 2', 'ESPN2 HD', 'ESPNU', 'ESPNews', 'ESPN+ 01', 'ESPN Deportes', 'US: ESPN HD', 'ABC 7 New York', 'Disney+ 3'].map((n) => indexed(n));
     expect(brief(matchGame(espnGame, index, NONE))).toEqual([
-      ['ABC 7 New York', 'network', false],
       ['US: ESPN HD', 'network', false],
+      ['ABC 7 New York', 'network', false],
     ]);
   });
 
@@ -509,7 +525,7 @@ describe('network channels', () => {
     const espn = ['BR: ESPN', 'NL: ESPN 1', 'LATAM| ESPN Norte', 'ESPN Brasil', 'MX: ESPN 2 HD', 'US: ESPN FHD', 'ESPN HD'].map((n) => indexed(n));
     // The group's tag counts when the name has none.
     const latam = toIndexed(channel('ESPN', 's1', { categoryName: 'LATAM| DEPORTES' }), { id: 's1', kind: 'xtream', name: 'S1' }, true);
-    expect(names(matchGame(pitt, [...espn, latam], NONE))).toEqual(['ESPN HD', 'US: ESPN FHD']);
+    expect(names(matchGame(pitt, [...espn, latam], NONE))).toEqual(['US: ESPN FHD', 'ESPN HD']);
     const tnt = game('cfb', team('BAY', 'Baylor', 'Bears', 'Baylor'), team('KU', 'Kansas', 'Jayhawks', 'Kansas'), '2026-10-24T19:30Z', { broadcasts: national('TNT') });
     expect(names(matchGame(tnt, ['BR: TNT', 'TNT Brasil', 'US: TNT'].map((n) => indexed(n)), NONE))).toEqual(['US: TNT']);
     expect(names(matchGame(espnGame, ['AU: ABC', 'CA| ABC SPARK', 'ABC 7 New York'].map((n) => indexed(n)), NONE))).toEqual(['ABC 7 New York']);
@@ -549,6 +565,62 @@ describe('network channels', () => {
     expect(brief(matchGame(espnGame, index, programs(index)))).toEqual([
       ['US: ESPN', 'guide', false],
       ['BR: ESPN', 'guide', false],
+    ]);
+  });
+
+  it("leaves out a station's news stream and its copies on free streaming lineups", () => {
+    const ws = game('mlb', team('MIL', 'Milwaukee', 'Brewers'), team('TB', 'Tampa Bay', 'Rays'), '2026-10-28T00:00Z', { broadcasts: national('Fox') });
+    const index = ['PRIME: FOX 13 TAMPA BAY ᴿᴬᵂ', 'RK: FOX 6 MILWAUKEE ᴿᴬᵂ', 'PRIME: FOX GREEN BAY NEWS (WLUK) ᴿᴬᵂ', 'US: FOX 13 (WTVT) TAMPA HD'].map((n) => indexed(n));
+    expect(index.map((r) => [r.network, r.spinOff])).toEqual([
+      [null, true],
+      [null, true],
+      [null, true],
+      ['fox', false],
+    ]);
+    expect(names(matchGame(ws, index, NONE))).toEqual(['US: FOX 13 (WTVT) TAMPA HD']);
+    // Not by a call sign in its name either.
+    const rockets = game('nba', team('OKC', 'Oklahoma City', 'Thunder'), team('HOU', 'Houston', 'Rockets'), '2026-10-16T00:30Z', {
+      broadcasts: [{ name: 'KTRK (ABC)', market: 'home', kind: 'tv' }],
+    });
+    const ktrk = ['RK: KTRK ABC13 HOUSTON ᴿᴬᵂ', 'US: ABC 13 (KTRK) HOUSTON HD'].map((n) => indexed(n));
+    expect(names(matchGame(rockets, ktrk, NONE))).toEqual(['US: ABC 13 (KTRK) HOUSTON HD']);
+    // A news channel the avoid lists keep from its network is no station either.
+    const suns = game('nba', team('PHX', 'Phoenix', 'Suns'), team('LAL', 'Los Angeles', 'Lakers'), '2026-10-16T02:00Z', {
+      broadcasts: [{ name: "Arizona's Family CBS5", market: 'away', kind: 'tv' }],
+    });
+    const kpho = ['US: CBS NEWS PHOENIX (KPHO) ᴿᴬᵂ', 'US: CBS 5 (KPHO) PHOENIX HD'].map((n) => indexed(n));
+    expect(names(matchGame(suns, kpho, NONE))).toEqual(['US: CBS 5 (KPHO) PHOENIX HD']);
+    // Nor through its guide, which is its station's, mapped by name.
+    const copy = indexed('PRIME: FOX 13 TAMPA BAY ᴿᴬᵂ');
+    const programs = guide([[copy, [programme('2026 World Series', '2026-10-28T00:00Z', '2026-10-28T03:00Z', 'Milwaukee Brewers at Tampa Bay Rays.')]]]);
+    expect(matchGame(ws, [copy], programs)).toEqual([]);
+  });
+
+  it("never takes another league's slot channel for the network it carries", () => {
+    const ws = game('mlb', team('MIL', 'Milwaukee', 'Brewers'), team('TB', 'Tampa Bay', 'Rays'), '2026-10-28T00:00Z', { broadcasts: national('Fox') });
+    const index = ['NCAAF 06: FOX', 'NFL | 02 - FOX', 'US| FOX HD'].map((n) => indexed(n));
+    expect(names(matchGame(ws, index, NONE))).toEqual(['US| FOX HD']);
+    const college = game('cfb', GEORGIA, TEXAS, '2026-10-24T16:00Z', { broadcasts: national('FOX') });
+    expect(names(matchGame(college, index, NONE))).toEqual(['US| FOX HD', 'NCAAF 06: FOX']);
+    // Nor is such a slot the network's own feed, which would keep its stations elsewhere out.
+    const elsewhere = ['US: FOX 5 (WNYW) NEW YORK HD', 'US: FOX 11 (KTTV) LOS ANGELES HD', 'US: FOX 2 (WJBK) DETROIT HD'].map((n) => indexed(n));
+    expect(names(matchGame(ws, [indexed('NCAAF 06: FOX'), indexed('US: FOX NFL ᴴᴰ'), ...elsewhere], NONE))).toHaveLength(3);
+  });
+
+  it("keeps three of a national game's out-of-market stations even when each one's guide names the game", () => {
+    const stations = ['US: ABC 7 (KMGH) DENVER HD', 'US: ABC 7 (WLS) CHICAGO HD', 'US: ABC 7 LITTLE ROCK AR (KATV)', 'US: ABC 7 OMAHA NE (KETV) HD', 'US: ABC 8 (WFAA) DALLAS HD'].map(
+      (n) => indexed(n),
+    );
+    const programs = guide(
+      stations.map((c): [IndexedChannel, EpgProgram[]] => [c, [programme('Dallas Cowboys at Philadelphia Eagles', '2026-10-27T00:15Z', '2026-10-27T03:15Z')]]),
+    );
+    // Dallas is a team's market. Of the four stations elsewhere, the three whose names say HD stay, not Little
+    // Rock's, though it comes before Omaha's in the index.
+    expect(brief(matchGame(espnGame, stations, programs))).toEqual([
+      ['US: ABC 7 (KMGH) DENVER HD', 'guide', false],
+      ['US: ABC 7 (WLS) CHICAGO HD', 'guide', false],
+      ['US: ABC 7 OMAHA NE (KETV) HD', 'guide', false],
+      ['US: ABC 8 (WFAA) DALLAS HD', 'guide', false],
     ]);
   });
 
@@ -666,8 +738,8 @@ describe('network channels', () => {
     const index = ['NBC Sports Philadelphia HD', 'NBC Sports Bay Area', 'MLB Network', 'MLB.TV 03', 'NBC Sports Boston'].map((n) => indexed(n));
     expect(brief(matchGame(phi, index, NONE))).toEqual([
       ['MLB Network', 'network', false],
-      ['NBC Sports Bay Area', 'network', true],
       ['NBC Sports Philadelphia HD', 'network', true],
+      ['NBC Sports Bay Area', 'network', true],
     ]);
     const okc = game('nba', team('OKC', 'Oklahoma City', 'Thunder'), team('HOU', 'Houston', 'Rockets'), '2026-10-16T00:30Z', {
       broadcasts: [...national('NBA TV'), { name: 'KSBI', market: 'away', kind: 'tv' }],
@@ -761,18 +833,45 @@ describe('order and dedup', () => {
     ]);
   });
 
-  it('lists backup feeds and SD copies after the main feeds of the same route', () => {
+  it('lists backup feeds and SD copies after the main feeds', () => {
     const g = game('nba', KNICKS, CELTICS, '2026-10-23T23:00Z', { broadcasts: national('ESPN') });
     const index = ['US| ESPN (Backup)', 'US| ESPN SD', 'US| ESPN HD', 'US| ESPN BKP 2', 'NBA 05: Knicks @ Celtics ALT', 'NBA 06: Knicks @ Celtics'].map((n) =>
       indexed(n),
     );
     expect(brief(matchGame(g, index, NONE))).toEqual([
+      ['US| ESPN HD', 'network', false],
       ['NBA 06: Knicks @ Celtics', 'event', false],
       ['NBA 05: Knicks @ Celtics ALT', 'event', false],
-      ['US| ESPN HD', 'network', false],
       ['US| ESPN (Backup)', 'network', false],
       ['US| ESPN BKP 2', 'network', false],
       ['US| ESPN SD', 'network', false],
+    ]);
+  });
+
+  it('puts the quality a name gives ahead of the route among the sure matches', () => {
+    const mnf = game('nfl', team('DAL', 'Dallas', 'Cowboys'), team('PHI', 'Philadelphia', 'Eagles'), '2026-10-27T00:15Z', { broadcasts: national('ESPN', 'ABC') });
+    const index = ['CA EN: TSN 1', 'US: ESPN HD', '4K: ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ', 'US: ESPN SD'].map((n) => indexed(n));
+    const programs = guide(
+      index.slice(0, 2).map((c): [IndexedChannel, EpgProgram[]] => [c, [programme('NFL Football', '2026-10-27T00:15Z', '2026-10-27T03:30Z', 'The Philadelphia Eagles host the Dallas Cowboys.')]]),
+    );
+    expect(brief(matchGame(mnf, index, programs))).toEqual([
+      ['4K: ESPN ᵁᴴᴰ ³⁸⁴⁰ᴾ', 'network', false],
+      ['US: ESPN HD', 'guide', false],
+      ['CA EN: TSN 1', 'guide', false],
+      ['US: ESPN SD', 'network', false],
+    ]);
+  });
+
+  it('lists feeds from abroad after every home feed, the regional ones too', () => {
+    const ws = game('mlb', team('MIL', 'Milwaukee', 'Brewers'), team('TB', 'Tampa Bay', 'Rays'), '2026-10-28T00:00Z', { broadcasts: national('Fox') });
+    const abroad = indexed('BH: ARENA PREMIUM 2 ᴿᴬᵂ');
+    const index = [abroad, indexed('US: MLB TAMPA BAY RAYS ᴿᴬᵂ'), indexed('US: FOX 13 (WTVT) TAMPA HD')];
+    const programs = guide([[abroad, [programme('Uživo: Tampa Bay Rays - Milwaukee Brewers, finale G4', '2026-10-28T00:00Z', '2026-10-28T03:00Z')]]]);
+    expect(brief(matchGame(ws, index, programs))).toEqual([
+      ['US: FOX 13 (WTVT) TAMPA HD', 'network', false],
+      // FOX carries it nationally: the Rays' own feed may be blacked out.
+      ['US: MLB TAMPA BAY RAYS ᴿᴬᵂ', 'team', true],
+      ['BH: ARENA PREMIUM 2 ᴿᴬᵂ', 'guide', false],
     ]);
   });
 
@@ -833,11 +932,11 @@ describe('candidates', () => {
       expect(matchGame(g, index, programs, now), g.key).toEqual(matchGameScanForTests(g, index, programs, now));
     }
     expect(brief(matchGame(espnGame, index, programs, now))).toEqual([
+      // ESPN lists NESN in Boston: the Celtics' feeds carry the game; the one whose name says HD goes first.
+      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
       ['Sports 1', 'guide', false],
       ['Sports 2', 'guide', false],
       ['NBA League Pass 07: Knicks @ Celtics', 'event', false],
-      // ESPN lists NESN in Boston: the Celtics' feeds carry the game, ahead of ESPN.
-      ['NBA: BOSTON CELTICS ᴴᴰ', 'team', false],
       ['NBA: CELTICS', 'team', false],
       ['US: ESPN', 'network', false],
       ['NESN', 'network', true],

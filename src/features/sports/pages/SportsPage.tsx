@@ -3,8 +3,9 @@
  * the user's channels that carry each one (lib/match.ts).
  *
  * The controls sit together at the top: the league tabs with each league's count for the day, the
- * "My teams" filter (once a team is followed from a card's menu) and the "With streams" filter, and the
- * Eastern day ESPN files games under (a week either way). The header's search field narrows every
+ * "My teams" filter (once a team is followed from a card's menu), the "With streams" filter, the "1080p+"
+ * quality filter (Live TV's own, which hides lower qualities everywhere), and the Eastern day ESPN files
+ * games under (a week either way). The header's search field narrows every
  * section to the games whose teams or networks it names. The league (`?league=nba`) and the day
  * (`?day=YYYY-MM-DD`) live in the URL; the defaults leave their parameter out, a URL without a league
  * opens the one picked last, and a day picked in an earlier run of the app opens today (paths.ts). The
@@ -17,19 +18,20 @@
  * the league and search leave on screen.
  */
 
-import { CalendarX2, SearchX, Star, Tv } from 'lucide-react';
+import { CalendarX2, Hd, SearchX, Star, Tv } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
 
+import type { ChannelQuality } from '@/api/types';
 import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { DayStrip } from '../components/DayStrip';
 import { GameCard } from '../components/GameCard';
 import { LeagueFilter } from '../components/LeagueFilter';
 import { SportsSkeleton } from '../components/SportsSkeleton';
-import { useStreamContext, type StreamContext } from '../components/StreamList';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, useNow, useShell, useVisibleSources } from '../deps';
+import { QUALITY_LABEL, useStreamContext, type StreamContext } from '../components/StreamList';
+import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, useLiveQuality, useNow, useShell, useVisibleSources } from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -67,6 +69,9 @@ const CLEAR_PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:[&_button
  * gap goes and the icon keeps one of its own.
  */
 const COMPACT_CHIP = 'max-sm:gap-0 max-sm:px-3 max-sm:[&>svg]:me-1.5';
+
+/** What the quality chip turns on: Full HD (1080p) and up. */
+const QUALITY_FLOOR: ChannelQuality = 'fhd';
 
 interface StreamsOf {
   (game: Game): { streams: readonly StreamMatch[] | undefined; streamsLoading: boolean };
@@ -147,6 +152,11 @@ export function SportsPage() {
     writeStreamsOnly(on);
     setStreamsOnly(on);
   };
+  // Live TV's quality filter, which the core applies to every channel list the page reads: the index refetches
+  // when it changes. The chip is pressed while it hides everything below 1080p (Full HD or 4K only); its name
+  // stays the same either way, so 720p and up, picked on Live TV, shows it unpressed.
+  const quality = useLiveQuality();
+  const qualityOn = quality.min === 'fhd' || quality.min === 'uhd';
   const followed = useFollowedTeams();
   const [myTeamsOnly, setMyTeamsOnly] = useState(readMyTeamsOnly);
   const toggleMyTeamsOnly = (on: boolean) => {
@@ -344,6 +354,21 @@ export function SportsPage() {
                   data-testid="sports-streams-only"
                 >
                   <span className="max-sm:sr-only">{t('withStreamsFilter')}</span>
+                </FilterChip>
+              ) : null}
+              {hasSources ? (
+                <FilterChip
+                  pressed={qualityOn}
+                  onClick={() => {
+                    backToTop();
+                    quality.update({ liveMinQuality: qualityOn ? null : QUALITY_FLOOR });
+                  }}
+                  className={COMPACT_CHIP}
+                  icon={<Hd aria-hidden size={14} className="shrink-0" />}
+                  title={t('qualityHint', { quality: QUALITY_LABEL[QUALITY_FLOOR] })}
+                  data-testid="sports-quality"
+                >
+                  <span className="max-sm:sr-only">{`${QUALITY_LABEL[QUALITY_FLOOR]}+`}</span>
                 </FilterChip>
               ) : null}
             </div>

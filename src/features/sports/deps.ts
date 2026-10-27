@@ -38,6 +38,7 @@ export { useDisplayPrefs } from '@/features/live/hooks/useDisplayPrefs';
 export { displayChannelName } from '@/features/live/lib/channelName';
 export { canCatchUp, formatClock, formatDay, formatTimeRange, ms } from '@/features/live/lib/epgTime';
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';
+export { useLiveQuality } from '@/features/live/components/QualityFilterButton';
 export { useRecordingCapabilities, useScheduleActions, useScheduleIndex } from '@/features/recording/hooks';
 export { markFor } from '@/features/recording/lib/schedule';
 export { openExternalUrl } from '@/features/settings/lib/links';

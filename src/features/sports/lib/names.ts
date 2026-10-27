@@ -108,10 +108,15 @@ export function hasMatchup(tokens: readonly string[], from = 0): boolean {
   return separated(tokens, from, MATCHUP);
 }
 
-/** Country tags of feeds from outside North America ("BR| ", "AU: ", "LATAM | "); two-letter codes count only as a tag. */
+/**
+ * Country tags of feeds from outside North America ("BR| ", "AU: ", "LATAM | "); two-letter codes count only as a tag.
+ * Besides ISO codes, the ones a real provider writes: SR (Serbia), BH (Bosnia), CG and ME (Montenegro), KU
+ * (Kurdish), AF (Africa), FL (Finland), LA and CHL (Latin America, Chile).
+ */
 const FOREIGN_CODES = (
   'uk gb ie fr de at ch it es pt nl be lu dk se no fi is pl cz sk hu ro bg gr tr ru ua rs hr ba si mk al il ae sa qa kw eg ' +
-  'ma dz tn ar br mx co cl pe ve ec uy py cr pa do au nz in pk bd lk jp kr cn hk tw th vn ph my sg id za ng ke gh ir iq lb jo lat'
+  'ma dz tn ar br mx co cl pe ve ec uy py cr pa do au nz in pk bd lk jp kr cn hk tw th vn ph my sg id za ng ke gh ir iq lb jo lat ' +
+  'lv lt ee by kz ge az md mt cy xk sr bh cg me ku af fl la chl'
 ).split(' ');
 /** Country words, which also count when a name or group opens with them untagged ("UK ESPN", "Brasil Esportes"). */
 const FOREIGN_WORDS = new Set(
@@ -608,8 +613,9 @@ const ESPN_ABROAD = [
 export const NETWORKS: readonly NetworkAlias[] = [
   net('espn', 'linear', 'ESPN', ['ESPN'], [
     'ESPN Classic', 'ESPN Bet', 'ESPN College Extra', 'ESPN Goal Line', 'ESPN Radio', ...abroad(['ESPN'], ESPN_ABROAD),
-    // ESPN 3 to 7 are Dutch and South American channels (and the old ESPN3 stream), never the US network.
-    'ESPN 3', 'ESPN 4', 'ESPN 5', 'ESPN 6', 'ESPN 7',
+    // ESPN 3 to 7 are Dutch and South American channels (and the old ESPN3 stream), never the US network; ESPN 8 is
+    // "The Ocho", a free streaming channel of reruns.
+    'ESPN 3', 'ESPN 4', 'ESPN 5', 'ESPN 6', 'ESPN 7', 'ESPN 8', 'ESPN Ocho',
   ]),
   net('espn2', 'linear', 'ESPN', ['ESPN2', 'ESPN 2'], abroad(['ESPN2', 'ESPN 2'], ESPN_ABROAD)),
   net('espnu', 'linear', 'ESPN', ['ESPNU', 'ESPN U']),
@@ -618,11 +624,13 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('espn-plus', 'package', 'ESPN', ['ESPN+', 'ESPN Unlimited', 'ESPN Unlmtd']),
   net('abc', 'linear', 'ABC', ['ABC'], [
     'ABC News', 'ABC Kids', 'ABC Me', 'ABC Family', 'ABC Comedy', 'ABC Australia', 'ABC TV+', 'ABC Spark', 'ABC Entertains',
+    'ABC 20/20', 'ABC Localish',
   ]),
   net('cbs', 'linear', 'CBS', ['CBS', 'CBS2'], ['CBS News', 'CBS Reality', 'CBS Drama', 'CBS Justice', 'CBS Europa', 'CBS Action']),
-  net('cbssn', 'linear', 'CBS', ['CBS Sports Network', 'CBS Sports Net', 'CBSSN', 'CBS Sports'], ['CBS Sports HQ', 'CBS Sports Golazo']),
-  // "NBC USA Network" is USA Network under its owner's name.
-  net('nbc', 'linear', 'NBC', ['NBC'], ['NBC News', 'NBC Universo', 'NBC Sports', 'NBC USA']),
+  // "Galazo" is a real provider's spelling of Golazo, CBS's soccer channel.
+  net('cbssn', 'linear', 'CBS', ['CBS Sports Network', 'CBS Sports Net', 'CBSSN', 'CBS Sports'], ['CBS Sports HQ', 'CBS Sports Golazo', 'CBS Sports Galazo']),
+  // "NBC USA Network" is USA Network under its owner's name, and "NBC E! (EAST)" is E!.
+  net('nbc', 'linear', 'NBC', ['NBC'], ['NBC News', 'NBC Universo', 'NBC Sports', 'NBC USA', 'NBC E! East', 'NBC E! West']),
   net('nbcsn', 'linear', 'NBC', ['NBCSN', 'NBC Sports Network']),
   net('fox', 'linear', 'FOX', ['FOX'], [
     'FOX News', 'FOX Business', 'FOX Sports', 'FOX Soccer', 'FOX Weather', 'FOX Nation', 'FOX Life', 'FOX Crime', 'FOX Movies',
@@ -655,7 +663,7 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('sec-network-plus', 'package', 'SEC', ['SEC Network+', 'SECN+', 'SEC+']),
   net('acc-network', 'linear', 'ACC', ['ACC Network', 'ACCN']),
   net('accnx', 'package', 'ACC', ['ACCNX', 'ACC Network Extra', 'ACC Extra']),
-  net('pac-12', 'linear', 'Pac', ['Pac-12 Network', 'Pac-12', 'Pac12']),
+  net('pac-12', 'linear', 'Pac', ['Pac-12 Network', 'Pac-12', 'Pac12'], ['Pac-12 Insider']),
   net('cw', 'linear', 'CW', ['CW', 'The CW'], ['CW Seed']),
   net('peacock', 'package', 'Peacock', ['Peacock']),
   net('prime-video', 'package', 'Prime', ['Prime Video', 'Amazon Prime Video', 'Amazon Prime', 'Prime', 'Thursday Night Football', 'TNF']),
@@ -663,14 +671,14 @@ export const NETWORKS: readonly NetworkAlias[] = [
   net('apple-tv', 'package', 'Apple TV', ['Apple TV']),
   net('paramount-plus', 'package', 'Paramount', ['Paramount+', 'Paramount'], ['Paramount Network']),
   net('disney-plus', 'package', 'Disney', ['Disney+']),
-  // Regional sports networks.
-  net('nesn', 'rsn', 'NESN', ['NESN', 'New England Sports Network']),
+  // Regional sports networks. "NESN Nation" and "MSG SportsZone" are their free streaming channels of highlights.
+  net('nesn', 'rsn', 'NESN', ['NESN', 'New England Sports Network'], ['NESN Nation']),
   // Israel's "yes" packages share the name.
   // "US: FOX SPORTS YES (NETWORK)" on one real account: the longer phrase keeps it from FOX's avoid list.
   net('yes', 'rsn', 'YES', ['YES Network', 'YES', 'DAZN (YES)', 'Fox Sports YES'], [
     'Yes TV', 'yes Action', 'yes Drama', 'yes Comedy', 'yes Kids', 'yes Docu', 'yes Movies',
   ]),
-  net('msg', 'rsn', 'MSG', ['MSG', 'MSG Network', 'MSGSN']),
+  net('msg', 'rsn', 'MSG', ['MSG', 'MSG Network', 'MSGSN'], ['MSG SportsZone', 'MSG Sports Zone']),
   net('sny', 'rsn', 'SNY', ['SNY', 'SportsNet New York']),
   net('marquee', 'rsn', 'Marquee', ['Marquee Sports Network', 'Marquee Sports Net', 'Marquee']),
   // The Lakers' network; "SportsNet LA Lakers" names it beside the Dodgers' SportsNet LA, the longer phrase winning.
@@ -747,7 +755,8 @@ const SERVICE_TAGS = new Set(['sling', 'tubi', 'hulu', 'philo', 'directv', 'fubo
 
 /**
  * The network a name opens with at `at`: a package service's name followed at once by a network's is that
- * network on the service's lineup ("PRIME: ABC CINCINNATI (WCPO)", "US: PRIME MLB NETWORK"), not the service.
+ * network on the service's lineup ("US: PRIME MLB NETWORK"; "PRIME: ABC CINCINNATI (WCPO)" too, which the
+ * index then turns down as a station's spin-off), not the service.
  */
 function leadingNetwork(tokens: readonly string[], at: number): { alias: NetworkAlias; end: number } | null | undefined {
   const hit = networkAt(tokens, at);
@@ -836,6 +845,33 @@ export function affiliateMarket(tokens: readonly string[]): string[] | null {
     return tokens.slice(hit.end).filter((t) => t !== DASH && t.length > 1 && !NUMBER.test(t) && !FEED_WORDS.has(t));
   }
   return null;
+}
+
+/** Free streaming services, whose lineups carry stations' news and library streams, never a station itself. */
+const FREE_LINEUPS = new Set(['prime', 'rk', 'roku', 'tubi', 'pluto', 'plex', 'xumo', 'freevee', 'localnow']);
+
+/** The tag and first word of a name: where it says which lineup it is from ("PRIME: ...", "RK: ...", "US| ROKU"). */
+function leadWords(name: string): string[] {
+  const { tag, tokens } = splitName(name);
+  return [...(tag ?? []), ...tokens.slice(0, 1)];
+}
+
+/** A news channel's words: "news", but not the city of Newport News. */
+export function namesNews(tokens: readonly string[]): boolean {
+  return tokens.some((t, i) => t === 'news' && tokens[i - 1] !== 'newport');
+}
+
+/**
+ * True for a broadcast station's spin-off, which carries no network programme and so no game: its news
+ * stream ("NBC 4 NEW YORK NEWS", "PRIME: CBS CINCINNATI NEWS (WKRC)"), or any of its channels on a free
+ * streaming service's lineup, by the name's tag or its group's ("PRIME: FOX 5 NEW YORK", "RK: ABC 20/20",
+ * "PRIME: CW GOLD"). On one real account that was every station named after Prime or Roku. False for every
+ * other network: "US: PRIME MLB NETWORK" is MLB Network.
+ */
+export function isStationSpinOff(network: string, name: string, groupName?: string | null): boolean {
+  if (!AFFILIATED.has(network) && networkAlias(network)?.kind !== 'local') return false;
+  if (namesNews(splitName(name).tokens)) return true;
+  return [...leadWords(name), ...(groupName ? leadWords(groupName) : [])].some((w) => FREE_LINEUPS.has(w));
 }
 
 /** Cities a team's location stands for where its market's stations name another ("New England" is Boston). */

@@ -13,7 +13,8 @@ import { useMemo } from 'react';
 import { categoriesArgs } from '@/api/bootPrefetch';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
-import { itemKey, type Category, type Channel, type ItemKey, type Page, type Source, type SourceKind } from '@/api/types';
+import { itemKey, type Category, type Channel, type ChannelQuality, type ItemKey, type Page, type Source, type SourceKind } from '@/api/types';
+import { channelQuality } from '@/lib/channelQuality';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import {
@@ -23,7 +24,9 @@ import {
   hasMatchup,
   isBackupFeed,
   isSportsGroup,
+  isStationSpinOff,
   nameTokens,
+  namesNews,
   networkIdForChannel,
   teamChannelName,
   textTokens,
@@ -52,6 +55,13 @@ export interface IndexedChannel {
    * for the network's own feed); null for any other channel. Rows built without it count as null.
    */
   affiliate?: string[] | null;
+  /**
+   * A station's news stream or free streaming copy (`isStationSpinOff`), or another news channel (`namesNews`):
+   * it shows no game, so it matches by no network, call sign or guide (`network` is null).
+   */
+  spinOff: boolean;
+  /** `channelQuality`: the picture quality the name gives, which orders the matches; null when it names none. */
+  quality: ChannelQuality | null;
 }
 
 /** Rows per `catalog.channels` page: the core's cap. */
@@ -80,11 +90,13 @@ interface Described {
   teamName: string | null;
   backup: boolean;
   affiliate: string[] | null;
+  spinOff: boolean;
+  quality: ChannelQuality | null;
 }
 
 const described = new WeakMap<Channel, Described>();
 
-/** Tokens, network, origin and team of a channel row, kept per row: a refetch with unchanged rows keeps the objects. */
+/** Tokens, network, origin, team and quality of a channel row, kept per row: a refetch with unchanged rows keeps the objects. */
 function describe(channel: Channel): Described {
   let d = described.get(channel);
   if (!d) {
@@ -93,6 +105,7 @@ function describe(channel: Channel): Described {
     // A feed from abroad is not the US network of its name ("BR: ESPN", "AU| FOX FOOTY").
     let network: string | null = null;
     let affiliate: string[] | null = null;
+    let spinOff = false;
     if (!foreign) {
       network = networkIdForChannel(tokens);
       let read: readonly string[] = tokens;
@@ -104,9 +117,22 @@ function describe(channel: Channel): Described {
           read = all;
         }
       }
+      // A station's news stream or free streaming copy shows no game ("PRIME: FOX 5 NEW YORK"), and neither
+      // does a news channel no network took, whatever call sign it names ("US: CBS NEWS PHOENIX (KPHO)").
+      spinOff = network !== null ? isStationSpinOff(network, channel.name, channel.categoryName) : namesNews(tokens);
+      if (spinOff) network = null;
       if (network !== null) affiliate = affiliateMarket(read);
     }
-    d = { tokens, network, foreign, teamName: teamChannelName(tokens), backup: isBackupFeed(channel.name), affiliate };
+    d = {
+      tokens,
+      network,
+      foreign,
+      teamName: teamChannelName(tokens),
+      backup: isBackupFeed(channel.name),
+      affiliate,
+      spinOff,
+      quality: channelQuality(channel.name),
+    };
     described.set(channel, d);
   }
   return d;
@@ -122,8 +148,22 @@ export function isSeparatorName(name: string): boolean {
 
 /** One index row. */
 export function toIndexed(channel: Channel, source: Pick<Source, 'id' | 'kind' | 'name'>, fromSportsGroup: boolean): IndexedChannel {
-  const { tokens, network, foreign, teamName, backup, affiliate } = describe(channel);
-  return { channel, sourceId: source.id, sourceKind: source.kind, sourceName: source.name, tokens, network, fromSportsGroup, foreign, teamName, backup, affiliate };
+  const { tokens, network, foreign, teamName, backup, affiliate, spinOff, quality } = describe(channel);
+  return {
+    channel,
+    sourceId: source.id,
+    sourceKind: source.kind,
+    sourceName: source.name,
+    tokens,
+    network,
+    fromSportsGroup,
+    foreign,
+    teamName,
+    backup,
+    affiliate,
+    spinOff,
+    quality,
+  };
 }
 
 /**

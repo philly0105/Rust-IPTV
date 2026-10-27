@@ -910,10 +910,16 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         </>
       ) : null}
 
-      {/* channel list: beside the stage from 768 px, under it on a phone */}
+      {/*
+        channel list: beside the stage from 768 px, under it on a phone. Its width is a share of
+        the page, not of the window: by the window (34vw) the list sat at its 400 px cap on a
+        1280 px window, where the rail and the groups column already take a third of it, and left
+        the stage about 390 px (a 220 px tall picture). 300 px at the least, so a touch row keeps
+        its name beside the menu button.
+      */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
-        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:min-w-60 md:flex-initial md:border-e"
+        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(300px,32%,400px)] md:min-w-60 md:flex-initial md:border-e"
         onFocus={onListFocus}
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">

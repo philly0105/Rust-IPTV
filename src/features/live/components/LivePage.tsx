@@ -43,6 +43,7 @@ import { intlLocale } from '@/lib/intl';
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
 import { useDigitEntry } from '../hooks/useDigitEntry';
 import { useDisplayPrefs } from '../hooks/useDisplayPrefs';
+import { useFitsWidth } from '../hooks/useFitsWidth';
 import { useLastChannel } from '../hooks/useLastChannel';
 import { useListEngaged } from '../hooks/useListEngaged';
 import { LIVE_VIEW_ID, liveViewOf, useLiveViewChannels } from '../hooks/useLiveViewChannels';
@@ -74,6 +75,16 @@ import { QualityEmptyState, QualityFilterButton, useLiveQuality } from './Qualit
 import { StageIdle } from './StageIdle';
 
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
+/**
+ * The page width, in rem, under which the groups leave their column for the drawer, whatever the
+ * window's width. The channel list takes up to 400 px and the stage has a 300 px floor, so on a
+ * page under about 66rem (990 px at 100%) four columns pin the stage near that floor: a 170 px
+ * tall strip whose idle card loses all but the channel name and a cut Resume. At 66rem the column
+ * comes back only where the stage keeps about 365 px (205 px tall). Beside the expanded rail that
+ * is a window of about 1240 px, so 1280 px (a 69rem page) keeps the column and a tablet held
+ * sideways (1180 or 1194 px) gets the drawer; beside the icon rail, about 1065 px.
+ */
+export const GROUPS_COLUMN_MIN_REM = 66;
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /**
  * Typing pauses this long before the list searches. `catalog.channels` answers a 20k list in
@@ -375,7 +386,11 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   }, [digits.buffer]);
 
   // ---- sidebar ------------------------------------------------------------
-  const wide = useMediaQuery('(min-width: 1024px)');
+  // The groups are a column beside the list only where the page has room for four columns; on a
+  // narrower window, or a page under GROUPS_COLUMN_MIN_REM, they open as a drawer from the toolbar.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const roomForGroups = useFitsWidth(pageRef, GROUPS_COLUMN_MIN_REM);
+  const wide = useMediaQuery('(min-width: 1024px)') && roomForGroups;
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_KEY) === '1';
@@ -872,9 +887,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const sidebarVisible = wide && !collapsed;
 
   return (
-    <div className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
+    <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
       {heading}
-      {/* groups: column on wide screens, drawer below 1024 px */}
+      {/* groups: a column where the page has room for it, else a drawer */}
       {sidebarVisible ? (
         <aside className="flex w-60 shrink-0 flex-col border-e border-divider bg-surface">{sidebar}</aside>
       ) : null}

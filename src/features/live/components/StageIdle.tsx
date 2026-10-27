@@ -37,13 +37,28 @@ export interface StageIdleProps {
 }
 
 /**
+ * The card's lines that go as the stage gets shorter (from md up; a phone's idle bar lays out on
+ * its own). The full card (logo, caption, name, Resume, hint) is about 14 rem tall; without the
+ * hint about 12.5 rem; without the logo too about 7.5 rem, and the caption goes last.
+ */
+const LOW_STAGE = 'md:[@container_(max-height:15rem)]:hidden';
+const SHORT_STAGE = 'md:[@container_(max-height:12.5rem)]:hidden';
+const TINY_STAGE = 'md:[@container_(max-height:8rem)]:hidden';
+
+/**
  * What the stage shows while nothing plays (CB-AUTOPLAY-LAST), one design for Live, a custom
- * list and Radio: the last channel's logo, what is on it now and a Resume button, over a dark
+ * list and Radio: the last channel's logo, its name, what is on it now and a Resume button, over a dark
  * glow in the channel's own hue. Nothing is started by itself. With no channel to offer, a
  * prompt to pick one.
  *
  * The stage is dark in every theme, so from md up the text takes the glass colours; on a phone
  * the idle stage is a slim bar on the theme's surface above the list, with theme colours.
+ *
+ * From md up a TV channel's programme stays out of the card: the guide ribbon's Now card right
+ * under the stage describes the same channel with the same programme, time left and progress.
+ * Radio has no ribbon, so its card keeps them. The card is a size container and sheds lines as the
+ * stage gets shorter (a laptop's or tablet's stage column is 170 to 230 px tall): the hint first,
+ * then the logo, so the name and Resume are never cut off.
  */
 export function StageIdle({ kind, last, highlighted = false, locked = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
@@ -62,7 +77,7 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
   const Icon = kind === 'radio' ? Radio : Tv;
 
   return (
-    <div data-testid="stage-idle" className="absolute inset-0 flex items-center justify-center overflow-hidden max-md:justify-start max-md:px-4">
+    <div data-testid="stage-idle" className="absolute inset-0 flex items-center justify-center overflow-hidden [container-type:size] max-md:justify-start max-md:px-4">
       {/* The glow is the dark stage's; a phone's idle bar sits on the theme's surface instead. */}
       <span
         aria-hidden
@@ -73,10 +88,10 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
       />
       {channel ? (
         <div className="relative flex max-w-md min-w-0 flex-col items-center gap-3 px-6 text-center max-md:w-full max-md:max-w-none max-md:flex-row max-md:gap-3 max-md:px-0 max-md:text-start">
-          <ChannelLogo src={channel.logoUrl} name={name} size={64} sourceId={channel.ref.sourceId} className="shadow-2 max-md:hidden" onHue={onHue} />
+          <ChannelLogo src={channel.logoUrl} name={name} size={64} sourceId={channel.ref.sourceId} className={cn('shadow-2 max-md:hidden', SHORT_STAGE)} onHue={onHue} />
           <ChannelLogo src={channel.logoUrl} name={name} size={32} sourceId={channel.ref.sourceId} className="md:hidden" />
           <div className="flex min-w-0 flex-col items-center gap-0.5 max-md:flex-1 max-md:items-start">
-            <p className="text-caption text-on-glass-muted max-md:hidden" data-testid="stage-idle-caption">
+            <p className={cn('text-caption text-on-glass-muted max-md:hidden', TINY_STAGE)} data-testid="stage-idle-caption">
               {t(highlighted ? 'highlightedChannel' : kind === 'radio' ? 'lastStation' : 'lastWatched')}
             </p>
             <p dir="auto" className="max-w-full truncate text-title-sm text-on-glass max-md:text-body-sm max-md:font-medium max-md:text-fg">
@@ -88,7 +103,7 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
                 {t('locked')}
               </p>
             ) : cur ? (
-              <div className="mt-1 flex w-80 max-w-full flex-col gap-1.5 max-md:mt-0 max-md:w-full max-md:gap-1">
+              <div className={cn('mt-1 flex w-80 max-w-full flex-col gap-1.5 max-md:mt-0 max-md:w-full max-md:gap-1', kind === 'live' && 'md:hidden')}>
                 <p dir="auto" className="truncate text-body-sm text-on-glass-muted max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-now">
                   {t('idleNowOn', { title: cur.title, left: t('minutesLeft', { count: minutesLeft(cur, now) }) })}
                 </p>
@@ -109,7 +124,9 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
             <span className="truncate max-md:hidden">{t(highlighted ? 'playChannel' : 'resumeChannel', { name })}</span>
             <span className="md:hidden">{t(highlighted ? 'play' : 'resume')}</span>
           </Button>
-          <p className="mt-1 text-caption text-on-glass-muted max-md:hidden">{hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}</p>
+          <p className={cn('mt-1 text-caption text-on-glass-muted max-md:hidden', LOW_STAGE)} data-testid="stage-idle-hint">
+            {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}
+          </p>
           {recent && recent.length > 0 && onPlayRef ? (
             <StationShelf
               heading={t('recentStations')}

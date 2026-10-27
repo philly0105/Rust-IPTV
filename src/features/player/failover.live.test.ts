@@ -137,6 +137,36 @@ describe('live failover', () => {
     expect(streamUrlCalls().length).toBe(before);
   });
 
+  it('tuning another channel takes the "Switched to" toast away, and a stale Undo does nothing', async () => {
+    reportStatus('error', 'HTTP 404');
+    await vi.waitFor(() => expect(sourceIdNow()).toBe('s2'));
+    const undo = useToastStore.getState().toasts.at(-1)?.action?.onClick;
+    expect(undo).toBeDefined();
+    await usePlayerStore.getState().play({ ...origin, url: 'http://s9/live/9.m3u8', title: 'News', ref: ref('s9', '9') });
+    await settle();
+    expect(useToastStore.getState().toasts.some((t) => t.id === 'live-failover')).toBe(false);
+    // An Undo pressed on its way out must not pull the user back to the channel that failed.
+    undo?.();
+    await settle();
+    expect(sourceIdNow()).toBe('s9');
+  });
+
+  it('a stale Undo of a pin redirect does nothing once another channel plays', async () => {
+    pins.setLivePin('sky sports 1', ref('s3', '30'));
+    failover.__resetFailover();
+    await usePlayerStore.getState().play({ ...origin, url: 'http://s1/live/1b.m3u8', ref: ref('s1', '2') });
+    await vi.waitFor(() => expect(sourceIdNow()).toBe('s3'));
+    const undo = useToastStore.getState().toasts.at(-1)?.action?.onClick;
+    // Another channel, with no pin of its own.
+    handlers['live.alternates'] = () => ({ key: 'news', quality: 'hd', alternates: [] });
+    await usePlayerStore.getState().play({ ...origin, url: 'http://s9/live/9.m3u8', title: 'News', ref: ref('s9', '9') });
+    await settle();
+    expect(useToastStore.getState().toasts.some((t) => t.id === 'live-failover')).toBe(false);
+    undo?.();
+    await settle();
+    expect(sourceIdNow()).toBe('s9');
+  });
+
   it('prefers the pinned source', async () => {
     pins.setLivePin('sky sports 1', ref('s3', '30'));
     reportStatus('error', 'HTTP 404');

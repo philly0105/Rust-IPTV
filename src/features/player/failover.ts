@@ -18,7 +18,7 @@ import { rpc } from '@/api/transport';
 import { itemKey, type ItemKey, type ItemRef, type LiveAlternate, type LiveAlternates, type PlayerSource } from '@/api/types';
 import { displayChannelName } from '@/features/live/lib/channelName';
 import { liveQualityKey } from '@/lib/liveQuality';
-import { toast } from '@/ui';
+import { dismissToast, toast } from '@/ui';
 
 import type { StreamErrorClass } from './errors';
 import { getLivePin } from './livePins';
@@ -211,6 +211,8 @@ interface Chain {
 }
 
 let chain: Chain | null = null;
+/** The one toast a switch shows ("Switched to …", "Moved to your pinned source"), updated in place. */
+const LIVE_FAILOVER_TOAST = 'live-failover';
 /** Channels whose automatic switch the user undid: no more switching until another channel plays. */
 const undone = new Set<ItemKey>();
 /** Channels whose pin redirect the user undid. */
@@ -350,8 +352,11 @@ export async function tryLiveFailover(failed: PlayerSource, cls?: StreamErrorCla
       alternate: alt,
       to,
       undo: () => {
+        // The chain ends when the user tunes something else: an Undo still on screen then would
+        // pull them back to the channel that failed.
+        if (chain !== run) return;
         undone.add(itemKey(origin.ref));
-        if (chain === run) chain = null;
+        chain = null;
         playOrigin(origin);
       },
     };
@@ -364,7 +369,7 @@ export async function failoverLive(failed: PlayerSource, cls?: StreamErrorClass)
   const res = await tryLiveFailover(failed, cls);
   if (!res) return false;
   toast({
-    id: 'live-failover',
+    id: LIVE_FAILOVER_TOAST,
     title: i18next.t('player:liveFailoverSwitched', { channel: res.to.title, source: res.alternate.sourceName }),
     description: i18next.t('player:liveFailoverSwitchedDetail', { channel: chain?.origin.title ?? failed.title }),
     variant: 'info',
@@ -377,6 +382,8 @@ export async function failoverLive(failed: PlayerSource, cls?: StreamErrorClass)
 export function playAlternate(alt: LiveAlternate): void {
   const cur = usePlayerStore.getState().source;
   chain = null;
+  // A copy the user picked is no longer the switch the toast offers to undo.
+  dismissToast(LIVE_FAILOVER_TOAST);
   void playItem(argsForAlternate(alt, cur ?? { url: '', kind: 'direct', title: alt.channel.name, isLive: true, isRadio: false }));
 }
 
@@ -403,13 +410,16 @@ async function maybeRedirectToPin(ref: ItemRef, data: LiveAlternates): Promise<v
   } finally {
     switching = null;
   }
+  const pinnedKey = itemKey(target.channel.ref);
   toast({
-    id: 'live-failover',
+    id: LIVE_FAILOVER_TOAST,
     title: i18next.t('player:livePinnedSwitched', { channel: to.title, source: target.sourceName }),
     variant: 'info',
     action: {
       label: i18next.t('player:undo'),
       onClick: () => {
+        const now = usePlayerStore.getState().source?.ref;
+        if (!now || itemKey(now) !== pinnedKey) return;
         pinUndone.add(key);
         playOrigin(origin);
       },
@@ -433,6 +443,8 @@ export function bindLiveFailover(): () => void {
     if (key !== (prev.source?.ref ? itemKey(prev.source.ref) : undefined) && key !== switching) {
       const ours = chain && key !== undefined && (chain.tried.has(key) || itemKey(chain.origin.ref) === key);
       if (!ours) {
+        // Another channel: the "Switched to" toast and its Undo are about the one left behind.
+        dismissToast(LIVE_FAILOVER_TOAST);
         chain = null;
         if (key === undefined || !undone.has(key)) undone.clear();
         if (key === undefined || !pinUndone.has(key)) pinUndone.clear();

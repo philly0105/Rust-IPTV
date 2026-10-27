@@ -1,7 +1,9 @@
 // L3-visual-7: on a phone an episode row gave its title about 29 px ('Cr…'): a fixed
 // 160 px thumbnail plus the menu and download buttons in the same line. The row now
-// narrows the thumbnail below sm, wraps its actions onto their own line, and lets the
-// title take two lines with the whole title as a tooltip.
+// narrows the thumbnail below sm and lets the title take two lines with the whole title
+// as a tooltip. Round 3: the actions no longer wrap onto a line of their own under the
+// text (a 112 px row with an empty strip under the thumbnail); they end the row's one
+// line, and a phone row is 84 px.
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { useEffect, useRef, useState } from 'react';
 import { I18nextProvider } from 'react-i18next';
@@ -74,16 +76,40 @@ describe('episode rows on a phone (L3-visual-7)', () => {
     expect(thumb.className.split(' ')).not.toContain('w-40');
   });
 
-  it('wraps the watched and download buttons onto their own line below sm, at the end, and keeps both reachable', async () => {
+  it('keeps the watched and download buttons at the end of the row\'s one line below sm, both reachable', async () => {
     renderList();
     const row = (await screen.findAllByTestId('episode-row'))[0]!;
-    expect(row.className.split(' ')).toEqual(expect.arrayContaining(['flex-wrap', 'sm:flex-nowrap']));
+    const classes = row.className.split(' ');
+    expect(classes).not.toContain('flex-wrap');
+    expect(classes).toEqual(expect.arrayContaining(['flex', 'items-center']));
     const play = within(row).getByRole('button', { name: new RegExp(`^Play .*${LONG}$`) });
-    expect(play.className.split(' ')).toContain('max-sm:basis-full');
+    expect(play.className.split(' ')).not.toContain('max-sm:basis-full');
     const actions = within(row).getByTestId('episode-actions');
-    expect(actions.className.split(' ')).toContain('max-sm:ms-auto');
+    // The play button and the actions share the line: the actions come last and never shrink.
+    expect(row.lastElementChild).toBe(actions);
+    expect(actions.className.split(' ')).toContain('shrink-0');
     expect(within(actions).getByRole('button', { name: /^Mark S\d+E\d+ as watched$/ })).toBeTruthy();
     expect(within(actions).getAllByRole('button').length).toBe(2);
+  });
+
+  it('gives a phone row 84 px instead of the 112 px it takes from sm up', async () => {
+    renderList();
+    const item = (await screen.findAllByRole('listitem'))[0]!;
+    expect(item.style.height).toBe('84px');
+    const second = (await screen.findAllByRole('listitem'))[1]!;
+    expect(second.style.top).toBe('84px');
+  });
+
+  it('keeps the 112 px row from sm up', async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ ...original(query), matches: query === '(min-width: 40rem)' })) as typeof window.matchMedia;
+    try {
+      renderList();
+      const item = (await screen.findAllByRole('listitem'))[0]!;
+      expect(item.style.height).toBe('112px');
+    } finally {
+      window.matchMedia = original;
+    }
   });
 
   it('lets the title take two lines on a phone, with the whole title as a tooltip', async () => {

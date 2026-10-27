@@ -1,5 +1,5 @@
 import { CircleCheck, HardDriveDownload, Play } from 'lucide-react';
-import { useRef, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Download, Episode, PlaybackPosition, Season } from '@/api/types';
@@ -13,6 +13,12 @@ import { IconButton, MetaLine, Poster, PosterCellWidthContext, ProgressBar, Tabs
 import { DownloadButton } from './actions';
 
 const ROW_H = 112;
+/**
+ * A phone's row at 100 % scale: the thumbnail, the text and the two actions on one line. The
+ * actions on a line of their own under the text made each row 112 px with the space under the
+ * thumbnail empty, so about two and a half episodes fit on a screen.
+ */
+const ROW_H_PHONE = 84;
 /** The thumbnail's box, `w-28 sm:w-40`: 28 or 40 spacing steps of 3.75 px at 100 % scale. */
 const THUMB_PX = 105;
 const THUMB_SM_PX = 150;
@@ -93,14 +99,25 @@ export function EpisodeList({
   const margin = useScrollMargin(listRef, scrollRef, [layoutKey, episodes.length]);
   // P2-POSTERS-2: the thumbnails' width is known, so they do not read their frames as they mount, a
   // forced layout per row between the rows' DOM writes.
-  const thumbWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? THUMB_SM_PX : THUMB_PX, true));
+  const sm = useMediaQuery(SM_QUERY);
+  const thumbWidth = usePosterWidthBox(useScaledPx(sm ? THUMB_SM_PX : THUMB_PX, true));
+  // The phone row holds two lines of title beside the thumbnail, so it grows with the UI scale.
+  const phoneRowH = useScaledPx(ROW_H_PHONE);
+  const rowH = sm ? ROW_H : phoneRowH;
   const v = useListVirtualizer({
     count: episodes.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_H,
+    estimateSize: () => rowH,
     overscan: 6,
     scrollMargin: margin,
   });
+  // A window crossing sm (a tablet turned) or a new scale: drop the cached sizes so every row takes the new height.
+  const measuredH = useRef(rowH);
+  useLayoutEffect(() => {
+    if (measuredH.current === rowH) return;
+    measuredH.current = rowH;
+    v.measure();
+  }, [rowH, v]);
 
   return (
     <div
@@ -129,13 +146,14 @@ export function EpisodeList({
             // The divider sits on the square list item; the row inside rounds its hover fill, so the
             // rule never curls into the corners.
             className="absolute start-0 w-full border-b border-divider py-1"
-            style={{ top: row.start - margin, height: ROW_H }}
+            style={{ top: row.start - margin, height: rowH }}
           >
-            {/* Below sm (a phone) the episode takes the row's width and its actions wrap onto a line of
-                their own under the text, so the title keeps room to read (L3-visual-7). */}
+            {/* One line at every width: thumbnail, text, actions. On a phone the narrower thumbnail and
+                a two-line title leave the title room to read (L3-visual-7) with the actions at the
+                line's end, so a row is 84 px instead of 112 with an empty strip under the thumbnail. */}
             <div
               className={cn(
-                '-mx-2 group flex h-full flex-wrap content-center items-center gap-x-3 gap-y-1 rounded-lg px-2 sm:flex-nowrap sm:gap-4',
+                '-mx-2 group flex h-full items-center gap-3 rounded-lg px-2 sm:gap-4',
                 'hover:bg-hover motion-safe:transition-colors',
                 playing && 'tuning-tick bg-selected ps-3 hover:bg-selected',
               )}
@@ -147,7 +165,7 @@ export function EpisodeList({
                 onClick={() => onPlay(ep)}
                 aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}${offline ? `, ${t('downloaded')}` : ''}`}
                 aria-current={playing ? 'true' : undefined}
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus max-sm:basis-full sm:gap-4"
+                className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus sm:gap-4"
               >
                 <div className="relative w-28 shrink-0 sm:w-40" data-testid="episode-thumb">
                   <PosterCellWidthContext.Provider value={thumbWidth}>
@@ -223,7 +241,7 @@ export function EpisodeList({
                 </div>
               </button>
               {hasActions && (
-                <div className="flex shrink-0 items-center gap-1 max-sm:ms-auto sm:gap-2" data-testid="episode-actions">
+                <div className="flex shrink-0 items-center gap-1 sm:gap-2" data-testid="episode-actions">
                   {/* One press marks the episode, as the hero's round button does for the title: a menu
                       with this one item cost a second press for the only thing in it. The tick is green
                       while watched, and the name says what a press does. */}

@@ -542,11 +542,11 @@ export function SeriesDetailPage() {
             )}
           </div>
           {placeholder ? (
-            // Rows of the episode list's height (112 px each with the gap) until the seasons come.
+            // Rows of the episode list's height (112 px each with the gap, 84 on a phone) until the seasons come.
             <div role="status" aria-busy="true" className="flex flex-col gap-2">
               <span className="sr-only">{t('loading')}</span>
               {Array.from({ length: 4 }, (_, i) => (
-                <Skeleton key={i} className="h-26 rounded-lg" />
+                <Skeleton key={i} className="h-26 rounded-lg max-sm:h-20" />
               ))}
             </div>
           ) : seasons.length === 0 ? (

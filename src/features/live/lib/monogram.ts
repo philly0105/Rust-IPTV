@@ -1,18 +1,20 @@
-import { hueOf, initialWords, isNameMarker, twoInitials } from '@/ui/Poster';
+import { initialWords, isNameMarker, twoInitials } from '@/ui/Poster';
+import { tintFill, tintOf } from '@/ui/tint';
 
 /**
- * A channel's monogram (LG-14): two letters on a two-stop fill from its name, one of eight hues
- * spread round the colour wheel and dark enough for white letters (the source monograms in the
- * rail use the same recipe). The same name gets the same tile everywhere: the list, the guide,
- * the stage, the archive and multi-view.
+ * A channel's monogram (LG-14): two letters on its name's tint (src/ui/tint.ts), the one every
+ * fallback tile uses, so the same name gets the same colour everywhere: the list, the guide, the
+ * stage, the archive, multi-view, and Home and Favorites, which draw the kit's poster tile.
  */
+
+/** The HSL hue of the monogram's colour, for the idle stage's glow (written in hsl()). */
 export function monogramHue(name: string): number {
-  return (hueOf(name) % 8) * 45 + 12;
+  return tintOf(name).hslHue;
 }
 
+/** The monogram's deep fill, for white letters: the player and multi-view, over video, use it in every theme. */
 export function monogramFill(name: string): string {
-  const hue = monogramHue(name);
-  return `linear-gradient(150deg, hsl(${hue} 40% 34%), hsl(${(hue + 30) % 360} 46% 22%))`;
+  return tintFill(name);
 }
 
 /** A per-game channel's league and slot before its matchup ("NFL 03: ", "NBA | 05 - "). */

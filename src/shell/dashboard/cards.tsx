@@ -10,7 +10,7 @@ import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { intlLocale, listSeparator } from '@/lib/intl';
-import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, Tooltip, cn, hueOf, initialsOf, useImageChain } from '@/ui';
+import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 import { sourceHomePath } from '../railLinks';
@@ -485,9 +485,8 @@ function menuHandlers<E extends HTMLElement>(open: ((pos: { x: number; y: number
 
 /**
  * Poster's initials tile, drawn as a logo-sized mark in the middle of the frame instead of across
- * all of it, without its type glyph (the rail and the caption already say it is a channel). A
- * channel with no logo, or one whose logo fails, then looks like a channel with one: a small mark
- * on the channel's glow. Filled edge to edge, every logo-less card was a saturated block, and a
+ * all of it. A channel with no logo, or one whose logo fails, then looks like a channel with one:
+ * a small mark on the channel's glow. Filled edge to edge, every logo-less card was a saturated block, and a
  * rail of them (a provider without logos fills Home with them) read as a wall of colour.
  */
 const LOGO_MARK = cn(
@@ -496,24 +495,30 @@ const LOGO_MARK = cn(
   '[&>[data-poster-fallback]]:m-auto [&>[data-poster-fallback]]:h-[46%] [&>[data-poster-fallback]]:w-auto [&>[data-poster-fallback]]:aspect-square',
   '[&>[data-poster-fallback]]:rounded-[22%]',
   '[&>[data-poster-fallback]]:shadow-1 [&>[data-poster-fallback]]:ring-1 [&>[data-poster-fallback]]:ring-white/10 [&>[data-poster-fallback]]:ring-inset',
-  '[&>[data-poster-fallback]>svg]:hidden',
 );
 
 /**
- * The channel's glow over `surface-2`, in the channel's hue (`--logo-hue`). The dark themes take a
- * deep tint; the light theme a pale one, because the deep tint showed on a pale card as a grey
- * smudge in its corner.
+ * The channel's glow over `surface-2`, in the channel's tint (src/ui/tint.ts), the colour its mark
+ * has here and its monogram has in Live TV. The dark themes take the tint's deep top stop
+ * (`--logo-glow-dark`); the light theme its pale one (`--logo-glow-light`), because the deep tint
+ * showed on a pale card as a grey smudge in its corner.
  */
 const LOGO_GLOW = cn(
   'absolute inset-0 bg-surface-2',
-  'bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_35%_30%/0.55),transparent_70%)]',
-  'light:bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_45%_85%/0.6),transparent_70%)]',
+  'bg-[radial-gradient(120%_90%_at_30%_20%,var(--logo-glow-dark),transparent_70%)]',
+  'light:bg-[radial-gradient(120%_90%_at_30%_20%,var(--logo-glow-light),transparent_70%)]',
 );
+
+/** The custom properties {@link LOGO_GLOW} reads for a channel. */
+function logoGlowVars(name: string): CSSProperties {
+  const tint = tintOf(name);
+  return { '--logo-glow-dark': withAlpha(tint.dark[0], 0.55), '--logo-glow-light': withAlpha(tint.light[1], 0.6) } as CSSProperties;
+}
 
 /** A channel logo centred on the channel's own tint: the art of a channel with no programme picture. */
 function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?: string; sourceId?: string; isRadio?: boolean }) {
   return (
-    <div className={LOGO_GLOW} style={{ '--logo-hue': hueOf(name) } as CSSProperties}>
+    <div className={LOGO_GLOW} style={logoGlowVars(name)}>
       <Poster
         src={logoUrl}
         sourceId={sourceId}
@@ -637,13 +642,9 @@ function WideArt({ title, backdropUrl, posterUrl, sourceId }: { title: string; b
   if (backdropUrl || !posterUrl) {
     return <Poster src={backdropUrl} fallbackSrc={posterUrl} sourceId={sourceId} alt="" label={title} aspect="wide" className="h-full after:hidden" rounded="sm" />;
   }
-  const hue = hueOf(title);
+  const tint = tintOf(title);
   return (
-    <div
-      aria-hidden
-      className="absolute inset-0 overflow-hidden"
-      style={{ background: `linear-gradient(150deg, hsl(${hue} 40% 26%), hsl(${(hue + 40) % 360} 45% 12%))` }}
-    >
+    <div aria-hidden className="absolute inset-0 overflow-hidden" style={{ background: `linear-gradient(160deg, ${tint.dark[1]}, ${tint.deep})` }}>
       {field.url && (
         <img src={field.url} alt="" loading="lazy" decoding="async" draggable={false} referrerPolicy="no-referrer" onError={field.onError} className={cn(QUARTER_BLUR, 'opacity-70 saturate-150')} />
       )}
@@ -849,7 +850,6 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
 /** Source tile: monogram, name, kind, and catalog counts. */
 export function SourceCard({ rail, source }: { rail: RailCardProps; source: Source }) {
   const { t, i18n } = useTranslation('shell');
-  const hue = hueOf(source.name);
   const counts = [
     source.channelCount > 0 && t('countChannels', { count: source.channelCount }),
     source.movieCount > 0 && t('countMovies', { count: source.movieCount }),
@@ -871,12 +871,15 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
   return (
     <Link to={sourceHomePath(source)} {...rail} className={cardRoot}>
       <div
-        className={cn(CARD_ART, 'flex aspect-video w-full flex-col justify-between p-4')}
-        style={{ background: `linear-gradient(150deg, hsl(${hue} 40% 30%), hsl(${(hue + 36) % 360} 46% 16%))` }}
+        // The source's tint, pale in the light theme, as its monogram in the rail.
+        className={cn(CARD_ART, TINT_THEME, 'flex aspect-video w-full flex-col justify-between p-4')}
+        style={tintVars(source.name)}
       >
         {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
-        <span aria-hidden className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
-        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white">{t(kindShortKey(source.kind))}</span>
+        <span aria-hidden className="font-display text-4xl font-semibold">{initialsOf(source.name)}</span>
+        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white light:bg-white/70 light:text-fg">
+          {t(kindShortKey(source.kind))}
+        </span>
         {source.lastError && (
           <span aria-hidden className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />
         )}

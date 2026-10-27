@@ -569,8 +569,11 @@ describe('HeroCarousel', () => {
     const layer = hero.querySelector<HTMLElement>('[data-hero-backdrop]')!;
     expect(layer.style.background).toContain('gradient');
     const tile = layer.querySelector<HTMLElement>('[data-hero-poster-fallback]')!;
-    // The rails' fallback tile for the same title: its initials and the movie glyph.
+    // The rails' fallback tile for the same title: its initials.
     expect(tile.querySelector('[data-poster-fallback]')!.textContent).toBe('HL');
+    // The hero is glass in every theme: its tile keeps the deep stops, never the light theme's pale ones.
+    expect(tile.querySelector('[data-poster-fallback]')!.className).toContain('[background-image:var(--tint-dark)]');
+    expect(tile.querySelector('[data-poster-fallback]')!.className).not.toContain('light:');
     expect(tile.className).toContain('lg:block');
     expect(tile.className).toContain('hidden');
     // Decoration only: the layer is hidden from assistive tech and the tile has no text alternative.

@@ -18,6 +18,7 @@ import { GLASS_FOCUS } from '../focus';
 import { MENU_DANGER } from '../Menu';
 import { PROGRESS_FILL, PROGRESS_TRACK } from '../Misc';
 import { SEGMENT_TONES, segmentClass } from '../Segmented';
+import { oklchHex, tintOf } from '../tint';
 
 const STYLES = join(__dirname, '..', '..', 'styles');
 const tokensCss = readFileSync(join(STYLES, 'tokens.css'), 'utf8');
@@ -650,3 +651,50 @@ describe('guide genre stripes (CB-GUIDE-GENRE)', () => {
   }
 });
 // ==== Guide genre colours ==== end
+
+// ==== Artwork fallback tints (src/ui/tint.ts) ====
+describe('artwork fallback tints', () => {
+  // One name per hue: nameHue spreads names over twelve hues, and each has its own stops.
+  const names: string[] = [];
+  for (let i = 0; names.length < 12 && i < 500; i++) {
+    const name = `Channel ${i}`;
+    if (!names.some((n) => tintOf(n).hue === tintOf(name).hue)) names.push(name);
+  }
+  const white: Rgb = [255, 255, 255];
+
+  it('covers all twelve hues', () => expect(names).toHaveLength(12));
+
+  it('white initials at 90% reach 4.5:1 on both deep stops of every hue', () => {
+    for (const name of names) {
+      for (const stop of tintOf(name).dark) {
+        const bg = hex(stop);
+        expect(contrast(over(white, 0.9, bg), bg), `${tintOf(name).hue}: ${stop}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it('the light theme ink reaches 4.5:1 on both pale stops of every hue', () => {
+    for (const name of names) {
+      const { ink, light, hue } = tintOf(name);
+      for (const stop of light) expect(contrast(hex(ink), hex(stop)), `${hue}: ${ink} on ${stop}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('keeps every hue at one brightness, so no tile glows or sinks beside the others', () => {
+    for (const scheme of ['dark', 'light'] as const) {
+      const lums = names.map((n) => luminance(hex(tintOf(n)[scheme][0])));
+      // Under HSL at one lightness the brightest hue was about three times the darkest.
+      expect(Math.max(...lums) / Math.min(...lums), scheme).toBeLessThan(1.35);
+    }
+  });
+
+  it('converts OKLCH to sRGB', () => {
+    expect(oklchHex(1, 0, 0)).toBe('#ffffff');
+    expect(oklchHex(0, 0, 0)).toBe('#000000');
+    // OKLCH's reference red, green and blue.
+    expect(oklchHex(0.627955, 0.257683, 29.234)).toBe('#ff0000');
+    expect(oklchHex(0.86644, 0.294827, 142.495)).toBe('#00ff00');
+    expect(oklchHex(0.452014, 0.313214, 264.052)).toBe('#0000ff');
+  });
+});
+// ==== Artwork fallback tints ==== end

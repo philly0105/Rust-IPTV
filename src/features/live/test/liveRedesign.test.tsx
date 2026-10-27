@@ -10,6 +10,7 @@ import { I18nextProvider } from 'react-i18next';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
+import { tintFill } from '@/ui/tint';
 
 import { ChannelLogo } from '../components/ChannelLogo';
 import { resetChannelListMemory } from '../components/ChannelList';
@@ -118,12 +119,17 @@ describe('channel logos (LG-14)', () => {
     const { container } = render(<ChannelLogo name="Ringside Fight" size={64} />);
     const tile = container.querySelector<HTMLElement>('[data-monogram]')!;
     expect(tile.textContent).toBe('RF');
-    expect(tile.style.background).toContain('linear-gradient');
+    // The shared tint (src/ui/tint.ts): deep stops in the dark themes, pale ones with deep ink in light.
+    expect(tile.style.getPropertyValue('--tint-dark')).toBe(tintFill('Ringside Fight', 'dark'));
+    expect(tile.style.getPropertyValue('--tint-light')).toBe(tintFill('Ringside Fight', 'light'));
+    expect(tile.className).toContain('light:not-in-data-player-stage:[background-image:var(--tint-light)]');
+    expect(tile.className).toContain('light:not-in-data-player-stage:[color:var(--tint-ink)]');
     expect(tile.style.fontSize).toBe('23px');
     const again = render(<ChannelLogo name="Ringside Fight" size={20} />).container.querySelector<HTMLElement>('[data-monogram]')!;
-    expect(again.style.background).toBe(tile.style.background);
+    expect(again.style.getPropertyValue('--tint-dark')).toBe(tile.style.getPropertyValue('--tint-dark'));
     const other = render(<ChannelLogo name="Meridian News HD" />).container.querySelector<HTMLElement>('[data-monogram]')!;
     expect(other.textContent).toBe('MN');
+    expect(other.style.getPropertyValue('--tint-dark')).not.toBe(tile.style.getPropertyValue('--tint-dark'));
   });
 
   it('a logo sits on a plate that does not follow the theme', () => {

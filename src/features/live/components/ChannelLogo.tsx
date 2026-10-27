@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useState, type SyntheticEvent } from 'react';
 
-import { cn, gateImage, useImageChain } from '@/ui';
+import { TINT_THEME, cn, gateImage, tintVars, useImageChain } from '@/ui';
 
 import { splitPlaceTag, stripCountryPrefix } from '../lib/channelName';
-import { monogramFill, monogramHue, monogramText } from '../lib/monogram';
+import { monogramHue, monogramText } from '../lib/monogram';
 
 export type LogoPlate = 'light' | 'dark';
 
@@ -85,7 +85,8 @@ export function measureLogo(img: HTMLImageElement): LogoReading {
 
 /**
  * Channel logo on a plate that stays the same in every theme, with a coloured monogram when there
- * is no logo (LG-14). The plate is dark (a deep slate, so white and coloured logos read), or light
+ * is no logo (LG-14), in the channel's tint (src/ui/tint.ts): pale in the light theme, like a light
+ * plate, so a list of them is not a column of dark slabs on the pale page. The plate is dark (a deep slate, so white and coloured logos read), or light
  * for a transparent logo drawn in dark ink, chosen once per logo from its pixels. A theme-coloured
  * plate lost dark logos in the dark themes and white ones in light.
  *
@@ -156,8 +157,8 @@ export const ChannelLogo = memo(function ChannelLogo({
       <span
         aria-hidden
         data-monogram=""
-        style={{ ...style, background: monogramFill(name), fontSize: Math.max(9, Math.round(size * 0.36)) }}
-        className={cn('inline-flex shrink-0 items-center justify-center font-display leading-none font-semibold tracking-tight text-white', radius, className)}
+        style={{ ...style, ...tintVars(name), fontSize: Math.max(9, Math.round(size * 0.36)) }}
+        className={cn('inline-flex shrink-0 items-center justify-center font-display leading-none font-semibold tracking-tight', TINT_THEME, radius, className)}
       >
         {monogramText(name)}
       </span>

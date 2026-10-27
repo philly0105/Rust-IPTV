@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
+import { tintOf, withAlpha } from '@/ui/tint';
 
 import { installDomStubs, rpcMock } from '../../test/harness';
 
@@ -62,9 +63,10 @@ describe('a channel without a logo (round 4)', () => {
       // The frame centres the tile as a square a little under half the card's height (a fixed size
       // crowded a phone card), rounded like an app icon, with no type glyph.
       const frame = mark.parentElement!.className;
-      for (const c of ['[&>[data-poster-fallback]]:m-auto', '[&>[data-poster-fallback]]:h-[46%]', '[&>[data-poster-fallback]]:aspect-square', '[&>[data-poster-fallback]]:rounded-[22%]', '[&>[data-poster-fallback]>svg]:hidden']) {
+      for (const c of ['[&>[data-poster-fallback]]:m-auto', '[&>[data-poster-fallback]]:h-[46%]', '[&>[data-poster-fallback]]:aspect-square', '[&>[data-poster-fallback]]:rounded-[22%]']) {
         expect(frame, `${name}: ${c}`).toContain(c);
       }
+      expect(mark.querySelector('svg'), name).toBeNull();
       expect(frame).not.toContain('size-16');
       // The channel's glow on the card's own surface shows around it.
       expect(frame).toContain('bg-transparent');
@@ -74,14 +76,17 @@ describe('a channel without a logo (round 4)', () => {
   it("draws the channel's glow pale in the light theme and deep in the dark ones", () => {
     wrap(<ChannelCard rail={rail} name="US| ESPN HD" now="NFL Live" nowProgress={0.4} onPlay={vi.fn()} ariaLabel="Play ESPN" />);
     const art = screen.getByRole('button', { name: 'Play ESPN' }).querySelector<HTMLElement>('[data-poster-fallback]')!.parentElement!.parentElement!;
-    // The hue rides on a variable; the gradient is in classes, so each theme can draw its own.
-    expect(art.style.getPropertyValue('--logo-hue')).toMatch(/^\d+$/);
+    // The channel's tint (the colour of its monogram in Live TV) rides on variables; the gradient
+    // is in classes, so each theme can draw its own.
+    const tint = tintOf('US| ESPN HD');
+    expect(art.style.getPropertyValue('--logo-glow-dark')).toBe(withAlpha(tint.dark[0], 0.55));
+    expect(art.style.getPropertyValue('--logo-glow-light')).toBe(withAlpha(tint.light[1], 0.6));
     expect(art.style.background).toBe('');
     const classes = art.className.split(' ');
     expect(classes).toContain('bg-surface-2');
-    expect(classes).toContain('bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_35%_30%/0.55),transparent_70%)]');
+    expect(classes).toContain('bg-[radial-gradient(120%_90%_at_30%_20%,var(--logo-glow-dark),transparent_70%)]');
     // The deep tint read as a grey smudge on a pale card.
-    expect(classes).toContain('light:bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_45%_85%/0.6),transparent_70%)]');
+    expect(classes).toContain('light:bg-[radial-gradient(120%_90%_at_30%_20%,var(--logo-glow-light),transparent_70%)]');
   });
 });
 

@@ -9,7 +9,7 @@ import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
-import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, hueOf, useImageChain } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, tintOf, useImageChain, withAlpha } from '@/ui';
 import { formatList } from '@/lib/intl';
 import { CastRow } from './CastRow';
 
@@ -95,7 +95,9 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
     // so it paints under everything that follows the hero, positioned or not.
     // An isolated hero would paint its bleed over the season tabs below.
     <section className="relative" aria-labelledby="vod-detail-title">
-      <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} title={model.title} />
+      {/* The tint comes from the title as the page shows it, as every rail's card takes it: the
+          provider's own name ("Harbor Lights (2021)") would put the page on another colour. */}
+      <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} title={model.titleBase ?? model.title} />
       {back && <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">{back}</div>}
       <div className={cn(HERO_GRID, top)}>
         <div
@@ -103,7 +105,15 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
           data-testid="vod-detail-poster"
         >
           {/* Provider artwork first (through the cache, then directly); when it fails, the TMDB poster (if any) the same way. */}
-          <Poster src={model.posterUrl} fallbackSrc={model.posterFallbackUrl} sourceId={sourceId} alt={model.title} aspect="poster" priority />
+          <Poster
+            src={model.posterUrl}
+            fallbackSrc={model.posterFallbackUrl}
+            sourceId={sourceId}
+            alt={model.title}
+            label={model.titleBase ?? model.title}
+            aspect="poster"
+            priority
+          />
         </div>
         <div className="flex min-w-0 flex-col gap-2 self-end">
           {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
@@ -230,16 +240,14 @@ export const HERO_BACK = 'border border-edge bg-surface/80 text-fg shadow-1 glas
 
 /**
  * The title's tint as two soft washes from the top edge, for a hero with no artwork at all: one
- * in the poster fallback's hue towards the far side, one in its second hue at the leading corner.
- * Pale in the light theme, deep in the dark one. The hue is the Poster fallback's (`hueOf` of the
- * same title), so the page reads as the title the poster tile stands for.
+ * in the tint's top stop towards the far side, one in its second stop at the leading corner.
+ * Pale in the light theme, deep in the dark one. It is the poster tile's tint (src/ui/tint.ts, from
+ * the same title), so the page reads as the title the poster tile stands for.
  */
 export function heroWash(title: string, dark: boolean): string {
-  const hue = hueOf(title);
-  const second = (hue + 40) % 360;
-  return dark
-    ? `radial-gradient(60% 100% at 78% 0%, hsl(${hue} 45% 34% / 0.75), transparent 72%), radial-gradient(50% 80% at 8% 0%, hsl(${second} 50% 24% / 0.6), transparent 70%)`
-    : `radial-gradient(60% 100% at 78% 0%, hsl(${hue} 55% 84% / 0.9), transparent 72%), radial-gradient(50% 80% at 8% 0%, hsl(${second} 45% 88% / 0.8), transparent 70%)`;
+  const tint = tintOf(title);
+  const [far, lead] = dark ? [withAlpha(tint.dark[0], 0.75), withAlpha(tint.dark[1], 0.6)] : [withAlpha(tint.light[1], 0.9), withAlpha(tint.light[0], 0.8)];
+  return `radial-gradient(60% 100% at 78% 0%, ${far}, transparent 72%), radial-gradient(50% 80% at 8% 0%, ${lead}, transparent 70%)`;
 }
 
 function Backdrop({ backdropUrl, posterUrl, sourceId, title }: { backdropUrl?: string; posterUrl?: string; sourceId: string; title: string }) {

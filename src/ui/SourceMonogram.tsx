@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 
 import { cn } from './cn';
-import { hueOf, initialsOf } from './Poster';
+import { initialsOf } from './Poster';
+import { TINT_THEME, tintVars } from './tint';
 
 export interface SourceMonogramProps {
   /** The source's name: its initials and its hue. */
@@ -14,18 +15,17 @@ export interface SourceMonogramProps {
 }
 
 /**
- * A source's monogram: its initials on a gradient whose hue comes from its name, so a source looks
+ * A source's monogram: its initials on its name's tint (tint.ts), pale in the light theme, so a source looks
  * the same in the rail, the phone's More sheet, the Sources page and the library's source badges.
  * Decorative: the name always sits next to it.
  */
 export function SourceMonogram({ name, className, children, testId }: SourceMonogramProps) {
-  const hue = hueOf(name);
   return (
     <span
       aria-hidden
       data-testid={testId}
-      className={cn('inline-flex shrink-0 items-center justify-center font-display font-semibold text-white', className)}
-      style={{ background: `linear-gradient(150deg, hsl(${hue} 42% 38%), hsl(${(hue + 36) % 360} 48% 24%))` }}
+      className={cn('inline-flex shrink-0 items-center justify-center font-display font-semibold', TINT_THEME, className)}
+      style={tintVars(name)}
     >
       {initialsOf(name)}
       {children}

@@ -41,7 +41,8 @@ import {
   useTooltip,
 } from '..';
 import { SWITCH_TONES } from '../Field';
-import { hueOf } from '../Poster';
+import { Poster } from '../Poster';
+import { TINT_THEME, hueOf, nameHue, tintFill, tintOf } from '../tint';
 import { mergeShownToasts, type ToastRecord } from '../Toast';
 import { TOOLTIP_CLOSE_MS } from '../Tooltip';
 
@@ -577,9 +578,56 @@ describe('SourceMonogram', () => {
     expect(mark.className).toContain('size-9');
     expect(within(mark).getByTestId('error-dot')).toBeTruthy();
     // One name, one look, wherever it is drawn; another name gets its own hue.
-    expect(hueOf('Night Portal HD')).not.toBe(hueOf('Riverside'));
+    expect(nameHue('Night Portal HD')).not.toBe(nameHue('Riverside'));
     expect(mark.getAttribute('style')).toBe(screen.getByTestId('same').getAttribute('style'));
     expect(mark.getAttribute('style')).not.toBe(screen.getByTestId('other').getAttribute('style'));
+    // The shared tint, pale with deep ink in the light theme, as the rail's other fallbacks.
+    expect(mark.style.getPropertyValue('--tint-light')).toBe(tintFill('Night Portal HD', 'light'));
+    for (const c of TINT_THEME.split(' ')) expect(mark.className.split(' ')).toContain(c);
+  });
+});
+
+describe('artwork fallback tint (src/ui/tint.ts)', () => {
+  const tile = (props: { tint?: 'theme' | 'dark' } = {}) => {
+    const { container } = render(<Poster src={undefined} alt="" label="Harbor Lights" {...props} />);
+    return container.querySelector<HTMLElement>('[data-poster-fallback]')!;
+  };
+
+  it('a poster without artwork takes its title tint, pale with deep ink in the light theme', () => {
+    const el = tile();
+    expect(el.style.getPropertyValue('--tint-dark')).toBe(tintFill('Harbor Lights', 'dark'));
+    expect(el.style.getPropertyValue('--tint-light')).toBe(tintFill('Harbor Lights', 'light'));
+    expect(el.style.getPropertyValue('--tint-ink')).toBe(tintOf('Harbor Lights').ink);
+    const classes = el.className.split(' ');
+    expect(classes).toContain('[background-image:var(--tint-dark)]');
+    expect(classes).toContain('light:not-in-data-player-stage:[background-image:var(--tint-light)]');
+    expect(classes).toContain('light:not-in-data-player-stage:[color:var(--tint-ink)]');
+  });
+
+  it("keeps the deep stops inside the player's stage, which is black in every theme, except as a phone's idle bar", () => {
+    const light = TINT_THEME.split(' ').filter((c) => c.startsWith('light:'));
+    // Every pale class stops at the stage's edge, or applies below md only, where Live's idle stage
+    // is a bar on the page surface: none of them reaches a tile on the black stage from md up.
+    expect(light.length).toBeGreaterThan(0);
+    for (const c of light) expect(c.startsWith('light:not-in-data-player-stage:') || c.startsWith('light:max-md:')).toBe(true);
+    for (const v of ['[background-image:var(--tint-light)]', '[color:var(--tint-ink)]']) {
+      expect(light).toContain(`light:not-in-data-player-stage:${v}`);
+      expect(light).toContain(`light:max-md:${v}`);
+    }
+    // Under them, in every theme and so on the stage, the deep stops and white initials.
+    expect(TINT_THEME.split(' ')).toEqual(expect.arrayContaining(['[background-image:var(--tint-dark)]', 'text-white/90']));
+  });
+
+  it('a tile on glass keeps the deep stops in every theme', () => {
+    const classes = tile({ tint: 'dark' }).className;
+    expect(classes).toContain('[background-image:var(--tint-dark)]');
+    expect(classes).not.toContain('light:');
+  });
+
+  it('gives one name the same colour in every recipe', () => {
+    expect(tintFill('US| ESPN HD')).toBe(`linear-gradient(160deg, ${tintOf('US| ESPN HD').dark[0]}, ${tintOf('US| ESPN HD').dark[1]})`);
+    expect(tintOf('US| ESPN HD')).toBe(tintOf('US| ESPN HD'));
+    expect(hueOf('Harbor Lights') % 12).toBe((nameHue('Harbor Lights') - 15) / 30);
   });
 });
 

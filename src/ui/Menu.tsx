@@ -269,6 +269,9 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
     let next: number;
     if (dir === 'first') next = 0;
     else if (dir === 'last') next = nodes.length - 1;
+    // No item has focus yet (a sheet focuses itself on open): Down starts at the first item and
+    // Up at the last, as they would wrap from an item.
+    else if (idx === -1) next = dir === 1 ? 0 : nodes.length - 1;
     else next = (idx + dir + nodes.length) % nodes.length;
     nodes[next]?.focus();
   };

@@ -439,6 +439,17 @@ describe('overlay exits (usePresence)', () => {
       expect(items[2]!.onSelect).toHaveBeenCalledTimes(1);
     });
 
+    it('starts ArrowUp at the last item while the sheet itself has focus', () => {
+      answer(true);
+      render(<Menu label="Actions for ESPN HD" items={items} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for ESPN HD' }));
+      const menu = screen.getByRole('menu');
+      expect(document.activeElement).toBe(menu);
+      // With no item focused, Up wraps to the end as it does from the first item.
+      fireEvent.keyDown(menu, { key: 'ArrowUp' });
+      expect(document.activeElement?.textContent).toBe('Remove from history');
+    });
+
     it('stays a popover beside its trigger elsewhere, without the sheet header', () => {
       answer(false);
       render(<Menu label="Actions for ESPN HD" items={items} sheetHeader={{ title: 'ESPN HD' }} />);

@@ -4,7 +4,10 @@
  * than in the shell header, so a phone-width header keeps room for the page
  * title (as on the category grid); Ctrl+F finds it through `data-page-search`.
  * On a phone the tabs, the search and the other two controls take a line
- * each; from about 1000 px up everything fits on one line.
+ * each; from about 1000 px up everything fits on one line. Every control is
+ * the md height (37.5 px at 100 %), the height the pill tabs and the view
+ * switch have: the search at sm and the sort at h-9 left three heights in one
+ * row.
  */
 
 import { LayoutGrid, List } from 'lucide-react';
@@ -84,7 +87,6 @@ export function MyListToolbar({
               onLeaveSearch();
             }
           }}
-          size="sm"
           placeholder={t('searchPlaceholder')}
           // Below sm the search shares its line with the grid/list switch only.
           className="min-w-0 flex-1 basis-[calc(100%-6rem)] sm:basis-auto sm:min-w-48 lg:w-56 lg:flex-none"
@@ -120,7 +122,7 @@ export function MyListToolbar({
           onValueChange={(v) => onSort(v as MyListSort)}
           options={SORTS.map((s) => ({ value: s, label: t(SORT_KEY[s]) }))}
           wrapperClassName="ms-auto min-w-0 flex-1 sm:flex-none"
-          className="h-9 sm:min-w-[11rem]"
+          className="sm:min-w-[11rem]"
           data-testid="mylist-sort"
         />
       </div>

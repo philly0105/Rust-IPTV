@@ -47,6 +47,13 @@ export interface MenuProps {
   className?: string;
 }
 
+/**
+ * A destructive item (Remove, Delete): red as a whole, its icon included, with a red wash under
+ * the pointer and focus, so it never looks like its neutral neighbours until it is read. Exported
+ * for src/ui/test/contrast.test.ts, which holds the red text to 4.5:1 on the strongest wash.
+ */
+export const MENU_DANGER = 'text-danger hover:bg-danger/10 focus:bg-danger/15 active:bg-danger/20';
+
 function isAction(i: MenuItem): i is MenuAction {
   return !('type' in i);
 }
@@ -350,11 +357,11 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
                     'flex h-9 cursor-pointer items-center gap-3 rounded-md px-3 text-sm outline-hidden select-none',
                     TOUCH_TARGET,
                     'hover:bg-hover focus:bg-active active:bg-pressed focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
-                    item.danger ? 'text-danger' : 'text-fg',
+                    item.danger ? MENU_DANGER : 'text-fg',
                   )}
                 >
                   {item.icon && (
-                    <span aria-hidden className="flex w-4 shrink-0 justify-center text-fg-muted">
+                    <span aria-hidden data-menu-icon="" className={cn('flex w-4 shrink-0 justify-center', item.danger ? 'text-danger' : 'text-fg-muted')}>
                       {item.icon}
                     </span>
                   )}

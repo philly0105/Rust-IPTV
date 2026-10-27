@@ -273,7 +273,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
               loading={allCats.isPending}
               hrefFor={hrefFor}
               onShowAll={showIndex}
-              manage={<IconButton label={manageLabel} icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0 max-md:order-last" />}
+              manage={<IconButton size="sm" label={manageLabel} icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0 max-md:order-last" />}
             />
             {/* CB-VOD-LANDING: rails first, the way Plex and Apple TV open a library. */}
             {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} />}

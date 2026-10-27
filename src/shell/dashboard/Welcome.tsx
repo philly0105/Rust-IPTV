@@ -65,10 +65,13 @@ export function Welcome({ onAddingChange }: { onAddingChange?: (adding: boolean)
         </div>
         {/*
           The Sources page's onboarding, as it is there. Its own heading becomes the step's
-          heading under the welcome, and its column starts on the page gutter, not centred. On a
-          phone its lead line goes (the welcome's lead just said it) and its gaps tighten.
+          heading under the welcome, and its column starts on the page gutter, not centred. On
+          the Sources page the block fills the window and centres itself in it; here it follows
+          the lead, so that height and centring go too: kept, they left a band of about 250 px
+          above the tiles and pushed the tiles, the privacy line and the backup link below the
+          fold. On a phone its lead line goes (the welcome's lead just said it) and its gaps tighten.
         */}
-        <div className="max-w-5xl [&_#sources-onboarding-title]:text-title-sm [&>section]:py-0 max-sm:[&>section]:gap-4 max-sm:[&_#sources-onboarding-title+p]:hidden">
+        <div className="max-w-5xl [&_#sources-onboarding-title]:text-title-sm [&>section]:min-h-0 [&>section]:justify-start [&>section]:py-0 max-sm:[&>section]:gap-4 max-sm:[&_#sources-onboarding-title+p]:hidden">
           <Onboarding onPick={pick} />
         </div>
       </Page>

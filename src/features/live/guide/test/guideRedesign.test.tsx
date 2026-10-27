@@ -184,6 +184,18 @@ describe('what is playing (LG-01)', () => {
     expect(document.querySelector('[data-channel-row="1"]')!.hasAttribute('aria-current')).toBe(false);
   });
 
+  // Round 4: an amber foot under every airing cell stacked into stripes; amber is for "here".
+  it("draws the airing progress in the accent on the playing channel's row only", async () => {
+    fakes.usePlayerStore.setState({ source: { url: 'x', kind: 'hls', title: 'Channel 2', ref: makeChannel(2).ref, isLive: true, isRadio: false } } as never);
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const playingCell = await screen.findByRole('button', { name: /^c2 P0,/ });
+    const otherCell = await screen.findByRole('button', { name: /^c1 P0,/ });
+    expect(within(playingCell).getByTestId('cell-progress').className).toContain('bg-accent-mark');
+    const other = within(otherCell).getByTestId('cell-progress').className;
+    expect(other).not.toContain('bg-accent');
+    expect(other).toContain('bg-fg-subtle/55');
+  });
+
   it('opens at the channel the link names, with the cursor on now', async () => {
     renderGuide({ path: '/epg?source=src1&focus=c7', routes: GRID });
     await waitFor(() => expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/^c7 P0,/));
@@ -245,6 +257,22 @@ describe('programme cells', () => {
     expect(title!.className).not.toContain('text-xs');
     expect(times!.className).toContain('text-caption');
     expect(times!.className).not.toContain('11rem');
+  });
+
+  // Round 4: a History badge on nearly every logo repeated the glyph on the ended cells. The
+  // column now says catch-up in the channel's name and its tooltip only.
+  it('say catch-up in the channel cell’s name and tooltip, with no badge on its logo', async () => {
+    rpc.handlers['sources.list'] = () => [{ id: 'src1', kind: 'xtream', name: 'Demo', channelCount: CHANNELS.length, epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } }];
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    const withArchive = document.querySelector<HTMLElement>('[data-channel-row="0"]')!;
+    const without = document.querySelector<HTMLElement>('[data-channel-row="5"]')!;
+    await waitFor(() => expect(withArchive.textContent).toContain('Catch-up available'));
+    expect(withArchive.title).toBe('Play Channel 0\nCatch-up available');
+    expect(within(withArchive).getByTestId('guide-archive-mark').className).toContain('sr-only');
+    expect(withArchive.querySelector('svg')).toBeNull();
+    expect(without.textContent).not.toContain('Catch-up available');
+    expect(without.title).toBe('Play Channel 5');
   });
 });
 

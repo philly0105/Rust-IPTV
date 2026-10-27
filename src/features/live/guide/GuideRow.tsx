@@ -156,6 +156,9 @@ export const GuideRow = memo(function GuideRow({
   });
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
   const { onNow } = labels;
+  // Catch-up is no badge on the logo: one on nearly every row repeated the History glyph its
+  // ended cells carry. The channel's name and tooltip still say it.
+  const archive = !!ch && hasUsableArchive(ch, kind);
   // Cells this render added get their text fitted before paint.
   useLayoutEffect(() => {
     if (ref.current) handlers.fitText(ref.current);
@@ -205,7 +208,7 @@ export const GuideRow = memo(function GuideRow({
             data-highlighted={highlighted ? '' : undefined}
             tabIndex={cursorStart !== null && (!programs || programs.length === 0) ? 0 : -1}
             onClick={() => handlers.play(ch)}
-            title={labels.playChannel(chName)}
+            title={archive ? `${labels.playChannel(chName)}\n${labels.archive}` : labels.playChannel(chName)}
             aria-current={playing ? 'true' : undefined}
             data-playing={playing ? '' : undefined}
             data-compact={compact ? '' : undefined}
@@ -217,32 +220,18 @@ export const GuideRow = memo(function GuideRow({
             {compact ? (
               // Phones: the logo over the number; the name is the button's label and tooltip.
               <>
-                {/* Catch-up rides on the logo's corner, as on the wide guide. */}
-                <span className="relative shrink-0">
-                  <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
-                  {hasUsableArchive(ch, kind) ? (
-                    <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
-                      <History size={10} aria-label={labels.archive} />
-                    </span>
-                  ) : null}
-                </span>
+                <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                 <span className={cn('max-w-full truncate font-numeric text-xs leading-none tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
                 <span className="sr-only">{playing ? `${chName}, ${labels.playingNow}` : chName}</span>
+                {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
               </>
             ) : (
               <>
                 {/* Playing: the tick and the playing mark are the amber; the number steps up to the text colour. */}
                 <span className={cn('w-7 shrink-0 text-end font-numeric text-sm tabular-nums', playing ? 'text-fg' : 'text-fg-muted')}>{ch.number ?? ''}</span>
-                <span className="relative shrink-0">
-                  <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
-                  {/* Catch-up rides on the logo's corner, so the name keeps the column's width. */}
-                  {hasUsableArchive(ch, kind) ? (
-                    <span data-testid="guide-archive-mark" className="absolute -end-1 -bottom-1 inline-flex size-4 items-center justify-center rounded-full bg-surface-3 text-fg-muted ring-2 ring-surface">
-                      <History size={10} aria-label={labels.archive} />
-                    </span>
-                  ) : null}
-                </span>
+                <ChannelLogo src={ch.logoUrl} name={chName} size={32} sourceId={ch.ref.sourceId} />
                 <span className={cn('min-w-0 flex-1 truncate text-body-sm text-fg', playing && 'font-semibold')}>{chName}</span>
+                {archive ? <span className="sr-only" data-testid="guide-archive-mark">, {labels.archive}</span> : null}
                 {playing ? (
                   <span className="inline-flex shrink-0 text-accent-mark" data-testid="guide-playing-mark">
                     <AudioLines size={14} aria-label={labels.playingNow} />
@@ -328,14 +317,17 @@ export const GuideRow = memo(function GuideRow({
                     muted
                       ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
                         'bg-bg text-fg-subtle hover:bg-surface'
-                      : // On now: the raised cell (white with a shadow in light, the next surface step
-                        // in dark), never a grey or amber wash. Light rows sit on the grey page:
-                        // there a cell is the white panel; dark keeps the lifted surface step.
+                      : // What airs now reads as one band down the grid. On now: the raised cell (white
+                        // with a lifted shadow in light, the raised fill in dark), never a grey or
+                        // amber wash. Later and ended: one step down on surface-2, which keeps an edge
+                        // against the page in every theme. dark:bg-surface would be the page's own
+                        // black under OLED, and an unfilled ended cell left catch-up hours as loose
+                        // text. Ended cells step back by their quiet text and the History glyph only.
                         b.when === 'now'
-                        ? 'bg-surface font-medium text-fg shadow-1 hover:bg-surface-3 dark:bg-surface-3 dark:hover:bg-pressed'
+                        ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
                         : b.when === 'past'
-                          ? 'bg-surface/50 text-fg-muted hover:bg-surface dark:bg-surface-2/50 dark:hover:bg-surface-2'
-                          : 'bg-surface text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
+                          ? 'bg-surface-2 text-fg-subtle hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3'
+                          : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
                   )}
                   style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
                 >
@@ -343,12 +335,15 @@ export const GuideRow = memo(function GuideRow({
                   {genre && !muted ? (
                     <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
                   ) : null}
-                  {/* The airing programme's progress along its foot (LG-18): the accent's mark tone, a mark of progress. */}
+                  {/* The airing programme's progress along its foot (LG-18). In the accent's mark tone
+                      only on the playing channel's row, where it means "here", as in the Live list;
+                      an amber foot on every airing cell stacked into stripes beside the red now line.
+                      The rest are neutral: the cell prints its times, so the foot only hints. */}
                   {b.when === 'now' && !muted ? (
                     <span
                       aria-hidden
                       data-testid="cell-progress"
-                      className="absolute start-0 bottom-0 h-0.5 bg-accent-mark"
+                      className={cn('absolute start-0 bottom-0 h-0.5', playing ? 'bg-accent-mark' : 'bg-fg-subtle/55')}
                       style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
                     />
                   ) : null}
@@ -374,8 +369,9 @@ export const GuideRow = memo(function GuideRow({
                   >
                     {/* The title at the dense-row size (13.5 px) and the times at caption size: at 11 px
                         a desktop guide was the smallest text in the app. Both lines fit the row in
-                        compact density too (20 + 16 px of the cell's 41). */}
-                    <span className="flex items-center gap-1 truncate text-body-sm font-medium">
+                        compact density too (20 + 16 px of the cell's 41). What airs now is set
+                        semibold, the rest medium. */}
+                    <span className={cn('flex items-center gap-1 truncate text-body-sm', b.when === 'now' && !muted ? 'font-semibold' : 'font-medium')}>
                       {b.when === 'past' && catchupOk ? <History className="size-3.5 shrink-0" aria-hidden /> : null}
                       <span dir="auto" className="truncate text-match-parent">
                         {p.title}
@@ -383,7 +379,9 @@ export const GuideRow = memo(function GuideRow({
                       {/* recording: */}
                       <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
                     </span>
-                    <span className={`block truncate text-caption tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{range}</span>
+                    {/* Times are the quiet line under every title; an ended or stepped-back cell's are
+                        already in its quiet text tone. */}
+                    <span className={cn('block truncate text-caption tabular-nums', !muted && b.when !== 'past' && 'text-fg-muted')}>{range}</span>
                   </span>
                 </button>
               );

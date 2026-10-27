@@ -430,8 +430,8 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     expect(line.className).not.toMatch(/(^|\s)z-/);
     expect(line.compareDocumentPosition(cell) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(document.querySelector('[role="rowheader"]')!.className).toContain('z-10');
-    // An opaque fill: the raised cell (white in light, the next surface step in dark), no state layer.
-    expect(cell.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-surface', 'dark:bg-surface-3', 'shadow-1']));
+    // An opaque fill: the raised cell (white in light, the raised fill in dark), no state layer.
+    expect(cell.className.split(/\s+/)).toEqual(expect.arrayContaining(['bg-surface', 'dark:bg-raised', 'shadow-2']));
     expect(cell.className).not.toMatch(/(^|\s)bg-(active|hover|selected)(\s|$)/);
     expect(cell.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
     const tick = within(cell).getByTestId('cell-now-tick');
@@ -440,5 +440,31 @@ describe('the now line (L2-guide-library-6, L3-visual-3)', () => {
     const later = await screen.findByRole('button', { name: /^c1 P1,/ });
     expect(later.className).not.toMatch(/(^|\s)(dark:)?bg-[\w-]+\/\d+(\s|$)/);
     expect(within(later).queryByTestId('cell-now-tick')).toBeNull();
+  });
+
+  // Round 4: the airing column is a band. Later cells sit one surface step under the airing
+  // cell in both themes (they shared the white in light), its title is semibold, and every
+  // time line is the quiet tone: the airing times used to be the loud ones. Later and ended
+  // cells take surface-2 in dark too: dark:bg-surface is the page's own black under OLED, and
+  // an ended cell with no fill left catch-up hours as loose text.
+  it('sets the airing cells apart from later ones as a band', async () => {
+    rpc.handlers['epg.grid'] = hourly(defaultStart(Date.now()));
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c1 P0,/ });
+    const later = await screen.findByRole('button', { name: /^c1 P1,/ });
+    const ended = await screen.findByRole('button', { name: /^c1 P-1,/ });
+    const fill = ['bg-surface-2', 'hover:bg-surface-3', 'dark:bg-surface-2', 'dark:hover:bg-surface-3'];
+    expect(later.className.split(/\s+/)).toEqual(expect.arrayContaining(fill));
+    expect(later.className.split(/\s+/)).not.toContain('shadow-2');
+    // An ended cell keeps the later cells' block and steps back by its text tone only.
+    expect(ended.className.split(/\s+/)).toEqual(expect.arrayContaining([...fill, 'text-fg-subtle']));
+    expect(ended.className.split(/\s+/)).not.toContain('bg-bg');
+    const [title, time] = within(cell).getByTestId('cell-text').children as unknown as HTMLElement[];
+    expect(title!.className).toContain('font-semibold');
+    expect(time!.className).toContain('text-fg-muted');
+    const [laterTitle, laterTime] = within(later).getByTestId('cell-text').children as unknown as HTMLElement[];
+    expect(laterTitle!.className).toContain('font-medium');
+    expect(laterTitle!.className).not.toContain('font-semibold');
+    expect(laterTime!.className).toContain('text-fg-muted');
   });
 });

@@ -66,8 +66,13 @@ function GameGrid({
   showLeague: boolean;
   ctx: StreamContext;
 }) {
+  // Each card spans four rows of this grid as a subgrid (GameCard), so the cards in a row share one
+  // height and their status lines, teams, notes and streams line up across it. The grid has no row
+  // gap, since a subgrid's tracks keep its parent's gutters and a card without notes would show
+  // two of them around its empty track: the cards' bottom margin spaces the rows instead, and the
+  // list takes the last one back.
   return (
-    <ul className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <ul className="-mb-3 grid gap-x-3 md:grid-cols-2 xl:grid-cols-3" data-testid="sports-grid">
       {games.map((g) => (
         <GameCard key={g.key} game={g} {...streamsOf(g)} showStreams={showStreams} showLeague={showLeague} ctx={ctx} />
       ))}

@@ -420,6 +420,24 @@ describe('sports page', () => {
     expect(within(card(postponed)).queryByTestId('sports-no-streams')).toBeNull();
   });
 
+  it('lines the cards of a row up: each spans four shared rows, streams in the last', async () => {
+    const plain = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    const noted = h.game('2', { startMs: Date.now() + 2 * h.HOUR, note: 'NBA Cup' });
+    setDay([plain, noted]);
+    setStreams(plain, [h.match(ESPN)]);
+    setStreams(noted, [h.match(ESPN)]);
+    await openReady();
+    // The grid stretches its items (no items-start), and each card is a subgrid of four of its rows.
+    expect(screen.getAllByTestId('sports-grid')[0]!.className).not.toContain('items-start');
+    for (const g of [plain, noted]) {
+      expect(card(g).className).toContain('row-span-4');
+      expect(card(g).className).toContain('grid-rows-subgrid');
+      // The streams sit in the fourth track whether or not the card has notes, so they share a line.
+      expect(within(card(g)).getByTestId('sports-streams').closest('.row-start-4')).toBeTruthy();
+    }
+    expect(within(card(noted)).getByTestId('sports-notes').className).toContain('row-start-3');
+  });
+
   it('splits the day into Live now, Upcoming and Final, so no game shows twice', async () => {
     const early = h.finalGame('1');
     const playing = h.liveGame('2');

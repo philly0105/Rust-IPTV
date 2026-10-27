@@ -150,10 +150,15 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
         }
       : null,
   );
+  // Four rows of the page's grid as a subgrid: the status line, the teams, the notes and the streams
+  // each take one track shared with the other cards in the row, so every card in a row is as tall as
+  // the tallest and the stream lists start on one line. The tracks have no gaps (the rows space
+  // themselves with a top margin), so a card without notes keeps an empty track of no height.
+  // Where subgrid is not supported the card is a plain four-row grid of its own.
   return (
     <li
       className={cn(
-        'flex min-w-0 flex-col gap-2.5 rounded-lg border bg-surface p-3.5',
+        'row-span-4 mb-3 grid min-w-0 grid-rows-subgrid rounded-lg border bg-surface p-3.5',
         game.phase === 'live' ? 'border-live/40' : 'border-edge',
       )}
       data-testid="sports-game"
@@ -202,13 +207,13 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
           ]}
         />
       </div>
-      <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="mt-2.5 flex min-w-0 flex-col gap-1.5">
         <TeamRow team={game.away} game={game} followed={follows(game.away)} />
         <TeamRow team={game.home} game={game} followed={follows(game.home)} />
       </div>
       {notes.length > 0 ? (
         <MetaLine
-          className="text-caption text-fg-muted"
+          className="row-start-3 mt-2.5 self-start text-caption text-fg-muted"
           data-testid="sports-notes"
           items={notes.map((text, i) => (
             <span key={i} dir="auto">
@@ -218,7 +223,7 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
         />
       ) : null}
       {showStreams && playable ? (
-        <div className="-mx-1 border-t border-divider px-1 pt-1">
+        <div className="row-start-4 -mx-1 mt-2.5 border-t border-divider px-1 pt-1">
           <StreamList game={game} title={title} streams={streams} loading={streamsLoading} ctx={ctx} />
         </div>
       ) : null}

@@ -558,6 +558,23 @@ describe('HeroCarousel', () => {
     expect(poster.className).toContain('lg:block');
   });
 
+  it('a slide with no artwork shows its initials tile upright at the inline end, over its tint', () => {
+    const { hero } = renderHero([slide('a', { title: 'Harbor Lights' }), slide('b', { backdropUrl: 'https://img.test/b-wide.jpg' })]);
+    const layer = hero.querySelector<HTMLElement>('[data-hero-backdrop]')!;
+    expect(layer.style.background).toContain('gradient');
+    const tile = layer.querySelector<HTMLElement>('[data-hero-poster-fallback]')!;
+    // The rails' fallback tile for the same title: its initials and the movie glyph.
+    expect(tile.querySelector('[data-poster-fallback]')!.textContent).toBe('HL');
+    expect(tile.className).toContain('lg:block');
+    expect(tile.className).toContain('hidden');
+    // Decoration only: the layer is hidden from assistive tech and the tile has no text alternative.
+    expect(layer.getAttribute('aria-hidden')).toBe('true');
+    // A slide with a picture gets no tile.
+    fireEvent.click(screen.getByRole('tab', { name: 'Title b' }));
+    const other = hero.querySelector<HTMLElement>('[data-hero-backdrop="s1|movie|b"]')!;
+    expect(other.querySelector('[data-hero-poster-fallback]')).toBeNull();
+  });
+
   it('titles a new arrival with titleBase like its detail page, and the year line follows what is shown', () => {
     const [base] = buildHeroSlides([], [vod('d', { title: 'Dune: Part Two (2024) [MULTI]', titleBase: 'Dune: Part Two', year: 2024 })]);
     expect(base).toMatchObject({ title: 'Dune: Part Two', year: 2024 });

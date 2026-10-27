@@ -43,6 +43,8 @@
   "tileLabel": "Θέση {{slot}}: {{name}}",
   "listen": "Αναπαραγωγή ήχου από {{name}}",
   "hasSound": "Ο ήχος είναι στο {{name}}",
+  "listenShort": "Αναπαραγωγή ήχου",
+  "hasSoundShort": "Έχει τον ήχο",
   "swapLabel": "Μετακίνηση του {{name}} σε άλλη θέση",
   "swapShort": "Μετακίνηση σε άλλη θέση",
   "swapHereLabel": "Ανταλλαγή με {{name}} στη θέση {{slot}}",

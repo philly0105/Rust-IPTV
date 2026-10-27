@@ -43,6 +43,8 @@
   "tileLabel": "البلاصة {{slot}}: {{name}}",
   "listen": "شغل الصوت ديال {{name}}",
   "hasSound": "الصوت عند {{name}}",
+  "listenShort": "شغل الصوت",
+  "hasSoundShort": "الصوت هنا",
   "swapLabel": "حرك {{name}} لبلاصة أخرى",
   "swapShort": "حرك لبلاصة أخرى",
   "swapHereLabel": "بدّل مع {{name}} فالبلاصة {{slot}}",

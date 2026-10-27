@@ -43,6 +43,8 @@
   "tileLabel": "{{slot}}. yer: {{name}}",
   "listen": "{{name}} sesini çal",
   "hasSound": "Ses {{name}} kanalında",
+  "listenShort": "Sesi çal",
+  "hasSoundShort": "Ses bu kanalda",
   "swapLabel": "{{name}} kanalını başka bir yere taşı",
   "swapShort": "Başka bir yere taşı",
   "swapHereLabel": "{{slot}}. yerdeki {{name}} ile değiştir",

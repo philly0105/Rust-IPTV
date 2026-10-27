@@ -43,6 +43,8 @@
   "tileLabel": "Slot {{slot}}: {{name}}",
   "listen": "Play sound from {{name}}",
   "hasSound": "{{name}} has the sound",
+  "listenShort": "Play sound",
+  "hasSoundShort": "Has the sound",
   "swapLabel": "Move {{name}} to another slot",
   "swapShort": "Move to another slot",
   "swapHereLabel": "Swap with {{name}} in slot {{slot}}",

@@ -43,6 +43,8 @@
   "tileLabel": "Plek {{slot}}: {{name}}",
   "listen": "Geluid van {{name}} afspelen",
   "hasSound": "{{name}} heeft het geluid",
+  "listenShort": "Geluid afspelen",
+  "hasSoundShort": "Heeft het geluid",
   "swapLabel": "{{name}} naar een andere plek verplaatsen",
   "swapShort": "Naar een andere plek verplaatsen",
   "swapHereLabel": "Wisselen met {{name}} op plek {{slot}}",

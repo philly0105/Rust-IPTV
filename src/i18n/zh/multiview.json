@@ -43,6 +43,8 @@
   "tileLabel": "第 {{slot}} 格：{{name}}",
   "listen": "播放 {{name}} 的声音",
   "hasSound": "{{name}} 正在出声",
+  "listenShort": "播放声音",
+  "hasSoundShort": "正在出声",
   "swapLabel": "把 {{name}} 移到另一个位置",
   "swapShort": "移到另一个位置",
   "swapHereLabel": "与第 {{slot}} 格的 {{name}} 交换",

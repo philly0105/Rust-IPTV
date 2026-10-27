@@ -43,6 +43,8 @@
   "tileLabel": "{{slot}}. hely: {{name}}",
   "listen": "{{name}} hangjának lejátszása",
   "hasSound": "A hang most: {{name}}",
+  "listenShort": "Hang lejátszása",
+  "hasSoundShort": "Innen szól a hang",
   "swapLabel": "{{name}} áthelyezése másik helyre",
   "swapShort": "Áthelyezés másik helyre",
   "swapHereLabel": "Csere ezzel: {{name}}, {{slot}}. hely",

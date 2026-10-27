@@ -946,6 +946,8 @@ describe('tile panels', () => {
     const centre = within(tileEl(2)).getByTestId('multiview-tile-centre').className.split(/\s+/);
     // bottom-12 clears the bottom row (bottom-2 plus the tools' 2.4rem): neither covers Retry.
     expect(centre).toContain('bottom-12');
+    // On touch the tools' 44 px floor makes the row taller, and the band stops above it there too.
+    expect(centre).toContain('pointer-coarse:bottom-16');
     expect(centre).not.toContain('inset-0');
     // The panel steps up with the tile: the help line only from 26rem.
     const hint = within(tileEl(2)).getByTestId('multiview-tile-error').querySelector('p.text-xs')!;
@@ -974,22 +976,69 @@ describe('tile panels', () => {
     // One row along the bottom: the tools never sit over the centred panel.
     expect(tools.parentElement).toBe(strip.parentElement);
     expect(tools.parentElement!.className).toContain('bottom-2');
-    // Wide tiles under a mouse show Swap, Replace and Remove as buttons; elsewhere the menu does.
-    for (const id of ['multiview-tile-swap', 'multiview-tile-replace', 'multiview-tile-close']) {
+    // Wide tiles under a mouse show Listen, Swap, Replace and Remove as buttons; elsewhere the menu does.
+    for (const id of ['multiview-tile-listen', 'multiview-tile-swap', 'multiview-tile-replace', 'multiview-tile-close']) {
       expect(within(tools).getByTestId(id).className).toContain('[@media(hover:hover)]:@[24rem]/tile:inline-flex');
     }
     expect(within(tools).getByTestId('multiview-tile-more').className).toContain('[@media(hover:hover)]:@[24rem]/tile:hidden');
 
     fireEvent.click(within(tools).getByRole('button', { name: 'More actions for Channel 2' }));
     const menu = await screen.findByRole('menu');
-    // Each item carries its key as a cap after the label.
+    // Each item carries its key as a cap after the label: the slot's number gives it the sound.
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      expect.stringMatching(/^Play sound.*2/),
       expect.stringMatching(/^Move to another slot/),
       expect.stringMatching(/^Replace/),
       expect.stringMatching(/^Close/),
     ]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Close/ }));
     expect(useMultiviewStore.getState().tiles.map((t) => t.key)).toEqual(['k1']);
+  });
+
+  it('gives a tile the sound from its menu, and the tile with sound says it has it', async () => {
+    seed([1, 2]);
+    renderPage();
+    const tools = await waitFor(() => within(tileEl(2)).getByTestId('multiview-tile-tools'));
+    expect(useMultiviewStore.getState().audioKey).toBe('k1');
+    fireEvent.click(within(tools).getByRole('button', { name: 'More actions for Channel 2' }));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: /Play sound/ }));
+    expect(useMultiviewStore.getState().audioKey).toBe('k2');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+    fireEvent.click(within(tools).getByRole('button', { name: 'More actions for Channel 2' }));
+    const item = within(await screen.findByRole('menu')).getAllByRole('menuitem')[0]!;
+    expect(item.textContent).toMatch(/^Has the sound/);
+    expect(item.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+
+    // On a muted wall the tile with sound still offers it, and choosing it unmutes the wall.
+    act(() => useMultiviewAudio.getState().setMuted(true));
+    fireEvent.click(within(tools).getByRole('button', { name: 'More actions for Channel 2' }));
+    const offer = within(await screen.findByRole('menu')).getAllByRole('menuitem')[0]!;
+    expect(offer.textContent).toMatch(/^Play sound/);
+    fireEvent.click(offer);
+    expect(useMultiviewAudio.getState().muted).toBe(false);
+  });
+
+  it("keeps hidden tools out of the strip's row on a screen with hover, so the name shows in full", async () => {
+    seed([1, 2]);
+    renderPage();
+    const tools = await waitFor(() => within(tileEl(2)).getByTestId('multiview-tile-tools'));
+    const cls = tools.className.split(/\s+/);
+    // At rest under a mouse the tools are out of flow and unseen; hover, focus or the open menu
+    // brings them into the row. Without hover they never leave it.
+    expect(cls).toEqual(expect.arrayContaining(['[@media(hover:hover)]:absolute', '[@media(hover:hover)]:opacity-0']));
+    expect(cls).toEqual(expect.arrayContaining(['group-hover/tile:static', 'group-focus-within/tile:static', 'has-[[aria-expanded=true]]:static']));
+    expect(cls).toEqual(expect.arrayContaining(['group-hover/tile:opacity-100', 'group-focus-within/tile:opacity-100', 'has-[[aria-expanded=true]]:opacity-100']));
+    expect(cls).not.toContain('absolute');
+    expect(cls).not.toContain('opacity-0');
+    // The two pills share the row's height, and touch gets the 44 px floor on every tool.
+    expect(tools.parentElement!.className).toContain('items-stretch');
+    for (const button of within(tools).getAllByRole('button')) {
+      expect(button.className).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
+      expect(button.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+    }
   });
 
   it('starts a swap from the menu as S does', async () => {

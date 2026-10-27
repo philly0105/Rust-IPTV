@@ -43,6 +43,8 @@
   "tileLabel": "Месца {{slot}}: {{name}}",
   "listen": "Слухаць гук {{name}}",
   "hasSound": "Гук у {{name}}",
+  "listenShort": "Слухаць гук",
+  "hasSoundShort": "Гук тут",
   "swapLabel": "Перамясціць {{name}} на іншае месца",
   "swapShort": "Перамясціць на іншае месца",
   "swapHereLabel": "Памяняць з {{name}} на месцы {{slot}}",

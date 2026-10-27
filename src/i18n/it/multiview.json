@@ -43,6 +43,8 @@
   "tileLabel": "Posizione {{slot}}: {{name}}",
   "listen": "Ascolta l'audio di {{name}}",
   "hasSound": "{{name}} ha l'audio",
+  "listenShort": "Ascolta l'audio",
+  "hasSoundShort": "Ha l'audio",
   "swapLabel": "Sposta {{name}} in un'altra posizione",
   "swapShort": "Sposta in un'altra posizione",
   "swapHereLabel": "Scambia con {{name}} nella posizione {{slot}}",

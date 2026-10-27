@@ -43,6 +43,8 @@
   "tileLabel": "الموضع {{slot}}: {{name}}",
   "listen": "تشغيل صوت {{name}}",
   "hasSound": "الصوت من {{name}}",
+  "listenShort": "تشغيل الصوت",
+  "hasSoundShort": "الصوت من هنا",
   "swapLabel": "نقل {{name}} إلى موضع آخر",
   "swapShort": "النقل إلى موضع آخر",
   "swapHereLabel": "التبديل مع {{name}} في الموضع {{slot}}",

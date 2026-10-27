@@ -43,6 +43,8 @@
   "tileLabel": "Platz {{slot}}: {{name}}",
   "listen": "Ton von {{name}} abspielen",
   "hasSound": "{{name}} hat den Ton",
+  "listenShort": "Ton abspielen",
+  "hasSoundShort": "Hat den Ton",
   "swapLabel": "{{name}} auf einen anderen Platz verschieben",
   "swapShort": "Auf einen anderen Platz verschieben",
   "swapHereLabel": "Mit {{name}} auf Platz {{slot}} tauschen",

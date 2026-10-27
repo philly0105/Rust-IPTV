@@ -43,6 +43,8 @@
   "tileLabel": "{{slot}}번 자리: {{name}}",
   "listen": "{{name}} 소리 듣기",
   "hasSound": "{{name}}에서 소리가 납니다",
+  "listenShort": "소리 듣기",
+  "hasSoundShort": "소리 나는 중",
   "swapLabel": "{{name}}을(를) 다른 자리로 옮기기",
   "swapShort": "다른 자리로 옮기기",
   "swapHereLabel": "{{slot}}번 자리의 {{name}}와(과) 바꾸기",

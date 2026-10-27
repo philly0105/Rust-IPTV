@@ -43,6 +43,8 @@
   "tileLabel": "Место {{slot}}: {{name}}",
   "listen": "Слушать звук {{name}}",
   "hasSound": "Звук у {{name}}",
+  "listenShort": "Слушать звук",
+  "hasSoundShort": "Звук здесь",
   "swapLabel": "Переместить {{name}} на другое место",
   "swapShort": "Переместить на другое место",
   "swapHereLabel": "Поменять с {{name}} на месте {{slot}}",

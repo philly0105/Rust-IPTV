@@ -43,6 +43,8 @@
   "tileLabel": "位置 {{slot}}: {{name}}",
   "listen": "{{name}} の音声を再生",
   "hasSound": "{{name}} の音声を再生中",
+  "listenShort": "音声を再生",
+  "hasSoundShort": "音声を再生中",
   "swapLabel": "{{name}} を別の位置に移動",
   "swapShort": "別の位置に移動",
   "swapHereLabel": "位置 {{slot}} の {{name}} と入れ替え",

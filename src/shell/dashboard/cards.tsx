@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next';
 import { BookmarkCheck, EllipsisVertical, Play, Search } from 'lucide-react';
 import { createContext, useContext, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
@@ -407,6 +407,60 @@ export interface ChannelCardProps {
   channel?: Channel;
   /** The source the logo belongs to, for the image cache (C3). Defaults to `channel`'s source. */
   sourceId?: string;
+  /**
+   * The page a live channel opens once the card (or its menu's Play) has started it, whose stage
+   * takes the player: the channel's Live TV (`itemPath`), or for a list's rail the list's page,
+   * where zapping walks the list (the pages the mini player's Expand opens). Without it the
+   * channel plays in the mini player over the page.
+   */
+  watchPath?: string;
+}
+
+/**
+ * Windows' default double-click time: long enough for the second click of a double click, short
+ * enough not to eat a deliberate click on the page that opened.
+ */
+const FOLLOW_UP_CLICK_MS = 500;
+
+/**
+ * Drops the rest of a double click on a card that opened another page. The new page is drawn
+ * under the pointer before the second click lands, which would otherwise press whatever sits there
+ * on Live TV (a group, or another channel's row). Capture on the window runs before React's own
+ * listeners.
+ */
+function swallowFollowUpClicks(): void {
+  const swallow = (e: Event) => {
+    e.stopPropagation();
+    e.preventDefault();
+    window.removeEventListener(e.type, swallow, true);
+  };
+  window.addEventListener('click', swallow, true);
+  window.addEventListener('dblclick', swallow, true);
+  window.setTimeout(() => {
+    window.removeEventListener('click', swallow, true);
+    window.removeEventListener('dblclick', swallow, true);
+  }, FOLLOW_UP_CLICK_MS);
+}
+
+/**
+ * What a live channel's card (and its menu's Play) does with a page to open (`path`): play the
+ * channel and open that page, whose stage takes the player, so one press gives a big picture with
+ * the channel list and the guide ribbon for zapping. The page opens at once, so the player starts
+ * in the stage instead of flashing up in the mini player first. Without a path, and for a radio
+ * station, the channel plays in the mini player over Home. Nothing opens for a source Home does
+ * not list (SourceKindContext holds the same sources Home's play looks the channel up in): that
+ * play only says the source is gone, and the page would show the source's error.
+ */
+function useWatchChannel(onPlay: () => void, channel: Channel | undefined, path: string | undefined): () => void {
+  const navigate = useNavigate();
+  const kinds = useContext(SourceKindContext);
+  const ref = channel?.ref;
+  return () => {
+    onPlay();
+    if (!path || ref?.contentType !== 'live' || !kinds?.has(ref.sourceId)) return;
+    void navigate(path);
+    swallowFollowUpClicks();
+  };
 }
 
 /** Right click, the context-menu key and Shift+F10 on a card, as one pair of handlers (`open` gets where to draw the menu). */
@@ -481,12 +535,14 @@ export function ChannelCard({
   ariaLabel,
   channel,
   sourceId,
+  watchPath,
 }: ChannelCardProps) {
   const { t } = useTranslation('shell');
   const openMenu = useContext(ChannelMenuContext);
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay }) : undefined;
+  const watch = useWatchChannel(onPlay, channel, watchPath);
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
   return (
-    <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
+    <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
       <div className={cn(CARD_ART, 'aspect-video w-full')}>
         <LogoArt name={name} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
         <PlayGlyph />
@@ -719,9 +775,13 @@ export interface OnNowCardProps {
  */
 export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
   const openMenu = useContext(ChannelMenuContext);
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay }) : undefined;
+  // On now is only ever Home's own rail, so its cards open the channel's Live TV. Played in the mini
+  // player over Home, the pressed card left On now (its channel joins Recently watched) and the
+  // rail shifted under the pointer.
+  const watch = useWatchChannel(onPlay, channel, channel && itemPath(channel.ref));
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
   return (
-    <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot} data-on-now="">
+    <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot} data-on-now="">
       <div className={cn(CARD_ART, 'aspect-video w-full bg-surface-2')}>
         {programmeArt ? (
           <>

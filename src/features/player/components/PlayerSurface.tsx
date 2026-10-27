@@ -65,6 +65,14 @@ function useKeyboardFocusPin(): {
 const OSD_BANNER_GAP = 8;
 
 /**
+ * The zap chip on a short but wide player (the Live page's stage beside the list, where the guide
+ * ribbon right below already says what airs now and next): in the title's corner, as wide as its
+ * one line needs. The full banner took about a third of a 330 px stage there and covered the
+ * stream's spinner and error.
+ */
+const SHORT_CHIP = 'top-3 max-w-[min(28rem,calc(100%-1.5rem))]';
+
+/**
  * The readout's top (px in the surface) while the zap banner sits over its column, else
  * undefined (its usual place). Both use the surface's top corners, and in a small player the
  * banner spans the width. Follows the banner as it mounts (a lazy part) and as it or the
@@ -487,6 +495,8 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
     setRootEl(el);
   }, []);
   const smallPlayer = useSmallPlayer(rootEl);
+  /** Short (any width): the zap banner is the one-line chip (see PlayerSurface). */
+  const shortPlayer = useNarrow(rootEl, Number.POSITIVE_INFINITY, SHORT_PLAYER_PX);
   const overlay = (isFullscreen || pip) && !compact;
   const small = compact || pip;
   const focusPin = useKeyboardFocusPin();
@@ -586,13 +596,19 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
           <StreamInfoPanel className={cn(pip ? 'start-2 top-11 max-h-[calc(100%-3.5rem)]' : 'start-3 top-3 max-h-[calc(100%-5rem)]', small && 'w-56')} />
           {/*
             Zap banner (C5): over the picture's top corner, cut out of the native video while up. The
-            mini player says it in its header instead; a small player gets the one-line chip.
+            mini player says it in its header instead; a short player gets the one-line chip.
           */}
           {!compact && (
             <ZapBanner
               compact={pip}
-              chip={smallPlayer && !pip}
-              className={pip ? 'inset-x-2 top-11' : smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')}
+              chip={shortPlayer && !pip}
+              className={
+                pip
+                  ? 'inset-x-2 top-11'
+                  : smallPlayer
+                    ? 'inset-x-2 top-2'
+                    : cn(shortPlayer ? SHORT_CHIP : 'top-3 sm:top-4', statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+              }
             />
           )}
           {/* Sleep timer's last-minute prompt where toasts cannot be seen (fullscreen, PiP). */}
@@ -1067,15 +1083,17 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
           <StreamInfoPanel className={compact ? 'start-2 top-2 max-h-[calc(100%-4rem)] w-56' : 'start-4 top-16 max-h-[calc(100%-9rem)]'} />
           {/*
             Zap banner (C5): the title's corner, or the far one while the channel list or stream info
-            holds it. The mini player says it in its header instead; a small player gets the
+            holds it. The mini player says it in its header instead; a short player gets the
             one-line chip.
           */}
           {!compact && (
             <ZapBanner
               compact={pip}
-              chip={smallPlayer && !pip}
+              chip={shortPlayer && !pip}
               className={
-                pip || smallPlayer ? 'inset-x-2 top-2' : cn('top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
+                pip || smallPlayer
+                  ? 'inset-x-2 top-2'
+                  : cn(shortPlayer ? SHORT_CHIP : 'top-3 sm:top-4', panelOpen || statsOpen ? 'end-3 sm:end-4' : 'start-3 sm:start-4')
               }
             />
           )}

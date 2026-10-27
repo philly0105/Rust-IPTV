@@ -452,10 +452,10 @@ describe('in a small player', () => {
    * jsdom has no layout: the player (and its bar) as wide as a 390 px phone's screen, and as tall
    * as `height` (a phone's 16:9 dock by default).
    */
-  function narrowPlayer(height = 219): () => void {
+  function narrowPlayer(height = 219, wide = 390): () => void {
     const player = (el: HTMLElement): boolean => !!el.parentElement?.hasAttribute('data-player-host');
     const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return player(this) || this.hasAttribute('data-player-controls') ? 390 : 0;
+      return player(this) || this.hasAttribute('data-player-controls') ? wide : 0;
     });
     const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
       return player(this) ? height : 0;
@@ -583,6 +583,27 @@ describe('in a small player', () => {
       await advance(0);
       expect(screen.getByTestId('zap-banner').getAttribute('data-variant')).toBeNull();
       expect(screen.getByTestId('zap-next')).toBeTruthy();
+      expect(hidden()).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  // The Live page's stage beside the list at 1440x900: 586x330, with the guide ribbon right under it.
+  it('a short but wide player (the Live stage) gets the chip in its corner and keeps its bar', async () => {
+    const restore = narrowPlayer(330, 586);
+    try {
+      tune(news);
+      mount();
+      await advance(0);
+      const banner = screen.getByTestId('zap-banner');
+      expect(banner.getAttribute('data-variant')).toBe('chip');
+      expect(screen.getByTestId('zap-now').textContent).toBe('Evening News');
+      expect(screen.queryByTestId('zap-next')).toBeNull();
+      // In the title's corner and as wide as its line, not across the picture as on a phone.
+      expect(banner.className).toContain('start-3');
+      expect(banner.className).not.toContain('inset-x-2');
+      // Room for both: the bar stays up with the chip.
       expect(hidden()).toBe(false);
     } finally {
       restore();

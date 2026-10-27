@@ -188,6 +188,8 @@ describe("What's new", () => {
     open();
     await screen.findAllByTestId('whats-new-item');
     const list = screen.getByTestId('whats-new-list');
+    // The dialog's gutter, not a fixed 1.5rem: a phone's sheet narrows it to 1rem for the title too.
+    expect(list.className).toContain('px-(--dialog-gutter)');
     const top = screen.getByTestId('whats-new-fade-top');
     const bottom = screen.getByTestId('whats-new-fade-bottom');
     // jsdom has no layout: everything fits, so no fade and no Tab stop.

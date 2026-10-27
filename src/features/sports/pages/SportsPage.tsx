@@ -59,6 +59,13 @@ const PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:sticky [@media(
 /** A control focused from the keyboard scrolls clear of the pinned toolbar, not under it. */
 const CLEAR_PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:[&_button]:scroll-mt-32';
 
+/**
+ * A filter chip on a phone, beside the day strip: its icon and count, with the label hidden but still
+ * the chip's name. The label's empty box would leave two gaps between the icon and the count, so the
+ * gap goes and the icon keeps one of its own.
+ */
+const COMPACT_CHIP = 'max-sm:gap-0 max-sm:px-3 max-sm:[&>svg]:me-1.5';
+
 interface StreamsOf {
   (game: Game): { streams: readonly StreamMatch[] | undefined; streamsLoading: boolean };
 }
@@ -279,10 +286,19 @@ export function SportsPage() {
       <h1 className="sr-only">{title}</h1>
       {/* Pinned, it covers the cards under it with the page's own colour, and keeps a strip of it above
           the league tabs (the margin takes back the padding where it is not pinned). The day tabs'
-          rule is its bottom edge. */}
-      <div ref={toolbarRef} className={cn('z-10 -mt-3 flex min-w-0 flex-col gap-3 bg-bg pt-3', PINNED)} data-testid="sports-toolbar">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+          rule is its bottom edge.
+          On a phone it is two rows, not three: the league tabs across the width, then the day strip
+          with the filter chips at its end, drawn as their icon and count (their label stays their
+          name). The chips' own row held a sixth of the first screen for one or two small chips. The
+          first row's box steps aside there (display: contents), so its two parts sit on the grid. */}
+      <div
+        ref={toolbarRef}
+        className={cn('z-10 -mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-y-3 bg-bg pt-3 sm:flex sm:flex-col sm:gap-3', PINNED)}
+        data-testid="sports-toolbar"
+      >
+        <div className="contents sm:flex sm:min-w-0 sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
           <LeagueFilter
+            className="max-sm:col-span-2"
             value={league}
             onChange={(next) => {
               backToTop();
@@ -291,40 +307,45 @@ export function SportsPage() {
             counts={counts}
             live={liveLeagues}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            {followed.size > 0 ? (
-              <FilterChip
-                pressed={myTeamsOnly}
-                onClick={() => {
-                  backToTop();
-                  toggleMyTeamsOnly(!myTeamsOnly);
-                }}
-                icon={<Star aria-hidden size={14} className={myTeamsOnly ? 'shrink-0 fill-current' : 'shrink-0'} />}
-                count={myTeamsCount}
-                title={t('myTeamsHint')}
-                data-testid="sports-my-teams"
-              >
-                {t('myTeams')}
-              </FilterChip>
-            ) : null}
-            {hasSources ? (
-              <FilterChip
-                pressed={streamsOnly}
-                onClick={() => {
-                  backToTop();
-                  toggleStreamsOnly(!streamsOnly);
-                }}
-                icon={<Tv aria-hidden size={14} className="shrink-0" />}
-                count={watchable}
-                title={t('withStreamsHint')}
-                data-testid="sports-streams-only"
-              >
-                {t('withStreamsFilter')}
-              </FilterChip>
-            ) : null}
-          </div>
+          {followed.size > 0 || hasSources ? (
+            <div className="flex items-center gap-2 max-sm:col-start-2 max-sm:row-start-2 max-sm:ms-2 sm:flex-wrap" data-testid="sports-filters">
+              {followed.size > 0 ? (
+                <FilterChip
+                  pressed={myTeamsOnly}
+                  onClick={() => {
+                    backToTop();
+                    toggleMyTeamsOnly(!myTeamsOnly);
+                  }}
+                  className={COMPACT_CHIP}
+                  icon={<Star aria-hidden size={14} className={myTeamsOnly ? 'shrink-0 fill-current' : 'shrink-0'} />}
+                  count={myTeamsCount}
+                  title={t('myTeamsHint')}
+                  data-testid="sports-my-teams"
+                >
+                  <span className="max-sm:sr-only">{t('myTeams')}</span>
+                </FilterChip>
+              ) : null}
+              {hasSources ? (
+                <FilterChip
+                  pressed={streamsOnly}
+                  onClick={() => {
+                    backToTop();
+                    toggleStreamsOnly(!streamsOnly);
+                  }}
+                  className={COMPACT_CHIP}
+                  icon={<Tv aria-hidden size={14} className="shrink-0" />}
+                  count={watchable}
+                  title={t('withStreamsHint')}
+                  data-testid="sports-streams-only"
+                >
+                  <span className="max-sm:sr-only">{t('withStreamsFilter')}</span>
+                </FilterChip>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <DayStrip
+          className="max-sm:col-start-1 max-sm:row-start-2"
           days={days}
           value={day}
           today={today}

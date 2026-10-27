@@ -451,6 +451,36 @@ describe('sports page', () => {
     expect(screen.getByTestId('sports-grid').className).toContain(`${pinned}:[&_button]:scroll-mt-32`);
   });
 
+  it('keeps the toolbar to two rows on a phone, the filter chips at the end of the day strip', async () => {
+    const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([g]);
+    setStreams(g, [h.match(ESPN)]);
+    localStorage.setItem('tsrust.sportsTeams', JSON.stringify(['nba:BOS']));
+    await openReady();
+    // jsdom applies no media queries, so this reads the classes that lay the toolbar out: a grid on a
+    // phone (the first row's box steps aside), the stacked rows from sm up.
+    const classes = (el: HTMLElement) => el.className.split(' ');
+    const toolbar = screen.getByTestId('sports-toolbar');
+    expect(classes(toolbar)).toEqual(expect.arrayContaining(['grid', 'grid-cols-[minmax(0,1fr)_auto]', 'sm:flex', 'sm:flex-col']));
+    expect(classes(screen.getByTestId('sports-leagues'))).toContain('max-sm:col-span-2');
+    // The league pills share the phone's row out between them.
+    expect(classes(within(screen.getByTestId('sports-leagues')).getByRole('tablist'))).toContain('max-sm:[&>button]:grow');
+    const filters = screen.getByTestId('sports-filters');
+    expect(classes(filters)).toEqual(expect.arrayContaining(['max-sm:col-start-2', 'max-sm:row-start-2']));
+    expect(classes(screen.getByTestId('sports-days'))).toEqual(expect.arrayContaining(['max-sm:col-start-1', 'max-sm:row-start-2']));
+    expect(filters.parentElement?.className.split(' ')).toContain('contents');
+    // There a chip is its icon and count; the label is hidden, not gone, so the chip keeps its name.
+    for (const [id, label] of [
+      ['sports-my-teams', 'My teams'],
+      ['sports-streams-only', 'With streams'],
+    ] as const) {
+      const chip = within(filters).getByTestId(id);
+      expect(chip.querySelector('svg')).toBeTruthy();
+      expect(classes(within(chip).getByText(label))).toContain('max-sm:sr-only');
+      expect(screen.getByRole('button', { name: new RegExp(`^${label} ?\\d+$`) })).toBe(chip);
+    }
+  });
+
   it('goes back to the top when the pinned toolbar changes the day, the league or a filter', async () => {
     const days = etDays(Date.now(), 7, 7);
     const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });

@@ -5,7 +5,7 @@
 
 import { useTranslation } from 'react-i18next';
 
-import { Tabs } from '../deps';
+import { Tabs, cn } from '../deps';
 import { LEAGUES, type League } from '../lib/types';
 
 export const LEAGUE_KEYS: Record<League, string> = { nfl: 'leagueNfl', cfb: 'leagueCfb', nba: 'leagueNba', mlb: 'leagueMlb' };
@@ -48,6 +48,7 @@ export function LeagueFilter({
   onChange,
   counts,
   live,
+  className,
 }: {
   value: League | null;
   onChange(next: League | null): void;
@@ -55,18 +56,20 @@ export function LeagueFilter({
   counts?: Record<League, number>;
   /** Leagues with a game in progress. */
   live: ReadonlySet<League>;
+  className?: string;
 }) {
   const { t } = useTranslation('sports');
   const total = counts ? LEAGUES.reduce((sum, l) => sum + counts[l], 0) : undefined;
   const liveLabel = t('liveNow');
   return (
-    <div data-testid="sports-leagues" className="max-w-full min-w-0">
+    <div data-testid="sports-leagues" className={cn('max-w-full min-w-0', className)}>
       {/* Five pills are wider than a phone in most languages, and pill tabs scroll with no fade or
           scrollbar, so the row wraps instead of hiding its last leagues. */}
       <Tabs
         variant="pill"
-        // Tighter pills on a phone, where the five tabs must share about 360 px.
-        className="flex-wrap max-sm:[&>button]:px-2"
+        // Tighter pills on a phone, where the five tabs must share about 360 px. There the track spans
+        // the row and the pills share what is left, so it doesn't stop short of the edge by a ragged gap.
+        className="flex-wrap max-sm:[&>button]:grow max-sm:[&>button]:px-2"
         label={t('leagues')}
         value={value ?? ALL}
         onChange={(id) => onChange(LEAGUES.find((l) => l === id) ?? null)}

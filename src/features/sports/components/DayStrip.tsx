@@ -8,7 +8,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Tabs, intlLocale } from '../deps';
+import { Tabs, cn, intlLocale } from '../deps';
 
 const DAY_MS = 86_400_000;
 
@@ -46,6 +46,7 @@ export function DayStrip({
   today,
   onChange,
   panelIdPrefix,
+  className,
 }: {
   /** 'YYYY-MM-DD' Eastern dates, oldest first. */
   days: readonly string[];
@@ -53,6 +54,7 @@ export function DayStrip({
   today: string;
   onChange(day: string): void;
   panelIdPrefix: string;
+  className?: string;
 }) {
   const { t, i18n } = useTranslation('sports');
   const lang = i18n.language;
@@ -75,7 +77,7 @@ export function DayStrip({
     });
   }, [days, today, t, lang]);
   return (
-    <div data-testid="sports-days" className="min-w-0">
+    <div data-testid="sports-days" className={cn('min-w-0', className)}>
       <Tabs
         items={items}
         value={value}

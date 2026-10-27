@@ -371,5 +371,9 @@
   "aboutSize": "الحجم",
   "aboutDownloaded": "تحمّل",
   "aboutFile": "الملف",
-  "openInCatalogue": "حلّ ف {{source}}"
+  "openInCatalogue": "حلّ ف {{source}}",
+  "entryMenu": "الإجراءات ديال {{title}}",
+  "rowOpen": "حل",
+  "rowMoveUp": "طلع لفوق",
+  "rowMoveDown": "هبط لتحت"
 }

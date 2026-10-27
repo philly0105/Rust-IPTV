@@ -371,5 +371,9 @@
   "aboutSize": "الحجم",
   "aboutDownloaded": "نُزّل في",
   "aboutFile": "الملف",
-  "openInCatalogue": "فتح في {{source}}"
+  "openInCatalogue": "فتح في {{source}}",
+  "entryMenu": "إجراءات {{title}}",
+  "rowOpen": "فتح",
+  "rowMoveUp": "نقل لأعلى",
+  "rowMoveDown": "نقل لأسفل"
 }

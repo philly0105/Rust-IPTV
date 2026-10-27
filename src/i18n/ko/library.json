@@ -299,5 +299,9 @@
   "aboutSize": "크기",
   "aboutDownloaded": "다운로드한 날짜",
   "aboutFile": "파일",
-  "openInCatalogue": "{{source}}에서 열기"
+  "openInCatalogue": "{{source}}에서 열기",
+  "entryMenu": "{{title}} 작업",
+  "rowOpen": "열기",
+  "rowMoveUp": "위로 이동",
+  "rowMoveDown": "아래로 이동"
 }

@@ -92,7 +92,7 @@ describe('P2-POSTERS-2: library rows', () => {
           />
         </I18nextProvider>,
       );
-      // w-8 (30 px) or w-11 (41.25 px) at 100 %: the 64 px copy.
+      // A w-8 poster (30 px) or the 40 px logo tile at 100 %: the 64 px copy.
       expect(widthOf(container)).toBe('64');
       expect(pictureReads).toEqual([]);
     });

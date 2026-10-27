@@ -317,5 +317,9 @@
   "aboutSize": "Dimensione",
   "aboutDownloaded": "Scaricato il",
   "aboutFile": "File",
-  "openInCatalogue": "Apri in {{source}}"
+  "openInCatalogue": "Apri in {{source}}",
+  "entryMenu": "Azioni per {{title}}",
+  "rowOpen": "Apri",
+  "rowMoveUp": "Sposta su",
+  "rowMoveDown": "Sposta giù"
 }

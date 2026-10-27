@@ -335,5 +335,9 @@
   "aboutSize": "Памер",
   "aboutDownloaded": "Спампавана",
   "aboutFile": "Файл",
-  "openInCatalogue": "Адкрыць у {{source}}"
+  "openInCatalogue": "Адкрыць у {{source}}",
+  "entryMenu": "Дзеянні для {{title}}",
+  "rowOpen": "Адкрыць",
+  "rowMoveUp": "Перамясціць вышэй",
+  "rowMoveDown": "Перамясціць ніжэй"
 }

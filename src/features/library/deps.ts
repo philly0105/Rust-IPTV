@@ -12,6 +12,7 @@ export {
   ErrorState,
   IconButton,
   Kbd,
+  Menu,
   Page,
   Poster,
   PosterCellWidthContext,
@@ -28,11 +29,13 @@ export {
   useScaledPx,
   useToast,
 } from '@/ui';
-export type { TabsProps } from '@/ui';
+export type { MenuItem, TabsProps } from '@/ui';
 export { useShell, useShortcut } from '@/shell';
 // From its own module, not the barrel: the shared settings query alone (tests stub the barrel).
 export { useSettings } from '@/shell/useSettings';
 export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
+// live: a channel's logo tile (or monogram), so Favorites and Recently watched draw a channel as Live TV does.
+export { ChannelLogo } from '@/features/live/components/ChannelLogo';
 // live: the quality filter leaves out the live favorites and history entries it hides.
 export { QualityFilterNote, useLiveQuality } from '@/features/live/components/QualityFilterButton';
 export { PlayerStage, playItem, playSource, usePlayerStore } from '@/features/player';

@@ -299,5 +299,9 @@
   "aboutSize": "Méret",
   "aboutDownloaded": "Letöltve",
   "aboutFile": "Fájl",
-  "openInCatalogue": "Megnyitás itt: {{source}}"
+  "openInCatalogue": "Megnyitás itt: {{source}}",
+  "entryMenu": "Műveletek: {{title}}",
+  "rowOpen": "Megnyitás",
+  "rowMoveUp": "Mozgatás fel",
+  "rowMoveDown": "Mozgatás le"
 }

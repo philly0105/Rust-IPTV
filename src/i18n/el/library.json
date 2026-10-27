@@ -299,5 +299,9 @@
   "aboutSize": "Μέγεθος",
   "aboutDownloaded": "Λήφθηκε",
   "aboutFile": "Αρχείο",
-  "openInCatalogue": "Άνοιγμα στο {{source}}"
+  "openInCatalogue": "Άνοιγμα στο {{source}}",
+  "entryMenu": "Ενέργειες για {{title}}",
+  "rowOpen": "Άνοιγμα",
+  "rowMoveUp": "Μετακίνηση πάνω",
+  "rowMoveDown": "Μετακίνηση κάτω"
 }

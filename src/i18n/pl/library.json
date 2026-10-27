@@ -335,5 +335,9 @@
   "aboutSize": "Rozmiar",
   "aboutDownloaded": "Pobrano",
   "aboutFile": "Plik",
-  "openInCatalogue": "Otwórz w {{source}}"
+  "openInCatalogue": "Otwórz w {{source}}",
+  "entryMenu": "Działania dla {{title}}",
+  "rowOpen": "Otwórz",
+  "rowMoveUp": "Przenieś w górę",
+  "rowMoveDown": "Przenieś w dół"
 }

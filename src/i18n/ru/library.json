@@ -335,5 +335,9 @@
   "aboutSize": "Размер",
   "aboutDownloaded": "Скачано",
   "aboutFile": "Файл",
-  "openInCatalogue": "Открыть в {{source}}"
+  "openInCatalogue": "Открыть в {{source}}",
+  "entryMenu": "Действия для «{{title}}»",
+  "rowOpen": "Открыть",
+  "rowMoveUp": "Переместить выше",
+  "rowMoveDown": "Переместить ниже"
 }

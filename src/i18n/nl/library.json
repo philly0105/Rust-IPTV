@@ -299,5 +299,9 @@
   "aboutSize": "Grootte",
   "aboutDownloaded": "Gedownload",
   "aboutFile": "Bestand",
-  "openInCatalogue": "Openen in {{source}}"
+  "openInCatalogue": "Openen in {{source}}",
+  "entryMenu": "Acties voor {{title}}",
+  "rowOpen": "Openen",
+  "rowMoveUp": "Omhoog",
+  "rowMoveDown": "Omlaag"
 }

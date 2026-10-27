@@ -299,5 +299,9 @@
   "aboutSize": "大小",
   "aboutDownloaded": "下載日期",
   "aboutFile": "檔案",
-  "openInCatalogue": "在 {{source}} 中開啟"
+  "openInCatalogue": "在 {{source}} 中開啟",
+  "entryMenu": "{{title}} 的動作",
+  "rowOpen": "開啟",
+  "rowMoveUp": "上移",
+  "rowMoveDown": "下移"
 }

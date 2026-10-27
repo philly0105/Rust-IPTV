@@ -299,5 +299,9 @@
   "aboutSize": "Größe",
   "aboutDownloaded": "Heruntergeladen",
   "aboutFile": "Datei",
-  "openInCatalogue": "In {{source}} öffnen"
+  "openInCatalogue": "In {{source}} öffnen",
+  "entryMenu": "Aktionen für {{title}}",
+  "rowOpen": "Öffnen",
+  "rowMoveUp": "Nach oben",
+  "rowMoveDown": "Nach unten"
 }

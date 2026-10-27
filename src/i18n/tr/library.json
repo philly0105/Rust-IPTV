@@ -299,5 +299,9 @@
   "aboutSize": "Boyut",
   "aboutDownloaded": "İndirilme tarihi",
   "aboutFile": "Dosya",
-  "openInCatalogue": "{{source}} içinde aç"
+  "openInCatalogue": "{{source}} içinde aç",
+  "entryMenu": "{{title}} işlemleri",
+  "rowOpen": "Aç",
+  "rowMoveUp": "Yukarı taşı",
+  "rowMoveDown": "Aşağı taşı"
 }

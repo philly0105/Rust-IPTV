@@ -299,5 +299,9 @@
   "aboutSize": "サイズ",
   "aboutDownloaded": "ダウンロード日",
   "aboutFile": "ファイル",
-  "openInCatalogue": "{{source}} で開く"
+  "openInCatalogue": "{{source}} で開く",
+  "entryMenu": "{{title}}の操作",
+  "rowOpen": "開く",
+  "rowMoveUp": "上へ移動",
+  "rowMoveDown": "下へ移動"
 }

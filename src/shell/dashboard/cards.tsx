@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 import { BookmarkCheck, EllipsisVertical, Play, Search } from 'lucide-react';
-import { createContext, useContext, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
 
@@ -491,19 +491,29 @@ function menuHandlers<E extends HTMLElement>(open: ((pos: { x: number; y: number
  * rail of them (a provider without logos fills Home with them) read as a wall of colour.
  */
 const LOGO_MARK = cn(
-  '[&>[data-poster-fallback]]:m-auto [&>[data-poster-fallback]]:size-16 [&>[data-poster-fallback]]:rounded-[22%]',
+  // Sized by the card's height, not fixed: a 4rem mark filled two thirds of a phone card and crowded
+  // its progress bar, while 46% keeps the room it has on a desktop card at every size.
+  '[&>[data-poster-fallback]]:m-auto [&>[data-poster-fallback]]:h-[46%] [&>[data-poster-fallback]]:w-auto [&>[data-poster-fallback]]:aspect-square',
+  '[&>[data-poster-fallback]]:rounded-[22%]',
   '[&>[data-poster-fallback]]:shadow-1 [&>[data-poster-fallback]]:ring-1 [&>[data-poster-fallback]]:ring-white/10 [&>[data-poster-fallback]]:ring-inset',
   '[&>[data-poster-fallback]>svg]:hidden',
 );
 
+/**
+ * The channel's glow over `surface-2`, in the channel's hue (`--logo-hue`). The dark themes take a
+ * deep tint; the light theme a pale one, because the deep tint showed on a pale card as a grey
+ * smudge in its corner.
+ */
+const LOGO_GLOW = cn(
+  'absolute inset-0 bg-surface-2',
+  'bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_35%_30%/0.55),transparent_70%)]',
+  'light:bg-[radial-gradient(120%_90%_at_30%_20%,hsl(var(--logo-hue)_45%_85%/0.6),transparent_70%)]',
+);
+
 /** A channel logo centred on the channel's own tint: the art of a channel with no programme picture. */
 function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?: string; sourceId?: string; isRadio?: boolean }) {
-  const hue = hueOf(name);
   return (
-    <div
-      className="absolute inset-0"
-      style={{ background: `radial-gradient(120% 90% at 30% 20%, hsl(${hue} 35% 30% / 0.55), transparent 70%), var(--color-surface-2)` }}
-    >
+    <div className={LOGO_GLOW} style={{ '--logo-hue': hueOf(name) } as CSSProperties}>
       <Poster
         src={logoUrl}
         sourceId={sourceId}

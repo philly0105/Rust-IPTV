@@ -101,6 +101,7 @@ describe('progress on Home cards (round 4)', () => {
         <OnNowCard rail={rail} programme="Morning Bulletin" channelName="News 24" progress={0.3} sourceId="s1" ariaLabel="Play News 24" onPlay={vi.fn()} />
         <OnNowCard rail={rail} programme="Forecast" programmeArt="https://img.test/forecast.jpg" channelName="Weather" progress={0.6} sourceId="s1" ariaLabel="Play Weather" onPlay={vi.fn()} />
         <ContinueCard rail={rail} title="Harbor Lights" progress={0.5} ariaLabel="Resume Harbor Lights" onPlay={vi.fn()} menu={[]} />
+        <ContinueCard rail={rail} title="Heat" backdropUrl="https://img.test/heat.jpg" progress={0.5} sourceId="s1" ariaLabel="Resume Heat" onPlay={vi.fn()} menu={[]} />
       </>,
     );
     // Over a channel's logo card: the neutral fill on the theme's track (a dark glass track drew a
@@ -115,10 +116,17 @@ describe('progress on Home cards (round 4)', () => {
     const art = screen.getByRole('button', { name: 'Play Weather' });
     expect(fill(art).className).toContain('bg-on-glass-muted');
     expect(bar(art).className).toContain('bg-glass-strong');
-    // The user's own progress stays amber.
-    const resume = screen.getByRole('button', { name: 'Resume Harbor Lights' });
+    // The user's own progress stays amber: on glass over a picture, and on the theme's track over
+    // the initials tile of a title with no artwork (pale in the light theme, where the dark glass
+    // track drew a black line along its foot).
+    const resume = screen.getByRole('button', { name: 'Resume Heat' });
     expect(fill(resume).className).toContain('bg-glass-accent');
-    for (const card of [screen.getByRole('button', { name: 'Play Sport 1' }), art, resume]) expect(bar(card).closest('[aria-hidden]')).not.toBeNull();
+    expect(bar(resume).className).toContain('bg-glass-strong');
+    const tile = screen.getByRole('button', { name: 'Resume Harbor Lights' });
+    expect(fill(tile).className).toContain('bg-accent-mark');
+    expect(bar(tile).className).toContain('bg-surface-3');
+    expect(bar(tile).className).not.toContain('bg-glass-strong');
+    for (const card of [screen.getByRole('button', { name: 'Play Sport 1' }), art, resume, tile]) expect(bar(card).closest('[aria-hidden]')).not.toBeNull();
   });
 });
 

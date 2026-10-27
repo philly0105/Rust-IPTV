@@ -541,8 +541,11 @@ function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?:
  * picture (`glass-quiet`) and on the theme's track over a channel's logo card (`quiet`). Four or
  * five channel rails put about twenty amber bars on one screen, which read as stripes (Live TV's
  * list keeps them quiet for the same reason) and left amber meaning nothing in particular.
+ * `accent` is resume progress over a title with no artwork: the theme's amber on the theme's
+ * track, since the initials tile under it is pale in the light theme and a dark glass track drew
+ * a black line along its foot.
  */
-function EdgeProgress({ value, tone = 'glass' }: { value: number; tone?: 'glass' | 'glass-quiet' | 'quiet' }) {
+function EdgeProgress({ value, tone = 'glass' }: { value: number; tone?: 'glass' | 'glass-quiet' | 'quiet' | 'accent' }) {
   return (
     // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
     <span className="absolute inset-x-0 bottom-0" aria-hidden>
@@ -747,7 +750,7 @@ export function ContinueCard({ rail, title, episode, left, progress, posterUrl, 
               <BookmarkCheck aria-hidden size={14} strokeWidth={2.25} />
             </span>
           )}
-          {progress !== undefined && progress > 0 && <EdgeProgress value={progress} />}
+          {progress !== undefined && progress > 0 && <EdgeProgress value={progress} tone={backdropUrl || posterUrl ? 'glass' : 'accent'} />}
         </div>
         <span dir="auto" title={title} className={CAPTION_TITLE}>
           {title}

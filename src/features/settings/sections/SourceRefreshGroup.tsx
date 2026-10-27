@@ -39,7 +39,7 @@ export function SourceRefreshGroup({ settings, update }: { settings: Settings; u
   }));
 
   return (
-    <SettingsGroup id="sources" title={t('sourceRefreshGroup')} description={t('sourceRefreshGroupHint')}>
+    <SettingsGroup id="sources" title={t('sourceRefreshGroup')}>
       <SettingsRow label={t('refreshInterval')} description={t('refreshIntervalHint')}>
         {({ id, describedBy }) => (
           <Select

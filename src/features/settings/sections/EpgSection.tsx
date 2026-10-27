@@ -285,7 +285,6 @@ export function EpgSection({ settings, update }: SectionProps) {
 
       <SettingsGroup
         title={t('epgStatus')}
-        description={t('epgStatusHint')}
         actions={
           <Button size="sm" variant="secondary" icon={<RefreshCw aria-hidden className="size-4" />} onClick={() => void refresh()} data-testid="epg-refresh-all">
             {t('epgRefreshAll')}

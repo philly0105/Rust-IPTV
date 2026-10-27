@@ -508,8 +508,10 @@ export function AppearanceSection({ settings, update }: SectionProps) {
         </SettingsRow>
       </SettingsGroup>
 
-      {/* SS-8: the home screen is something the user sees, so it sits with the other looks. */}
-      <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? t('dashboardHint') : t('railsOffHint')}>
+      {/* SS-8: the home screen is something the user sees, so it sits with the other looks. A
+          description only while its rows can't act: with the dashboard on, "choose which rows
+          appear" would only repeat the switches. */}
+      <SettingsGroup title={t('dashboard')} description={settings.showDashboard ? undefined : t('railsOffHint')}>
         <SwitchRow
           label={t('showDashboard')}
           description={t('showDashboardHint')}

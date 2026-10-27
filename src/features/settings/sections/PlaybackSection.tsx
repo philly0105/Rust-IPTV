@@ -131,7 +131,7 @@ export function PlaybackSection({ settings, update }: SectionProps) {
 
   return (
     <SettingsSection title={t('sectionPlayback')} testId="settings-playback">
-      <SettingsGroup title={t('player')} description={t('playerHint')}>
+      <SettingsGroup title={t('player')}>
         <div className="flex flex-col p-2">
           {caps.isError ? (
             <div role="alert" className="m-2 flex flex-wrap items-center gap-3 rounded-md bg-danger/10 px-3 py-2 text-sm" data-testid="player-caps-error">

@@ -304,5 +304,7 @@
   "rowOpen": "Open",
   "rowMoveUp": "Move up",
   "rowMoveDown": "Move down",
-  "browseMovies": "Browse movies"
+  "browseMovies": "Browse movies",
+  "removeFromFavorites": "Remove from favorites",
+  "removeFromHistory": "Remove from history"
 }

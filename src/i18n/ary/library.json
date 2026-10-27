@@ -376,5 +376,7 @@
   "rowOpen": "حل",
   "rowMoveUp": "طلع لفوق",
   "rowMoveDown": "هبط لتحت",
-  "browseMovies": "تصفح الأفلام"
+  "browseMovies": "تصفح الأفلام",
+  "removeFromFavorites": "حيد من المفضلة",
+  "removeFromHistory": "حيد من السجل"
 }

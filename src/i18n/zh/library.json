@@ -304,5 +304,7 @@
   "rowOpen": "打开",
   "rowMoveUp": "上移",
   "rowMoveDown": "下移",
-  "browseMovies": "浏览电影"
+  "browseMovies": "浏览电影",
+  "removeFromFavorites": "从收藏中移除",
+  "removeFromHistory": "从观看记录中移除"
 }

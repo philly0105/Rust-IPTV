@@ -304,5 +304,7 @@
   "rowOpen": "Aç",
   "rowMoveUp": "Yukarı taşı",
   "rowMoveDown": "Aşağı taşı",
-  "browseMovies": "Filmlere göz at"
+  "browseMovies": "Filmlere göz at",
+  "removeFromFavorites": "Favorilerden kaldır",
+  "removeFromHistory": "Geçmişten kaldır"
 }

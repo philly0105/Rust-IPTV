@@ -304,5 +304,7 @@
   "rowOpen": "Megnyitás",
   "rowMoveUp": "Mozgatás fel",
   "rowMoveDown": "Mozgatás le",
-  "browseMovies": "Filmek böngészése"
+  "browseMovies": "Filmek böngészése",
+  "removeFromFavorites": "Eltávolítás a kedvencek közül",
+  "removeFromHistory": "Eltávolítás az előzményekből"
 }

@@ -304,5 +304,7 @@
   "rowOpen": "開く",
   "rowMoveUp": "上へ移動",
   "rowMoveDown": "下へ移動",
-  "browseMovies": "映画を見る"
+  "browseMovies": "映画を見る",
+  "removeFromFavorites": "お気に入りから削除",
+  "removeFromHistory": "履歴から削除"
 }

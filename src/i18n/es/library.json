@@ -322,5 +322,7 @@
   "rowOpen": "Abrir",
   "rowMoveUp": "Subir",
   "rowMoveDown": "Bajar",
-  "browseMovies": "Explorar películas"
+  "browseMovies": "Explorar películas",
+  "removeFromFavorites": "Quitar de favoritos",
+  "removeFromHistory": "Quitar del historial"
 }

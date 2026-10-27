@@ -240,6 +240,7 @@ export function RecentPage() {
         now={nowOn.get(itemKey(e.ref))}
         time={relativeTime(e.viewedAt, i18n.language)}
         removeLabel={t('removeRecent', { title: snapshotTitle(e.ref, e.snapshot.title).title })}
+        menuRemoveLabel={t('removeFromHistory')}
         busy={pending.has(key)}
         onOpen={() => open(e)}
         onRemove={() => remove(e)}

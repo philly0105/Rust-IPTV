@@ -211,6 +211,7 @@ export function FavoritesPage() {
           now={nowOn.get(itemKey(e.ref))}
           time={t('addedAgo', { time: relativeTime(e.addedAt, i18n.language) })}
           removeLabel={t('removeFavorite', { title: e.snapshot.title })}
+          menuRemoveLabel={t('removeFromFavorites')}
           busy={pending.has(refKey(e.ref))}
           onOpen={() => open(e)}
           onRemove={() => remove(e)}

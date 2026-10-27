@@ -340,5 +340,7 @@
   "rowOpen": "Адкрыць",
   "rowMoveUp": "Перамясціць вышэй",
   "rowMoveDown": "Перамясціць ніжэй",
-  "browseMovies": "Праглядзець фільмы"
+  "browseMovies": "Праглядзець фільмы",
+  "removeFromFavorites": "Выдаліць з выбранага",
+  "removeFromHistory": "Выдаліць з гісторыі"
 }

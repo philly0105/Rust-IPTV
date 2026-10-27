@@ -304,5 +304,7 @@
   "rowOpen": "Openen",
   "rowMoveUp": "Omhoog",
   "rowMoveDown": "Omlaag",
-  "browseMovies": "Films bekijken"
+  "browseMovies": "Films bekijken",
+  "removeFromFavorites": "Verwijderen uit favorieten",
+  "removeFromHistory": "Verwijderen uit geschiedenis"
 }

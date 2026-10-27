@@ -38,7 +38,14 @@ export interface EntryRowProps {
   source?: Source | undefined;
   showSource: boolean;
   time: string;
+  /** The hover strip's remove button's name, with the title ("Remove Heat from favorites"). */
   removeLabel: string;
+  /**
+   * The touch menu's remove item, without the title ("Remove from favorites"): the menu is already
+   * named for the row, and a long channel name cut the titled label to "Remove US| ESPN Alt…",
+   * losing what the one destructive item does.
+   */
+  menuRemoveLabel: string;
   busy?: boolean;
   /** The programme on air now, for a live or radio entry with a guide. */
   now?: NowOn | undefined;
@@ -85,7 +92,7 @@ const HOVER_ACTIONS =
 const HIDE_UNDER_ACTIONS =
   'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible';
 
-function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, busy, now, onOpen, onRemove, reorder }: EntryRowProps) {
+function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, menuRemoveLabel, busy, now, onOpen, onRemove, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
   const playable = type === 'live' || type === 'radio';
@@ -104,7 +111,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         ]
       : []),
     { id: 'sep', type: 'separator' as const },
-    { id: 'remove', label: removeLabel, icon: <Trash2 size={16} aria-hidden />, danger: true, disabled: !!busy, onSelect: onRemove },
+    { id: 'remove', label: menuRemoveLabel, icon: <Trash2 size={16} aria-hidden />, danger: true, disabled: !!busy, onSelect: onRemove },
   ];
   return (
     <div

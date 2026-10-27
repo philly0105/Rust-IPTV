@@ -304,5 +304,7 @@
   "rowOpen": "열기",
   "rowMoveUp": "위로 이동",
   "rowMoveDown": "아래로 이동",
-  "browseMovies": "영화 둘러보기"
+  "browseMovies": "영화 둘러보기",
+  "removeFromFavorites": "즐겨찾기에서 삭제",
+  "removeFromHistory": "시청 기록에서 삭제"
 }

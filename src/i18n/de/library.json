@@ -304,5 +304,7 @@
   "rowOpen": "Öffnen",
   "rowMoveUp": "Nach oben",
   "rowMoveDown": "Nach unten",
-  "browseMovies": "Filme durchsuchen"
+  "browseMovies": "Filme durchsuchen",
+  "removeFromFavorites": "Aus Favoriten entfernen",
+  "removeFromHistory": "Aus dem Verlauf entfernen"
 }

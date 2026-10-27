@@ -87,6 +87,7 @@ describe('P2-POSTERS-2: library rows', () => {
             showSource={false}
             time="Today"
             removeLabel="Remove BBC One"
+            menuRemoveLabel="Remove from favorites"
             onOpen={() => undefined}
             onRemove={() => undefined}
           />

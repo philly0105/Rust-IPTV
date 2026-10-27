@@ -376,5 +376,7 @@
   "rowOpen": "فتح",
   "rowMoveUp": "نقل لأعلى",
   "rowMoveDown": "نقل لأسفل",
-  "browseMovies": "تصفح الأفلام"
+  "browseMovies": "تصفح الأفلام",
+  "removeFromFavorites": "إزالة من المفضلة",
+  "removeFromHistory": "إزالة من السجل"
 }

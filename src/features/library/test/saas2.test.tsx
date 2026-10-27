@@ -120,10 +120,27 @@ describe('Favorites rows say what is on air', () => {
     fireEvent.click(trigger);
     const menu = await screen.findByRole('menu');
     const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent);
-    expect(items).toEqual(['Play', 'Move up', 'Move down', expect.stringMatching(/^Remove .* from favorites$/)]);
+    // The red item says what it does in full: the menu is named for the row, so no title in it
+    // (a long channel name cut a titled label before "from favorites").
+    expect(items).toEqual(['Play', 'Move up', 'Move down', 'Remove from favorites']);
     // The first row cannot move up.
     expect(within(menu).getByRole('menuitem', { name: 'Move up' }).getAttribute('aria-disabled')).toBe('true');
     expect(within(menu).getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBeNull();
+    // The hover strip's remove button keeps the titled name, for a screen reader on the button alone.
+    expect(within(strip).getByRole('button', { name: /^Remove .+ from favorites$/ })).toBeTruthy();
+  });
+
+  it('gives a Recently watched row a menu whose remove item says "from history", without the title', async () => {
+    rpc.handlers['recent.list'] = () => [makeRecent('m1', new Date().toISOString())];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+    const row = await screen.findByTestId('entry-row');
+    // No reorder on this page: the time keeps the usual column.
+    expect(within(row).getByTestId('entry-time').className).toMatch(/(^|\s)w-36(\s|$)/);
+    fireEvent.click(within(row).getByRole('button', { name: 'Actions for Watched m1' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Open', 'Remove from history']);
+    expect(within(row).getByRole('button', { name: 'Remove Watched m1 from history' })).toBeTruthy();
   });
 
   it('draws a channel with its Live TV logo tile and no movie glyph', async () => {

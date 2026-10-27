@@ -304,5 +304,7 @@
   "rowOpen": "Άνοιγμα",
   "rowMoveUp": "Μετακίνηση πάνω",
   "rowMoveDown": "Μετακίνηση κάτω",
-  "browseMovies": "Περιήγηση ταινιών"
+  "browseMovies": "Περιήγηση ταινιών",
+  "removeFromFavorites": "Αφαίρεση από τα αγαπημένα",
+  "removeFromHistory": "Αφαίρεση από το ιστορικό"
 }

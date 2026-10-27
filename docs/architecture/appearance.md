@@ -83,6 +83,8 @@ Values are sanitized before they are written: an unknown accent or density falls
 
 Put `CARD_ROOT` on the focusable element (it names the `card` group and hands its focus ring to the artwork), `CARD_ART` on the artwork frame, and add `CARD_ART_CURSOR` for the grid cursor. Movement is behind `motion-safe`; reduced motion keeps every colour and ring change. Inside a frame, pass `after:hidden` to `Poster` so its inner hairline does not double the frame's ring. Chips on artwork (rating, language) use `bg-glass-strong text-on-glass` and the glass accent; the watched mark is the kit's `WatchedChip` in the top-end corner. A progress bar on artwork takes `tone="glass"` (a light track and the glass accent in every theme), never the theme tone.
 
+A channel card on Home (`LogoArt` in `src/shell/dashboard/cards.tsx`) centres the channel's logo on a soft glow of the channel's hue over `surface-2`. A channel with no logo, or one whose logo fails, gets Poster's initials tile there as a logo-sized mark (4rem, rounded like an app icon, no type glyph) instead of a tile across the whole card, so a provider without logos does not turn Home into rows of colour blocks.
+
 ## Dashboard hero
 
 `HeroCarousel` follows the WAI-ARIA auto-rotating carousel with tabs.

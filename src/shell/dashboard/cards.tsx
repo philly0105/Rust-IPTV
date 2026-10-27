@@ -483,6 +483,19 @@ function menuHandlers<E extends HTMLElement>(open: ((pos: { x: number; y: number
   };
 }
 
+/**
+ * Poster's initials tile, drawn as a logo-sized mark in the middle of the frame instead of across
+ * all of it, without its type glyph (the rail and the caption already say it is a channel). A
+ * channel with no logo, or one whose logo fails, then looks like a channel with one: a small mark
+ * on the channel's glow. Filled edge to edge, every logo-less card was a saturated block, and a
+ * rail of them (a provider without logos fills Home with them) read as a wall of colour.
+ */
+const LOGO_MARK = cn(
+  '[&>[data-poster-fallback]]:m-auto [&>[data-poster-fallback]]:size-16 [&>[data-poster-fallback]]:rounded-[22%]',
+  '[&>[data-poster-fallback]]:shadow-1 [&>[data-poster-fallback]]:ring-1 [&>[data-poster-fallback]]:ring-white/10 [&>[data-poster-fallback]]:ring-inset',
+  '[&>[data-poster-fallback]>svg]:hidden',
+);
+
 /** A channel logo centred on the channel's own tint: the art of a channel with no programme picture. */
 function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?: string; sourceId?: string; isRadio?: boolean }) {
   const hue = hueOf(name);
@@ -499,7 +512,7 @@ function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?:
         aspect="wide"
         fit="contain"
         kind={isRadio ? 'radio' : 'live'}
-        className="h-full bg-transparent after:hidden"
+        className={cn('h-full bg-transparent after:hidden', LOGO_MARK)}
         rounded="sm"
       />
     </div>

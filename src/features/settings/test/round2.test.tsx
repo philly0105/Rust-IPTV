@@ -90,10 +90,15 @@ describe('Appearance', () => {
 });
 
 describe('About', () => {
-  it('has a lead like every other section', async () => {
+  it('names itself a step under the header, with no lead line, like every other section', async () => {
     renderAt(settingsRoutes, '/settings/about');
     const section = await screen.findByTestId('settings-about');
-    expect(within(section).getByText('Version, updates, and where your data is kept.')).toBeTruthy();
+    // The lead only listed what follows; the phone's list of sections still shows it.
+    expect(within(section).queryByText('Version, updates, and where your data is kept.')).toBeNull();
+    // The shell header's "Settings" is the page title (text-title); the section heading sits under it.
+    const h2 = within(section).getByRole('heading', { level: 2, name: 'About' });
+    expect(h2.className).toContain('text-title-sm');
+    expect(h2.className).not.toMatch(/\btext-title\b(?!-)/);
   });
 
   it("keeps What's new and the tour together in one row of equal buttons", async () => {

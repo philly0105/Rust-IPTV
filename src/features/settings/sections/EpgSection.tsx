@@ -225,7 +225,7 @@ export function EpgSection({ settings, update }: SectionProps) {
   const offset = parity(settings).epgOffsetMinutes;
 
   return (
-    <SettingsSection title={t('sectionEpg')} description={t('sectionEpgLead')} testId="settings-epg">
+    <SettingsSection title={t('sectionEpg')} testId="settings-epg">
       <SettingsGroup title={t('epgGlobalUrls')} description={t('epgGlobalUrlsHint')}>
         {settings.epgUrls.length === 0 ? (
           <p className="px-4 py-4 text-sm text-fg-muted">{t('epgGlobalEmpty')}</p>

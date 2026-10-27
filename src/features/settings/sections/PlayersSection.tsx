@@ -102,7 +102,7 @@ export function PlayersSection({ settings, update }: SectionProps) {
   );
 
   return (
-    <SettingsSection title={t('sectionPlayers')} description={t('sectionPlayersLead')} testId="settings-players">
+    <SettingsSection title={t('sectionPlayers')} testId="settings-players">
       <SettingsGroup
         title={t('playerPaths')}
         description={t('playerPathsHint')}

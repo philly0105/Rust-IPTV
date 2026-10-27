@@ -31,7 +31,7 @@ export function RecordingSection({ settings, update }: SectionProps) {
   const action: ReminderAction = settings.reminderAction;
 
   return (
-    <SettingsSection title={t('sectionRecording')} description={t('recordingSectionHint')} testId="settings-recording">
+    <SettingsSection title={t('sectionRecording')} testId="settings-recording">
       {/* SS-8: the folder sits with the rest of recording, where people look for it. The padding is
           one row with its two minutes side by side, not two label-only rows. */}
       <SettingsGroup title={t('recordingsGroup')}>

@@ -410,7 +410,7 @@ export function AppearanceSection({ settings, update }: SectionProps) {
   ];
 
   return (
-    <SettingsSection title={t('sectionAppearance')} description={t('sectionAppearanceLead')} testId="settings-appearance">
+    <SettingsSection title={t('sectionAppearance')} testId="settings-appearance">
       <SettingsGroup title={t('theme')}>
         <div role="radiogroup" aria-label={t('theme')} className="grid gap-3 p-3 @2xl:grid-cols-3">
           {options.map((o) => {

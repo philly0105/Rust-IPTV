@@ -130,7 +130,7 @@ export function PlaybackSection({ settings, update }: SectionProps) {
   const current: VideoPlayer = builtIn ? 'html5' : settings.player;
 
   return (
-    <SettingsSection title={t('sectionPlayback')} description={t('sectionPlaybackLead')} testId="settings-playback">
+    <SettingsSection title={t('sectionPlayback')} testId="settings-playback">
       <SettingsGroup title={t('player')} description={t('playerHint')}>
         <div className="flex flex-col p-2">
           {caps.isError ? (

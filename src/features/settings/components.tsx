@@ -60,22 +60,27 @@ function RowMark({ rowId }: { rowId: string }) {
 }
 
 /**
- * One settings page: heading, optional lead, and grouped rows. Below md (the phone layout, where
- * the shell header names the section) the heading is for screen readers only, so the lead and the
- * first group start right under the header.
+ * One settings page: its heading and grouped rows. The heading is a step under the shell header's
+ * "Settings" (text-title-sm, the size of a section heading), so the header stays the one page
+ * title and the heading reads as the current nav item's name. Below md (the phone layout, where
+ * the shell header names the section) it is for screen readers only, so the first group starts
+ * right under the header.
+ *
+ * No lead line under the heading: it only listed the groups that follow, and the phone's list of
+ * sections, where a lead helps pick one, still shows it. `description` is accepted and not drawn,
+ * for callers outside this feature that still pass one.
  */
-export function SettingsSection({ title, description, children, testId }: { title: string; description?: string; children: ReactNode; testId?: string }) {
+export function SettingsSection({ title, children, testId }: { title: string; description?: string; children: ReactNode; testId?: string }) {
   const fb = useContext(SaveFeedback);
   return (
     <section className="flex flex-col gap-8 max-md:gap-6" aria-labelledby="settings-section-title" data-testid={testId}>
-      <header className="flex max-w-2xl flex-col gap-1.5">
-        <div className="flex flex-wrap items-baseline gap-x-3">
-          <h2 id="settings-section-title" className="text-title text-fg max-md:sr-only">
-            {title}
-          </h2>
-          {fb.rowId === null && fb.state !== 'idle' ? <SavedMark state={fb.state} /> : null}
-        </div>
-        {description ? <p className="text-body-sm text-pretty text-fg-muted">{description}</p> : null}
+      {/* On a phone the header holds only the hidden heading, so it takes no row of its own
+          (`contents`), and the section's gap does not open above the first group. */}
+      <header className="flex flex-wrap items-baseline gap-x-3 max-md:contents">
+        <h2 id="settings-section-title" className="text-title-sm text-fg max-md:sr-only">
+          {title}
+        </h2>
+        {fb.rowId === null && fb.state !== 'idle' ? <SavedMark state={fb.state} /> : null}
       </header>
       {children}
     </section>
@@ -350,8 +355,8 @@ export function Segmented<T extends string>({
 export function SectionSkeleton() {
   return (
     <div role="status" aria-busy="true" className="flex flex-col gap-6" data-testid="settings-loading">
-      <Skeleton className="h-8 w-56" />
-      <Skeleton className="h-4 w-96 max-w-full" />
+      {/* The section heading (text-title-sm); there is no lead line under it any more. */}
+      <Skeleton className="h-6 w-40 max-md:hidden" />
       <div className="flex flex-col gap-px overflow-hidden rounded-lg border border-edge">
         {Array.from({ length: 5 }, (_, i) => (
           <Skeleton key={i} className="h-16 rounded-none" />

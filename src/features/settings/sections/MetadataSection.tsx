@@ -64,7 +64,7 @@ export function MetadataSection({ settings, update }: SectionProps) {
   const languageOptions = TMDB_LANGUAGES.map((l) => (l.value === '' ? { value: '', label: t('tmdbLanguageAuto') } : l));
 
   return (
-    <SettingsSection title={t('sectionMetadata')} description={t('sectionMetadataLead')} testId="settings-metadata">
+    <SettingsSection title={t('sectionMetadata')} testId="settings-metadata">
       <SettingsGroup>
         <SwitchRow
           label={t('tmdbEnabled')}

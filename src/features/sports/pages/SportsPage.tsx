@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
 
-import { NoSourcesState } from '@/features/sources/components/NoSourcesState';
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { DayStrip } from '../components/DayStrip';
 import { GameCard } from '../components/GameCard';
@@ -159,7 +159,10 @@ export function SportsPage() {
   const sources = useVisibleSources();
   const sourceCount = sources.data?.length ?? 0;
   const hasSources = sourceCount > 0;
-  const noSources = sources.data !== undefined && !hasSources;
+  // The banner stays while its add dialog is open: the new source is listed before its import
+  // runs, and dropping the banner then would close the dialog mid-import.
+  const adding = useNoSourcesAdding();
+  const noSources = (sources.data !== undefined && !hasSources) || adding;
 
   const allLive = useLiveGames(LEAGUES);
   const allDay = useSportsDay(day, LEAGUES);

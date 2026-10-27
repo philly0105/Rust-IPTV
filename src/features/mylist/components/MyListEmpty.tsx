@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import type { Source } from '@/api/types';
-import { NoSourcesState } from '@/features/sources/components/NoSourcesState';
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { buttonClass, cn } from '../deps';
@@ -31,13 +31,15 @@ export function browseTarget(sources: readonly Source[], kind: 'movie' | 'series
 export function MyListEmpty({ sources, kind }: MyListEmptyProps) {
   const { t, i18n } = useTranslation('mylist');
   const nf = numberFormat(intlLocale(i18n.language));
+  const adding = useNoSourcesAdding();
   const movies = sources ? browseTarget(sources, 'movie') : undefined;
   const series = sources ? browseTarget(sources, 'series') : undefined;
   const noVod = sources !== undefined && !movies && !series;
 
   // With no source the page says what every page says then; the numbered slots would only push it
-  // down the window.
-  if (sources && sources.length === 0) {
+  // down the window. It stays while its add dialog is open, which the new source's listing would
+  // otherwise close mid-import.
+  if (sources && (sources.length === 0 || adding)) {
     return <NoSourcesState icon={<BookmarkPlus />} title={t('emptyTitle')} description={t('emptyNoSources')} testId="mylist-empty-add-source" stateTestId="mylist-empty" />;
   }
 

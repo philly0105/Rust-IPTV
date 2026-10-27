@@ -94,6 +94,8 @@ const { pickDay } = await import('../paths');
 const { gameProgram, streamAction } = await import('../components/StreamList');
 const { forgetFollowedTeamsForTests } = await import('../hooks/useFollowedTeams');
 const { useMultiviewStore } = await import('@/features/multiview/store');
+const { invalidate } = await import('@/api/query');
+const { handleImportEvent, resetProgressForTests } = await import('@/features/sources/lib/progress');
 
 const today = () => etDate(Date.now());
 /** The Today tab, named with its date ("Today Oct 25"). */
@@ -850,6 +852,55 @@ describe('sports page', () => {
     expect(within(card(g)).queryByTestId('sports-no-streams')).toBeNull();
     expect(within(card(g)).queryByTestId('sports-streams-loading')).toBeNull();
     expect(data.streamCalls.at(-1)?.enabled).toBe(false);
+  });
+
+  it('keeps the add dialog through the new source being listed mid-import, then stays and fills in', async () => {
+    resetProgressForTests();
+    let listed: unknown[] = [];
+    rpc.handlers['sources.list'] = () => listed;
+    const created = {
+      id: 'new1',
+      kind: 'm3u',
+      name: 'Huge list',
+      position: 0,
+      autoRefresh: false,
+      channelCount: 1200,
+      movieCount: 0,
+      seriesCount: 0,
+      m3u: { origin: 'url', url: 'http://lists.example.com/huge.m3u' },
+      epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] },
+    };
+    let finish: (s: unknown) => void = () => undefined;
+    rpc.handlers['sources.add'] = () => new Promise((resolve) => (finish = resolve));
+    setDay([h.liveGame('1')]);
+    open();
+    fireEvent.click(await screen.findByTestId('sports-add-source'));
+    const dlg = await screen.findByRole('dialog');
+    fireEvent.click(within(dlg).getByRole('tab', { name: 'M3U playlist' }));
+    fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
+    fireEvent.change(within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }), { target: { value: 'http://lists.example.com/huge.m3u' } });
+    fireEvent.click(within(dlg).getByTestId('add-source-submit'));
+    await waitFor(() => expect(rpc.callsOf('sources.add')).toHaveLength(1));
+    act(() => handleImportEvent({ sourceId: 'new1', phase: 'parsing', done: 1200 }));
+    await within(dlg).findByTestId('import-cancel');
+
+    // The core lists the new source before its import runs: the banner and its dialog stay.
+    listed = [created];
+    const listCalls = rpc.callsOf('sources.list').length;
+    await act(async () => {
+      await invalidate('sources.');
+    });
+    await waitFor(() => expect(rpc.callsOf('sources.list').length).toBeGreaterThan(listCalls));
+    expect(screen.getByRole('dialog')).toBe(dlg);
+    expect(within(dlg).getByTestId('import-cancel')).toBeTruthy();
+    expect(screen.getByTestId('sports-no-sources')).toBeTruthy();
+
+    // The import finishes: Sports stays put, the banner goes and the games get their streams.
+    await act(async () => finish(created));
+    await waitFor(() => expect(screen.queryByTestId('sports-no-sources')).toBeNull());
+    expect(h.location.current).toBe('/sports');
+    await waitFor(() => expect(data.streamCalls.at(-1)?.enabled).toBe(true));
+    resetProgressForTests();
   });
 });
 

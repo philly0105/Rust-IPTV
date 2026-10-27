@@ -2,6 +2,7 @@ import { DatabaseBackup } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
+import { create } from 'zustand';
 
 import { holdImportToasts } from '@/shell/effects';
 import { sourceHomePath } from '@/shell/railLinks';
@@ -9,6 +10,20 @@ import { Button, EmptyState, buttonClass, cn } from '@/ui';
 
 // The add flow (forms, import progress) loads on the press, not with the page's chunk.
 const AddSourceDialog = lazy(() => import('./AddSourceDialog').then((m) => ({ default: m.AddSourceDialog })));
+
+/** How many add dialogs opened from a no-source state are open (one at a time in practice). */
+const useAddingStore = create<{ open: number }>(() => ({ open: 0 }));
+
+/**
+ * True while Add a source, opened from a page's no-source state, has its dialog open. The page
+ * keeps its no-source state up meanwhile: the core lists a new source before its import runs, and
+ * a page that switched to its filled-in view on that refetch would unmount the dialog with its
+ * progress, its Cancel button, its error and Retry, and the move to the new source. Home's welcome
+ * stays up the same way (welcomeAdding). Every host ORs this into its no-source condition.
+ */
+export function useNoSourcesAdding(): boolean {
+  return useAddingStore((s) => s.open > 0);
+}
 
 export interface NoSourcesActionsProps {
   /** Test id of the Add button; pages keep the ids their tests already use. */
@@ -34,8 +49,16 @@ export function NoSourcesActions({ testId = 'no-sources-add', stay = false }: No
   const [open, setOpen] = useState(false);
   // Mounted on the first press and kept, so the dialog's exit animation can run.
   const [requested, setRequested] = useState(false);
-  // The dialog shows the import's progress and toasts its success itself, as on Home and Sources.
-  useEffect(() => (open ? holdImportToasts() : undefined), [open]);
+  useEffect(() => {
+    if (!open) return;
+    // The dialog shows the import's progress and toasts its success itself, as on Home and Sources.
+    const release = holdImportToasts();
+    useAddingStore.setState((s) => ({ open: s.open + 1 }));
+    return () => {
+      release();
+      useAddingStore.setState((s) => ({ open: s.open - 1 }));
+    };
+  }, [open]);
   return (
     <>
       <Button

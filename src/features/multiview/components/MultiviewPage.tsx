@@ -6,7 +6,7 @@ import { useLocation } from 'react-router';
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey } from '@/api/types';
-import { NoSourcesState } from '@/features/sources/components/NoSourcesState';
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
 import { cn, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
@@ -112,6 +112,9 @@ export function MultiviewPage() {
   const chrome = useIdleChrome(fsActive);
   const { mainPlaying, stopMain } = useMainPlayerHandoff(count > 0);
   const sources = useSources();
+  // The no-source state stays while its add dialog is open: the new source is listed before its
+  // import runs, and the wall taking over then would close the dialog mid-import.
+  const adding = useNoSourcesAdding();
   const parental = useParentalState();
   const loads = useSourceLoads(tiles, sources.byId, parental.active);
   const over = useMemo(() => overLimit(loads), [loads]);
@@ -434,7 +437,7 @@ export function MultiviewPage() {
     body = <WallSkeleton layout={layout} />;
   } else if (count === 0 && sources.error) {
     body = <ErrorState error={sources.error} onRetry={sources.refetch} />;
-  } else if (count === 0 && sources.byId.size === 0) {
+  } else if (count === 0 && (sources.byId.size === 0 || adding)) {
     body = (
       <NoSourcesState icon={<LayoutGrid />} title={t('noSourcesTitle')} description={t('noSources')} stay />
     );

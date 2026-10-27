@@ -3,7 +3,7 @@
  * user is, cancelling leaves them there, and Import a backup sits beside it.
  */
 
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
@@ -38,7 +38,12 @@ vi.mock('../components/AddSourceDialog', () => ({
     ) : null,
 }));
 
-const { NoSourcesState } = await import('../components/NoSourcesState');
+const { NoSourcesState, useNoSourcesAdding } = await import('../components/NoSourcesState');
+
+/** What a host page reads to keep its no-source state up while the dialog is open. */
+function AddingProbe() {
+  return <output data-testid="adding">{String(useNoSourcesAdding())}</output>;
+}
 
 beforeEach(() => {
   rpcMock.reset();
@@ -85,6 +90,38 @@ describe('NoSourcesState', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add source' }));
     await waitFor(() => expect(screen.queryByTestId('add-source-dialog')).toBeNull());
     expect(stay.router.state.location.pathname).toBe('/favorites');
+  });
+
+  it('tells the page it is adding while the dialog is open, until it closes or the state goes', async () => {
+    const adding = () => screen.getByTestId('adding').textContent;
+    const routes = [
+      {
+        path: '/favorites',
+        element: (
+          <>
+            <AddingProbe />
+            <NoSourcesState icon={<span />} title="No favorites yet" description="Add a source first." testId="fav-add" />
+          </>
+        ),
+      },
+      { path: '/elsewhere', element: <AddingProbe /> },
+    ];
+    const { router } = renderAt(routes, '/favorites');
+    expect(adding()).toBe('false');
+    fireEvent.click(screen.getByTestId('fav-add'));
+    await screen.findByTestId('add-source-dialog');
+    expect(adding()).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(adding()).toBe('false'));
+
+    // Leaving the page with the dialog open does not leave the flag behind.
+    fireEvent.click(screen.getByTestId('fav-add'));
+    await waitFor(() => expect(adding()).toBe('true'));
+    await act(async () => {
+      await router.navigate('/elsewhere');
+    });
+    expect(screen.queryByTestId('fav-add')).toBeNull();
+    expect(adding()).toBe('false');
   });
 
   it('draws one short row in the banner layout, with the same actions', () => {

@@ -248,9 +248,10 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
     <div ref={scrollRef} className="h-full min-h-0 overflow-y-auto overflow-x-hidden" data-testid={`vod-landing-${kind}`}>
       <Page width="wide" className="flex flex-col gap-10 max-sm:gap-8">
         {/* The shell header shows the title, the source and the count (one place, L1-visual-13). Its
-            subtitle folds away below md, so only there the source line shows here. */}
+            subtitle folds away below md, so only there the source line shows here: in the category
+            row's first line, or on its own over an empty source. */}
         <h1 className="sr-only">{title}</h1>
-        {sourceLine && <p className="-mb-6 min-w-0 truncate text-sm text-fg-muted md:hidden">{sourceLine}</p>}
+        {isEmptySource && sourceLine && <p className="-mb-6 min-w-0 truncate text-sm text-fg-muted md:hidden">{sourceLine}</p>}
         {isEmptySource ? (
           <EmptyState
             icon={kind === 'movie' ? <Clapperboard size={32} /> : <Tv size={32} />}
@@ -266,12 +267,13 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
           <>
             {/* The categories one press from the top: the index itself waits under the rails. */}
             <CategoryChips
+              lead={sourceLine}
               cats={chipCats}
               total={shownCats?.length}
               loading={allCats.isPending}
               hrefFor={hrefFor}
               onShowAll={showIndex}
-              manage={<IconButton label={manageLabel} icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0" />}
+              manage={<IconButton label={manageLabel} icon={<ListFilter aria-hidden size={16} />} onClick={() => setManageOpen(true)} className="shrink-0 max-md:order-last" />}
             />
             {/* CB-VOD-LANDING: rails first, the way Plex and Apple TV open a library. */}
             {continuing.length > 0 && <ContinueSectionRail positions={continuing} locked={locks.itemLocked} sourceKind={sourceKind} />}
@@ -569,8 +571,14 @@ function CategoryIndexSection({
  * kit's filter-chip look; "All categories" follows them as a quiet link with a chevron, so it does
  * not read as a chosen filter, and the manage button sits next to it rather than at the far end.
  * The chips scroll sideways; the edge that hides chips fades out and a vertical wheel moves them.
+ *
+ * Below md the shell header drops its subtitle, so the row starts with the source line (`lead`)
+ * with All categories at its end, and the chips take the next line, ended by Manage: beside the
+ * two buttons a phone showed little more than one chip. The lines have no gap between them: the
+ * buttons' boxes (44 px on touch) already space them, so the page grows by little.
  */
 function CategoryChips({
+  lead,
   cats,
   total,
   loading,
@@ -578,6 +586,8 @@ function CategoryChips({
   onShowAll,
   manage,
 }: {
+  /** The source and its title count, shown below md, where the header does not show them. */
+  lead?: string | undefined;
   cats: readonly { id: string; name: string; locked: boolean }[];
   total: number | undefined;
   loading: boolean;
@@ -589,9 +599,19 @@ function CategoryChips({
   const fades = useEdgeFades(`${loading}|${cats.map((c) => c.id).join(',')}|${i18n.language}`);
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   return (
-    <nav aria-label={t('categories')} className="-mb-4 flex min-w-0 items-center gap-2 max-sm:-mb-2" data-testid="vod-category-chips">
-      {/* Room for the focus halo, which the scroller would clip. */}
-      <ul ref={fades.ref} style={fades.style} className="-m-1.5 flex min-w-0 items-center gap-2 overflow-x-auto p-1.5 scrollbar-none">
+    <nav aria-label={t('categories')} className="-mb-4 flex min-w-0 flex-wrap items-center gap-x-2 max-sm:-mb-2 md:flex-nowrap" data-testid="vod-category-chips">
+      {lead && (
+        <p className="min-w-0 flex-1 truncate text-sm text-fg-muted md:hidden" data-testid="vod-landing-source">
+          {lead}
+        </p>
+      )}
+      {/* Room for the focus halo, which the scroller would clip. Below md it is too wide to share the
+          source line, so it starts the next line, and Manage (also order-last, after it) ends that line. */}
+      <ul
+        ref={fades.ref}
+        style={fades.style}
+        className="-m-1.5 flex min-w-0 items-center gap-2 overflow-x-auto p-1.5 scrollbar-none max-md:order-last max-md:grow max-md:basis-[calc(100%-5.5rem)]"
+      >
         {loading
           ? [0, 1, 2, 3, 4].map((i) => (
               <li key={i} aria-hidden className="shrink-0">
@@ -614,7 +634,7 @@ function CategoryChips({
         type="button"
         onClick={onShowAll}
         aria-label={total !== undefined ? `${t('allCategories')}, ${t('categoryCount', { count: total })}` : undefined}
-        className={buttonClass('ghost', 'sm', 'shrink-0 gap-1 px-2')}
+        className={buttonClass('ghost', 'sm', 'shrink-0 gap-1 px-2 max-md:ms-auto')}
         data-testid="vod-chip-all"
       >
         {t('allCategories')}

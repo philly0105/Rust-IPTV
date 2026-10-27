@@ -171,7 +171,6 @@
   "watchedFailed": "Não foi possível atualizar o status de assistido",
   "markEpisodeWatched": "Marcar {{code}} como assistido",
   "markEpisodeUnwatched": "Marcar {{code}} como não assistido",
-  "episodeActions": "Mais ações para {{code}}",
   "markSeasonWatched": "Marcar temporada como assistida",
   "markSeasonUnwatched": "Marcar temporada como não assistida",
   "ratingFilterNote": "Mostrando títulos com avaliação {{rating}} ou mais",

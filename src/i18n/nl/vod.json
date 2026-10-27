@@ -165,7 +165,6 @@
   "watchedFailed": "Kan de bekeken-status niet bijwerken",
   "markEpisodeWatched": "{{code}} markeren als bekeken",
   "markEpisodeUnwatched": "{{code}} markeren als niet bekeken",
-  "episodeActions": "Meer acties voor {{code}}",
   "markSeasonWatched": "Seizoen markeren als bekeken",
   "markSeasonUnwatched": "Seizoen markeren als niet bekeken",
   "ratingFilterNote": "Titels met een score van {{rating}} of hoger",

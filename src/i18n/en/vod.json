@@ -165,7 +165,6 @@
   "watchedFailed": "Could not update watched state",
   "markEpisodeWatched": "Mark {{code}} as watched",
   "markEpisodeUnwatched": "Mark {{code}} as unwatched",
-  "episodeActions": "More actions for {{code}}",
   "markSeasonWatched": "Mark season watched",
   "markSeasonUnwatched": "Mark season unwatched",
   "ratingFilterNote": "Showing titles rated {{rating}} or higher",

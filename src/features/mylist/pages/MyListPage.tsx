@@ -40,6 +40,7 @@ import {
   POSTER_GAP,
   useCoverColumn,
   usePendingRemovals,
+  useScaledPx,
   useShell,
   useShortcut,
   useToast,
@@ -132,6 +133,8 @@ export function MyListPage() {
     writeView(v);
   }, []);
   const column = useCoverColumn();
+  // The caption is text, so the row the grid reserves for it grows with the UI scale as the card's caption box does.
+  const captionHeight = useScaledPx(CARD_CAPTION_HEIGHT);
   const language = i18n.language;
 
   const all = query.data;
@@ -419,7 +422,7 @@ export function MyListPage() {
         render={renderCard}
         onActivate={(r) => open(r.entry)}
         postersFillCells
-        captionHeight={CARD_CAPTION_HEIGHT}
+        captionHeight={captionHeight}
         minColumnWidth={column}
         gap={POSTER_GAP}
         className="-mx-2 px-2 pt-1"

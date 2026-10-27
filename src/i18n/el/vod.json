@@ -165,7 +165,6 @@
   "watchedFailed": "Δεν ήταν δυνατή η ενημέρωση της κατάστασης προβολής",
   "markEpisodeWatched": "Σήμανση του {{code}} ως προβεβλημένου",
   "markEpisodeUnwatched": "Σήμανση του {{code}} ως μη προβεβλημένου",
-  "episodeActions": "Περισσότερες ενέργειες για το {{code}}",
   "markSeasonWatched": "Σήμανση σεζόν ως προβεβλημένης",
   "markSeasonUnwatched": "Σήμανση σεζόν ως μη προβεβλημένης",
   "ratingFilterNote": "Εμφανίζονται τίτλοι με βαθμολογία {{rating}} και άνω",

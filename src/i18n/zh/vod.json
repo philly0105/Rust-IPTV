@@ -165,7 +165,6 @@
   "watchedFailed": "无法更新观看状态",
   "markEpisodeWatched": "将 {{code}} 标记为已观看",
   "markEpisodeUnwatched": "将 {{code}} 标记为未观看",
-  "episodeActions": "{{code}} 的更多操作",
   "markSeasonWatched": "将本季标记为已观看",
   "markSeasonUnwatched": "将本季标记为未观看",
   "ratingFilterNote": "仅显示评分 {{rating}} 及以上的作品",

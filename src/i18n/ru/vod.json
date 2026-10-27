@@ -177,7 +177,6 @@
   "watchedFailed": "Не удалось обновить отметку о просмотре",
   "markEpisodeWatched": "Отметить {{code}} как просмотренную",
   "markEpisodeUnwatched": "Отметить {{code}} как непросмотренную",
-  "episodeActions": "Другие действия для {{code}}",
   "markSeasonWatched": "Отметить сезон как просмотренный",
   "markSeasonUnwatched": "Отметить сезон как непросмотренный",
   "ratingFilterNote": "Показаны позиции с рейтингом {{rating}} и выше",

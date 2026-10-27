@@ -17,8 +17,15 @@ import { CARD_ART } from '@/ui/card';
 
 import { IconButton, Poster, ProgressBar, WatchedChip, cn } from '../deps';
 
-/** Caption under the poster: the title and one line of facts. */
-export const CARD_CAPTION_HEIGHT = 52;
+/**
+ * Caption under the poster at 100 % UI scale: up to two lines of title and one line of facts (plus
+ * the 8 px gap above it), as the posters of the VOD grids and rails caption theirs. The text grows
+ * with the UI scale, so the caption box and the row the grid reserves scale with it.
+ */
+export const CARD_CAPTION_HEIGHT = 64;
+
+/** The caption box's height, scaled in CSS as the rem-based text inside it is. */
+const CAPTION_BOX_HEIGHT = `calc(${CARD_CAPTION_HEIGHT - 8}px * var(--ui-scale, 1))`;
 
 export interface MyListCardProps {
   entry: WatchlistEntry;
@@ -82,8 +89,9 @@ function MyListCardImpl({ entry, busy, progress, progressLabel, onRemove }: MyLi
           data-action="remove"
         />
       </div>
-      <div className="flex min-w-0 flex-col" style={{ height: CARD_CAPTION_HEIGHT - 8 }}>
-        <span dir="auto" className="truncate text-match-parent text-body-sm font-medium text-fg" title={title} data-testid="mylist-title">
+      <div className="flex min-w-0 flex-col" style={{ height: CAPTION_BOX_HEIGHT }}>
+        {/* Two lines before it is cut, so a narrow phone column shows "The Clubhouse", not "The Clubh…". */}
+        <span dir="auto" className="line-clamp-2 text-match-parent text-body-sm font-medium [overflow-wrap:anywhere] text-fg" title={title} data-testid="mylist-title">
           {title}
         </span>
         <span dir="auto" className="truncate text-match-parent text-caption text-fg-muted">

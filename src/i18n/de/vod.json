@@ -165,7 +165,6 @@
   "watchedFailed": "Der Angesehen-Status konnte nicht geändert werden",
   "markEpisodeWatched": "{{code}} als angesehen markieren",
   "markEpisodeUnwatched": "{{code}} als nicht angesehen markieren",
-  "episodeActions": "Weitere Aktionen für {{code}}",
   "markSeasonWatched": "Staffel als angesehen markieren",
   "markSeasonUnwatched": "Staffel als nicht angesehen markieren",
   "ratingFilterNote": "Titel mit Bewertung ab {{rating}} werden angezeigt",

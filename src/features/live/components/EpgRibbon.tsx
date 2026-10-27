@@ -209,7 +209,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
     >
       {/* Three lines tall with or without a programme (time, title, description), so a zap never
           moves what is under it. The Now card (details, md up) keeps its own fixed height: its four
-          lines (channel, title, time, progress), or the channel's name alone without a guide. */}
+          lines (channel, title, time, progress), or the channel's name alone without a guide. The
+          four lines come to 78 px, inside the 78.75 px minimum: a 1 px larger gap above the times
+          made the card taller with a guide than without, and moved the timeline on a zap. */}
       <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3', details ? '@max-[26rem]/now:basis-full md:min-h-[5.25rem]' : 'max-[480px]:basis-full')}>
         {details && shown?.icon ? <ProgrammeArt src={shown.icon} sourceId={channel?.ref.sourceId} /> : null}
         {/* A container: the meta line drops what does not fit by the pane's own width, not the window's. */}
@@ -232,7 +234,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
               {/* Clipped, never overflowing, and numbers are never cut: a narrow pane says "27m" for
                   "27 min left" and leaves the category out (it used to read "2.. N"). The Now card
                   makes room for them first (the art goes, then the buttons wrap). */}
-              <p className={cn('flex min-w-0 items-center gap-2 overflow-hidden text-fg-muted', details ? 'text-caption md:mt-1' : 'text-xs')}>
+              <p className={cn('flex min-w-0 items-center gap-2 overflow-hidden text-fg-muted', details ? 'text-caption md:mt-0.5' : 'text-xs')}>
                 {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                   {shownWhen !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ? `${formatDay(ms(shown.start), i18n.language)} ` : ''}

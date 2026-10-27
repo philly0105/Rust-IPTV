@@ -73,8 +73,11 @@ describe('the Now card order (review round 4)', () => {
     const time = screen.getByTestId('ribbon-time');
     expect(follows(channel, title)).toBe(true);
     expect(follows(title, time)).toBe(true);
-    // The times are on the caption scale beside the title.
+    // The times are on the caption scale under the title, with the half step above them that keeps
+    // the card's four lines inside its 5.25rem minimum (78 px of 78.75 measured in Chrome; a full
+    // step made it 79.9 px with a guide and 78.75 without, so a zap moved the timeline).
     expect(time.parentElement!.className).toContain('text-caption');
+    expect(time.parentElement!.className.split(' ')).toContain('md:mt-0.5');
     expect(title.className).toContain('md:text-title-sm');
   });
 

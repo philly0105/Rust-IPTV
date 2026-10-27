@@ -18,6 +18,8 @@ import { queryClient } from '@/api/query';
 import type { ItemRef, Source, WatchStats, WatchStatsDay, WatchStatsTop } from '@/api/types';
 import common from '@/i18n/en/common.json';
 import stats from '@/i18n/en/stats.json';
+// The shared no-source state (sources feature) draws its actions in its own namespace.
+import sources from '@/i18n/en/sources.json';
 import { shortcutRegistry } from '@/shell/shortcuts';
 import { useShellStore } from '@/shell/store';
 import { useToastStore } from '@/ui';
@@ -28,9 +30,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['stats', 'common'],
+  ns: ['stats', 'common', 'sources'],
   defaultNS: 'stats',
-  resources: { en: { stats, common } },
+  resources: { en: { stats, common, sources } },
   interpolation: { escapeValue: false },
   initAsync: false,
 });

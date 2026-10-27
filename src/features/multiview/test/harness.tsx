@@ -18,6 +18,8 @@ import { queryClient } from '@/api/query';
 import type { Channel, ItemRef, Source } from '@/api/types';
 import common from '@/i18n/en/common.json';
 import multiview from '@/i18n/en/multiview.json';
+// The shared no-source state (sources feature) draws its actions in its own namespace.
+import sources from '@/i18n/en/sources.json';
 
 import { __reloadMultiviewForTests, AUDIO_STORAGE_KEY, STORAGE_KEY } from '../store';
 import type { MultiviewChannelInput } from '../types';
@@ -26,9 +28,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['multiview', 'common'],
+  ns: ['multiview', 'common', 'sources'],
   defaultNS: 'multiview',
-  resources: { en: { multiview, common } },
+  resources: { en: { multiview, common, sources } },
   interpolation: { escapeValue: false },
 });
 

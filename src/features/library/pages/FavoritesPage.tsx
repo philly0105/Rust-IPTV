@@ -14,7 +14,7 @@ import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, useLiveQuality, useShortcut, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, useLiveQuality, useNoSourcesAdding, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
@@ -57,6 +57,8 @@ export function FavoritesPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  // Add a source's dialog is open: the no-source line stays with it (see BrowseAction).
+  const adding = useNoSourcesAdding();
   const args = useMemo(() => (sourceId ? { sourceId } : {}), [sourceId]);
   const query = useRpcQuery('favorites.list', args);
   const { pending, run } = usePending<string>();
@@ -243,7 +245,7 @@ export function FavoritesPage() {
       <EmptyState
         icon={<Heart size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
-        description={sourceId ? t('favoritesEmptySourceBody') : sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
+        description={sourceId ? t('favoritesEmptySourceBody') : (sources.size === 0 || adding) && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
         action={
           <>
             <BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />

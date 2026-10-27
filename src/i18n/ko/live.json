@@ -72,7 +72,7 @@
   "guideNoMatch": "이 채널 중 불러온 가이드와 일치하는 채널이 없습니다. 채널 메뉴에서 가이드 채널을 연결하세요.",
   "guideBackToNow": "지금으로 돌아가기",
   "guideNoSources": "아직 소스가 없습니다",
-  "guideNoSourcesHint": "TV 가이드를 보려면 재생목록이나 포털을 추가하세요.",
+  "guideNoSourcesHint": "TV 가이드를 보려면 소스를 추가하세요.",
   "previousDay": "전날",
   "nextDay": "다음날",
   "earlier": "3시간 전",

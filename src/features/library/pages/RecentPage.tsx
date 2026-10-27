@@ -11,7 +11,7 @@ import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, useNoSourcesAdding, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
 import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
@@ -51,6 +51,8 @@ export function RecentPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
+  // Add a source's dialog is open: the no-source line stays with it (see BrowseAction).
+  const adding = useNoSourcesAdding();
   const args = useMemo(() => (sourceId ? { sourceId, limit: RECENT_LIMIT } : { limit: RECENT_LIMIT }), [sourceId]);
   // Watching anything changes both lists, so they are read fresh on every visit.
   const query = useRpcQuery('recent.list', args, { staleTime: 0 });
@@ -256,7 +258,7 @@ export function RecentPage() {
       <EmptyState
         icon={<History size={28} aria-hidden />}
         title={t('recentEmptyTitle')}
-        description={!sourceId && sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('recentEmptyBody')}
+        description={!sourceId && (sources.size === 0 || adding) && !sourcesLoading ? t('recentNoSourcesBody') : t('recentEmptyBody')}
         action={
           <>
             <BrowseAction sourceId={sourceId} sources={sources} loading={sourcesLoading} />

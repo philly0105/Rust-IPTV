@@ -3,6 +3,7 @@
   "listLabel": "あなたのソース",
   "add": "ソースを追加",
   "addSource": "ソースを追加",
+  "noSourcesAdd": "ソースを追加",
   "addSourceSubmit": "ソースを追加",
   "adding": "追加中…",
   "addFailed": "このソースを追加できませんでした",

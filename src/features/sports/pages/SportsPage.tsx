@@ -20,14 +20,16 @@
 import { CalendarX2, SearchX, Star, Tv } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
+
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { DayStrip } from '../components/DayStrip';
 import { GameCard } from '../components/GameCard';
 import { LeagueFilter } from '../components/LeagueFilter';
 import { SportsSkeleton } from '../components/SportsSkeleton';
 import { useStreamContext, type StreamContext } from '../components/StreamList';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, buttonClass, cn, useNow, useShell, useVisibleSources } from '../deps';
+import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, useNow, useShell, useVisibleSources } from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -164,7 +166,10 @@ export function SportsPage() {
   const sources = useVisibleSources();
   const sourceCount = sources.data?.length ?? 0;
   const hasSources = sourceCount > 0;
-  const noSources = sources.data !== undefined && !hasSources;
+  // The banner stays while its add dialog is open: the new source is listed before its import
+  // runs, and dropping the banner then would close the dialog mid-import.
+  const adding = useNoSourcesAdding();
+  const noSources = (sources.data !== undefined && !hasSources) || adding;
 
   const allLive = useLiveGames(LEAGUES);
   const allDay = useSportsDay(day, LEAGUES);
@@ -358,19 +363,8 @@ export function SportsPage() {
         />
       </div>
       {noSources ? (
-        <div className="rounded-lg border border-dashed border-edge" data-testid="sports-no-sources">
-          <EmptyState
-            size="inline"
-            icon={<Tv />}
-            title={t('noSourcesTitle')}
-            description={t('noSourcesHint')}
-            action={
-              <Link to="/sources?add=1" className={buttonClass('primary', 'sm')} data-testid="sports-add-source">
-                {t('addSource')}
-              </Link>
-            }
-          />
-        </div>
+        // One short row over the day's games, which still list without a source.
+        <NoSourcesState layout="banner" icon={<Tv />} title={t('noSourcesTitle')} description={t('noSourcesHint')} testId="sports-add-source" stateTestId="sports-no-sources" stay />
       ) : null}
       {live.length > 0 ? (
         <Section id="live" title={t('liveNow')} count={live.length}>

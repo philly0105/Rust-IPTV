@@ -72,7 +72,7 @@
   "guideNoMatch": "None of these channels matches a loaded guide. Match a channel to its guide channel from its menu.",
   "guideBackToNow": "Back to now",
   "guideNoSources": "No sources yet",
-  "guideNoSourcesHint": "Add a playlist or portal to see its TV guide.",
+  "guideNoSourcesHint": "Add a source to see its TV guide.",
   "previousDay": "Previous day",
   "nextDay": "Next day",
   "earlier": "3 hours earlier",

@@ -72,7 +72,7 @@
   "guideNoMatch": "Keiner dieser Sender passt zu einem geladenen Programmführer. Ordnen Sie einen Sender über sein Menü einem EPG-Sender zu.",
   "guideBackToNow": "Zurück zu jetzt",
   "guideNoSources": "Noch keine Quellen",
-  "guideNoSourcesHint": "Fügen Sie eine Playlist oder ein Portal hinzu, um dessen Programmführer zu sehen.",
+  "guideNoSourcesHint": "Fügen Sie eine Quelle hinzu, um ihren Programmführer zu sehen.",
   "previousDay": "Zum vorherigen Tag",
   "nextDay": "Zum nächsten Tag",
   "earlier": "3 Stunden früher",

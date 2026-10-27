@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Source } from '@/api/types';
@@ -39,6 +39,8 @@ vi.mock('@/shell', () => {
 vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
 
 const harness = await import('./harness');
+const { invalidate } = await import('@/api/query');
+const { handleImportEvent, resetProgressForTests } = await import('@/features/sources/lib/progress');
 rpcMock.current = harness.createRpcMock();
 const rpc = rpcMock.current;
 
@@ -130,13 +132,77 @@ describe('library empty states point to where items come from', () => {
     expect(link.getAttribute('href')).toBe('/s/portal%2F1%20x/live');
   });
 
-  it('Favorites with no sources: add one', async () => {
+  it('Favorites with no sources: the shared add-a-source state, which adds in place', async () => {
     rpc.handlers['sources.list'] = () => [];
     rpc.handlers['favorites.list'] = () => [];
     renderAt('/favorites', favoritesRoute);
-    const link = await screen.findByTestId('library-empty-add-source');
-    expect(link.getAttribute('href')).toBe('/sources');
-    expect(screen.getByText(/Add a playlist or portal first/)).toBeTruthy();
+    const add = await screen.findByTestId('library-empty-add-source');
+    expect(add.tagName).toBe('BUTTON');
+    expect(add.textContent).toBe('Add a source');
+    expect(screen.getByRole('link', { name: 'Import a backup' }).getAttribute('href')).toBe('/settings/backup');
+    expect(screen.getByText(/add to your favorites then show up here/)).toBeTruthy();
+    fireEvent.click(add);
+    expect(await screen.findByTestId('add-source-dialog')).toBeTruthy();
+  });
+
+  it('Favorites keeps the add dialog through the new source being listed mid-import, then opens the source', async () => {
+    resetProgressForTests();
+    let listed: Partial<Source>[] = [];
+    rpc.handlers['sources.list'] = () => listed;
+    rpc.handlers['favorites.list'] = () => [];
+    const created = {
+      id: 'new1',
+      kind: 'm3u',
+      name: 'Huge list',
+      position: 0,
+      autoRefresh: false,
+      channelCount: 1200,
+      movieCount: 0,
+      seriesCount: 0,
+      m3u: { origin: 'url', url: 'http://lists.example.com/huge.m3u' },
+      epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] },
+    } as unknown as Source;
+    let finish: (s: Source) => void = () => undefined;
+    rpc.handlers['sources.add'] = () => new Promise<Source>((resolve) => (finish = resolve));
+    renderAt('/favorites', [...favoritesRoute, { path: '/s/:id/live', element: <p>the new source's channels</p> }]);
+    fireEvent.click(await screen.findByTestId('library-empty-add-source'));
+    const dlg = await screen.findByTestId('add-source-dialog');
+    fireEvent.click(within(dlg).getByRole('tab', { name: 'M3U playlist' }));
+    fireEvent.change(within(dlg).getByLabelText(/^Name/, { selector: 'input' }), { target: { value: 'Huge list' } });
+    fireEvent.change(within(dlg).getByLabelText(/^Playlist URL/, { selector: 'input' }), { target: { value: 'http://lists.example.com/huge.m3u' } });
+    fireEvent.click(within(dlg).getByTestId('add-source-submit'));
+    await waitFor(() => expect(rpc.callsOf('sources.add')).toHaveLength(1));
+    act(() => handleImportEvent({ sourceId: 'new1', phase: 'parsing', done: 1200 }));
+    await within(dlg).findByTestId('import-cancel');
+
+    // The core lists the new source before its import runs, and the list refetches then. The page
+    // stays on Add a source, so the dialog keeps its run, its progress and Cancel.
+    listed = [created];
+    const listCalls = rpc.callsOf('sources.list').length;
+    await act(async () => {
+      await invalidate('sources.');
+    });
+    await waitFor(() => expect(rpc.callsOf('sources.list').length).toBeGreaterThan(listCalls));
+    expect(screen.getByTestId('add-source-dialog')).toBe(dlg);
+    expect(within(dlg).getByTestId('import-cancel')).toBeTruthy();
+    expect(within(dlg).getByTestId('import-progress').textContent).toContain('1,200');
+    expect(screen.getByTestId('library-empty-add-source')).toBeTruthy();
+    expect(screen.queryByTestId('library-empty-browse')).toBeNull();
+
+    // The import finishes: the first source opens on its channels.
+    await act(async () => finish(created));
+    expect(await screen.findByText("the new source's channels")).toBeTruthy();
+    resetProgressForTests();
+  });
+
+  it('Recently watched with no sources: its own line, not the favorites one', async () => {
+    rpc.handlers['sources.list'] = () => [];
+    rpc.handlers['recent.list'] = () => [];
+    rpc.handlers['positions.continueWatching'] = () => [];
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+    expect(await screen.findByTestId('library-empty-add-source')).toBeTruthy();
+    expect(screen.getByText(/episodes you open then show up here/)).toBeTruthy();
+    expect(screen.queryByText(/favorites/)).toBeNull();
   });
 
   it('Recent per source: browse that source', async () => {

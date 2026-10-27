@@ -1,14 +1,15 @@
 import { LayoutGrid } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation } from 'react-router';
+import { useLocation } from 'react-router';
 
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey } from '@/api/types';
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 
 import { addToWall, gateItem } from '../addChannel';
-import { buttonClass, cn, EmptyState, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
+import { cn, ensureUnlocked, ErrorState, requestPin, Skeleton, toast, useShellHeader, useShortcut } from '../deps';
 import { capacityOf, MAX_TILES, nextLayout, slotClass, WALL_BASE, WALL_CLASSES } from '../layout';
 import { reinsertTile, restoreClearedWall, snapshotWall, useMultiviewAudio, useMultiviewStore } from '../store';
 import type { MultiviewChannelInput, MultiviewLayout, MultiviewTile } from '../types';
@@ -111,6 +112,9 @@ export function MultiviewPage() {
   const chrome = useIdleChrome(fsActive);
   const { mainPlaying, stopMain } = useMainPlayerHandoff(count > 0);
   const sources = useSources();
+  // The no-source state stays while its add dialog is open: the new source is listed before its
+  // import runs, and the wall taking over then would close the dialog mid-import.
+  const adding = useNoSourcesAdding();
   const parental = useParentalState();
   const loads = useSourceLoads(tiles, sources.byId, parental.active);
   const over = useMemo(() => overLimit(loads), [loads]);
@@ -433,18 +437,9 @@ export function MultiviewPage() {
     body = <WallSkeleton layout={layout} />;
   } else if (count === 0 && sources.error) {
     body = <ErrorState error={sources.error} onRetry={sources.refetch} />;
-  } else if (count === 0 && sources.byId.size === 0) {
+  } else if (count === 0 && (sources.byId.size === 0 || adding)) {
     body = (
-      <EmptyState
-        icon={<LayoutGrid aria-hidden size={28} />}
-        title={t('noSourcesTitle')}
-        description={t('noSources')}
-        action={
-          <Link to="/sources" className={buttonClass('primary')}>
-            {t('noSourcesAction')}
-          </Link>
-        }
-      />
+      <NoSourcesState icon={<LayoutGrid />} title={t('noSourcesTitle')} description={t('noSources')} stay />
     );
   } else {
     body = (

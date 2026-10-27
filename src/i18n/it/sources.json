@@ -3,6 +3,7 @@
   "listLabel": "Le tue sorgenti",
   "add": "Aggiungi sorgente",
   "addSource": "Aggiungi una sorgente",
+  "noSourcesAdd": "Aggiungi una sorgente",
   "addSourceSubmit": "Aggiungi sorgente",
   "adding": "Aggiunta in corso…",
   "addFailed": "Impossibile aggiungere questa sorgente",

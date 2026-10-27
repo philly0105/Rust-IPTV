@@ -8,14 +8,16 @@ import { create } from 'zustand';
 import { queryClient } from '@/api/query';
 import type { PlayerSource } from '@/api/types';
 import library from '@/i18n/en/library.json';
+// The shared no-source state's actions come from the sources feature, in its namespace.
+import sources from '@/i18n/en/sources.json';
 
 export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['library'],
+  ns: ['library', 'sources'],
   defaultNS: 'library',
-  resources: { en: { library } },
+  resources: { en: { library, sources } },
   interpolation: { escapeValue: false },
   initAsync: false,
 });

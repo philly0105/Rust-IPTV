@@ -3,6 +3,7 @@
   "listLabel": "Kaynaklarınız",
   "add": "Kaynak ekle",
   "addSource": "Kaynak ekle",
+  "noSourcesAdd": "Kaynak ekle",
   "addSourceSubmit": "Kaynağı ekle",
   "adding": "Ekleniyor…",
   "addFailed": "Bu kaynak eklenemedi",

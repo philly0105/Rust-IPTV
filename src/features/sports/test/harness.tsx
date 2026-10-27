@@ -20,6 +20,8 @@ import common from '@/i18n/en/common.json';
 import live from '@/i18n/en/live.json';
 import multiview from '@/i18n/en/multiview.json';
 import sports from '@/i18n/en/sports.json';
+// The shared no-source state (sources feature) draws its actions in its own namespace.
+import sources from '@/i18n/en/sources.json';
 import { shortcutRegistry } from '@/shell/shortcuts';
 import { useShellStore } from '@/shell/store';
 import { useToastStore } from '@/ui';
@@ -32,9 +34,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['sports', 'common', 'live', 'multiview'],
+  ns: ['sports', 'common', 'live', 'multiview', 'sources'],
   defaultNS: 'sports',
-  resources: { en: { sports, common, live, multiview } },
+  resources: { en: { sports, common, live, multiview, sources } },
   interpolation: { escapeValue: false },
   initAsync: false,
 });

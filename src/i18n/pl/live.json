@@ -80,7 +80,7 @@
   "guideNoMatch": "Żaden z tych kanałów nie pasuje do wczytanego przewodnika. Dopasuj kanał do kanału przewodnika w jego menu.",
   "guideBackToNow": "Wróć do teraz",
   "guideNoSources": "Brak źródeł",
-  "guideNoSourcesHint": "Dodaj listę odtwarzania lub portal, aby zobaczyć przewodnik TV.",
+  "guideNoSourcesHint": "Dodaj źródło, aby zobaczyć przewodnik TV.",
   "previousDay": "Poprzedni dzień",
   "nextDay": "Następny dzień",
   "earlier": "3 godziny wcześniej",

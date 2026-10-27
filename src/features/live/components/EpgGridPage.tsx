@@ -91,6 +91,8 @@ import { QualityEmptyState, useLiveQuality } from './QualityFilterButton';
 import { EpgMappingDialog } from './EpgMappingDialog';
 // recording:
 import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/features/recording';
+// sources: the state every page shows until a source exists.
+import { NoSourcesState, useNoSourcesAdding } from '@/features/sources/components/NoSourcesState';
 // guide (Run 2 C5): jump to a date and time, guide search.
 import { GuideSearch } from '../guide/GuideSearchPanel';
 import { JumpToDialog } from '../guide/JumpToDialog';
@@ -455,6 +457,9 @@ export function EpgGridPage() {
   usePrefetchSchedule();
 
   const sources = useRpcQuery('sources.list', undefined);
+  // The no-source state stays while its add dialog is open: the new source is listed before its
+  // import runs, and the grid taking over then would close the dialog mid-import.
+  const adding = useNoSourcesAdding();
   // LG-11: the guide is for live channels; a source with only films and series is not offered.
   // (An older core or a test without counts keeps every source.)
   const liveSources = useMemo(() => sources.data?.filter((s) => s.channelCount !== 0), [sources.data]);
@@ -1488,20 +1493,11 @@ export function EpgGridPage() {
       </>
     );
   }
-  if (sources.data && sources.data.length === 0) {
+  if ((sources.data && sources.data.length === 0) || adding) {
     return (
       <>
       {heading}
-      <EmptyState
-        icon={<CalendarClock className="size-8" />}
-        title={t('guideNoSources')}
-        description={t('guideNoSourcesHint')}
-        action={
-          <Link to="/sources" className={buttonClass('primary', 'sm')}>
-            {t('openSources')}
-          </Link>
-        }
-      />
+      <NoSourcesState icon={<CalendarClock />} title={t('guideNoSources')} description={t('guideNoSourcesHint')} stay />
       </>
     );
   }

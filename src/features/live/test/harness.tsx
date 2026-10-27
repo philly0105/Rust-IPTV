@@ -8,6 +8,8 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import type { Channel, EpgProgram, Settings } from '@/api/types';
 import { DEFAULT_SETTINGS } from '@/api/types';
 import live from '@/i18n/en/live.json';
+// The shared no-source state (sources feature) draws its actions in its own namespace.
+import sources from '@/i18n/en/sources.json';
 
 import { resetStalkerPreviewSources } from '../lib/stalkerPreviewQueue';
 
@@ -15,9 +17,9 @@ export const i18n = i18next.createInstance();
 void i18n.use(initReactI18next).init({
   lng: 'en',
   fallbackLng: 'en',
-  ns: ['live'],
+  ns: ['live', 'sources'],
   defaultNS: 'live',
-  resources: { en: { live } },
+  resources: { en: { live, sources } },
   interpolation: { escapeValue: false },
 });
 

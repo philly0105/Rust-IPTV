@@ -11,7 +11,7 @@ import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 import { SourceMonogram as Monogram } from '@/ui/SourceMonogram';
 
-import { Badge, Button, Dialog, SectionHeader, railLinkIds } from '../deps';
+import { Badge, Button, Dialog, NoSourcesActions, SectionHeader, railLinkIds, useNoSourcesAdding } from '../deps';
 
 /**
  * Source provenance: the rail's monogram (same hue, so a source is recognised at a glance) and
@@ -140,25 +140,24 @@ export function SectionHeading({ title, count, hint, action }: { title: string; 
 /**
  * Empty-state action for Favorites and History: points at where items come
  * from. Inside a source (or when any source exists) it opens that source's
- * channels; with no sources at all it leads to adding one. Renders nothing
- * while sources are still loading so the button never flips.
+ * channels; with no sources at all it offers the shared Add a source and
+ * Import a backup, as every page without a source does, and keeps them while
+ * their add dialog is open (the new source is listed before its import runs).
+ * Renders nothing while sources are still loading so the button never flips.
  */
 export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string | undefined; sources: ReadonlyMap<string, Source>; loading?: boolean }) {
   const { t } = useTranslation('library');
+  const adding = useNoSourcesAdding();
   if (loading && !sourceId) return null;
   const target = sourceId ?? sources.keys().next().value;
-  if (target) {
+  if (target && !adding) {
     return (
       <Link to={`/s/${encodeURIComponent(target)}/live`} className={buttonClass('primary', 'md')} data-testid="library-empty-browse">
         {t('browseChannels')}
       </Link>
     );
   }
-  return (
-    <Link to="/sources" className={buttonClass('primary', 'md')} data-testid="library-empty-add-source">
-      {t('addSourceAction')}
-    </Link>
-  );
+  return <NoSourcesActions testId="library-empty-add-source" />;
 }
 
 /**
@@ -170,7 +169,10 @@ export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string
  */
 export function BrowseMoviesAction({ sources, loading }: { sources: ReadonlyMap<string, Source>; loading?: boolean }) {
   const { t } = useTranslation('library');
+  const adding = useNoSourcesAdding();
   if (loading) return null;
+  // Add a source's dialog is open: BrowseAction keeps it up until the dialog closes.
+  if (adding) return <BrowseAction sources={sources} />;
   const list = [...sources.values()];
   const movies = list.find((s) => railLinkIds(s).includes('movies'));
   if (movies) {

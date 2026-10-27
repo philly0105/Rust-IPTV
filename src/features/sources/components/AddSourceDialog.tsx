@@ -554,7 +554,9 @@ export function AddSourceDialog({
         // A click on the backdrop never throws typed details away (SS-1); Escape and Cancel ask first.
         dismissible={!dirty}
         title={t('addSource')}
-        description={t('addSourceLead')}
+        // Opened from a tile, the user just chose the kind; asking again above its tab only
+        // pushed the form down a line.
+        description={initial?.kind ? undefined : t('addSourceLead')}
         size="lg"
         // As tall as the window allows on a phone, whatever the kind: a sheet as tall as its form
         // moved the kind and origin choices under the finger at every switch.

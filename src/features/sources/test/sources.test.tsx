@@ -200,6 +200,20 @@ describe('Sources page states', () => {
     for (const id of ['onboard-m3u', 'onboard-xtream', 'onboard-stalker']) expect(screen.getByTestId(id)).toBeTruthy();
   });
 
+  it('asks for the kind only when the dialog opens without one', async () => {
+    // A tile is the choice: its dialog goes straight to the form under the tabs.
+    const tile = await openAdd();
+    expect(within(tile).getByRole('tab', { name: 'M3U playlist', selected: true })).toBeTruthy();
+    expect(within(tile).queryByText('Choose the kind of login your provider gave you.')).toBeNull();
+    expect(tile.getAttribute('aria-describedby')).toBeNull();
+    cleanup();
+
+    // A bare Add opens on Xtream and says what the tabs are for.
+    const bare = await openAdd('/sources?add=1');
+    expect(within(bare).getByRole('tab', { name: 'Xtream Codes', selected: true })).toBeTruthy();
+    expect(within(bare).getByText('Choose the kind of login your provider gave you.')).toBeTruthy();
+  });
+
   it('error offers a retry', async () => {
     let fail = true;
     rpcMock.handlers['sources.list'] = () => {

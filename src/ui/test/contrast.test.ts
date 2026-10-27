@@ -16,7 +16,7 @@ import { ACCENTS } from '@/api/types';
 import { SWITCH_TONES } from '../Field';
 import { GLASS_FOCUS } from '../focus';
 import { MENU_DANGER } from '../Menu';
-import { PROGRESS_TRACK } from '../Misc';
+import { PROGRESS_FILL, PROGRESS_TRACK } from '../Misc';
 import { SEGMENT_TONES, segmentClass } from '../Segmented';
 
 const STYLES = join(__dirname, '..', '..', 'styles');
@@ -233,6 +233,14 @@ for (const [name, c] of Object.entries(THEMES)) {
 
     it('a progress fill reaches 3:1 on the track ProgressBar draws', () => {
       expect(contrast(tok('accent-mark'), tok(restingToken(PROGRESS_TRACK.theme, 'bg'))), 'mark on progress track').toBeGreaterThanOrEqual(3);
+    });
+
+    // Round 4: a programme's progress on Home's channel cards is quiet. Neutral, but still a bar
+    // that reads against its track, not a fill that melts into it.
+    it('the quiet progress fill reaches 3:1 on the theme track, and is not the accent', () => {
+      const fill = restingToken(PROGRESS_FILL.quiet, 'bg');
+      expect(fill).not.toMatch(/accent/);
+      expect(contrast(tok(fill), tok(restingToken(PROGRESS_TRACK.theme, 'bg'))), `${fill} on progress track`).toBeGreaterThanOrEqual(3);
     });
 
     it('every text colour reaches 4.5:1 on bg and every surface', () => {
@@ -554,6 +562,24 @@ describe('glass tokens (C8)', () => {
         ] as const) {
           expect(contrast(fill, over(rgb, alpha, under)), `${accent} fill on ${name} ${track} over ${label}`).toBeGreaterThanOrEqual(3);
         }
+      }
+    }
+  });
+
+  it('a quiet glass progress fill reaches 3:1 on its track over black and over white, in every theme', () => {
+    const track = restingToken(PROGRESS_TRACK.glass, 'bg');
+    const fillToken = restingToken(PROGRESS_FILL['glass-quiet'], 'bg');
+    expect(fillToken).not.toMatch(/accent/);
+    for (const [name, body] of Object.entries(blocks)) {
+      const text = name === 'oled' ? THEMES['dark']! : THEMES[name]!;
+      const fill = text[fillToken];
+      if (!fill) throw new Error(`${name}: --color-${fillToken} missing`);
+      const { rgb, alpha } = rgbaToken(body, track);
+      for (const [under, label] of [
+        [BLACK, 'black'],
+        [WHITE, 'white'],
+      ] as const) {
+        expect(contrast(fill, over(rgb, alpha, under)), `${fillToken} on ${name} ${track} over ${label}`).toBeGreaterThanOrEqual(3);
       }
     }
   });

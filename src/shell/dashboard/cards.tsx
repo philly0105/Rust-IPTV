@@ -519,13 +519,19 @@ function LogoArt({ name, logoUrl, sourceId, isRadio }: { name: string; logoUrl?:
   );
 }
 
-/** A thin bar flush with the artwork's bottom edge: watched share, or how far the programme on air has run. */
-function EdgeProgress({ value }: { value: number }) {
+/**
+ * A thin bar flush with the artwork's bottom edge: watched share, or how far the programme on air
+ * has run. `glass` (the default) is the bright dial amber on the dark glass track, for the user's
+ * own resume progress. A programme's progress is quiet: a neutral fill, on glass over a programme
+ * picture (`glass-quiet`) and on the theme's track over a channel's logo card (`quiet`). Four or
+ * five channel rails put about twenty amber bars on one screen, which read as stripes (Live TV's
+ * list keeps them quiet for the same reason) and left amber meaning nothing in particular.
+ */
+function EdgeProgress({ value, tone = 'glass' }: { value: number; tone?: 'glass' | 'glass-quiet' | 'quiet' }) {
   return (
     // Visual only: a button's content is presentational, and an unnamed progressbar fails axe.
     <span className="absolute inset-x-0 bottom-0" aria-hidden>
-      {/* The glass tone: the bright dial amber on the dark glass track in every theme, as everything drawn on artwork. */}
-      <ProgressBar value={Math.min(1, value) * 100} size="xs" tone="glass" className="h-1 rounded-none [&>div]:rounded-none" />
+      <ProgressBar value={Math.min(1, value) * 100} size="xs" tone={tone} className="h-1 rounded-none [&>div]:rounded-none" />
     </span>
   );
 }
@@ -533,7 +539,7 @@ function EdgeProgress({ value }: { value: number }) {
 /**
  * 16:9 channel tile with the logo centered on a per-channel tint. No LIVE pill: a channel tile
  * is live by definition, and a dozen identical red pills drowned out the programme and its
- * progress bar (SH-live-pill-noise); the bar along the bottom is the live cue.
+ * progress bar (SH-live-pill-noise); the quiet bar along the bottom is the live cue.
  */
 export function ChannelCard({
   rail,
@@ -559,7 +565,7 @@ export function ChannelCard({
       <div className={cn(CARD_ART, 'aspect-video w-full')}>
         <LogoArt name={name} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
         <PlayGlyph />
-        {nowProgress !== undefined && <EdgeProgress value={nowProgress} />}
+        {nowProgress !== undefined && <EdgeProgress value={nowProgress} tone="quiet" />}
       </div>
       <span dir="auto" title={name} className={CAPTION_TITLE}>
         {name}
@@ -810,7 +816,7 @@ export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl,
           <LogoArt name={channelName} logoUrl={logoUrl} sourceId={sourceId} isRadio={isRadio} />
         )}
         <PlayGlyph />
-        {progress !== undefined && <EdgeProgress value={progress} />}
+        {progress !== undefined && <EdgeProgress value={progress} tone={programmeArt ? 'glass-quiet' : 'quiet'} />}
       </div>
       <span dir="auto" title={programme} className={CAPTION_TITLE}>
         {programme}

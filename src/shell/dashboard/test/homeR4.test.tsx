@@ -1,6 +1,7 @@
 /**
  * Round 4 of the UI refine pass on Home: channel cards without a logo show a logo-sized mark
- * instead of a full-frame colour block.
+ * instead of a full-frame colour block, and a programme's progress is quiet (amber stays on the
+ * user's own resume progress).
  */
 import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -24,7 +25,7 @@ vi.mock('@/api/events', () => ({
 }));
 
 const { queryClient } = await import('@/api/query');
-const { ChannelCard, OnNowCard } = await import('../cards');
+const { ChannelCard, ContinueCard, OnNowCard } = await import('../cards');
 
 function wrap(node: React.ReactNode) {
   queryClient.clear();
@@ -62,5 +63,37 @@ describe('a channel without a logo (round 4)', () => {
       // The channel's glow on the card's own surface shows around it.
       expect(frame).toContain('bg-transparent');
     }
+  });
+});
+
+describe('progress on Home cards (round 4)', () => {
+  const bar = (card: HTMLElement) => card.querySelector<HTMLElement>('[role="progressbar"]')!;
+  const fill = (card: HTMLElement) => bar(card).firstElementChild as HTMLElement;
+
+  it('a programme on air shows a quiet bar; resume progress keeps the amber', () => {
+    wrap(
+      <>
+        <ChannelCard rail={rail} name="Sport 1" now="Match Day" nowProgress={0.4} onPlay={vi.fn()} ariaLabel="Play Sport 1" />
+        <OnNowCard rail={rail} programme="Morning Bulletin" channelName="News 24" progress={0.3} sourceId="s1" ariaLabel="Play News 24" onPlay={vi.fn()} />
+        <OnNowCard rail={rail} programme="Forecast" programmeArt="https://img.test/forecast.jpg" channelName="Weather" progress={0.6} sourceId="s1" ariaLabel="Play Weather" onPlay={vi.fn()} />
+        <ContinueCard rail={rail} title="Harbor Lights" progress={0.5} ariaLabel="Resume Harbor Lights" onPlay={vi.fn()} menu={[]} />
+      </>,
+    );
+    // Over a channel's logo card: the neutral fill on the theme's track (a dark glass track drew a
+    // black line under a pale card in the light theme).
+    for (const name of ['Play Sport 1', 'Play News 24']) {
+      const card = screen.getByRole('button', { name });
+      expect(fill(card).className, name).toContain('bg-fg-subtle');
+      expect(bar(card).className, name).toContain('bg-surface-3');
+      expect(fill(card).className, name).not.toMatch(/accent/);
+    }
+    // Over a programme's picture: neutral glass.
+    const art = screen.getByRole('button', { name: 'Play Weather' });
+    expect(fill(art).className).toContain('bg-on-glass-muted');
+    expect(bar(art).className).toContain('bg-glass-strong');
+    // The user's own progress stays amber.
+    const resume = screen.getByRole('button', { name: 'Resume Harbor Lights' });
+    expect(fill(resume).className).toContain('bg-glass-accent');
+    for (const card of [screen.getByRole('button', { name: 'Play Sport 1' }), art, resume]) expect(bar(card).closest('[aria-hidden]')).not.toBeNull();
   });
 });

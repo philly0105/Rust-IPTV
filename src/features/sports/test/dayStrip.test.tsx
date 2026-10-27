@@ -1,4 +1,4 @@
-/** The day strip opens with the picked day in its middle, and glides to each day picked after. */
+/** The day strip opens with the picked day in its middle, on a whole day at its start, and glides to each day picked after. */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
@@ -43,7 +43,7 @@ function Strip() {
 afterEach(cleanup);
 
 describe('day strip', () => {
-  it('opens with today in the middle, so Yesterday and Tomorrow show beside it', () => {
+  it('opens with today in the middle, so Yesterday and Tomorrow show beside it, and no label cut at the start', () => {
     layOut();
     render(
       <I18nextProvider i18n={i18n}>
@@ -51,13 +51,28 @@ describe('day strip', () => {
       </I18nextProvider>,
     );
     const list = screen.getByRole('tablist');
-    // Today is the eighth of fifteen tabs: its middle (7 * 60 + 30) on the box's (120).
-    expect(list.scrollLeft).toBe(7 * TAB + TAB / 2 - BOX / 2);
+    // Today is the eighth of fifteen tabs: its middle (7 * 60 + 30) on the box's (120) would be a
+    // scroll of 330, which cut a tab in half at the start. Rounded to a tab's edge, the strip starts
+    // on a whole day, with Today half a tab off the middle at most.
+    expect(list.scrollLeft % TAB).toBe(0);
+    expect(Math.abs(list.scrollLeft - (7 * TAB + TAB / 2 - BOX / 2))).toBeLessThanOrEqual(TAB / 2);
+    const shown = (name: RegExp) => {
+      const r = screen.getByRole('tab', { name }).getBoundingClientRect();
+      return r.left >= 0 && r.right <= BOX;
+    };
+    expect(shown(/^Yesterday /)).toBe(true);
+    expect(shown(/^Today /)).toBe(true);
+    expect(shown(/^Tomorrow /)).toBe(true);
   });
 
   it('glides a picked day to the middle, unless motion is turned down', () => {
     layOut();
-    const scrollBy = vi.fn();
+    // Where each glide would land: the kit may already have nudged the strip (a picked tab is kept
+    // clear of the faded edge) before the strip centres it.
+    const landed: number[] = [];
+    const scrollBy = vi.fn(function (this: HTMLElement, o: ScrollToOptions) {
+      landed.push(this.scrollLeft + (o.left ?? 0));
+    });
     Object.defineProperty(HTMLElement.prototype, 'scrollBy', { value: scrollBy, configurable: true });
     try {
       render(
@@ -68,9 +83,9 @@ describe('day strip', () => {
       const list = screen.getByRole('tablist');
       const start = list.scrollLeft;
       fireEvent.click(screen.getByRole('tab', { name: /^Tomorrow / }));
-      // One tab further on: its middle is a tab's width right of the box's.
-      expect(scrollBy).toHaveBeenLastCalledWith({ left: TAB, behavior: 'smooth' });
-      expect(list.scrollLeft).toBe(start);
+      // One tab further on, smoothly: the strip glides a tab's width, still starting on a whole day.
+      expect(scrollBy).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: 'smooth' }));
+      expect(landed.at(-1)).toBe(start + TAB);
 
       // jsdom has no matchMedia: this one says the user turned motion down.
       Object.defineProperty(window, 'matchMedia', { value: () => ({ matches: true }), configurable: true });

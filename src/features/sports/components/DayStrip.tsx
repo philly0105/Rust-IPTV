@@ -3,7 +3,8 @@
  * week ahead. Each tab is two short lines, so the whole fortnight fits a laptop window: Yesterday,
  * Today and Tomorrow by name or the weekday, over the date, in the UI language. The kit's tabs
  * scroll sideways with faded edges where the window is narrower, and take arrows, Home and End;
- * there the picked day sits in the middle, with the days either side of it in view.
+ * there the picked day sits in the middle, with the days either side of it in view, and the strip
+ * starts on a whole day rather than half a label.
  */
 
 import { useLayoutEffect, useMemo, useRef } from 'react';
@@ -28,6 +29,11 @@ function localNoon(day: string): number {
  * Scrolls a strip that is wider than its box so the picked tab sits in the middle. The kit only
  * keeps a picked tab clear of the faded edge, which on a phone opened the strip with Today at its
  * end and Tomorrow, the likeliest next pick, cut off. Physical coordinates, so RTL works as is.
+ *
+ * The middle is then rounded to the nearest tab's edge at the box's left, so the strip starts on a
+ * whole day: centred exactly, it cut the first and last labels mid-word at 1024 and 1280 px
+ * ("ct 22"), which read as a layout fault even under the fade. The picked tab moves at most half
+ * a tab off the middle; the far edge keeps the kit's fade to show the strip goes on.
  */
 function centreTab(list: HTMLElement, smooth: boolean) {
   const tab = list.querySelector<HTMLElement>('[role=tab][aria-selected=true]');
@@ -35,7 +41,17 @@ function centreTab(list: HTMLElement, smooth: boolean) {
   const box = list.getBoundingClientRect();
   const r = tab.getBoundingClientRect();
   if (box.width <= 0) return;
-  const by = r.left + r.width / 2 - (box.left + box.width / 2);
+  const want = r.left + r.width / 2 - box.width / 2;
+  let edge = want;
+  let best = Infinity;
+  for (const t of list.querySelectorAll<HTMLElement>('[role=tab]')) {
+    const left = t.getBoundingClientRect().left;
+    if (Math.abs(left - want) < best) {
+      best = Math.abs(left - want);
+      edge = left;
+    }
+  }
+  const by = edge - box.left;
   if (Math.abs(by) < 1) return;
   if (smooth && typeof list.scrollBy === 'function') list.scrollBy({ left: by, behavior: 'smooth' });
   else list.scrollLeft += by;
@@ -120,8 +136,9 @@ export function DayStrip({
         onChange={onChange}
         label={t('days')}
         panelIdPrefix={panelIdPrefix}
-        // Two lines a tab: taller and narrower than the kit's one-line tabs.
-        className="[&>button]:h-12 [&>button]:min-w-16 [&>button]:justify-center [&>button]:px-2"
+        // Two lines a tab: taller and narrower than the kit's one-line tabs. No wider than a date
+        // needs, so the whole fortnight fits from a 1280 px window (at 4rem a tab it scrolled there).
+        className="[&>button]:h-12 [&>button]:min-w-14 [&>button]:justify-center [&>button]:px-2"
       />
     </div>
   );

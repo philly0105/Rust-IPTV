@@ -9,7 +9,7 @@ import { FavoritesPage } from '../pages/FavoritesPage';
 import { MyVideosPage } from '../pages/MyVideosPage';
 import { RecentPage } from '../pages/RecentPage';
 import { makeFavorite, makePosition, makeRecent } from './fixtures';
-import { installDomStubs, renderAt } from './harness';
+import { fakePlayer, installDomStubs, renderAt } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
 
@@ -252,14 +252,15 @@ describe('library removals can be undone', () => {
 
   it('removing a continue-watching item offers Undo that restores the position', async () => {
     const pos = makePosition('p1', 600, 2400);
-    rpc.handlers['recent.list'] = () => [makeRecent('a', new Date().toISOString())];
+    rpc.handlers['recent.list'] = () => [makeRecent('a', new Date().toISOString()), { ref: pos.ref, viewedAt: new Date().toISOString(), snapshot: pos.snapshot! }];
     rpc.handlers['positions.continueWatching'] = () => [pos];
     rpc.handlers['positions.remove'] = () => undefined;
     rpc.handlers['positions.set'] = () => undefined;
     renderAt('/recent', recentRoute);
 
-    await screen.findByTestId('continue-rail');
-    fireEvent.click(screen.getByRole('button', { name: /from continue watching/ }));
+    await screen.findByTestId('entry-resume');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Actions for Continue p1' })[0]!);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
     await waitFor(() => expect(lastToast()?.title).toMatch(/^Removed .* from continue watching$/));
     lastToast()!.action!.onClick();
     await waitFor(() =>
@@ -267,20 +268,38 @@ describe('library removals can be undone', () => {
     );
   });
 
-  it('Delete on a continue-watching card removes it and keeps focus in the rail', async () => {
-    rpc.handlers['recent.list'] = () => [makeRecent('a', new Date().toISOString())];
-    rpc.handlers['positions.continueWatching'] = () => [makePosition('p1', 600, 2400), makePosition('p2', 300, 2400)];
-    rpc.handlers['positions.remove'] = () => undefined;
+  it('a keyboard user resumes with Enter and reaches Remove from continue watching through the row menu', async () => {
+    const [p1, p2] = [makePosition('p1', 600, 2400), makePosition('p2', 300, 2400)];
+    rpc.handlers['recent.list'] = () => [p1, p2].map((p) => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! }));
+    // The saved spots as the core keeps them, so the removed one is gone from the refetch.
+    let spots = [p1, p2];
+    rpc.handlers['positions.continueWatching'] = () => spots;
+    rpc.handlers['positions.remove'] = (a) => {
+      spots = spots.filter((p) => p.ref.itemId !== (a as { ref: { itemId: string } }).ref.itemId);
+    };
+    fakePlayer.items.length = 0;
     renderAt('/recent', recentRoute);
 
-    const rail = await screen.findByTestId('continue-rail');
-    const cards = rail.querySelectorAll<HTMLElement>('[data-continue-open]');
-    expect(cards).toHaveLength(2);
-    cards[0]!.focus();
-    fireEvent.keyDown(cards[0]!, { key: 'Delete' });
+    expect(await screen.findAllByTestId('entry-resume')).toHaveLength(2);
+    // The row is the keyboard stop and Enter resumes it, as the Continue watching card did.
+    const row = screen.getAllByTestId('entry-row')[0]!.closest<HTMLElement>('[tabindex]')!;
+    row.focus();
+    fireEvent.keyDown(row, { key: 'Enter' });
+    await waitFor(() => expect(fakePlayer.items).toHaveLength(1));
+    expect(fakePlayer.items[0]).toMatchObject({ ref: p1.ref, isLive: false });
+    // The strip's menu is a Tab stop inside the row (its buttons are not), so the keyboard gets to it.
+    const trigger = within(screen.getAllByTestId('entry-actions')[0]!).getByRole('button', { name: 'Actions for Continue p1' });
+    expect(trigger.tabIndex).toBe(0);
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
     await waitFor(() => expect(rpc.callsOf('positions.remove')).toHaveLength(1));
     expect((rpc.callsOf('positions.remove')[0] as { ref: { itemId: string } }).ref.itemId).toBe('p1');
-    expect(document.activeElement).toBe(cards[1]);
+    // The history entry stays; only its saved spot went, and the strip's menu with it.
+    await waitFor(() => expect(within(screen.getAllByTestId('entry-row')[0]!).queryByTestId('entry-resume')).toBeNull());
+    expect(screen.getAllByTestId('entry-row')).toHaveLength(2);
+    expect(within(screen.getAllByTestId('entry-actions')[0]!).queryByRole('button', { name: 'Actions for Continue p1' })).toBeNull();
+    // Focus stays on the row rather than dropping to the page with the menu's trigger.
+    expect(document.activeElement).toBe(row);
   });
 
   it('a failed undo says so instead of failing silently', async () => {

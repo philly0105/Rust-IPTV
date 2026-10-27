@@ -224,9 +224,7 @@
   "historyRestored": "Historia przywrócona",
   "historyRestorePartial": "Przywrócono {{restored}} z {{total}} wpisów.",
   "clearFailed": "Nie udało się wyczyścić historii",
-  "continueWatching": "Kontynuuj oglądanie",
   "continueTitle": "Kontynuuj {{title}} od {{time}}",
-  "removeContinue": "Usuń {{title}} z sekcji Kontynuuj oglądanie",
   "watchedPercent": "Obejrzano {{percent}}%",
   "typeLive": "Kanał na żywo",
   "typeMovie": "Film",
@@ -343,6 +341,9 @@
   "browseMovies": "Przeglądaj filmy",
   "removeFromFavorites": "Usuń z ulubionych",
   "removeFromHistory": "Usuń z historii",
+  "removeFromContinue": "Usuń z sekcji Kontynuuj oglądanie",
+  "rowResume": "Wznów",
+  "rowDetails": "Otwórz szczegóły",
   "minutesLeftShort": "{{count}} min",
   "browseSeries": "Przeglądaj seriale"
 }

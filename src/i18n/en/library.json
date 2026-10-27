@@ -192,9 +192,7 @@
   "historyRestored": "History restored",
   "historyRestorePartial": "{{restored}} of {{total}} entries came back.",
   "clearFailed": "Could not clear the history",
-  "continueWatching": "Continue watching",
   "continueTitle": "Continue {{title}} at {{time}}",
-  "removeContinue": "Remove {{title}} from continue watching",
   "watchedPercent": "{{percent}}% watched",
   "typeLive": "Live channel",
   "typeMovie": "Movie",
@@ -307,6 +305,9 @@
   "browseMovies": "Browse movies",
   "removeFromFavorites": "Remove from favorites",
   "removeFromHistory": "Remove from history",
+  "removeFromContinue": "Remove from continue watching",
+  "rowResume": "Resume",
+  "rowDetails": "Open details",
   "minutesLeftShort": "{{count}}m",
   "browseSeries": "Browse series"
 }

@@ -141,15 +141,19 @@ export function VirtualCardGrid<T>({
     return () => ro.disconnect();
   }, []);
 
-  const columns = Math.max(1, Math.floor((width + gap) / (minColumnWidth + gap)));
-  const cardWidth = (width - gap * (columns - 1)) / columns;
+  // Columns are fitted to the list's own width, inside the scroller's side padding: counting the
+  // padding as room fitted a fourth 80 px poster on a 390 px phone (My List's px-2), where a
+  // category grid shows three, and two-word titles wrapped under posters too narrow for them.
+  const listWidth = width - inset;
+  const columns = Math.max(1, Math.floor((listWidth + gap) / (minColumnWidth + gap)));
+  const cardWidth = (listWidth - gap * (columns - 1)) / columns;
   const rowHeight = Math.round(cardWidth / aspect + captionHeight + gap);
   const rowCount = Math.ceil(items.length / columns);
   // The list's column width, rounded as the frame's clientWidth is, in a box with one identity:
   // posters read it as their pictures mount, so a new width re-renders none of them (P2-POSTERS-3,
   // as P2-GRID-1).
   const posterWidth = useRef(0);
-  posterWidth.current = Math.round((width - inset - gap * (columns - 1)) / columns);
+  posterWidth.current = Math.round(cardWidth);
 
   const virtualizer = useListVirtualizer({
     count: rowCount,

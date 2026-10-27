@@ -256,9 +256,7 @@
   "historyRestored": "تمت استعادة السجل",
   "historyRestorePartial": "عاد {{restored}} من أصل {{total}} إدخال.",
   "clearFailed": "تعذّر مسح السجل",
-  "continueWatching": "متابعة المشاهدة",
   "continueTitle": "متابعة {{title}} عند {{time}}",
-  "removeContinue": "إزالة {{title}} من متابعة المشاهدة",
   "watchedPercent": "تمت مشاهدة {{percent}}%",
   "typeLive": "قناة مباشرة",
   "typeMovie": "فيلم",
@@ -379,6 +377,9 @@
   "browseMovies": "تصفح الأفلام",
   "removeFromFavorites": "إزالة من المفضلة",
   "removeFromHistory": "إزالة من السجل",
+  "removeFromContinue": "إزالة من متابعة المشاهدة",
+  "rowResume": "استئناف",
+  "rowDetails": "فتح التفاصيل",
   "minutesLeftShort": "{{count}} د",
   "browseSeries": "تصفح المسلسلات"
 }

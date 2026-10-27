@@ -208,9 +208,7 @@
   "historyRestored": "Cronologia ripristinata",
   "historyRestorePartial": "Sono tornate {{restored}} voci su {{total}}.",
   "clearFailed": "Impossibile cancellare la cronologia",
-  "continueWatching": "Continua a guardare",
   "continueTitle": "Continua {{title}} da {{time}}",
-  "removeContinue": "Rimuovi {{title}} da Continua a guardare",
   "watchedPercent": "{{percent}}% visto",
   "typeLive": "Canale in diretta",
   "typeMovie": "Film",
@@ -325,6 +323,9 @@
   "browseMovies": "Sfoglia i film",
   "removeFromFavorites": "Rimuovi dai preferiti",
   "removeFromHistory": "Rimuovi dalla cronologia",
+  "removeFromContinue": "Rimuovi da Continua a guardare",
+  "rowResume": "Riprendi",
+  "rowDetails": "Apri dettagli",
   "minutesLeftShort": "{{count}} min",
   "browseSeries": "Sfoglia le serie"
 }

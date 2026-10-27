@@ -192,9 +192,7 @@
   "historyRestored": "Verlauf wiederhergestellt",
   "historyRestorePartial": "{{restored}} von {{total}} Einträgen sind zurück.",
   "clearFailed": "Der Verlauf konnte nicht gelöscht werden",
-  "continueWatching": "Weiterschauen",
   "continueTitle": "{{title}} bei {{time}} fortsetzen",
-  "removeContinue": "{{title}} aus „Weiterschauen“ entfernen",
   "watchedPercent": "{{percent}}% angesehen",
   "typeLive": "Live-Sender",
   "typeMovie": "Film",
@@ -307,6 +305,9 @@
   "browseMovies": "Filme durchsuchen",
   "removeFromFavorites": "Aus Favoriten entfernen",
   "removeFromHistory": "Aus dem Verlauf entfernen",
+  "removeFromContinue": "Aus „Weiterschauen“ entfernen",
+  "rowResume": "Fortsetzen",
+  "rowDetails": "Details öffnen",
   "minutesLeftShort": "{{count}} min",
   "browseSeries": "Serien durchsuchen"
 }

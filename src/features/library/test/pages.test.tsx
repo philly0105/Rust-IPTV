@@ -414,14 +414,26 @@ describe('FavoritesPage', () => {
 });
 
 describe('RecentPage', () => {
-  it('renders history with continue watching and clears it', async () => {
-    rpc.handlers['recent.list'] = () => [makeRecent('a', new Date().toISOString()), makeRecent('b', '2025-01-01T00:00:00Z')];
-    rpc.handlers['positions.continueWatching'] = () => [makePosition('p1', 600, 2400)];
+  it('renders history, a title stopped part way once with its progress, and clears it', async () => {
+    const p1 = makePosition('p1', 600, 2400);
+    rpc.handlers['recent.list'] = () => [
+      makeRecent('a', new Date().toISOString()),
+      { ref: p1.ref, viewedAt: new Date().toISOString(), snapshot: p1.snapshot! },
+      makeRecent('b', '2025-01-01T00:00:00Z'),
+    ];
+    rpc.handlers['positions.continueWatching'] = () => [p1];
     rpc.handlers['recent.clear'] = () => undefined;
     renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
 
-    expect(await screen.findByTestId('continue-rail')).toBeTruthy();
-    expect(screen.getAllByTestId('entry-row')).toHaveLength(2);
+    // No Continue watching cards above the days: the title's own row carries its saved spot.
+    const resume = await screen.findByTestId('entry-resume');
+    expect(screen.queryByTestId('continue-rail')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Continue watching' })).toBeNull();
+    expect(screen.getAllByTestId('entry-row')).toHaveLength(3);
+    expect(screen.getAllByText('Continue p1')).toHaveLength(1);
+    expect(within(resume).getByRole('progressbar', { name: '25% watched' })).toBeTruthy();
+    expect(within(resume).getByText('30 minutes left')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Continue Continue p1 at 10:00' })).toBeTruthy();
     expect(screen.getByText('Today')).toBeTruthy();
     expect(screen.getByText('Older')).toBeTruthy();
     expect(rpc.callsOf('recent.list')[0]).toEqual({ limit: 500 });
@@ -430,6 +442,43 @@ describe('RecentPage', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Clear history' }));
     await waitFor(() => expect(rpc.callsOf('recent.clear')).toEqual([{}]));
+  });
+
+  it('every title stopped part way in the history shows its progress and resumes, past the 20 newest saved spots', async () => {
+    // 25 saved spots, newest first as the core answers them; the history lists them the other way
+    // round, so its first row holds the oldest spot.
+    const spots = Array.from({ length: 25 }, (_, i) => ({ ...makePosition(`p${i}`, 600, 2400), updatedAt: new Date(Date.UTC(2026, 9, 10, 20, 30 - i)).toISOString() }));
+    rpc.handlers['recent.list'] = () => [...spots].reverse().map((p) => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! }));
+    rpc.handlers['positions.continueWatching'] = (a) => spots.slice(0, (a as { limit: number }).limit);
+    fakePlayer.items.length = 0;
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+
+    const first = await screen.findByText('Continue p24');
+    const row = first.closest<HTMLElement>('[data-testid="entry-row"]')!;
+    await waitFor(() => expect(within(row).getByTestId('entry-resume')).toBeTruthy());
+    expect(within(row).getByRole('progressbar', { name: '25% watched' })).toBeTruthy();
+    expect(rpc.callsOf('positions.continueWatching')[0]).toEqual({ limit: 500 });
+    // A click resumes it, as on the newer rows, rather than opening its page.
+    fireEvent.click(first);
+    await waitFor(() => expect(fakePlayer.items).toHaveLength(1));
+    expect(fakePlayer.items[0]).toMatchObject({ ref: spots[24]!.ref, isLive: false });
+  });
+
+  it('a saved spot without a duration says where it resumes', async () => {
+    const p1 = makePosition('p1', 1800);
+    rpc.handlers['recent.list'] = () => [makeRecent('a', new Date().toISOString()), { ref: p1.ref, viewedAt: new Date().toISOString(), snapshot: p1.snapshot! }];
+    rpc.handlers['positions.continueWatching'] = () => [p1];
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+
+    // No bar and no time left to show, so the row's end gives the clock the card gave.
+    const resume = await screen.findByTestId('entry-resume');
+    expect(within(resume).queryByRole('progressbar')).toBeNull();
+    const left = within(resume).getByTestId('entry-left');
+    expect(left.getAttribute('title')).toBe('Resume at 30:00');
+    expect(within(left).getByText('Resume at 30:00')).toBeTruthy();
+    expect(within(left).getByText('30:00')).toBeTruthy();
+    // The other row is plain history: no clock.
+    expect(screen.getAllByTestId('entry-left')).toHaveLength(1);
   });
 
   it('empty while the quality filter is on, says it may be hiding channels', async () => {
@@ -453,6 +502,7 @@ describe('RecentPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Watched a from history' }));
     await waitFor(() => expect(rpc.callsOf('recent.remove')).toHaveLength(1));
     expect(rpc.callsOf('recent.list')[0]).toEqual({ sourceId: 'src1', limit: 500 });
-    expect(screen.queryByTestId('continue-rail')).toBeNull();
+    // Another source's saved spot is not this page's.
+    expect(screen.queryByTestId('entry-resume')).toBeNull();
   });
 });

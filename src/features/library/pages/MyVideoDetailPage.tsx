@@ -314,12 +314,12 @@ export function MyVideoDetailPage() {
       )}
     </HeroActionGroup>
   );
-  // The file's round icon buttons, each with its phone caption (DetailHero `icons`).
+  // The file's icon buttons, in the rounded square every detail hero uses, each with its phone caption (DetailHero `icons`).
   const heroIcons = (
     <>
       {primary && resume > 0 && !movieMissing && (
         <HeroIcon caption={t('startOver')}>
-          <IconButton size="lg" variant="secondary" className="rounded-full" label={t('startOver')} icon={<RotateCcw size={18} aria-hidden />} onClick={() => void play(primary, true)} />
+          <IconButton size="lg" variant="secondary" label={t('startOver')} icon={<RotateCcw size={18} aria-hidden />} onClick={() => void play(primary, true)} />
         </HeroIcon>
       )}
       {entry.kind === 'movie' && isDesktop && !movieMissing && (
@@ -327,7 +327,6 @@ export function MyVideoDetailPage() {
           <IconButton
             size="lg"
             variant="secondary"
-            className="rounded-full"
             label={t('actionReveal')}
             icon={<FolderOpen size={18} aria-hidden />}
             onClick={() => void perform('reveal', entry.download)}
@@ -339,7 +338,7 @@ export function MyVideoDetailPage() {
           <IconButton
             size="lg"
             variant="secondary"
-            className="rounded-full hover:text-danger"
+            className="hover:text-danger"
             label={t('removeFromLibrary')}
             icon={<Trash2 size={18} aria-hidden />}
             onClick={() => {

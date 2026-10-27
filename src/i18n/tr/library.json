@@ -192,9 +192,7 @@
   "historyRestored": "Geçmiş geri yüklendi",
   "historyRestorePartial": "{{total}} kaydın {{restored}} tanesi geri geldi.",
   "clearFailed": "Geçmiş temizlenemedi",
-  "continueWatching": "İzlemeye devam et",
   "continueTitle": "Devam et: {{title}}, {{time}}",
-  "removeContinue": "İzlemeye devam et listesinden kaldır: {{title}}",
   "watchedPercent": "%{{percent}} izlendi",
   "typeLive": "Canlı kanal",
   "typeMovie": "Film",
@@ -307,6 +305,9 @@
   "browseMovies": "Filmlere göz at",
   "removeFromFavorites": "Favorilerden kaldır",
   "removeFromHistory": "Geçmişten kaldır",
+  "removeFromContinue": "İzlemeye devam et listesinden kaldır",
+  "rowResume": "Devam et",
+  "rowDetails": "Ayrıntıları aç",
   "minutesLeftShort": "{{count}} dk",
   "browseSeries": "Dizilere göz at"
 }

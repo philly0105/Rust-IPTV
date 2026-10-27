@@ -208,9 +208,7 @@
   "historyRestored": "Historique restauré",
   "historyRestorePartial": "{{restored}} entrées sur {{total}} sont revenues.",
   "clearFailed": "Impossible d'effacer l'historique",
-  "continueWatching": "Reprendre la lecture",
   "continueTitle": "Reprendre {{title}} à {{time}}",
-  "removeContinue": "Retirer {{title}} de Reprendre la lecture",
   "watchedPercent": "{{percent}}% regardé",
   "typeLive": "Chaîne en direct",
   "typeMovie": "Film",
@@ -325,6 +323,9 @@
   "browseMovies": "Parcourir les films",
   "removeFromFavorites": "Retirer des favoris",
   "removeFromHistory": "Retirer de l'historique",
+  "removeFromContinue": "Retirer de Reprendre la lecture",
+  "rowResume": "Reprendre",
+  "rowDetails": "Ouvrir les détails",
   "minutesLeftShort": "{{count}} min",
   "browseSeries": "Parcourir les séries"
 }

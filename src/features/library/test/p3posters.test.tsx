@@ -2,7 +2,8 @@
  * P2-POSTERS-2: download and favorites/recent rows load their artwork at the width their boxes
  * are given, instead of each picture reading its frame as it mounts (a forced layout per row).
  * P2-POSTERS-3: the card grid (My videos, My List) mounts its cards at the width it read before
- * having any, and hands their posters the column width. P2-POSTERS-4: so does the continue rail.
+ * having any, and hands their posters the column width. P2-POSTERS-4: so does a history row
+ * with a saved spot (it was the continue rail).
  */
 
 import { cleanup, render, screen } from '@testing-library/react';
@@ -12,7 +13,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { ItemRef } from '@/api/types';
 import { Poster } from '@/ui/Poster';
 
-import { ContinueRail } from '../components/ContinueRail';
 import { DownloadRow } from '../components/DownloadRow';
 import { EntryRow } from '../components/EntryRow';
 import { VirtualCardGrid } from '../components/VirtualCardGrid';
@@ -141,30 +141,50 @@ describe('P2-POSTERS-3: the card grid', () => {
     expect(widths).toEqual(widths.map(() => '192'));
     expect(pictureReads).toEqual([]);
   });
+
+  it('fits its columns inside that padding, so a phone gets the three posters a category grid has', () => {
+    // A 390 px phone: the scroller is 374 px, the list inside My List's px-2 359 px. With the phone's
+    // 80 px column and the 16 px gap, the scroller's width fitted four 79 px posters a row.
+    laidOut = (el) => (el.getAttribute('data-testid') === 'cards' ? 374 : el.getAttribute('role') === 'list' ? 359 : undefined);
+    render(
+      <VirtualCardGrid<Film>
+        items={films}
+        itemKey={(f) => f.id}
+        label="Films"
+        cardLabel={(f) => f.id}
+        onActivate={() => undefined}
+        render={(f) => <Poster src={f.src} alt="" label={f.id} aspect="poster" />}
+        postersFillCells
+        minColumnWidth={80}
+        gap={16}
+        testId="cards"
+      />,
+    );
+    const row = screen.getByRole('list').querySelector<HTMLElement>('[role="listitem"]')!.parentElement!;
+    expect(row.style.gridTemplateColumns).toBe('repeat(3, minmax(0, 1fr))');
+  });
 });
 
-describe('P2-POSTERS-4: the continue rail', () => {
-  it("loads its posters at the cards' 10rem width without reading them", () => {
+describe('P2-POSTERS-4: a title stopped part way', () => {
+  it("loads its artwork at the row's art width without reading it, as the other history rows do", () => {
+    // Recently watched had Continue watching cards with 150 px posters; the title is now one row.
     const { container } = render(
       <I18nextProvider i18n={i18n}>
-        <ContinueRail
-          positions={[
-            {
-              ref: { sourceId: 's1', contentType: 'movie', itemId: 'm1' },
-              positionSeconds: 600,
-              durationSeconds: 6000,
-              updatedAt: '2026-10-01T00:00:00Z',
-              watched: false,
-              snapshot: { title: 'Heat', contentType: 'movie', posterUrl: POSTER },
-            },
-          ]}
+        <EntryRow
+          entryRef={{ sourceId: 's1', contentType: 'movie', itemId: 'm1' }}
+          snapshot={{ title: 'Heat', contentType: 'movie', posterUrl: POSTER }}
+          showSource={false}
+          time="Today"
+          removeLabel="Remove Heat from history"
+          menuRemoveLabel="Remove from history"
+          resume={{ fraction: 0.1, minutesLeft: 90, label: 'Continue Heat at 10:00', onDetails: () => undefined, onForget: () => undefined }}
           onOpen={() => undefined}
           onRemove={() => undefined}
         />
       </I18nextProvider>,
     );
-    // 150 px at 100 % (no matchMedia here, so the wide layout): the 192 px copy.
-    expect(widthOf(container)).toBe('192');
+    // A w-8 poster (30 px at 100 %): the 64 px copy.
+    expect(widthOf(container)).toBe('64');
     expect(pictureReads).toEqual([]);
   });
 });

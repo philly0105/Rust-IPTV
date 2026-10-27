@@ -192,9 +192,7 @@
   "historyRestored": "Το ιστορικό επαναφέρθηκε",
   "historyRestorePartial": "Επέστρεψαν {{restored}} από {{total}} καταχωρίσεις.",
   "clearFailed": "Δεν ήταν δυνατή η εκκαθάριση του ιστορικού",
-  "continueWatching": "Συνέχιση παρακολούθησης",
   "continueTitle": "Συνέχιση του {{title}} στο {{time}}",
-  "removeContinue": "Αφαίρεση του {{title}} από τη συνέχιση παρακολούθησης",
   "watchedPercent": "Προβλήθηκε {{percent}}%",
   "typeLive": "Ζωντανό κανάλι",
   "typeMovie": "Ταινία",
@@ -307,6 +305,9 @@
   "browseMovies": "Περιήγηση ταινιών",
   "removeFromFavorites": "Αφαίρεση από τα αγαπημένα",
   "removeFromHistory": "Αφαίρεση από το ιστορικό",
+  "removeFromContinue": "Αφαίρεση από τη συνέχιση παρακολούθησης",
+  "rowResume": "Συνέχιση",
+  "rowDetails": "Άνοιγμα λεπτομερειών",
   "minutesLeftShort": "{{count}} λεπ.",
   "browseSeries": "Περιήγηση σειρών"
 }

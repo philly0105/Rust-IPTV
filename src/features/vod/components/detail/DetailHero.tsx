@@ -217,9 +217,9 @@ export function HeroIcon({ caption, children }: { caption: string; children: Rea
   );
 }
 
-/** The hero's More menu trigger: the Menu's own icon button, drawn as the other round secondaries. */
+/** The hero's More menu trigger: the Menu's own icon button, drawn as the other icon secondaries. */
 export const HERO_MENU_TRIGGER =
-  'h-12 w-12 rounded-full border border-edge bg-surface-2 text-fg hover:bg-surface-3 hover:text-fg active:bg-pressed active:text-fg';
+  'h-12 w-12 rounded-md border border-edge bg-surface-2 text-fg hover:bg-surface-3 hover:text-fg active:bg-pressed active:text-fg';
 
 /**
  * The hero's Back pill, for a page that passes its own `back`: the kit back button on a frosted
@@ -298,9 +298,9 @@ export function DetailHeroSkeleton() {
       <div className="col-span-2 flex min-w-0 flex-col gap-4 sm:col-span-1 sm:col-start-2">
         <div className="flex gap-2">
           <Skeleton className="h-12 w-36 rounded-md" />
-          <Skeleton className="h-12 w-12 rounded-full" />
-          <Skeleton className="h-12 w-12 rounded-full" />
-          <Skeleton className="h-12 w-12 rounded-full" />
+          <Skeleton className="h-12 w-12 rounded-md" />
+          <Skeleton className="h-12 w-12 rounded-md" />
+          <Skeleton className="h-12 w-12 rounded-md" />
         </div>
         <Skeleton className="h-4 w-full max-w-[72ch]" />
         <Skeleton className="h-4 w-5/6 max-w-[72ch]" />

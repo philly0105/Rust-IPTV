@@ -224,9 +224,7 @@
   "historyRestored": "История восстановлена",
   "historyRestorePartial": "Восстановлено {{restored}} из {{total}} записей.",
   "clearFailed": "Не удалось очистить историю",
-  "continueWatching": "Продолжить просмотр",
   "continueTitle": "Продолжить «{{title}}» с {{time}}",
-  "removeContinue": "Убрать «{{title}}» из списка «Продолжить просмотр»",
   "watchedPercent": "Просмотрено {{percent}}%",
   "typeLive": "ТВ-канал",
   "typeMovie": "Фильм",
@@ -343,6 +341,9 @@
   "browseMovies": "Смотреть фильмы",
   "removeFromFavorites": "Удалить из избранного",
   "removeFromHistory": "Удалить из истории",
+  "removeFromContinue": "Убрать из списка «Продолжить просмотр»",
+  "rowResume": "Продолжить",
+  "rowDetails": "Открыть подробности",
   "minutesLeftShort": "{{count}} мин",
   "browseSeries": "Смотреть сериалы"
 }

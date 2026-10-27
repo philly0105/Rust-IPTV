@@ -208,9 +208,7 @@
   "historyRestored": "Histórico restaurado",
   "historyRestorePartial": "{{restored}} de {{total}} entradas voltaram.",
   "clearFailed": "Não foi possível limpar o histórico",
-  "continueWatching": "Continuar assistindo",
   "continueTitle": "Continuar {{title}} em {{time}}",
-  "removeContinue": "Remover {{title}} de Continuar assistindo",
   "watchedPercent": "{{percent}}% assistido",
   "typeLive": "Canal ao vivo",
   "typeMovie": "Filme",
@@ -325,6 +323,9 @@
   "browseMovies": "Explorar filmes",
   "removeFromFavorites": "Remover dos favoritos",
   "removeFromHistory": "Remover do histórico",
+  "removeFromContinue": "Remover de Continuar assistindo",
+  "rowResume": "Retomar",
+  "rowDetails": "Abrir detalhes",
   "minutesLeftShort": "{{count}} min",
   "browseSeries": "Explorar séries"
 }

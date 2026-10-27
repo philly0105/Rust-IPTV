@@ -177,12 +177,12 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     h['positions.get'] = () => null;
   });
 
-  it('has one primary action and round icon buttons; the rest waits in More', async () => {
+  it('has one primary action and icon buttons; the rest waits in More', async () => {
     renderAt('/s/src1/movie/m7', route);
     const actions = await screen.findByTestId('vod-hero-actions');
     const play = within(actions).getByRole('button', { name: 'Play' });
     expect(play.className).toContain('bg-accent-solid');
-    // Every other control in the row is an icon button (round), named for screen readers.
+    // Every other control in the row is an icon button, named for screen readers.
     for (const b of within(actions).getAllByRole('button').filter((x) => x !== play)) {
       expect(b.textContent?.trim()).toBe('');
       expect(b.getAttribute('aria-label')).toBeTruthy();
@@ -192,7 +192,9 @@ describe('VL-hero-actions / VL-offline-play / VL-detail-empty-no-tmdb: the movie
     expect(within(actions).getByRole('button', { name: 'Download' })).toBeTruthy();
     // Favorite sits between My List and Watched, so the page says whether the title is one.
     const favorite = within(actions).getByRole('button', { name: 'Favorite', pressed: false });
-    expect(favorite.className).toContain('rounded-full');
+    // The text buttons' rounded square, not a circle: one shape per row.
+    expect(favorite.className).toContain('rounded-md');
+    expect(favorite.className).not.toContain('rounded-full');
     const order = within(actions).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
     expect(order.indexOf('Favorite')).toBe(order.indexOf('Mark as watched') - 1);
     // Nothing else to offer: no Start over (no saved spot), no other copies, no lock, so no More.

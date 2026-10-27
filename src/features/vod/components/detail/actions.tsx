@@ -35,7 +35,7 @@ function useFavoriteToggle(itemRef: ItemRef, snapshot: ItemSnapshot) {
 }
 
 /**
- * Favorites on or off. `round` is the detail hero's round icon button (VL-hero-actions), between
+ * Favorites on or off. `round` is the detail hero's icon button (VL-hero-actions), between
  * My List and Watched, so the page says the title is a favourite: a toggle named "Favorite" whose
  * pressed state is the neutral selected fill with the heart filled in (a state, never amber), and
  * whose tooltip says what a press does.
@@ -52,7 +52,6 @@ export function FavoriteButton({ itemRef, snapshot, isFavorite, round }: { itemR
         tooltip={isFavorite ? t('removeFromFavorites') : t('addToFavorites')}
         pressed={isFavorite}
         icon={<Heart aria-hidden size={18} className={cn(isFavorite && 'fill-current')} />}
-        className="rounded-full"
         onClick={onClick}
         disabled={pending}
         data-testid="vod-favorite-button"
@@ -91,7 +90,7 @@ export function WatchedButton({
   series?: boolean;
   watched: boolean;
   compact?: boolean;
-  /** The detail hero's round icon button, pressed while watched (VL-hero-actions). */
+  /** The detail hero's icon button, pressed while watched (VL-hero-actions). */
   round?: boolean;
   /** Overrides for the two button labels (season-level wording). */
   labels?: { mark: string; unmark: string };
@@ -140,7 +139,7 @@ export function WatchedButton({
         label={label}
         icon={icon}
         // Watched is a state, so it reads as pressed (neutral), with the green tick; the label says what a press does.
-        className={cn('rounded-full', watched && 'bg-selected text-fg')}
+        className={cn(watched && 'bg-selected text-fg')}
         onClick={() => void onClick()}
         disabled={disabled || setWatched.isPending}
         data-testid="vod-watched-button"
@@ -185,7 +184,7 @@ export function DownloadButton({
   pending: boolean;
   onStart: () => void;
   compact?: boolean;
-  /** The detail hero's round icon button: the state in the icon and the tooltip (VL-hero-actions). */
+  /** The detail hero's icon button: the state in the icon and the tooltip (VL-hero-actions). */
   round?: boolean;
   /** Accessible context, e.g. the episode title. */
   label?: string;
@@ -259,19 +258,18 @@ function DownloadingLink({ download, compact, ctx }: { download: Download; compa
 }
 
 /**
- * The progress ring of the round download button: a track and an arc for the share downloaded,
- * drawn inside the button's edge from 12 o'clock. The arc takes the accent while bytes move
- * (progress) and is neutral while paused or waiting in the queue. `pathLength` makes the dash
- * pattern a percentage.
+ * The progress ring of the hero's download button: a track and an arc for the share downloaded,
+ * drawn just inside the button's edge, a rounded square like the button, from the middle of its
+ * top side clockwise. The arc takes the accent while bytes move (progress) and is neutral while
+ * paused or waiting in the queue. `pathLength` makes the dash pattern a percentage.
  */
+const RING_PATH = 'M18 2.5H30a3.5 3.5 0 0 1 3.5 3.5V30a3.5 3.5 0 0 1-3.5 3.5H6A3.5 3.5 0 0 1 2.5 30V6A3.5 3.5 0 0 1 6 2.5Z';
 function DownloadRing({ percent, moving }: { percent: number; moving: boolean }) {
   return (
-    <svg aria-hidden viewBox="0 0 36 36" className="pointer-events-none absolute inset-0 size-full -rotate-90" data-testid="vod-download-ring">
-      <circle cx="18" cy="18" r="16" fill="none" strokeWidth="2.5" className="stroke-surface-3" />
-      <circle
-        cx="18"
-        cy="18"
-        r="16"
+    <svg aria-hidden viewBox="0 0 36 36" className="pointer-events-none absolute inset-0 size-full" data-testid="vod-download-ring">
+      <path d={RING_PATH} fill="none" strokeWidth="2.5" className="stroke-surface-3" />
+      <path
+        d={RING_PATH}
         fill="none"
         strokeWidth="2.5"
         strokeLinecap="round"
@@ -285,7 +283,7 @@ function DownloadRing({ percent, moving }: { percent: number; moving: boolean })
 }
 
 /**
- * Round variant of {@link DownloadButton}: one 48 px circle whose icon and tooltip carry the state.
+ * Hero variant of {@link DownloadButton}: one 48 px icon button whose icon and tooltip carry the state.
  * While the file comes in, a ring around the download glyph shows how much has (VL-hero-actions),
  * so the state reads without the tooltip, which touch never shows; only a download of unknown
  * size falls back to the spinner. It comes in its `HeroIcon`, whose phone caption is the state in
@@ -320,7 +318,6 @@ function RoundDownloadButton({
         onClick={() => {
           if (!pending) onStart();
         }}
-        className="rounded-full"
         data-testid="vod-download-button"
       />
     </HeroIcon>
@@ -331,7 +328,7 @@ function RoundDownloadButton({
 function RoundDownloadState({ download, downloadedHref }: { download: Download; downloadedHref: string }) {
   const { t, i18n } = useTranslation('vod');
   const status = download.status;
-  const round = buttonClass('secondary', 'lg', 'relative w-12 rounded-full px-0');
+  const round = buttonClass('secondary', 'lg', 'relative w-12 px-0');
   const pct = useDownloadPercent(download);
   const text =
     status === 'completed'

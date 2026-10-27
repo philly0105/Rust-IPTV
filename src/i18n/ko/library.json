@@ -192,9 +192,7 @@
   "historyRestored": "기록을 복원했습니다",
   "historyRestorePartial": "{{total}}개 중 {{restored}}개를 복원했습니다.",
   "clearFailed": "시청 기록을 지울 수 없습니다",
-  "continueWatching": "이어서 시청",
   "continueTitle": "{{time}}부터 {{title}} 이어서 시청",
-  "removeContinue": "이어서 시청에서 {{title}} 삭제",
   "watchedPercent": "{{percent}}% 시청함",
   "typeLive": "라이브 채널",
   "typeMovie": "영화",
@@ -307,6 +305,9 @@
   "browseMovies": "영화 둘러보기",
   "removeFromFavorites": "즐겨찾기에서 삭제",
   "removeFromHistory": "시청 기록에서 삭제",
+  "removeFromContinue": "이어서 시청에서 삭제",
+  "rowResume": "이어 보기",
+  "rowDetails": "세부 정보 열기",
   "minutesLeftShort": "{{count}}분",
   "browseSeries": "시리즈 둘러보기"
 }

@@ -391,4 +391,20 @@ describe('My Videos toolbar and the offline detail page', () => {
     fireEvent.scroll(window);
     expect(screen.getByTestId('page-title').textContent).toBeTruthy();
   });
+
+  it("draws the hero's icon buttons in the rounded square of Play and of the catalogue's detail heroes", async () => {
+    rpc.handlers['myvideos.list'] = () => [
+      makeDownload({ id: 7, title: 'Heat', status: 'completed', fileAvailable: true, fileName: 'Heat (1995).mkv', positionSeconds: 600 }),
+    ];
+    renderAt('/my-videos/7', [{ path: '/my-videos/:id', element: <MyVideoDetailPage /> }]);
+    const play = await screen.findByTestId('play-offline');
+    const buttons = within(screen.getByTestId('vod-hero-actions')).getAllByRole('button');
+    // Play, then Start over (a saved spot), Show in folder (the desktop app) and Remove.
+    expect(buttons[0]).toBe(play);
+    expect(buttons).toHaveLength(4);
+    for (const b of buttons) {
+      expect(b.className, b.getAttribute('aria-label') ?? '').toContain('rounded-md');
+      expect(b.className, b.getAttribute('aria-label') ?? '').not.toContain('rounded-full');
+    }
+  });
 });

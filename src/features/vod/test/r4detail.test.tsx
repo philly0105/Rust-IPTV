@@ -100,3 +100,28 @@ describe('the hero title on a phone', () => {
     expect(h1.className).toContain('max-sm:text-headline');
   });
 });
+
+describe('the hero action row', () => {
+  it("draws its icon buttons, My List and the More menu in the text buttons' rounded square", async () => {
+    // A saved spot puts Start over in More, so the menu trigger is in the row too.
+    rpcMock.handlers['positions.get'] = () => ({ ref: mref, positionSeconds: 1200, durationSeconds: 3600, updatedAt: 'x', watched: false });
+    renderAt('/s/src1/movie/m7', detailRoute);
+    const resume = await screen.findByRole('button', { name: 'Resume from 20:00' });
+    const actions = screen.getByTestId('vod-hero-actions');
+    const buttons = within(actions).getAllByRole('button');
+    // My List's label comes from the mylist namespace, not loaded here: its test id names it.
+    expect(buttons.map((b) => b.dataset['testid'] ?? b.getAttribute('aria-label'))).toEqual([
+      null,
+      'mylist-button',
+      'vod-favorite-button',
+      'vod-watched-button',
+      'vod-download-button',
+      'More actions',
+    ]);
+    for (const b of buttons) {
+      expect(b.className, b.getAttribute('aria-label') ?? '').toContain('rounded-md');
+      expect(b.className, b.getAttribute('aria-label') ?? '').not.toContain('rounded-full');
+    }
+    expect(buttons[0]).toBe(resume);
+  });
+});

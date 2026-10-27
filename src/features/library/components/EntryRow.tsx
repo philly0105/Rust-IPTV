@@ -12,12 +12,13 @@
  * grip float over the row's end on hover or keyboard focus, as Live's do, so they take no width at
  * rest and the time sits at the row's end. On touch a tap on the row already plays or opens it, so
  * the row carries one menu button instead (Play, the moves, remove), and a stray tap at the row's
- * end no longer removes anything.
+ * end no longer removes anything. A title stopped part way carries its progress and resumes
+ * (`resume`); its menu adds the title's page and taking it out of Continue watching.
  */
 
 import { k } from '../lib/keys';
-import { ArrowDown, ArrowUp, GripVertical, Play, Trash2, X } from 'lucide-react';
-import { memo, type DragEvent } from 'react';
+import { ArrowDown, ArrowUp, GripVertical, Info, Play, Trash2, X } from 'lucide-react';
+import { memo, useRef, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
@@ -51,6 +52,13 @@ export interface EntryRowProps {
   busy?: boolean;
   /** The programme on air now, for a live or radio entry with a guide. */
   now?: NowOn | undefined;
+  /**
+   * A movie or series stopped part way (Recently watched): the row shows how far in the accent,
+   * the user's own progress, and its open action (`onOpen`) resumes, so the page needs no
+   * Continue watching cards that repeat the row. The title's page and forgetting the progress
+   * wait in the row's menu, which joins the hover strip on a fine pointer.
+   */
+  resume?: EntryResume | undefined;
   onOpen: () => void;
   onRemove: () => void;
   /** Reorder affordances (favorites only). */
@@ -65,6 +73,22 @@ export interface EntryRowProps {
     onDragOver: (e: DragEvent<HTMLElement>) => void;
     onDrop: (e: DragEvent<HTMLElement>) => void;
   };
+}
+
+export interface EntryResume {
+  /** Share watched, 0..1; undefined without a duration. */
+  fraction: number | undefined;
+  /** Minutes left, when the duration is known. */
+  minutesLeft: number | undefined;
+  /** Where it stopped ("30:00"): the row's end says it when the time left is unknown. */
+  at?: string | undefined;
+  /** The episode it resumes, for a series. */
+  episode?: string | undefined;
+  /** The strip's Play button: "Continue Heat at 30:00", as the Continue watching card said it. */
+  label: string;
+  onDetails: () => void;
+  /** Takes the title out of Continue watching (the saved spot goes; the history entry stays). */
+  onForget: () => void;
 }
 
 /**
@@ -84,7 +108,7 @@ const LOGO_PX = 40;
  * hover or keyboard focus, on a fine pointer only (touch gets the menu button).
  */
 const HOVER_ACTIONS =
-  'absolute inset-y-0 end-1 my-auto hidden h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 shadow-2 opacity-0 group-hover:opacity-100 in-focus-visible:opacity-100 focus-within:opacity-100 not-pointer-coarse:flex';
+  'absolute inset-y-0 end-1 my-auto hidden h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 shadow-2 opacity-0 group-hover:opacity-100 in-focus-visible:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100 not-pointer-coarse:flex';
 
 /**
  * The time hides while the strip shows over it (on the same hover, keyboard focus or focused strip
@@ -92,9 +116,9 @@ const HOVER_ACTIONS =
  * and left a cut-off "4 m" beside it. Invisible, not removed, so the row does not reflow.
  */
 const HIDE_UNDER_ACTIONS =
-  'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible';
+  'not-pointer-coarse:group-hover:invisible not-pointer-coarse:in-focus-visible:invisible not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible not-pointer-coarse:group-has-[[aria-expanded=true]]:invisible';
 
-function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, menuRemoveLabel, busy, now, onOpen, onRemove, reorder }: EntryRowProps) {
+function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabel, menuRemoveLabel, busy, now, resume, onOpen, onRemove, reorder }: EntryRowProps) {
   const { t } = useTranslation('library');
   const type = entryRef.contentType;
   const playable = type === 'live' || type === 'radio';
@@ -103,9 +127,30 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   const minutesLeft = now ? Math.max(1, Math.round(now.leftSeconds / 60)) : 0;
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
-  const openLabel = playable ? t('playTitle', { title }) : t('openTitle', { title });
+  const openLabel = resume ? resume.label : playable ? t('playTitle', { title }) : t('openTitle', { title });
+  const rowRef = useRef<HTMLDivElement>(null);
+  // What a resumable row adds to its menu: on a fine pointer these are the strip's own menu, beside
+  // its Resume and remove buttons; on touch they join the one menu at the row's end.
+  const resumeItems: MenuItem[] = resume
+    ? [
+        { id: 'details', label: t('rowDetails'), icon: <Info size={16} aria-hidden />, onSelect: resume.onDetails },
+        {
+          id: 'forget',
+          label: t('removeFromContinue'),
+          icon: <X size={16} aria-hidden />,
+          disabled: !!busy,
+          onSelect: () => {
+            // The menu hands focus back to its trigger, and the strip's trigger goes with the saved
+            // spot, which would drop focus to the page. The row stays, so it takes focus first.
+            rowRef.current?.closest<HTMLElement>('[role=listitem]')?.focus();
+            resume.onForget();
+          },
+        },
+      ]
+    : [];
   const menuItems: MenuItem[] = [
-    { id: 'open', label: playable ? t('episodePlay') : t('rowOpen'), icon: <Play size={16} aria-hidden />, onSelect: onOpen },
+    { id: 'open', label: resume ? t('rowResume') : playable ? t('episodePlay') : t('rowOpen'), icon: <Play size={16} aria-hidden />, onSelect: onOpen },
+    ...resumeItems,
     ...(reorder
       ? [
           { id: 'up', label: t('rowMoveUp'), icon: <ArrowUp size={16} aria-hidden />, disabled: !reorder.canUp || !!busy, onSelect: () => reorder.onMove(-1) },
@@ -117,6 +162,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   ];
   return (
     <div
+      ref={rowRef}
       className={cn(
         'group relative flex h-full items-center gap-3 rounded-md px-2 hover:bg-hover in-focus-visible:bg-hover motion-safe:transition-colors',
         reorder?.dragging && 'opacity-40',
@@ -180,6 +226,47 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
               label={t('nowProgress', { title: now.title })}
             />
           </span>
+        ) : resume ? (
+          // A title stopped part way reads as a channel's programme does: what it is with the time
+          // left at the end, and a bar under them, amber because it is the user's own progress.
+          <span className="flex w-full min-w-0 flex-col" data-testid="entry-resume">
+            <span className="flex w-full min-w-0 items-baseline gap-2 text-caption text-fg-muted">
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
+                <span className="shrink-0">{t(k('type', type))}</span>
+                {resume.episode && (
+                  <span dir="auto" className="truncate text-match-parent">
+                    {resume.episode}
+                  </span>
+                )}
+              </span>
+              {resume.minutesLeft !== undefined ? (
+                <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: resume.minutesLeft })} data-testid="entry-left">
+                  <span aria-hidden>{t('minutesLeftShort', { count: resume.minutesLeft })}</span>
+                  <span className="sr-only">{t('minutesLeft', { count: resume.minutesLeft })}</span>
+                </span>
+              ) : (
+                // No duration, so no time left and no bar: where it stopped, as the Continue watching
+                // card said it, so the row still reads as one that resumes (My Videos' cards mark it so).
+                resume.at !== undefined && (
+                  <span className="inline-flex shrink-0 items-center gap-1 tabular-nums text-fg-subtle" title={t('resumeAt', { time: resume.at })} data-testid="entry-left">
+                    <Play size={10} aria-hidden className="fill-current" />
+                    <span aria-hidden>{resume.at}</span>
+                    <span className="sr-only">{t('resumeAt', { time: resume.at })}</span>
+                  </span>
+                )
+              )}
+            </span>
+            {resume.fraction !== undefined && (
+              <ProgressBar
+                value={Math.round(resume.fraction * 100)}
+                max={100}
+                size="xs"
+                className="mt-1"
+                label={t('watchedPercent', { percent: Math.round(resume.fraction * 100) })}
+              />
+            )}
+          </span>
         ) : (
           <span className="flex w-full min-w-0 items-center gap-1.5 text-caption text-fg-muted pointer-coarse:text-body-sm">
             <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
@@ -242,6 +329,9 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           className="rounded-full"
           data-action="open"
         />
+        {resume && (
+          <Menu items={resumeItems} label={t('entryMenu', { title })} align="end" triggerClassName="h-8 w-8" />
+        )}
         <IconButton
           size="sm"
           tabIndex={-1}

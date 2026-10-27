@@ -192,9 +192,7 @@
   "historyRestored": "历史记录已恢复",
   "historyRestorePartial": "已恢复 {{total}} 条中的 {{restored}} 条。",
   "clearFailed": "无法清除观看记录",
-  "continueWatching": "继续观看",
   "continueTitle": "从 {{time}} 继续观看 {{title}}",
-  "removeContinue": "将 {{title}} 从“继续观看”中移除",
   "watchedPercent": "已观看 {{percent}}%",
   "typeLive": "直播频道",
   "typeMovie": "电影",
@@ -307,6 +305,9 @@
   "browseMovies": "浏览电影",
   "removeFromFavorites": "从收藏中移除",
   "removeFromHistory": "从观看记录中移除",
+  "removeFromContinue": "从“继续观看”中移除",
+  "rowResume": "继续播放",
+  "rowDetails": "打开详情",
   "minutesLeftShort": "{{count}} 分钟",
   "browseSeries": "浏览剧集"
 }

@@ -32,7 +32,7 @@ Never put `border-border` on a container: it turns the dark theme into a wirefra
 
 Selection is neutral plus the small amber tick, never an amber wash (`bg-accent/10` and the like are banned).
 
-The airing cell in the guide grid and the EPG ribbon takes `bg-active`, not `bg-selected`: the red now line is drawn before the cells so it never strikes through a title, and it has to read through the airing cell's fill. An opaque or mostly opaque fill there hides the line or turns it grey (the contrast test checks the line through the layer).
+The guide grid's cells come in three steps, so what airs now reads as one band down the grid: the airing cell is raised (`bg-surface shadow-2` in light, `bg-surface-3` in dark) with its title semibold, a later cell sits one step under it (`bg-surface-2`, `bg-surface` in dark), and an ended cell has no fill and the quiet text tone (`bg-bg text-fg-subtle`). Every time line is `text-fg-muted` (an ended cell's is in its own quiet tone). All of them are opaque: the red now line is drawn before the cells so it never strikes through a title, and shows only in the gutters, the ruler and its stub at the airing cell's foot.
 
 ### Accent
 

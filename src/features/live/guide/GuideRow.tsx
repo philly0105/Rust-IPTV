@@ -328,14 +328,17 @@ export const GuideRow = memo(function GuideRow({
                     muted
                       ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
                         'bg-bg text-fg-subtle hover:bg-surface'
-                      : // On now: the raised cell (white with a shadow in light, the next surface step
-                        // in dark), never a grey or amber wash. Light rows sit on the grey page:
-                        // there a cell is the white panel; dark keeps the lifted surface step.
+                      : // Three steps, so what airs now reads as one band down the grid. On now: the
+                        // raised cell (white with a lifted shadow in light, the top surface step in
+                        // dark), never a grey or amber wash. Later: one step down (a pale fill on the
+                        // grey page in light, the panel step in dark), so the airing cells stand
+                        // above them; they used to share the white (light) or sit one 1.12:1 step
+                        // below (dark). Ended: no fill, quiet text, as a muted cell.
                         b.when === 'now'
-                        ? 'bg-surface font-medium text-fg shadow-1 hover:bg-surface-3 dark:bg-surface-3 dark:hover:bg-pressed'
+                        ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-surface-3 dark:shadow-1 dark:hover:bg-pressed'
                         : b.when === 'past'
-                          ? 'bg-surface/50 text-fg-muted hover:bg-surface dark:bg-surface-2/50 dark:hover:bg-surface-2'
-                          : 'bg-surface text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
+                          ? 'bg-bg text-fg-subtle hover:bg-surface dark:hover:bg-surface-2'
+                          : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface dark:hover:bg-surface-2',
                   )}
                   style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
                 >
@@ -374,8 +377,9 @@ export const GuideRow = memo(function GuideRow({
                   >
                     {/* The title at the dense-row size (13.5 px) and the times at caption size: at 11 px
                         a desktop guide was the smallest text in the app. Both lines fit the row in
-                        compact density too (20 + 16 px of the cell's 41). */}
-                    <span className="flex items-center gap-1 truncate text-body-sm font-medium">
+                        compact density too (20 + 16 px of the cell's 41). What airs now is set
+                        semibold, the rest medium. */}
+                    <span className={cn('flex items-center gap-1 truncate text-body-sm', b.when === 'now' && !muted ? 'font-semibold' : 'font-medium')}>
                       {b.when === 'past' && catchupOk ? <History className="size-3.5 shrink-0" aria-hidden /> : null}
                       <span dir="auto" className="truncate text-match-parent">
                         {p.title}
@@ -383,7 +387,9 @@ export const GuideRow = memo(function GuideRow({
                       {/* recording: */}
                       <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
                     </span>
-                    <span className={`block truncate text-caption tabular-nums ${b.when === 'future' ? 'text-fg-muted' : ''}`}>{range}</span>
+                    {/* Times are the quiet line under every title; an ended or stepped-back cell's are
+                        already in its quiet text tone. */}
+                    <span className={cn('block truncate text-caption tabular-nums', !muted && b.when !== 'past' && 'text-fg-muted')}>{range}</span>
                   </span>
                 </button>
               );

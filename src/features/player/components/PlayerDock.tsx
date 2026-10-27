@@ -19,6 +19,7 @@ import { useMediaStore } from '../media';
 import { bindLiveProgramme } from '../nowNext';
 import { bindRemote } from '../remote';
 import { bindParentalGuard } from '../parentalGuard';
+import { lockLandscapeForVideo, unlockOrientation } from '../fullscreen';
 import { exitPip, usePipStore } from '../pip';
 import { expandPath, noteStageShown, setRehome, useStageTarget } from '../stage';
 import { flushProgress, replay, reportFullscreen, selectEnded, usePlayerStore } from '../store';
@@ -319,7 +320,10 @@ export const PlayerDock = memo(function PlayerDock() {
   // Store fullscreen flag <-> DOM fullscreen of the host (which outlives engine remounts).
   useEffect(() => {
     if (isFullscreen && document.fullscreenElement !== host) {
-      host.requestFullscreen?.().catch(() => reportFullscreen(false));
+      host.requestFullscreen?.().then(
+        () => lockLandscapeForVideo(usePlayerStore.getState().mode),
+        () => reportFullscreen(false),
+      );
     } else if (!isFullscreen && document.fullscreenElement === host) {
       void document.exitFullscreen().catch(() => undefined);
     }
@@ -328,7 +332,10 @@ export const PlayerDock = memo(function PlayerDock() {
     const on = (): void => {
       const fs = document.fullscreenElement === host;
       reportFullscreen(fs);
-      if (!fs) useMediaStore.setState({ channelPanelOpen: false });
+      if (!fs) {
+        useMediaStore.setState({ channelPanelOpen: false });
+        unlockOrientation();
+      }
     };
     document.addEventListener('fullscreenchange', on);
     return () => document.removeEventListener('fullscreenchange', on);

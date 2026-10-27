@@ -70,14 +70,23 @@
    * comments give the size and line height at 100 %. Page titles use text-title, rail and
    * section headings text-title-sm, card titles text-body-sm with font-medium, metadata
    * text-caption. Headings from title-sm up are 600 and tracked in; Tailwind's stock sizes
-   * (text-xs ... text-2xl) still work.
+   * (text-base ... text-2xl) still work.
+   *
+   * text-xs and text-sm are the scale's caption and body-sm under their stock names. Stock,
+   * they were 11.25 and 13.1 px, a fraction off the 12 and 13.5 px beside them, so a field's
+   * text sat a hair smaller than the rows under it and a ribbon's time line under a caption
+   * read as a third size. New code uses the token names.
    */
   --text-2xs: calc(10rem / 15); /* 10/14 */
   --text-2xs--line-height: 1.4;
   --text-caption: calc(12rem / 15); /* 12/16 */
   --text-caption--line-height: calc(16rem / 15);
+  --text-xs: calc(12rem / 15); /* text-caption */
+  --text-xs--line-height: calc(16rem / 15);
   --text-body-sm: calc(13.5rem / 15); /* 13.5/20 */
   --text-body-sm--line-height: calc(20rem / 15);
+  --text-sm: calc(13.5rem / 15); /* text-body-sm */
+  --text-sm--line-height: calc(20rem / 15);
   --text-body: 1rem; /* 15/22 */
   --text-body--line-height: calc(22rem / 15);
   --text-title-sm: calc(18rem / 15); /* 18/24 */

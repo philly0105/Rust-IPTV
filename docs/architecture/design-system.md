@@ -81,6 +81,8 @@ Scale (rem against the 15 px root, so it follows the UI scale; size / line heigh
 
 Weights are 400, 500 and 600 only. Headings track in by -0.01 to -0.02 em (the classes set it). Prefer these over `text-[calc(…rem/15)]` in new code; a new `@theme` text size must also go into `src/ui/cn.ts`, or `cn()` treats it as a colour.
 
+The stock `text-xs` and `text-sm` are aliases of `text-caption` and `text-body-sm` (`globals.css` sets them to the same size and line height), so the small end of the type is 10 (`text-2xs`, key caps), 12, 13.5 and 15 px. Stock, they were 11.25 and 13.1 px, a fraction off the sizes beside them. New code uses the token names.
+
 ## Radii, elevation, spacing
 
 - Radii: `rounded-xs` 4 (badges, checkboxes, key caps), `rounded-sm` 6 (segments, small status chips on artwork), `rounded-md` 8 (buttons, inputs, rows, menu items, segmented tracks), `rounded-lg` 12 (cards, posters, menus, toasts, panels, settings groups), `rounded-xl` 16 (dialogs, the hero frame, sheets), `rounded-full` (filter chips, the watched mark, sliders, dots, avatars). Bare `rounded` is a mistake; use `rounded-xs`.

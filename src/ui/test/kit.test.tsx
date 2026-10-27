@@ -578,6 +578,20 @@ describe('SourceMonogram', () => {
   });
 });
 
+describe('type scale (DS-TYPE-SCALE)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  const token = (name: string) => new RegExp(`--text-${name}:\\s*([^;]+);`).exec(globals)?.[1]?.replace(/\/\*.*?\*\//g, '').trim();
+
+  it('draws the stock text-xs and text-sm at the scale’s caption and body-sm sizes', () => {
+    expect(token('caption')).toBe('calc(12rem / 15)');
+    expect(token('xs')).toBe(token('caption'));
+    expect(token('xs--line-height')).toBe(token('caption--line-height'));
+    expect(token('body-sm')).toBe('calc(13.5rem / 15)');
+    expect(token('sm')).toBe(token('body-sm'));
+    expect(token('sm--line-height')).toBe(token('body-sm--line-height'));
+  });
+});
+
 describe('icon stroke (DS-ICON-STROKE)', () => {
   const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
   // The selector list of the rule that sets this stroke, as the browser reads it.

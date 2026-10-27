@@ -21,6 +21,8 @@ import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
+// Straight from live, as useCoverColumn takes useMediaQuery: deps.ts hands over ChannelLogo only.
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { snapshotTitle } from '@/lib/title';
 import { cn } from '@/ui/cn';
 
@@ -144,14 +146,20 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         )}
       </div>
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-start">
-        <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg">
-          {title}
-        </span>
+        {/* A channel's provider tag trails its name, quiet, as in Live TV's rows. */}
+        {playable ? (
+          <ChannelName name={title} className="w-full truncate text-match-parent text-body-sm font-medium text-fg pointer-coarse:text-body" />
+        ) : (
+          <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg pointer-coarse:text-body">
+            {title}
+          </span>
+        )}
         {now ? (
           // What is on now, as Live TV's rows say it: a guide answers "what is this?" better than
           // "Live channel" under a heading that already says so.
           <span className="flex w-full min-w-0 flex-col" data-testid="entry-now">
-            <span className="flex w-full min-w-0 items-baseline gap-2 text-caption text-fg-muted">
+            {/* A step up on touch, as Live's rows. */}
+            <span className="flex w-full min-w-0 items-baseline gap-2 text-caption text-fg-muted pointer-coarse:text-body-sm">
               <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">
                 {now.title}
               </span>
@@ -162,17 +170,18 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
                 <span className="sr-only">{t('minutesLeft', { count: minutesLeft })}</span>
               </span>
             </span>
-            {/* Quiet, as on Live TV's rows that are not playing: a list of amber bars read as stripes. */}
+            {/* Quiet, as on Live TV's rows that are not playing: a hairline track with a neutral fill,
+                since a list of amber bars read as stripes and 3 px grey ones as ruled paper. */}
             <ProgressBar
               value={Math.round(now.progress * 100)}
               max={100}
               size="xs"
-              className="mt-1 [&>div]:bg-fg-subtle/55"
+              className="mt-1 h-0.5 bg-fg/7 [&>div]:bg-fg-subtle/50"
               label={t('nowProgress', { title: now.title })}
             />
           </span>
         ) : (
-          <span className="flex w-full min-w-0 items-center gap-1.5 text-caption text-fg-muted">
+          <span className="flex w-full min-w-0 items-center gap-1.5 text-caption text-fg-muted pointer-coarse:text-body-sm">
             <ContentIcon type={type} size={12} className="shrink-0 text-fg-subtle" />
             <span className="shrink-0">{t(k('type', type))}</span>
             {snapshot.subtitle && (

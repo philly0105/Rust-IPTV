@@ -12,7 +12,7 @@ import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
 import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNowNext } from '../lib/epgTime';
-import { ChannelLogo } from './ChannelLogo';
+import { ChannelLogo, ChannelName } from './ChannelLogo';
 
 /**
  * Three lines (LG-03): the name, the programme on now with its time left, and the progress bar.
@@ -196,7 +196,10 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
       className={cn(
         // `group/row` for the floating actions; the list is `group/list`, so the keyboard cursor's
         // row is marked only while the list has focus (a phantom "selected" first row otherwise).
-        'group/row relative flex h-full touch-manipulation items-stretch border-b border-divider select-none [-webkit-touch-callout:none]',
+        // No rule between rows: the 60 px rhythm, the logo column and the hover and selected fills
+        // keep them apart. A divider under each row on top of its progress track drew two lines
+        // per channel, and a screen of channels read as ruled paper, more so in light.
+        'group/row relative flex h-full touch-manipulation items-stretch select-none [-webkit-touch-callout:none]',
         playing ? 'tuning-tick bg-selected' : cn('hover:bg-hover', active && 'group-focus-within/list:bg-hover'),
       )}
       onContextMenu={(e) => props.onContextMenu(e, channel, index)}
@@ -222,11 +225,12 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         className="flex min-w-0 flex-1 items-center gap-3 py-2 ps-2.5 pe-3 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
       >
         {/* The playing row's number steps up to the text colour: the tick and the progress are
-            its amber marks, a third amber mark in the number read as noise. */}
+            its amber marks, a third amber mark in the number read as noise. The others are quiet,
+            so the logo and the name lead the row. */}
         <span
           className={cn(
             'w-7 shrink-0 text-end font-numeric text-sm tabular-nums',
-            playing ? 'text-fg' : 'text-fg-muted',
+            playing ? 'text-fg' : 'text-fg-subtle',
           )}
         >
           {channel.number ?? ''}
@@ -234,9 +238,13 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         {!compact ? <ChannelLogo src={channel.logoUrl} name={name} size={props.station ? 44 : 40} sourceId={channel.ref.sourceId} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span dir="auto" className={cn('truncate text-body-sm text-match-parent text-fg', playing ? 'font-semibold' : 'font-medium')}>
-              {name}
-            </span>
+            <ChannelName
+              name={channel.name}
+              strip={props.stripPrefix}
+              // A step up on touch, held at arm's length: the desktop's dense 13.5 px name and 12 px
+              // programme fit the same 60 px row at 15 and 13.5.
+              className={cn('truncate text-body-sm text-match-parent text-fg pointer-coarse:text-body', playing ? 'font-semibold' : 'font-medium')}
+            />
             {/* Marks, not slots: an empty row gives their room to the title. */}
             {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
                 It steps aside while the floating actions show their own heart. */}
@@ -260,7 +268,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
               {/* Only the title truncates, in its own direction; the remaining time is a sibling in
                   compact "38m" form, so narrow lists keep the title readable (and RTL titles put the
                   ellipsis at their own end, not before the clock). */}
-              <span className="flex min-w-0 items-baseline gap-2 text-caption text-fg-muted" data-testid="row-now">
+              <span className="flex min-w-0 items-baseline gap-2 text-caption text-fg-muted pointer-coarse:text-body-sm" data-testid="row-now">
                 <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent" data-testid="row-now-title" title={cur.title}>
                   {cur.title}
                 </span>
@@ -271,12 +279,21 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
                 </span>
               </span>
               {props.station ? null : (
-                <span className={cn('relative mt-1 h-[3px] w-full overflow-hidden rounded-full bg-surface-3', playing && 'max-md:hidden')} aria-hidden data-testid="channel-progress-track">
+                <span
+                  className={cn(
+                    'relative mt-1 w-full overflow-hidden rounded-full',
+                    // A hairline on every row and a firmer bar on the one playing: a 3 px grey bar
+                    // under each name was the darkest mark in the list after the text.
+                    playing ? 'h-[3px] bg-surface-3 max-md:hidden' : 'h-0.5 bg-fg/7',
+                  )}
+                  aria-hidden
+                  data-testid="channel-progress-track"
+                >
                   {/* Quiet on every row, the accent on the one playing: a list of bright bars read as
                       stripes, and red ones as "all live, all alerting". */}
                   <span
                     data-testid="channel-progress"
-                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent-mark' : 'bg-fg-subtle/55')}
+                    className={cn('absolute inset-y-0 start-0 rounded-full', playing ? 'bg-accent-mark' : 'bg-fg-subtle/50')}
                     style={{ width: `${progress * 100}%` }}
                   />
                 </span>

@@ -777,7 +777,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
     listBody = (
       <div className="min-h-0 flex-1 overflow-hidden" role="status" aria-busy="true" aria-label={t('loadingChannels')} data-testid="channel-list-loading">
         {Array.from({ length: 12 }, (_, i) => (
-          <div key={i} className="border-b border-divider" style={{ height: rowHeight }}>
+          <div key={i} style={{ height: rowHeight }}>
             <RowSkeleton pulse />
           </div>
         ))}

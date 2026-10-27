@@ -42,7 +42,7 @@ import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../
 // recording:
 import { RibbonActions, ScheduleMark } from '@/features/recording';
 import { listSeparator } from '@/lib/intl';
-import { ChannelLogo } from './ChannelLogo';
+import { ChannelLogo, ChannelName } from './ChannelLogo';
 import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;
@@ -183,6 +183,11 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const liveName = props.watchingArchive || !channelName ? liveLabel : [liveLabel, channelName].join(listSeparator(i18n.language));
   const details = !!props.details;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
+  const titleLine = shown ? (
+    <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:text-title-sm')}>
+      {shown.title}
+    </p>
+  ) : null;
   const header = (
     // Below 480 px (the Now card: below 26rem of stage column, as on a tablet) the programme
     // lines take the full width and the buttons wrap under them, so the time range and title are
@@ -203,7 +208,9 @@ export function EpgRibbon(props: EpgRibbonProps) {
     >
       {/* Three lines tall with or without a programme (time, title, description), so a zap never
           moves what is under it. The Now card (details, md up) keeps its own fixed height: its four
-          lines (channel, time, title, progress), or the channel's name alone without a guide. */}
+          lines (channel, title, time, progress), or the channel's name alone without a guide. The
+          four lines come to 78 px, inside the 78.75 px minimum: a 1 px larger gap above the times
+          made the card taller with a guide than without, and moved the timeline on a zap. */}
       <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3', details ? '@max-[26rem]/now:basis-full md:min-h-[5.25rem]' : 'max-[480px]:basis-full')}>
         {details && shown?.icon ? <ProgrammeArt src={shown.icon} sourceId={channel?.ref.sourceId} /> : null}
         {/* A container: the meta line drops what does not fit by the pane's own width, not the window's. */}
@@ -216,15 +223,17 @@ export function EpgRibbon(props: EpgRibbonProps) {
                 <p className="mb-0.5 flex min-w-0 items-center gap-1.5 text-caption text-fg-muted" data-testid="ribbon-channel">
                   <ChannelLogo src={channel.logoUrl} name={channelName} size={20} sourceId={channel.ref.sourceId} />
                   {channel.number !== undefined ? <span className="shrink-0 font-numeric tabular-nums">{channel.number}</span> : null}
-                  <span dir="auto" className="min-w-0 truncate text-match-parent">
-                    {channelName}
-                  </span>
+                  <ChannelName name={channel.name} strip={prefs.stripCountryPrefix} className="min-w-0 truncate text-match-parent" />
                 </p>
               ) : null}
+              {/* The Now card reads eyebrow, title, then the details, as the hero and the detail pages
+                  do: the channel line, the programme, then LIVE with its times over the progress.
+                  The phone's one-line ribbon (no details) keeps the times first. */}
+              {details ? titleLine : null}
               {/* Clipped, never overflowing, and numbers are never cut: a narrow pane says "27m" for
                   "27 min left" and leaves the category out (it used to read "2.. N"). The Now card
                   makes room for them first (the art goes, then the buttons wrap). */}
-              <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
+              <p className={cn('flex min-w-0 items-center gap-2 overflow-hidden text-fg-muted', details ? 'text-caption md:mt-0.5' : 'text-xs')}>
                 {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                   {shownWhen !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ? `${formatDay(ms(shown.start), i18n.language)} ` : ''}
@@ -256,9 +265,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   </button>
                 ) : null}
               </p>
-              <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:mt-0.5 md:text-title-sm')}>
-                {shown.title}
-              </p>
+              {details ? null : titleLine}
               {details ? (
                 // The airing programme's progress; the row keeps its height for the others.
                 <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full overflow-hidden rounded-full bg-surface-3 md:block', shownWhen !== 'now' && 'md:invisible')}>
@@ -272,8 +279,16 @@ export function EpgRibbon(props: EpgRibbonProps) {
               ) : null}
             </>
           ) : (
-            <p dir="auto" className="truncate text-match-parent text-sm font-semibold text-fg" data-testid="ribbon-channel-name">
-              {channelName || t('guide')}
+            // Without a guide (or while it loads) the channel's name heads the card, drawn as the
+            // stage above and the list draw it.
+            <p className="text-sm font-semibold text-fg" data-testid="ribbon-channel-name">
+              {channelName ? (
+                <ChannelName name={channel?.name} strip={prefs.stripCountryPrefix} className="block truncate text-match-parent" />
+              ) : (
+                <span dir="auto" className="block truncate text-match-parent">
+                  {t('guide')}
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -407,7 +422,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
       mode === 'list' ? (
         <div className="flex flex-col" aria-busy="true" aria-label={t('loadingGuide')}>
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center gap-3 border-b border-divider px-4" style={{ height: LIST_ROW }}>
+            <div key={i} className="flex items-center gap-3 px-4" style={{ height: LIST_ROW }}>
               <Skeleton className="h-3 w-24 shrink-0" />
               <Skeleton className="h-3 flex-1" />
             </div>
@@ -855,7 +870,7 @@ function ProgramList(props: ViewProps) {
                 tabIndex={v.index === (nowIndex >= 0 ? nowIndex : 0) ? 0 : -1}
                 onClick={() => props.onActivate(p)}
                 onFocus={() => props.onFocusProgram(p)}
-                className={`flex h-full w-full items-center gap-3 border-b border-divider px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset ${
+                className={`flex h-full w-full items-center gap-3 px-4 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset ${
                   when === 'now' ? 'tuning-tick bg-selected' : 'hover:bg-hover'
                 } ${when === 'past' && !catchup ? 'text-fg-subtle' : 'text-fg'}`}
               >

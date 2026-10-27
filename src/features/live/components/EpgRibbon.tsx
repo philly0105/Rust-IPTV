@@ -184,6 +184,11 @@ export function EpgRibbon(props: EpgRibbonProps) {
   const liveName = props.watchingArchive || !channelName ? liveLabel : [liveLabel, channelName].join(listSeparator(i18n.language));
   const details = !!props.details;
   const shownWhen = shown ? programWhen(shown, now) : undefined;
+  const titleLine = shown ? (
+    <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:text-title-sm')}>
+      {shown.title}
+    </p>
+  ) : null;
   const header = (
     // Below 480 px (the Now card: below 26rem of stage column, as on a tablet) the programme
     // lines take the full width and the buttons wrap under them, so the time range and title are
@@ -204,7 +209,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
     >
       {/* Three lines tall with or without a programme (time, title, description), so a zap never
           moves what is under it. The Now card (details, md up) keeps its own fixed height: its four
-          lines (channel, time, title, progress), or the channel's name alone without a guide. */}
+          lines (channel, title, time, progress), or the channel's name alone without a guide. */}
       <div className={cn('flex min-h-[3.25rem] min-w-0 flex-1 gap-3', details ? '@max-[26rem]/now:basis-full md:min-h-[5.25rem]' : 'max-[480px]:basis-full')}>
         {details && shown?.icon ? <ProgrammeArt src={shown.icon} sourceId={channel?.ref.sourceId} /> : null}
         {/* A container: the meta line drops what does not fit by the pane's own width, not the window's. */}
@@ -220,10 +225,14 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   <ChannelName name={channel.name} strip={prefs.stripCountryPrefix} className="min-w-0 truncate text-match-parent" />
                 </p>
               ) : null}
+              {/* The Now card reads eyebrow, title, then the details, as the hero and the detail pages
+                  do: the channel line, the programme, then LIVE with its times over the progress.
+                  The phone's one-line ribbon (no details) keeps the times first. */}
+              {details ? titleLine : null}
               {/* Clipped, never overflowing, and numbers are never cut: a narrow pane says "27m" for
                   "27 min left" and leaves the category out (it used to read "2.. N"). The Now card
                   makes room for them first (the art goes, then the buttons wrap). */}
-              <p className="flex min-w-0 items-center gap-2 overflow-hidden text-xs text-fg-muted">
+              <p className={cn('flex min-w-0 items-center gap-2 overflow-hidden text-fg-muted', details ? 'text-caption md:mt-1' : 'text-xs')}>
                 {shownWhen === 'now' ? <LivePill size="sm" dot="none" /> : null}
                 <span className="shrink-0 whitespace-nowrap tabular-nums" data-testid="ribbon-time">
                   {shownWhen !== 'now' && localDayKey(ms(shown.start)) !== localDayKey(now) ? `${formatDay(ms(shown.start), i18n.language)} ` : ''}
@@ -255,9 +264,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
                   </button>
                 ) : null}
               </p>
-              <p dir="auto" title={shown.title} className={cn('truncate text-match-parent text-sm font-semibold text-fg', details && 'md:mt-0.5 md:text-title-sm')}>
-                {shown.title}
-              </p>
+              {details ? null : titleLine}
               {details ? (
                 // The airing programme's progress; the row keeps its height for the others.
                 <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full overflow-hidden rounded-full bg-surface-3 md:block', shownWhen !== 'now' && 'md:invisible')}>

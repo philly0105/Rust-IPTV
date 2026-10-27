@@ -193,7 +193,6 @@
   "historyRestorePartial": "{{total}} kaydın {{restored}} tanesi geri geldi.",
   "clearFailed": "Geçmiş temizlenemedi",
   "continueTitle": "Devam et: {{title}}, {{time}}",
-  "removeContinue": "İzlemeye devam et listesinden kaldır: {{title}}",
   "watchedPercent": "%{{percent}} izlendi",
   "typeLive": "Canlı kanal",
   "typeMovie": "Film",

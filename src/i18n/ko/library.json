@@ -193,7 +193,6 @@
   "historyRestorePartial": "{{total}}개 중 {{restored}}개를 복원했습니다.",
   "clearFailed": "시청 기록을 지울 수 없습니다",
   "continueTitle": "{{time}}부터 {{title}} 이어서 시청",
-  "removeContinue": "이어서 시청에서 {{title}} 삭제",
   "watchedPercent": "{{percent}}% 시청함",
   "typeLive": "라이브 채널",
   "typeMovie": "영화",

@@ -193,7 +193,6 @@
   "historyRestorePartial": "{{restored}} von {{total}} Einträgen sind zurück.",
   "clearFailed": "Der Verlauf konnte nicht gelöscht werden",
   "continueTitle": "{{title}} bei {{time}} fortsetzen",
-  "removeContinue": "{{title}} aus „Weiterschauen“ entfernen",
   "watchedPercent": "{{percent}}% angesehen",
   "typeLive": "Live-Sender",
   "typeMovie": "Film",

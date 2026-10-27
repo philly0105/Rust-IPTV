@@ -193,7 +193,6 @@
   "historyRestorePartial": "已恢复 {{total}} 条中的 {{restored}} 条。",
   "clearFailed": "无法清除观看记录",
   "continueTitle": "从 {{time}} 继续观看 {{title}}",
-  "removeContinue": "将 {{title}} 从“继续观看”中移除",
   "watchedPercent": "已观看 {{percent}}%",
   "typeLive": "直播频道",
   "typeMovie": "电影",

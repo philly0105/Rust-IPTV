@@ -225,7 +225,6 @@
   "historyRestorePartial": "Przywrócono {{restored}} z {{total}} wpisów.",
   "clearFailed": "Nie udało się wyczyścić historii",
   "continueTitle": "Kontynuuj {{title}} od {{time}}",
-  "removeContinue": "Usuń {{title}} z sekcji Kontynuuj oglądanie",
   "watchedPercent": "Obejrzano {{percent}}%",
   "typeLive": "Kanał na żywo",
   "typeMovie": "Film",

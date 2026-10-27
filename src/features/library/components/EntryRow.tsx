@@ -18,7 +18,7 @@
 
 import { k } from '../lib/keys';
 import { ArrowDown, ArrowUp, GripVertical, Info, Play, Trash2, X } from 'lucide-react';
-import { memo, type DragEvent } from 'react';
+import { memo, useRef, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
@@ -78,6 +78,8 @@ export interface EntryResume {
   fraction: number | undefined;
   /** Minutes left, when the duration is known. */
   minutesLeft: number | undefined;
+  /** Where it stopped ("30:00"): the row's end says it when the time left is unknown. */
+  at?: string | undefined;
   /** The episode it resumes, for a series. */
   episode?: string | undefined;
   /** The strip's Play button: "Continue Heat at 30:00", as the Continue watching card said it. */
@@ -124,12 +126,24 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
   const openLabel = resume ? resume.label : playable ? t('playTitle', { title }) : t('openTitle', { title });
+  const rowRef = useRef<HTMLDivElement>(null);
   // What a resumable row adds to its menu: on a fine pointer these are the strip's own menu, beside
   // its Resume and remove buttons; on touch they join the one menu at the row's end.
   const resumeItems: MenuItem[] = resume
     ? [
         { id: 'details', label: t('rowDetails'), icon: <Info size={16} aria-hidden />, onSelect: resume.onDetails },
-        { id: 'forget', label: t('removeFromContinue'), icon: <X size={16} aria-hidden />, disabled: !!busy, onSelect: resume.onForget },
+        {
+          id: 'forget',
+          label: t('removeFromContinue'),
+          icon: <X size={16} aria-hidden />,
+          disabled: !!busy,
+          onSelect: () => {
+            // The menu hands focus back to its trigger, and the strip's trigger goes with the saved
+            // spot, which would drop focus to the page. The row stays, so it takes focus first.
+            rowRef.current?.closest<HTMLElement>('[role=listitem]')?.focus();
+            resume.onForget();
+          },
+        },
       ]
     : [];
   const menuItems: MenuItem[] = [
@@ -146,6 +160,7 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
   ];
   return (
     <div
+      ref={rowRef}
       className={cn(
         'group relative flex h-full items-center gap-3 rounded-md px-2 hover:bg-hover in-focus-visible:bg-hover motion-safe:transition-colors',
         reorder?.dragging && 'opacity-40',
@@ -216,11 +231,21 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
                   </span>
                 )}
               </span>
-              {resume.minutesLeft !== undefined && (
+              {resume.minutesLeft !== undefined ? (
                 <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: resume.minutesLeft })} data-testid="entry-left">
                   <span aria-hidden>{t('minutesLeftShort', { count: resume.minutesLeft })}</span>
                   <span className="sr-only">{t('minutesLeft', { count: resume.minutesLeft })}</span>
                 </span>
+              ) : (
+                // No duration, so no time left and no bar: where it stopped, as the Continue watching
+                // card said it, so the row still reads as one that resumes (My Videos' cards mark it so).
+                resume.at !== undefined && (
+                  <span className="inline-flex shrink-0 items-center gap-1 tabular-nums text-fg-subtle" title={t('resumeAt', { time: resume.at })} data-testid="entry-left">
+                    <Play size={10} aria-hidden className="fill-current" />
+                    <span aria-hidden>{resume.at}</span>
+                    <span className="sr-only">{t('resumeAt', { time: resume.at })}</span>
+                  </span>
+                )
               )}
             </span>
             {resume.fraction !== undefined && (

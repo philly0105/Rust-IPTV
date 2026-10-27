@@ -193,7 +193,6 @@
   "historyRestorePartial": "Επέστρεψαν {{restored}} από {{total}} καταχωρίσεις.",
   "clearFailed": "Δεν ήταν δυνατή η εκκαθάριση του ιστορικού",
   "continueTitle": "Συνέχιση του {{title}} στο {{time}}",
-  "removeContinue": "Αφαίρεση του {{title}} από τη συνέχιση παρακολούθησης",
   "watchedPercent": "Προβλήθηκε {{percent}}%",
   "typeLive": "Ζωντανό κανάλι",
   "typeMovie": "Ταινία",

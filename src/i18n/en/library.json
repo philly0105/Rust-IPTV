@@ -193,7 +193,6 @@
   "historyRestorePartial": "{{restored}} of {{total}} entries came back.",
   "clearFailed": "Could not clear the history",
   "continueTitle": "Continue {{title}} at {{time}}",
-  "removeContinue": "Remove {{title}} from continue watching",
   "watchedPercent": "{{percent}}% watched",
   "typeLive": "Live channel",
   "typeMovie": "Movie",

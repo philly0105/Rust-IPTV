@@ -48,7 +48,13 @@ const HEADER_HEIGHT = 56;
 /** The first heading's row with nothing above it (see FavoritesPage). */
 const FIRST_HEADER_HEIGHT = 36;
 const RECENT_LIMIT = 500;
-const CONTINUE_LIMIT = 20;
+/**
+ * As many saved spots as the history has rows, so every half-watched row in it shows its progress
+ * and resumes; a shorter list left the older ones looking and opening like plain history. The VOD
+ * grids and My List ask the same, so they share one answer. The core sends at most 200
+ * (CONTINUE_MAX_LIMIT).
+ */
+const CONTINUE_LIMIT = RECENT_LIMIT;
 
 export function RecentPage() {
   const { t, i18n } = useTranslation('library');
@@ -241,12 +247,14 @@ export function RecentPage() {
   const resumeOf = (e: RecentEntry, title: string): EntryResume | undefined => {
     const p = resumable.get(itemKey(e.ref));
     if (!p) return undefined;
+    const at = formatClock(p.positionSeconds);
     return {
       fraction: watchedFraction(p),
       minutesLeft: p.durationSeconds ? Math.max(1, Math.round((p.durationSeconds - p.positionSeconds) / 60)) : undefined,
+      at,
       // A series names the episode it goes back to.
       episode: p.episodeId ? p.snapshot?.subtitle : undefined,
-      label: t('continueTitle', { title, time: formatClock(p.positionSeconds) }),
+      label: t('continueTitle', { title, time: at }),
       onDetails: () => open(e),
       onForget: () => void removeContinue(p),
     };

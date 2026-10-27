@@ -225,7 +225,6 @@
   "historyRestorePartial": "Адноўлена {{restored}} з {{total}} запісаў.",
   "clearFailed": "Не ўдалося ачысціць гісторыю",
   "continueTitle": "Працягнуць {{title}} з {{time}}",
-  "removeContinue": "Выдаліць {{title}} з «Працягнуць прагляд»",
   "watchedPercent": "Прагледжана {{percent}}%",
   "typeLive": "Канал",
   "typeMovie": "Фільм",

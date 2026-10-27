@@ -444,6 +444,43 @@ describe('RecentPage', () => {
     await waitFor(() => expect(rpc.callsOf('recent.clear')).toEqual([{}]));
   });
 
+  it('every title stopped part way in the history shows its progress and resumes, past the 20 newest saved spots', async () => {
+    // 25 saved spots, newest first as the core answers them; the history lists them the other way
+    // round, so its first row holds the oldest spot.
+    const spots = Array.from({ length: 25 }, (_, i) => ({ ...makePosition(`p${i}`, 600, 2400), updatedAt: new Date(Date.UTC(2026, 9, 10, 20, 30 - i)).toISOString() }));
+    rpc.handlers['recent.list'] = () => [...spots].reverse().map((p) => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! }));
+    rpc.handlers['positions.continueWatching'] = (a) => spots.slice(0, (a as { limit: number }).limit);
+    fakePlayer.items.length = 0;
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+
+    const first = await screen.findByText('Continue p24');
+    const row = first.closest<HTMLElement>('[data-testid="entry-row"]')!;
+    await waitFor(() => expect(within(row).getByTestId('entry-resume')).toBeTruthy());
+    expect(within(row).getByRole('progressbar', { name: '25% watched' })).toBeTruthy();
+    expect(rpc.callsOf('positions.continueWatching')[0]).toEqual({ limit: 500 });
+    // A click resumes it, as on the newer rows, rather than opening its page.
+    fireEvent.click(first);
+    await waitFor(() => expect(fakePlayer.items).toHaveLength(1));
+    expect(fakePlayer.items[0]).toMatchObject({ ref: spots[24]!.ref, isLive: false });
+  });
+
+  it('a saved spot without a duration says where it resumes', async () => {
+    const p1 = makePosition('p1', 1800);
+    rpc.handlers['recent.list'] = () => [makeRecent('a', new Date().toISOString()), { ref: p1.ref, viewedAt: new Date().toISOString(), snapshot: p1.snapshot! }];
+    rpc.handlers['positions.continueWatching'] = () => [p1];
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+
+    // No bar and no time left to show, so the row's end gives the clock the card gave.
+    const resume = await screen.findByTestId('entry-resume');
+    expect(within(resume).queryByRole('progressbar')).toBeNull();
+    const left = within(resume).getByTestId('entry-left');
+    expect(left.getAttribute('title')).toBe('Resume at 30:00');
+    expect(within(left).getByText('Resume at 30:00')).toBeTruthy();
+    expect(within(left).getByText('30:00')).toBeTruthy();
+    // The other row is plain history: no clock.
+    expect(screen.getAllByTestId('entry-left')).toHaveLength(1);
+  });
+
   it('empty while the quality filter is on, says it may be hiding channels', async () => {
     rpc.handlers['settings.get'] = () => ({ ...DEFAULT_SETTINGS, liveMinQuality: 'uhd', liveHideUntagged: true });
     rpc.handlers['recent.list'] = () => [];

@@ -193,7 +193,6 @@
   "historyRestorePartial": "{{restored}} van {{total}} items zijn terug.",
   "clearFailed": "Kan de geschiedenis niet wissen",
   "continueTitle": "{{title}} verder kijken vanaf {{time}}",
-  "removeContinue": "{{title}} verwijderen uit Verder kijken",
   "watchedPercent": "{{percent}}% bekeken",
   "typeLive": "Live kanaal",
   "typeMovie": "Film",

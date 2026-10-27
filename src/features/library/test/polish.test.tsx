@@ -205,8 +205,12 @@ describe('library removals can be undone', () => {
   it('a keyboard user resumes with Enter and reaches Remove from continue watching through the row menu', async () => {
     const [p1, p2] = [makePosition('p1', 600, 2400), makePosition('p2', 300, 2400)];
     rpc.handlers['recent.list'] = () => [p1, p2].map((p) => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! }));
-    rpc.handlers['positions.continueWatching'] = () => [p1, p2];
-    rpc.handlers['positions.remove'] = () => undefined;
+    // The saved spots as the core keeps them, so the removed one is gone from the refetch.
+    let spots = [p1, p2];
+    rpc.handlers['positions.continueWatching'] = () => spots;
+    rpc.handlers['positions.remove'] = (a) => {
+      spots = spots.filter((p) => p.ref.itemId !== (a as { ref: { itemId: string } }).ref.itemId);
+    };
     fakePlayer.items.length = 0;
     renderAt('/recent', recentRoute);
 
@@ -224,8 +228,12 @@ describe('library removals can be undone', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
     await waitFor(() => expect(rpc.callsOf('positions.remove')).toHaveLength(1));
     expect((rpc.callsOf('positions.remove')[0] as { ref: { itemId: string } }).ref.itemId).toBe('p1');
-    // The history entry stays; only its saved spot went.
+    // The history entry stays; only its saved spot went, and the strip's menu with it.
+    await waitFor(() => expect(within(screen.getAllByTestId('entry-row')[0]!).queryByTestId('entry-resume')).toBeNull());
     expect(screen.getAllByTestId('entry-row')).toHaveLength(2);
+    expect(within(screen.getAllByTestId('entry-actions')[0]!).queryByRole('button', { name: 'Actions for Continue p1' })).toBeNull();
+    // Focus stays on the row rather than dropping to the page with the menu's trigger.
+    expect(document.activeElement).toBe(row);
   });
 
   it('a failed undo says so instead of failing silently', async () => {

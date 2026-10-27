@@ -193,7 +193,6 @@
   "historyRestorePartial": "已還原 {{total}} 筆中的 {{restored}} 筆。",
   "clearFailed": "無法清除觀看記錄",
   "continueTitle": "從 {{time}} 繼續觀看 {{title}}",
-  "removeContinue": "將 {{title}} 從「繼續觀看」中移除",
   "watchedPercent": "已觀看 {{percent}}%",
   "typeLive": "直播頻道",
   "typeMovie": "電影",

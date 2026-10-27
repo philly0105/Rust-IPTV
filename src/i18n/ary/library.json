@@ -257,7 +257,6 @@
   "historyRestorePartial": "عاد {{restored}} من أصل {{total}} إدخال.",
   "clearFailed": "ما قدرناش نمسحو السجل",
   "continueTitle": "كمّل {{title}} من {{time}}",
-  "removeContinue": "حيد {{title}} من كمّل المشاهدة",
   "watchedPercent": "تشاهد {{percent}}%",
   "typeLive": "قناة مباشرة",
   "typeMovie": "فيلم",

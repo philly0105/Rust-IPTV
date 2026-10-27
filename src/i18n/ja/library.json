@@ -193,7 +193,6 @@
   "historyRestorePartial": "{{total}} 件中 {{restored}} 件を復元しました。",
   "clearFailed": "履歴をクリアできませんでした",
   "continueTitle": "{{title}}を{{time}}から再開",
-  "removeContinue": "{{title}}を「視聴を再開」から削除",
   "watchedPercent": "{{percent}}% 視聴済み",
   "typeLive": "ライブチャンネル",
   "typeMovie": "映画",

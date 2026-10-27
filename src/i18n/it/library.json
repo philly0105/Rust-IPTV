@@ -209,7 +209,6 @@
   "historyRestorePartial": "Sono tornate {{restored}} voci su {{total}}.",
   "clearFailed": "Impossibile cancellare la cronologia",
   "continueTitle": "Continua {{title}} da {{time}}",
-  "removeContinue": "Rimuovi {{title}} da Continua a guardare",
   "watchedPercent": "{{percent}}% visto",
   "typeLive": "Canale in diretta",
   "typeMovie": "Film",

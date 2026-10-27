@@ -209,7 +209,6 @@
   "historyRestorePartial": "{{restored}} de {{total}} entradas voltaram.",
   "clearFailed": "Não foi possível limpar o histórico",
   "continueTitle": "Continuar {{title}} em {{time}}",
-  "removeContinue": "Remover {{title}} de Continuar assistindo",
   "watchedPercent": "{{percent}}% assistido",
   "typeLive": "Canal ao vivo",
   "typeMovie": "Filme",

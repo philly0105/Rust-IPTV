@@ -209,7 +209,6 @@
   "historyRestorePartial": "{{restored}} entrées sur {{total}} sont revenues.",
   "clearFailed": "Impossible d'effacer l'historique",
   "continueTitle": "Reprendre {{title}} à {{time}}",
-  "removeContinue": "Retirer {{title}} de Reprendre la lecture",
   "watchedPercent": "{{percent}}% regardé",
   "typeLive": "Chaîne en direct",
   "typeMovie": "Film",

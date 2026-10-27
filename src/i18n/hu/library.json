@@ -193,7 +193,6 @@
   "historyRestorePartial": "{{total}} bejegyzésből {{restored}} visszakerült.",
   "clearFailed": "Nem sikerült törölni az előzményeket",
   "continueTitle": "{{title}} folytatása innen: {{time}}",
-  "removeContinue": "{{title}} eltávolítása a Lejátszás folytatása sorból",
   "watchedPercent": "{{percent}}% megtekintve",
   "typeLive": "Élő csatorna",
   "typeMovie": "Film",

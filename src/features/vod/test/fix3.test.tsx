@@ -323,7 +323,9 @@ describe('U4-fix3: watched state', () => {
     ];
     renderAt('/s/src1/series/s1', seriesRoute);
     expect(await screen.findByRole('button', { name: 'Play S01E01 Episode 1.1, Watched' })).toBeTruthy();
-    expect(screen.getAllByTestId('episode-watched')).toHaveLength(1);
+    // The window here is phone-sized: the watched episode carries its thumbnail's tick, and its facts
+    // leave Watched out (they say it in words from sm up, episodeListPhone.test).
+    expect(screen.getAllByTestId('episode-watched-chip')).toHaveLength(1);
     // Play starts after the watched episode.
     expect(screen.getByRole('button', { name: 'Play S01E02' })).toBeTruthy();
 

@@ -450,7 +450,8 @@ describe('SeriesDetailPage', () => {
     await screen.findByRole('heading', { name: 'Severance', level: 1 });
     expect(await screen.findByRole('button', { name: 'Resume S01E02' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Season 1/ })).toBeTruthy();
-    expect(screen.getByText('20% watched')).toBeTruthy();
+    // Phone-sized here: the row's facts leave the percent to the thumbnail's bar, and its play button says it.
+    expect(screen.getByRole('button', { name: 'Resume S01E02 Episode 1.2, 20% watched' })).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: /Season 2/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Play S02E01 Episode 2.1' }));
     await waitFor(() => expect(played).toHaveLength(1));

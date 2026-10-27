@@ -78,7 +78,8 @@ export function offlineDownload(d: Download | undefined): Download | undefined {
 /**
  * Episodes of one season, virtualized. Each row plays on Enter/click (from the downloaded file when
  * there is one); arrows move between rows. A row is one surface: it lights on hover, and its facts
- * (code, runtime, watched or progress, downloaded) read as one line above the title.
+ * (code, runtime, watched or progress, downloaded) read as one line above the title. On a phone that
+ * line keeps to the code, the runtime, Now playing and the downloaded icon.
  */
 export function EpisodeList({
   episodes,
@@ -139,6 +140,8 @@ export function EpisodeList({
         const code = episodeCode(ep.season, ep.episode);
         const hasActions = !!onToggleWatched || canDownload;
         const offline = offlineDownload(downloads.get(ep.id));
+        // How far in, for the row's facts and its play button's name (the only place a phone says it in words).
+        const progressLabel = !playing && resumable && pos ? t('percentWatched', { percent: Math.round(fraction * 100) }) : undefined;
         return (
           <div
             key={ep.id}
@@ -163,7 +166,7 @@ export function EpisodeList({
                 type="button"
                 data-grid-index={row.index}
                 onClick={() => onPlay(ep)}
-                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}${offline ? `, ${t('downloaded')}` : ''}`}
+                aria-label={`${resumable ? t('resume') : t('play')} ${code} ${ep.title}${watched ? `, ${t('watched')}` : ''}${progressLabel ? `, ${progressLabel}` : ''}${offline ? `, ${t('downloaded')}` : ''}`}
                 aria-current={playing ? 'true' : undefined}
                 className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-focus sm:gap-4"
               >
@@ -181,7 +184,7 @@ export function EpisodeList({
                   {/* On the thumbnail the bar is glass, and drawn only (the row says how far). A watched
                       episode shows the watched tick instead, as a poster does. */}
                   {watched ? (
-                    <WatchedChip className="pointer-events-none absolute end-1.5 top-1.5" />
+                    <WatchedChip className="pointer-events-none absolute end-1.5 top-1.5" testId="episode-watched-chip" />
                   ) : fraction > 0 ? (
                     <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5">
                       <ProgressBar value={fraction} max={1} size="xs" tone="glass" decorative />
@@ -190,10 +193,16 @@ export function EpisodeList({
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                   {/* One line of facts, one separator between them; the runtime no longer floats to the
-                      far end, where it sat on another line from the actions beside it. */}
+                      far end, where it sat on another line from the actions beside it. On a phone the
+                      column is 110-140 px wide and a wrapped line pushed a two-line title out of the
+                      84 px row, so there it is one line high: Watched and the percent give way to the
+                      thumbnail's tick and bar (the play button's name still says both), Downloaded keeps
+                      its icon, and an item that does not fit (Now playing beside a long runtime; the
+                      row's tick and fill mark it too) wraps whole onto a second line that is cut off.
+                      A line cut at its end showed "· N". */}
                   <MetaLine
                     as="span"
-                    className="min-w-0 text-caption text-fg-subtle"
+                    className="min-w-0 text-caption text-fg-subtle max-sm:h-[1lh] max-sm:overflow-hidden max-sm:whitespace-nowrap"
                     items={[
                       <span key="code" className="tabular text-fg-muted">
                         {code}
@@ -203,7 +212,7 @@ export function EpisodeList({
                           {runtime}
                         </span>
                       ),
-                      watched && (
+                      watched && sm && (
                         <span key="watched" className="inline-flex items-center gap-1 text-success" data-testid="episode-watched">
                           <CircleCheck aria-hidden size={12} className="shrink-0" />
                           {t('watched')}
@@ -214,15 +223,15 @@ export function EpisodeList({
                           {t('nowPlaying')}
                         </span>
                       ),
-                      !playing && resumable && pos && (
+                      progressLabel && sm && (
                         <span key="progress" className="tabular">
-                          {t('percentWatched', { percent: Math.round(fraction * 100) })}
+                          {progressLabel}
                         </span>
                       ),
                       offline && (
                         <span key="offline" className="inline-flex items-center gap-1" data-testid="episode-offline">
                           <HardDriveDownload aria-hidden size={12} className="shrink-0" />
-                          {t('downloaded')}
+                          {sm && t('downloaded')}
                         </span>
                       ),
                     ]}

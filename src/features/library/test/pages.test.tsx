@@ -295,8 +295,9 @@ describe('FavoritesPage', () => {
     renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
     expect(await screen.findByText('No favorites yet')).toBeTruthy();
     expect(screen.queryByTestId('page-search')).toBeNull();
-    // One icon per idea: a favourite is the rail's heart.
+    // One icon per idea: a favourite is the rail's heart, and the copy under it no longer says "Star".
     expect(document.querySelector('svg.lucide-heart')).toBeTruthy();
+    expect(screen.getByText('Add channels, movies, and series from any source to your favorites to collect them here.')).toBeTruthy();
     cleanup();
 
     rpc.handlers['favorites.list'] = () => favs;

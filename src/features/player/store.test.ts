@@ -167,6 +167,27 @@ describe('store transitions', () => {
     }
   });
 
+  it('selects live, catch-up, and movie or series players independently', async () => {
+    const choices = { player: 'embedded-mpv', livePlayer: 'embedded-mpv', catchupPlayer: 'html5', vodPlayer: 'vlc' } as const;
+    expect(store.playerForSource(choices, { isLive: true, isRadio: false })).toBe('embedded-mpv');
+    expect(store.playerForSource(choices, { isLive: false, isRadio: false, catchupProgramStart: '2026-10-25T10:00:00Z' })).toBe('html5');
+    expect(store.playerForSource(choices, { isLive: false, isRadio: false })).toBe('vlc');
+    expect(store.playerForSource(choices, { isLive: false, isRadio: true })).toBe('embedded-mpv');
+    expect(store.playerForSource({ player: 'mpv' }, { isLive: false, isRadio: false })).toBe('mpv');
+    env.desktop = true;
+    try {
+      handlers['settings.get'] = () => choices;
+      handlers['player.openExternal'] = () => undefined;
+      await usePlayerStore.getState().play(vod('1'));
+      expect(usePlayerStore.getState().mode).toBe('external');
+      expect(calls('player.openExternal')).toEqual([{
+        player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }),
+      }]);
+    } finally {
+      env.desktop = false;
+    }
+  });
+
   it('a saved mpv or vlc plays in the built-in player in the browser', async () => {
     for (const player of ['mpv', 'vlc'] as const) {
       store.setSettingsCache({ player } as Settings);
@@ -1231,6 +1252,22 @@ describe('settings and the first-frame watchdog', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(usePlayerStore.getState().status).toBe('error');
     expect(media.useMediaStore.getState().errorCode).toBe('timeout');
+  });
+
+  it('does not time out live mpv playback whose position advances while mpv reports paused', async () => {
+    vi.useFakeTimers();
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/live/101.ts', kind: 'mpegts', title: 'News', isLive: true, isRadio: false });
+    await playItem({ title: 'News', isLive: true, ref: liveRef, sourceKind: 'xtream' });
+    usePlayerStore.setState({ mode: 'embedded-mpv' });
+    store.reportStatus('paused');
+    media.useMediaStore.setState({ waiting: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    store.reportProgress(5);
+    await vi.advanceTimersByTimeAsync(store.LIVE_STARTUP_TIMEOUT_MS - 5_000);
+    expect(usePlayerStore.getState().status).toBe('paused');
+    expect(media.useMediaStore.getState().errorCode).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(store.LIVE_STARTUP_TIMEOUT_MS * 2);
+    expect(usePlayerStore.getState().status).toBe('paused');
   });
 
   it('a pause the user asked for before the first frame is not a hang', async () => {

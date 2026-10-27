@@ -4,7 +4,7 @@
 //! export, reset and import.
 
 use iptv_core::backup::{APP_SETTING_EXCLUDED, APP_SETTING_KEYS};
-use iptv_core::model::Settings;
+use iptv_core::model::{Settings, VideoPlayer};
 use iptv_core::rpc::RpcRouter;
 use iptv_core::{AppState, BroadcastSink};
 use serde_json::{json, Map, Value};
@@ -16,6 +16,9 @@ use std::sync::Arc;
 #[test]
 fn every_settings_field_is_exported_or_explicitly_excluded() {
     let full = Settings {
+        live_player: Some(VideoPlayer::Html5),
+        catchup_player: Some(VideoPlayer::Html5),
+        vod_player: Some(VideoPlayer::Html5),
         last_route: Some("/live".into()),
         mpv_path: Some("mpv".into()),
         vlc_path: Some("vlc".into()),

@@ -1119,6 +1119,7 @@ async function mpegtsEngine(
   let lastNetworkTraceAt = 0;
   /** The stream produced media once: only then is a dropped connection restarted here. */
   let hadMedia = false;
+  let failed = false;
   /** Handed to `onNotTs`: whatever this pipeline reports after that is moot. */
   let handedOff = false;
   /**
@@ -1206,8 +1207,17 @@ async function mpegtsEngine(
   };
 
   const fail = (err: EngineError): void => {
+    if (destroyed || failed) return;
+    failed = true;
     traceTimeshift(source, 'mpegts fatal', { kind: err.kind, message: err.message, currentTime: el.currentTime, hadMedia });
-    if (!destroyed) cb.onError(err);
+    const toStop = player;
+    queueMicrotask(() => {
+      if (toStop && player === toStop) {
+        player = null;
+        teardown(toStop);
+      }
+    });
+    cb.onError(err);
   };
 
   const withPark = (from: string): string => {
@@ -1229,10 +1239,10 @@ async function mpegtsEngine(
     }, config);
     player = p;
     p.on(mpegts.Events.ERROR, (type: string, detail: string, info?: { code?: number; msg?: string }) => {
-      if (player !== p || destroyed || handedOff) return;
-      const http = info?.code && info.code > 0 ? ` (HTTP ${info.code})` : '';
+      if (player !== p || destroyed || handedOff || failed) return;
+      const http = type === mpegts.ErrorTypes.NETWORK_ERROR && info?.code && info.code > 0 ? ` (HTTP ${info.code})` : '';
       const message = `${detail || type}${http}`;
-      traceTimeshift(source, 'mpegts error', { type, detail, code: info?.code, hadMedia, loadComplete, currentTime: el.currentTime });
+      traceTimeshift(source, 'mpegts error', { type, detail, code: info?.code, reason: info?.msg, hadMedia, loadComplete, currentTime: el.currentTime });
       if (type === mpegts.ErrorTypes.NETWORK_ERROR) {
         // An HTTP answer (404, 503, ...) is the provider's verdict: it goes up at once, and the
         // player's reconnect decides whether a retry is worth it (`reconnect.ts`, one layer

@@ -254,6 +254,7 @@ function measureParts(surface: Element): Parts {
   }
   /** The on-screen rect of chrome that may overlap the surface, or null when it cannot. */
   const visible = (node: Element): Rect | null => {
+    if (node.hasAttribute('data-mpv-notices') && !node.firstElementChild) return null;
     // The surface's own content, or a container the player itself sits in.
     if (node === surface || surface.contains(node) || node.contains(surface)) return null;
     // In fullscreen only the top layer is visible: chrome left outside it (the docked page's
@@ -270,7 +271,7 @@ function measureParts(surface: Element): Parts {
   const host = surface.closest('[data-player-host]') ?? surface.parentElement ?? document.body;
   /** The player's own popovers are holes; other host chrome (the control bar) is reserved. */
   const reservedInHost = (node: Element): boolean =>
-    host.contains(node) && node.matches(RESERVED_SELECTOR) && !node.matches(PLAYER_OVERLAY_SELECTOR);
+    host.contains(node) && node.matches(RESERVED_SELECTOR) && !node.closest(PLAYER_OVERLAY_SELECTOR);
   const overlays: Rect[] = [];
   const modals: Rect[] = [];
   for (const node of Array.from(document.querySelectorAll(OVERLAY_SELECTOR))) {

@@ -430,12 +430,13 @@ function MpvNotices({ compact, overlay = false }: { compact: boolean; overlay?: 
   if (mpv?.attached && status === 'loading') {
     return (
       <div role="status" aria-live="polite" data-mpv-reserved="" className={cn(strip, 'text-on-glass-muted')}>
-        {t('mpvLoading')}
+        {t(source?.catchupProgramStart ? 'buffering' : 'mpvLoading')}
       </div>
     );
   }
-  // Docked: a strip like the loading one. Fullscreen and PiP show it in the bar readout instead.
-  if (buffering && !overlay) {
+  // Compact players have no bar readout; the notice sits in the overlay over
+  // the video so a short cache stall does not resize the native surface.
+  if (buffering && !overlay && compact) {
     return (
       <div role="status" aria-live="polite" data-mpv-reserved="" className={strip}>
         <BufferingLabel />
@@ -588,7 +589,15 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
         focusPin.onBlur(e);
       }}
     >
-      <MpvSurface className={overlay ? 'absolute! inset-0' : 'min-h-0 flex-1'} />
+      <div className={cn('min-h-0', overlay ? 'absolute inset-0' : 'relative flex-1')}>
+        <MpvSurface className={overlay ? 'absolute! inset-0' : undefined} />
+        {/* Notices cover the bottom of the picture; the native view keeps one steady size. */}
+        {!overlay && (
+          <div data-mpv-overlay="" data-mpv-notices="" className="absolute inset-x-0 bottom-0 z-10">
+            <MpvNotices compact={compact} />
+          </div>
+        )}
+      </div>
       {/* A phone bar's thumbnail is the picture alone: the bar beside it has the controls. */}
       {!thumb && (
         <>
@@ -669,8 +678,7 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
             )
           ) : (
             <>
-              <MpvNotices compact={compact} />
-              <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} />
+              <Controls variant="dock" visible compact={compact} onMenuOpenChange={setMenuOpen} readoutIdle={buffering ? <BufferingLabel /> : undefined} />
             </>
           )}
         </>
@@ -875,7 +883,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   // Resume notice for VOD.
   const resumedFrom = source?.resumeSeconds;
   useEffect(() => {
-    if (resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
+    if (source?.url && resumedFrom && resumedFrom > MIN_RESUME_SECONDS && !compact) {
       showOsd(t('resumedAt', { time: formatTime(resumedFrom) }));
     }
     // Only when a new item starts.

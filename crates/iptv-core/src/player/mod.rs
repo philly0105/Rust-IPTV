@@ -194,13 +194,20 @@ pub struct PlayerCapabilities {
     pub reason: Option<String>,
 }
 
-/// Computes `player.capabilities`. Embedded mpv needs Windows, a found
-/// `mpv.exe`, and a registered [`ChildWindowFactory`] (desktop shell only).
+/// Computes `player.capabilities`. Embedded mpv needs a registered window
+/// factory and either mpv.exe (Windows) or libmpv (macOS).
 pub fn capabilities(state: &AppState) -> PlayerCapabilities {
     let detected = detect(&state.settings_snapshot());
     let has_factory = window_factory(state).is_some();
-    let reason =
-        embedded_unavailable_reason(cfg!(windows), detected.mpv_path.is_some(), has_factory);
+    #[cfg(target_os = "macos")]
+    let mpv_found = embedded::native_available();
+    #[cfg(not(target_os = "macos"))]
+    let mpv_found = detected.mpv_path.is_some();
+    let reason = embedded_unavailable_reason(
+        cfg!(any(windows, target_os = "macos")),
+        mpv_found,
+        has_factory,
+    );
     PlayerCapabilities {
         embedded_mpv: reason.is_none(),
         mpv_path: detected.mpv_path,
@@ -211,16 +218,16 @@ pub fn capabilities(state: &AppState) -> PlayerCapabilities {
 
 /// The user-facing reason embedded mpv cannot run, or `None` when it can.
 pub fn embedded_unavailable_reason(
-    is_windows: bool,
+    platform_supported: bool,
     mpv_found: bool,
     has_window_factory: bool,
 ) -> Option<String> {
-    if !is_windows {
-        Some("Embedded mpv is only available on Windows. Choose mpv or VLC as an external player instead.".into())
+    if !platform_supported {
+        Some("Embedded mpv is only available on Windows and macOS. Choose mpv or VLC as an external player instead.".into())
     } else if !has_window_factory {
         Some("Embedded mpv needs the desktop app. In the browser, use the built-in player.".into())
     } else if !mpv_found {
-        Some("mpv.exe was not found. Put mpv in vendor\\mpv\\ beside the app, install it (scoop, choco, PATH), or set its path in Settings > Players.".into())
+        Some(if cfg!(windows) { "mpv.exe was not found. Put mpv in vendor\\mpv\\ beside the app, install it (scoop, choco, PATH), or set its path in Settings > Players." } else if cfg!(target_os = "macos") { "libmpv was not found. Install mpv with Homebrew to use embedded playback." } else { "mpv was not found. Install mpv or set its path in Settings > Players." }.into())
     } else {
         None
     }

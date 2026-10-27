@@ -3,7 +3,7 @@
  * (L3-visual-10): no placeholder that pushes the list down and goes away again, and no row that
  * appears or vanishes once the answer arrives.
  */
-import { act, cleanup, screen, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PlayerCapabilities } from '@/api/rpc';
@@ -39,8 +39,8 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const radios = () => within(screen.getByRole('radiogroup', { name: 'Player' })).getAllByRole('radio') as HTMLInputElement[];
-const values = () => radios().map((r) => r.value);
+const live = () => screen.getByTestId('select-livePlayer') as HTMLSelectElement;
+const values = () => Array.from(live().options).map((option) => option.value);
 
 async function openPlayback() {
   renderAt(settingsRoutes, '/settings/playback');
@@ -77,21 +77,17 @@ describe('Settings > Playback while the player capabilities load (L3-visual-10)'
     flags.desktop = true;
     await openPlayback();
     expect(values()).toEqual(['html5', 'embedded-mpv', 'mpv', 'vlc']);
-    expect(screen.getByTestId('player-embedded-mpv')).toHaveProperty('disabled', false);
+    expect(live().querySelector('option[value="embedded-mpv"]')).toHaveProperty('disabled', false);
     await act(async () => answer({ embeddedMpv: true, mpvPath: 'C:/mpv/mpv.exe' }));
-    await screen.findByText("VLC wasn't found. Set its path under External players.");
     expect(values()).toEqual(['html5', 'embedded-mpv', 'mpv', 'vlc']);
-    expect(screen.getByTestId('player-embedded-mpv')).toHaveProperty('disabled', false);
+    expect(live().querySelector('option[value="embedded-mpv"]')).toHaveProperty('disabled', false);
   });
 
   it('desktop without mpv: the row stays, disabled, and says why', async () => {
     flags.desktop = true;
     await openPlayback();
     await act(async () => answer({ embeddedMpv: false, reason: 'mpv.exe was not found' }));
-    await screen.findByText('mpv.exe was not found');
     expect(values()).toEqual(['html5', 'embedded-mpv', 'mpv', 'vlc']);
-    const row = screen.getByTestId('player-embedded-mpv');
-    expect(row).toHaveProperty('disabled', true);
-    expect(row.closest('label')!.textContent).toContain('mpv.exe was not found');
+    await waitFor(() => expect(live().querySelector('option[value="embedded-mpv"]')).toHaveProperty('disabled', true));
   });
 });

@@ -21,6 +21,8 @@ mod helper_windows;
 mod memory;
 #[cfg(windows)]
 mod mpv_window;
+#[cfg(target_os = "macos")]
+mod mpv_window_mac;
 mod pip_state;
 #[cfg(windows)]
 mod pip_window;
@@ -861,6 +863,11 @@ async fn boot_state(
     iptv_core::player::set_window_factory(
         &state,
         Arc::new(crate::mpv_window::MpvWindowFactory::new(handle.clone())),
+    );
+    #[cfg(target_os = "macos")]
+    iptv_core::player::set_window_factory(
+        &state,
+        Arc::new(crate::mpv_window_mac::MpvWindowFactory::new(handle.clone())),
     );
 
     tauri::async_runtime::spawn(allow_known_media_dirs(handle.clone(), Arc::clone(&state)));

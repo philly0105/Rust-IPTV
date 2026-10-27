@@ -7,7 +7,7 @@ import type { Settings, StreamFormat, VideoPlayer } from '@/api/types';
 import { BackgroundChoice, ColorChoice, PositionSlider, SizeChoice, SubtitlePreview } from '@/features/player/components/SubtitleStyleFields';
 import { styleFromSettings } from '@/features/player/subtitles/style';
 
-import { Badge, Button, RadioGroup, errorDescription } from '@/ui';
+import { Badge, Button, Select, errorDescription } from '@/ui';
 import { Segmented, SettingsGroup, SettingsRow, SettingsSection, SwitchRow } from '../components';
 import type { SectionProps } from './types';
 
@@ -95,8 +95,9 @@ export function PlaybackSection({ settings, update }: SectionProps) {
   // The list keeps its shape while the capabilities load (L3-visual-10): no placeholder above it that
   // goes away again. Only the desktop app can embed mpv, so there the row is always listed, available
   // until the answer says otherwise and then with the reason; in the browser it appears only if chosen.
-  const embeddedPending = caps.isPending && (isDesktop || settings.player === 'embedded-mpv');
-  if (embedded || isDesktop || settings.player === 'embedded-mpv') {
+  const selected = [settings.livePlayer ?? settings.player, settings.catchupPlayer ?? settings.player, settings.vodPlayer ?? settings.player];
+  const embeddedPending = caps.isPending && (isDesktop || selected.includes('embedded-mpv'));
+  if (embedded || isDesktop || selected.includes('embedded-mpv')) {
     players.push({
       value: 'embedded-mpv',
       label: t('playerEmbeddedMpv'),
@@ -124,10 +125,15 @@ export function PlaybackSection({ settings, update }: SectionProps) {
       },
     );
   }
-  // Legacy value from the old app's Video.js player maps to the built-in one, and so does a saved
-  // external player in the browser (the player store plays it there too).
-  const builtIn = settings.player === 'videojs' || (!isDesktop && (settings.player === 'mpv' || settings.player === 'vlc'));
-  const current: VideoPlayer = builtIn ? 'html5' : settings.player;
+  // Older settings had one choice for every stream. Each row uses it until the user selects
+  // its own player. Video.js and desktop-only choices in the browser play through built-in.
+  const current = (value: VideoPlayer): VideoPlayer =>
+    value === 'videojs' || (!isDesktop && (value === 'mpv' || value === 'vlc')) ? 'html5' : value;
+  const rows = [
+    { key: 'livePlayer' as const, label: t('livePlayer'), hint: t('livePlayerHint') },
+    { key: 'catchupPlayer' as const, label: t('catchupPlayer'), hint: t('catchupPlayerHint') },
+    { key: 'vodPlayer' as const, label: t('vodPlayer'), hint: t('vodPlayerHint') },
+  ];
 
   return (
     <SettingsSection title={t('sectionPlayback')} testId="settings-playback">
@@ -155,21 +161,28 @@ export function PlaybackSection({ settings, update }: SectionProps) {
               <Badge className="mt-0.5">{t('playerInUse')}</Badge>
             </div>
           ) : (
-            <RadioGroup<VideoPlayer>
-              label={t('player')}
-              name="settings-player"
-              value={current}
-              onValueChange={(player) => void update({ player })}
-              options={players.map((p) => ({
-                value: p.value,
-                label: p.label,
-                description: p.hint,
-                note: p.note,
-                // The saved choice stays selectable even when its player has gone missing.
-                disabled: !p.available && current !== p.value,
-                testId: `player-${p.value}`,
-              }))}
-            />
+            rows.map(({ key, label, hint }) => {
+              const value = current(settings[key] ?? settings.player);
+              const choice = players.find((p) => p.value === value);
+              return (
+                <SettingsRow key={key} label={label} description={choice?.note ?? hint}>
+                  {({ id, describedBy }) => (
+                    <Select
+                      id={id}
+                      aria-describedby={describedBy}
+                      value={value}
+                      options={players.map((p) => ({
+                        value: p.value,
+                        label: p.label,
+                        disabled: !p.available && value !== p.value,
+                      }))}
+                      onValueChange={(player) => void update({ [key]: player as VideoPlayer })}
+                      data-testid={`select-${key}`}
+                    />
+                  )}
+                </SettingsRow>
+              );
+            })
           )}
         </div>
       </SettingsGroup>

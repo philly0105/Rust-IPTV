@@ -610,6 +610,7 @@ export interface RpcMap {
   /** `volume` (0..100) and `muted` are applied before the first state event. */
   'mpv.attach': Cmd<{ bounds: Bounds; volume?: number; muted?: boolean }, MpvState>;
   'mpv.load': Cmd<{ source: PlayerSource }, void>;
+  'mpv.unload': Cmd<void, void>;
   /** Raw mpv JSON IPC command. */
   'mpv.command': Cmd<{ cmd: MpvArg[] }, unknown>;
   'mpv.setProperty': Cmd<{ name: string; value: unknown }, void>;
@@ -921,6 +922,7 @@ export const RPC_COMMANDS = [
   'player.stopExternal',
   'mpv.attach',
   'mpv.load',
+  'mpv.unload',
   'mpv.command',
   'mpv.setProperty',
   'mpv.setBounds',

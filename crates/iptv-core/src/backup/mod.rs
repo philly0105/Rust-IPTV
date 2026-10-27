@@ -139,11 +139,18 @@ pub const APP_SETTING_KEYS: [&str; 41] = [
 /// Settings fields a backup never carries, each with the reason. `epgUrls`
 /// travels on its own (IPTVnator's field) and is listed here only so the
 /// completeness test accounts for it.
-pub const APP_SETTING_EXCLUDED: [(&str, &str); 19] = [
+pub const APP_SETTING_EXCLUDED: [(&str, &str); 23] = [
     ("epgUrls", "exported as the manifest's own settings.epgUrls"),
     (
         "player",
         "depends on the players installed here; embedded mpv is desktop-only",
+    ),
+    ("livePlayer", "depends on the players installed here"),
+    ("catchupPlayer", "depends on the players installed here"),
+    ("vodPlayer", "depends on the players installed here"),
+    (
+        "downloadRateLimitBps",
+        "a network cap tuned for this machine",
     ),
     ("mpvPath", "a path on this machine"),
     ("vlcPath", "a path on this machine"),

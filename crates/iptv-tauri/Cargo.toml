@@ -26,6 +26,7 @@ updater = ["dep:tauri-plugin-updater"]
 
 [build-dependencies]
 tauri-build = { workspace = true }
+cc = "1"
 
 [dependencies]
 iptv-core = { workspace = true }

@@ -279,14 +279,17 @@ describe('Controls live rewind', () => {
   });
 
   it('the behind-live readout and the LIVE badge agree near the edge', () => {
-    // 8 s behind on mpv is within its edge slack: LIVE, no "0:08 behind live".
+    // 25 s behind mpv's cached end can still be normal live playback.
     act(() => {
-      usePlayerStore.setState({ source: live, mode: 'embedded-mpv', durationSeconds: undefined, positionSeconds: 1082 });
+      usePlayerStore.setState({ source: live, mode: 'embedded-mpv', durationSeconds: undefined, positionSeconds: 1065 });
       useMediaStore.setState({ seekable: { start: 900, end: 1090 } });
     });
     render(<Controls variant="dock" visible />);
     expect(screen.getByTestId('live-badge')).toBeTruthy();
     expect(screen.getByRole('slider', { name: /seek/i }).getAttribute('aria-valuetext')).not.toMatch(/behind/);
+    act(() => usePlayerStore.setState({ positionSeconds: 1059 }));
+    expect(screen.getByRole('button', { name: 'Jump to live' })).toBeTruthy();
+    expect(screen.getByRole('slider', { name: /seek/i }).getAttribute('aria-valuetext')).toMatch(/behind/);
   });
 });
 

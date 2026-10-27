@@ -1146,6 +1146,13 @@ impl Default for RemoteControlSettings {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub player: VideoPlayer,
+    /// Per-content player choices. None preserves the legacy `player` setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_player: Option<VideoPlayer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catchup_player: Option<VideoPlayer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vod_player: Option<VideoPlayer>,
     pub stream_format: StreamFormat,
     pub epg_urls: Vec<String>,
     pub language: String,
@@ -1282,6 +1289,9 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             player: VideoPlayer::Html5,
+            live_player: None,
+            catchup_player: None,
+            vod_player: None,
             stream_format: StreamFormat::Auto,
             epg_urls: Vec::new(),
             language: "en".to_string(),
@@ -1795,6 +1805,24 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn player_choices_preserve_legacy_settings_and_round_trip() {
+        let mut settings: Settings =
+            serde_json::from_value(serde_json::json!({ "player": "embedded-mpv" })).unwrap();
+        assert_eq!(settings.player, VideoPlayer::EmbeddedMpv);
+        assert_eq!(settings.live_player, None);
+        assert_eq!(settings.catchup_player, None);
+        assert_eq!(settings.vod_player, None);
+        settings.live_player = Some(VideoPlayer::EmbeddedMpv);
+        settings.catchup_player = Some(VideoPlayer::Html5);
+        settings.vod_player = Some(VideoPlayer::Vlc);
+        let restored: Settings =
+            serde_json::from_value(serde_json::to_value(settings).unwrap()).unwrap();
+        assert_eq!(restored.live_player, Some(VideoPlayer::EmbeddedMpv));
+        assert_eq!(restored.catchup_player, Some(VideoPlayer::Html5));
+        assert_eq!(restored.vod_player, Some(VideoPlayer::Vlc));
+    }
 
     #[test]
     fn enums_are_kebab_case() {

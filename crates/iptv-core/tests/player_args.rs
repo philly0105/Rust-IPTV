@@ -345,12 +345,14 @@ fn external_player_serde() {
 #[test]
 fn embedded_args_contain_c4_flags_after_user_args() {
     let pipe = mpv_pipe_name(4242);
+    #[cfg(windows)]
     assert_eq!(pipe, r"\\.\pipe\tsrust-iptv-mpv-4242");
+    #[cfg(not(windows))]
+    assert_eq!(pipe, "/tmp/tsrust-iptv-mpv-4242");
     let args = embedded_mpv_args(0x1234, &pipe, "--wid=999 --vo=gpu-next", 80.4, true);
     assert_eq!(&args[..2], &s(&["--wid=999", "--vo=gpu-next"])[..]);
     for flag in [
         "--wid=4660",
-        r"--input-ipc-server=\\.\pipe\tsrust-iptv-mpv-4242",
         "--idle=yes",
         "--keep-open=yes",
         "--no-osc",
@@ -365,6 +367,7 @@ fn embedded_args_contain_c4_flags_after_user_args() {
             "missing {flag} in {args:?}"
         );
     }
+    assert!(args.contains(&format!("--input-ipc-server={pipe}")));
     // Our --wid comes after the user's, so mpv uses ours.
     let ours = args.iter().position(|a| a == "--wid=4660").unwrap();
     assert!(ours > 0);

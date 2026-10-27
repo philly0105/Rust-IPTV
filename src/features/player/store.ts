@@ -145,6 +145,8 @@ let saveTimer: ReturnType<typeof setInterval> | null = null;
 let playToken = 0;
 /** Incremented by every user-level request (playItem, playSource, play, stop); pending resolutions compare it. */
 let requestSeq = 0;
+/** Preserve selection order when rapid VOD switches close an old mpv file. */
+let pendingMpvUnload: Promise<void> = Promise.resolve();
 let settingsCache: Settings | null = null;
 let settingsPromise: Promise<Settings | null> | null = null;
 const sourceKindCache = new Map<string, SourceKind>();
@@ -250,7 +252,7 @@ export function kindFromUrl(url: string): PlayerKind {
 /** VOD content whose position is tracked (`positions.set`). */
 export function tracksPosition(source: PlayerSource | undefined): source is PlayerSource & { ref: ItemRef } {
   return (
-    !!source?.ref && !source.isLive && (source.ref.contentType === 'movie' || source.ref.contentType === 'series')
+    !!source?.url && !!source.ref && !source.isLive && (source.ref.contentType === 'movie' || source.ref.contentType === 'series')
   );
 }
 
@@ -402,6 +404,17 @@ export function modeForSettings(player: VideoPlayer | undefined, source: Pick<Pl
   if (source.isRadio) return 'radio';
   if (player === 'embedded-mpv' && !source.drm) return 'embedded-mpv';
   return 'inline';
+}
+
+/** Catch-up is recorded live TV but uses a separate provider stream and player choice. */
+export function playerForSource(
+  settings: Pick<Settings, 'player' | 'livePlayer' | 'catchupPlayer' | 'vodPlayer'> | null | undefined,
+  source: Pick<PlayerSource, 'catchupProgramStart' | 'isLive' | 'isRadio'>,
+): VideoPlayer | undefined {
+  if (!settings) return undefined;
+  if (source.catchupProgramStart) return settings.catchupPlayer ?? settings.player;
+  if (source.isLive || source.isRadio) return settings.livePlayer ?? settings.player;
+  return settings.vodPlayer ?? settings.player;
 }
 
 export function errorMessage(err: unknown): string {
@@ -590,11 +603,15 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     bindUnload();
     // Persist the outgoing item before switching.
     if (get().source) flushProgress();
+    // Direct plays (including VOD failover) also need the previous embedded
+    // file closed. The catalog/queue paths may already have started this.
+    const previousUnloaded = unloadPreviousForVod(source.isLive);
     lastSavedPosition = -1;
 
     const settings = await getSettings();
     if (token !== playToken) return;
-    let mode = opts?.mode ?? modeForSettings(settings?.player, source);
+    const selectedPlayer = playerForSource(settings, source);
+    let mode = opts?.mode ?? modeForSettings(selectedPlayer, source);
     // Embedded mpv needs the desktop shell; everywhere else the built-in player takes over. It can't
     // do ClearKey either.
     if (mode === 'embedded-mpv' && (!isDesktop || source.drm)) mode = 'inline';
@@ -605,6 +622,8 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       if (token !== playToken) return;
       if (mpvUnavailable()) mode = 'inline';
     }
+    await previousUnloaded;
+    if (token !== playToken) return;
     const queue = opts?.queue ?? (get().queue.some((q) => sameSource(q, source)) ? get().queue : []);
 
     resetMedia();
@@ -634,7 +653,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       clearCatchupResume();
       const chosen = opts?.externalPlayer ?? (externalChoice && sameSource(externalChoice.source, source) ? externalChoice.player : undefined);
       externalChoice = chosen ? { source, player: chosen } : null;
-      const player = chosen ?? (settings?.player === 'vlc' ? 'vlc' : 'mpv');
+      const player = chosen ?? (selectedPlayer === 'vlc' ? 'vlc' : 'mpv');
       // downloads: the player connects to the provider itself, so a download holding the
       // connection it needs lets go first.
       const room = reportAnswered(source);
@@ -846,11 +865,10 @@ export function reportProgress(positionSeconds: number, durationSeconds?: number
 export function reportStatus(status: PlayerState['status'], error?: string): void {
   const s = usePlayerStore.getState();
   if (!s.source) return;
-  // No media yet (a failed lookup): the surface's events are about the media it just dropped,
-  // not this item. A zap waiting to tune keeps the last picture up under its banner: that
-  // media's events are not about the channel the placeholder names either.
+  // No media yet (a failed lookup or a VOD switch): surface events still belong to the
+  // previous file. A zap waiting to tune keeps that last picture under its banner too.
   if (isPendingZap(s.source)) return;
-  if (!s.source.url && status !== 'error' && status !== 'loading') return;
+  if (!s.source.url) return;
   if (status !== 'error' && useMediaStore.getState().errorCode) useMediaStore.setState({ errorCode: undefined });
   if (s.status === status && s.error === error) return;
   usePlayerStore.setState(status === 'error' ? { status, error } : { status, error: undefined });
@@ -988,12 +1006,21 @@ usePlayerStore.subscribe((s, prev) => {
   if (!watching || !key) return;
   stallFor = key;
   const firstFrame = startedFor !== key;
+  const positionAtStart = s.positionSeconds;
   stallTimer = setTimeout(
     () => {
       stallTimer = null;
       stallFor = undefined;
       const now = usePlayerStore.getState();
       if (watchKey(now.source) !== key || !waitingOnMedia(now, key)) return;
+      // Some live mpv streams keep reporting pause=true while video and
+      // time-pos advance. Progress over the watchdog interval is proof that
+      // the first frame arrived, even when the pause flag is stale.
+      if (now.mode === 'embedded-mpv' && now.source?.isLive && now.status === 'paused' &&
+          now.positionSeconds > positionAtStart + 0.5 && !useMediaStore.getState().waiting) {
+        startedFor = key;
+        return;
+      }
       traceTimeshift(now.source, 'player startup watchdog expired', { status: now.status, position: now.positionSeconds });
       useMediaStore.setState({ errorCode: 'timeout' });
       reportStatus('error', 'Timed out waiting for the stream');
@@ -1039,12 +1066,13 @@ export function cancelUpNext(): void {
  * Either way the entry picks up its saved position.
  */
 async function playQueued(entry: PlayerSource): Promise<void> {
-  const { queue, mode } = usePlayerStore.getState();
+  const { queue } = usePlayerStore.getState();
   // A queue of different items (not episodes of one series) asks the gate before the entry shows.
   if (entry.ref && !gatePassed(entry.ref)) {
     const seq = requestSeq;
     if (!(await passGate({ ref: entry.ref, title: entry.title })) || seq !== requestSeq) return;
   }
+  const previousUnloaded = unloadPreviousForVod(entry.isLive);
   const run = async (): Promise<void> => {
     const seq = ++requestSeq;
     let resolved = entry;
@@ -1072,12 +1100,44 @@ async function playQueued(entry: PlayerSource): Promise<void> {
       return;
     }
     if (seq !== requestSeq) return;
+    await previousUnloaded;
+    if (seq !== requestSeq) return;
     // The list owner may have rebuilt or refreshed the queue meanwhile: keep its newest copy.
     const latest = usePlayerStore.getState().queue;
-    await usePlayerStore.getState().play(resolved, { queue: latest.some((q) => sameSource(q, entry)) ? latest : queue, mode });
+    await usePlayerStore.getState().play(resolved, { queue: latest.some((q) => sameSource(q, entry)) ? latest : queue });
   };
-  if (!entry.url) usePlayerStore.setState({ status: 'loading', error: undefined });
+  if (!entry.isLive) {
+    usePlayerStore.setState({ status: 'loading', error: undefined, source: { ...entry, url: '' } });
+  } else if (!entry.url) {
+    usePlayerStore.setState({ status: 'loading', error: undefined });
+  }
   await run();
+}
+
+/** Release an embedded VOD connection while the next item's URL is resolving. */
+function unloadPreviousForVod(nextIsLive: boolean): Promise<void> {
+  const current = usePlayerStore.getState();
+  if (nextIsLive || current.mode !== 'embedded-mpv') return Promise.resolve();
+  // A rapid second selection can arrive after the first replaced the URL with
+  // a placeholder but before its unload RPC has completed.
+  if (!current.source?.url) return pendingMpvUnload;
+  // Capture the outgoing position before mpv clears its time-pos property.
+  flushProgress();
+  // The subsequent mpv.load also waits for idle, so a failed early request
+  // cannot cause two VOD connections to overlap.
+  pendingMpvUnload = pendingMpvUnload.then(() => rpc('mpv.unload').catch(() => undefined));
+  return pendingMpvUnload;
+}
+
+/** Release a failed movie/episode even when the error UI keeps its URL for Retry. */
+export function releaseFailedEmbeddedVod(): void {
+  const current = usePlayerStore.getState();
+  const refType = current.source?.ref?.contentType;
+  if (current.mode !== 'embedded-mpv' || !current.source?.url ||
+      (refType !== 'movie' && refType !== 'series')) return;
+  void unloadPreviousForVod(false);
+  // A title that never recovered must not auto-open again on the next app launch.
+  clearResume();
 }
 
 /** A resolution failed: show the error on the item it was for, and let Retry run it again. */
@@ -1250,7 +1310,7 @@ async function autoLiveFormat(args: PlayItemArgs): Promise<'ts' | undefined> {
   if ((args.ref.contentType !== 'live' && args.ref.contentType !== 'radio') || !liveTsPlayable()) return undefined;
   const settings = peekSettings() ?? (await getSettings());
   if (settings?.streamFormat !== 'auto') return undefined;
-  const mode = modeForSettings(settings.player, { isRadio: !!args.isRadio });
+  const mode = modeForSettings(settings.livePlayer ?? settings.player, { isRadio: !!args.isRadio });
   // play() moves embedded mpv to the built-in player outside the desktop app.
   return mode === 'inline' || mode === 'radio' || (mode === 'embedded-mpv' && !isDesktop) ? 'ts' : undefined;
 }
@@ -1449,22 +1509,23 @@ export async function startItem(
   const gate: PlaybackGateItem = args.categoryId ? { ref: args.ref, categoryId: args.categoryId, title: args.title } : { ref: args.ref, title: args.title };
   if (!(await passGate(gate))) return seq === requestSeq ? 'refused' : 'superseded';
   if (seq !== requestSeq) return 'superseded';
+  const previousUnloaded = unloadPreviousForVod(args.isLive);
   // Any other start replaces a start over's intent (a plain play of the same item resumes).
   startOverKey = args.fromStart ? playKey(args.ref, args.episodeId) : null;
   opts?.onAllowed?.();
   if (!opts?.keepList) leaveListZap(args.ref);
   const queueOpts = opts?.queue ? { queue: opts.queue } : undefined;
+  const placeholder: PlayerSource = {
+    url: '', kind: 'direct', title: args.title, isLive: args.isLive,
+    isRadio: !!args.isRadio, ref: args.ref,
+  };
+  if (args.episodeId) placeholder.episodeId = args.episodeId;
+  if (args.subtitle) placeholder.subtitle = args.subtitle;
+  if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
   usePlayerStore.setState({
     status: 'loading',
     error: undefined,
-    source: usePlayerStore.getState().source ?? {
-      url: '',
-      kind: 'direct',
-      title: args.title,
-      isLive: args.isLive,
-      isRadio: !!args.isRadio,
-      ref: args.ref,
-    },
+    source: args.isLive ? usePlayerStore.getState().source ?? placeholder : placeholder,
     dock: stageCount > 0 ? 'stage' : usePlayerStore.getState().dock === 'hidden' ? 'mini' : usePlayerStore.getState().dock,
   });
   let source: PlayerSource;
@@ -1474,10 +1535,6 @@ export async function startItem(
   } catch (err) {
     // A newer request won the race: do not clobber it.
     if (seq !== requestSeq) return 'superseded';
-    const placeholder: PlayerSource = { url: '', kind: 'direct', title: args.title, isLive: args.isLive, isRadio: !!args.isRadio, ref: args.ref };
-    if (args.episodeId) placeholder.episodeId = args.episodeId;
-    if (args.subtitle) placeholder.subtitle = args.subtitle;
-    if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
     failResolve(err, placeholder, () => playItem(args, queueOpts));
     throw err;
   }
@@ -1485,6 +1542,8 @@ export async function startItem(
     const subtitle = await opts.subtitle;
     if (subtitle) source = { ...source, subtitle };
   }
+  if (seq !== requestSeq) return 'superseded';
+  await previousUnloaded;
   if (seq !== requestSeq) return 'superseded';
   const playing = usePlayerStore.getState().play(source, queueOpts);
   // play() took its own request number before its first await.
@@ -1499,7 +1558,13 @@ export async function playSource(source: PlayerSource): Promise<void> {
   cancelUpNext();
   if (source.ref && !(await passGate({ ref: source.ref, title: source.title }))) return;
   if (seq !== requestSeq) return;
+  const previousUnloaded = unloadPreviousForVod(source.isLive);
+  if (!source.isLive) {
+    usePlayerStore.setState({ status: 'loading', error: undefined, source: { ...source, url: '' } });
+  }
   const withPos = await withResume(source);
+  if (seq !== requestSeq) return;
+  await previousUnloaded;
   if (seq !== requestSeq) return;
   await usePlayerStore.getState().play(withPos);
 }
@@ -1513,7 +1578,7 @@ export async function restorePlayback(): Promise<boolean> {
   const source: PlayerSource = { ...rec.source };
   if (!source.isLive && rec.positionSeconds > 0) source.resumeSeconds = rec.positionSeconds;
   else delete source.resumeSeconds;
-  await usePlayerStore.getState().play(source, { mode: rec.mode });
+  await usePlayerStore.getState().play(source);
   return true;
 }
 
@@ -2341,6 +2406,7 @@ export async function zapToNumber(n: number): Promise<Channel | undefined> {
 export function __resetPlayerForTests(): void {
   playToken = 0;
   requestSeq = 0;
+  pendingMpvUnload = Promise.resolve();
   externalChoice = null;
   stageCount = 0;
   controller = null;

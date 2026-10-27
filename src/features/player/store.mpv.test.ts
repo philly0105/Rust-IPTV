@@ -54,3 +54,54 @@ describe('embedded mpv known to be missing (L3-player-core-x1)', () => {
     expect(usePlayerStore.getState().mode).toBe('embedded-mpv');
   });
 });
+
+describe('embedded mpv VOD switching', () => {
+  it('waits for unload when a caller plays the next movie directly', async () => {
+    await usePlayerStore.getState().play(movie('1'));
+    let finishUnload: () => void = () => undefined;
+    const unload = vi.fn(() => new Promise<void>((resolve) => { finishUnload = resolve; }));
+    handlers['mpv.unload'] = unload;
+
+    const next = usePlayerStore.getState().play(movie('2'));
+    await vi.waitFor(() => expect(unload).toHaveBeenCalledOnce());
+    expect(usePlayerStore.getState().source?.url).toBe(movie('1').url);
+    finishUnload();
+    await next;
+    expect(usePlayerStore.getState().source?.url).toBe(movie('2').url);
+  });
+
+  it('unloads the previous movie before starting the next one', async () => {
+    await usePlayerStore.getState().play(movie('1'));
+    let finishUnload: () => void = () => undefined;
+    const unload = vi.fn(() => new Promise<void>((resolve) => { finishUnload = resolve; }));
+    handlers['mpv.unload'] = unload;
+
+    const next = store.playSource(movie('2'));
+    await vi.waitFor(() => expect(unload).toHaveBeenCalledOnce());
+    expect(usePlayerStore.getState().source).toMatchObject({ url: '', title: 'Movie 2' });
+    expect(usePlayerStore.getState().status).toBe('loading');
+    // A late error from the stopped file belongs to movie 1, not movie 2.
+    store.reportStatus('error', 'old stream disconnected');
+    expect(usePlayerStore.getState().status).toBe('loading');
+
+    finishUnload();
+    await next;
+    expect(usePlayerStore.getState().source?.url).toBe(movie('2').url);
+  });
+
+  it('keeps a rapid third selection behind the pending unload', async () => {
+    await usePlayerStore.getState().play(movie('1'));
+    let finishUnload: () => void = () => undefined;
+    handlers['mpv.unload'] = () => new Promise<void>((resolve) => { finishUnload = resolve; });
+
+    const second = store.playSource(movie('2'));
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.title).toBe('Movie 2'));
+    const third = store.playSource(movie('3'));
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.title).toBe('Movie 3'));
+    expect(usePlayerStore.getState().source?.url).toBe('');
+
+    finishUnload();
+    await Promise.all([second, third]);
+    expect(usePlayerStore.getState().source?.url).toBe(movie('3').url);
+  });
+});

@@ -141,7 +141,7 @@ Everything else stays on your computer or your server: sources and their logins,
 
 ## Development
 
-The app is a Tauri 2 desktop shell and an axum web server around one Rust core, with a React and TypeScript interface. You need Rust 1.90 or newer, Node 24 with pnpm 10 (`corepack enable`), and Windows for the desktop app; the core and the server also build on Linux.
+The app is a Tauri 2 desktop shell and an axum web server around one Rust core, with a React and TypeScript interface. You need Rust 1.90 or newer and Node 24 with pnpm 10 (`corepack enable`). The desktop app builds on Windows and macOS; the core and server also build on Linux. For embedded mpv on macOS, install mpv with Homebrew (`brew install mpv`) before starting the desktop app.
 
 ```sh
 pnpm install
@@ -149,6 +149,8 @@ pnpm tauri:dev   # the desktop app with hot reload
 pnpm mock        # sample Xtream, Stalker, M3U and XMLTV sources on port 7290
 pnpm check       # typecheck, unit tests, cargo test, clippy and rustfmt
 ```
+
+On macOS, `pnpm tauri build --bundles app --no-sign` creates an unsigned production app in `target/release/bundle/macos/`. Embedded mpv uses the system `libmpv`, so install mpv on the Mac that runs the app.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers every command, the end-to-end and screenshot tooling, CI, style and releases.
 

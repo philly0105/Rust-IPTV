@@ -683,24 +683,34 @@ describe('mpegts.js engine recovery', () => {
 
   it('maps errors: any HTTP status fails at once (the player reconnect owns retries), codec errors are unsupported', async () => {
     vi.useFakeTimers();
-    const callbacks = cb();
-    await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
-    const p2 = FakeTsPlayer.created[0]!;
+    const emitFatal = async (type: string, detail: string, info: Record<string, unknown>, kind: string, message?: string): Promise<void> => {
+      const callbacks = cb();
+      await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
+      const player = FakeTsPlayer.created.at(-1)!;
+      player.emit('error', type, detail, info);
+      expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ kind, ...(message ? { message } : {}) }));
+      await Promise.resolve();
+      expect(player.destroyed).toBe(true);
+    };
     // A 503 used to restart here as well, stacking on the player's own retries (L2-live-5).
-    p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 503 });
-    expect(callbacks.onError).toHaveBeenLastCalledWith(
-      expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 503)' }),
-    );
+    await emitFatal('NetworkError', 'HttpStatusCodeInvalid', { code: 503 }, 'network', 'HttpStatusCodeInvalid (HTTP 503)');
     await vi.advanceTimersByTimeAsync(tsRestartDelay(1) * 4);
     expect(FakeTsPlayer.created).toHaveLength(1);
-    p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 403 });
-    expect(callbacks.onError).toHaveBeenLastCalledWith(
-      expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 403)' }),
-    );
-    p2.emit('error', 'MediaError', 'CodecUnsupported', { msg: 'hevc' });
-    expect(callbacks.onError).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'unsupported' }));
-    p2.emit('error', 'MediaError', 'FormatError', {});
-    expect(callbacks.onError).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'media' }));
+    await emitFatal('NetworkError', 'HttpStatusCodeInvalid', { code: 403 }, 'network', 'HttpStatusCodeInvalid (HTTP 403)');
+    await emitFatal('MediaError', 'CodecUnsupported', { msg: 'hevc' }, 'unsupported');
+    await emitFatal('MediaError', 'FormatError', {}, 'media');
+  });
+
+  it('stops a failed MPEG-TS loader and reports an MSE decode error once without an HTTP label', async () => {
+    const callbacks = cb();
+    await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
+    const player = FakeTsPlayer.created[0]!;
+    for (let i = 0; i < 100; i++) player.emit('error', 'MediaError', 'MediaMSEError', { code: 11, msg: 'The object is in an invalid state.' });
+    expect(callbacks.onError).toHaveBeenCalledTimes(1);
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ kind: 'media', message: 'MediaMSEError' }));
+    await Promise.resolve();
+    expect(player.destroyed).toBe(true);
+    expect(player.loaded).toBe(false);
   });
 
   it('keeps the displayed live position monotonic across reconnects', async () => {

@@ -205,7 +205,7 @@ describe('seek preview position', () => {
     slider.setPointerCapture = () => undefined;
     slider.releasePointerCapture = () => undefined;
     fireEvent.pointerDown(slider, { button: 0, pointerId: 1, pointerType: 'touch', clientX: 0 });
-    expect(screen.getByTestId('seek-preview')).toBeTruthy();
+    expect(screen.getByTestId('seek-preview').hasAttribute('data-mpv-overlay')).toBe(true);
     fireEvent.pointerUp(slider, { button: 0, pointerId: 1, pointerType: 'touch', clientX: 0 });
     expect(screen.queryByTestId('seek-preview')).toBeNull();
   });

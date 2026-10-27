@@ -65,10 +65,6 @@
 [data-player-host][data-idle='true']:fullscreen * {
   cursor: none;
 }
-[data-player-window-layer] [data-player-host][data-idle='true'],
-[data-player-window-layer] [data-player-host][data-idle='true'] * {
-  cursor: none;
-}
 
 /*
  * Subtitles (engine tracks and loaded files) in the user's style (C6). The player draws them in

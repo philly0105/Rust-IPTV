@@ -551,6 +551,10 @@ export interface RemoteControlSettings {
 
 export interface Settings {
   player: VideoPlayer;
+  /** Per-content choices; omitted by older settings and resolved through `player`. */
+  livePlayer?: VideoPlayer;
+  catchupPlayer?: VideoPlayer;
+  vodPlayer?: VideoPlayer;
   streamFormat: StreamFormat;
   epgUrls: string[];
   language: string;

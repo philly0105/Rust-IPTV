@@ -226,6 +226,41 @@ describe('smart reconnect', () => {
     expect(usePlayerStore.getState().positionSeconds).toBe(600);
   });
 
+  it('does not reopen an unplayed movie and releases its embedded mpv connection', async () => {
+    handlers['mpv.unload'] = () => undefined;
+    sessionStorage.setItem(store.RESUME_KEY, 'failed movie');
+    usePlayerStore.setState({ source: movie, mode: 'embedded-mpv', status: 'loading' });
+    fail('Network error');
+    expect(usePlayerStore.getState().status).toBe('error');
+    expect(phase()).toBe('idle');
+    await vi.waitFor(() => expect(rpcMock.mock.calls.some(([name]) => name === 'mpv.unload')).toBe(true));
+    expect(sessionStorage.getItem(store.RESUME_KEY)).toBeNull();
+    vi.advanceTimersByTime(20_000);
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('times out an embedded movie stuck connecting and closes its stream', async () => {
+    handlers['mpv.unload'] = () => undefined;
+    usePlayerStore.setState({ source: movie, mode: 'embedded-mpv', status: 'loading' });
+    vi.advanceTimersByTime(reconnect.VOD_STARTUP_TIMEOUT_MS - 1);
+    expect(usePlayerStore.getState().status).toBe('loading');
+    vi.advanceTimersByTime(1);
+    expect(usePlayerStore.getState().status).toBe('error');
+    await vi.waitFor(() => expect(rpcMock.mock.calls.some(([name]) => name === 'mpv.unload')).toBe(true));
+    expect(retry).not.toHaveBeenCalled();
+  });
+
+  it('allows only one automatic retry after movie playback fails', () => {
+    start(movie, 600);
+    fail('Network error');
+    vi.advanceTimersByTime(RECONNECT_DELAYS_MS[0]);
+    expect(retry).toHaveBeenCalledTimes(1);
+    fail('Network error again');
+    expect(usePlayerStore.getState().status).toBe('error');
+    vi.advanceTimersByTime(20_000);
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
   it('treats a stream that stops moving while playing as a drop', () => {
     start(live, 10);
     for (let s = 1; s <= 5; s++) {

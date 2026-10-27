@@ -17,6 +17,7 @@ pub const COMMANDS: &[&str] = &[
     "player.stopExternal",
     "mpv.attach",
     "mpv.load",
+    "mpv.unload",
     "mpv.command",
     "mpv.setProperty",
     "mpv.setBounds",
@@ -156,6 +157,12 @@ pub fn register(r: &mut RpcRouter) {
     r.add("mpv.load", |state, a: LoadArgs| async move {
         ensure_desktop(&state)?;
         embedded::load(&state, &a.source).await?;
+        Ok::<_, RpcError>(())
+    });
+
+    r.add("mpv.unload", |state, _: ()| async move {
+        ensure_desktop(&state)?;
+        embedded::unload(&state).await?;
         Ok::<_, RpcError>(())
     });
 

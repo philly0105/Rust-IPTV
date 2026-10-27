@@ -208,6 +208,10 @@ describe('Shortcut rows (critique)', () => {
     }
     // Only this reference takes the width beside the nav; other sections keep 46rem.
     expect(list.closest('.\\@container')!.className).toContain('max-w-[72rem]');
+    // Until two columns fit, the one column stays as wide as before (at 1280 it ran 732 px, with
+    // keys even further from their labels), and only the two columns take the extra width.
+    expect(list.className).toContain('max-w-[46rem]');
+    expect(list.className).toContain('@min-[52rem]:max-w-none');
     cleanup();
     renderAt(settingsRoutes, '/settings/general');
     const general = await screen.findByTestId('settings-general');

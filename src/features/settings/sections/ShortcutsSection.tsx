@@ -51,8 +51,10 @@ export function ShortcutsSection(_props: SectionProps) {
           tabIndex={0}
           data-testid="shortcuts-list"
           // From 52rem the groups flow down two columns, each kept whole, so the reference is
-          // half as tall and the keys sit near their labels instead of across a wide row.
-          className="flex flex-col gap-8 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus @min-[52rem]:block @min-[52rem]:columns-2 @min-[52rem]:gap-x-8"
+          // half as tall and the keys sit near their labels instead of across a wide row. Until
+          // then the one column keeps the 46rem of every other section: the wider page is for two
+          // columns, and one column across it put the keys even further from their labels.
+          className="flex max-w-[46rem] flex-col gap-8 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus @min-[52rem]:block @min-[52rem]:max-w-none @min-[52rem]:columns-2 @min-[52rem]:gap-x-8"
         >
           {groups.map(([area, items]) => (
             <div key={area} className="break-inside-avoid @min-[52rem]:pb-8 @min-[52rem]:last:pb-0" data-testid="shortcut-area">

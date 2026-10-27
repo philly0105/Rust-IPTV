@@ -212,8 +212,8 @@ describe('LivePage on a Stalker source', () => {
 
 describe('page headings and list semantics', () => {
   it.each([
-    ['live', '/s/src1/live', '/s/:sourceId/live', <LivePage key="l" />, 'Demo portal'],
-    ['radio', '/s/src1/radio', '/s/:sourceId/radio', <LivePage key="r" mode="radio" />, 'Demo portal'],
+    ['live', '/s/src1/live', '/s/:sourceId/live', <LivePage key="l" />, 'Live TV'],
+    ['radio', '/s/src1/radio', '/s/:sourceId/radio', <LivePage key="r" mode="radio" />, 'Radio'],
     ['guide', '/epg?source=src1', '/epg', <EpgGridPage key="g" />, 'TV guide'],
   ])('%s renders exactly one h1 matching the page title', async (_name, url, path, element, title) => {
     renderAt(url, [{ path, element }]);

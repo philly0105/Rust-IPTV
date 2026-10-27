@@ -289,12 +289,25 @@ describe('the idle stage (CB-AUTOPLAY-LAST)', () => {
 });
 
 describe('the Live page header and guide link', () => {
-  it('names the group and its count once, in the header', async () => {
+  it('names the section, then the scope: no group for All channels, the count with its noun', async () => {
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     await screen.findByText('Channel 0');
-    // The group's name already says what is counted: no "All channels · 20 channels" (review
-    // round 2). A named group keeps the unit (liveStage2: "Favorites · 2 channels").
-    await waitFor(() => expect(fakes.lastHeader()?.subtitle).toBe('All channels · 20'));
+    // The title is the section the rail lights, not the source; with one source its name is left out.
+    await waitFor(() => expect(fakes.lastHeader()).toMatchObject({ title: 'Live TV', subtitle: '20 channels' }));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Live TV');
+  });
+
+  it('names a group before its count, and the source first only when there are others', async () => {
+    rpcMock.handlers['sources.list'] = () => [rpcMock.handlers['sources.get']!({}), { ...(rpcMock.handlers['sources.get']!({}) as object), id: 'src2', name: 'Other' }];
+    renderAt('/s/src1/live/g1', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
+    await screen.findByText('Channel 0');
+    await waitFor(() => expect(fakes.lastHeader()).toMatchObject({ title: 'Live TV', subtitle: 'Demo portal · News · 20 channels' }));
+  });
+
+  it('shows the section title while the source is still loading', async () => {
+    rpcMock.handlers['sources.get'] = () => new Promise(() => undefined);
+    renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
+    await waitFor(() => expect(fakes.lastHeader()?.title).toBe('Live TV'));
   });
 
   it('the guide link carries the group and the channel to open at (LG-01)', () => {

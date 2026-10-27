@@ -233,6 +233,7 @@
   "hideRibbon": "隐藏节目信息",
   "groupWithCount": "{{group}} · {{count}}",
   "liveTv": "直播电视",
+  "radio": "广播",
   "archiveStageIdle": "选择一个节目在此播放。",
   "favoritesGroup": "收藏",
   "recentGroup": "最近观看",

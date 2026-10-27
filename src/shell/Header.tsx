@@ -170,6 +170,7 @@ export const Header = memo(function Header({
               {searchField}
               <Kbd
                 combo="mod+f"
+                size="sm"
                 className="pointer-events-none absolute end-1.5 top-1/2 -translate-y-1/2 pointer-coarse:hidden group-has-[input:focus]/search:hidden group-has-[input:not(:placeholder-shown)]/search:hidden"
               />
             </div>
@@ -191,7 +192,7 @@ export const Header = memo(function Header({
             >
               <Search aria-hidden size={16} className="shrink-0" />
               <span className="min-w-0 flex-1 truncate text-start">{t('searchEverything')}</span>
-              <Kbd combo="mod+k" className="pointer-coarse:hidden" />
+              <Kbd combo="mod+k" size="sm" className="pointer-coarse:hidden" />
             </button>
           )}
           <IconButton
@@ -215,8 +216,9 @@ function HeaderField({ search, phone }: { search: NonNullable<HeaderState['searc
         HEADER_FIELD_WIDTH,
         // The palette trigger's fill, under the field's own control border.
         '[&>input]:bg-surface-2',
-        // Room for the Ctrl F hint while the field rests empty.
-        !phone && '[&>input:placeholder-shown:not(:focus)]:pe-16',
+        // Room for the Ctrl F hint while the field rests empty; a long placeholder ("Search
+        // Northwind Premium") ends in an ellipsis before the hint instead of a cut letter.
+        !phone && '[&>input:placeholder-shown:not(:focus)]:pe-16 [&>input]:text-ellipsis',
         /*
           Below sm a fixed-width field would squeeze the page title to its first
           letter, so the search folds into a search-icon button: the same input,

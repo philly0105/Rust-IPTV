@@ -24,6 +24,19 @@ describe('Kbd', () => {
     expect(wrap.querySelector('.sr-only')?.textContent).toBe('Ctrl + Shift + L');
     expect([...wrap.querySelectorAll('kbd')].every((k) => k.getAttribute('aria-hidden') === 'true')).toBe(true);
   });
+
+  it('comes in a compact size for caps inside a 30 px control, keeping the lip', () => {
+    const { container } = render(
+      <>
+        <Kbd combo="mod+k" />
+        <Kbd combo="mod+k" size="sm" />
+      </>,
+    );
+    const [md, sm] = [...container.children].map((w) => w.querySelector('kbd')!.className.split(' '));
+    expect(md).toEqual(expect.arrayContaining(['h-6', 'min-w-6', 'text-xs', 'border-b-2']));
+    expect(sm).toEqual(expect.arrayContaining(['h-5', 'min-w-5', 'text-2xs', 'border-b-2']));
+    expect(sm).not.toContain('h-6');
+  });
 });
 
 describe('placeTooltip', () => {

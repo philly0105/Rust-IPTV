@@ -100,12 +100,21 @@ export interface KbdProps {
   combo?: string;
   children?: ReactNode;
   className?: string;
+  /**
+   * `md` (default) for key caps in running text, lists and dialogs; `sm` for a cap inside a
+   * 30 px control (the header's search slot): 19 px with a 10 px label, the tooltip's size.
+   */
+  size?: 'sm' | 'md';
 }
 
-export function Kbd({ combo, children, className }: KbdProps) {
+const KBD_SIZES = { sm: 'h-5 min-w-5 px-1 text-2xs', md: 'h-6 min-w-6 px-1.5 text-xs' } as const;
+
+export function Kbd({ combo, children, className, size = 'md' }: KbdProps) {
   const { t } = useTranslation('common');
-  const keyClass =
-    'inline-flex h-6 min-w-6 items-center justify-center rounded-xs border border-edge border-b-2 bg-surface-2 px-1.5 font-sans text-xs font-medium text-fg-muted';
+  const keyClass = cn(
+    'inline-flex items-center justify-center rounded-xs border border-edge border-b-2 bg-surface-2 font-sans font-medium text-fg-muted',
+    KBD_SIZES[size],
+  );
   if (combo) {
     const tr: KeyTranslate = (key) => t(key);
     const keys = comboKeys(combo, tr);

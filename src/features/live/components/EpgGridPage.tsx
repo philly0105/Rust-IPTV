@@ -14,7 +14,6 @@ import {
   PanelTopOpen,
   Play,
   Radio,
-  Search,
   Star,
   Tv,
   X,
@@ -32,7 +31,6 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
-  type RefObject,
 } from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -46,7 +44,7 @@ import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, t
 import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 import { joinList } from '@/shell/dashboard/cards';
-import { useShell, useShortcut } from '@/shell';
+import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
 import { channelMenuHeader, useChannelMenuItems } from '../hooks/useChannelMenuItems';
@@ -92,7 +90,7 @@ import { EpgMappingDialog } from './EpgMappingDialog';
 // recording:
 import { ProgramActions, usePrefetchSchedule, useScheduleIndex } from '@/features/recording';
 // guide (Run 2 C5): jump to a date and time, guide search.
-import { GuideSearch } from '../guide/GuideSearchPanel';
+import { GuideHeaderSearch } from '../guide/GuideSearchPanel';
 import { JumpToDialog } from '../guide/JumpToDialog';
 import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
@@ -514,11 +512,6 @@ export function EpgGridPage() {
   const count = paged.total ?? 0;
   // The Live TV quality filter applies here too; a guide it empties says so (Live sets it).
   const quality = useLiveQuality();
-
-  const shell = useShell();
-  useEffect(() => {
-    shell.setHeader({ title: t('guide'), subtitle: source?.name });
-  }, [source?.name, i18n.language]);
 
   // ---- what plays, the genre filter, the preview band ----------------------------
   // LG-01: the channel playing in the app is marked in its row.
@@ -1216,9 +1209,8 @@ export function EpgGridPage() {
   const [jumpOpen, setJumpOpen] = useState(false);
   const openJump = useCallback(() => setJumpOpen(true), []);
   const closeJump = useCallback(() => setJumpOpen(false), []);
+  // The guide's search field, in the header's search slot (GuideHeaderSearch).
   const searchRef = useRef<HTMLInputElement>(null);
-  // A phone's toolbar folds the search field into a button on the pickers' row until it is used.
-  const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [highlight, setHighlight] = useState<ItemKey | null>(null);
   const guideArea = tg('shortcutArea');
@@ -1226,8 +1218,7 @@ export function EpgGridPage() {
     '/',
     (e) => {
       e.preventDefault();
-      // Folded on a phone: unfold it, and it takes focus as it opens.
-      if (!searchRef.current) setPhoneSearchOpen(true);
+      // On a phone the header's field is folded into an icon; focus unfolds it.
       searchRef.current?.focus();
       searchRef.current?.select();
     },
@@ -1479,7 +1470,25 @@ export function EpgGridPage() {
   const nowX = ((now - start) / MINUTE) * pxPerMin;
 
   // The shell header title is a <p>; the page owns its single h1 (same text as the header title).
-  const heading = <h1 className="sr-only">{t('guide')}</h1>;
+  // GuideHeaderSearch sets the header (and its search field, when there is anything to search).
+  const heading = (
+    <>
+      <h1 className="sr-only">{t('guide')}</h1>
+      <GuideHeaderSearch
+        title={t('guide')}
+        subtitle={source?.name}
+        inputRef={searchRef}
+        sourceId={sourceId}
+        disabled={!sourceId}
+        field={!sources.error && !(sources.data && sources.data.length === 0)}
+        offsetMinutes={prefs.epgOffsetMinutes}
+        now={now}
+        stripCountryPrefix={prefs.stripCountryPrefix}
+        onSelect={selectHit}
+        onWatch={watchHit}
+      />
+    </>
+  );
   if (sources.error) {
     return (
       <>
@@ -1543,19 +1552,11 @@ export function EpgGridPage() {
         start={start}
         end={end}
         nowInWindow={nowInWindow}
-        now={now}
-        offsetMinutes={prefs.epgOffsetMinutes}
-        stripCountryPrefix={prefs.stripCountryPrefix}
-        searchRef={searchRef}
-        phoneSearchOpen={phoneSearchOpen}
-        onPhoneSearchOpen={setPhoneSearchOpen}
         onQuery={setQuery}
         onShift={shift}
         onShiftDay={shiftDay}
         onNow={toNow}
         onJump={openJump}
-        onSelectHit={selectHit}
-        onWatchHit={watchHit}
         zoom={zoom}
         onZoom={zoomBy}
         genre={genreFilter}
@@ -1936,19 +1937,11 @@ const GuideToolbar = memo(function GuideToolbar({
   start,
   end,
   nowInWindow,
-  now,
-  offsetMinutes,
-  stripCountryPrefix,
-  searchRef,
-  phoneSearchOpen,
-  onPhoneSearchOpen,
   onQuery,
   onShift,
   onShiftDay,
   onNow,
   onJump,
-  onSelectHit,
-  onWatchHit,
   zoom,
   onZoom,
   genre,
@@ -1967,20 +1960,11 @@ const GuideToolbar = memo(function GuideToolbar({
   start: number;
   end: number;
   nowInWindow: boolean;
-  now: number;
-  offsetMinutes: number;
-  stripCountryPrefix: boolean;
-  searchRef: RefObject<HTMLInputElement | null>;
-  /** The phone layout's search field is unfolded over the pickers' row. */
-  phoneSearchOpen: boolean;
-  onPhoneSearchOpen(open: boolean): void;
   onQuery(key: string, value: string | undefined): void;
   onShift(delta: number): void;
   onShiftDay(days: number): void;
   onNow(): void;
   onJump(): void;
-  onSelectHit(hit: GuideSearchHit): void;
-  onWatchHit(hit: GuideSearchHit): void;
   /** The time scale's step (GUIDE_ZOOM_SLOT_PX). */
   zoom: number;
   onZoom(delta: 1 | -1): void;
@@ -2043,32 +2027,11 @@ const GuideToolbar = memo(function GuideToolbar({
   // the list loads the picker holds its place, so the toolbar does not shift for two sources.
   const sourcePicker = !sources || sources.length > 1 || (sources[0] !== undefined && sources[0].id !== sourceId);
   const range = formatTimeRange(start, end, lang);
-  // The phone's folded field takes focus as it unfolds; it folds again once left empty.
-  const searchToggle = useRef<HTMLButtonElement>(null);
-  const searchUnfolded = phone && phoneSearchOpen;
-  useEffect(() => {
-    if (searchUnfolded) searchRef.current?.focus();
-  }, [searchUnfolded, searchRef]);
-  const search = (
-    <GuideSearch
-      inputRef={searchRef}
-      sourceId={sourceId}
-      disabled={!sourceId}
-      offsetMinutes={offsetMinutes}
-      now={now}
-      stripCountryPrefix={stripCountryPrefix}
-      onSelect={onSelectHit}
-      onWatch={onWatchHit}
-      // Narrow pages: the field fills what the selects leave on their row, or a row of its own.
-      className={phone ? 'w-full' : stacked ? 'min-w-48 flex-1' : 'w-60'}
-    />
-  );
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
-      {/* A phone puts the two pickers side by side on one row, of equal width, with the search
-          folded into a button at its end: unfolded, the field covers the row (as the header's
-          search does), so the guide starts two rows lower, not three. */}
-      <div className={phone ? cn('relative grid w-full items-center gap-2', sourcePicker ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]') : 'contents'}>
+      {/* A phone puts the two pickers side by side on one row, of equal width. The search is the
+          header's field. */}
+      <div className={phone ? cn('grid w-full items-center gap-2', sourcePicker ? 'grid-cols-2' : 'grid-cols-1') : 'contents'}>
         {sourcePicker ? (
           <ScopePicker
             label={t('guideSource')}
@@ -2088,40 +2051,7 @@ const GuideToolbar = memo(function GuideToolbar({
           className={bar === 'phone' ? 'h-9' : 'w-48'}
           testId="guide-group"
         />
-        {phone ? (
-          <IconButton
-            ref={searchToggle}
-            size="sm"
-            label={tg('searchLabel')}
-            icon={<Search className="size-4" />}
-            aria-expanded={phoneSearchOpen}
-            disabled={!sourceId}
-            onClick={() => onPhoneSearchOpen(true)}
-            className="size-9"
-            data-testid="guide-search-toggle"
-          />
-        ) : null}
-        {searchUnfolded ? (
-          <div
-            className="absolute inset-0 z-10 flex items-center bg-surface"
-            data-testid="guide-search-unfolded"
-            onBlur={(e) => {
-              if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) && !searchRef.current?.value) onPhoneSearchOpen(false);
-            }}
-            onKeyDown={(e) => {
-              // Escape in an empty field folds it back (the first one clears what was typed).
-              if (e.key === 'Escape' && !searchRef.current?.value) {
-                onPhoneSearchOpen(false);
-                requestAnimationFrame(() => searchToggle.current?.focus());
-              }
-            }}
-          >
-            {search}
-          </div>
-        ) : null}
       </div>
-      {/* While the sources load the field holds its place, disabled, so the toolbar does not shift (L2-visual-2). */}
-      {phone ? null : search}
       {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
       <div className={stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'} role="group" aria-label={t('guideTime')} data-testid="guide-time">
         {bar !== 'phone' ? (

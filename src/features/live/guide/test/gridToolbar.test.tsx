@@ -14,6 +14,7 @@ import { useToastStore } from '@/ui';
 import { defaultStart, EpgGridPage } from '../../components/EpgGridPage';
 import { preloadScopePickerList } from '../../components/ScopePicker';
 import { formatClockBare, formatDay } from '../../lib/epgTime';
+import { HeaderSlot, lastHeader } from '../../test/fakes';
 import { createRpcMock, installDomStubs, makeChannel, renderGuide, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -65,7 +66,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const GRID = [{ path: '/epg', element: <EpgGridPage /> }];
+const GRID = [
+  {
+    path: '/epg',
+    element: (
+      <>
+        <HeaderSlot />
+        <EpgGridPage />
+      </>
+    ),
+  },
+];
 
 /** jsdom has no layout: give the guide page a width (the rest keep jsdom's empty boxes). */
 function pageWidth(width: number) {
@@ -109,22 +120,30 @@ describe('the toolbar at narrow widths', () => {
     expect(await screen.findByTestId('guide-jump')).toBeTruthy();
   });
 
-  it('a phone folds the search into a button on the pickers row, which unfolds over the row and folds back once empty', async () => {
-    pageWidth(318);
-    await openGuide();
-    // Two rows of controls before the grid, not three: no field of its own.
-    expect(screen.queryByRole('searchbox', { name: 'Search the guide' })).toBeNull();
-    const toggle = screen.getByTestId('guide-search-toggle');
-    expect(toggle.getAttribute('aria-label')).toBe('Search the guide');
-    expect(toggle.closest('.grid')).toBe(screen.getByTestId('guide-group').closest('.grid'));
-    fireEvent.click(toggle);
-    const field = await screen.findByRole('searchbox', { name: 'Search the guide' });
-    await waitFor(() => expect(document.activeElement).toBe(field));
-    expect(screen.getByTestId('guide-search-unfolded').className).toContain('absolute');
-    // Escape in the empty field folds it back, and focus returns to the button.
-    fireEvent.keyDown(field, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('searchbox', { name: 'Search the guide' })).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('guide-search-toggle')));
+  it("the guide's search is the header's field at every width, so the toolbar has no search control (round 4)", async () => {
+    for (const width of [318, 560, 1208]) {
+      vi.restoreAllMocks();
+      pageWidth(width);
+      await openGuide();
+      const toolbar = screen.getByTestId('guide-time').parentElement!;
+      expect(within(toolbar).queryByRole('searchbox')).toBeNull();
+      expect(within(toolbar).queryByRole('button', { name: 'Search the guide' })).toBeNull();
+      const field = within(screen.getByTestId('shell-header')).getByRole('searchbox', { name: 'Search the guide' });
+      expect(field.getAttribute('placeholder')).toBe('Search guide');
+      // `/` still reaches it (on a phone the header's folded field unfolds as it takes focus).
+      fireEvent.keyDown(document.body, { key: '/' });
+      expect(document.activeElement).toBe(field);
+      cleanup();
+    }
+  });
+
+  it('with no sources the header still names the guide, with no field to search', async () => {
+    rpc.handlers['sources.list'] = () => [];
+    renderGuide({ path: '/epg', routes: GRID });
+    await screen.findByText('No sources yet');
+    await waitFor(() => expect(lastHeader()).toMatchObject({ title: 'TV guide' }));
+    expect(lastHeader()!.search).toBeUndefined();
+    expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
   it('shows the source picker only when there is another source to choose', async () => {
@@ -133,7 +152,7 @@ describe('the toolbar at narrow widths', () => {
     await openGuide();
     // One source with channels, on show: no picker of one entry; the group picker takes the phone's row.
     expect(screen.queryByRole('combobox', { name: 'Source' })).toBeNull();
-    expect(screen.getByTestId('guide-group').closest('.grid')!.className).toContain('grid-cols-[1fr_auto]');
+    expect(screen.getByTestId('guide-group').closest('.grid')!.className).toContain('grid-cols-1');
     cleanup();
 
     const src = (id: string, name: string) => ({ id, kind: 'm3u', name, channelCount: CHANNELS.length, epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
@@ -144,7 +163,7 @@ describe('the toolbar at narrow widths', () => {
     await openGuide();
     const picker = screen.getByRole('combobox', { name: 'Source' });
     expect(picker.textContent).toBe('Demo');
-    expect(picker.closest('.grid')!.className).toContain('grid-cols-[1fr_1fr_auto]');
+    expect(picker.closest('.grid')!.className).toContain('grid-cols-2');
     fireEvent.click(picker);
     expect(await screen.findByRole('option', { name: /^Second/ })).toBeTruthy();
   });

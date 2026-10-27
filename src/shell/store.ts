@@ -3,7 +3,7 @@
  * store so `useShell()` works anywhere (pages, tests) without a provider.
  */
 
-import { useCallback, useEffect, useId, useMemo, type KeyboardEvent, type ReactNode, type RefCallback } from 'react';
+import { useCallback, useEffect, useId, useMemo, type KeyboardEvent, type ReactNode, type Ref, type RefCallback } from 'react';
 import { create } from 'zustand';
 
 export interface HeaderSearch {
@@ -14,6 +14,19 @@ export interface HeaderSearch {
   onSubmit?: (value: string) => void;
   /** Every key in the header search box, before its own Enter and Escape handling (preventDefault skips those). */
   onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
+  /** The field's accessible name, when it says more than the placeholder. */
+  label?: string;
+  /**
+   * The field itself, for a page whose results hang under it (the guide's panel): its own
+   * shortcut focuses it, and closing the results hands focus back to it.
+   */
+  inputRef?: Ref<HTMLInputElement>;
+  /** The field took focus (the guide reopens its results for the text still in it). */
+  onFocus?: () => void;
+  /** The id of the results the field drives, while they show (aria-controls). */
+  controls?: string;
+  /** The field holds its place but takes no input (the guide before its source is known). */
+  disabled?: boolean;
 }
 
 /** The header's Back control (the kit BackButton at its leading edge). */

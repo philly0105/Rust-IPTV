@@ -1,6 +1,6 @@
 /**
- * Guide search (Run 2 C5): a toolbar field (`/` focuses it) and a floating
- * results panel. Queries `epg.search` for the selected source 120 ms after
+ * Guide search (Run 2 C5): the header's search field (`/` and Ctrl+F focus it) and a floating
+ * results panel under it. Queries `epg.search` for the selected source 120 ms after
  * typing stops, from what airs now to 14 days ahead, and lists the hits by
  * day with channel, time and title. Choosing a hit moves the grid to it; each
  * hit also offers Watch (while it airs), Remind, Record and Record series.
@@ -15,7 +15,8 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { GuideSearchHit } from '@/api/types';
 import { ProgramActionsView, ScheduleMarkView, useProgramActionsShared, type ProgramActionsShared } from '@/features/recording';
-import { buttonClass, cn, EmptyState, ErrorState, IconButton, SearchInput, Skeleton } from '@/ui';
+import { useShell } from '@/shell';
+import { buttonClass, cn, EmptyState, ErrorState, IconButton, Skeleton } from '@/ui';
 import { intlLocale } from '@/lib/intl';
 
 import { useDebounced } from '../hooks/useDebounced';
@@ -23,6 +24,7 @@ import { displayChannelName } from '../lib/channelName';
 import { formatClock, formatDay, localDayDiff, ms, programWhen } from '../lib/epgTime';
 import { ChannelLogo } from '../components/ChannelLogo';
 import { displayHits, groupHitsByDay, hitKey, SEARCH_LIMIT, searchQuery, searchWindow } from './search';
+import { useStable } from './useStable';
 
 /** Debounce before a query is sent (the search itself answers within the 150 ms budget's rest). */
 export const SEARCH_DEBOUNCE_MS = 120;
@@ -76,121 +78,139 @@ interface SharedProps {
   onWatch(hit: GuideSearchHit): void;
 }
 
-export interface GuideSearchProps extends SharedProps {
-  /** For the `/` shortcut. */
+export interface GuideHeaderSearchProps extends SharedProps {
+  /** The header's title and subtitle, which this component sets along with the search slot. */
+  title: string;
+  subtitle?: string;
+  /** The header's field, for the `/` shortcut. */
   inputRef: RefObject<HTMLInputElement | null>;
-  className?: string;
   /** No source yet (the sources list is loading): the field holds its place, disabled. */
   disabled?: boolean;
+  /** False: the header has no field (no sources, or they failed to load: nothing to search). */
+  field?: boolean;
 }
 
-/** The toolbar field with its results panel. */
-export const GuideSearch = memo(function GuideSearch({ inputRef, className, onSelect, onWatch, disabled, ...rest }: GuideSearchProps) {
+/**
+ * The guide's search in the shell header's search slot, where every page that searches its own
+ * content has its field (and Ctrl+F reaches it), with the results panel hanging under it. It owns
+ * the header (title, subtitle and the field) and the query, so typing re-renders this and the
+ * header, not the grid. Renders the panel only; place it inside the page (SEARCH_BOUNDS_ATTR).
+ */
+export const GuideHeaderSearch = memo(function GuideHeaderSearch({ title, subtitle, inputRef, onSelect, onWatch, disabled, field = true, ...rest }: GuideHeaderSearchProps) {
   const { t } = useTranslation('guide');
+  const { setHeader } = useShell();
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
+  const shown = open && !disabled && field;
 
-  // A press outside closes the panel; dialogs opened from a hit (Record series) are not outside.
+  // A press outside the field and the panel closes it; dialogs opened from a hit (Record series) are not outside.
   useEffect(() => {
-    if (!open) return;
+    if (!shown) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target;
-      if (!(target instanceof Node) || wrapRef.current?.contains(target)) return;
+      if (!(target instanceof Node)) return;
+      // The field's box holds its clear button too.
+      if (inputRef.current?.parentElement?.contains(target) || document.getElementById(panelId)?.contains(target)) return;
       if (target instanceof Element && target.closest('[data-dialog-layer]')) return;
       setOpen(false);
     };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
-  }, [open]);
+  }, [shown, inputRef, panelId]);
 
-  // The panel is placed against the guide page, not just under the field: see panelPlacement.
+  // The panel hangs under the header's field, kept inside the guide page: see panelPlacement.
   const [place, setPlace] = useState<CSSProperties | null>(null);
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!shown) return;
     const measure = () => {
-      const wrap = wrapRef.current;
-      if (!wrap) return;
-      const field = wrap.getBoundingClientRect();
-      const bounds = (wrap.closest<HTMLElement>(`[${SEARCH_BOUNDS_ATTR}]`) ?? document.documentElement).getBoundingClientRect();
+      const input = inputRef.current;
+      const panel = document.getElementById(panelId);
+      if (!input || !panel) return;
+      const field = (input.parentElement ?? input).getBoundingClientRect();
+      const bounds = (panel.closest<HTMLElement>(`[${SEARCH_BOUNDS_ATTR}]`) ?? document.documentElement).getBoundingClientRect();
       const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 15;
-      const spot = panelPlacement(field, bounds, PANEL_MAX_REM * rem, getComputedStyle(wrap).direction === 'rtl');
-      // No layout (jsdom, a hidden page): the classes' end-anchored fallback stays.
+      const spot = panelPlacement(field, bounds, PANEL_MAX_REM * rem, getComputedStyle(input).direction === 'rtl');
+      // No layout (jsdom, a hidden page): the classes' fallback under the header stays.
       if (!spot || field.width === 0) {
         setPlace(null);
         return;
       }
-      const below = window.innerHeight - field.bottom - PANEL_GAP - PANEL_MARGIN;
-      setPlace({ left: spot.left, width: spot.width, maxHeight: Math.max(160, Math.min(PANEL_MAX_HEIGHT_REM * rem, below)) });
+      const top = field.bottom + PANEL_GAP;
+      const below = window.innerHeight - top - PANEL_MARGIN;
+      setPlace({ top, left: field.left + spot.left, width: spot.width, maxHeight: Math.max(160, Math.min(PANEL_MAX_HEIGHT_REM * rem, below)) });
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [open]);
+  }, [shown, inputRef, panelId]);
 
-  const close = (refocus: boolean) => {
+  const close = useStable((refocus: boolean) => {
     setOpen(false);
     if (refocus) inputRef.current?.focus();
-  };
+  });
 
-  const onFieldKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape' && open) {
-      // First Escape closes the panel, the next one clears the field.
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(false);
-    } else if ((e.key === 'ArrowDown' || e.key === 'Enter') && query.trim()) {
-      e.preventDefault();
-      setOpen(true);
-      // The first hit, once the panel shows one.
-      requestAnimationFrame(() => document.getElementById(panelId)?.querySelector<HTMLElement>('[data-hit]')?.focus());
+  const placeholder = t('searchPlaceholder');
+  const label = t('searchLabel');
+  useEffect(() => {
+    if (!field) {
+      setHeader({ title, subtitle });
+      return;
     }
-  };
-
-  return (
-    <div ref={wrapRef} className={cn('relative', className)}>
-      <SearchInput
-        ref={inputRef}
-        size="sm"
-        value={query}
-        onChange={(v) => {
+    setHeader({
+      title,
+      subtitle,
+      search: {
+        value: query,
+        onChange: (v) => {
           setQuery(v);
           setOpen(v.trim().length > 0);
-        }}
-        onFocus={() => {
+        },
+        onFocus: () => {
           if (query.trim()) setOpen(true);
-        }}
-        onKeyDown={onFieldKey}
-        placeholder={t('searchPlaceholder')}
-        label={t('searchLabel')}
-        aria-controls={open ? panelId : undefined}
-        className="w-full"
-        disabled={disabled}
-        data-testid="guide-search-input"
-      />
-      {open && !disabled ? (
-        <GuideSearchPanel
-          {...rest}
-          id={panelId}
-          query={query}
-          onClose={close}
-          onSelect={(hit) => {
+        },
+        onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === 'Escape' && shown) {
+            // First Escape closes the panel, the next one clears the field.
+            e.preventDefault();
+            e.stopPropagation();
             setOpen(false);
-            onSelect(hit);
-          }}
-          onWatch={(hit) => {
-            setOpen(false);
-            onWatch(hit);
-          }}
-          // Physical `left` from the measurement wins over the logical end anchor, which would
-          // over-constrain the box in RTL; the anchor is only the fallback before a layout exists.
-          className={cn('absolute top-full z-30 mt-1.5', !place && 'end-0')}
-          style={place ?? undefined}
-        />
-      ) : null}
-    </div>
-  );
+          } else if ((e.key === 'ArrowDown' || e.key === 'Enter') && query.trim()) {
+            e.preventDefault();
+            setOpen(true);
+            // The first hit, once the panel shows one.
+            requestAnimationFrame(() => document.getElementById(panelId)?.querySelector<HTMLElement>('[data-hit]')?.focus());
+          }
+        },
+        placeholder,
+        label,
+        inputRef,
+        controls: shown ? panelId : undefined,
+        disabled,
+      },
+    });
+  }, [setHeader, title, subtitle, query, shown, placeholder, label, inputRef, panelId, disabled, field]);
+
+  return shown ? (
+    <GuideSearchPanel
+      {...rest}
+      id={panelId}
+      query={query}
+      onClose={close}
+      onSelect={(hit) => {
+        setOpen(false);
+        onSelect(hit);
+      }}
+      onWatch={(hit) => {
+        setOpen(false);
+        onWatch(hit);
+      }}
+      // Fixed, so the header's edge and the page's scroll box do not clip it. Before a layout
+      // exists it sits under the header at the page's end; the measurement places it under the field.
+      className={cn('fixed z-30', !place && 'end-2 top-[calc(var(--header-height)+0.375rem)]')}
+      style={place ?? undefined}
+    />
+  ) : null;
 });
 
 export interface GuideSearchPanelProps extends SharedProps {
@@ -200,7 +220,7 @@ export interface GuideSearchPanelProps extends SharedProps {
   /** `refocus`: hand focus back to the field. */
   onClose(refocus: boolean): void;
   className?: string;
-  /** Measured placement (left, width, max height), from GuideSearch. */
+  /** Measured placement (top, left, width, max height), from GuideHeaderSearch. */
   style?: CSSProperties;
 }
 

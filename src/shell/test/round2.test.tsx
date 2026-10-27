@@ -91,6 +91,20 @@ function SearchingPage() {
   return <Page>movies page</Page>;
 }
 
+/** A page whose results hang under the header's field (the guide's search panel). */
+const guideField = { current: null as HTMLInputElement | null };
+const onGuideFocus = vi.fn();
+function GuideLikePage() {
+  const shell = useShell();
+  useEffect(() => {
+    shell.setHeader({
+      title: 'TV guide',
+      search: { value: 'news', onChange: () => undefined, placeholder: 'Search guide', label: 'Search the guide', inputRef: guideField, onFocus: onGuideFocus, controls: 'guide-results' },
+    });
+  }, [shell]);
+  return <Page>guide page</Page>;
+}
+
 const onBack = vi.fn();
 
 function routes() {
@@ -103,6 +117,7 @@ function routes() {
         { path: 'favorites', element: <Page>favorites page</Page> },
         { path: 'my-list', element: <Page>my list page</Page> },
         { path: 'searching', element: <SearchingPage /> },
+        { path: 'guide-like', element: <GuideLikePage /> },
         { path: 'detail', element: <DetailPage onBack={onBack} /> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
@@ -245,6 +260,17 @@ describe('the header search slot', () => {
     expect(palette.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(palette);
     expect(useShellStore.getState().paletteOpen).toBe(true);
+  });
+
+  it("hands a page its field: the ref, focus, a name beyond the placeholder and the results it controls", async () => {
+    renderRoutes(routes(), '/guide-like');
+    await screen.findByText('guide page');
+    const field = screen.getByRole('searchbox', { name: 'Search the guide' });
+    expect(field.getAttribute('placeholder')).toBe('Search guide');
+    expect(guideField.current).toBe(field);
+    expect(field.getAttribute('aria-controls')).toBe('guide-results');
+    fireEvent.focus(field);
+    expect(onGuideFocus).toHaveBeenCalledTimes(1);
   });
 
   it('the palette trigger has the field look too: the fill and the control border', async () => {

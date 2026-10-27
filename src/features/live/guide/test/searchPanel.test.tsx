@@ -10,7 +10,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { EpgSourceStatus, GuideSearchHit } from '@/api/types';
 
 import { DAY, HOUR, MINUTE } from '../../lib/epgTime';
-import { GuideSearch, GuideSearchPanel, SEARCH_DEBOUNCE_MS } from '../GuideSearchPanel';
+import { HeaderSlot, lastHeader } from '../../test/fakes';
+import { GuideHeaderSearch, GuideSearchPanel, SEARCH_DEBOUNCE_MS } from '../GuideSearchPanel';
 import { SEARCH_LIMIT } from '../search';
 import { createRpcMock, hit, i18n, installDomStubs, renderGuide, settings } from './harness';
 
@@ -246,15 +247,45 @@ describe('GuideSearchPanel results', () => {
   });
 });
 
-describe('GuideSearch field', () => {
+describe("GuideHeaderSearch: the guide's field in the header's search slot", () => {
   function field() {
     const onSelect = vi.fn();
     const onWatch = vi.fn();
     const inputRef = { current: null as HTMLInputElement | null };
-    renderGuide(<GuideSearch inputRef={inputRef} sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onWatch={onWatch} />);
+    renderGuide(
+      <>
+        <HeaderSlot />
+        <GuideHeaderSearch title="TV guide" subtitle="Demo" inputRef={inputRef} sourceId="src1" offsetMinutes={0} now={NOW} onSelect={onSelect} onWatch={onWatch} />
+      </>,
+    );
     const input = screen.getByRole('searchbox', { name: 'Search the guide' }) as HTMLInputElement;
     return { onSelect, onWatch, input, inputRef };
   }
+
+  it('sets the header: title, subtitle and the field, which points at the panel while it shows', async () => {
+    const { input } = field();
+    expect(lastHeader()).toMatchObject({ title: 'TV guide', subtitle: 'Demo', search: { placeholder: 'Search guide', label: 'Search the guide' } });
+    expect(input.hasAttribute('data-shell-search')).toBe(true);
+    expect(input.getAttribute('aria-controls')).toBeNull();
+    fireEvent.change(input, { target: { value: 'news' } });
+    const panelEl = screen.getByTestId('guide-search-panel');
+    expect(input.getAttribute('aria-controls')).toBe(panelEl.id);
+    // Fixed under the header, so neither the header's edge nor the page's scroll box clips it.
+    expect(panelEl.className).toContain('fixed');
+  });
+
+  it('a disabled field (no source yet) opens no panel', async () => {
+    const inputRef = { current: null as HTMLInputElement | null };
+    renderGuide(
+      <>
+        <HeaderSlot />
+        <GuideHeaderSearch title="TV guide" inputRef={inputRef} sourceId="" disabled offsetMinutes={0} now={NOW} onSelect={vi.fn()} onWatch={vi.fn()} />
+      </>,
+    );
+    const input = screen.getByRole('searchbox', { name: 'Search the guide' });
+    expect(input.hasAttribute('disabled')).toBe(true);
+    expect(screen.queryByTestId('guide-search-panel')).toBeNull();
+  });
 
   it('debounces typing into one search for the final text', async () => {
     rpc.handlers['epg.search'] = () => HITS;

@@ -2,6 +2,7 @@
 
 import { useTranslation } from 'react-i18next';
 
+import { isDesktop } from '@/api/transport';
 import type { ReminderAction } from '@/api/types';
 import { Select, type SelectOption } from '@/ui';
 import { intlLocale } from '@/lib/intl';
@@ -79,7 +80,8 @@ export function RecordingSection({ settings, update }: SectionProps) {
       <SettingsGroup title={t('remindersGroup')}>
         <SwitchRow
           label={t('remindersEnabled')}
-          description={t('remindersEnabledHint')}
+          // Only the desktop app has a tray to keep alerting from.
+          description={isDesktop ? t('remindersEnabledHint') : t('remindersEnabledHintServer')}
           checked={enabled}
           onChange={(v) => void update({ remindersEnabled: v })}
           testId="reminders-enabled"

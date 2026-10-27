@@ -6,7 +6,7 @@ import { cleanup, screen, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ItemRef, VodDetail } from '@/api/types';
-import { tintOf, useToastStore } from '@/ui';
+import { tintFill, tintOf, useToastStore } from '@/ui';
 
 import { heroWash } from '../components/detail/DetailHero';
 import { MovieDetailPage } from '../pages/MovieDetailPage';
@@ -81,6 +81,23 @@ describe('a detail hero without artwork', () => {
     const layers = Array.from(backdrop.children);
     expect(layers.indexOf(wash)).toBe(0);
     expect(layers.length).toBe(3);
+  });
+
+  it("takes the tint of the title the rails show, not the provider's name with its year", async () => {
+    rpcMock.handlers['xtream.vodDetail'] = () => detail({ title: 'Harbor Lights (2021)', titleBase: 'Harbor Lights' });
+    // The two names fall on different hues, so a hero tinted from the provider's name would fail below.
+    expect(tintOf('Harbor Lights (2021)').hue).not.toBe(tintOf('Harbor Lights').hue);
+    renderAt('/s/src1/movie/m7', detailRoute);
+    await screen.findByRole('heading', { level: 1, name: 'Harbor Lights' });
+    const wash = within(screen.getByTestId('vod-detail-backdrop')).getByTestId('vod-detail-wash');
+    expect(wash.style.getPropertyValue('--wash-dark')).toBe(heroWash('Harbor Lights', true));
+    expect(wash.style.getPropertyValue('--wash-light')).toBe(heroWash('Harbor Lights', false));
+    // The poster tile carries the tint a rail's card for the title has (PosterCard's label is titleBase).
+    const tile = screen.getByTestId('vod-detail-poster').querySelector<HTMLElement>('[data-poster-fallback]')!;
+    expect(tile.style.getPropertyValue('--tint-dark')).toBe(tintFill('Harbor Lights', 'dark'));
+    expect(tile.style.getPropertyValue('--tint-light')).toBe(tintFill('Harbor Lights', 'light'));
+    expect(tile.style.getPropertyValue('--tint-ink')).toBe(tintOf('Harbor Lights').ink);
+    expect(tile.textContent).toBe('HL');
   });
 
   it('leaves the wash out while there is artwork to show', async () => {

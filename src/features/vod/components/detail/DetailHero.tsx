@@ -95,7 +95,9 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
     // so it paints under everything that follows the hero, positioned or not.
     // An isolated hero would paint its bleed over the season tabs below.
     <section className="relative" aria-labelledby="vod-detail-title">
-      <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} title={model.title} />
+      {/* The tint comes from the title as the page shows it, as every rail's card takes it: the
+          provider's own name ("Harbor Lights (2021)") would put the page on another colour. */}
+      <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} title={model.titleBase ?? model.title} />
       {back && <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">{back}</div>}
       <div className={cn(HERO_GRID, top)}>
         <div
@@ -103,7 +105,15 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
           data-testid="vod-detail-poster"
         >
           {/* Provider artwork first (through the cache, then directly); when it fails, the TMDB poster (if any) the same way. */}
-          <Poster src={model.posterUrl} fallbackSrc={model.posterFallbackUrl} sourceId={sourceId} alt={model.title} aspect="poster" priority />
+          <Poster
+            src={model.posterUrl}
+            fallbackSrc={model.posterFallbackUrl}
+            sourceId={sourceId}
+            alt={model.title}
+            label={model.titleBase ?? model.title}
+            aspect="poster"
+            priority
+          />
         </div>
         <div className="flex min-w-0 flex-col gap-2 self-end">
           {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}

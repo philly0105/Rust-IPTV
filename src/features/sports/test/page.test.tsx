@@ -552,6 +552,10 @@ describe('sports page', () => {
     const more = within(rows[0]!).getByRole('button', { name: 'Show all 5 streams' });
     expect(more.textContent).toBe('+4');
     expect(more.getAttribute('aria-expanded')).toBe('false');
+    // Its 44 px hit area is for touch only: for a mouse it stays on the chip, off the name above it.
+    const hit = more.className.split(' ');
+    expect(hit).toEqual(expect.arrayContaining(['pointer-coarse:after:absolute', 'pointer-coarse:after:-inset-y-3']));
+    expect(hit.filter((c) => c.startsWith('after:'))).toEqual([]);
     fireEvent.click(more);
     rows = within(list).getAllByTestId('sports-stream');
     // The toggle stays put in the first row, so the same press closes the list again.

@@ -351,7 +351,9 @@ export function StreamList({
   // The rest of the streams open from a small "+2" at the end of the best row's metadata, not a row
   // of its own under it: on most cards that row was a fifth of the card. It stays where it is once
   // open (a chevron up), so the same press closes the list again. Its hit area reaches 44 px on
-  // touch screens without making the line taller.
+  // touch screens without making the line taller. Only for a coarse pointer, as the kit's
+  // TOUCH_TARGET: for a mouse it would reach up over the channel name, and hovering a long name
+  // would light the chip and open its tooltip.
   const toggle =
     more > 0 ? (
       <Tooltip content={toggleLabel} describe={false}>
@@ -360,7 +362,7 @@ export function StreamList({
           aria-label={toggleLabel}
           aria-expanded={all}
           onClick={() => setAll((v) => !v)}
-          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums after:absolute after:-inset-x-1 after:-inset-y-3 hover:bg-surface-3 active:bg-pressed"
+          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums pointer-coarse:after:absolute pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-3 hover:bg-surface-3 active:bg-pressed"
           data-testid="sports-show-all"
         >
           {all ? null : <span aria-hidden>{`+${more}`}</span>}

@@ -32,7 +32,7 @@ Never put `border-border` on a container: it turns the dark theme into a wirefra
 
 Selection is neutral plus the small amber tick, never an amber wash (`bg-accent/10` and the like are banned).
 
-The guide grid's cells come in three steps, so what airs now reads as one band down the grid: the airing cell is raised (`bg-surface shadow-2` in light, `bg-surface-3` in dark) with its title semibold, a later cell sits one step under it (`bg-surface-2`, `bg-surface` in dark), and an ended cell has no fill and the quiet text tone (`bg-bg text-fg-subtle`). Every time line is `text-fg-muted` (an ended cell's is in its own quiet tone). All of them are opaque: the red now line is drawn before the cells so it never strikes through a title, and shows only in the gutters, the ruler and its stub at the airing cell's foot.
+In the guide grid, what airs now reads as one band down the grid: the airing cell is raised (`bg-surface shadow-2` in light, `bg-raised shadow-1` in dark) with its title semibold, and later and ended cells sit one step under it on `bg-surface-2` in every theme, which keeps their edge against the page (`bg-surface` would be the page's own black under OLED). An ended cell keeps that block and steps back through the quiet text tone (`text-fg-subtle`), its medium title weight and the History glyph. Every time line is `text-fg-muted` (an ended cell's is in its own quiet tone). All of them are opaque: the red now line is drawn before the cells so it never strikes through a title, and shows only in the gutters, the ruler and its stub at the airing cell's foot. The EPG ribbon's airing block is opaque for the same reason.
 
 ### Accent
 
@@ -84,7 +84,7 @@ Weights are 400, 500 and 600 only. Headings track in by -0.01 to -0.02 em (the c
 ## Radii, elevation, spacing
 
 - Radii: `rounded-xs` 4 (badges, checkboxes, key caps), `rounded-sm` 6 (segments, small status chips on artwork), `rounded-md` 8 (buttons, inputs, rows, menu items, segmented tracks), `rounded-lg` 12 (cards, posters, menus, toasts, panels, settings groups), `rounded-xl` 16 (dialogs, the hero frame, sheets), `rounded-full` (filter chips, the watched mark, sliders, dots, avatars). Bare `rounded` is a mistake; use `rounded-xs`.
-- Elevation: `shadow-1` (cards, raised thumbs, the primary button), `shadow-2` (menus, popovers, toasts, tooltips, floating panels, the mini player), `shadow-3` (dialogs, drawers, sheets). They read `--elevation-N`, which differs per theme; in CSS write `var(--elevation-N)`. Never put a literal shadow in `@theme`.
+- Elevation: `shadow-1` (cards, raised thumbs, the primary button), `shadow-2` (menus, popovers, toasts, tooltips, floating panels, the mini player, and the guide's airing cell in light, where a white cell on the pale later cells needs the lift to read as a band), `shadow-3` (dialogs, drawers, sheets). They read `--elevation-N`, which differs per theme; in CSS write `var(--elevation-N)`. Never put a literal shadow in `@theme`.
 - Spacing follows density (compact shrinks every spacing step by an eighth); text and icons follow the UI scale only.
 - Page gutter: `--page-gutter` (1rem, 1.5rem from `sm`, 2rem from `lg`), shared by the header and `Page`.
 

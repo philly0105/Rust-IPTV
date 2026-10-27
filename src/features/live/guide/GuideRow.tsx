@@ -317,17 +317,17 @@ export const GuideRow = memo(function GuideRow({
                     muted
                       ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
                         'bg-bg text-fg-subtle hover:bg-surface'
-                      : // Three steps, so what airs now reads as one band down the grid. On now: the
-                        // raised cell (white with a lifted shadow in light, the top surface step in
-                        // dark), never a grey or amber wash. Later: one step down (a pale fill on the
-                        // grey page in light, the panel step in dark), so the airing cells stand
-                        // above them; they used to share the white (light) or sit one 1.12:1 step
-                        // below (dark). Ended: no fill, quiet text, as a muted cell.
+                      : // What airs now reads as one band down the grid. On now: the raised cell (white
+                        // with a lifted shadow in light, the raised fill in dark), never a grey or
+                        // amber wash. Later and ended: one step down on surface-2, which keeps an edge
+                        // against the page in every theme. dark:bg-surface would be the page's own
+                        // black under OLED, and an unfilled ended cell left catch-up hours as loose
+                        // text. Ended cells step back by their quiet text and the History glyph only.
                         b.when === 'now'
-                        ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-surface-3 dark:shadow-1 dark:hover:bg-pressed'
+                        ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
                         : b.when === 'past'
-                          ? 'bg-bg text-fg-subtle hover:bg-surface dark:hover:bg-surface-2'
-                          : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface dark:hover:bg-surface-2',
+                          ? 'bg-surface-2 text-fg-subtle hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3'
+                          : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
                   )}
                   style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
                 >

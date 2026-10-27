@@ -68,6 +68,7 @@ Removing a source hides it and shows an Undo toast. The source is deleted 8 seco
 - A channel played from Favorites zaps through your favorites in their order.
 - In fullscreen live TV, the channel list opens with C, by resting the pointer on the left edge (right in Arabic), or with the Channel list button that shows with the player controls.
 - When a live channel stops working, the player switches to the same channel on another of your sources and says so, with Undo. The player's settings menu lists "Alternate sources" for the channel and can pin a preferred source. Settings > Playback > "Switch live channels to another source".
+- The groups sit in a column beside the channel list when the window has room for it. On a narrower window (a tablet, or a 1024 px window beside the full side rail) they open as a panel from the button at the start of the channel list's toolbar (Ctrl+B), so the channel list and the player keep their width.
 - When most of a source's groups start with a country tag ("US| Sports", "UK: News"), a region picker beside "Groups" shows one country's groups at a time, each tag with its number of groups. The filter field searches inside the picked region, the group you have open stays listed, and the app remembers the region for each source.
 - M3U channels with ClearKey DRM (`#KODIPROP` `inputstream.adaptive.license_type=clearkey` and `license_key`, as Kodi and IPTVnator read them) play DASH streams in the built-in player, which takes the keys. The MPV and VLC players cannot, so those channels always use the built-in player.
 

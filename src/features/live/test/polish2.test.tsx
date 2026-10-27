@@ -422,6 +422,35 @@ describe('groups drawer below 1024 px', () => {
   });
 });
 
+describe('groups drawer on a narrow page (beside the expanded rail)', () => {
+  it('keeps the groups out of a page narrower than 60rem, behind the toolbar toggle, even on a wide window', async () => {
+    // The harness answers every min-width query as matching (a wide window); the page itself is
+    // 776 px wide, as beside the expanded rail in a 1024 px window.
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === 'live-page' ? 776 : 0;
+    });
+    renderIn('/s/src1/live', LIVE);
+    await screen.findByText('Channel 0');
+    expect(screen.queryByRole('navigation', { name: 'Groups' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show groups' }));
+    const drawer = await screen.findByTestId('groups-drawer');
+    expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
+    width.mockRestore();
+  });
+
+  it('shows the groups as a column once the page has room for them', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === 'live-page' ? 1032 : 0;
+    });
+    renderIn('/s/src1/live', LIVE);
+    await screen.findByText('Channel 0');
+    expect(screen.getByRole('navigation', { name: 'Groups' })).toBeTruthy();
+    expect(screen.queryByTestId('groups-drawer')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Hide groups' })).toBeTruthy();
+    width.mockRestore();
+  });
+});
+
 describe('channel logos in reused rows', () => {
   it('a broken logo does not stick to the slot when the row shows another channel', () => {
     const { rerender, container } = render(<ChannelLogo src="https://x/broken.png" name="Alpha One" />);

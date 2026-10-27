@@ -515,8 +515,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // The phone's groups button names the group being browsed, All channels included.
   const groupLabel = groupName ?? (isRadio ? t('allStations') : t('allChannels'));
   // The count always says what it counts ("106 channels"); All channels is the page with no group,
-  // so it shows the count alone rather than "All channels · 106 channels".
-  const countText = paged.total !== undefined ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
+  // so it shows the count alone rather than "All channels · 106 channels". An empty list says so in
+  // its own empty state, so "0 stations" over "No radio stations in this source" is left out.
+  const countText = paged.total ? t(isRadio ? 'stationCount' : 'channelCount', { count: paged.total, formatted: fmt.format(paged.total) }) : '';
   // The scope under the section, once: the source (with several), the group and the count. The
   // list no longer repeats them over its rows.
   const scope = groupName && countText ? t('groupWithCount', { group: groupName, count: countText }) : groupName || countText;

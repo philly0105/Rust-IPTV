@@ -310,6 +310,15 @@ describe('the Live page header and guide link', () => {
     await waitFor(() => expect(fakes.lastHeader()?.title).toBe('Live TV'));
   });
 
+  it('Radio with no stations: the empty state says so, with no "0 stations" over it', async () => {
+    rpcMock.handlers['catalog.categories'] = () => [];
+    rpcMock.handlers['catalog.channels'] = serve([]);
+    renderAt('/s/src1/radio', [{ path: '/s/:sourceId/radio', element: <LivePage mode="radio" /> }]);
+    await screen.findByText('No radio stations in this source');
+    await waitFor(() => expect(fakes.lastHeader()?.title).toBe('Radio'));
+    expect(fakes.lastHeader()?.subtitle).toBeUndefined();
+  });
+
   it('the guide link carries the group and the channel to open at (LG-01)', () => {
     expect(guideLink('src 1', 'g/1', 'c7')).toBe('/epg?source=src+1&category=g%2F1&focus=c7');
     expect(guideLink('src1')).toBe('/epg?source=src1');

@@ -184,6 +184,18 @@ describe('what is playing (LG-01)', () => {
     expect(document.querySelector('[data-channel-row="1"]')!.hasAttribute('aria-current')).toBe(false);
   });
 
+  // Round 4: an amber foot under every airing cell stacked into stripes; amber is for "here".
+  it("draws the airing progress in the accent on the playing channel's row only", async () => {
+    fakes.usePlayerStore.setState({ source: { url: 'x', kind: 'hls', title: 'Channel 2', ref: makeChannel(2).ref, isLive: true, isRadio: false } } as never);
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const playingCell = await screen.findByRole('button', { name: /^c2 P0,/ });
+    const otherCell = await screen.findByRole('button', { name: /^c1 P0,/ });
+    expect(within(playingCell).getByTestId('cell-progress').className).toContain('bg-accent-mark');
+    const other = within(otherCell).getByTestId('cell-progress').className;
+    expect(other).not.toContain('bg-accent');
+    expect(other).toContain('bg-fg-subtle/55');
+  });
+
   it('opens at the channel the link names, with the cursor on now', async () => {
     renderGuide({ path: '/epg?source=src1&focus=c7', routes: GRID });
     await waitFor(() => expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/^c7 P0,/));

@@ -335,12 +335,15 @@ export const GuideRow = memo(function GuideRow({
                   {genre && !muted ? (
                     <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
                   ) : null}
-                  {/* The airing programme's progress along its foot (LG-18): the accent's mark tone, a mark of progress. */}
+                  {/* The airing programme's progress along its foot (LG-18). In the accent's mark tone
+                      only on the playing channel's row, where it means "here", as in the Live list;
+                      an amber foot on every airing cell stacked into stripes beside the red now line.
+                      The rest are neutral: the cell prints its times, so the foot only hints. */}
                   {b.when === 'now' && !muted ? (
                     <span
                       aria-hidden
                       data-testid="cell-progress"
-                      className="absolute start-0 bottom-0 h-0.5 bg-accent-mark"
+                      className={cn('absolute start-0 bottom-0 h-0.5', playing ? 'bg-accent-mark' : 'bg-fg-subtle/55')}
                       style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
                     />
                   ) : null}

@@ -153,7 +153,7 @@ Before the router mounts, `src/main.tsx` prefetches `settings.get` and `sources.
 - My List (`settings.dashboardRails.myList`), then one rail per custom list with "Show on Home" on (`CustomListRails` from `src/features/lists/rails`, in list order; a list's own `onDashboard` flag decides, not `dashboardRails`; see lists.md)
 - favorite channels: live and radio favorites, with EPG now-playing from `epg.nowNext` (asked only while Home's live rails are on, and asked again once a programme in the answer has ended, `firstProgrammeEnd`, not every minute; a minute tick moves the progress bars)
 - channels in the most used source, when no other live rail has anything to show (an M3U source on first run)
-- recently watched channels
+- recently watched channels, drawn as the favourites are: what is on and how far it has run, from the same `epg.nowNext` call (their channels are asked about on top of On now's share). A channel card names its source only when Home has two or more; with one, a card with no programme says Live TV or Radio
 - favorite movies and series
 - your sources: ranked by latest use, then refresh time
 - recently added: `catalog.recentlyAdded` for movies and series, merged

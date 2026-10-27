@@ -451,6 +451,36 @@ describe('sports page', () => {
     expect(screen.getByTestId('sports-grid').className).toContain(`${pinned}:[&_button]:scroll-mt-32`);
   });
 
+  it('goes back to the top when the pinned toolbar changes the day, the league or a filter', async () => {
+    const days = etDays(Date.now(), 7, 7);
+    const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([g]);
+    setDay([h.game('2', { startMs: Date.now() + 26 * h.HOUR, etDate: days[8] })], days[8]);
+    setStreams(g, [h.match(ESPN)]);
+    localStorage.setItem('tsrust.sportsTeams', JSON.stringify(['nba:BOS']));
+    // The shell's outlet is the page's scroller. jsdom lays nothing out, so the toolbar's top is on
+    // the scroller's, as when it is pinned.
+    h.renderAt('/sports', [{ path: '/sports', element: <main id="main"><SportsPage /></main> }]);
+    await waitFor(() => expect(data.streamCalls.at(-1)?.enabled).toBe(true));
+    const main = document.getElementById('main')!;
+    const press = (el: HTMLElement) => {
+      main.scrollTop = 600;
+      fireEvent.click(el);
+      return main.scrollTop;
+    };
+    expect(press(screen.getByRole('tab', { name: /^Tomorrow / }))).toBe(0);
+    await waitFor(() => expect(h.location.current).toBe(`/sports?day=${days[8]}`));
+    expect(press(screen.getByRole('tab', { name: /^NBA / }))).toBe(0);
+    expect(press(screen.getByTestId('sports-streams-only'))).toBe(0);
+    expect(press(screen.getByTestId('sports-my-teams'))).toBe(0);
+
+    // Not pinned (the toolbar below the scroller's top, scrolled only part way to it): the page stays.
+    const toolbar = screen.getByTestId('sports-toolbar');
+    vi.spyOn(toolbar, 'getBoundingClientRect').mockReturnValue({ top: 8 } as DOMRect);
+    expect(press(screen.getByRole('tab', { name: TODAY }))).toBe(600);
+    await waitFor(() => expect(h.location.current).toBe('/sports?league=nba'));
+  });
+
   it('splits the day into Live now, Upcoming and Final, so no game shows twice', async () => {
     const early = h.finalGame('1');
     const playing = h.liveGame('2');

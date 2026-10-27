@@ -33,8 +33,8 @@ it('a title with no artwork shows its initials tile, as its poster card does, no
   const el = card({});
   const tile = el.querySelector('[data-poster-fallback]');
   expect(tile?.textContent).toBe('HL');
-  // The movie glyph under the initials, and the watched share still along the bottom edge.
-  expect(tile?.querySelector('svg')).toBeTruthy();
+  // The initials alone (the caption names the title), and the watched share still along the bottom edge.
+  expect(tile?.querySelector('svg')).toBeNull();
   expect(el.querySelector('[role="progressbar"]')).toBeTruthy();
 });
 

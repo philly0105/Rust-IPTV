@@ -1,4 +1,3 @@
-import { Clapperboard, Radio, Tv } from 'lucide-react';
 import { createContext, useCallback, useContext, useRef, type ReactNode } from 'react';
 
 import { sizedImageUrl } from '@/api/images';
@@ -21,7 +20,10 @@ export interface PosterProps {
   label?: string;
   aspect?: PosterAspect;
   className?: string;
-  /** Fallback glyph kind when there is no image. */
+  /**
+   * What the item is. The fallback tile no longer draws a glyph for it (the caption or the row
+   * beside every tile already says it); kept so callers need not change.
+   */
   kind?: 'movie' | 'live' | 'radio';
   /** Overlay content (badges, progress) positioned inside the frame. */
   children?: ReactNode;
@@ -179,8 +181,8 @@ function reveal(img: HTMLImageElement, url: string, instant: boolean): void {
 
 /**
  * Artwork frame with lazy loading, a fade-in reveal, and a designed fallback
- * tile (initials on a per-title tint plus a glyph) when the image is missing
- * or fails.
+ * tile (initials on the title's tint, src/ui/tint.ts) when the image is
+ * missing or fails.
  *
  * Remote artwork loads through the image cache (`imageUrl`). When the cache
  * route errors, the original URL is tried once and then the cache once more,
@@ -202,7 +204,6 @@ export function Poster({
   label,
   aspect = 'poster',
   className,
-  kind = 'movie',
   children,
   fit = 'cover',
   eager,
@@ -243,7 +244,6 @@ export function Poster({
   );
 
   const fallbackText = label ?? alt;
-  const Glyph = kind === 'live' ? Tv : kind === 'radio' ? Radio : Clapperboard;
   const radius = { sm: 'rounded-sm', md: 'rounded-md', lg: 'rounded-lg' }[rounded];
 
   return (
@@ -267,24 +267,29 @@ export function Poster({
           ref={pauseWhenOffscreen}
         />
       ) : (
-        // A size container: the letters and glyph scale with the tile's shorter side, so a 36 px row
-        // thumbnail fits "WM" and its glyph; from about 70 px up they keep the full text-3xl / text-2xl.
+        // A size container: the letters scale with the tile's shorter side, from a 36 px row
+        // thumbnail (which still fits "WM") to a 135 px On now card, where fixed 22 px letters
+        // floated in an empty field and read as a loading placeholder. No type glyph under them:
+        // in a 44 px tile it pushed the letters to the top edge, and the caption or row beside
+        // every tile says what the item is.
         <div
           aria-hidden
           data-poster-fallback=""
-          className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1 [container-type:size]', tint === 'dark' ? TINT_DARK : TINT_THEME)}
+          className={cn('absolute inset-0 flex items-center justify-center [container-type:size]', tint === 'dark' ? TINT_DARK : TINT_THEME)}
           style={tintVars(fallbackText)}
         >
           <span
             className={cn(
-              'font-display font-semibold tracking-wide',
-              // text-3xl / text-2xl, with their line heights, capped by the tile.
-              aspect === 'poster' ? 'text-[length:min(1.875rem,40cqmin)] leading-[1.2]' : 'text-[length:min(1.5rem,40cqmin)] leading-[calc(4/3)]',
+              'font-display leading-none font-semibold tracking-tight',
+              // About a quarter of a poster's width, a third of a wide tile's height, capped; under
+              // about 60 px the floor (40% of the side, up to 0.9rem) keeps small tiles legible.
+              aspect === 'poster'
+                ? 'text-[length:max(min(40cqmin,0.9rem),min(24cqmin,2.25rem))]'
+                : 'text-[length:max(min(40cqmin,1rem),min(30cqmin,2.75rem))]',
             )}
           >
             {initialsOf(fallbackText)}
           </span>
-          <Glyph size={16} className="size-[min(16px,30cqmin)] shrink-0 opacity-65" />
         </div>
       )}
       {url && (

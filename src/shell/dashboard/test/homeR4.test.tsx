@@ -63,9 +63,10 @@ describe('a channel without a logo (round 4)', () => {
       // The frame centres the tile as a square a little under half the card's height (a fixed size
       // crowded a phone card), rounded like an app icon, with no type glyph.
       const frame = mark.parentElement!.className;
-      for (const c of ['[&>[data-poster-fallback]]:m-auto', '[&>[data-poster-fallback]]:h-[46%]', '[&>[data-poster-fallback]]:aspect-square', '[&>[data-poster-fallback]]:rounded-[22%]', '[&>[data-poster-fallback]>svg]:hidden']) {
+      for (const c of ['[&>[data-poster-fallback]]:m-auto', '[&>[data-poster-fallback]]:h-[46%]', '[&>[data-poster-fallback]]:aspect-square', '[&>[data-poster-fallback]]:rounded-[22%]']) {
         expect(frame, `${name}: ${c}`).toContain(c);
       }
+      expect(mark.querySelector('svg'), name).toBeNull();
       expect(frame).not.toContain('size-16');
       // The channel's glow on the card's own surface shows around it.
       expect(frame).toContain('bg-transparent');

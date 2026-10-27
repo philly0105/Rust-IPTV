@@ -485,9 +485,8 @@ function menuHandlers<E extends HTMLElement>(open: ((pos: { x: number; y: number
 
 /**
  * Poster's initials tile, drawn as a logo-sized mark in the middle of the frame instead of across
- * all of it, without its type glyph (the rail and the caption already say it is a channel). A
- * channel with no logo, or one whose logo fails, then looks like a channel with one: a small mark
- * on the channel's glow. Filled edge to edge, every logo-less card was a saturated block, and a
+ * all of it. A channel with no logo, or one whose logo fails, then looks like a channel with one:
+ * a small mark on the channel's glow. Filled edge to edge, every logo-less card was a saturated block, and a
  * rail of them (a provider without logos fills Home with them) read as a wall of colour.
  */
 const LOGO_MARK = cn(
@@ -496,7 +495,6 @@ const LOGO_MARK = cn(
   '[&>[data-poster-fallback]]:m-auto [&>[data-poster-fallback]]:h-[46%] [&>[data-poster-fallback]]:w-auto [&>[data-poster-fallback]]:aspect-square',
   '[&>[data-poster-fallback]]:rounded-[22%]',
   '[&>[data-poster-fallback]]:shadow-1 [&>[data-poster-fallback]]:ring-1 [&>[data-poster-fallback]]:ring-white/10 [&>[data-poster-fallback]]:ring-inset',
-  '[&>[data-poster-fallback]>svg]:hidden',
 );
 
 /**

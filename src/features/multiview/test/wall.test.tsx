@@ -811,13 +811,58 @@ describe('stacked wall', () => {
     const wall = await screen.findByTestId('multiview-wall');
     const classes = wall.className.split(/\s+/);
     expect(classes).toEqual(expect.arrayContaining(['self-start', 'content-start']));
-    // A free slot lets its 16:9 height (or its label) size its row when stacked.
+    // A fitted wall's slots fill their grid cells.
     for (const slot of screen.getAllByTestId('multiview-empty-slot')) {
       const own = slot.className.split(/\s+/);
-      expect(own).toContain('aspect-video');
-      expect(own).not.toContain('min-h-0');
       expect(own).toContain('@2xl:min-h-0');
+      expect(own).toContain('@2xl:aspect-auto');
     }
+  });
+
+  it('shows one short add row under the tiles instead of a 16:9 frame per free slot', async () => {
+    seed([1]);
+    renderPage();
+    await screen.findByTestId('multiview-wall');
+    // Nothing recent or favorite: the next slot is a plain frame once both lists answered.
+    await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
+    const [next, ...rest] = screen.getAllByTestId('multiview-empty-slot');
+    expect(next!.getAttribute('data-slot')).toBe('2');
+    expect(next!.className.split(/\s+/)).toEqual(expect.arrayContaining(['@max-2xl:aspect-auto', '@max-2xl:h-14', '@max-2xl:flex-row']));
+    // The slots after it are drawn only on a fitted wall, where they show the layout's shape.
+    expect(rest).toHaveLength(2);
+    for (const slot of rest) expect(slot.className.split(/\s+/)).toEqual(expect.arrayContaining(['hidden', '@2xl:flex']));
+  });
+
+  it('keeps the quick picks to their own height when stacked', async () => {
+    handlers['recent.list'] = () => [{ ref: channel(2, 'm3u1').ref, viewedAt: '2026-10-13T00:00:00Z', snapshot: { title: 'Channel 2', contentType: 'live' } }];
+    seed([1]);
+    renderPage();
+    const slot = await screen.findByRole('group', { name: 'Slot 2: add a channel' });
+    expect(slot.className.split(/\s+/)).toContain('@max-2xl:aspect-auto');
+  });
+
+  it('leaves the layout choice to wider walls, where it changes something', async () => {
+    seed([1]);
+    renderPage();
+    const stage = await screen.findByTestId('multiview-stage');
+    expect(stage.className.split(/\s+/)).toContain('@container/stage');
+    const choice = within(screen.getByTestId('multiview-toolbar')).getByRole('radiogroup', { name: 'Layout' });
+    expect(choice.parentElement!.className.split(/\s+/)).toEqual(['hidden', '@[45rem]/stage:flex']);
+  });
+
+  it('moves focus only between slots that are drawn', async () => {
+    seed([1]);
+    renderPage();
+    await playAll([1]);
+    await waitFor(() => expect(screen.queryByTestId('multiview-quick-picks-skeleton')).toBeNull());
+    // jsdom draws everything: say the slots after the next one are not drawn, as on a stacked wall.
+    for (const el of document.querySelectorAll<HTMLElement>('[data-testid="multiview-empty-slot"]')) {
+      const drawn = el.getAttribute('data-slot') === '2';
+      el.checkVisibility = () => drawn;
+    }
+    mainOf(1).focus();
+    fireEvent.keyDown(mainOf(1), { key: 'End' });
+    expect(document.activeElement?.getAttribute('data-slot')).toBe('2');
   });
 });
 

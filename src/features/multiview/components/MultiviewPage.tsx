@@ -456,7 +456,7 @@ export function MultiviewPage() {
           onPointerMove={fsActive ? chrome.poke : undefined}
           onPointerDown={fsActive ? chrome.poke : undefined}
           onKeyDownCapture={fsActive ? chrome.poke : undefined}
-          className={cn('relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
+          className={cn('@container/stage relative flex min-h-0 flex-1 flex-col', fsActive ? 'bg-black' : 'bg-bg', fsActive && !chrome.visible && 'cursor-none')}
         >
           {/* One toolbar from the first visit on, so the layout choice never moves or changes look
               when the first tile goes up. */}
@@ -470,7 +470,7 @@ export function MultiviewPage() {
             </div>
           ) : null}
           {!fsActive ? banners : null}
-          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size]', fsActive ? 'p-0' : 'px-(--page-gutter) py-3 sm:py-4')}>{wall}</div>
+          <div className={cn('relative flex min-h-0 flex-1 overflow-y-auto [container-type:size] [container-name:wall]', fsActive ? 'p-0' : 'px-(--page-gutter) py-3 sm:py-4')}>{wall}</div>
           {fsActive ? (
             <div
               ref={overlayRef}

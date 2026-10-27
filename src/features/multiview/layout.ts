@@ -2,8 +2,8 @@
  * Wall geometry. Three layouts, each a fixed number of slots; tiles fill the slots in order
  * and the rest show an "Add channel" frame.
  *
- * Sizing: the wall host is a size container. Below 42rem of width the slots stack in one
- * column at 16:9 and the host scrolls. From 42rem the whole wall is fitted into the host
+ * Sizing: the wall host is a size container (named `wall`). Below 42rem of width the slots stack
+ * in one column at 16:9 and the host scrolls; free slots then shrink to one short row (FreeSlot). From 42rem the whole wall is fitted into the host
  * (`cqw`/`cqh`) at the aspect ratio that keeps every slot 16:9, and centered, like a monitor
  * wall: nothing is letterboxed twice and nothing scrolls.
  *

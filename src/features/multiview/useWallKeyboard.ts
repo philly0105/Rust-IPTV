@@ -27,10 +27,14 @@ export interface WallKeyboardOptions {
   onSwapCancel(): void;
 }
 
-/** The focusable element of each slot, by slot index. */
+/**
+ * The focusable element of each slot on screen, by slot index. A stacked wall leaves out the free
+ * slots after the next one (FreeSlot), so focus never goes to a slot that is not drawn.
+ */
 export function slotTargets(wall: HTMLElement): Map<number, HTMLElement> {
   const out = new Map<number, HTMLElement>();
   for (const el of wall.querySelectorAll<HTMLElement>('[data-slot-focus]')) {
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility()) continue;
     const i = Number(el.dataset['slotFocus']);
     if (Number.isInteger(i)) out.set(i, el);
   }

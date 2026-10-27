@@ -55,8 +55,8 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
   const { t } = useTranslation('multiview');
   const number = slot + 1;
   const hintId = `multiview-slot-hint-${number}`;
-  // A slot's width also sets its height, so the line shows only in a large slot (a 2x2 slot on a
-  // desktop window, the large 1+3 slot); the header says what the page is for in any case.
+  // A fitted slot's width also sets its height, so the line shows only in a large slot (a 2x2
+  // slot on a desktop window, the large 1+3 slot); the header says what the page is for anyway.
   const hint = (extra: string) =>
     next && intro ? (
       <span id={hintId} data-testid="multiview-empty-hint" className={cn('hidden max-w-[28rem] text-center text-sm font-normal text-pretty text-fg-muted @[32rem]/slot:block', extra)}>
@@ -65,6 +65,9 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
     ) : null;
 
   if (!next || (!picksLoading && picks.length === 0)) {
+    // Stacked (a wall under 42rem, a phone), the slots after the next one are left out and the
+    // next one is a short row: N full-width 16:9 frames were screens of dashes to scroll past.
+    // The toolbar's Add channel and the next slot still reach the picker.
     return (
       <button
         type="button"
@@ -78,6 +81,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
         className={cn(
           FRAME,
           '@container/slot group/slot flex flex-col items-center justify-center gap-2 p-2 text-fg-muted outline-none',
+          next ? '@max-2xl:aspect-auto @max-2xl:h-14 @max-2xl:flex-row @max-2xl:gap-3' : 'hidden @2xl:flex',
           'hover:border-accent hover:bg-surface hover:text-fg active:bg-surface-2',
           'focus-visible:border-solid focus-visible:border-focus focus-visible:text-fg',
           'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-divider disabled:hover:bg-surface/50',
@@ -86,7 +90,7 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
         )}
       >
         <SlotNumber number={number} />
-        <span aria-hidden className="flex size-10 items-center justify-center rounded-full border border-edge bg-surface-2 group-hover/slot:border-border group-hover/slot:text-fg">
+        <span aria-hidden className="flex size-10 shrink-0 items-center justify-center rounded-full border border-edge bg-surface-2 group-hover/slot:border-border group-hover/slot:text-fg">
           <Plus className="size-5" />
         </span>
         <span className="text-center text-sm font-medium">{t('addChannel')}</span>
@@ -101,10 +105,12 @@ export function FreeSlot({ slot, className, disabled, next, intro, picks, picksL
       aria-label={t('slotEmptyLabel', { slot: number })}
       data-testid="multiview-next-slot"
       data-slot={number}
-      className={cn(FRAME, '@container/slot flex flex-col items-center justify-center p-3', className)}
+      className={cn(FRAME, '@container/slot flex flex-col items-center justify-center p-3 @max-2xl:aspect-auto', className)}
     >
       <SlotNumber number={number} />
-      {hint('mb-3')}
+      {/* Stacked, the slot takes its content's height, so the line fits at any width; the padding
+          keeps it clear of the slot number. */}
+      {hint('mb-3 px-9 @max-2xl/wall:block')}
       {/* Clear of the slot number on either side, so a narrow slot never runs a row under it. */}
       <div className="flex w-[calc(100%-4.5rem)] max-w-[18rem] min-w-0 flex-col gap-1.5">
         {picksLoading ? (

@@ -84,26 +84,30 @@ export function WallToolbar({
       )}
     >
       {/* Layout: the kit segmented control, each segment drawn as its monitor wall. A layout that
-          cannot hold the tiles stays focusable and hoverable, so its tooltip can say why. */}
-      <SegmentedControl<MultiviewLayout>
-        size="sm"
-        tone={overlay ? 'glass' : 'default'}
-        label={t('layoutLabel')}
-        value={layout}
-        onChange={onLayout}
-        options={LAYOUTS.map((l) => ({
-          value: l,
-          label: t(LAYOUT_LABEL_KEYS[l]),
-          content: (
-            <>
-              <LayoutGlyph layout={l} tally={l === layout && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
-              <span className="hidden lg:inline">{t(LAYOUT_LABEL_KEYS[l])}</span>
-            </>
-          ),
-          disabledReason: layoutFits(l, count) ? undefined : t('layout1x2Disabled'),
-          testId: `multiview-layout-${l}`,
-        }))}
-      />
+          cannot hold the tiles stays focusable and hoverable, so its tooltip can say why. On a
+          stacked wall (under 42rem, which the stage passes at 45rem with its gutters) every layout
+          is the same column of tiles, so the choice waits for a wider window; L still cycles. */}
+      <div className="hidden @[45rem]/stage:flex">
+        <SegmentedControl<MultiviewLayout>
+          size="sm"
+          tone={overlay ? 'glass' : 'default'}
+          label={t('layoutLabel')}
+          value={layout}
+          onChange={onLayout}
+          options={LAYOUTS.map((l) => ({
+            value: l,
+            label: t(LAYOUT_LABEL_KEYS[l]),
+            content: (
+              <>
+                <LayoutGlyph layout={l} tally={l === layout && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
+                <span className="hidden lg:inline">{t(LAYOUT_LABEL_KEYS[l])}</span>
+              </>
+            ),
+            disabledReason: layoutFits(l, count) ? undefined : t('layout1x2Disabled'),
+            testId: `multiview-layout-${l}`,
+          }))}
+        />
+      </div>
 
       <button type="button" className={toolButton(overlay)} onClick={onAdd} disabled={full} data-testid="multiview-add">
         <Plus aria-hidden className="size-4" />

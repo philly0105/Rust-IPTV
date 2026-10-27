@@ -382,7 +382,7 @@ describe('My Videos toolbar and the offline detail page', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Heat' })).toBeTruthy();
     expect(screen.getByTestId('vod-detail-poster')).toBeTruthy();
     // One Back pattern: the hero's pill, back to the library.
-    expect(screen.getByRole('link', { name: 'Back to My Videos' }).getAttribute('href')).toBe('/my-videos');
+    expect(screen.getByRole('link', { name: 'Back to My videos' }).getAttribute('href')).toBe('/my-videos');
     const about = screen.getByTestId('vod-about');
     expect(within(about).getByText('Heat (1995).mkv')).toBeTruthy();
     expect(within(about).getByText('Northwind')).toBeTruthy();

@@ -249,7 +249,7 @@ describe('DownloadsPage', () => {
     rpc.handlers['downloads.list'] = () => [list[3]];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
     expect(await screen.findByText('Nothing is downloading')).toBeTruthy();
-    expect(screen.getByText('Your 1 finished download is in My Videos.')).toBeTruthy();
+    expect(screen.getByText('Your 1 finished download is in My videos.')).toBeTruthy();
   });
 
   it('shows the error state', async () => {
@@ -305,7 +305,7 @@ describe('MyVideosPage', () => {
     rpc.handlers['recordings.library'] = () => [];
     renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
     await screen.findAllByTestId('library-card');
-    expect(screen.getByTestId('page-search').textContent).toBe('Search My Videos');
+    expect(screen.getByTestId('page-search').textContent).toBe('Search My videos');
   });
 });
 

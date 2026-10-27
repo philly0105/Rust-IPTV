@@ -146,9 +146,9 @@ describe('phone headers (L3-visual-6)', () => {
     rpc.handlers['downloads.list'] = () => [];
     rpc.handlers['myvideos.list'] = () => [];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
-    const link = await screen.findByRole('link', { name: 'Open My Videos' });
-    expect(link.getAttribute('title')).toBe('Open My Videos');
-    expect(within(link).getByText('Open My Videos').className).toContain('max-sm:sr-only');
+    const link = await screen.findByRole('link', { name: 'Open My videos' });
+    expect(link.getAttribute('title')).toBe('Open My videos');
+    expect(within(link).getByText('Open My videos').className).toContain('max-sm:sr-only');
   });
 
   it('Recent: on a phone Clear history moves out of the header into a bar above the list', async () => {

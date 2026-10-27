@@ -460,6 +460,69 @@ describe('list page', () => {
   });
 });
 
+describe('lists drawer on a narrow page (beside the expanded rail)', () => {
+  // The page's width reaches the hook through its ResizeObserver, as the browser reports it after
+  // layout; the harness's own stub reports nothing. These observers record what they watch, so a
+  // test can report a width for the list page alone.
+  const original = globalThis.ResizeObserver;
+  let observed: { cb: ResizeObserverCallback; ro: ResizeObserver; el: Element }[] = [];
+  beforeEach(() => {
+    observed = [];
+    globalThis.ResizeObserver = class {
+      constructor(private cb: ResizeObserverCallback) {}
+      observe(el: Element) {
+        observed.push({ cb: this.cb, ro: this as unknown as ResizeObserver, el });
+      }
+      unobserve() {}
+      disconnect() {
+        observed = observed.filter((o) => o.ro !== (this as unknown as ResizeObserver));
+      }
+    } as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    globalThis.ResizeObserver = original;
+  });
+  const reportPageWidth = (width: number) =>
+    act(() => {
+      for (const o of observed.filter((x) => (x.el as HTMLElement).dataset.testid === 'list-page')) {
+        o.cb([{ target: o.el, contentRect: { width } } as unknown as ResizeObserverEntry], o.ro);
+      }
+    });
+
+  it('keeps the lists out of a page narrower than 66rem, behind the bar toggle, even on a wide window', async () => {
+    // The harness answers every min-width query as matching (a wide window); the page itself is
+    // 776 px wide, as beside the expanded rail in a 1024 px window, where three columns pushed the
+    // stage off the page's end.
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC, CNN]), h.coreList('L2', 'Kids', [CNN])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.getByTestId('lists-section')).toBeTruthy();
+    reportPageWidth(776);
+    expect(screen.queryByTestId('lists-section')).toBeNull();
+    // With the column gone the header carries Manage lists again.
+    await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[title="Manage lists"]')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Show lists' }));
+    const drawer = await screen.findByTestId('lists-drawer');
+    expect(within(drawer).getByRole('link', { name: /Kids/ })).toBeTruthy();
+    // Escape closes it.
+    fireEvent.keyDown(drawer, { key: 'Escape' });
+    expect(screen.queryByTestId('lists-drawer')).toBeNull();
+  });
+
+  it('shows the lists as a column once the page has room for them', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC])]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    // jsdom's root is 16 px, so 66rem is 1056 px (990 px at the app's 15 px root).
+    reportPageWidth(1100);
+    expect(screen.getByTestId('lists-section')).toBeTruthy();
+    expect(screen.queryByTestId('lists-drawer')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Hide lists' })).toBeTruthy();
+  });
+});
+
 describe('/lists', () => {
   it('opens the first list', async () => {
     h.installCore(rpc, [h.coreList('L7', 'Sports', [BBC]), h.coreList('L8', 'Kids', [])]);

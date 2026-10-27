@@ -419,11 +419,11 @@ describe('list page', () => {
     expect(screen.queryByTestId('lists-section')).toBeNull();
     await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[title="Manage lists"]')).toBeTruthy());
     const folded = render(<>{useShellStore.getState().header!.actions}</>).container;
-    // On a phone it shrinks to its icon, keeping its name for screen readers and the tooltip.
+    // Folded away on a wide page it keeps its label (on a phone the lists are a drawer, where it
+    // is a bare gear: see the narrow-page test below).
     const manage = within(folded).getByRole('button', { name: 'Manage lists' });
-    expect(manage.getAttribute('title')).toBe('Manage lists');
-    expect(manage.className).toContain('max-sm:w-8');
-    expect(within(manage).getByText('Manage lists').className).toContain('max-sm:sr-only');
+    expect(manage.textContent).toBe('Manage lists');
+    expect(manage.className.split(' ')).not.toContain('w-8');
     fireEvent.click(manage);
     expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
   });
@@ -500,8 +500,18 @@ describe('lists drawer on a narrow page (beside the expanded rail)', () => {
     expect(screen.getByTestId('lists-section')).toBeTruthy();
     reportPageWidth(776);
     expect(screen.queryByTestId('lists-section')).toBeNull();
-    // With the column gone the header carries Manage lists again.
-    await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[title="Manage lists"]')).toBeTruthy());
+    // With the column gone the header carries Manage lists again, as a bare gear at any window
+    // size (a phone's too), so the list's channel count keeps its room beside the title. It keeps
+    // its name for screen readers and the kit tooltip, not a native title box.
+    await waitFor(() => expect(render(<>{useShellStore.getState().header!.actions}</>).container.querySelector('[aria-label="Manage lists"]')).toBeTruthy());
+    const header = render(<>{useShellStore.getState().header!.actions}</>).container;
+    const manage = within(header).getByRole('button', { name: 'Manage lists' });
+    expect(manage.textContent).toBe('');
+    expect(manage.hasAttribute('title')).toBe(false);
+    expect(manage.className.split(' ')).toContain('w-8');
+    fireEvent.click(manage);
+    expect(useListsDialogs.getState().dialog).toEqual({ kind: 'manage', focusId: 'L1' });
+    act(() => useListsDialogs.setState({ dialog: null }));
     fireEvent.click(screen.getByRole('button', { name: 'Show lists' }));
     const drawer = await screen.findByTestId('lists-drawer');
     expect(within(drawer).getByRole('link', { name: /Kids/ })).toBeTruthy();

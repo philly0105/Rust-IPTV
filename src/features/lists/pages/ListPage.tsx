@@ -342,9 +342,12 @@ export function ListPage() {
       ...(subtitle ? { subtitle } : {}),
       actions: list ? (
         // On a phone the list's name needs the room (L3-app-pages-x1): Edit channels leaves the header
-        // there, since the channels bar right below has the same button, and Manage lists is a bare icon.
+        // there, since the channels bar right below has the same button.
         // Manage lists is also the lists column's gear: while the column is on screen the header
-        // leaves it out, so it shows once; folded away or in the drawer, the header keeps it.
+        // leaves it out, so it shows once; folded away or in the drawer, the header keeps it. Folded
+        // away on a wide page it keeps its label. With the lists in the drawer (a page under 66rem,
+        // a phone included) it is a bare gear, so the list's channel count keeps its room beside the
+        // title, as Live TV's does at the same width.
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -356,22 +359,23 @@ export function ListPage() {
           >
             {t('editChannels')}
           </Button>
-          {sidebarVisible ? null : (
+          {sidebarVisible ? null : wide ? (
             <Button
               variant="ghost"
               size="sm"
               icon={<Settings2 className="size-4" />}
               onClick={() => openManageLists(list.id)}
               title={t('manageLists')}
-              className="max-sm:w-8 max-sm:px-0"
             >
-              <span className="max-sm:sr-only">{t('manageLists')}</span>
+              {t('manageLists')}
             </Button>
+          ) : (
+            <IconButton size="sm" label={t('manageLists')} icon={<Settings2 className="size-4" />} onClick={() => openManageLists(list.id)} />
           )}
         </div>
       ) : undefined,
     });
-  }, [title, subtitle, list?.id, sidebarVisible, i18n.language]);
+  }, [title, subtitle, list?.id, sidebarVisible, wide, i18n.language]);
 
   useEffect(
     () =>

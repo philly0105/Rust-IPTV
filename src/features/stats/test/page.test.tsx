@@ -148,6 +148,29 @@ describe('stats page', () => {
     expect(screen.queryByRole('tablist', { name: 'Range' })).toBeNull();
   });
 
+  it.each([
+    ['empty', h.summary(30), false],
+    ['holding something', h.summary(30, { 12: { live: 900 } }), true],
+  ] as const)('keeps the range while an empty week waits for a month %s, and drops it only when both are empty', async (_, month, kept) => {
+    let answerMonth: (value: unknown) => void = () => undefined;
+    rpc.handlers['stats.summary'] = (raw) =>
+      (raw as { days: 7 | 30 }).days === 30
+        ? new Promise((resolve) => {
+            answerMonth = resolve;
+          })
+        : h.summary(7);
+    open();
+    // Loading the week: the range is there from the first frame.
+    expect(screen.getByRole('tablist', { name: 'Range' })).toBeTruthy();
+    // The week is empty and the month has not answered: still the skeleton, still the range.
+    await waitFor(() => expect(rpc.callsOf('stats.summary').some((a) => (a as { days: number }).days === 30)).toBe(true));
+    expect(screen.getByRole('status', { name: 'Loading watch stats' })).toBeTruthy();
+    expect(screen.getByRole('tablist', { name: 'Range' })).toBeTruthy();
+    await act(async () => answerMonth(month));
+    expect(await screen.findByText('Nothing watched yet')).toBeTruthy();
+    expect(screen.queryByRole('tablist', { name: 'Range' }) !== null).toBe(kept);
+  });
+
   it('keeps the range in the URL, from the tabs and from 7 and 3', async () => {
     await loaded();
     fireEvent.click(screen.getByRole('tab', { name: '30 days' }));

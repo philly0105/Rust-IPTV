@@ -88,10 +88,11 @@ export function StatsPage() {
 
   const time = (s: number) => formatWatchTime(s, lang);
   // With nothing watched in either range, 7 days and 30 days would only switch between two empty
-  // pages: the range stays away until there is something to compare (it shows again while a week
-  // is empty but the month is not). Also while an empty week waits to hear about the month, so it
-  // does not show and then vanish.
-  const nothingToRange = data?.totalSeconds === 0 && !(range === 7 && monthHasData === true);
+  // pages, so the range goes. It goes only once both are known to be empty, in the same frame the
+  // skeleton turns into the empty state: it stays while the page loads and while an empty week
+  // waits to hear about the month (a failed probe counts as something), so it never shows, hides
+  // and comes back.
+  const nothingToRange = data?.totalSeconds === 0 && (range !== 7 || monthHasData === false);
 
   let headline = null;
   let body;

@@ -9,7 +9,7 @@ import type { Source } from '@/api/types';
 import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
 import { useOffline } from './connection';
-import { LIBRARY_LINKS, readLastSource, sectionCurrent, watchLinks, type NavLinkDef } from './navigation';
+import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, watchLinks, type NavLinkDef } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
@@ -560,6 +560,63 @@ function SourceEntry({
   );
 }
 
+/**
+ * The Sources group's one row when there is one source: its monogram and name, leading to the
+ * Sources page. The entry used to take three rows (the source, its links, Manage sources), and
+ * every link it opened was a Watch or Library row already; Radio, the one that was not, joins
+ * Watch (loneSourceRadio). Collapsed it is the monogram alone, no longer a menu of those links.
+ * Its name ends in "Manage sources", and so does its tooltip, which also carries the full name
+ * that the row may cut.
+ */
+function LoneSource({ source, collapsed, tour }: { source: Source; collapsed: boolean; tour?: 'live' }) {
+  const { t } = useTranslation('shell');
+  const intent = useRouteIntent('/sources');
+  const name = source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name;
+  return (
+    <li>
+      <Tooltip
+        content={
+          <>
+            <span dir="auto" className="block font-medium">
+              {source.name}
+            </span>
+            <span className="block text-fg-muted">{t('manageSources')}</span>
+          </>
+        }
+        side="inline-end"
+        describe={false}
+      >
+        <NavLink
+          {...intent}
+          to="/sources"
+          end
+          data-tour={tour}
+          data-rail-source=""
+          aria-label={collapsed ? `${name}, ${t('manageSources')}` : undefined}
+          className={({ isActive }) => itemClass(isActive, collapsed)}
+        >
+          {/* The collapsed rail has no room for the error dot beside the name: it rides on the monogram. */}
+          <SourceMark source={source} errorDot={collapsed && !!source.lastError} />
+          {!collapsed && (
+            <>
+              <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">
+                {source.name}
+              </span>
+              <span className="sr-only">{`, ${t(kindShortKey(source.kind))}`}</span>
+              {source.lastError && (
+                <span className="h-2 w-2 shrink-0 rounded-full bg-danger">
+                  <span className="sr-only">{`, ${t('sourceHasError')}`}</span>
+                </span>
+              )}
+              <span className="sr-only">{`, ${t('manageSources')}`}</span>
+            </>
+          )}
+        </NavLink>
+      </Tooltip>
+    </li>
+  );
+}
+
 /** One of an open source's links (Live TV, Movies, …); a rest on it starts the page's code and first data. */
 function SourceLink({ to, current, children }: { to: string; current: boolean; children: ReactNode }) {
   const intent = useRouteIntent(to);
@@ -684,7 +741,12 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const noSources = sources.isSuccess && sourceCount === 0;
   // Live TV, Movies and Series open the source on show, else the one last opened.
   // Search is left out: the header's search box is the way in (notInRail).
-  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource()).filter((l) => !l.notInRail);
+  // With one source its Radio is a Watch row, after Live TV (its entry is a single row then).
+  const radio = loneSourceRadio(sources.data);
+  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource())
+    .filter((l) => !l.notInRail)
+    .flatMap((l) => (l.section === 'live' && radio ? [l, radio] : [l]));
+  const lone = sourceCount === 1 ? sources.data![0] : undefined;
   // With two or more sources, the source of the page on show opens. A lone source stays as the
   // user left it: the Watch links already lead to its sections and mark its pages.
   const pageSource = sourceCount > 1 ? activeSourceId : undefined;
@@ -748,6 +810,12 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           icon={<RotateCw aria-hidden size={15} className={cn(sources.isFetching && 'motion-safe:animate-spin')} />}
         />
       </div>
+    );
+  } else if (lone) {
+    sourceList = (
+      <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
+        <LoneSource source={lone} collapsed={collapsed} tour={lone.id === tourSourceId ? 'live' : undefined} />
+      </ul>
     );
   } else if (sources.data && sources.data.length > 0) {
     sourceList = (
@@ -845,7 +913,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
               action={noSources || (sources.isError && !offline) ? undefined : addSource}
             />
             {sourceList}
-            <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />
+            {/* One source: its own row leads to the Sources page. */}
+            {!lone && <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />}
           </div>
         </div>
       </div>

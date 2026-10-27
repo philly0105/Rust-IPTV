@@ -3,7 +3,7 @@
  * Settings out of reach (L3-visual-2); the tour's Live step points at a source that has channels
  * (L3-app-6); a cut-off source name shows in full on hover (L3-visual-12).
  */
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { Outlet } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -104,11 +104,23 @@ describe('tour Live anchor (L3-app-6)', () => {
 describe('source names (L3-visual-12)', () => {
   it('a long name carries its full text as a tooltip', async () => {
     const name = 'A very long provider name that the rail has to cut off';
-    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name })];
+    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name }), makeSource('s2')];
     renderRoutes(routes(), '/dashboard');
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     const label = await within(nav).findByText(name);
     expect(label.getAttribute('title')).toBe(name);
     expect(label.className).toMatch(/\btruncate\b/);
+  });
+
+  it("the only source's row shows its full name and where it leads in its tooltip", async () => {
+    const name = 'A very long provider name that the rail has to cut off';
+    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name })];
+    renderRoutes(routes(), '/dashboard');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const row = await within(nav).findByRole('link', { name: new RegExp(`^${name}`) });
+    expect(within(row).getByText(name).className).toMatch(/\btruncate\b/);
+    fireEvent.mouseEnter(row);
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe(`${name}Manage sources`);
   });
 });

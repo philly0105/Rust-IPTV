@@ -45,6 +45,7 @@ function routes() {
       children: [
         { path: 'dashboard', element: <Page>home page</Page> },
         { path: 'favorites', element: <Page>favorites page</Page> },
+        { path: 'sources', element: <Page>sources page</Page> },
         { path: 's/:sourceId/*', element: <Page>source page</Page> },
         { path: 'live/archive/:sourceId/:channel', element: <Page>archive page</Page> },
       ],
@@ -124,7 +125,8 @@ describe('section targets', () => {
 
   it("sectionCurrent: a section's pages in any source, with the pages beside them", () => {
     expect(sectionCurrent('live', '/s/x/live')).toBe(true);
-    expect(sectionCurrent('live', '/s/x/radio/4')).toBe(true);
+    // Radio has its own row (the only source's in Watch, else the source's own link).
+    expect(sectionCurrent('live', '/s/x/radio/4')).toBe(false);
     expect(sectionCurrent('live', '/live/archive/x/ch1')).toBe(true);
     expect(sectionCurrent('live', '/s/x/movies')).toBe(false);
     expect(sectionCurrent('movies', '/s/x/movies')).toBe(true);
@@ -173,8 +175,8 @@ describe('the Watch group', () => {
     expect(href(watch, 'Series')).toBe('/s/s2/series');
   });
 
-  it("marks Movies on a movie's page, Series under it, and Live TV on radio and the archive", async () => {
-    handlers([imported('s1', { name: 'Night Portal', movieCount: 40, seriesCount: 3 })]);
+  it("marks Movies on a movie's page, Series under it, Radio on radio and Live TV on the archive", async () => {
+    handlers([imported('s1', { name: 'Night Portal', movieCount: 40, seriesCount: 3, radioCount: 2 })]);
     const { router } = renderRoutes(routes(), '/s/s1/movie/9');
     const watch = await watchGroup();
     const current = () =>
@@ -189,13 +191,13 @@ describe('the Watch group', () => {
     await act(() => router.navigate('/s/s1/series/4'));
     expect(current()).toEqual(['Series']);
     await act(() => router.navigate('/s/s1/radio'));
-    expect(current()).toEqual(['Live TV']);
+    expect(current()).toEqual(['Radio']);
     await act(() => router.navigate('/live/archive/s1/ch1'));
     expect(current()).toEqual(['Live TV']);
     await act(() => router.navigate('/dashboard'));
     expect(current()).toEqual(['Home']);
-    // The only source stayed closed on its own pages: the Watch links mark them.
-    expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
+    // The only source is one row to the Sources page: the Watch links mark its pages.
+    expect(screen.getByRole('link', { name: /^Night Portal/ }).getAttribute('aria-current')).toBeNull();
   });
 
   it('leaves out Movies and Series when no source has them', async () => {
@@ -280,15 +282,23 @@ describe('the sources accordion', () => {
     expect(localStorage.getItem('tsrust.railSource')).toBeNull();
   });
 
-  it('the only source opens on a press, from any page, and stays as the user left it', async () => {
+  it('the only source is no accordion: one row, current on the Sources page, also in the icon rail', async () => {
     handlers([night]);
     const { router } = renderRoutes(routes(), '/s/s1/live');
-    const entry = await screen.findByRole('button', { name: /^Night Portal/ });
-    expect(entry.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(entry);
-    expect(entry.getAttribute('aria-expanded')).toBe('true');
-    expect(localStorage.getItem('tsrust.railSource')).toBe('s1');
-    await act(() => router.navigate('/dashboard'));
-    expect(entry.getAttribute('aria-expanded')).toBe('true');
+    const row = await screen.findByRole('link', { name: /^Night Portal/ });
+    expect(row.getAttribute('href')).toBe('/sources');
+    expect(screen.queryByRole('button', { name: /^Night Portal/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Manage sources' })).toBeNull();
+    await act(() => router.navigate('/sources'));
+    expect(row.getAttribute('aria-current')).toBe('page');
+    expect(row.className).toContain('tuning-tick');
+    cleanup();
+    // Collapsed, the monogram is that link too, not a menu of pages the Watch and Library rows already open.
+    act(() => useShellStore.setState({ railCollapsed: true }));
+    renderRoutes(routes(), '/dashboard');
+    const mark = await screen.findByRole('link', { name: 'Night Portal, Manage sources' });
+    expect(mark.getAttribute('href')).toBe('/sources');
+    expect(mark.textContent).toBe('NP');
+    expect(screen.queryByRole('button', { name: /Night Portal/ })).toBeNull();
   });
 });

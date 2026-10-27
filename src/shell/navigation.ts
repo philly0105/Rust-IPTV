@@ -19,6 +19,7 @@ import {
   Layers,
   LayoutGrid,
   ListOrdered,
+  Radio,
   Search,
   Trophy,
   Tv,
@@ -173,11 +174,13 @@ export function sectionTarget(section: SourceSection, sources: readonly Source[]
 
 /**
  * Whether the page on show belongs to a section link, in any source: Live TV stands for the live
- * and radio pages and the archive (isLiveRoute, as the phone tab), Movies and Series for what
+ * pages and the archive (isLiveRoute without radio, which has its own row), Movies and Series for what
  * railLinkCurrent counts for a source's own link (a movie's detail and player beside Movies).
  */
 export function sectionCurrent(section: SourceSection, pathname: string): boolean {
-  if (section === 'live') return isLiveRoute(pathname);
+  // Radio has a row of its own (the lone source's in Watch, a source's own link otherwise), so
+  // Live TV leaves its pages to that row rather than lighting up beside it.
+  if (section === 'live') return isLiveRoute(pathname) && !/^\/s\/[^/]+\/radio(\/|$)/.test(pathname);
   // The route's own source segment, as it is in the path: decoding and encoding it again could
   // spell it differently.
   const base = /^\/s\/[^/?#]+/.exec(pathname)?.[0];
@@ -195,4 +198,17 @@ export function watchLinks(sources: readonly Source[] | undefined, preferredId: 
     const to = sectionTarget(l.section, sources, preferredId);
     return to === null ? [] : [{ ...l, to, dim: sources?.length === 0 }];
   });
+}
+
+/**
+ * Radio as a Watch link, for the rail and the phone's More sheet: only with exactly one source,
+ * whose entry is then a single row to the Sources page (its other links were Watch's and
+ * Library's own pages over again), and only when that source has stations by railLinkIds' rules.
+ * Null otherwise: with two or more sources each one's Radio stays in its own entry.
+ */
+export function loneSourceRadio(sources: readonly Source[] | undefined): NavLinkDef | null {
+  if (sources?.length !== 1) return null;
+  const only = sources[0]!;
+  if (!railLinkIds(only, { hasRadio: only.radioCount > 0 }).includes('radio')) return null;
+  return { to: `${sourceBasePath(only.id)}/radio`, labelKey: 'railRadio', icon: Radio };
 }

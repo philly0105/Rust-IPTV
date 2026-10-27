@@ -138,13 +138,20 @@ describe('rail (SH-rail-ia)', () => {
     expect(within(nav).getByRole('button', { name: /Night Portal, Xtream/ })).toBeTruthy();
   });
 
-  it('leaves the only source closed: its Live TV, Movies and Series are in the Watch group', async () => {
+  it('makes the only source one row to the Sources page: its Live TV, Radio, Movies and Series are in the Watch group', async () => {
     handlers([makeSource('s1', { name: 'Only One' })]);
     renderRoutes(routes(), '/favorites');
-    const entry = await screen.findByRole('button', { name: /Only One/ });
-    expect(entry.getAttribute('aria-expanded')).toBe('false');
+    const row = await screen.findByRole('link', { name: /^Only One.*Manage sources$/ });
+    expect(row.getAttribute('href')).toBe('/sources');
+    expect(screen.queryByRole('button', { name: /Only One/ })).toBeNull();
+    // It stands for Manage sources, which no longer has a row of its own.
+    const sources = screen.getByRole('group', { name: 'Sources' });
+    expect(within(sources).getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/sources?add=1', '/sources']);
     const watch = screen.getByRole('group', { name: 'Watch' });
     expect(within(watch).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live');
+    // Radio was the one link of the source's own that no Watch or Library row had: it follows Live TV.
+    expect(within(watch).getByRole('link', { name: 'Radio' }).getAttribute('href')).toBe('/s/s1/radio');
+    expect(within(watch).getAllByRole('link').map((l) => l.textContent).slice(1, 4)).toEqual(['Live TV', 'Radio', 'TV guide']);
     expect(within(watch).getByRole('link', { name: 'Movies' }).getAttribute('href')).toBe('/s/s1/movies');
     expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('href')).toBe('/s/s1/series');
   });
@@ -238,16 +245,6 @@ describe('rail at laptop heights (stage 2)', () => {
     renderRoutes(routes(), '/dashboard');
     expect((await screen.findByRole('button', { name: /^Backup/ })).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
-    // The only source stays closed until the user opens it, and then stays open next launch.
-    cleanup();
-    handlers([makeSource('s1', { name: 'Night Portal' })]);
-    renderRoutes(routes(), '/dashboard');
-    const only = await screen.findByRole('button', { name: /^Night Portal/ });
-    expect(only.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(only);
-    cleanup();
-    renderRoutes(routes(), '/dashboard');
-    expect((await screen.findByRole('button', { name: /^Night Portal/ })).getAttribute('aria-expanded')).toBe('true');
   });
 
   it('collapsed: the footer keeps Settings and the toggle, and the current source is marked for the scroll', async () => {

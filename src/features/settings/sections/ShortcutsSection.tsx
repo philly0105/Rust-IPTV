@@ -50,31 +50,35 @@ export function ShortcutsSection(_props: SectionProps) {
           aria-label={ts('shortcutsListLabel')}
           tabIndex={0}
           data-testid="shortcuts-list"
-          className="flex flex-col gap-8 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus"
+          // From 52rem the groups flow down two columns, each kept whole, so the reference is
+          // half as tall and the keys sit near their labels instead of across a wide row.
+          className="flex flex-col gap-8 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus @min-[52rem]:block @min-[52rem]:columns-2 @min-[52rem]:gap-x-8"
         >
           {groups.map(([area, items]) => (
-            <SettingsGroup key={area} title={area}>
-              <dl className="flex flex-col divide-y divide-divider" data-testid="shortcut-group">
-                {items.map((s) => (
-                  <div
-                    key={`${s.combos.join(' ')}|${s.description}`}
-                    data-combo={s.combos[0]}
-                    data-combos={s.combos.join(' ')}
-                    className="flex min-h-11 items-center justify-between gap-4 px-4 py-2"
-                  >
-                    <dt className="text-body-sm text-fg">{s.description}</dt>
-                    <dd className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                      {s.combos.map((combo, i) => (
-                        <Fragment key={combo}>
-                          {i > 0 ? <span className="text-caption text-fg-subtle">{t('shortcutsOr')}</span> : null}
-                          <Kbd combo={combo} />
-                        </Fragment>
-                      ))}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </SettingsGroup>
+            <div key={area} className="break-inside-avoid @min-[52rem]:pb-8 @min-[52rem]:last:pb-0" data-testid="shortcut-area">
+              <SettingsGroup title={area}>
+                <dl className="flex flex-col divide-y divide-divider" data-testid="shortcut-group">
+                  {items.map((s) => (
+                    <div
+                      key={`${s.combos.join(' ')}|${s.description}`}
+                      data-combo={s.combos[0]}
+                      data-combos={s.combos.join(' ')}
+                      className="flex min-h-11 items-center justify-between gap-4 px-4 py-2"
+                    >
+                      <dt className="text-body-sm text-fg">{s.description}</dt>
+                      <dd className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                        {s.combos.map((combo, i) => (
+                          <Fragment key={combo}>
+                            {i > 0 ? <span className="text-caption text-fg-subtle">{t('shortcutsOr')}</span> : null}
+                            <Kbd combo={combo} />
+                          </Fragment>
+                        ))}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </SettingsGroup>
+            </div>
           ))}
         </div>
       )}

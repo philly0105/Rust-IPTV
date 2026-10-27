@@ -309,8 +309,10 @@ export function SettingsPage() {
             <SettingsNav current={current} />
           </aside>
         )}
-        {/* Its own container: rows lay out by the column's width, not the window's. */}
-        <div className="@container min-w-0 max-w-[46rem] flex-1">
+        {/* Its own container: rows lay out by the column's width, not the window's. Keyboard
+            shortcuts is a read-only reference with short rows, so it may take the width beside the
+            nav for two columns; every other section keeps a readable 46rem. */}
+        <div className={clsx('@container min-w-0 flex-1', current === 'shortcuts' ? 'max-w-[72rem]' : 'max-w-[46rem]')}>
           <SaveFeedback.Provider value={save.status}>
             {query.isPending ? (
               <SectionSkeleton />

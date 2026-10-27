@@ -254,7 +254,8 @@ export function WhatsNewDialog({ since, auto, onClose }: WhatsNewDialogProps) {
           role="region"
           aria-label={t('whatsNewTitle')}
           tabIndex={edges.scrollable ? 0 : undefined}
-          className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-1', edges.scrollable && 'focus-visible:outline-offset-[-2px]')}
+          // The dialog's own gutter, so the notes line up with the title (1rem in a phone's sheet).
+          className={cn('min-h-0 flex-1 overflow-y-auto px-(--dialog-gutter) pb-6 pt-1', edges.scrollable && 'focus-visible:outline-offset-[-2px]')}
           data-testid="whats-new-list"
         >
           {loading ? (

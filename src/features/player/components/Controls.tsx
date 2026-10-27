@@ -1433,6 +1433,12 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const isVod = !isLive && !source.isRadio;
   const playing = status === 'playing' || status === 'loading';
   const failed = status === 'error';
+  // Over a failed stream the overlay's error panel owns the actions (Retry, Other sources and so
+  // on), so the bar keeps only what still works there: the queue, a running sleep timer, the
+  // options menu, leaving picture-in-picture and fullscreen. A second Retry, a volume for nothing
+  // and a "No signal" badge under "This stream did not play" were noise. The dock bar (embedded
+  // mpv, whose error strip may leave Retry out) keeps them.
+  const panelOwnsError = failed && variant === 'overlay';
   const prev = prevInQueue();
   const next = nextInQueue();
   const captionsOn = tracks.text.some((x) => x.selected);
@@ -1444,7 +1450,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
   const showTime = !!duration || hasPosition || status !== 'loading';
   const canRecord = isDesktop && mode === 'embedded-mpv' && isLive && mpvAttached;
-  const showPip = canPip && (variant === 'overlay' || !compact) && !tiny;
+  const showPip = canPip && (variant === 'overlay' || !compact) && !tiny && (!panelOwnsError || inPip);
   // An iPhone has no element fullscreen; its video goes fullscreen natively (PL-IOS-FULLSCREEN).
   const showFullscreen = !windowPip && canEnterFullscreen();
   // Fullscreen: larger controls, further in from the edges, read from across a room.
@@ -1645,12 +1651,12 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
             )}
             <div ref={setRow} data-ctl-row="" className={cn('flex min-w-0 items-center', compact ? 'gap-0.5' : big ? 'gap-2' : 'gap-1')}>
               {!compact && !narrow && prevButton}
-              {playButton}
+              {!panelOwnsError && playButton}
               {!compact && !narrow && nextButton}
               {!narrow && jumpButtons}
-              <VolumeControl compact={compact || narrow} />
+              {!panelOwnsError && <VolumeControl compact={compact || narrow} />}
 
-              {isLive ? (
+              {panelOwnsError ? null : isLive ? (
                 <LiveEdge
                   shown={visible}
                   status={status}

@@ -82,6 +82,8 @@ describe('stream error overlay', () => {
     expect(alert.querySelector('details')).toBeNull();
     expect(alert.querySelector('p.line-clamp-2')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    // With the title bar hidden, the panel names what failed.
+    expect(screen.getByTestId('error-item').textContent).toBe('Movie');
   });
 
   it('uses the RPC error code when the message says nothing useful', () => {

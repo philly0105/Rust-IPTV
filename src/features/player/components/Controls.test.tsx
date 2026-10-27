@@ -419,11 +419,31 @@ describe('Controls live status', () => {
     expect(screen.queryByRole('button', { name: 'Jump to live' })).toBeNull();
   });
 
-  it('a failed movie offers Retry in the play spot too', () => {
+  it('a failed movie offers Retry in the play spot of the dock bar too', () => {
     act(() => usePlayerStore.setState({ status: 'error', error: 'HTTP 500' }));
-    render(<Controls variant="overlay" visible />);
+    render(<Controls variant="dock" visible />);
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(commands.retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('over the error panel, the overlay bar keeps only what still works: options and fullscreen', () => {
+    act(() => {
+      usePlayerStore.setState({ source: live, status: 'error', error: 'HTTP 404', durationSeconds: undefined });
+      useMediaStore.setState({ canPip: true });
+    });
+    render(<Controls variant="overlay" visible />);
+    // The panel has Retry; the bar has no second one, no volume for nothing, no "No signal" under "did not play".
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /mute/i })).toBeNull();
+    expect(screen.queryByTestId('live-badge')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Picture in picture' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Playback options' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Fullscreen' })).toBeTruthy();
+    // Trying again brings the whole bar back.
+    act(() => usePlayerStore.setState({ status: 'loading', error: undefined }));
+    expect(screen.getByTestId('live-badge')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Picture in picture' })).toBeTruthy();
   });
 });
 

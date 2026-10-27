@@ -306,5 +306,6 @@
   "rowMoveDown": "Mozgatás le",
   "browseMovies": "Filmek böngészése",
   "removeFromFavorites": "Eltávolítás a kedvencek közül",
-  "removeFromHistory": "Eltávolítás az előzményekből"
+  "removeFromHistory": "Eltávolítás az előzményekből",
+  "minutesLeftShort": "{{count}} p"
 }

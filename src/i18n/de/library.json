@@ -306,5 +306,6 @@
   "rowMoveDown": "Nach unten",
   "browseMovies": "Filme durchsuchen",
   "removeFromFavorites": "Aus Favoriten entfernen",
-  "removeFromHistory": "Aus dem Verlauf entfernen"
+  "removeFromHistory": "Aus dem Verlauf entfernen",
+  "minutesLeftShort": "{{count}} min"
 }

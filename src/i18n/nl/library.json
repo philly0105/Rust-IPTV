@@ -306,5 +306,6 @@
   "rowMoveDown": "Omlaag",
   "browseMovies": "Films bekijken",
   "removeFromFavorites": "Verwijderen uit favorieten",
-  "removeFromHistory": "Verwijderen uit geschiedenis"
+  "removeFromHistory": "Verwijderen uit geschiedenis",
+  "minutesLeftShort": "{{count}} min"
 }

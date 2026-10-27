@@ -155,7 +155,12 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
               <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">
                 {now.title}
               </span>
-              <span className="shrink-0 tabular-nums text-fg-subtle">{t('minutesLeft', { count: minutesLeft })}</span>
+              {/* Live's compact "48m": in full it read as one phrase with the "34 minutes ago" beside
+                  it. The full words stay for the pointer's tooltip and for a screen reader. */}
+              <span className="shrink-0 tabular-nums text-fg-subtle" title={t('minutesLeft', { count: minutesLeft })} data-testid="entry-left">
+                <span aria-hidden>{t('minutesLeftShort', { count: minutesLeft })}</span>
+                <span className="sr-only">{t('minutesLeft', { count: minutesLeft })}</span>
+              </span>
             </span>
             {/* Quiet, as on Live TV's rows that are not playing: a list of amber bars read as stripes. */}
             <ProgressBar

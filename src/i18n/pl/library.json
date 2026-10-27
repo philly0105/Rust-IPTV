@@ -342,5 +342,6 @@
   "rowMoveDown": "Przenieś w dół",
   "browseMovies": "Przeglądaj filmy",
   "removeFromFavorites": "Usuń z ulubionych",
-  "removeFromHistory": "Usuń z historii"
+  "removeFromHistory": "Usuń z historii",
+  "minutesLeftShort": "{{count}} min"
 }

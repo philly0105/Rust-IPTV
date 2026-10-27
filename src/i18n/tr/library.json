@@ -306,5 +306,6 @@
   "rowMoveDown": "Aşağı taşı",
   "browseMovies": "Filmlere göz at",
   "removeFromFavorites": "Favorilerden kaldır",
-  "removeFromHistory": "Geçmişten kaldır"
+  "removeFromHistory": "Geçmişten kaldır",
+  "minutesLeftShort": "{{count}} dk"
 }

@@ -342,5 +342,6 @@
   "rowMoveDown": "Перамясціць ніжэй",
   "browseMovies": "Праглядзець фільмы",
   "removeFromFavorites": "Выдаліць з выбранага",
-  "removeFromHistory": "Выдаліць з гісторыі"
+  "removeFromHistory": "Выдаліць з гісторыі",
+  "minutesLeftShort": "{{count}} хв"
 }

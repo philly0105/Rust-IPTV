@@ -378,5 +378,6 @@
   "rowMoveDown": "نقل لأسفل",
   "browseMovies": "تصفح الأفلام",
   "removeFromFavorites": "إزالة من المفضلة",
-  "removeFromHistory": "إزالة من السجل"
+  "removeFromHistory": "إزالة من السجل",
+  "minutesLeftShort": "{{count}} د"
 }

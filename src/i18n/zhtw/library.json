@@ -306,5 +306,6 @@
   "rowMoveDown": "下移",
   "browseMovies": "瀏覽電影",
   "removeFromFavorites": "從我的最愛中移除",
-  "removeFromHistory": "從觀看記錄中移除"
+  "removeFromHistory": "從觀看記錄中移除",
+  "minutesLeftShort": "{{count}} 分鐘"
 }

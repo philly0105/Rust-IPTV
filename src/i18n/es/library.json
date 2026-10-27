@@ -324,5 +324,6 @@
   "rowMoveDown": "Bajar",
   "browseMovies": "Explorar películas",
   "removeFromFavorites": "Quitar de favoritos",
-  "removeFromHistory": "Quitar del historial"
+  "removeFromHistory": "Quitar del historial",
+  "minutesLeftShort": "{{count}} min"
 }

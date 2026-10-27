@@ -70,7 +70,11 @@ describe('Favorites rows say what is on air', () => {
     renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
     const now = await screen.findByTestId('entry-now');
     expect(now.textContent).toContain('Evening Bulletin');
-    expect(now.textContent).toMatch(/10 minutes left/);
+    // Live's compact form on screen, the full words in the tooltip and for a screen reader.
+    const left = within(now).getByTestId('entry-left');
+    expect(left.querySelector('[aria-hidden]')?.textContent).toBe('10m');
+    expect(left.querySelector('.sr-only')?.textContent).toBe('10 minutes left');
+    expect(left.getAttribute('title')).toBe('10 minutes left');
     // 20 of 30 minutes in, as a percentage (a 0..1 scale would read "1").
     expect(within(now).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('67');
     // Asked once for the page, titles only, and only for the channels.

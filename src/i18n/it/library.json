@@ -324,5 +324,6 @@
   "rowMoveDown": "Sposta giù",
   "browseMovies": "Sfoglia i film",
   "removeFromFavorites": "Rimuovi dai preferiti",
-  "removeFromHistory": "Rimuovi dalla cronologia"
+  "removeFromHistory": "Rimuovi dalla cronologia",
+  "minutesLeftShort": "{{count}} min"
 }

@@ -260,6 +260,19 @@ describe('Scheduled says the padding once and stops with a labelled button', () 
     expect(stop.getAttribute('aria-label')).toBe('Stop recording Film');
     expect(screen.getByTestId('recording-rec').textContent).toBe('Rec');
   });
+
+  it('says once, in a quiet line, why a server without mpv cannot record', async () => {
+    rpc.handlers['recordings.capabilities'] = () => ({ supported: false, mpv: false });
+    rpc.handlers['reminders.list'] = () => [];
+    rpc.handlers['recordings.rules'] = () => [];
+    rpc.handlers['recordings.list'] = () => [];
+    renderAt('/scheduled', [{ path: '/scheduled', element: <ScheduledPage /> }]);
+    const note = await screen.findByRole('note');
+    expect(note.dataset['testid']).toBe('scheduled-no-recording');
+    expect(note.textContent).toBe('Recording is unavailable because the server has no mpv. Reminders still work.');
+    // Not a page-wide card over the empty state.
+    expect(note.className).not.toMatch(/\bborder\b|bg-surface/);
+  });
 });
 
 describe('My Videos toolbar and the offline detail page', () => {

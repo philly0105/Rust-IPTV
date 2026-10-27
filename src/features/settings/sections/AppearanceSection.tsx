@@ -317,14 +317,16 @@ function ScaleControl({
 
   // One line, like Minimum rating: Reset, the slider with its tick per step, and the value at body
   // size. Reset keeps its place while hidden at 100 %, so the slider never moves under the pointer
-  // when a drag away from 100 % brings it up.
+  // when a drag away from 100 % brings it up. In a narrow column (a phone), where the control has a
+  // line of its own under the label, Reset goes last: the slider then starts at the row's edge like
+  // every other control there, and the hidden slot sits at the end instead of as a gap before it.
   return (
     <div className="flex w-full items-center gap-3 @md:w-auto">
       <Button
         variant="ghost"
         size="sm"
         data-testid="ui-scale-reset"
-        className={clsx('shrink-0', atDefault && 'invisible')}
+        className={clsx('shrink-0 @max-md:order-last', atDefault && 'invisible')}
         onClick={() => {
           setDraft(1);
           commit(1);
@@ -332,7 +334,11 @@ function ScaleControl({
       >
         {t('uiScaleReset')}
       </Button>
-      <div className="flex min-w-0 flex-1 flex-col gap-1 @md:w-44 @md:flex-none">
+      {/* The ticks hang under the slider out of flow, so Reset, the track and the value centre on
+          one line whatever height Reset takes (44 px on a touch screen); centred on the slider and
+          its ticks, the value sat a few pixels under the track. The row's label column, or a
+          touch-size Reset, leaves room for the ticks below. */}
+      <div className="relative flex min-w-0 flex-1 flex-col @md:w-44 @md:flex-none">
         <Slider
           id={id}
           min={Math.round(UI_SCALE_MIN * 100)}
@@ -358,7 +364,7 @@ function ScaleControl({
         />
         {/* The tuning scale: a tick per 5 % step, taller at the ends and at 100 %. The value beside
             the slider says the number, so the ticks carry no labels. */}
-        <div aria-hidden className="relative h-2">
+        <div aria-hidden className="absolute inset-x-0 top-full mt-1 h-2">
           {Array.from({ length: SCALE_TICKS }, (_, i) => {
             const v = UI_SCALE_MIN + i * SCALE_STEP;
             const major = i === 0 || i === SCALE_TICKS - 1 || Math.abs(v - 1) < 1e-9;

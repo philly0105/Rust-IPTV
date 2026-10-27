@@ -184,6 +184,26 @@ describe('Interface size slider', () => {
     expect(value.textContent).toBe('110%');
   });
 
+  it("starts the slider at the row's edge in a narrow column, and keeps the value level with the track", async () => {
+    renderAt(settingsRoutes, '/settings/appearance');
+    const slider = await screen.findByTestId('ui-scale');
+    const reset = screen.getByTestId('ui-scale-reset');
+    const value = screen.getByTestId('ui-scale-value');
+    // On a phone the control has its own line under the label: Reset's hidden slot goes after the
+    // value, not before the slider, where it left a blank about 60 px wide at 100 %.
+    expect(reset.className).toContain('@max-md:order-last');
+    // The ticks hang under the slider out of flow, so the value and Reset centre on the track
+    // itself, not on the slider and its ticks (which put the number below the track).
+    const ticks = slider.nextElementSibling!;
+    expect(ticks.getAttribute('aria-hidden')).toBe('true');
+    expect(ticks.className).toContain('absolute');
+    expect(ticks.className).toContain('top-full');
+    expect(slider.parentElement!.className).toContain('relative');
+    const line = reset.parentElement!;
+    expect(line.className).toContain('items-center');
+    expect(Array.from(line.children)).toEqual([reset, slider.parentElement, value]);
+  });
+
   it('does not resize the app under the pointer mid-drag, and previews on release', async () => {
     const { useAppearanceStore } = await import('@/shell/theme');
     useAppearanceStore.setState({ preview: null });

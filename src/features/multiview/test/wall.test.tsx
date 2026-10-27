@@ -797,6 +797,8 @@ describe('empty wall', () => {
       fireEvent.mouseEnter(radio);
       expect((await screen.findByRole('tooltip')).textContent).toBe(name);
       fireEvent.mouseLeave(radio);
+      // The names show only on a stage wide enough for the whole toolbar on one row.
+      expect(within(radio).getByTestId('multiview-layout-name').className.split(/\s+/)).toEqual(['hidden', '@[64rem]/stage:inline']);
     }
   });
 });

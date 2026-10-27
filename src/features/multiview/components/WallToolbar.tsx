@@ -100,7 +100,11 @@ export function WallToolbar({
             content: (
               <>
                 <LayoutGlyph layout={l} tally={l === layout && soundSlot >= 0 ? soundSlot : undefined} onGlass={overlay} className="h-4 w-7 shrink-0" />
-                <span className="hidden lg:inline">{t(LAYOUT_LABEL_KEYS[l])}</span>
+                {/* Named only where the whole toolbar still fits one row with the names (a 64rem
+                    stage); narrower, the glyphs keep their names in tooltips. */}
+                <span data-testid="multiview-layout-name" className="hidden @[64rem]/stage:inline">
+                  {t(LAYOUT_LABEL_KEYS[l])}
+                </span>
               </>
             ),
             disabledReason: layoutFits(l, count) ? undefined : t('layout1x2Disabled'),

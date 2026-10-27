@@ -43,7 +43,7 @@ import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, t
 
 import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
-import { intlLocale, relativeTimeFormat } from '@/lib/intl';
+import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
@@ -240,15 +240,21 @@ export function guideBarLayout(width: number): 'full' | 'stacked' | 'phone' {
   return width >= GUIDE_BAR_DAYS_PX ? 'stacked' : 'phone';
 }
 
+/** "Yesterday", "Today" or "Tomorrow" in the UI language, capitalised. */
+function relativeDay(diff: -1 | 0 | 1, lang: string): string {
+  const rel = relativeTimeFormat(intlLocale(lang), { numeric: 'auto' }).format(diff, 'day');
+  return `${rel.charAt(0).toLocaleUpperCase(lang)}${rel.slice(1)}`;
+}
+
 /**
- * A phone's window label: "Today", "Tomorrow" or "Yesterday" in the UI language, else the date.
- * The ruler right under the toolbar shows the times, so the label only needs to name the day.
+ * A phone's window label: "Today", "Tomorrow" or "Yesterday" in the UI language, else the month
+ * and day ("Oct 29"), which is no wider than those words, so the label keeps its width from day
+ * to day. The ruler right under the toolbar shows the times, so the label only needs to name the day.
  */
 export function shortDay(at: number, now: number, lang: string): string {
   const diff = localDayDiff(at, now);
-  if (diff < -1 || diff > 1) return formatDay(at, lang);
-  const rel = relativeTimeFormat(intlLocale(lang), { numeric: 'auto' }).format(diff, 'day');
-  return `${rel.charAt(0).toLocaleUpperCase(lang)}${rel.slice(1)}`;
+  if (diff < -1 || diff > 1) return dateTimeFormat(intlLocale(lang), { month: 'short', day: 'numeric' }).format(at);
+  return relativeDay(diff as -1 | 0 | 1, lang);
 }
 
 /** The programme after `program` in a channel's sorted list, if the guide has it. */
@@ -2050,9 +2056,10 @@ const GuideToolbar = memo(function GuideToolbar({
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-divider bg-surface px-3 py-2">
       {/* A phone with a source to choose puts the two pickers side by side on a row of their own,
-          of equal width. With one source the group picker shares the time controls' row, so a
-          single row of controls leads the grid; the search is the header's field, and the genre
-          filter and Go to playing are header actions (GuidePhoneActions). */}
+          of equal width. With one source the group picker shares the time controls' row when the
+          group's name fits beside them, so a single row of controls leads the grid; the search is
+          the header's field, and the genre filter and Go to playing are header actions
+          (GuidePhoneActions). */}
       <div className={phone && sourcePicker ? 'grid w-full grid-cols-2 items-center gap-2' : 'contents'}>
         {sourcePicker ? (
           <ScopePicker
@@ -2070,15 +2077,22 @@ const GuideToolbar = memo(function GuideToolbar({
           value={view ? `${VIEW_OPTION}${guideViewParam(view)}` : (categoryId ?? '')}
           sections={groupSections}
           onChange={(v) => (v.startsWith(VIEW_OPTION) ? onQuery('view', v.slice(VIEW_OPTION.length)) : onQuery('category', v || undefined))}
-          className={phone ? (sourcePicker ? 'h-9' : 'h-9 min-w-24 flex-1') : pickerWidth}
-          // Sharing a phone's row with the time controls, the group's name gets the icon's room.
+          // Sharing a phone's row with the time controls, the picker is never narrower than the
+          // group's name (fit-content, at most the row): a name that does not fit beside them pushes
+          // them onto a row of their own rather than being cut ("US| SPORTS …" read as "US| SPORTS").
+          // A name longer than the row wraps onto a second line. The group's name gets the icon's room.
+          className={phone ? (sourcePicker ? 'h-9' : 'h-auto min-h-9 w-auto min-w-fit grow py-1') : pickerWidth}
           optionIcon={!oneRow}
+          wrapLabel={oneRow}
           testId="guide-group"
         />
       </div>
-      {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave. */}
+      {/* Narrow pages give the time controls a full row; the window label takes what the buttons leave.
+          On a phone's one row they take what the group picker leaves (nearly all of the free room
+          goes to them, so the picker stays at its name's width), and a row of their own when they
+          wrap under a long group name. */}
       <div
-        className={oneRow ? 'flex shrink-0 items-center gap-1' : stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'}
+        className={oneRow ? 'flex min-w-0 grow-[999] items-center gap-1' : stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'}
         role="group"
         aria-label={t('guideTime')}
         data-testid="guide-time"
@@ -2088,43 +2102,30 @@ const GuideToolbar = memo(function GuideToolbar({
         ) : null}
         <IconButton size="sm" icon={<ChevronLeft className="size-4 rtl:rotate-180" />} onClick={() => onShift(-3 * HOUR)} label={t('earlier')} />
         {/* The window's span; pressing it opens Jump to date and time (`t`). The text is the same in
-            wide and stacked layouts (day, space, times; stacked, the day sits small over the times).
-            A phone shows the day alone, "Today" for today (the ruler right under it has the
-            times), and reads out the date and times. */}
-        <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            onClick={onJump}
-            data-testid="guide-window"
-            className={cn(
-              'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-              phone
-                ? cn('bg-surface-2 px-2.5 text-sm font-medium whitespace-nowrap hover:bg-surface-3', TOUCH_TARGET, !oneRow && 'min-w-0 flex-1')
-                : stacked
-                  ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3'
-                  : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
-            )}
-          >
-            {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-            {phone ? (
-              <span aria-live="polite">
-                <span aria-hidden className="truncate">
-                  {shortDay(start, now, lang)}
-                </span>
-                <span className="sr-only">
-                  {formatDay(start, lang)} {range}
-                </span>
-              </span>
-            ) : (
+            wide and stacked layouts (day, space, times; stacked, the day sits small over the times). */}
+        {oneRow ? (
+          <GuideWindowDay start={start} end={end} now={now} lang={lang} onJump={onJump} />
+        ) : (
+          <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              onClick={onJump}
+              data-testid="guide-window"
+              className={cn(
+                'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
+                stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+              )}
+            >
+              {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
               <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
                 <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
                 <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
               </span>
-            )}
-            <span className="sr-only">, {tg('jumpTitle')}</span>
-          </button>
-        </Tooltip>
+              <span className="sr-only">, {tg('jumpTitle')}</span>
+            </button>
+          </Tooltip>
+        )}
         <IconButton size="sm" icon={<ChevronRight className="size-4 rtl:rotate-180" />} onClick={() => onShift(3 * HOUR)} label={t('later')} />
         {bar !== 'phone' ? (
           <IconButton size="sm" icon={<ChevronsRight className="size-4 rtl:rotate-180" />} onClick={() => onShiftDay(1)} label={t('nextDay')} />
@@ -2183,6 +2184,72 @@ const GuideToolbar = memo(function GuideToolbar({
   );
 });
 
+
+/**
+ * The window label on a phone's one-row toolbar; pressing it opens Jump to date and time (`t`).
+ * Its narrowest width is the widest of "Yesterday", "Today", "Tomorrow" and the day it shows
+ * (hidden copies under it), and that is what the toolbar counts when it decides whether the time
+ * controls fit beside the group picker. So stepping across midnight neither moves the picker or
+ * the buttons nor sends the time controls to another row. Sharing the row, it shows the day alone
+ * (the ruler right under it has the times) and reads out the date and times after it. On a row of
+ * its own, under a group name too long to share the row, it has the room for the date over the
+ * times, as the stacked layout shows them.
+ */
+const GuideWindowDay = memo(function GuideWindowDay({
+  start,
+  end,
+  now,
+  lang,
+  onJump,
+}: {
+  start: number;
+  end: number;
+  now: number;
+  lang: string;
+  onJump(): void;
+}) {
+  const { t: tg } = useTranslation('guide');
+  const day = shortDay(start, now, lang);
+  const date = formatDay(start, lang);
+  const range = formatTimeRange(start, end, lang);
+  const sizes = [...new Set([relativeDay(-1, lang), relativeDay(0, lang), relativeDay(1, lang), day])];
+  return (
+    <span className="grid min-w-0 grow">
+      {sizes.map((text) => (
+        <span key={text} aria-hidden className="invisible col-start-1 row-start-1 truncate px-2.5 text-sm font-medium">
+          {text}
+        </span>
+      ))}
+      <Tooltip content={tg('jumpTitle')} shortcut="t" describe={false}>
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={onJump}
+          data-testid="guide-window"
+          className={cn(
+            '@container col-start-1 row-start-1 inline-flex h-8 min-w-0 items-center justify-center rounded-md bg-surface-2 px-2.5 tabular-nums text-fg outline-none hover:bg-surface-3 active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
+            TOUCH_TARGET,
+          )}
+        >
+          <span aria-live="polite" className="flex max-w-full min-w-0 justify-center">
+            {/* The visible day leads the spoken name, so "Today" is what voice control hears it called. */}
+            <span className="truncate text-sm font-medium @min-[11rem]:hidden">
+              {day}
+              <span className="sr-only">
+                , {date} {range}
+              </span>
+            </span>
+            <span className="hidden max-w-full min-w-0 flex-col items-center leading-tight @min-[11rem]:flex">
+              <span className="max-w-full truncate text-[calc(11rem/15)] text-fg-muted">{date}</span>{' '}
+              <span className="max-w-full truncate text-[calc(13rem/15)] font-medium">{range}</span>
+            </span>
+          </span>
+          <span className="sr-only">, {tg('jumpTitle')}</span>
+        </button>
+      </Tooltip>
+    </span>
+  );
+});
 
 /**
  * A phone's header actions on the guide (round 4): the genre filter as a picker, inverted while a

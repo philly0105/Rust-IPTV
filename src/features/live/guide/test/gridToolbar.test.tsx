@@ -98,13 +98,14 @@ describe('the toolbar at narrow widths', () => {
     const at = await openGuide();
     expect(screen.getByTestId('epg-grid-page').dataset.guideBar).toBe('phone');
     const time = screen.getByTestId('guide-time');
-    // Beside the group picker on one row: the picker takes the room the controls leave.
-    expect(time.className).toContain('shrink-0');
+    // Beside the group picker on one row: the time controls take the room the picker leaves, and
+    // a row of their own when they wrap.
+    expect(time.className.split(' ')).toEqual(expect.arrayContaining(['grow-[999]', 'min-w-0']));
     expect(time.className).not.toContain('w-full');
     // The pickers' wrapper is `contents`, so the group picker and the time controls share the toolbar's row.
     expect(screen.getByTestId('guide-group').parentElement!.className).toBe('contents');
     expect(screen.getByTestId('guide-group').parentElement!.parentElement).toBe(time.parentElement);
-    expect(screen.getByTestId('guide-group').className).toContain('flex-1');
+    expect(time.parentElement!.className).toContain('flex-wrap');
     expect(within(time).queryByRole('button', { name: 'Previous day' })).toBeNull();
     expect(within(time).queryByRole('button', { name: 'Next day' })).toBeNull();
     expect(within(time).getByRole('button', { name: '3 hours earlier' })).toBeTruthy();
@@ -113,18 +114,49 @@ describe('the toolbar at narrow widths', () => {
     expect(now.className).toContain('shrink-0');
     // The group's name gets the room of its icon.
     expect(screen.getByTestId('guide-group').querySelector('svg:not(.lucide-chevron-down)')).toBeNull();
-    // The label names the day ("Today"); the times are on the ruler right under it, and the date
-    // and times are read out.
+    // The label names the day ("Today"); the times are on the ruler right under it. The visible
+    // day leads its accessible name (WCAG 2.5.3), then the date and times are read out.
     const label = screen.getByTestId('guide-window');
-    const [day, spoken] = [...label.querySelectorAll('[aria-live] > span')];
-    expect(day!.textContent).toBe(shortDay(at, Date.now(), 'en'));
-    expect(day!.getAttribute('aria-hidden')).toBe('true');
-    expect(spoken!.className).toContain('sr-only');
+    const dayText = shortDay(at, Date.now(), 'en');
+    const day = [...label.querySelectorAll('span')].find((s) => s.firstChild?.nodeType === Node.TEXT_NODE && s.firstChild.textContent === dayText)!;
+    expect(day).toBeTruthy();
+    expect(day.closest('[aria-hidden]')).toBeNull();
+    expect(day.querySelector('.sr-only')!.textContent).toContain(formatClockBare(at, 'en'));
+    expect(screen.getByRole('button', { name: new RegExp(`^${dayText}, ${formatDay(at, 'en')} ${formatClockBare(at, 'en')}`) })).toBe(label);
     // The window's start (its AM/PM named once, at the range's end, when both ends share it).
     expect(label.textContent).toContain(`${formatDay(at, 'en')} ${formatClockBare(at, 'en')}`);
+    // On a row of its own (the label is a size container) the date shows over the times instead.
+    expect(label.className).toContain('@container');
+    expect(day.className).toContain('@min-[11rem]:hidden');
+    const both = [...label.querySelectorAll('span')].find((s) => s.className.includes('@min-[11rem]:flex'))!;
+    expect(both.textContent!.startsWith(`${formatDay(at, 'en')} ${formatClockBare(at, 'en')}`)).toBe(true);
     // Every day is still reachable: the label opens Jump to date and time.
     fireEvent.click(label);
     expect(await screen.findByTestId('guide-jump')).toBeTruthy();
+  });
+
+  it("a phone's group name is never cut: the picker is as wide as the name, and a long name pushes the time controls onto a row of their own (round 4)", async () => {
+    rpc.handlers['catalog.categories'] = () => [cat('g1', 'US| SPORTS', 20), cat('g2', 'US| SPORTS BACKUP', 20)];
+    pageWidth(318);
+    renderGuide({ path: `/epg?source=src1&category=g2&at=${defaultStart(Date.now())}`, routes: GRID });
+    await screen.findByText('Channel 0');
+    const group = screen.getByTestId('guide-group');
+    await waitFor(() => expect(group.textContent).toBe('US| SPORTS BACKUP'));
+    // fit-content (at most the row) and no flex-basis of 0: the toolbar's flex-wrap moves the time
+    // controls under a name that does not fit beside them, instead of shrinking the name.
+    expect(group.className.split(' ')).toEqual(expect.arrayContaining(['min-w-fit', 'w-auto', 'grow', 'h-auto']));
+    expect(group.className).not.toMatch(/(^| )(flex-1|min-w-0|min-w-24)( |$)/);
+    // A name longer than the row wraps onto a second line rather than ending in an ellipsis.
+    const name = within(group).getByText('US| SPORTS BACKUP');
+    expect(name.className).not.toContain('truncate');
+    expect(name.className.split(' ')).toEqual(expect.arrayContaining(['line-clamp-2', 'break-words']));
+    // Wider layouts keep their one-line, cut-to-fit trigger.
+    cleanup();
+    vi.restoreAllMocks();
+    pageWidth(1208);
+    renderGuide({ path: `/epg?source=src1&category=g2&at=${defaultStart(Date.now())}`, routes: GRID });
+    await screen.findByText('Channel 0');
+    await waitFor(() => expect(within(screen.getByTestId('guide-group')).getByText('US| SPORTS BACKUP').className).toContain('truncate'));
   });
 
   it("the guide's search is the header's field at every width, so the toolbar has no search control (round 4)", async () => {
@@ -153,13 +185,25 @@ describe('the toolbar at narrow widths', () => {
     expect(screen.queryByRole('searchbox')).toBeNull();
   });
 
-  it("a phone's day label says Today, Tomorrow or Yesterday, else the date", () => {
+  it("a phone's day label says Today, Tomorrow or Yesterday, else the month and day", () => {
     const now = new Date(2026, 9, 27, 10, 40).getTime();
     expect(shortDay(now - 30 * 60_000, now, 'en')).toBe('Today');
     expect(shortDay(now + 24 * 3_600_000, now, 'en')).toBe('Tomorrow');
     expect(shortDay(now - 24 * 3_600_000, now, 'en')).toBe('Yesterday');
-    expect(shortDay(now + 3 * 24 * 3_600_000, now, 'en')).toBe(formatDay(now + 3 * 24 * 3_600_000, 'en'));
+    // No wider than those words, so the label keeps its width a day further on.
+    expect(shortDay(now + 3 * 24 * 3_600_000, now, 'en')).toBe('Oct 30');
+    expect(shortDay(now - 2 * 24 * 3_600_000, now, 'en')).toBe('Oct 25');
     expect(shortDay(now, now, 'de')).toBe('Heute');
+  });
+
+  it("a phone's day label is as wide as the widest of Yesterday, Today, Tomorrow, so neither the picker nor the buttons move at midnight (round 4)", async () => {
+    pageWidth(318);
+    await openGuide();
+    const label = screen.getByTestId('guide-window');
+    // Hidden copies of each day name share the label's grid cell; the widest sets its width.
+    const sizes = [...label.parentElement!.querySelectorAll(':scope > [aria-hidden]')].map((s) => s.textContent);
+    expect(sizes).toEqual(expect.arrayContaining(['Yesterday', 'Today', 'Tomorrow']));
+    expect(label.parentElement!.className.split(' ')).toEqual(expect.arrayContaining(['grid', 'grow']));
   });
 
   it('shows the source picker only when there is another source to choose', async () => {
@@ -182,6 +226,12 @@ describe('the toolbar at narrow widths', () => {
     // Two pickers keep a row of their own, side by side, over a full row of time controls.
     expect(picker.closest('.grid')!.className).toContain('grid-cols-2');
     expect(screen.getByTestId('guide-time').className).toContain('w-full');
+    // That row has the room for the date over the times, so the label shows both, not "Today" alone.
+    const at = defaultStart(Date.now());
+    const label = screen.getByTestId('guide-window');
+    expect(label.textContent!.startsWith(`${formatDay(at, 'en')} ${formatClockBare(at, 'en')}`)).toBe(true);
+    expect(label.textContent).toMatch(/, Jump to date and time$/);
+    expect(label.textContent).not.toContain(shortDay(at, Date.now(), 'en'));
     fireEvent.click(picker);
     expect(await screen.findByRole('option', { name: /^Second/ })).toBeTruthy();
   });

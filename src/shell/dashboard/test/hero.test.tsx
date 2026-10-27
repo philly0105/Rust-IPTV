@@ -366,8 +366,10 @@ describe('HeroCarousel', () => {
     const { HERO_BODY } = await import('../HeroSkeleton');
     // From sm: 40vh, capped by the width and at 30rem (360 px of a 1440 x 900 window, was 504).
     expect(HERO_BODY).toContain('sm:min-h-[clamp(18rem,min(40vh,32vw),30rem)]');
-    // A phone's stays taller (artwork over copy) but stops at 28rem, 420 px of an 844 px phone (was 510).
-    expect(HERO_BODY).toMatch(/(^| )min-h-\[clamp\(22rem,56vh,28rem\)\]( |$)/);
+    // A phone's is as tall as its copy, with a band of artwork above it: the floor stops at
+    // 20rem (300 px), so On now starts on the first screen of an 844 px phone (was 420 px).
+    expect(HERO_BODY).toMatch(/(^| )min-h-\[clamp\(16rem,38vh,20rem\)\]( |$)/);
+    expect(HERO_BODY).toMatch(/(^| )pt-12 .*sm:pt-20 .*lg:pt-12/);
   });
 
   it('a poster standing in for the backdrop ends above the slide controls in its corner', () => {

@@ -451,6 +451,36 @@ describe('sports page', () => {
     expect(screen.getByTestId('sports-grid').className).toContain(`${pinned}:[&_button]:scroll-mt-32`);
   });
 
+  it('keeps the toolbar to two rows on a phone, the filter chips at the end of the day strip', async () => {
+    const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([g]);
+    setStreams(g, [h.match(ESPN)]);
+    localStorage.setItem('tsrust.sportsTeams', JSON.stringify(['nba:BOS']));
+    await openReady();
+    // jsdom applies no media queries, so this reads the classes that lay the toolbar out: a grid on a
+    // phone (the first row's box steps aside), the stacked rows from sm up.
+    const classes = (el: HTMLElement) => el.className.split(' ');
+    const toolbar = screen.getByTestId('sports-toolbar');
+    expect(classes(toolbar)).toEqual(expect.arrayContaining(['grid', 'grid-cols-[minmax(0,1fr)_auto]', 'sm:flex', 'sm:flex-col']));
+    expect(classes(screen.getByTestId('sports-leagues'))).toContain('max-sm:col-span-2');
+    // The league pills share the phone's row out between them.
+    expect(classes(within(screen.getByTestId('sports-leagues')).getByRole('tablist'))).toContain('max-sm:[&>button]:grow');
+    const filters = screen.getByTestId('sports-filters');
+    expect(classes(filters)).toEqual(expect.arrayContaining(['max-sm:col-start-2', 'max-sm:row-start-2']));
+    expect(classes(screen.getByTestId('sports-days'))).toEqual(expect.arrayContaining(['max-sm:col-start-1', 'max-sm:row-start-2']));
+    expect(filters.parentElement?.className.split(' ')).toContain('contents');
+    // There a chip is its icon and count; the label is hidden, not gone, so the chip keeps its name.
+    for (const [id, label] of [
+      ['sports-my-teams', 'My teams'],
+      ['sports-streams-only', 'With streams'],
+    ] as const) {
+      const chip = within(filters).getByTestId(id);
+      expect(chip.querySelector('svg')).toBeTruthy();
+      expect(classes(within(chip).getByText(label))).toContain('max-sm:sr-only');
+      expect(screen.getByRole('button', { name: new RegExp(`^${label} ?\\d+$`) })).toBe(chip);
+    }
+  });
+
   it('goes back to the top when the pinned toolbar changes the day, the league or a filter', async () => {
     const days = etDays(Date.now(), 7, 7);
     const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
@@ -606,6 +636,25 @@ describe('sports page', () => {
     fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Show fewer' }));
     expect(within(list).getAllByTestId('sports-stream')).toHaveLength(1);
     expect(within(list).getByRole('button', { name: 'Show all 5 streams' })).toBeTruthy();
+    // A live game shows no start time, so its broadcast's slot says when it runs.
+    expect(within(list).getByTestId('sports-stream-slot').textContent).toMatch(/\d.*–.*\d/);
+  });
+
+  it("leaves out a guide slot that starts with an upcoming game, and keeps one that starts before it", async () => {
+    const at = Date.now() + 2 * h.HOUR;
+    const sameStart = h.game('1', { startMs: at });
+    const earlier = h.game('2', { startMs: at, home: h.team('CHI', 'Chicago Bulls'), away: h.team('MIA', 'Miami Heat') });
+    const slot = (start: number) => ({ channelId: '2', start: new Date(start).toISOString(), end: new Date(at + 3 * h.HOUR).toISOString(), title: 'NBA Basketball' });
+    setDay([sameStart, earlier]);
+    setStreams(sameStart, [h.match(EVENT, { reason: 'guide', program: slot(at) })]);
+    setStreams(earlier, [h.match(EVENT, { reason: 'guide', program: slot(at - 30 * h.MINUTE) })]);
+    await openReady();
+    // The start time is on the card's first line already: the slot would only say it again.
+    expect(within(card(sameStart)).getByTestId('sports-start')).toBeTruthy();
+    expect(within(card(sameStart)).getByText('In guide')).toBeTruthy();
+    expect(within(card(sameStart)).queryByTestId('sports-stream-slot')).toBeNull();
+    // Coverage that starts half an hour early is news.
+    expect(within(card(earlier)).getByTestId('sports-stream-slot').textContent).toMatch(/\d.*–.*\d/);
   });
 
   it('names the source of each stream when there are several', async () => {

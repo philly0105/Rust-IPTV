@@ -2,13 +2,14 @@
  * The day picker: underline tabs over the Eastern dates ESPN files games under, a week back and a
  * week ahead. Each tab is two short lines, so the whole fortnight fits a laptop window: Yesterday,
  * Today and Tomorrow by name or the weekday, over the date, in the UI language. The kit's tabs
- * scroll sideways with faded edges where the window is narrower, and take arrows, Home and End.
+ * scroll sideways with faded edges where the window is narrower, and take arrows, Home and End;
+ * there the picked day sits in the middle, with the days either side of it in view.
  */
 
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Tabs, intlLocale } from '../deps';
+import { Tabs, cn, intlLocale } from '../deps';
 
 const DAY_MS = 86_400_000;
 
@@ -21,6 +22,23 @@ function utcOf(day: string): number {
 function localNoon(day: string): number {
   const [y = NaN, m = NaN, d = NaN] = day.split('-').map(Number);
   return new Date(y, m - 1, d, 12).getTime();
+}
+
+/**
+ * Scrolls a strip that is wider than its box so the picked tab sits in the middle. The kit only
+ * keeps a picked tab clear of the faded edge, which on a phone opened the strip with Today at its
+ * end and Tomorrow, the likeliest next pick, cut off. Physical coordinates, so RTL works as is.
+ */
+function centreTab(list: HTMLElement, smooth: boolean) {
+  const tab = list.querySelector<HTMLElement>('[role=tab][aria-selected=true]');
+  if (!tab || list.scrollWidth - list.clientWidth <= 1) return;
+  const box = list.getBoundingClientRect();
+  const r = tab.getBoundingClientRect();
+  if (box.width <= 0) return;
+  const by = r.left + r.width / 2 - (box.left + box.width / 2);
+  if (Math.abs(by) < 1) return;
+  if (smooth && typeof list.scrollBy === 'function') list.scrollBy({ left: by, behavior: 'smooth' });
+  else list.scrollLeft += by;
 }
 
 const formatters = new Map<string, { weekday: Intl.DateTimeFormat; date: Intl.DateTimeFormat; full: Intl.DateTimeFormat }>();
@@ -46,6 +64,7 @@ export function DayStrip({
   today,
   onChange,
   panelIdPrefix,
+  className,
 }: {
   /** 'YYYY-MM-DD' Eastern dates, oldest first. */
   days: readonly string[];
@@ -53,9 +72,28 @@ export function DayStrip({
   today: string;
   onChange(day: string): void;
   panelIdPrefix: string;
+  className?: string;
 }) {
   const { t, i18n } = useTranslation('sports');
   const lang = i18n.language;
+  const boxRef = useRef<HTMLDivElement>(null);
+  const opened = useRef(false);
+  // On opening, and on every pick after it: the first jump is instant, a pick glides where motion is
+  // welcome. From a one-shot observer, as the kit's own reveal, so it runs after the browser's layout
+  // and after that reveal, and the strip opens centred in its first frame.
+  useLayoutEffect(() => {
+    const list = boxRef.current?.querySelector<HTMLElement>('[role=tablist]');
+    if (!list) return;
+    const smooth = opened.current && !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    opened.current = true;
+    if (typeof ResizeObserver === 'undefined') return centreTab(list, smooth);
+    const ro = new ResizeObserver(() => {
+      ro.disconnect();
+      centreTab(list, smooth);
+    });
+    ro.observe(list);
+    return () => ro.disconnect();
+  }, [value, days]);
   const items = useMemo(() => {
     const f = formattersFor(lang);
     return days.map((day) => {
@@ -75,7 +113,7 @@ export function DayStrip({
     });
   }, [days, today, t, lang]);
   return (
-    <div data-testid="sports-days" className="min-w-0">
+    <div ref={boxRef} data-testid="sports-days" className={cn('min-w-0', className)}>
       <Tabs
         items={items}
         value={value}

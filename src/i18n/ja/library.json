@@ -303,5 +303,6 @@
   "entryMenu": "{{title}}の操作",
   "rowOpen": "開く",
   "rowMoveUp": "上へ移動",
-  "rowMoveDown": "下へ移動"
+  "rowMoveDown": "下へ移動",
+  "browseMovies": "映画を見る"
 }

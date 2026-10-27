@@ -303,5 +303,6 @@
   "entryMenu": "Ενέργειες για {{title}}",
   "rowOpen": "Άνοιγμα",
   "rowMoveUp": "Μετακίνηση πάνω",
-  "rowMoveDown": "Μετακίνηση κάτω"
+  "rowMoveDown": "Μετακίνηση κάτω",
+  "browseMovies": "Περιήγηση ταινιών"
 }

@@ -303,5 +303,6 @@
   "entryMenu": "Acties voor {{title}}",
   "rowOpen": "Openen",
   "rowMoveUp": "Omhoog",
-  "rowMoveDown": "Omlaag"
+  "rowMoveDown": "Omlaag",
+  "browseMovies": "Films bekijken"
 }

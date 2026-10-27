@@ -303,5 +303,6 @@
   "entryMenu": "{{title}} 작업",
   "rowOpen": "열기",
   "rowMoveUp": "위로 이동",
-  "rowMoveDown": "아래로 이동"
+  "rowMoveDown": "아래로 이동",
+  "browseMovies": "영화 둘러보기"
 }

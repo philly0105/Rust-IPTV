@@ -339,5 +339,6 @@
   "entryMenu": "Дзеянні для {{title}}",
   "rowOpen": "Адкрыць",
   "rowMoveUp": "Перамясціць вышэй",
-  "rowMoveDown": "Перамясціць ніжэй"
+  "rowMoveDown": "Перамясціць ніжэй",
+  "browseMovies": "Праглядзець фільмы"
 }

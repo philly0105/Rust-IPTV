@@ -303,5 +303,6 @@
   "entryMenu": "Aktionen für {{title}}",
   "rowOpen": "Öffnen",
   "rowMoveUp": "Nach oben",
-  "rowMoveDown": "Nach unten"
+  "rowMoveDown": "Nach unten",
+  "browseMovies": "Filme durchsuchen"
 }

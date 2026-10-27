@@ -375,5 +375,6 @@
   "entryMenu": "الإجراءات ديال {{title}}",
   "rowOpen": "حل",
   "rowMoveUp": "طلع لفوق",
-  "rowMoveDown": "هبط لتحت"
+  "rowMoveDown": "هبط لتحت",
+  "browseMovies": "تصفح الأفلام"
 }

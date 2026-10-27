@@ -5,7 +5,7 @@
  */
 
 import { k } from '../lib/keys';
-import { Star } from 'lucide-react';
+import { Heart } from 'lucide-react';
 import { useCallback, useMemo, useState, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
@@ -164,7 +164,10 @@ export function FavoritesPage() {
   const title = source ? t('sourceFavoritesTitle', { source: source.name }) : t('favoritesTitle');
   // An empty page says so itself; "0 favorites" above it adds nothing (as on My Videos).
   const subtitle = query.data && entries.length > 0 ? t('favoritesCount', { count: entries.length }) : undefined;
-  usePageHeader(title, subtitle, undefined, { value: search, onChange: setSearch, placeholder: t('searchFavorites') });
+  // The page search only once there is something to search: over an empty list the header keeps
+  // its usual Search everything. While the list loads it stays, so a full list does not swap it.
+  const searchable = !query.data || entries.length > 0 || search !== '';
+  usePageHeader(title, subtitle, undefined, searchable ? { value: search, onChange: setSearch, placeholder: t('searchFavorites') } : undefined);
 
   const onDragStart = (row: Extract<FavoriteRow, { kind: 'item' }>) => (e: DragEvent<HTMLElement>) => {
     e.dataTransfer.effectAllowed = 'move';
@@ -237,7 +240,7 @@ export function FavoritesPage() {
   else if (entries.length === 0)
     body = (
       <EmptyState
-        icon={<Star size={28} aria-hidden />}
+        icon={<Heart size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
         description={sourceId ? t('favoritesEmptySourceBody') : sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
         action={

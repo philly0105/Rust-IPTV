@@ -303,5 +303,6 @@
   "entryMenu": "{{title}} 的操作",
   "rowOpen": "打开",
   "rowMoveUp": "上移",
-  "rowMoveDown": "下移"
+  "rowMoveDown": "下移",
+  "browseMovies": "浏览电影"
 }

@@ -339,5 +339,6 @@
   "entryMenu": "Działania dla {{title}}",
   "rowOpen": "Otwórz",
   "rowMoveUp": "Przenieś w górę",
-  "rowMoveDown": "Przenieś w dół"
+  "rowMoveDown": "Przenieś w dół",
+  "browseMovies": "Przeglądaj filmy"
 }

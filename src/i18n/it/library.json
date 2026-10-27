@@ -321,5 +321,6 @@
   "entryMenu": "Azioni per {{title}}",
   "rowOpen": "Apri",
   "rowMoveUp": "Sposta su",
-  "rowMoveDown": "Sposta giù"
+  "rowMoveDown": "Sposta giù",
+  "browseMovies": "Sfoglia i film"
 }

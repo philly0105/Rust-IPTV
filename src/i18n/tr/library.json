@@ -303,5 +303,6 @@
   "entryMenu": "{{title}} işlemleri",
   "rowOpen": "Aç",
   "rowMoveUp": "Yukarı taşı",
-  "rowMoveDown": "Aşağı taşı"
+  "rowMoveDown": "Aşağı taşı",
+  "browseMovies": "Filmlere göz at"
 }

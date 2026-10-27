@@ -205,6 +205,14 @@ describe('DownloadsPage', () => {
     expect(detail.getAttribute('title')).toBe(long);
   });
 
+  it('points an empty queue with nothing saved at the catalogue, where downloads start', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect(await screen.findByText('Nothing is downloading')).toBeTruthy();
+    const browse = await screen.findByRole('link', { name: 'Browse movies' });
+    expect(browse.getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
+  });
+
   it('shows the empty state when only completed items remain', async () => {
     rpc.handlers['downloads.list'] = () => [list[3]];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
@@ -237,10 +245,22 @@ describe('MyVideosPage', () => {
     expect(screen.getByText('2 episodes')).toBeTruthy();
   });
 
-  it('shows the empty state', async () => {
+  it('shows the empty state, pointing at the catalogue where downloads start, with no page search', async () => {
     rpc.handlers['myvideos.list'] = () => [];
+    rpc.handlers['recordings.library'] = () => [];
     renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
     expect(await screen.findByText('No offline videos yet')).toBeTruthy();
+    const browse = await screen.findByRole('link', { name: 'Browse movies' });
+    expect(browse.getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
+    expect(screen.queryByTestId('page-search')).toBeNull();
+  });
+
+  it('keeps its search in the header once something is offline', async () => {
+    rpc.handlers['myvideos.list'] = () => library;
+    rpc.handlers['recordings.library'] = () => [];
+    renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
+    await screen.findAllByTestId('library-card');
+    expect(screen.getByTestId('page-search').textContent).toBe('Search My Videos');
   });
 });
 
@@ -269,6 +289,21 @@ describe('MyVideoDetailPage', () => {
 
 describe('FavoritesPage', () => {
   const favs = [makeFavorite('live', 'c1', 0), makeFavorite('movie', 'v1', 1), makeFavorite('movie', 'v2', 2, 'src2'), makeFavorite('series', 's1', 3)];
+
+  it('searches in the header only with favorites to search; empty, it shows the heart and no page search', async () => {
+    rpc.handlers['favorites.list'] = () => [];
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    expect(await screen.findByText('No favorites yet')).toBeTruthy();
+    expect(screen.queryByTestId('page-search')).toBeNull();
+    // One icon per idea: a favourite is the rail's heart.
+    expect(document.querySelector('svg.lucide-heart')).toBeTruthy();
+    cleanup();
+
+    rpc.handlers['favorites.list'] = () => favs;
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    await screen.findAllByTestId('entry-row');
+    expect(screen.getByTestId('page-search').textContent).toBe('Search favorites');
+  });
 
   it('groups entries and reorders with the move buttons (global page)', async () => {
     rpc.handlers['favorites.list'] = () => favs;

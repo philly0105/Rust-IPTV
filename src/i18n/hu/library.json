@@ -303,5 +303,6 @@
   "entryMenu": "Műveletek: {{title}}",
   "rowOpen": "Megnyitás",
   "rowMoveUp": "Mozgatás fel",
-  "rowMoveDown": "Mozgatás le"
+  "rowMoveDown": "Mozgatás le",
+  "browseMovies": "Filmek böngészése"
 }

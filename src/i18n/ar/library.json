@@ -375,5 +375,6 @@
   "entryMenu": "إجراءات {{title}}",
   "rowOpen": "فتح",
   "rowMoveUp": "نقل لأعلى",
-  "rowMoveDown": "نقل لأسفل"
+  "rowMoveDown": "نقل لأسفل",
+  "browseMovies": "تصفح الأفلام"
 }

@@ -339,5 +339,6 @@
   "entryMenu": "Действия для «{{title}}»",
   "rowOpen": "Открыть",
   "rowMoveUp": "Переместить выше",
-  "rowMoveDown": "Переместить ниже"
+  "rowMoveDown": "Переместить ниже",
+  "browseMovies": "Смотреть фильмы"
 }

@@ -160,3 +160,25 @@ export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string
     </Link>
   );
 }
+
+/**
+ * Empty-state action for Downloads and My Videos: downloads start from a movie's or an episode's
+ * page, so the way in is the catalogue, not the other offline page (which is empty too). With no
+ * source yet it leads to adding one, as BrowseAction does.
+ */
+export function BrowseMoviesAction({ sources }: { sources: ReadonlyMap<string, Source> }) {
+  const { t } = useTranslation('library');
+  const target = sources.keys().next().value;
+  if (target) {
+    return (
+      <Link to={`/s/${encodeURIComponent(target)}/movies`} className={buttonClass('primary', 'md')} data-testid="library-empty-movies">
+        {t('browseMovies')}
+      </Link>
+    );
+  }
+  return (
+    <Link to="/sources" className={buttonClass('primary', 'md')} data-testid="library-empty-add-source">
+      {t('addSourceAction')}
+    </Link>
+  );
+}

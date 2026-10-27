@@ -303,5 +303,6 @@
   "entryMenu": "Actions for {{title}}",
   "rowOpen": "Open",
   "rowMoveUp": "Move up",
-  "rowMoveDown": "Move down"
+  "rowMoveDown": "Move down",
+  "browseMovies": "Browse movies"
 }

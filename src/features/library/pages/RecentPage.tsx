@@ -215,11 +215,14 @@ export function RecentPage() {
     [count, phone, t],
   );
   const title = source ? t('sourceRecentTitle', { source: source.name }) : t('recentTitle');
-  usePageHeader(title, query.data && count > 0 ? t('recentCount', { count }) : undefined, headerActions, {
-    value: search,
-    onChange: setSearch,
-    placeholder: t('searchRecent'),
-  });
+  // As on Favorites: no history search over an empty history.
+  const searchable = !query.data || count > 0 || search !== '';
+  usePageHeader(
+    title,
+    query.data && count > 0 ? t('recentCount', { count }) : undefined,
+    headerActions,
+    searchable ? { value: search, onChange: setSearch, placeholder: t('searchRecent') } : undefined,
+  );
 
   const rail =
     continuing.length > 0 && !search ? <ContinueRail positions={continuing} onOpen={openContinue} onRemove={(p) => void removeContinue(p)} /> : null;

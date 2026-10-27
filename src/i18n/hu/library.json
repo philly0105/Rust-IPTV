@@ -192,7 +192,6 @@
   "historyRestored": "Előzmények visszaállítva",
   "historyRestorePartial": "{{total}} bejegyzésből {{restored}} visszakerült.",
   "clearFailed": "Nem sikerült törölni az előzményeket",
-  "continueWatching": "Lejátszás folytatása",
   "continueTitle": "{{title}} folytatása innen: {{time}}",
   "removeContinue": "{{title}} eltávolítása a Lejátszás folytatása sorból",
   "watchedPercent": "{{percent}}% megtekintve",
@@ -307,6 +306,9 @@
   "browseMovies": "Filmek böngészése",
   "removeFromFavorites": "Eltávolítás a kedvencek közül",
   "removeFromHistory": "Eltávolítás az előzményekből",
+  "removeFromContinue": "Eltávolítás a Lejátszás folytatása sorból",
+  "rowResume": "Folytatás",
+  "rowDetails": "Részletek megnyitása",
   "minutesLeftShort": "{{count}} p",
   "browseSeries": "Sorozatok böngészése"
 }

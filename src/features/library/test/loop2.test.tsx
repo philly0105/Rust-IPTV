@@ -2,9 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { PlaybackPosition, RecordingFile } from '@/api/types';
+import type { RecordingFile } from '@/api/types';
 
-import { ContinueRail } from '../components/ContinueRail';
 import { EntryRow } from '../components/EntryRow';
 import { splitPath } from '../components/FolderBar';
 import { DownloadsPage } from '../pages/DownloadsPage';
@@ -215,20 +214,31 @@ describe('Downloads folder bar (L2-guide-library-14)', () => {
   });
 });
 
-describe('Continue watching rail (L2-visual-3, -7, -11)', () => {
-  const position = (title: string): PlaybackPosition =>
-    ({ ref: { sourceId: 's', contentType: 'movie', itemId: 'm1' }, positionSeconds: 600, durationSeconds: 6000, updatedAt: '2026-10-16T00:00:00Z', snapshot: { title, contentType: 'movie' } }) as PlaybackPosition;
-
-  it('captions with the cleaned title, isolated for RTL, and snaps the first card to the heading', () => {
+describe('Recently watched titles (L2-visual-3, -7, -11)', () => {
+  it('a title stopped part way keeps its cleaned title, isolated for RTL, over its progress and time left', () => {
     render(
       <I18nWrap>
-        <ContinueRail positions={[position('EN - Black Harbor (2026) [4K]')]} onOpen={() => undefined} onRemove={() => undefined} />
+        <EntryRow
+          entryRef={{ sourceId: 's', contentType: 'movie', itemId: 'm1' }}
+          snapshot={{ title: 'EN - Black Harbor (2026) [4K]', contentType: 'movie' }}
+          showSource={false}
+          time=""
+          removeLabel="Remove"
+          menuRemoveLabel="Remove from history"
+          resume={{ fraction: 0.1, minutesLeft: 90, label: 'Continue Black Harbor at 10:00', onDetails: () => undefined, onForget: () => undefined }}
+          onOpen={() => undefined}
+          onRemove={() => undefined}
+        />
       </I18nWrap>,
     );
     const caption = screen.getByText('Black Harbor');
     expect(caption.getAttribute('dir')).toBe('auto');
     expect(caption.className).toContain('text-match-parent');
-    expect(screen.getByTestId('continue-rail').className).toContain('scroll-px-1');
+    const resume = screen.getByTestId('entry-resume');
+    // The user's own progress, so the accent bar, not the quiet one a channel's programme gets.
+    expect(within(resume).getByRole('progressbar', { name: '10% watched' })).toBeTruthy();
+    expect(within(resume).getByText('90 minutes left')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Continue Black Harbor at 10:00' })).toBeTruthy();
   });
 
   // The title rules themselves are pinned against the core's cases in src/lib/title.test.ts.

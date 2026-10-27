@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { RecentEntry, Source } from '@/api/types';
 import { useToastStore } from '@/ui';
 
-import { ContinueRail } from '../components/ContinueRail';
+import { moveInRail } from '../components/ContinueRail';
 import { DialProgress } from '../components/DownloadRow';
 import { reinsertFavorite } from '../lib/favorites';
 import { collectHistory, restoreHistory, RECENT_LIST_MAX, type RecentAddArgs } from '../lib/recent';
@@ -275,6 +275,13 @@ describe('search survives a reload (D17)', () => {
 });
 
 describe('continue watching (D18, series queue)', () => {
+  // Recently watched lists a title stopped part way once, on its history row, which carries the
+  // saved spot: the row's Resume, its strip's "Continue … at …" button and its menu.
+  const watchedNow = (p: ReturnType<typeof makePosition>): RecentEntry => ({ ref: p.ref, viewedAt: new Date().toISOString(), snapshot: p.snapshot! });
+  const forget = async (title: string) => {
+    fireEvent.click((await screen.findAllByRole('button', { name: `Actions for ${title}` }))[0]!);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove from continue watching' }));
+  };
   const series = {
     ...makePosition('show1', 300, 1800),
     ref: { sourceId: 'src1', contentType: 'series' as const, itemId: 'show1' },
@@ -283,7 +290,7 @@ describe('continue watching (D18, series queue)', () => {
   };
 
   it('resumes a series episode and queues the rest of the series', async () => {
-    rpc.handlers['recent.list'] = () => [];
+    rpc.handlers['recent.list'] = () => [watchedNow(series)];
     rpc.handlers['positions.continueWatching'] = () => [series];
     renderAt('/recent', recentRoute);
 
@@ -294,8 +301,9 @@ describe('continue watching (D18, series queue)', () => {
   });
 
   it('a movie resumes without a queue', async () => {
-    rpc.handlers['recent.list'] = () => [];
-    rpc.handlers['positions.continueWatching'] = () => [makePosition('m1', 300, 1800)];
+    const movie = makePosition('m1', 300, 1800);
+    rpc.handlers['recent.list'] = () => [watchedNow(movie)];
+    rpc.handlers['positions.continueWatching'] = () => [movie];
     renderAt('/recent', recentRoute);
     fireEvent.click(await screen.findByRole('button', { name: /Continue Continue m1/ }));
     await waitFor(() => expect(fakePlayer.items).toHaveLength(1));
@@ -307,14 +315,14 @@ describe('continue watching (D18, series queue)', () => {
     const e1 = { ...series, episodeId: 'ep1', positionSeconds: 300, updatedAt: at(1) };
     const e2 = { ...series, episodeId: 'ep7', positionSeconds: 120, updatedAt: at(3) };
     const done = { ...series, episodeId: 'ep3', positionSeconds: 1800, updatedAt: at(2), watched: true };
-    rpc.handlers['recent.list'] = () => [];
+    rpc.handlers['recent.list'] = () => [watchedNow(e2)];
     rpc.handlers['positions.continueWatching'] = () => [e2];
     rpc.handlers['positions.forSeries'] = () => [e2, done, e1];
     rpc.handlers['positions.remove'] = () => undefined;
     rpc.handlers['positions.set'] = () => undefined;
     renderAt('/recent', recentRoute);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove Show One from continue watching' }));
+    await forget('Show One');
     await waitFor(() => expect(lastToast()?.title).toBe('Removed Show One from continue watching'));
     expect(rpc.callsOf('positions.remove')).toEqual([{ ref: series.ref, allEpisodes: true }]);
 
@@ -327,7 +335,7 @@ describe('continue watching (D18, series queue)', () => {
     ]);
   });
 
-  it('Undo puts a removed card back in its old place in the rail (C14)', async () => {
+  it('Undo gives a row its saved spot back, with its old time (C14)', async () => {
     type Row = ReturnType<typeof makePosition>;
     let rows: Row[] = [
       { ...makePosition('first', 300, 1800), updatedAt: '2026-10-03T00:00:00.000Z' },
@@ -335,7 +343,8 @@ describe('continue watching (D18, series queue)', () => {
       { ...makePosition('last', 300, 1800), updatedAt: '2026-10-01T00:00:00.000Z' },
     ];
     // A core in miniature: newest first; a save without updatedAt is stamped now.
-    rpc.handlers['recent.list'] = () => [];
+    const history = rows.map(watchedNow);
+    rpc.handlers['recent.list'] = () => history;
     rpc.handlers['positions.continueWatching'] = () => [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     rpc.handlers['positions.remove'] = (a) => {
       rows = rows.filter((r) => r.ref.itemId !== (a as { ref: Row['ref'] }).ref.itemId);
@@ -349,31 +358,45 @@ describe('continue watching (D18, series queue)', () => {
     await screen.findByRole('button', { name: /Continue Continue middle/ });
     const before = order();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Continue middle from continue watching' }));
+    await forget('Continue middle');
     await waitFor(() => expect(order()).toHaveLength(2));
+    // The history entry stays: only its progress went.
+    expect(screen.getAllByTestId('entry-row')).toHaveLength(3);
     lastToast()!.action!.onClick();
     await waitFor(() => expect(order()).toEqual(before));
+    expect(rows.find((r) => r.ref.itemId === 'middle')?.updatedAt).toBe('2026-10-02T00:00:00.000Z');
   });
 
   it('removing a movie card removes just that row', async () => {
     const movie = makePosition('m1', 300, 1800);
-    rpc.handlers['recent.list'] = () => [];
+    rpc.handlers['recent.list'] = () => [watchedNow(movie)];
     rpc.handlers['positions.continueWatching'] = () => [movie];
     rpc.handlers['positions.remove'] = () => undefined;
     renderAt('/recent', recentRoute);
-    fireEvent.click(await screen.findByRole('button', { name: /^Remove .* from continue watching$/ }));
+    await forget('Continue m1');
     await waitFor(() => expect(rpc.callsOf('positions.remove')).toEqual([{ ref: movie.ref }]));
     expect(rpc.callsOf('positions.forSeries')).toEqual([]);
   });
 
-  it('arrow keys, Home and End move between cards', () => {
-    const ps = [makePosition('a', 10, 100), makePosition('b', 10, 100), makePosition('c', 10, 100)];
+  it('arrow keys, Home and End move between cards in a row of them (My Videos recordings)', () => {
     render(
-      <harness.I18nWrap>
-        <ContinueRail positions={ps} onOpen={() => undefined} onRemove={() => undefined} />
-      </harness.I18nWrap>,
+      <ul>
+        {['a', 'b', 'c'].map((id) => (
+          <li key={id}>
+            <button
+              type="button"
+              data-card=""
+              onKeyDown={(e) => {
+                if (moveInRail(e.currentTarget, e.key, '[data-card]')) e.preventDefault();
+              }}
+            >
+              {`Continue ${id}`}
+            </button>
+          </li>
+        ))}
+      </ul>,
     );
-    const cards = screen.getAllByRole('button', { name: /^Continue Continue/ });
+    const cards = screen.getAllByRole('button', { name: /^Continue / });
     act(() => cards[0]!.focus());
     fireEvent.keyDown(cards[0]!, { key: 'ArrowRight' });
     expect(document.activeElement).toBe(cards[1]);

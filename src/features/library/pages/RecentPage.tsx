@@ -1,4 +1,8 @@
-/** /recent (every source) and /s/:sourceId/recent: history by day plus continue watching. */
+/**
+ * /recent (every source) and /s/:sourceId/recent: history by day. A title stopped part way shows
+ * its progress on its own row and resumes from it, so it is listed once (no Continue watching
+ * cards above the day that repeat it).
+ */
 
 import { k } from '../lib/keys';
 import { History, Trash } from 'lucide-react';
@@ -13,13 +17,13 @@ import { snapshotTitle } from '@/lib/title';
 
 import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
-import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
-import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
+import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton, type EntryResume } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
 import { useNowOn } from '../hooks/useNowOn';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { useUrlSearch } from '../hooks/useUrlSearch';
+import { formatClock } from '../lib/format';
 import { SourceGoneError, detailPath, openEntry, relativeTime, resumePosition } from '../lib/open';
 import {
   buildRecentRows,
@@ -29,6 +33,7 @@ import {
   restoreArgs,
   restoreHistory,
   restorePositions,
+  watchedFraction,
   type PositionCalls,
   type RecentRow,
 } from '../lib/recent';
@@ -75,7 +80,8 @@ export function RecentPage() {
   }, [playingUrl]);
 
   const rows = useMemo(() => buildRecentRows(query.data ?? [], search), [query.data, search]);
-  const continuing = useMemo(() => continueForSource(cont.data ?? [], sourceId), [cont.data, sourceId]);
+  // Each title's saved spot, by its history entry's key: the row shows it and resumes from it.
+  const resumable = useMemo(() => new Map(continueForSource(cont.data ?? [], sourceId).map((p) => [itemKey(p.ref), p])), [cont.data, sourceId]);
   const source = sourceId ? sources.get(sourceId) : undefined;
   const count = query.data?.length ?? 0;
   const refs = useMemo(() => (query.data ?? []).map((e) => e.ref), [query.data]);
@@ -224,13 +230,33 @@ export function RecentPage() {
     searchable ? { value: search, onChange: setSearch, placeholder: t('searchRecent') } : undefined,
   );
 
-  const rail =
-    continuing.length > 0 && !search ? <ContinueRail positions={continuing} onOpen={openContinue} onRemove={(p) => void removeContinue(p)} /> : null;
+  // A row with a saved spot resumes it, as the Continue watching card it replaces did (and Home's
+  // still does); its page stays one menu item away.
+  const activate = (e: RecentEntry) => {
+    const p = resumable.get(itemKey(e.ref));
+    if (p) openContinue(p);
+    else open(e);
+  };
+
+  const resumeOf = (e: RecentEntry, title: string): EntryResume | undefined => {
+    const p = resumable.get(itemKey(e.ref));
+    if (!p) return undefined;
+    return {
+      fraction: watchedFraction(p),
+      minutesLeft: p.durationSeconds ? Math.max(1, Math.round((p.durationSeconds - p.positionSeconds) / 60)) : undefined,
+      // A series names the episode it goes back to.
+      episode: p.episodeId ? p.snapshot?.subtitle : undefined,
+      label: t('continueTitle', { title, time: formatClock(p.positionSeconds) }),
+      onDetails: () => open(e),
+      onForget: () => void removeContinue(p),
+    };
+  };
 
   const renderRow = (row: RecentRow) => {
     if (row.kind === 'header') return <SectionHeading title={t(k('bucket', row.bucket))} count={row.count} />;
     const e = row.entry;
     const key = `${e.ref.sourceId}|${e.ref.contentType}|${e.ref.itemId}`;
+    const title = snapshotTitle(e.ref, e.snapshot.title).title;
     return (
       <EntryRow
         entryRef={e.ref}
@@ -239,10 +265,11 @@ export function RecentPage() {
         showSource={!sourceId && namesSources}
         now={nowOn.get(itemKey(e.ref))}
         time={relativeTime(e.viewedAt, i18n.language)}
-        removeLabel={t('removeRecent', { title: snapshotTitle(e.ref, e.snapshot.title).title })}
+        removeLabel={t('removeRecent', { title })}
         menuRemoveLabel={t('removeFromHistory')}
         busy={pending.has(key)}
-        onOpen={() => open(e)}
+        resume={resumeOf(e, title)}
+        onOpen={() => activate(e)}
         onRemove={() => remove(e)}
       />
     );
@@ -251,7 +278,7 @@ export function RecentPage() {
   let body;
   if (query.isLoading) body = <EntryRowsSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  else if (count === 0 && !rail)
+  else if (count === 0)
     body = (
       <EmptyState
         icon={<History size={28} aria-hidden />}
@@ -281,23 +308,19 @@ export function RecentPage() {
       <VirtualRows
         rows={rows}
         label={title}
-        // The rail takes the rows' reading width, so the page has one right edge.
-        header={rail ? <div className="max-w-4xl">{rail}</div> : null}
-        headerHeight={rail ? CONTINUE_RAIL_HEIGHT : 0}
-        // With no rail above it, the first day's heading row is only as tall as the heading (as on Favorites).
-        rowHeight={(r) => (r.kind === 'header' ? (!rail && r === rows[0] ? FIRST_HEADER_HEIGHT : HEADER_HEIGHT) : ENTRY_ROW_HEIGHT)}
+        // The first day's heading row is only as tall as the heading (as on Favorites).
+        rowHeight={(r) => (r.kind === 'header' ? (r === rows[0] ? FIRST_HEADER_HEIGHT : HEADER_HEIGHT) : ENTRY_ROW_HEIGHT)}
         isFocusable={(r) => r.kind === 'item'}
         renderRow={renderRow}
         testId="recent-list"
         // As on Favorites: the hover fill bleeds into the gutter and the rows keep a reading width.
-        // The Continue rail above lines up with the rows' content.
         className="-mx-2"
         listClassName="max-w-4xl"
         onRowKeyDown={(r, ev) => {
           if (r.kind !== 'item') return;
           if (ev.key === 'Enter') {
             ev.preventDefault();
-            open(r.entry);
+            activate(r.entry);
           } else if (ev.key === 'Delete') {
             ev.preventDefault();
             remove(r.entry);

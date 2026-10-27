@@ -224,7 +224,6 @@
   "historyRestored": "Гісторыя адноўлена",
   "historyRestorePartial": "Адноўлена {{restored}} з {{total}} запісаў.",
   "clearFailed": "Не ўдалося ачысціць гісторыю",
-  "continueWatching": "Працягнуць прагляд",
   "continueTitle": "Працягнуць {{title}} з {{time}}",
   "removeContinue": "Выдаліць {{title}} з «Працягнуць прагляд»",
   "watchedPercent": "Прагледжана {{percent}}%",
@@ -343,6 +342,9 @@
   "browseMovies": "Праглядзець фільмы",
   "removeFromFavorites": "Выдаліць з выбранага",
   "removeFromHistory": "Выдаліць з гісторыі",
+  "removeFromContinue": "Выдаліць з «Працягнуць прагляд»",
+  "rowResume": "Працягнуць",
+  "rowDetails": "Адкрыць падрабязнасці",
   "minutesLeftShort": "{{count}} хв",
   "browseSeries": "Праглядзець серыялы"
 }

@@ -192,7 +192,6 @@
   "historyRestored": "Geschiedenis hersteld",
   "historyRestorePartial": "{{restored}} van {{total}} items zijn terug.",
   "clearFailed": "Kan de geschiedenis niet wissen",
-  "continueWatching": "Verder kijken",
   "continueTitle": "{{title}} verder kijken vanaf {{time}}",
   "removeContinue": "{{title}} verwijderen uit Verder kijken",
   "watchedPercent": "{{percent}}% bekeken",
@@ -307,6 +306,9 @@
   "browseMovies": "Films bekijken",
   "removeFromFavorites": "Verwijderen uit favorieten",
   "removeFromHistory": "Verwijderen uit geschiedenis",
+  "removeFromContinue": "Verwijderen uit Verder kijken",
+  "rowResume": "Hervatten",
+  "rowDetails": "Details openen",
   "minutesLeftShort": "{{count}} min",
   "browseSeries": "Series bekijken"
 }

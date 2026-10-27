@@ -414,14 +414,26 @@ describe('FavoritesPage', () => {
 });
 
 describe('RecentPage', () => {
-  it('renders history with continue watching and clears it', async () => {
-    rpc.handlers['recent.list'] = () => [makeRecent('a', new Date().toISOString()), makeRecent('b', '2025-01-01T00:00:00Z')];
-    rpc.handlers['positions.continueWatching'] = () => [makePosition('p1', 600, 2400)];
+  it('renders history, a title stopped part way once with its progress, and clears it', async () => {
+    const p1 = makePosition('p1', 600, 2400);
+    rpc.handlers['recent.list'] = () => [
+      makeRecent('a', new Date().toISOString()),
+      { ref: p1.ref, viewedAt: new Date().toISOString(), snapshot: p1.snapshot! },
+      makeRecent('b', '2025-01-01T00:00:00Z'),
+    ];
+    rpc.handlers['positions.continueWatching'] = () => [p1];
     rpc.handlers['recent.clear'] = () => undefined;
     renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
 
-    expect(await screen.findByTestId('continue-rail')).toBeTruthy();
-    expect(screen.getAllByTestId('entry-row')).toHaveLength(2);
+    // No Continue watching cards above the days: the title's own row carries its saved spot.
+    const resume = await screen.findByTestId('entry-resume');
+    expect(screen.queryByTestId('continue-rail')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Continue watching' })).toBeNull();
+    expect(screen.getAllByTestId('entry-row')).toHaveLength(3);
+    expect(screen.getAllByText('Continue p1')).toHaveLength(1);
+    expect(within(resume).getByRole('progressbar', { name: '25% watched' })).toBeTruthy();
+    expect(within(resume).getByText('30 minutes left')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Continue Continue p1 at 10:00' })).toBeTruthy();
     expect(screen.getByText('Today')).toBeTruthy();
     expect(screen.getByText('Older')).toBeTruthy();
     expect(rpc.callsOf('recent.list')[0]).toEqual({ limit: 500 });
@@ -453,6 +465,7 @@ describe('RecentPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Watched a from history' }));
     await waitFor(() => expect(rpc.callsOf('recent.remove')).toHaveLength(1));
     expect(rpc.callsOf('recent.list')[0]).toEqual({ sourceId: 'src1', limit: 500 });
-    expect(screen.queryByTestId('continue-rail')).toBeNull();
+    // Another source's saved spot is not this page's.
+    expect(screen.queryByTestId('entry-resume')).toBeNull();
   });
 });

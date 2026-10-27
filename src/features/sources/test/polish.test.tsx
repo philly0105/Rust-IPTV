@@ -88,6 +88,21 @@ describe('field error helpers', () => {
 });
 
 describe('inline validation in the add dialog', () => {
+  it('marks the missing address on an empty submit but not the optional Name, and the error stands in for the hint', async () => {
+    await openAdd();
+    const url = input(/^Playlist URL/);
+    const hint = document.getElementById(url.getAttribute('aria-describedby')!)!;
+    expect(hint.getAttribute('role')).toBeNull();
+    fireEvent.click(screen.getByTestId('add-source-submit'));
+    await waitFor(() => expect(url.getAttribute('aria-invalid')).toBe('true'));
+    // Name is optional and takes the address's name, so with no address only the address is flagged.
+    expect(input(/^Name/).getAttribute('aria-invalid')).toBeNull();
+    // The address's error is its only description now, in the hint's place.
+    const error = document.getElementById(url.getAttribute('aria-describedby')!)!;
+    expect(error.getAttribute('role')).toBe('alert');
+    expect(hint.isConnected).toBe(false);
+  });
+
   it('removes a field error as soon as the user edits that field', async () => {
     await openAdd();
     type(/^Playlist URL/, 'ftp://nope');

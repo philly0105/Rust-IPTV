@@ -38,6 +38,9 @@ describe('focus rings', () => {
       src.split('\n').forEach((line, i) => {
         if (!line.includes('outline-none')) return;
         if (/(focus-visible|focus):ring-2/.test(line)) return;
+        // The channel menu's phone sheet takes focus as a whole, so that no item looks chosen. Like
+        // the kit Dialog's panel it draws no ring around itself; its items carry theirs.
+        if (file === 'ContextMenu.tsx' && line.includes('inset-x-0 bottom-0') && line.includes('focus-visible:shadow-3')) return;
         // A bare input inside a <label className="... focus-within:ring-2 ...">: the label draws the ring.
         const above = src.split('\n').slice(0, i).join('\n');
         const label = above.lastIndexOf('<label');

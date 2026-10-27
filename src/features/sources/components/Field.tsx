@@ -31,7 +31,9 @@ export function Field({
   const id = useId();
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
-  const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ') || undefined;
+  // An error takes the hint's place, so the field gains no line and the two never stack.
+  const showHint = !!hint && !error;
+  const describedBy = error ? errorId : showHint ? hintId : undefined;
   return (
     <div className={clsx('flex min-w-0 flex-col gap-1.5', className)}>
       <label htmlFor={id} className="flex items-baseline gap-2 text-sm font-medium text-fg">
@@ -44,7 +46,7 @@ export function Field({
           {error}
         </p>
       ) : null}
-      {hint ? (
+      {showHint ? (
         <p id={hintId} className="text-sm text-fg-muted">
           {hint}
         </p>

@@ -49,14 +49,26 @@ export interface DialogProps {
   placement?: DialogPlacement;
   /**
    * Below sm, a centred dialog becomes a bottom sheet: full width from the bottom edge, top
-   * corners rounded, clear of the home indicator, rising in. From sm up it is the usual card.
+   * corners rounded, clear of the home indicator, rising in, with a 1rem gutter instead of
+   * 1.5rem. From sm up it is the usual card. On by default for `sm`, `md` and `lg` dialogs that
+   * draw a header row; `xl`, `full` and a dialog with neither title nor close button (the command
+   * palette) stay floating cards. `sheet={false}` keeps the card.
    */
   sheet?: boolean;
 }
 
-/** The sheet's panel below sm. Its height cap can be overridden through `className` (`max-sm:max-h-…`). */
+/**
+ * The sheet's panel below sm. Its height cap can be overridden through `className` (`max-sm:max-h-…`).
+ * The cap leaves room above it for the toast stack, which moves to the top edge while a dialog
+ * is open on a phone (see Toast.tsx), so a toast never covers the sheet's title.
+ */
 const SHEET =
-  'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:max-w-none max-sm:max-h-[calc(100dvh-1.5rem)] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[env(safe-area-inset-bottom,0px)]';
+  'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:max-w-none max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[env(safe-area-inset-bottom,0px)] max-sm:[--dialog-gutter:1rem]';
+
+/** Whether a dialog is a sheet below sm when its caller does not say (see `DialogProps.sheet`). */
+function sheetByDefault(size: DialogSize, headerless: boolean): boolean {
+  return (size === 'sm' || size === 'md' || size === 'lg') && !headerless;
+}
 
 const sizes: Record<DialogSize, string> = {
   sm: 'max-w-sm',
@@ -174,10 +186,12 @@ export function Dialog({
   initialFocus,
   testId,
   placement = 'center',
-  sheet = false,
+  sheet,
 }: DialogProps) {
   const drawer = placement === 'end';
-  const asSheet = sheet && !drawer;
+  // On a phone a floating card leaves 24 px of page on each side and ends its footer mid-screen;
+  // a sheet spans the width and puts the actions at the thumb.
+  const asSheet = !drawer && (sheet ?? sheetByDefault(size, !!(hideTitle && hideClose)));
   const { t } = useTranslation('common');
   const toastReserve = useToastReserve((s) => s.px);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -356,7 +370,7 @@ export function Dialog({
         data-testid={testId}
         className={cn(
           // The panel itself only takes focus when it holds nothing focusable; a ring around the whole dialog would read as a stray highlight.
-          'relative flex flex-col border-edge bg-surface text-fg shadow-3 focus-visible:shadow-3 focus-visible:outline-none',
+          'relative flex flex-col border-edge bg-surface text-fg shadow-3 [--dialog-gutter:1.5rem] focus-visible:shadow-3 focus-visible:outline-none',
           drawer
             ? cn('h-full w-[min(var(--panel-width),90vw)] border-s', closing ? 'motion-safe:animate-drawer-out' : 'motion-safe:animate-drawer-in')
             : cn(
@@ -387,7 +401,7 @@ export function Dialog({
               'flex gap-4',
               drawer
                 ? 'h-(--header-height) shrink-0 items-center border-b border-divider ps-5 pe-3'
-                : cn('items-start px-6 pt-5', hideTitle ? 'pb-0' : 'pb-4'),
+                : cn('items-start px-(--dialog-gutter) pt-5', hideTitle ? 'pb-0' : 'pb-4'),
             )}
           >
             <div className={cn('min-w-0 flex-1', hideTitle && 'sr-only')}>
@@ -417,9 +431,9 @@ export function Dialog({
           -mt-1 pt-1: a field at the top of a scrolling body keeps its focus glow, which the
           scroll clip would otherwise cut along the top edge; the box itself does not move.
         */}
-        {hasBody && <div className={cn('-mt-1 min-h-0 flex-1 overflow-y-auto px-6 pt-1 pb-6', bodyClassName)}>{children}</div>}
+        {hasBody && <div className={cn('-mt-1 min-h-0 flex-1 overflow-y-auto px-(--dialog-gutter) pt-1 pb-6', bodyClassName)}>{children}</div>}
         {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-divider px-6 py-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-divider px-(--dialog-gutter) py-4">
             {footer}
           </div>
         )}

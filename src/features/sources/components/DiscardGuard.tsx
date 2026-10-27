@@ -67,9 +67,3 @@ export function useDiscardGuard({ open, dirty, onClose, title }: { open: boolean
   ) : null;
   return { request, prompt };
 }
-
-/**
- * Below sm a source dialog is a bottom sheet (SS-13, the Dialog's `sheet`), and its body gives the
- * fields the room the floating card's margins took.
- */
-export const PHONE_SHEET_BODY = 'max-sm:px-4';

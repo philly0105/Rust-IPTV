@@ -52,7 +52,7 @@ export interface MenuProps {
  * the pointer and focus, so it never looks like its neutral neighbours until it is read. Exported
  * for src/ui/test/contrast.test.ts, which holds the red text to 4.5:1 on the strongest wash.
  */
-export const MENU_DANGER = 'text-danger hover:bg-danger/10 focus:bg-danger/15 active:bg-danger/20';
+export const MENU_DANGER = 'text-danger hover:bg-danger/10 focus-visible:bg-danger/15 active:bg-danger/20';
 
 function isAction(i: MenuItem): i is MenuAction {
   return !('type' in i);
@@ -356,7 +356,9 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
                   className={cn(
                     'flex h-9 cursor-pointer items-center gap-3 rounded-md px-3 text-sm outline-hidden select-none',
                     TOUCH_TARGET,
-                    'hover:bg-hover focus:bg-active active:bg-pressed focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
+                    // The fill follows keyboard focus only: a menu opened by a click or a tap focuses its first
+                    // item too, and a filled first item read as already chosen.
+                    'hover:bg-hover focus-visible:bg-active active:bg-pressed focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus aria-disabled:cursor-not-allowed aria-disabled:opacity-40',
                     item.danger ? MENU_DANGER : 'text-fg',
                   )}
                 >
@@ -366,7 +368,8 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {item.hint && <span className="text-xs text-fg-subtle">{item.hint}</span>}
+                  {/* A key hint means nothing to a finger. */}
+                  {item.hint && <span className="text-xs text-fg-subtle pointer-coarse:hidden">{item.hint}</span>}
                 </div>
               ) : (
                 <div key={item.id} role="separator" className="my-1 h-px bg-divider" />

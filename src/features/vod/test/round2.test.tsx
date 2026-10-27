@@ -362,4 +362,26 @@ describe('category pages', () => {
     expect(all.className).not.toContain('bg-fg');
     expect(all.nextElementSibling?.getAttribute('aria-label')).toMatch(/categories/i);
   });
+
+  it('below md the source line leads the chip row beside All categories, and the chips and Manage take the next line', async () => {
+    renderAt('/s/src1/movies', [{ path: '/s/:sourceId/movies', element: <VodLandingPage kind="movie" /> }]);
+    const nav = await screen.findByTestId('vod-category-chips');
+    await within(nav).findAllByTestId('vod-category-chip');
+    // The header shows the source from md up; below it the row's first line does, beside All categories.
+    const lead = await within(nav).findByTestId('vod-landing-source');
+    expect(lead.className).toContain('md:hidden');
+    expect(nav.firstElementChild).toBe(lead);
+    expect(nav.className).toContain('flex-wrap');
+    expect(nav.className).toContain('md:flex-nowrap');
+    const list = within(nav).getAllByTestId('vod-category-chip')[0]!.closest('ul')!;
+    expect(list.className).toContain('max-md:order-last');
+    expect(list.className).toContain('max-md:grow');
+    const all = within(nav).getByTestId('vod-chip-all');
+    expect(all.className).toContain('max-md:ms-auto');
+    expect(all.className).not.toContain('order-last');
+    // Manage follows the chips (same order, later in the document), so it ends their line.
+    expect(all.nextElementSibling!.className).toContain('max-md:order-last');
+    // Only one source line on the page: the row's.
+    expect(screen.getAllByText(lead.textContent!)).toHaveLength(1);
+  });
 });

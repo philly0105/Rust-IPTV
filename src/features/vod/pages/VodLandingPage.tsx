@@ -22,6 +22,7 @@ import { resumeKey, useRecentlyAdded, useResumeMap, useSectionContinue, useSetti
 import { useClientHeight } from '../hooks/useContainerColumns';
 import { useEdgeFades } from '../hooks/useEdgeFades';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useShowSourceName } from '../hooks/useShowSourceName';
 import { useWatchedKeys } from '../hooks/useWatched';
 import { rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
 import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
@@ -146,7 +147,10 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   }, [shownCats, source.data, sourceCount]);
   const fmt = useMemo(() => new Intl.NumberFormat(intlLocale(i18n.language)), [i18n.language]);
   const countText = visibleCount ? t('titleCount', { count: visibleCount, formatted: fmt.format(visibleCount) }) : undefined;
-  const sourceLine = source.data ? (countText ? `${source.data.name} · ${countText}` : source.data.name) : undefined;
+  // The source's name only when there are others to tell it from; with one, the count alone.
+  const showSource = useShowSourceName();
+  const sourceName = showSource ? source.data?.name : undefined;
+  const sourceLine = sourceName ? (countText ? `${sourceName} · ${countText}` : sourceName) : countText;
 
   // One search entry (L1-visual-13): the header field searches this source. Typing opens the
   // source's search page with the text so far; the field stays in the header there, so focus and
@@ -173,7 +177,9 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   // VOD starts here: warm hls.js and mpegts.js once the browser is idle (preloadEngines waits for
   // it), so the first movie or episode play does not fetch them after the click.
   useEffect(() => preloadEngines(), []);
-  const searchPlaceholder = source.data ? t('searchInSource', { source: source.data.name }) : t('searchSource');
+  // With one source, searching it is searching everything it has: the field says what that is, not
+  // "Search everything", the name of the palette's button right beside it.
+  const searchPlaceholder = sourceName ? t('searchInSource', { source: sourceName }) : showSource ? t('searchSource') : t('searchEverything');
   usePageHeader(
     {
       title,
@@ -247,7 +253,7 @@ export function VodLandingPage({ kind }: { kind: VodKind }) {
   return (
     <div ref={scrollRef} className="h-full min-h-0 overflow-y-auto overflow-x-hidden" data-testid={`vod-landing-${kind}`}>
       <Page width="wide" className="flex flex-col gap-10 max-sm:gap-8">
-        {/* The shell header shows the title, the source and the count (one place, L1-visual-13). Its
+        {/* The shell header shows the title and the count, with the source when there are others (one place, L1-visual-13). Its
             subtitle folds away below md, so only there the source line shows here: in the category
             row's first line, or on its own over an empty source. */}
         <h1 className="sr-only">{title}</h1>
@@ -586,7 +592,7 @@ function CategoryChips({
   onShowAll,
   manage,
 }: {
-  /** The source and its title count, shown below md, where the header does not show them. */
+  /** The title count (after the source's name when there are others), shown below md, where the header does not show it. */
   lead?: string | undefined;
   cats: readonly { id: string; name: string; locked: boolean }[];
   total: number | undefined;

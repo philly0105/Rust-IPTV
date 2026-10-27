@@ -39,6 +39,7 @@ import { useToggleWatched, useWatchedKeys, useWatchedPages } from '../hooks/useW
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { PageGate, PageGateProvider, usePageOpen } from '../hooks/pageGate';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useShowSourceName } from '../hooks/useShowSourceName';
 import { useUrlSearchDraft } from '../hooks/useUrlSearchDraft';
 import { useVodLocks, type VodLocks } from '../hooks/useVodLocks';
 import { recallSpot, rememberSpot, useScrollMemory } from '../hooks/useScrollMemory';
@@ -384,13 +385,15 @@ export function CategoryGridPage({ kind }: { kind: VodKind }) {
   // header shows it; the page's h1 is for assistive technology only, so the title shows once.
   const pageTitle = categoryName || (kind === 'movie' ? t('movies') : t('series'));
   const countText = firstReady ? t('titleCount', { count: total, formatted: fmt.format(total) }) : undefined;
+  // The source's name only when there are others to tell it from; with one, the count alone.
+  const sourceName = useShowSourceName() ? source.data?.name : undefined;
 
   usePageHeader(
     {
       title: pageTitle,
-      subtitle: source.data ? (countText ? `${source.data.name} · ${countText}` : source.data.name) : undefined,
+      subtitle: sourceName ? (countText ? `${sourceName} · ${countText}` : sourceName) : countText,
     },
-    [pageTitle, source.data?.name, countText],
+    [pageTitle, sourceName, countText],
   );
   const locks = useVodLocks(sourceId, kind);
   // Phones: sort, years and Hide watched fold behind one Filters button, so the grid starts under the search row.

@@ -39,6 +39,7 @@ import {
   useTwinProbe,
 } from '../hooks/queries';
 import { usePageHeader } from '../hooks/usePageHeader';
+import { useShowSourceName } from '../hooks/useShowSourceName';
 import { recallSeason, rememberSeason, useScrollMemory } from '../hooks/useScrollMemory';
 import { useItemDownloads, usePlayback, type PlayTarget } from '../hooks/usePlayback';
 import { useDetailEscapeBack, useGoBack } from '../hooks/useBackKey';
@@ -208,10 +209,12 @@ export function SeriesDetailPage() {
   // The header title is also the window and tab title, so it stays the series' name; on screen the
   // header names the section until the hero's h1 scrolls away. Watching, the stage's bar names it,
   // the header names the section and the window keeps the name (see MovieDetailPage).
+  // The source is named only when there are others (useShowSourceName); the About facts always name it.
+  const headerSource = useShowSourceName() ? source.data?.name : undefined;
   const header = watch.active
     ? { title: t('series'), documentTitle: pageTitle }
-    : { title: pageTitle, subtitle: source.data?.name, section: t('series'), back: { onClick: goBack } };
-  usePageHeader(header, [watch.active, pageTitle, source.data?.name, t]);
+    : { title: pageTitle, subtitle: headerSource, section: t('series'), back: { onClick: goBack } };
+  usePageHeader(header, [watch.active, pageTitle, headerSource, t]);
   const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
@@ -442,7 +445,7 @@ export function SeriesDetailPage() {
       {watch.active ? (
         <WatchStage
           title={model.titleBase ?? model.title}
-          subtitle={playing ? episodeSubtitle(playing.season, playing.episode, playing.title) : source.data?.name}
+          subtitle={playing ? episodeSubtitle(playing.season, playing.episode, playing.title) : headerSource}
           onClose={playback.stop}
           aside={
             settings.playerUpNextRail ? (

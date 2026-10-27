@@ -615,13 +615,13 @@ function CategoryChips({
         {loading
           ? [0, 1, 2, 3, 4].map((i) => (
               <li key={i} aria-hidden className="shrink-0">
-                <Skeleton className="h-7 w-24 rounded-full" />
+                <Skeleton className="h-8 w-28 rounded-full" />
               </li>
             ))
           : cats.map((c) => (
               <li key={c.id} className="shrink-0">
                 <Link to={hrefFor(c.id)} state={FROM_LANDING} className={filterChipClass(false, 'max-w-[16rem]')} title={c.name} data-testid="vod-category-chip">
-                  {c.locked && <Lock aria-hidden size={12} className="shrink-0" />}
+                  {c.locked && <Lock aria-hidden size={14} className="shrink-0" />}
                   <span dir="auto" className="truncate">
                     {c.name}
                   </span>

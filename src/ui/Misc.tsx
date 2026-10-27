@@ -367,12 +367,18 @@ export function WatchedChip({ className, testId }: WatchedChipProps) {
   );
 }
 
-/** Classes of a filter chip, for a Link or a custom element drawn as one (`FilterChip` is the button). */
+/**
+ * Classes of a filter chip, for a Link or a custom element drawn as one (`FilterChip` is the button).
+ * A chip is as tall as an `sm` button or field (h-8), so a row of chips lines up with the "All
+ * categories" button or the sort menu beside it, and its label is body text in the full text tone:
+ * a caption in the muted tone read as a disabled tag rather than something to press. A count after
+ * the label stays quiet (FilterChip).
+ */
 export function filterChipClass(on: boolean, className?: string): string {
   return cn(
-    'inline-flex h-7 min-w-0 shrink-0 items-center gap-1.5 rounded-full border px-3 text-caption font-medium motion-safe:transition-colors',
+    'inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-body-sm font-medium motion-safe:transition-colors',
     // A chosen filter is inverted, never amber: amber marks actions and progress.
-    on ? 'border-transparent bg-fg text-bg hover:bg-fg/90' : 'border-edge bg-surface-2 text-fg-muted hover:bg-surface-3 hover:text-fg active:bg-pressed',
+    on ? 'border-transparent bg-fg text-bg hover:bg-fg/90' : 'border-edge bg-surface-2 text-fg hover:bg-surface-3 active:bg-pressed',
     className,
   );
 }

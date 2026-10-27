@@ -228,7 +228,7 @@ function RatingFloorChip({ setting, on, onChange, className }: { setting: number
         // The kit's filter chip, as the decade chips beside it: inverted while it filters.
         className={filterChipClass(on, cn('tabular gap-1 whitespace-nowrap', !on && 'text-fg-subtle line-through', className))}
       >
-        <Star aria-hidden size={13} className="fill-current" />
+        <Star aria-hidden size={14} className="fill-current" />
         {`${rating}+`}
       </button>
     </Tooltip>

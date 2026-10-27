@@ -403,6 +403,11 @@ describe('sports page', () => {
     expect(within(card(final)).getAllByTestId('sports-score')[1]!.className).toContain('text-fg-muted');
     expect(within(card(overtime)).getByText('Final/OT')).toBeTruthy();
     expect(card(later).textContent).toContain(formatClock(start, 'en'));
+    // The start time keeps its line beside a long network list ("8:00" never wraps over "PM").
+    const at = within(card(later)).getByTestId('sports-start');
+    expect(at.textContent).toContain(formatClock(start, 'en'));
+    expect(at.className).toContain('whitespace-nowrap');
+    expect(at.className).toContain('shrink-0');
     expect(within(card(tbd)).getByText('TBD')).toBeTruthy();
     expect(within(card(tbd)).getByText('Ranked 5')).toBeTruthy();
     expect(within(card(flex)).getByText('TBD')).toBeTruthy();
@@ -413,6 +418,67 @@ describe('sports page', () => {
     // Nothing airs for a postponed game: no stream list.
     expect(within(card(postponed)).queryByTestId('sports-streams')).toBeNull();
     expect(within(card(postponed)).queryByTestId('sports-no-streams')).toBeNull();
+  });
+
+  it('lines the cards of a row up: each spans four shared rows, streams in the last', async () => {
+    const plain = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    const noted = h.game('2', { startMs: Date.now() + 2 * h.HOUR, note: 'NBA Cup' });
+    setDay([plain, noted]);
+    setStreams(plain, [h.match(ESPN)]);
+    setStreams(noted, [h.match(ESPN)]);
+    await openReady();
+    // The grid stretches its items (no items-start), and each card is a subgrid of four of its rows.
+    expect(screen.getAllByTestId('sports-grid')[0]!.className).not.toContain('items-start');
+    for (const g of [plain, noted]) {
+      expect(card(g).className).toContain('row-span-4');
+      expect(card(g).className).toContain('grid-rows-subgrid');
+      // The streams sit in the fourth track whether or not the card has notes, so they share a line.
+      expect(within(card(g)).getByTestId('sports-streams').closest('.row-start-4')).toBeTruthy();
+    }
+    expect(within(card(noted)).getByTestId('sports-notes').className).toContain('row-start-3');
+  });
+
+  it('pins the toolbar on a tablet or desktop window that is tall enough, and keeps focused controls clear of it', async () => {
+    const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([g]);
+    setStreams(g, [h.match(ESPN)]);
+    await openReady();
+    const pinned = '[@media(min-width:48rem)_and_(min-height:40rem)]';
+    const toolbar = screen.getByTestId('sports-toolbar').className.split(' ');
+    expect(toolbar).toEqual(expect.arrayContaining([`${pinned}:sticky`, `${pinned}:top-0`, 'bg-bg', 'z-10']));
+    // Not pinned on a phone: no bare sticky.
+    expect(toolbar).not.toContain('sticky');
+    expect(screen.getByTestId('sports-grid').className).toContain(`${pinned}:[&_button]:scroll-mt-32`);
+  });
+
+  it('goes back to the top when the pinned toolbar changes the day, the league or a filter', async () => {
+    const days = etDays(Date.now(), 7, 7);
+    const g = h.game('1', { startMs: Date.now() + 2 * h.HOUR });
+    setDay([g]);
+    setDay([h.game('2', { startMs: Date.now() + 26 * h.HOUR, etDate: days[8] })], days[8]);
+    setStreams(g, [h.match(ESPN)]);
+    localStorage.setItem('tsrust.sportsTeams', JSON.stringify(['nba:BOS']));
+    // The shell's outlet is the page's scroller. jsdom lays nothing out, so the toolbar's top is on
+    // the scroller's, as when it is pinned.
+    h.renderAt('/sports', [{ path: '/sports', element: <main id="main"><SportsPage /></main> }]);
+    await waitFor(() => expect(data.streamCalls.at(-1)?.enabled).toBe(true));
+    const main = document.getElementById('main')!;
+    const press = (el: HTMLElement) => {
+      main.scrollTop = 600;
+      fireEvent.click(el);
+      return main.scrollTop;
+    };
+    expect(press(screen.getByRole('tab', { name: /^Tomorrow / }))).toBe(0);
+    await waitFor(() => expect(h.location.current).toBe(`/sports?day=${days[8]}`));
+    expect(press(screen.getByRole('tab', { name: /^NBA / }))).toBe(0);
+    expect(press(screen.getByTestId('sports-streams-only'))).toBe(0);
+    expect(press(screen.getByTestId('sports-my-teams'))).toBe(0);
+
+    // Not pinned (the toolbar below the scroller's top, scrolled only part way to it): the page stays.
+    const toolbar = screen.getByTestId('sports-toolbar');
+    vi.spyOn(toolbar, 'getBoundingClientRect').mockReturnValue({ top: 8 } as DOMRect);
+    expect(press(screen.getByRole('tab', { name: TODAY }))).toBe(600);
+    await waitFor(() => expect(h.location.current).toBe('/sports?league=nba'));
   });
 
   it('splits the day into Live now, Upcoming and Final, so no game shows twice', async () => {
@@ -511,12 +577,23 @@ describe('sports page', () => {
     const c = card(g);
     const list = within(c).getByRole('list', { name: 'Streams for Boston Celtics at New York Knicks' });
     let rows = within(list).getAllByTestId('sports-stream');
-    // One row a card until Show all.
+    // One row a card until Show all, a small "+4" at the end of that row's metadata rather than a row of its own.
     expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide']);
-    fireEvent.click(within(c).getByRole('button', { name: 'Show all 5 streams' }));
+    const more = within(rows[0]!).getByRole('button', { name: 'Show all 5 streams' });
+    expect(more.textContent).toBe('+4');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    // Its 44 px hit area is for touch only: for a mouse it stays on the chip, off the name above it.
+    const hit = more.className.split(' ');
+    expect(hit).toEqual(expect.arrayContaining(['pointer-coarse:after:absolute', 'pointer-coarse:after:-inset-y-3']));
+    expect(hit.filter((c) => c.startsWith('after:'))).toEqual([]);
+    fireEvent.click(more);
     rows = within(list).getAllByTestId('sports-stream');
+    // The toggle stays put in the first row, so the same press closes the list again.
+    expect(within(rows[0]!).getByTestId('sports-show-all').getAttribute('aria-expanded')).toBe('true');
     expect(rows.map((r) => r.getAttribute('data-reason'))).toEqual(['guide', 'event', 'network', 'network', 'network']);
     expect(within(rows[0]!).getByText('In guide')).toBeTruthy();
+    // The reason is quiet text, not a badge: only the regional warning is one.
+    expect(within(rows[0]!).getByTestId('sports-reason').getAttribute('class')).toBeNull();
     expect(within(rows[1]!).getByText('Event channel')).toBeTruthy();
     expect(within(rows[2]!).getByText('Network')).toBeTruthy();
     expect(within(rows[2]!).getByTestId('sports-regional').textContent).toBe('Regional');
@@ -526,8 +603,9 @@ describe('sports page', () => {
     expect(within(rows[1]!).getByText('ESPN HD')).toBeTruthy();
     expect(within(c).queryByTestId('sports-stream-source')).toBeNull();
 
-    fireEvent.click(within(c).getByRole('button', { name: 'Show fewer' }));
+    fireEvent.click(within(rows[0]!).getByRole('button', { name: 'Show fewer' }));
     expect(within(list).getAllByTestId('sports-stream')).toHaveLength(1);
+    expect(within(list).getByRole('button', { name: 'Show all 5 streams' })).toBeTruthy();
   });
 
   it('names the source of each stream when there are several', async () => {
@@ -564,9 +642,10 @@ describe('sports page', () => {
     // With nothing to do yet, the best row says when Watch comes.
     const from = within(card(later)).getByTestId('sports-watch-from');
     const at = formatClock(later.startMs - 15 * h.MINUTE, 'en');
-    // A play mark and the time on screen; the sentence is what it reads and its tooltip.
+    // A clock and the time on screen, nothing that looks like a button; the sentence is what it reads and its tooltip.
     expect(from.getAttribute('title')).toBe(`Watch from ${at}`);
     expect(within(from).getByText(`Watch from ${at}`).className).toContain('sr-only');
+    expect(from.querySelector('svg')?.getAttribute('class')).toContain('lucide-clock');
     expect(within(card(soon)).queryByTestId('sports-watch-from')).toBeNull();
     fireEvent.click(within(card(soon)).getByTestId('sports-watch'));
     await waitFor(() => expect(h.lastToast()?.title).toBe("Couldn't play ESPN HD"));

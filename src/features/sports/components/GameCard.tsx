@@ -44,7 +44,7 @@ function GameStatus({ game }: { game: Game }) {
         </span>
       );
     case 'final':
-      return <span className="font-semibold text-fg">{finalLabel(game, t)}</span>;
+      return <span className="shrink-0 font-semibold whitespace-nowrap text-fg">{finalLabel(game, t)}</span>;
     case 'postponed':
     case 'canceled':
     case 'suspended':
@@ -54,11 +54,16 @@ function GameStatus({ game }: { game: Game }) {
         </Badge>
       );
     default: {
-      if (!game.timeValid || game.timeNote) return <span className="text-fg-muted">{t('tbd')}</span>;
+      if (!game.timeValid || game.timeNote) return <span className="shrink-0 whitespace-nowrap text-fg-muted">{t('tbd')}</span>;
       const time = formatClock(game.startMs, lang);
       // A late Eastern game falls on the next day further east: say which.
       const label = localDate(game.startMs) === game.etDate ? time : t('dayTime', { day: formatDay(game.startMs, lang), time });
-      return <span className="font-medium text-fg tabular-nums">{label}</span>;
+      // The time keeps its line and the networks after it truncate first ("8:00" never sits over "PM").
+      return (
+        <span className="shrink-0 font-medium whitespace-nowrap text-fg tabular-nums" data-testid="sports-start">
+          {label}
+        </span>
+      );
     }
   }
 }
@@ -145,10 +150,15 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
         }
       : null,
   );
+  // Four rows of the page's grid as a subgrid: the status line, the teams, the notes and the streams
+  // each take one track shared with the other cards in the row, so every card in a row is as tall as
+  // the tallest and the stream lists start on one line. The tracks have no gaps (the rows space
+  // themselves with a top margin), so a card without notes keeps an empty track of no height.
+  // Where subgrid is not supported the card is a plain four-row grid of its own.
   return (
     <li
       className={cn(
-        'flex min-w-0 flex-col gap-2.5 rounded-lg border bg-surface p-3.5',
+        'row-span-4 mb-3 grid min-w-0 grid-rows-subgrid rounded-lg border bg-surface p-3.5',
         game.phase === 'live' ? 'border-live/40' : 'border-edge',
       )}
       data-testid="sports-game"
@@ -166,8 +176,9 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
           <GameStatus game={game} />
           {networks.length > 0 ? (
             // One line that truncates: a regional MLB game can list five networks, and the whole list
-            // is in the tooltip. The dots are drawn, not spoken.
-            <span className="flex min-w-0 items-center gap-2 text-caption text-fg-muted" title={networks.join(', ')}>
+            // is in the tooltip. It takes only the room the status leaves (flex-1 grows from zero), so
+            // it truncates before a live clock does. The dots are drawn, not spoken.
+            <span className="flex min-w-0 flex-1 items-center gap-2 text-caption text-fg-muted" title={networks.join(', ')}>
               <span aria-hidden className="text-fg-subtle">
                 ·
               </span>
@@ -196,13 +207,13 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
           ]}
         />
       </div>
-      <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="mt-2.5 flex min-w-0 flex-col gap-1.5">
         <TeamRow team={game.away} game={game} followed={follows(game.away)} />
         <TeamRow team={game.home} game={game} followed={follows(game.home)} />
       </div>
       {notes.length > 0 ? (
         <MetaLine
-          className="text-caption text-fg-muted"
+          className="row-start-3 mt-2.5 self-start text-caption text-fg-muted"
           data-testid="sports-notes"
           items={notes.map((text, i) => (
             <span key={i} dir="auto">
@@ -212,7 +223,7 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
         />
       ) : null}
       {showStreams && playable ? (
-        <div className="-mx-1 border-t border-divider px-1 pt-1">
+        <div className="row-start-4 -mx-1 mt-2.5 border-t border-divider px-1 pt-1">
           <StreamList game={game} title={title} streams={streams} loading={streamsLoading} ctx={ctx} />
         </div>
       ) : null}

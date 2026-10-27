@@ -1,13 +1,13 @@
 /**
  * The streams matched to one game (lib/match.ts): the best one, rows with an action ahead of rows
- * without, then "Show all" for the rest, so a card stays one stream tall. Each row names
- * the channel, why it matched (the guide, an event channel's name, a team's own channel, or a network carrying the game)
+ * without, and a small "+2" at the end of its metadata that shows the rest, so a card stays one
+ * stream tall. Each row names the channel, why it matched (the guide, an event channel's name, a team's own channel, or a network carrying the game)
  * and offers what fits the game's phase: Watch from 15 minutes before the start, Replay from the
  * channel's archive once it is over, Record before it starts. The player loads on the press.
  */
 
-import { Circle, History, Play } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, Circle, Clock, History, Play } from 'lucide-react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { sameRef, type EpgProgram, type ItemRef, type Settings } from '@/api/types';
@@ -17,6 +17,7 @@ import {
   Button,
   ChannelLogo,
   MetaLine,
+  Tooltip,
   canCatchUp,
   displayChannelName,
   errorDescription,
@@ -171,16 +172,32 @@ export function streamAction(game: Game, m: StreamMatch, now: number, canRecord:
 function WatchFrom({ time }: { time: string }) {
   const { t } = useTranslation('sports');
   const label = t('watchFrom', { time });
+  // A clock, not a play mark: nothing here can be pressed yet, and a play mark beside a time read as a button.
   return (
     <span className="inline-flex shrink-0 items-center gap-1 text-caption text-fg-subtle tabular-nums" title={label} data-testid="sports-watch-from">
-      <Play aria-hidden size={12} />
+      <Clock aria-hidden size={12} />
       <span aria-hidden>{time}</span>
       <span className="sr-only">{label}</span>
     </span>
   );
 }
 
-function StreamRow({ game, match, title, ctx, first }: { game: Game; match: StreamMatch; title: string; ctx: StreamContext; first: boolean }) {
+function StreamRow({
+  game,
+  match,
+  title,
+  ctx,
+  first,
+  toggle,
+}: {
+  game: Game;
+  match: StreamMatch;
+  title: string;
+  ctx: StreamContext;
+  first: boolean;
+  /** The first row's Show all toggle, at the end of its metadata. */
+  toggle?: ReactNode;
+}) {
   const { t, i18n } = useTranslation('sports');
   const [busy, setBusy] = useState(false);
   const name = displayChannelName(match.channel.name, ctx.strip) || match.channel.name;
@@ -249,34 +266,41 @@ function StreamRow({ game, match, title, ctx, first }: { game: Game; match: Stre
         <span dir="auto" className="truncate text-body-sm font-medium text-fg">
           {name}
         </span>
-        <MetaLine
-          as="span"
-          items={[
-            <Badge key="reason" variant={match.reason === 'guide' ? 'success' : 'neutral'}>
-              {t(REASON_KEYS[match.reason])}
-            </Badge>,
-            match.regional ? (
-              <Badge key="regional" variant="warning" title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')} data-testid="sports-regional">
-                {t('regional')}
-              </Badge>
-            ) : null,
-            ctx.multiSource ? (
-              <span key="source" dir="auto" data-testid="sports-stream-source">
-                {match.sourceName}
-              </span>
-            ) : null,
-            program ? (
-              <span key="time" className="tabular-nums">
-                {formatTimeRange(ms(program.start), ms(program.end), i18n.language)}
-              </span>
-            ) : null,
-          ]}
-        />
+        {/* Wraps as a whole: where the details and the toggle don't fit beside an action, the toggle
+            goes under them rather than the details breaking in two. */}
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          <MetaLine
+            as="span"
+            items={[
+              // Why it matched is quiet text: a badge on every card made status green the page's loudest
+              // colour. Only the regional warning stays a badge, since it may be the wrong game.
+              <span key="reason" data-testid="sports-reason">
+                {t(REASON_KEYS[match.reason])}
+              </span>,
+              match.regional ? (
+                <Badge key="regional" variant="warning" title={t(match.reason === 'team' ? 'regionalTeamHint' : 'regionalHint')} data-testid="sports-regional">
+                  {t('regional')}
+                </Badge>
+              ) : null,
+              ctx.multiSource ? (
+                <span key="source" dir="auto" data-testid="sports-stream-source">
+                  {match.sourceName}
+                </span>
+              ) : null,
+              program ? (
+                <span key="time" className="tabular-nums">
+                  {formatTimeRange(ms(program.start), ms(program.end), i18n.language)}
+                </span>
+              ) : null,
+            ]}
+          />
+          {toggle}
+        </span>
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
       {!button && first && watchesLater(game, ctx.now) ? (
-        // Where nothing can be done yet (no recording here), the best row says when Watch comes: a play
-        // mark and the time, small enough to leave the channel's name its room; the sentence is its name.
+        // Where nothing can be done yet (no recording here), the best row says when Watch comes: a clock
+        // and the time, small enough to leave the channel's name its room; the sentence is its name.
         <WatchFrom time={formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language)} />
       ) : null}
     </li>
@@ -322,18 +346,43 @@ export function StreamList({
     );
   }
   const shown = all ? list : list.slice(0, STREAMS_SHOWN);
+  const more = list.length - STREAMS_SHOWN;
+  const toggleLabel = all ? t('showFewer') : t('showAllStreams', { count: list.length });
+  // The rest of the streams open from a small "+2" at the end of the best row's metadata, not a row
+  // of its own under it: on most cards that row was a fifth of the card. It stays where it is once
+  // open (a chevron up), so the same press closes the list again. Its hit area reaches 44 px on
+  // touch screens without making the line taller. Only for a coarse pointer, as the kit's
+  // TOUCH_TARGET: for a mouse it would reach up over the channel name, and hovering a long name
+  // would light the chip and open its tooltip.
+  const toggle =
+    more > 0 ? (
+      <Tooltip content={toggleLabel} describe={false}>
+        <button
+          type="button"
+          aria-label={toggleLabel}
+          aria-expanded={all}
+          onClick={() => setAll((v) => !v)}
+          className="relative inline-flex h-5 shrink-0 items-center gap-0.5 rounded-xs border border-edge bg-surface-2 px-1.5 text-caption font-medium text-fg tabular-nums pointer-coarse:after:absolute pointer-coarse:after:-inset-x-1 pointer-coarse:after:-inset-y-3 hover:bg-surface-3 active:bg-pressed"
+          data-testid="sports-show-all"
+        >
+          {all ? null : <span aria-hidden>{`+${more}`}</span>}
+          {all ? <ChevronUp aria-hidden size={12} /> : <ChevronDown aria-hidden size={12} />}
+        </button>
+      </Tooltip>
+    ) : null;
   return (
-    <div className="flex flex-col">
-      <ul className="flex flex-col divide-y divide-divider" aria-label={t('streamsFor', { title })} data-testid="sports-streams">
-        {shown.map((m) => (
-          <StreamRow key={`${m.sourceId}|${m.channel.ref.itemId}`} game={game} match={m} title={title} ctx={ctx} first={m === shown[0]} />
-        ))}
-      </ul>
-      {list.length > STREAMS_SHOWN ? (
-        <Button variant="ghost" size="sm" className="-ms-3 self-start" aria-expanded={all} onClick={() => setAll((v) => !v)} data-testid="sports-show-all">
-          {all ? t('showFewer') : t('showAllStreams', { count: list.length })}
-        </Button>
-      ) : null}
-    </div>
+    <ul className="flex flex-col divide-y divide-divider" aria-label={t('streamsFor', { title })} data-testid="sports-streams">
+      {shown.map((m, i) => (
+        <StreamRow
+          key={`${m.sourceId}|${m.channel.ref.itemId}`}
+          game={game}
+          match={m}
+          title={title}
+          ctx={ctx}
+          first={i === 0}
+          {...(i === 0 ? { toggle } : {})}
+        />
+      ))}
+    </ul>
   );
 }

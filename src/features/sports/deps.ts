@@ -23,6 +23,7 @@ export {
   SectionHeader,
   Skeleton,
   Tabs,
+  Tooltip,
   buttonClass,
   cn,
   errorDescription,

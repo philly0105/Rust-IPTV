@@ -18,7 +18,7 @@
  */
 
 import { CalendarX2, SearchX, Star, Tv } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router';
 
@@ -27,7 +27,7 @@ import { GameCard } from '../components/GameCard';
 import { LeagueFilter } from '../components/LeagueFilter';
 import { SportsSkeleton } from '../components/SportsSkeleton';
 import { useStreamContext, type StreamContext } from '../components/StreamList';
-import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, buttonClass, useNow, useShell, useVisibleSources } from '../deps';
+import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, buttonClass, cn, useNow, useShell, useVisibleSources } from '../deps';
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
@@ -49,6 +49,16 @@ import {
 
 const DAY_PANEL = 'sports-day';
 
+/**
+ * From a tablet up, on a window at least 40rem tall, the toolbar stays at the top of the page's
+ * scroller while the cards scroll under it, so a 15-game day never needs a scroll back up to change
+ * day or league. Not on a phone or a short window, where its three rows would hold a fifth of the
+ * screen for good. Written out whole, so Tailwind finds the classes.
+ */
+const PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:sticky [@media(min-width:48rem)_and_(min-height:40rem)]:top-0';
+/** A control focused from the keyboard scrolls clear of the pinned toolbar, not under it. */
+const CLEAR_PINNED = '[@media(min-width:48rem)_and_(min-height:40rem)]:[&_button]:scroll-mt-32';
+
 interface StreamsOf {
   (game: Game): { streams: readonly StreamMatch[] | undefined; streamsLoading: boolean };
 }
@@ -66,8 +76,13 @@ function GameGrid({
   showLeague: boolean;
   ctx: StreamContext;
 }) {
+  // Each card spans four rows of this grid as a subgrid (GameCard), so the cards in a row share one
+  // height and their status lines, teams, notes and streams line up across it. The grid has no row
+  // gap, since a subgrid's tracks keep its parent's gutters and a card without notes would show
+  // two of them around its empty track: the cards' bottom margin spaces the rows instead, and the
+  // list takes the last one back.
   return (
-    <ul className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <ul className={cn('-mb-3 grid gap-x-3 md:grid-cols-2 xl:grid-cols-3', CLEAR_PINNED)} data-testid="sports-grid">
       {games.map((g) => (
         <GameCard key={g.key} game={g} {...streamsOf(g)} showStreams={showStreams} showLeague={showLeague} ctx={ctx} />
       ))}
@@ -195,6 +210,17 @@ export function SportsPage() {
     setRemembered(next);
     setParam('league', next);
   };
+  // A day, league or filter changed from the pinned toolbar part way down a long day would open the
+  // new list part way down too, its first rows under the toolbar: the shell's scroll memory only
+  // starts a new page at the top. While the toolbar is pinned (its top on the scroller's), the page
+  // goes back to the top first. Unpinned, the toolbar is only in reach near the top anyway.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const backToTop = () => {
+    const bar = toolbarRef.current;
+    const main = bar?.closest<HTMLElement>('#main');
+    if (!bar || !main || main.scrollTop === 0) return;
+    if (Math.abs(bar.getBoundingClientRect().top - main.getBoundingClientRect().top) < 1) main.scrollTop = 0;
+  };
   const clearFilters = () => {
     setQuery('');
     toggleStreamsOnly(false);
@@ -251,14 +277,28 @@ export function SportsPage() {
     <Page width="wide" className="flex min-w-0 flex-col gap-6 pb-10" data-testid="sports-page">
       {/* C16: the page's single h1; the shell header shows the same text as a paragraph. */}
       <h1 className="sr-only">{title}</h1>
-      <div className="flex min-w-0 flex-col gap-3" data-testid="sports-toolbar">
+      {/* Pinned, it covers the cards under it with the page's own colour, and keeps a strip of it above
+          the league tabs (the margin takes back the padding where it is not pinned). The day tabs'
+          rule is its bottom edge. */}
+      <div ref={toolbarRef} className={cn('z-10 -mt-3 flex min-w-0 flex-col gap-3 bg-bg pt-3', PINNED)} data-testid="sports-toolbar">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-          <LeagueFilter value={league} onChange={pickLeague} counts={counts} live={liveLeagues} />
+          <LeagueFilter
+            value={league}
+            onChange={(next) => {
+              backToTop();
+              pickLeague(next);
+            }}
+            counts={counts}
+            live={liveLeagues}
+          />
           <div className="flex flex-wrap items-center gap-2">
             {followed.size > 0 ? (
               <FilterChip
                 pressed={myTeamsOnly}
-                onClick={() => toggleMyTeamsOnly(!myTeamsOnly)}
+                onClick={() => {
+                  backToTop();
+                  toggleMyTeamsOnly(!myTeamsOnly);
+                }}
                 icon={<Star aria-hidden size={14} className={myTeamsOnly ? 'shrink-0 fill-current' : 'shrink-0'} />}
                 count={myTeamsCount}
                 title={t('myTeamsHint')}
@@ -270,7 +310,10 @@ export function SportsPage() {
             {hasSources ? (
               <FilterChip
                 pressed={streamsOnly}
-                onClick={() => toggleStreamsOnly(!streamsOnly)}
+                onClick={() => {
+                  backToTop();
+                  toggleStreamsOnly(!streamsOnly);
+                }}
                 icon={<Tv aria-hidden size={14} className="shrink-0" />}
                 count={watchable}
                 title={t('withStreamsHint')}
@@ -286,6 +329,7 @@ export function SportsPage() {
           value={day}
           today={today}
           onChange={(d) => {
+            backToTop();
             pickDay(d);
             setParam('day', d === today ? null : d);
           }}

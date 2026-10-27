@@ -67,7 +67,7 @@ describe('Tour', () => {
     const dialog = screen.getByRole('dialog', { name: 'Live TV' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     const described = document.getElementById(dialog.getAttribute('aria-describedby') ?? '');
-    expect(described?.textContent).toMatch(/Live channels from all your sources start here/);
+    expect(described?.textContent).toMatch(/Your live channels start here/);
     expect(screen.getByTestId('tour-progress')?.textContent).toContain('Step 1 of 3');
     // The dots show the step, so the text is for screen readers only, and the steps to come show on the card.
     expect(screen.getByTestId('tour-progress').className).toContain('sr-only');

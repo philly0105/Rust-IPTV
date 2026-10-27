@@ -1,5 +1,6 @@
 import { useId, type KeyboardEvent, type ReactNode } from 'react';
 
+import { TOUCH_TARGET } from './Button';
 import { cn } from './cn';
 import { GLASS_FOCUS } from './focus';
 import { useTooltip, withTooltipProps } from './Tooltip';
@@ -46,10 +47,14 @@ const SEGMENT_FORCED = 'forced-color-adjust-none forced-colors:bg-[Highlight] fo
  * forced colours drop, leaving the unchosen segments as loose text; they repaint an outline in the
  * system's text colour instead. The track itself never takes focus, so the focus outline does not
  * replace this one.
+ *
+ * On a touch screen the track takes the buttons' 44 px floor (TOUCH_TARGET) at either size, as
+ * fields do, and the segments stretch to fill it: buttons grow to 44 px there, so a 30 or 38 px
+ * track no longer matched them, and a 30 px segment was a small target.
  */
 export const SEGMENT_TRACK: Record<SegmentedTone, string> = {
-  default: `flex gap-1 rounded-md p-1 outline-1 -outline-offset-1 ${SEGMENT_TONES.default.track}`,
-  glass: `flex gap-1 rounded-md p-0.5 ${SEGMENT_TONES.glass.track}`,
+  default: `flex gap-1 rounded-md p-1 outline-1 -outline-offset-1 ${TOUCH_TARGET} ${SEGMENT_TONES.default.track}`,
+  glass: `flex gap-1 rounded-md p-0.5 ${TOUCH_TARGET} ${SEGMENT_TONES.glass.track}`,
 };
 
 /** `md` (default) for forms and toolbars, as tall as an `md` button; `sm` for a compact header row beside `sm` buttons, as tall as them (h-8). */

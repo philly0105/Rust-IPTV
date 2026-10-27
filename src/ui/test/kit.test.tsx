@@ -16,21 +16,26 @@ import {
   BackButton,
   Checkbox,
   Dialog,
+  FilterChip,
   IconButton,
+  Input,
   LivePill,
   Menu,
   MetaLine,
   Page,
   PageHeader,
   RadioGroup,
+  SearchInput,
   SectionHeader,
   SegmentedControl,
+  Select,
   SourceMonogram,
   Switch,
   Tabs,
   Toggle,
   Tooltip,
   buttonClass,
+  fieldClass,
   useTooltip,
 } from '..';
 import { SWITCH_TONES } from '../Field';
@@ -233,6 +238,45 @@ describe('IconButton tooltip', () => {
     expect(cls).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
     expect(cls).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
     expect(buttonClass('secondary', 'md')).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
+  });
+
+  it('gives fields, segmented controls and pill tabs the same 44 px floor, so a touch toolbar lines up', () => {
+    const floor = 'pointer-coarse:min-h-[calc(44rem/15)]';
+    render(
+      <>
+        <Input aria-label="Name" />
+        <SearchInput size="sm" value="q" onChange={() => {}} label="Filter" />
+        <Select aria-label="Sort" options={[{ value: 'a', label: 'A' }]} />
+        <SegmentedControl size="sm" label="View" value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]} />
+        <Tabs variant="pill" label="Kind" value="all" onChange={() => {}} items={[{ id: 'all', label: 'All' }, { id: 'movies', label: 'Movies' }]} />
+        <Tabs label="Section" value="one" onChange={() => {}} items={[{ id: 'one', label: 'One' }]} />
+      </>,
+    );
+    expect(fieldClass('sm')).toContain(floor);
+    expect(screen.getByRole('textbox', { name: 'Name' }).className).toContain(floor);
+    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain(floor);
+    expect(screen.getByRole('combobox', { name: 'Sort' }).className).toContain(floor);
+    // The clear button grows inside the taller field.
+    expect(screen.getByRole('button', { name: 'Clear search' }).className).toContain('pointer-coarse:size-[calc(36rem/15)]');
+    // The track takes the floor and its segments stretch to fill it.
+    expect(screen.getByRole('radiogroup', { name: 'View' }).className).toContain(floor);
+    const pills = screen.getByRole('tablist', { name: 'Kind' });
+    expect(pills.className).toContain(floor);
+    expect(within(pills).getByRole('tab', { name: 'All' }).className).toContain('pointer-coarse:self-stretch');
+    expect(within(screen.getByRole('tablist', { name: 'Section' })).getByRole('tab', { name: 'One' }).className).toContain(floor);
+  });
+
+  it('grows a filter chip to 36 px on touch and takes its target to 44 px with an invisible band', () => {
+    render(
+      <FilterChip pressed={false} onClick={() => {}}>
+        Sports
+      </FilterChip>,
+    );
+    const cls = screen.getByRole('button', { name: 'Sports' }).className;
+    expect(cls).toContain('h-8');
+    expect(cls).toContain('pointer-coarse:min-h-[calc(36rem/15)]');
+    expect(cls).toContain('relative');
+    expect(cls).toContain('pointer-coarse:before:-inset-y-[calc(4rem/15)]');
   });
 });
 

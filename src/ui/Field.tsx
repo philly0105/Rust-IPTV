@@ -2,6 +2,7 @@ import { Check, ChevronDown, Minus, Search, X } from 'lucide-react';
 import { useId, useLayoutEffect, useRef, type ComponentPropsWithRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { TOUCH_TARGET } from './Button';
 import { cn } from './cn';
 import { useMergedRef } from './Tooltip';
 
@@ -11,11 +12,17 @@ import { useMergedRef } from './Tooltip';
  * firm-up, and on focus the focus-colour border with a 3px glow (the global rule in globals.css
  * draws the glow; there is no offset outline on fields). The glow sits outside the box, so a
  * scroll container holding fields keeps a little padding on every side (Dialog's body does).
+ *
+ * On a touch screen a field takes the buttons' 44 px floor (TOUCH_TARGET): at its own 30 or
+ * 38 px it sat between 44 px buttons in every toolbar (Live's search between the groups button
+ * and the quality filter, My List's search beside its menu), so no row of controls lined up,
+ * and a 30 px field was a small target too. A minimum height, so a mouse keeps h-8 and h-10.
  */
 const fieldBase =
   'w-full rounded-md border border-border bg-surface text-fg placeholder:text-fg-subtle ' +
   'hover:border-fg-subtle focus-visible:border-focus disabled:cursor-not-allowed disabled:opacity-50 ' +
-  'aria-[invalid=true]:border-danger motion-safe:transition-colors';
+  'aria-[invalid=true]:border-danger motion-safe:transition-colors ' +
+  TOUCH_TARGET;
 
 /** Field classes for a hand-built input: `fieldClass('sm', 'font-mono')`. Sizes match Input (md) and SearchInput (sm). */
 export function fieldClass(size: 'sm' | 'md' = 'md', className?: string): string {
@@ -183,7 +190,7 @@ export function Select({
             data-select-sizer=""
             className={cn(
               selectClass,
-              'pointer-events-none invisible col-start-1 row-start-1 flex h-0 min-h-0 flex-col overflow-hidden border-transparent py-0 whitespace-nowrap',
+              'pointer-events-none invisible col-start-1 row-start-1 flex h-0 min-h-0 flex-col overflow-hidden border-transparent py-0 whitespace-nowrap pointer-coarse:min-h-0',
             )}
           >
             {options.map((o) => (
@@ -571,7 +578,9 @@ export function SearchInput({
             // The button goes with the text; focus stays in the field instead of dropping to the page.
             input.current?.focus();
           }}
-          className="absolute end-1 inline-flex size-[calc(28rem/15)] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors"
+          // In the 44 px touch field the clear button grows to 36 px, the most it can take
+          // inside the field's border and still leave the text room.
+          className="absolute end-1 inline-flex size-[calc(28rem/15)] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors pointer-coarse:size-[calc(36rem/15)]"
         >
           <X aria-hidden size={14} />
         </button>

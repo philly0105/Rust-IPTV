@@ -529,7 +529,14 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         <Link
           to={guideHref}
           aria-label={t('openGuide')}
-          className="inline-flex h-8 items-center gap-2 rounded-md px-3 text-sm text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
+          // The kit's small ghost button, like every other page's header actions (a hand-built muted
+          // link read as a caption beside them). On a phone it is the icon alone, in an icon
+          // button's square, quieter tone and 44 px touch target.
+          className={buttonClass(
+            'ghost',
+            'sm',
+            'max-sm:w-8 max-sm:px-0 max-sm:text-fg-muted max-sm:hover:text-fg max-sm:pointer-coarse:min-w-[calc(44rem/15)]',
+          )}
         >
           <CalendarClock className="size-4" aria-hidden />
           {/* Icon only on a phone, so the label does not squeeze the page title. */}

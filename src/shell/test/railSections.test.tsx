@@ -141,6 +141,8 @@ describe('section targets', () => {
     const labels = (links: { labelKey: string }[]) => links.map((l) => l.labelKey);
     const all = watchLinks([night, backup], 's1');
     expect(labels(all)).toEqual(['navDashboard', 'navSearch', 'railLive', 'navGuide', 'railMovies', 'railSeries', 'sports:title', 'navMultiview']);
+    // Search stays in the list (the palette's Go to group reads it) but not in the rail.
+    expect(all.filter((l) => l.notInRail).map((l) => l.labelKey)).toEqual(['navSearch']);
     expect(all.filter((l) => l.section).map((l) => l.to)).toEqual(['/s/s1/live', '/s/s1/movies', '/s/s2/series']);
     expect(all.some((l) => l.dim)).toBe(false);
     expect(labels(watchLinks([night], 's1'))).not.toContain('railSeries');
@@ -201,7 +203,7 @@ describe('the Watch group', () => {
     renderRoutes(routes(), '/dashboard');
     const watch = await watchGroup();
     await waitFor(() => expect(href(watch, 'Live TV')).toBe('/s/m/live'));
-    expect(within(watch).getAllByRole('link').map((l) => l.textContent)).toEqual(['Home', 'Search', 'Live TV', 'TV guide', 'Sports', 'Multi-view']);
+    expect(within(watch).getAllByRole('link').map((l) => l.textContent)).toEqual(['Home', 'Live TV', 'TV guide', 'Sports', 'Multi-view']);
   });
 
   it('collapsed, they are icons named by their tooltips, and the current one is marked', async () => {

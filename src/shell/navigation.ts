@@ -48,6 +48,11 @@ export interface NavLinkDef {
   section?: SourceSection;
   /** Stepped back: a section link while there are no sources, where it leads to adding one. */
   dim?: boolean;
+  /**
+   * Left out of the rail, kept in the palette's Go to list: the header's search box stands for
+   * it on every page from sm up, and Ctrl+F opens the page (Search). Phones have their Search tab.
+   */
+  notInRail?: boolean;
 }
 
 /** Where Live TV, Movies and Series lead with no sources: the Sources page, as the phone tab's Live TV. */
@@ -57,7 +62,8 @@ const NO_SOURCES_TARGET = '/sources';
 // tile-shaped Home would echo Multi-view's grid (LayoutGrid, as in its page and menus).
 export const WATCH_LINKS: readonly NavLinkDef[] = [
   { to: '/dashboard', labelKey: 'navDashboard', icon: House },
-  { to: '/search', labelKey: 'navSearch', icon: Search },
+  // The header's search box sat a hand's width away from this row on every page: one way in is enough.
+  { to: '/search', labelKey: 'navSearch', icon: Search, notInRail: true },
   // A source's sections, with the icons of its own links (railLinks). Most people have one source,
   // and these three, the most used pages, sat in its entry at the foot of the rail, under Library.
   { to: NO_SOURCES_TARGET, labelKey: 'railLive', icon: Tv, section: 'live' },
@@ -83,6 +89,9 @@ export const LIBRARY_LINKS: readonly NavLinkDef[] = [
   { to: '/scheduled', labelKey: 'navScheduled', icon: AlarmClock },
   { to: '/stats', labelKey: 'stats:title', icon: ChartColumn },
 ];
+
+/** The Watch links the rail and its boot skeleton show. */
+export const RAIL_WATCH_LINKS = WATCH_LINKS.filter((l) => !l.notInRail);
 
 /** The phone tab bar's width limit (Tailwind `sm`): below it the rail goes and the bar shows. */
 export const PHONE_QUERY = '(max-width: 639px)';

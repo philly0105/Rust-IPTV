@@ -681,7 +681,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const sourceCount = sources.data?.length ?? 0;
   const noSources = sources.isSuccess && sourceCount === 0;
   // Live TV, Movies and Series open the source on show, else the one last opened.
-  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource());
+  // Search is left out: the header's search box is the way in (notInRail).
+  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource()).filter((l) => !l.notInRail);
   // With two or more sources, the source of the page on show opens. A lone source stays as the
   // user left it: the Watch links already lead to its sections and mark its pages.
   const pageSource = sourceCount > 1 ? activeSourceId : undefined;

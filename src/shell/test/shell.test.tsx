@@ -1411,7 +1411,8 @@ describe('Run 3 onboarding wiring', () => {
       expect(search).toHaveLength(1);
       expect(screen.getByTestId('shell-header').contains(search[0]!)).toBe(true);
       const nav = screen.getByRole('navigation', { name: 'Main navigation' });
-      expect(within(nav).getByRole('link', { name: 'Search' }).hasAttribute('data-tour')).toBe(false);
+      // The rail has no Search row of its own (the header's box is the way in), so nothing else can hold it.
+      expect(within(nav).queryByRole('link', { name: 'Search' })).toBeNull();
     });
 
     it('on a phone the tab bar Search tab holds it, and the header has no search, palette or theme button', async () => {

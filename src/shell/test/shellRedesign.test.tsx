@@ -99,7 +99,6 @@ describe('rail (SH-rail-ia)', () => {
     const group = (name: string) => within(nav).getByRole('group', { name });
     expect(within(group('Watch')).getAllByRole('link').map((l) => l.textContent)).toEqual([
       'Home',
-      'Search',
       'Live TV',
       'TV guide',
       'Movies',
@@ -118,6 +117,9 @@ describe('rail (SH-rail-ia)', () => {
       'Watch stats',
     ]);
     expect(within(group('Sources')).getByText('Backup')).toBeTruthy();
+    // No Search row: the header's search box is the way in, and the palette still goes to the page.
+    expect(within(nav).queryByRole('link', { name: 'Search' })).toBeNull();
+    expect(within(screen.getByTestId('shell-header')).getByTestId('open-palette')).toBeTruthy();
     // The app's own mark, not a CSS drawing.
     expect(within(nav).getByRole('link', { name: 'Tsrust IPTV' }).querySelector('svg')).toBeTruthy();
     // The footer: Settings, then the keyboard reference and the collapse toggle as icon buttons.

@@ -21,8 +21,9 @@ import { memo, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
+// Straight from live, as useCoverColumn takes useMediaQuery: deps.ts hands over ChannelLogo only.
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { snapshotTitle } from '@/lib/title';
-import { ChannelName } from '@/ui/ChannelName';
 import { cn } from '@/ui/cn';
 
 import { ChannelLogo, IconButton, Menu, Poster, PosterCellWidthContext, ProgressBar, Skeleton, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';

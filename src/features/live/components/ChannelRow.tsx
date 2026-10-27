@@ -6,14 +6,13 @@ import { useTranslation } from 'react-i18next';
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
 import { listSeparator } from '@/lib/intl';
 import { IconButton } from '@/ui/Button';
-import { ChannelName } from '@/ui/ChannelName';
 import { cn } from '@/ui/cn';
 
 import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName } from '../lib/channelName';
 import { documentIsRtl } from '../lib/rtl';
 import { hasUsableArchive, isValidProgram, minutesLeft, programProgress, shiftNowNext } from '../lib/epgTime';
-import { ChannelLogo } from './ChannelLogo';
+import { ChannelLogo, ChannelName } from './ChannelLogo';
 
 /**
  * Three lines (LG-03): the name, the programme on now with its time left, and the progress bar.

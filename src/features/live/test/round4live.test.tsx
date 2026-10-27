@@ -7,8 +7,7 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { ChannelName } from '@/ui/ChannelName';
-
+import { ChannelName } from '../components/ChannelLogo';
 import { ChannelRow } from '../components/ChannelRow';
 import { StageIdle } from '../components/StageIdle';
 import { MINUTE } from '../lib/epgTime';

@@ -10,7 +10,6 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
 import { Button, cn, IconButton, LivePill, SegmentedControl, Skeleton, TEXT_LINK, Tooltip, useImageChain, useListVirtualizer, useToast, errorDescription } from '@/ui';
-import { ChannelName } from '@/ui/ChannelName';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -43,7 +42,7 @@ import { inlineStart, scrollLeftFor, scrollStart, timeStep, useIsRtl } from '../
 // recording:
 import { RibbonActions, ScheduleMark } from '@/features/recording';
 import { listSeparator } from '@/lib/intl';
-import { ChannelLogo } from './ChannelLogo';
+import { ChannelLogo, ChannelName } from './ChannelLogo';
 import { UpNext } from './UpNext';
 
 export const RIBBON_PX_PER_MIN = 4;

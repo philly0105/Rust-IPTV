@@ -4,12 +4,11 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type Channel, type EpgNowNext, type ItemRef, type RecentEntry } from '@/api/types';
 import { Button } from '@/ui/Button';
-import { ChannelName } from '@/ui/ChannelName';
 import { cn } from '@/ui/cn';
 
 import { displayChannelName } from '../lib/channelName';
 import { isValidProgram, minutesLeft, programProgress, programWhen, shiftNowNext } from '../lib/epgTime';
-import { ChannelLogo } from './ChannelLogo';
+import { ChannelLogo, ChannelName } from './ChannelLogo';
 
 export interface StageIdleProps {
   kind: 'live' | 'radio';

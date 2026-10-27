@@ -73,14 +73,22 @@ function RowMark({ rowId }: { rowId: string }) {
 export function SettingsSection({ title, children, testId }: { title: string; description?: string; children: ReactNode; testId?: string }) {
   const fb = useContext(SaveFeedback);
   return (
-    <section className="flex flex-col gap-8 max-md:gap-6" aria-labelledby="settings-section-title" data-testid={testId}>
+    <section className="relative flex flex-col gap-8 max-md:gap-6" aria-labelledby="settings-section-title" data-testid={testId}>
       {/* On a phone the header holds only the hidden heading, so it takes no row of its own
-          (`contents`), and the section's gap does not open above the first group. */}
+          (`contents`), and the section's gap does not open above the first group. The mark for a
+          save from outside a row (a theme card, an accent swatch) then sits out of flow at the end
+          of the first group's title line, at that line's height: as a flex child it pushed the
+          groups down by itself and the gap for two seconds, under the finger that tapped. */}
       <header className="flex flex-wrap items-baseline gap-x-3 max-md:contents">
         <h2 id="settings-section-title" className="text-title-sm text-fg max-md:sr-only">
           {title}
         </h2>
-        {fb.rowId === null && fb.state !== 'idle' ? <SavedMark state={fb.state} /> : null}
+        {fb.rowId === null && fb.state !== 'idle' ? (
+          <SavedMark
+            state={fb.state}
+            className="max-md:pointer-events-none max-md:absolute max-md:end-0 max-md:top-0 max-md:leading-(--text-body--line-height)"
+          />
+        ) : null}
       </header>
       {children}
     </section>

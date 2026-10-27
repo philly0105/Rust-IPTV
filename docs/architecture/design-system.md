@@ -74,8 +74,8 @@ Scale (rem against the 15 px root, so it follows the UI scale; size / line heigh
 | `text-caption` | 12/16 | metadata, counts, hints under a row |
 | `text-body-sm` | 13.5/20 | card titles (`font-medium`), dense rows |
 | `text-body` | 15/22 | running text, the default |
-| `text-title-sm` | 18/24, 600 | section, rail and dialog headings |
-| `text-title` | 22/28, 600 | page titles (the shell header, PageHeader, settings sections) |
+| `text-title-sm` | 18/24, 600 | section, rail and dialog headings, settings section headings |
+| `text-title` | 22/28, 600 | page titles (the shell header, PageHeader) |
 | `text-headline` | 28/34, 600 | the search page heading, large empty states |
 | `text-display` | 36 to 54, 600 | hero, movie, series and actor titles |
 

@@ -252,6 +252,25 @@ describe('save confirmation (SS-17)', () => {
     const header = screen.getByRole('heading', { level: 2, name: 'Appearance' }).parentElement!;
     await waitFor(() => expect(within(header).getByTestId('settings-saved-mark').dataset['state']).toBe('saved'));
   });
+
+  it('on a phone that mark stays out of flow, so the theme cards do not move under the finger', async () => {
+    phoneWindow(true);
+    renderAt(settingsRoutes, '/settings/appearance');
+    const section = await screen.findByTestId('settings-appearance');
+    const children = Array.from(section.children);
+    fireEvent.click(screen.getByTestId('theme-light'));
+    const header = screen.getByRole('heading', { level: 2, name: 'Appearance' }).parentElement!;
+    const mark = await within(header).findByTestId('settings-saved-mark');
+    await waitFor(() => expect(mark.dataset['state']).toBe('saved'));
+    // The header is `contents` below md, so its children lay out as the section's own flex
+    // children: the mark is positioned against the section instead, on the first group's title line.
+    expect(header.className).toContain('max-md:contents');
+    expect(section.className).toContain('relative');
+    expect(mark.className).toContain('max-md:absolute');
+    expect(mark.className).toContain('max-md:top-0');
+    expect(mark.className).toContain('max-md:end-0');
+    expect(Array.from(section.children)).toEqual(children);
+  });
 });
 
 describe('regrouped sections (SS-8)', () => {

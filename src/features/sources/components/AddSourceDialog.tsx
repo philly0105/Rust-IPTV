@@ -38,7 +38,7 @@ import { useFocusInvalid } from '../lib/useFocusInvalid';
 import { useAutoRefreshHint } from '../lib/useAutoRefreshHint';
 import { useNextFrame } from '../lib/useNextFrame';
 import { checkHttpUrl, displayHost, parseXtreamLink, suggestName } from '../lib/validate';
-import { PHONE_SHEET_BODY, sameDraft, useDiscardGuard } from './DiscardGuard';
+import { sameDraft, useDiscardGuard } from './DiscardGuard';
 import { Field } from './Field';
 import { HeadersFields } from './HeadersFields';
 import { ImportProgressView } from './ImportProgressView';
@@ -552,8 +552,6 @@ export function AddSourceDialog({
         title={t('addSource')}
         description={t('addSourceLead')}
         size="lg"
-        sheet
-        bodyClassName={PHONE_SHEET_BODY}
         testId="add-source-dialog"
         footer={
           <>

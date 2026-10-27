@@ -28,7 +28,7 @@ import { useAutoRefreshHint } from '../lib/useAutoRefreshHint';
 import { useFocusInvalid } from '../lib/useFocusInvalid';
 import { AccountPanel, hasAccountInfo } from './AccountPanel';
 import { CatchupOverrideFields } from './CatchupOverrideFields';
-import { PHONE_SHEET_BODY, useDiscardGuard } from './DiscardGuard';
+import { useDiscardGuard } from './DiscardGuard';
 import { EpgLinksEditor, shiftTextOf } from './EpgLinksEditor';
 import { Field } from './Field';
 import { M3uForm } from './M3uForm';
@@ -234,8 +234,6 @@ export function EditSourceDialog({
         dismissible={!dirty}
         title={t('editSourceTitle', { name: source.name })}
         size="lg"
-        sheet
-        bodyClassName={PHONE_SHEET_BODY}
         testId="edit-source-dialog"
         footer={
           <>

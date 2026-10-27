@@ -389,10 +389,19 @@ describe('Dialog sheet and header row', () => {
       </Dialog>,
     );
     expect(classes()).toEqual(
-      expect.arrayContaining(['max-sm:fixed', 'max-sm:inset-x-0', 'max-sm:bottom-0', 'max-sm:rounded-b-none', 'max-sm:max-h-[calc(100dvh-1.5rem)]', 'max-sm:motion-safe:animate-sheet-in']),
+      expect.arrayContaining([
+        'max-sm:fixed',
+        'max-sm:inset-x-0',
+        'max-sm:bottom-0',
+        'max-sm:rounded-b-none',
+        'max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))]',
+        'max-sm:motion-safe:animate-sheet-in',
+        // A narrower gutter on a phone, for the header, body and footer alike.
+        'max-sm:[--dialog-gutter:1rem]',
+      ]),
     );
     // The floating card's phone height cap gives way to the sheet's, not the other way round.
-    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[calc(100dvh-1.5rem)]']);
+    expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[calc(100dvh-max(1.5rem,var(--toast-reserve,0px)))]']);
     rerender(
       <Dialog open onClose={() => {}} title="Sort and filter" sheet className="max-sm:max-h-[70dvh]">
         <p>Body</p>
@@ -401,9 +410,37 @@ describe('Dialog sheet and header row', () => {
     expect(classes().filter((c) => c.startsWith('max-sm:max-h-'))).toEqual(['max-sm:max-h-[70dvh]']);
   });
 
-  it('is a plain card without `sheet`, and a drawer ignores it', () => {
+  it('is a sheet by default for sm, md and lg dialogs with a header row, and a card otherwise', () => {
     const { rerender } = render(
-      <Dialog open onClose={() => {}} title="Rename">
+      <Dialog open onClose={() => {}} title="Rename" size="sm">
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(classes()).toContain('max-sm:fixed');
+    expect(classes()).toContain('max-sm:motion-safe:animate-sheet-in');
+    for (const size of ['md', 'lg'] as const) {
+      rerender(
+        <Dialog open onClose={() => {}} title="Rename" size={size}>
+          <p>Body</p>
+        </Dialog>,
+      );
+      expect(classes()).toContain('max-sm:fixed');
+    }
+    // A wide dialog, a headerless one (the command palette) and an explicit opt-out stay cards.
+    rerender(
+      <Dialog open onClose={() => {}} title="Trailer" size="xl">
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(classes()).not.toContain('max-sm:fixed');
+    rerender(
+      <Dialog open onClose={() => {}} title="Command palette" hideTitle hideClose>
+        <p>Body</p>
+      </Dialog>,
+    );
+    expect(classes()).not.toContain('max-sm:fixed');
+    rerender(
+      <Dialog open onClose={() => {}} title="Rename" sheet={false}>
         <p>Body</p>
       </Dialog>,
     );

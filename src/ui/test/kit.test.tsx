@@ -314,6 +314,27 @@ describe('overlay exits (usePresence)', () => {
     expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
     expect(trigger.hasAttribute('title')).toBe(false);
   });
+
+  it('Menu fills an item for keyboard focus only, and hides key hints from a finger', () => {
+    render(
+      <Menu
+        label="Source actions"
+        items={[
+          { id: 'a', label: 'Refresh all', hint: 'mod+r', onSelect: () => {} },
+          { id: 'b', label: 'Remove', danger: true, onSelect: () => {} },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Source actions' }));
+    const [first, danger] = screen.getAllByRole('menuitem');
+    // Opened by a click, the first item has focus: a plain focus fill made it look already chosen.
+    for (const item of [first!, danger!]) {
+      const cls = item.className.split(/\s+/);
+      expect(cls.some((c) => c.startsWith('focus:bg-'))).toBe(false);
+      expect(cls.some((c) => c.startsWith('focus-visible:bg-'))).toBe(true);
+    }
+    expect(within(first!).getByText('mod+r').className).toContain('pointer-coarse:hidden');
+  });
 });
 
 describe('LivePill and MetaLine', () => {

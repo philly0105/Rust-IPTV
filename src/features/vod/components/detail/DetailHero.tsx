@@ -1,5 +1,5 @@
 import { CircleAlert, Star } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 // The store module, not the barrel: pages that mock '@/shell' in their tests still render the hero.
@@ -9,7 +9,7 @@ import { useFormatRuntime } from '../../hooks/useFormatRuntime';
 import { formatRating } from '../../lib/format';
 import { languageName } from '../../lib/language';
 import type { DetailModel } from '../../lib/merge';
-import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, useImageChain } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, Skeleton, TEXT_LINK, cn, hueOf, useImageChain } from '@/ui';
 import { formatList } from '@/lib/intl';
 import { CastRow } from './CastRow';
 
@@ -95,7 +95,7 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
     // so it paints under everything that follows the hero, positioned or not.
     // An isolated hero would paint its bleed over the season tabs below.
     <section className="relative" aria-labelledby="vod-detail-title">
-      <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} />
+      <Backdrop backdropUrl={model.backdropUrl} posterUrl={model.posterUrl} sourceId={sourceId} title={model.title} />
       {back && <div className="absolute inset-x-0 top-0 z-10 w-full max-w-[120rem] px-(--page-gutter) pt-4">{back}</div>}
       <div className={cn(HERO_GRID, top)}>
         <div
@@ -107,7 +107,7 @@ export function DetailHero({ model, sourceId, actions, icons, progress, chips, n
         </div>
         <div className="flex min-w-0 flex-col gap-2 self-end">
           {/* Focusable from script only: a title opened without a primary action lands here (useFocusOnOpen). */}
-          <h1 ref={titleRef} id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-title">
+          <h1 ref={titleRef} id="vod-detail-title" dir="auto" tabIndex={-1} className="text-match-parent outline-none text-display text-fg max-sm:text-headline">
             {model.titleBase ?? model.title}
           </h1>
           <MetaLine
@@ -228,7 +228,21 @@ export const HERO_MENU_TRIGGER =
  */
 export const HERO_BACK = 'border border-edge bg-surface/80 text-fg shadow-1 glass-blur hover:bg-surface hover:text-fg active:bg-surface-2';
 
-function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; posterUrl?: string; sourceId: string }) {
+/**
+ * The title's tint as two soft washes from the top edge, for a hero with no artwork at all: one
+ * in the poster fallback's hue towards the far side, one in its second hue at the leading corner.
+ * Pale in the light theme, deep in the dark one. The hue is the Poster fallback's (`hueOf` of the
+ * same title), so the page reads as the title the poster tile stands for.
+ */
+export function heroWash(title: string, dark: boolean): string {
+  const hue = hueOf(title);
+  const second = (hue + 40) % 360;
+  return dark
+    ? `radial-gradient(60% 100% at 78% 0%, hsl(${hue} 45% 34% / 0.75), transparent 72%), radial-gradient(50% 80% at 8% 0%, hsl(${second} 50% 24% / 0.6), transparent 70%)`
+    : `radial-gradient(60% 100% at 78% 0%, hsl(${hue} 55% 84% / 0.9), transparent 72%), radial-gradient(50% 80% at 8% 0%, hsl(${second} 45% 88% / 0.8), transparent 70%)`;
+}
+
+function Backdrop({ backdropUrl, posterUrl, sourceId, title }: { backdropUrl?: string; posterUrl?: string; sourceId: string; title: string }) {
   const image = useImageChain([backdropUrl, posterUrl], sourceId);
   const wide = !!image.url && image.source === backdropUrl?.trim();
   return (
@@ -237,6 +251,16 @@ function Backdrop({ backdropUrl, posterUrl, sourceId }: { backdropUrl?: string; 
       data-testid="vod-detail-backdrop"
       className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[min(78vh,760px)] overflow-hidden select-none"
     >
+      {/* No picture at all (none given, or every attempt failed): the title's tint instead of a flat
+          page, as Home's hero does. Only once the chain has run out, so a loading backdrop never
+          flashes from the tint's colour to its own. Under the fades, so the text keeps its contrast. */}
+      {image.failed && (
+        <div
+          data-testid="vod-detail-wash"
+          className="pointer-events-none absolute inset-0 [background-image:var(--wash-light)] dark:[background-image:var(--wash-dark)]"
+          style={{ '--wash-light': heroWash(title, false), '--wash-dark': heroWash(title, true) } as CSSProperties}
+        />
+      )}
       {image.url && (
         <img
           key={image.url}

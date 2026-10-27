@@ -48,7 +48,11 @@ export const Header = memo(function Header({
   const windowTitle = header?.documentTitle || header?.title;
   // A detail page names its section until its own large title scrolls away, then the title.
   const showSection = !!header?.section && !titleScrolledAway;
-  const shownTitle = showSection ? header?.section : header?.title;
+  // On a phone a detail page's header is Back alone while its h1 is on screen: a title-sized
+  // section line beside it outranked the page's own title. (Back does not take the section's name
+  // either: it goes back in history, which is often Home, Search or another title.) The title
+  // still comes in once the h1 has scrolled away.
+  const shownTitle = showSection ? (phone && header?.back ? undefined : header?.section) : header?.title;
   const appName = t('appName');
 
   const searchField = header?.search ? <HeaderField search={header.search} phone={phone} /> : null;

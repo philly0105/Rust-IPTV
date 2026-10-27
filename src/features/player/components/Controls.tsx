@@ -47,7 +47,7 @@ import { useTranslation } from 'react-i18next';
 import { isDesktop, rpc } from '@/api/transport';
 import { intlLocale } from '@/lib/intl';
 
-import { comboKeys } from '@/ui/Misc';
+import { comboKeys, Kbd } from '@/ui/Misc';
 import { useToast } from '@/ui/Toast';
 import { Tooltip } from '@/ui/Tooltip';
 import { errorDescription } from '@/ui/States';
@@ -431,12 +431,19 @@ export function MenuRow({ label, value, onClick }: { label: string; value?: Reac
 
 /**
  * A key hint at the end of a menu row, in the UI language; the item carries `aria-keyshortcuts`.
- * Not under a coarse pointer: a phone's menu has no keys to name.
+ * Not under a coarse pointer: a phone's menu has no keys to name. The kit's small key caps in the
+ * glass tone the player's tooltips give theirs: as bare caption text a lone letter (the I after
+ * Stream info) read as a stray divider at the row's end.
  */
 function MenuHint({ combo }: { combo: string }) {
   return (
-    <span aria-hidden className="ms-auto shrink-0 ps-4 font-sans text-caption text-on-glass-muted pointer-coarse:hidden">
-      {comboKeys(combo).join('+')}
+    <span aria-hidden data-menu-hint="" className="ms-auto flex shrink-0 gap-1 ps-4 pointer-coarse:hidden">
+      {/* One cap per key, without Kbd's spoken copy: the row's aria-keyshortcuts names the key. */}
+      {comboKeys(combo).map((key, i) => (
+        <Kbd key={`${key}-${i}`} size="sm" className="border-glass-border bg-white/10 text-on-glass-muted">
+          {key}
+        </Kbd>
+      ))}
     </span>
   );
 }

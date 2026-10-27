@@ -392,6 +392,12 @@ describe('PL-BAR-HIERARCHY: the redesigned bar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Playback options' }));
     expect(screen.getByRole('menuitem', { name: 'Take screenshot' }).getAttribute('aria-keyshortcuts')).toBe('S');
     expect(screen.getByRole('menuitem', { name: 'Channel history' }).getAttribute('aria-keyshortcuts')).toBe('Shift+B');
+    // The keys are glass key caps, one per key, so a lone letter does not read as a divider.
+    const caps = (name: string) =>
+      Array.from(screen.getByRole('menuitem', { name }).querySelectorAll('[data-menu-hint] kbd')).map((k) => k.textContent);
+    expect(caps('Take screenshot')).toEqual(['S']);
+    expect(caps('Channel history')).toEqual(['Shift', 'B']);
+    expect(screen.getByRole('menuitem', { name: 'Take screenshot' }).querySelector('kbd')!.className).toContain('bg-white/10');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Stop' }));
     expect(usePlayerStore.getState().source).toBeUndefined();
   });

@@ -87,6 +87,20 @@ describe('Appearance', () => {
     expect(card.className).toContain('rounded-md');
     expect(card.className).not.toContain('rounded-lg');
   });
+
+  it('lays the three theme cards side by side at every width, a phone too', async () => {
+    renderAt(settingsRoutes, '/settings/appearance');
+    const dark = await screen.findByTestId('theme-dark');
+    const group = screen.getByRole('radiogroup', { name: 'Theme' });
+    // Not one column until @2xl: stacked on a phone the cards took the whole first screen.
+    expect(group.className).toMatch(/(^| )grid-cols-3( |$)/);
+    expect(group.className).not.toContain('@2xl:grid-cols-3');
+    // Narrow, the preview is shorter and the hint line goes; the card keeps its name.
+    const card = dark.closest('label')!;
+    expect(card.querySelector('[aria-hidden].h-24')!.className).toContain('@max-md:h-16');
+    expect(within(card).getByText('Dim surfaces for watching.').className).toContain('@max-md:hidden');
+    expect(within(card).getByText('Dark')).toBeTruthy();
+  });
 });
 
 describe('About', () => {

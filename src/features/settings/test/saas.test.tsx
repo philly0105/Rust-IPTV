@@ -27,7 +27,7 @@ vi.mock('@/api/events', () => ({
 }));
 
 const settingsRoutes = await eagerRoutes((await import('../routes')).settingsRoutes);
-const { PHONE_QUERY } = await import('../SettingsPage');
+const { PHONE_QUERY, TOUCH_ONLY_QUERY } = await import('../SettingsPage');
 const { BUTTON_VARIANTS } = await import('@/ui/Button');
 const { useShellStore } = await import('@/shell');
 
@@ -145,6 +145,35 @@ describe('phone layout (SS-7)', () => {
     const lead = within(list).getByText('Which player opens streams', { exact: false });
     expect(lead.className).toContain('line-clamp-2');
     expect(lead.className).not.toContain('truncate');
+  });
+
+  it('leaves Keyboard shortcuts out of the list on a touch-only phone, and still opens it by link', async () => {
+    window.matchMedia = ((query: string) => ({
+      matches: query === PHONE_QUERY || query === TOUCH_ONLY_QUERY,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    renderAt(settingsRoutes, '/settings');
+    const list = await screen.findByTestId('settings-nav-list');
+    // A phone has no keyboard for the list of keys; the rest of App is still there.
+    expect(within(list).queryByRole('link', { name: /^Keyboard shortcuts/ })).toBeNull();
+    expect(within(list).getByRole('link', { name: /^Appearance/ })).toBeTruthy();
+    cleanup();
+    // The section is still reachable (the command palette, a link, a phone with a keyboard).
+    renderAt(settingsRoutes, '/settings/shortcuts');
+    expect(await screen.findByTestId('settings-shortcuts')).toBeTruthy();
+  });
+
+  it('keeps Keyboard shortcuts in the list on a phone-width window with a mouse', async () => {
+    phoneWindow(true);
+    renderAt(settingsRoutes, '/settings');
+    const list = await screen.findByTestId('settings-nav-list');
+    expect(within(list).getByRole('link', { name: /^Keyboard shortcuts/ })).toBeTruthy();
   });
 
   it('a wider window goes from /settings to General with the side nav', async () => {

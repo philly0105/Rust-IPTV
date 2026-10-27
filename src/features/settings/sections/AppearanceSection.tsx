@@ -125,7 +125,7 @@ function ThemePreview({ mode, oled, accent }: { mode: 'light' | 'dark' | 'system
     );
   };
   return (
-    <div aria-hidden className="flex h-24 w-full overflow-hidden rounded-md border border-edge">
+    <div aria-hidden className="flex h-24 w-full overflow-hidden rounded-md border border-edge @max-md:h-16">
       {mode === 'system' ? (
         <>
           {half('light')}
@@ -412,7 +412,10 @@ export function AppearanceSection({ settings, update }: SectionProps) {
   return (
     <SettingsSection title={t('sectionAppearance')} testId="settings-appearance">
       <SettingsGroup title={t('theme')}>
-        <div role="radiogroup" aria-label={t('theme')} className="grid gap-3 p-3 @2xl:grid-cols-3">
+        {/* Three across at every width: stacked on a phone, the three cards took a whole screen for a
+            three-way choice. Under @md the cards tighten and drop their hint line, which only
+            describes the picture beside it. */}
+        <div role="radiogroup" aria-label={t('theme')} className="grid grid-cols-3 gap-2 p-3 @md:gap-3">
           {options.map((o) => {
             const selected = o.value === current;
             return (
@@ -423,7 +426,7 @@ export function AppearanceSection({ settings, update }: SectionProps) {
               <label
                 key={o.value}
                 className={clsx(
-                  'relative flex cursor-pointer flex-col gap-3 rounded-md border p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
+                  'relative flex min-w-0 cursor-pointer flex-col gap-2 rounded-md border p-2 @md:gap-3 @md:p-3 motion-safe:transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus',
                   selected ? 'border-accent bg-surface-2' : 'border-edge hover:border-border hover:bg-hover active:bg-active',
                 )}
               >
@@ -453,8 +456,8 @@ export function AppearanceSection({ settings, update }: SectionProps) {
                   />
                 </span>
                 <span className="flex flex-col gap-0.5">
-                  <span className="text-body font-medium text-fg">{o.label}</span>
-                  <span className="text-body-sm text-fg-muted">{o.hint}</span>
+                  <span className="text-body font-medium break-words text-fg">{o.label}</span>
+                  <span className="text-body-sm text-fg-muted @max-md:hidden">{o.hint}</span>
                 </span>
               </label>
             );

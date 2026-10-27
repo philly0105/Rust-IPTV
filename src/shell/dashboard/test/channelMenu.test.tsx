@@ -5,6 +5,7 @@
  */
 
 import { configure, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useLocation } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { FavoriteEntry, RecentEntry } from '@/api/types';
@@ -38,12 +39,17 @@ const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');
 const { queryClient } = await import('@/api/query');
 
+/** A source's pages: where a live card's Play lands. */
+function SourcePage() {
+  return <Page>{`source page ${useLocation().pathname}`}</Page>;
+}
+
 function routes() {
   return [
     {
       path: '/',
       element: <ShellLayout />,
-      children: [...shellRoutes, { path: 's/:sourceId/*', element: <Page>source page</Page> }],
+      children: [...shellRoutes, { path: 's/:sourceId/*', element: <SourcePage /> }],
     },
   ];
 }
@@ -111,7 +117,7 @@ describe('dashboard channel card menu', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
-  it('Shift+F10 and the context-menu key open it from the keyboard; Escape returns focus and Play plays', async () => {
+  it('Shift+F10 and the context-menu key open it from the keyboard; Escape returns focus and Play plays in Live TV', async () => {
     renderRoutes(routes(), '/dashboard');
     const card = await newsCard();
     card.focus();
@@ -126,7 +132,24 @@ describe('dashboard channel card menu', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Play' }));
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledTimes(1));
     expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: newsRef, title: 'News 24', isLive: true }));
-    expect(document.activeElement).toBe(card);
+    // As the card itself: the channel's Live TV opens, whose stage takes the player.
+    expect(await screen.findByText('source page /s/s1/live')).toBeTruthy();
+  });
+
+  it('a live card plays its channel and opens Live TV in one press, not the mini player over Home', async () => {
+    renderRoutes(routes(), '/dashboard');
+    fireEvent.click(await newsCard());
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: newsRef, isLive: true })));
+    expect(await screen.findByText('source page /s/s1/live')).toBeTruthy();
+  });
+
+  it('a radio card plays the station in the dock and stays on Home', async () => {
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-recent-live');
+    fireEvent.click(await within(rail).findByRole('button', { name: 'Play Jazz FM' }));
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: radioRef, isRadio: true })));
+    expect(screen.getByTestId('dashboard-rail-recent-live')).toBeTruthy();
+    expect(screen.queryByText(/^source page/)).toBeNull();
   });
 
   it('a radio card gets the station entries and no multi-view', async () => {

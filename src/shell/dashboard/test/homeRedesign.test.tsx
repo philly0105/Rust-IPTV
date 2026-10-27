@@ -330,7 +330,7 @@ describe('On now (CB-PROGRAM-ART)', () => {
     expect(items[0]!.left).toBe(30);
   });
 
-  it('draws what is on air with the programme picture and the channel logo, and plays the channel', async () => {
+  it('draws what is on air with the programme picture and the channel logo, and plays the channel in Live TV', async () => {
     home({
       channels: [channel(news, 'News 24'), channel(sport, 'Sport 1')],
       favorites: [fav(sport, 'Sport 1')],
@@ -345,6 +345,8 @@ describe('On now (CB-PROGRAM-ART)', () => {
     expect(within(rail).getByRole('link', { name: 'Full guide' }).getAttribute('href')).toBe('/epg');
     fireEvent.click(card);
     await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: news, isLive: true })));
+    // The channel's Live TV opens with it, so its stage holds the player instead of the mini over Home.
+    expect(await screen.findByText('source page')).toBeTruthy();
     // One guide call for the rail and the favourites under it.
     expect(rpcMock.calls.filter((c) => c.cmd === 'epg.nowNext')).toHaveLength(1);
   });

@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next';
 import { BookmarkCheck, EllipsisVertical, Play, Search } from 'lucide-react';
 import { createContext, useContext, useMemo, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 
 import { itemKey, type Channel, type ContentType, type ItemRef, type ItemSnapshot, type Source, type SourceKind } from '@/api/types';
 import { MyListButton, canSave, useInMyList, useMyListState, useMyListToggle } from '@/features/mylist';
@@ -409,6 +409,23 @@ export interface ChannelCardProps {
   sourceId?: string;
 }
 
+/**
+ * What a live channel's card (and its menu's Play) does: play the channel and open its source's
+ * Live TV, whose stage takes the player, the page the mini player's Expand opens for a channel
+ * played from Home. One press then gives a big picture with the channel list and the guide ribbon
+ * for zapping; before, the channel started in the mini player over Home's rails and the card left
+ * On now under the pointer. The page opens at once, so the player starts in the stage instead of
+ * flashing up in the mini first. A radio station keeps playing in the dock over Home.
+ */
+function useWatchChannel(onPlay: () => void, channel: Channel | undefined): () => void {
+  const navigate = useNavigate();
+  const ref = channel?.ref;
+  return () => {
+    onPlay();
+    if (ref?.contentType === 'live') void navigate(itemPath(ref));
+  };
+}
+
 /** Right click, the context-menu key and Shift+F10 on a card, as one pair of handlers (`open` gets where to draw the menu). */
 function menuHandlers<E extends HTMLElement>(open: ((pos: { x: number; y: number }) => void) | undefined) {
   if (!open) return {};
@@ -484,9 +501,10 @@ export function ChannelCard({
 }: ChannelCardProps) {
   const { t } = useTranslation('shell');
   const openMenu = useContext(ChannelMenuContext);
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay }) : undefined;
+  const watch = useWatchChannel(onPlay, channel);
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
   return (
-    <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
+    <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot}>
       <div className={cn(CARD_ART, 'aspect-video w-full')}>
         <LogoArt name={name} logoUrl={logoUrl} sourceId={sourceId ?? channel?.ref.sourceId} isRadio={isRadio} />
         <PlayGlyph />
@@ -719,9 +737,10 @@ export interface OnNowCardProps {
  */
 export function OnNowCard({ rail, programme, programmeArt, channelName, logoUrl, left, progress, sourceId, isRadio, ariaLabel, onPlay, channel }: OnNowCardProps) {
   const openMenu = useContext(ChannelMenuContext);
-  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay }) : undefined;
+  const watch = useWatchChannel(onPlay, channel);
+  const menu = channel && openMenu ? (pos: { x: number; y: number }) => openMenu({ pos, channel, onPlay: watch }) : undefined;
   return (
-    <button type="button" {...rail} onClick={onPlay} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot} data-on-now="">
+    <button type="button" {...rail} onClick={watch} {...menuHandlers<HTMLButtonElement>(menu)} aria-label={ariaLabel} className={cardRoot} data-on-now="">
       <div className={cn(CARD_ART, 'aspect-video w-full bg-surface-2')}>
         {programmeArt ? (
           <>

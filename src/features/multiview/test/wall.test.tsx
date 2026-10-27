@@ -1040,6 +1040,10 @@ describe('picker browsing (LG-19)', () => {
     fireEvent.click(within(dialog).getByRole('combobox', { name: 'Show' }));
     fireEvent.click(await screen.findByRole('option', { name: /^Sport/ }));
     await waitFor(() => expect(within(dialog).getAllByTestId('multiview-picker-row')).toHaveLength(2));
+    // The results keep one height while a group or search narrows them, so a phone sheet holds the field still.
+    const results = within(dialog).getByTestId('multiview-picker-results');
+    expect(results.className).toContain('h-[min(26rem,55dvh)]');
+    expect(results.className).not.toContain('max-h-');
     expect(calls.some((c) => c.cmd === 'catalog.channels' && (c.args as { categoryId?: string }).categoryId === 'sport')).toBe(true);
     expect(await within(dialog).findByText('Cup final')).toBeTruthy();
   });

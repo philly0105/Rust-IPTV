@@ -403,6 +403,11 @@ describe('sports page', () => {
     expect(within(card(final)).getAllByTestId('sports-score')[1]!.className).toContain('text-fg-muted');
     expect(within(card(overtime)).getByText('Final/OT')).toBeTruthy();
     expect(card(later).textContent).toContain(formatClock(start, 'en'));
+    // The start time keeps its line beside a long network list ("8:00" never wraps over "PM").
+    const at = within(card(later)).getByTestId('sports-start');
+    expect(at.textContent).toContain(formatClock(start, 'en'));
+    expect(at.className).toContain('whitespace-nowrap');
+    expect(at.className).toContain('shrink-0');
     expect(within(card(tbd)).getByText('TBD')).toBeTruthy();
     expect(within(card(tbd)).getByText('Ranked 5')).toBeTruthy();
     expect(within(card(flex)).getByText('TBD')).toBeTruthy();

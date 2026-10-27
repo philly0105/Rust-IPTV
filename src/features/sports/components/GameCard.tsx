@@ -44,7 +44,7 @@ function GameStatus({ game }: { game: Game }) {
         </span>
       );
     case 'final':
-      return <span className="font-semibold text-fg">{finalLabel(game, t)}</span>;
+      return <span className="shrink-0 font-semibold whitespace-nowrap text-fg">{finalLabel(game, t)}</span>;
     case 'postponed':
     case 'canceled':
     case 'suspended':
@@ -54,11 +54,16 @@ function GameStatus({ game }: { game: Game }) {
         </Badge>
       );
     default: {
-      if (!game.timeValid || game.timeNote) return <span className="text-fg-muted">{t('tbd')}</span>;
+      if (!game.timeValid || game.timeNote) return <span className="shrink-0 whitespace-nowrap text-fg-muted">{t('tbd')}</span>;
       const time = formatClock(game.startMs, lang);
       // A late Eastern game falls on the next day further east: say which.
       const label = localDate(game.startMs) === game.etDate ? time : t('dayTime', { day: formatDay(game.startMs, lang), time });
-      return <span className="font-medium text-fg tabular-nums">{label}</span>;
+      // The time keeps its line and the networks after it truncate first ("8:00" never sits over "PM").
+      return (
+        <span className="shrink-0 font-medium whitespace-nowrap text-fg tabular-nums" data-testid="sports-start">
+          {label}
+        </span>
+      );
     }
   }
 }
@@ -166,8 +171,9 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
           <GameStatus game={game} />
           {networks.length > 0 ? (
             // One line that truncates: a regional MLB game can list five networks, and the whole list
-            // is in the tooltip. The dots are drawn, not spoken.
-            <span className="flex min-w-0 items-center gap-2 text-caption text-fg-muted" title={networks.join(', ')}>
+            // is in the tooltip. It takes only the room the status leaves (flex-1 grows from zero), so
+            // it truncates before a live clock does. The dots are drawn, not spoken.
+            <span className="flex min-w-0 flex-1 items-center gap-2 text-caption text-fg-muted" title={networks.join(', ')}>
               <span aria-hidden className="text-fg-subtle">
                 ·
               </span>

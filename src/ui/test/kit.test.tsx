@@ -425,7 +425,11 @@ describe('page scaffold', () => {
     expect(page.className).toContain('max-w-[56rem]');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Downloads12');
     expect(screen.getByRole('heading', { level: 2 }).className).toContain('text-title-sm');
-    expect(screen.getByRole('link', { name: 'See all' }).getAttribute('href')).toBe('/recent');
+    const seeAll = screen.getByRole('link', { name: 'See all' });
+    expect(seeAll.getAttribute('href')).toBe('/recent');
+    // A 44 px touch target around the 19 px link, drawn by nothing.
+    expect(seeAll.className).toContain('relative');
+    expect(seeAll.className).toContain('pointer-coarse:after:-inset-y-[calc(12.5rem/15)]');
   });
 
   it('BackButton names its destination and can go back in history while showing the link', () => {

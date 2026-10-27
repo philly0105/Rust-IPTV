@@ -107,7 +107,12 @@ export function SectionHeader({ title, count, seeAll, action, as: Heading = 'h2'
           {seeAll && (
             <Link
               to={seeAll.to}
-              className="inline-flex items-center gap-0.5 rounded-sm text-sm font-medium text-fg-muted hover:text-fg active:text-accent-pressed motion-safe:transition-colors"
+              // On a touch screen an invisible band around the 19 px link takes its target to
+              // 44 px (a "See all" was a 59 x 19 tap), without changing how the row looks.
+              className={cn(
+                'relative inline-flex items-center gap-0.5 rounded-sm text-sm font-medium text-fg-muted hover:text-fg active:text-accent-pressed motion-safe:transition-colors',
+                'pointer-coarse:after:absolute pointer-coarse:after:-inset-x-2 pointer-coarse:after:-inset-y-[calc(12.5rem/15)]',
+              )}
             >
               {seeAll.label ?? t('seeAll')}
               <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />

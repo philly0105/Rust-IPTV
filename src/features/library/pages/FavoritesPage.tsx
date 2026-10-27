@@ -5,7 +5,7 @@
  */
 
 import { k } from '../lib/keys';
-import { Star } from 'lucide-react';
+import { Heart } from 'lucide-react';
 import { useCallback, useMemo, useState, type DragEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router';
@@ -14,9 +14,9 @@ import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc } from '@/api/transport';
 import { itemKey, sameRef, type FavoriteEntry, type ItemRef } from '@/api/types';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, SkeletonList, useLiveQuality, useShortcut, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, useLiveQuality, useShortcut, useToast, errorDescription } from '../deps';
 import { BrowseAction, PageTitle, SectionHeading } from '../components/bits';
-import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
+import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
 import { useNowOn } from '../hooks/useNowOn';
@@ -164,7 +164,10 @@ export function FavoritesPage() {
   const title = source ? t('sourceFavoritesTitle', { source: source.name }) : t('favoritesTitle');
   // An empty page says so itself; "0 favorites" above it adds nothing (as on My Videos).
   const subtitle = query.data && entries.length > 0 ? t('favoritesCount', { count: entries.length }) : undefined;
-  usePageHeader(title, subtitle, undefined, { value: search, onChange: setSearch, placeholder: t('searchFavorites') });
+  // The page search only once there is something to search: over an empty list the header keeps
+  // its usual Search everything. While the list loads it stays, so a full list does not swap it.
+  const searchable = !query.data || entries.length > 0 || search !== '';
+  usePageHeader(title, subtitle, undefined, searchable ? { value: search, onChange: setSearch, placeholder: t('searchFavorites') } : undefined);
 
   const onDragStart = (row: Extract<FavoriteRow, { kind: 'item' }>) => (e: DragEvent<HTMLElement>) => {
     e.dataTransfer.effectAllowed = 'move';
@@ -208,6 +211,7 @@ export function FavoritesPage() {
           now={nowOn.get(itemKey(e.ref))}
           time={t('addedAgo', { time: relativeTime(e.addedAt, i18n.language) })}
           removeLabel={t('removeFavorite', { title: e.snapshot.title })}
+          menuRemoveLabel={t('removeFromFavorites')}
           busy={pending.has(refKey(e.ref))}
           onOpen={() => open(e)}
           onRemove={() => remove(e)}
@@ -232,12 +236,12 @@ export function FavoritesPage() {
   };
 
   let body;
-  if (query.isLoading) body = <SkeletonList rows={8} className="pt-2" />;
+  if (query.isLoading) body = <EntryRowsSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   else if (entries.length === 0)
     body = (
       <EmptyState
-        icon={<Star size={28} aria-hidden />}
+        icon={<Heart size={28} aria-hidden />}
         title={t('favoritesEmptyTitle')}
         description={sourceId ? t('favoritesEmptySourceBody') : sources.size === 0 && !sourcesLoading ? t('emptyNoSourcesBody') : t('favoritesEmptyBody')}
         action={

@@ -241,6 +241,7 @@ describe('Continue watching rail (L2-visual-3, -7, -11)', () => {
         showSource={false}
         time=""
         removeLabel="Remove"
+        menuRemoveLabel="Remove from favorites"
         onOpen={() => undefined}
         onRemove={() => undefined}
       />
@@ -269,6 +270,7 @@ describe('Favorites and Recent time column (L2-visual-10)', () => {
           showSource={false}
           time="Added 2 minutes ago"
           removeLabel="Remove"
+          menuRemoveLabel="Remove from favorites"
           onOpen={() => undefined}
           onRemove={() => undefined}
         />

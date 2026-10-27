@@ -32,6 +32,7 @@ function renderRow(contentType: ItemRef['contentType'], onOpen = vi.fn()) {
         showSource={false}
         time="Today"
         removeLabel="Remove BBC One"
+        menuRemoveLabel="Remove from favorites"
         onOpen={onOpen}
         onRemove={() => undefined}
       />

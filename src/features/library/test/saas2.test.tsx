@@ -70,7 +70,11 @@ describe('Favorites rows say what is on air', () => {
     renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
     const now = await screen.findByTestId('entry-now');
     expect(now.textContent).toContain('Evening Bulletin');
-    expect(now.textContent).toMatch(/10 minutes left/);
+    // Live's compact form on screen, the full words in the tooltip and for a screen reader.
+    const left = within(now).getByTestId('entry-left');
+    expect(left.querySelector('[aria-hidden]')?.textContent).toBe('10m');
+    expect(left.querySelector('.sr-only')?.textContent).toBe('10 minutes left');
+    expect(left.getAttribute('title')).toBe('10 minutes left');
     // 20 of 30 minutes in, as a percentage (a 0..1 scale would read "1").
     expect(within(now).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('67');
     // Asked once for the page, titles only, and only for the channels.
@@ -91,17 +95,71 @@ describe('Favorites rows say what is on air', () => {
     expect(screen.queryByTestId('entry-now')).toBeNull();
   });
 
-  it('puts the row actions on hover and focus for fine pointers, the grip after them', async () => {
+  it('floats the row actions over the row end on a fine pointer, the grip last, and gives touch one menu with all of them', async () => {
     rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('live', 'ch2', 1)];
     rpc.handlers['epg.nowNext'] = () => ({});
     renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
     const row = (await screen.findAllByTestId('entry-row'))[0]!;
-    const open = row.querySelector<HTMLElement>('[data-action="open"]')!;
-    expect(open.className).toContain('pointer-fine:opacity-0');
-    expect(open.className).toContain('pointer-fine:in-focus-visible:opacity-100');
-    // The artwork leads the row, on the headings' line; the drag handle comes last.
+    // The artwork leads the row, on the headings' line.
     expect(row.firstElementChild?.getAttribute('data-testid')).toBe('entry-artwork');
-    expect(row.lastElementChild?.getAttribute('draggable')).toBe('true');
+    // Hover strip: out of the layout (absolute, so the time keeps the row's end), shown on hover or
+    // keyboard focus, and only on a fine pointer; the drag handle comes last in it.
+    const strip = within(row).getByTestId('entry-actions');
+    expect(strip.className).toContain('absolute');
+    expect(strip.className).toContain('group-hover:opacity-100');
+    expect(strip.className).toContain('in-focus-visible:opacity-100');
+    expect(strip.className).toContain('not-pointer-coarse:flex');
+    expect(strip.querySelector('[data-action="open"]')).toBeTruthy();
+    expect(strip.lastElementChild?.getAttribute('draggable')).toBe('true');
+    // The time hides while the strip covers it (invisible, so the row keeps its layout), on the
+    // strip's own conditions; with the moves and the grip its column holds the whole strip.
+    const time = within(row).getByTestId('entry-time');
+    expect(time.className).toContain('not-pointer-coarse:group-hover:invisible');
+    expect(time.className).toContain('not-pointer-coarse:in-focus-visible:invisible');
+    expect(time.className).toContain('not-pointer-coarse:group-has-[[data-testid=entry-actions]:focus-within]:invisible');
+    expect(time.className).toMatch(/(^|\s)w-40(\s|$)/);
+    // Touch: one menu button, hidden on a fine pointer, holding Play, the moves and remove.
+    const trigger = within(row).getByRole('button', { name: /Actions for/ });
+    expect(trigger.className).toContain('not-pointer-coarse:hidden');
+    fireEvent.click(trigger);
+    const menu = await screen.findByRole('menu');
+    const items = within(menu).getAllByRole('menuitem').map((i) => i.textContent);
+    // The red item says what it does in full: the menu is named for the row, so no title in it
+    // (a long channel name cut a titled label before "from favorites").
+    expect(items).toEqual(['Play', 'Move up', 'Move down', 'Remove from favorites']);
+    // The first row cannot move up.
+    expect(within(menu).getByRole('menuitem', { name: 'Move up' }).getAttribute('aria-disabled')).toBe('true');
+    expect(within(menu).getByRole('menuitem', { name: 'Move down' }).getAttribute('aria-disabled')).toBeNull();
+    // The hover strip's remove button keeps the titled name, for a screen reader on the button alone.
+    expect(within(strip).getByRole('button', { name: /^Remove .+ from favorites$/ })).toBeTruthy();
+  });
+
+  it('gives a Recently watched row a menu whose remove item says "from history", without the title', async () => {
+    rpc.handlers['recent.list'] = () => [makeRecent('m1', new Date().toISOString())];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/recent', [{ path: '/recent', element: <RecentPage /> }]);
+    const row = await screen.findByTestId('entry-row');
+    // No reorder on this page: the time keeps the usual column.
+    expect(within(row).getByTestId('entry-time').className).toMatch(/(^|\s)w-36(\s|$)/);
+    fireEvent.click(within(row).getByRole('button', { name: 'Actions for Watched m1' }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Open', 'Remove from history']);
+    expect(within(row).getByRole('button', { name: 'Remove Watched m1 from history' })).toBeTruthy();
+  });
+
+  it('draws a channel with its Live TV logo tile and no movie glyph', async () => {
+    rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('movie', 'm1', 1)];
+    rpc.handlers['epg.nowNext'] = () => ({});
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    const rows = await screen.findAllByTestId('entry-row');
+    const live = rows.find((r) => r.dataset['contentType'] === 'live')!;
+    const movie = rows.find((r) => r.dataset['contentType'] === 'movie')!;
+    // Live's monogram tile (ChannelLogo), not the poster fallback with its clapperboard.
+    expect(within(live).getByTestId('entry-artwork').querySelector('[data-monogram]')).toBeTruthy();
+    expect(within(live).getByTestId('entry-artwork').querySelector('[data-poster-fallback]')).toBeNull();
+    // Both art boxes take the same 40 px column, so the titles start at one x.
+    expect(within(live).getByTestId('entry-artwork').className).toContain('w-10');
+    expect(within(movie).getByTestId('entry-artwork').className).toContain('w-10');
   });
 });
 

@@ -63,7 +63,7 @@ export const playerModule = {
 };
 
 /** The shell header: pages push title and actions into it; tests render the actions. */
-type FakeHeaderState = { title: string; subtitle?: string; actions?: React.ReactNode } | null;
+type FakeHeaderState = { title: string; subtitle?: string; actions?: React.ReactNode; search?: { placeholder: string } } | null;
 const useFakeHeader = create<{ header: FakeHeaderState }>(() => ({ header: null }));
 const setHeader = (header: FakeHeaderState) => useFakeHeader.setState({ header });
 export const shellModule = {
@@ -78,6 +78,8 @@ function FakeHeader() {
       <p data-testid="page-title">{header?.title}</p>
       {header?.subtitle ? <p data-testid="page-subtitle">{header.subtitle}</p> : null}
       {header?.actions}
+      {/* The page's own search, when it puts one in the header (else the shell shows Search everything). */}
+      {header?.search ? <p data-testid="page-search">{header.search.placeholder}</p> : null}
     </header>
   );
 }

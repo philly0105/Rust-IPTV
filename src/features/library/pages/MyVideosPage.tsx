@@ -17,11 +17,11 @@ import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades,
 import { moveInRail } from '../components/ContinueRail';
 import { CARD_CAPTION_HEIGHT, LibraryCard } from '../components/LibraryCard';
 import { RecordingCard } from '../components/RecordingCard';
-import { PageTitle } from '../components/bits';
+import { BrowseMoviesAction, PageTitle } from '../components/bits';
 import { VirtualCardGrid } from '../components/VirtualCardGrid';
 import { useActiveDownloads } from '../hooks/useActiveDownloads';
 import { POSTER_GAP, useCoverColumn } from '../hooks/useCoverColumn';
-import { useMyVideos } from '../hooks/useLibraryData';
+import { useMyVideos, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { formatBytes } from '../lib/format';
 import {
@@ -79,6 +79,7 @@ export function MyVideosPage() {
   const location = useLocation();
   const [params, setParams] = useSearchParams();
   const query = useMyVideos();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const [search, setSearch] = useState(() => params.get('q') ?? '');
   const rawFilter = params.get('filter');
   const filter: LibraryFilter = isFilter(rawFilter) ? rawFilter : 'all';
@@ -166,7 +167,8 @@ export function MyVideosPage() {
   );
   const libraryEmpty = !!query.data && !!recordingFiles.data && everything.length === 0 && !showRecordings && !search && filter === 'all';
   const title = t('myVideosTitle');
-  usePageHeader(title, subtitle, undefined, { value: search, onChange: onSearch, placeholder: t('searchLibrary') });
+  // Nothing offline yet: the header keeps its usual Search everything instead of searching nothing.
+  usePageHeader(title, subtitle, undefined, libraryEmpty ? undefined : { value: search, onChange: onSearch, placeholder: t('searchLibrary') });
 
   const openEntry = (e: GridEntry) => {
     if (e.kind === 'recording') {
@@ -197,9 +199,16 @@ export function MyVideosPage() {
         title={t('libraryEmptyTitle')}
         description={t('libraryEmptyBody')}
         action={
-          <Link to="/downloads" className={buttonClass('secondary', 'md')}>
-            {t('openQueue')}
-          </Link>
+          // While the queue holds anything (downloading, waiting, paused, or failed and waiting to
+          // be retried), it is where that shows: the page's toolbar with its queue link is hidden
+          // while the library is empty. Otherwise the catalogue, where downloads start.
+          active.active + active.paused + active.attention > 0 ? (
+            <Link to="/downloads" className={buttonClass('primary', 'md')} data-testid="library-empty-queue">
+              {t('openQueue')}
+            </Link>
+          ) : (
+            <BrowseMoviesAction sources={sources} loading={sourcesLoading} />
+          )
         }
       />
     );

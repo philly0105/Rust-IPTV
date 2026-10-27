@@ -12,7 +12,7 @@ import { buttonClass } from '@/ui/Button';
 import { formatList } from '@/lib/intl';
 
 import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useShortcut } from '../deps';
-import { ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
+import { BrowseMoviesAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { DOWNLOAD_ROW_HEIGHT, DownloadRow } from '../components/DownloadRow';
 import { FolderBar } from '../components/FolderBar';
 import { VirtualRows, type RowRenderInfo } from '../components/VirtualRows';
@@ -36,7 +36,7 @@ function focusedDownloadId(): number | undefined {
 export function DownloadsPage() {
   const { t, i18n } = useTranslation('library');
   const query = useDownloads();
-  const { byId: sources } = useSourcesById();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const { pending, perform } = useDownloadActions();
 
   const [confirm, setConfirm] = useState<Pending | null>(null);
@@ -196,7 +196,10 @@ export function DownloadsPage() {
             <Link to="/my-videos" className={buttonClass('primary', 'md')}>
               {t('openMyVideos')}
             </Link>
-          ) : undefined
+          ) : (
+            // Nothing saved either: the catalogue, where a download starts.
+            <BrowseMoviesAction sources={sources} loading={sourcesLoading} />
+          )
         }
       />
     );

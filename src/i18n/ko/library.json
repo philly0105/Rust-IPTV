@@ -160,8 +160,8 @@
   "groupMovies": "영화",
   "groupSeries": "시리즈",
   "favoritesEmptyTitle": "아직 즐겨찾기가 없습니다",
-  "favoritesEmptyBody": "모든 소스의 채널, 영화, 시리즈에 별표를 표시하면 여기에 모입니다.",
-  "favoritesEmptySourceBody": "이 소스의 채널, 영화, 시리즈에 별표를 표시하면 여기에 모입니다.",
+  "favoritesEmptyBody": "모든 소스의 채널, 영화, 시리즈를 즐겨찾기에 추가하면 여기에 모입니다.",
+  "favoritesEmptySourceBody": "이 소스의 채널, 영화, 시리즈를 즐겨찾기에 추가하면 여기에 모입니다.",
   "favoriteRemoved": "{{title}}을(를) 즐겨찾기에서 삭제했습니다",
   "removeFavorite": "즐겨찾기에서 {{title}} 삭제",
   "reorderFailed": "새 순서를 저장할 수 없습니다",
@@ -299,5 +299,14 @@
   "aboutSize": "크기",
   "aboutDownloaded": "다운로드한 날짜",
   "aboutFile": "파일",
-  "openInCatalogue": "{{source}}에서 열기"
+  "openInCatalogue": "{{source}}에서 열기",
+  "entryMenu": "{{title}} 작업",
+  "rowOpen": "열기",
+  "rowMoveUp": "위로 이동",
+  "rowMoveDown": "아래로 이동",
+  "browseMovies": "영화 둘러보기",
+  "removeFromFavorites": "즐겨찾기에서 삭제",
+  "removeFromHistory": "시청 기록에서 삭제",
+  "minutesLeftShort": "{{count}}분",
+  "browseSeries": "시리즈 둘러보기"
 }

@@ -160,8 +160,8 @@
   "groupMovies": "映画",
   "groupSeries": "シリーズ",
   "favoritesEmptyTitle": "まだお気に入りがありません",
-  "favoritesEmptyBody": "どのソースのチャンネル、映画、シリーズでも、星を付けるとここにまとめられます。",
-  "favoritesEmptySourceBody": "このソースのチャンネル、映画、シリーズに星を付けると、ここにまとめられます。",
+  "favoritesEmptyBody": "どのソースのチャンネル、映画、シリーズでも、お気に入りに追加するとここにまとめられます。",
+  "favoritesEmptySourceBody": "このソースのチャンネル、映画、シリーズをお気に入りに追加すると、ここにまとめられます。",
   "favoriteRemoved": "{{title}}をお気に入りから削除しました",
   "removeFavorite": "{{title}}をお気に入りから削除",
   "reorderFailed": "新しい並び順を保存できませんでした",
@@ -299,5 +299,14 @@
   "aboutSize": "サイズ",
   "aboutDownloaded": "ダウンロード日",
   "aboutFile": "ファイル",
-  "openInCatalogue": "{{source}} で開く"
+  "openInCatalogue": "{{source}} で開く",
+  "entryMenu": "{{title}}の操作",
+  "rowOpen": "開く",
+  "rowMoveUp": "上へ移動",
+  "rowMoveDown": "下へ移動",
+  "browseMovies": "映画を見る",
+  "removeFromFavorites": "お気に入りから削除",
+  "removeFromHistory": "履歴から削除",
+  "minutesLeftShort": "{{count}}分",
+  "browseSeries": "シリーズを見る"
 }

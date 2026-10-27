@@ -175,8 +175,8 @@
   "groupMovies": "Film",
   "groupSeries": "Serie",
   "favoritesEmptyTitle": "Ancora nessun preferito",
-  "favoritesEmptyBody": "Aggiungi una stella a canali, film e serie di qualsiasi sorgente per raccoglierli qui.",
-  "favoritesEmptySourceBody": "Aggiungi una stella a canali, film e serie di questa sorgente per raccoglierli qui.",
+  "favoritesEmptyBody": "Aggiungi ai preferiti canali, film e serie di qualsiasi sorgente per raccoglierli qui.",
+  "favoritesEmptySourceBody": "Aggiungi ai preferiti canali, film e serie di questa sorgente per raccoglierli qui.",
   "favoriteRemoved": "{{title}} rimosso dai preferiti",
   "removeFavorite": "Rimuovi {{title}} dai preferiti",
   "reorderFailed": "Impossibile salvare il nuovo ordine",
@@ -317,5 +317,14 @@
   "aboutSize": "Dimensione",
   "aboutDownloaded": "Scaricato il",
   "aboutFile": "File",
-  "openInCatalogue": "Apri in {{source}}"
+  "openInCatalogue": "Apri in {{source}}",
+  "entryMenu": "Azioni per {{title}}",
+  "rowOpen": "Apri",
+  "rowMoveUp": "Sposta su",
+  "rowMoveDown": "Sposta giù",
+  "browseMovies": "Sfoglia i film",
+  "removeFromFavorites": "Rimuovi dai preferiti",
+  "removeFromHistory": "Rimuovi dalla cronologia",
+  "minutesLeftShort": "{{count}} min",
+  "browseSeries": "Sfoglia le serie"
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { Source } from '@/api/types';
 import { useToastStore } from '@/ui';
 
+import { ENTRY_ROW_HEIGHT } from '../components/EntryRow';
 import { FavoritesPage } from '../pages/FavoritesPage';
 import { MyVideosPage } from '../pages/MyVideosPage';
 import { RecentPage } from '../pages/RecentPage';
@@ -68,6 +69,13 @@ describe('library loading and error states', () => {
     rpc.handlers['favorites.list'] = never;
     const view = renderAt('/favorites', favoritesRoute);
     expect(view.container.querySelector('[aria-busy="true"], [role="status"]')).toBeTruthy();
+    // The stand-in has the loaded list's box and row height, so nothing moves when rows arrive.
+    const skeleton = screen.getByTestId('entry-rows-skeleton');
+    expect(skeleton.className).toContain('max-w-4xl');
+    expect(skeleton.className).toContain('-mx-2');
+    const rows = [...skeleton.querySelectorAll<HTMLElement>('[style]')];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(r.style.height).toBe(`${ENTRY_ROW_HEIGHT}px`);
     cleanup();
 
     rpc.handlers['favorites.list'] = fail;
@@ -83,6 +91,7 @@ describe('library loading and error states', () => {
     rpc.handlers['recent.list'] = never;
     const view = renderAt('/recent', recentRoute);
     expect(view.container.querySelector('[aria-busy="true"], [role="status"]')).toBeTruthy();
+    expect(screen.getByTestId('entry-rows-skeleton')).toBeTruthy();
     cleanup();
 
     rpc.handlers['recent.list'] = fail;

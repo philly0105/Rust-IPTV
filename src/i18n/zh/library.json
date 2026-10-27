@@ -160,8 +160,8 @@
   "groupMovies": "电影",
   "groupSeries": "剧集",
   "favoritesEmptyTitle": "暂无收藏",
-  "favoritesEmptyBody": "为任意播放源中的频道、电影和剧集加星标，即可将它们收集到这里。",
-  "favoritesEmptySourceBody": "为此播放源中的频道、电影和剧集加星标，即可将它们收集到这里。",
+  "favoritesEmptyBody": "将任意播放源中的频道、电影和剧集加入收藏，即可将它们收集到这里。",
+  "favoritesEmptySourceBody": "将此播放源中的频道、电影和剧集加入收藏，即可将它们收集到这里。",
   "favoriteRemoved": "已将 {{title}} 从收藏中移除",
   "removeFavorite": "将 {{title}} 从收藏中移除",
   "reorderFailed": "无法保存新顺序",
@@ -299,5 +299,14 @@
   "aboutSize": "大小",
   "aboutDownloaded": "下载日期",
   "aboutFile": "文件",
-  "openInCatalogue": "在 {{source}} 中打开"
+  "openInCatalogue": "在 {{source}} 中打开",
+  "entryMenu": "{{title}} 的操作",
+  "rowOpen": "打开",
+  "rowMoveUp": "上移",
+  "rowMoveDown": "下移",
+  "browseMovies": "浏览电影",
+  "removeFromFavorites": "从收藏中移除",
+  "removeFromHistory": "从观看记录中移除",
+  "minutesLeftShort": "{{count}} 分钟",
+  "browseSeries": "浏览剧集"
 }

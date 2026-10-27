@@ -175,8 +175,8 @@
   "groupMovies": "Films",
   "groupSeries": "Séries",
   "favoritesEmptyTitle": "Aucun favori pour le moment",
-  "favoritesEmptyBody": "Marquez des chaînes, films et séries de n'importe quelle source pour les retrouver ici.",
-  "favoritesEmptySourceBody": "Marquez des chaînes, films et séries de cette source pour les retrouver ici.",
+  "favoritesEmptyBody": "Ajoutez aux favoris des chaînes, films et séries de n'importe quelle source pour les retrouver ici.",
+  "favoritesEmptySourceBody": "Ajoutez aux favoris des chaînes, films et séries de cette source pour les retrouver ici.",
   "favoriteRemoved": "{{title}} retiré des favoris",
   "removeFavorite": "Retirer {{title}} des favoris",
   "reorderFailed": "Impossible d'enregistrer le nouvel ordre",
@@ -317,5 +317,14 @@
   "aboutSize": "Taille",
   "aboutDownloaded": "Téléchargé le",
   "aboutFile": "Fichier",
-  "openInCatalogue": "Ouvrir dans {{source}}"
+  "openInCatalogue": "Ouvrir dans {{source}}",
+  "entryMenu": "Actions pour {{title}}",
+  "rowOpen": "Ouvrir",
+  "rowMoveUp": "Monter",
+  "rowMoveDown": "Descendre",
+  "browseMovies": "Parcourir les films",
+  "removeFromFavorites": "Retirer des favoris",
+  "removeFromHistory": "Retirer de l'historique",
+  "minutesLeftShort": "{{count}} min",
+  "browseSeries": "Parcourir les séries"
 }

@@ -11,10 +11,10 @@ import { rpc } from '@/api/transport';
 import { itemKey, type PlaybackPosition, type RecentEntry } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
 
-import { Button, EmptyState, ErrorState, Page, QualityFilterNote, SkeletonList, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
+import { Button, EmptyState, ErrorState, Page, QualityFilterNote, clearSearches, recentSearchList, rememberSearch, useLiveQuality, useMediaQuery, usePlayerStore, useToast, errorDescription } from '../deps';
 import { BrowseAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { CONTINUE_RAIL_HEIGHT, ContinueRail } from '../components/ContinueRail';
-import { ENTRY_ROW_HEIGHT, EntryRow } from '../components/EntryRow';
+import { ENTRY_ROW_HEIGHT, EntryRow, EntryRowsSkeleton } from '../components/EntryRow';
 import { VirtualRows } from '../components/VirtualRows';
 import { useNamesSources, usePending, useSourcesById } from '../hooks/useLibraryData';
 import { useNowOn } from '../hooks/useNowOn';
@@ -215,11 +215,14 @@ export function RecentPage() {
     [count, phone, t],
   );
   const title = source ? t('sourceRecentTitle', { source: source.name }) : t('recentTitle');
-  usePageHeader(title, query.data && count > 0 ? t('recentCount', { count }) : undefined, headerActions, {
-    value: search,
-    onChange: setSearch,
-    placeholder: t('searchRecent'),
-  });
+  // As on Favorites: no history search over an empty history.
+  const searchable = !query.data || count > 0 || search !== '';
+  usePageHeader(
+    title,
+    query.data && count > 0 ? t('recentCount', { count }) : undefined,
+    headerActions,
+    searchable ? { value: search, onChange: setSearch, placeholder: t('searchRecent') } : undefined,
+  );
 
   const rail =
     continuing.length > 0 && !search ? <ContinueRail positions={continuing} onOpen={openContinue} onRemove={(p) => void removeContinue(p)} /> : null;
@@ -237,6 +240,7 @@ export function RecentPage() {
         now={nowOn.get(itemKey(e.ref))}
         time={relativeTime(e.viewedAt, i18n.language)}
         removeLabel={t('removeRecent', { title: snapshotTitle(e.ref, e.snapshot.title).title })}
+        menuRemoveLabel={t('removeFromHistory')}
         busy={pending.has(key)}
         onOpen={() => open(e)}
         onRemove={() => remove(e)}
@@ -245,7 +249,7 @@ export function RecentPage() {
   };
 
   let body;
-  if (query.isLoading) body = <SkeletonList rows={8} className="pt-2" />;
+  if (query.isLoading) body = <EntryRowsSkeleton />;
   else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   else if (count === 0 && !rail)
     body = (

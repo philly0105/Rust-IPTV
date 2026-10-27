@@ -205,6 +205,46 @@ describe('DownloadsPage', () => {
     expect(detail.getAttribute('title')).toBe(long);
   });
 
+  it('points an empty queue with nothing saved at the catalogue, where downloads start', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect(await screen.findByText('Nothing is downloading')).toBeTruthy();
+    const browse = await screen.findByRole('link', { name: 'Browse movies' });
+    expect(browse.getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
+  });
+
+  it('opens the first source whose Movies the rail shows, then one with series, then the channels', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    // A live-only playlist comes first: the rail has no Movies for it, so the link passes it by.
+    const liveOnly = { id: 'live-only', kind: 'm3u', name: 'Live only', movieCount: 0, seriesCount: 0 };
+    rpc.handlers['sources.list'] = () => [liveOnly, { id: 'vod', kind: 'm3u', name: 'VOD', movieCount: 12, seriesCount: 3 }];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect((await screen.findByRole('link', { name: 'Browse movies' })).getAttribute('href')).toBe('/s/vod/movies');
+    cleanup();
+
+    rpc.handlers['sources.list'] = () => [liveOnly, { id: 'shows', kind: 'm3u', name: 'Shows', movieCount: 0, seriesCount: 4 }];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect((await screen.findByRole('link', { name: 'Browse series' })).getAttribute('href')).toBe('/s/shows/series');
+    cleanup();
+
+    rpc.handlers['sources.list'] = () => [liveOnly];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect((await screen.findByRole('link', { name: 'Browse channels' })).getAttribute('href')).toBe('/s/live-only/live');
+    expect(screen.queryByRole('link', { name: 'Browse movies' })).toBeNull();
+  });
+
+  it('offers no way in until the sources load, so a deep link never flashes Add a source', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    let answer!: (v: unknown) => void;
+    rpc.handlers['sources.list'] = () => new Promise((resolve) => (answer = resolve));
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect(await screen.findByText('Nothing is downloading')).toBeTruthy();
+    expect(screen.queryByTestId('library-empty-add-source')).toBeNull();
+    expect(screen.queryByTestId('library-empty-movies')).toBeNull();
+    answer(sources);
+    expect((await screen.findByRole('link', { name: 'Browse movies' })).getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
+  });
+
   it('shows the empty state when only completed items remain', async () => {
     rpc.handlers['downloads.list'] = () => [list[3]];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
@@ -237,10 +277,35 @@ describe('MyVideosPage', () => {
     expect(screen.getByText('2 episodes')).toBeTruthy();
   });
 
-  it('shows the empty state', async () => {
+  it('shows the empty state, pointing at the catalogue where downloads start, with no page search', async () => {
     rpc.handlers['myvideos.list'] = () => [];
+    rpc.handlers['recordings.library'] = () => [];
     renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
     expect(await screen.findByText('No offline videos yet')).toBeTruthy();
+    const browse = await screen.findByRole('link', { name: 'Browse movies' });
+    expect(browse.getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
+    expect(screen.queryByTestId('page-search')).toBeNull();
+  });
+
+  it('leads an empty library to the queue while a download is paused or failed', async () => {
+    rpc.handlers['myvideos.list'] = () => [];
+    rpc.handlers['recordings.library'] = () => [];
+    for (const status of ['paused', 'failed'] as const) {
+      rpc.handlers['downloads.list'] = () => [makeDownload({ id: 40, status, title: 'Waiting' })];
+      renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
+      expect(await screen.findByText('No offline videos yet')).toBeTruthy();
+      expect((await screen.findByRole('link', { name: 'Open download queue' })).getAttribute('href')).toBe('/downloads');
+      expect(screen.queryByRole('link', { name: 'Browse movies' })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('keeps its search in the header once something is offline', async () => {
+    rpc.handlers['myvideos.list'] = () => library;
+    rpc.handlers['recordings.library'] = () => [];
+    renderAt('/my-videos', [{ path: '/my-videos', element: <MyVideosPage /> }]);
+    await screen.findAllByTestId('library-card');
+    expect(screen.getByTestId('page-search').textContent).toBe('Search My Videos');
   });
 });
 
@@ -269,6 +334,22 @@ describe('MyVideoDetailPage', () => {
 
 describe('FavoritesPage', () => {
   const favs = [makeFavorite('live', 'c1', 0), makeFavorite('movie', 'v1', 1), makeFavorite('movie', 'v2', 2, 'src2'), makeFavorite('series', 's1', 3)];
+
+  it('searches in the header only with favorites to search; empty, it shows the heart and no page search', async () => {
+    rpc.handlers['favorites.list'] = () => [];
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    expect(await screen.findByText('No favorites yet')).toBeTruthy();
+    expect(screen.queryByTestId('page-search')).toBeNull();
+    // One icon per idea: a favourite is the rail's heart, and the copy under it no longer says "Star".
+    expect(document.querySelector('svg.lucide-heart')).toBeTruthy();
+    expect(screen.getByText('Add channels, movies, and series from any source to your favorites to collect them here.')).toBeTruthy();
+    cleanup();
+
+    rpc.handlers['favorites.list'] = () => favs;
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    await screen.findAllByTestId('entry-row');
+    expect(screen.getByTestId('page-search').textContent).toBe('Search favorites');
+  });
 
   it('groups entries and reorders with the move buttons (global page)', async () => {
     rpc.handlers['favorites.list'] = () => favs;

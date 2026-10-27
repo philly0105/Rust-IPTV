@@ -564,7 +564,10 @@ export function SearchInput({
         }}
         className={cn(
           fieldBase,
-          'ps-9 pe-9 text-sm [&::-webkit-search-cancel-button]:hidden',
+          // pe-11 on touch: the clear button grows to 36 px there (end-1 plus 36 px reaches
+          // 39.75 px in), so the text stops short of it and a tap at the end of a query moves
+          // the caret instead of clearing the search.
+          'ps-9 pe-9 text-sm pointer-coarse:pe-11 [&::-webkit-search-cancel-button]:hidden',
           size === 'sm' ? 'h-8' : 'h-10',
         )}
         {...rest}
@@ -579,7 +582,7 @@ export function SearchInput({
             input.current?.focus();
           }}
           // In the 44 px touch field the clear button grows to 36 px, the most it can take
-          // inside the field's border and still leave the text room.
+          // inside the field's border; the input's end padding grows with it (pointer-coarse:pe-11).
           className="absolute end-1 inline-flex size-[calc(28rem/15)] items-center justify-center rounded-sm text-fg-subtle hover:bg-hover hover:text-fg active:bg-active motion-safe:transition-colors pointer-coarse:size-[calc(36rem/15)]"
         >
           <X aria-hidden size={14} />

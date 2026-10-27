@@ -257,8 +257,10 @@ describe('IconButton tooltip', () => {
     expect(screen.getByRole('textbox', { name: 'Name' }).className).toContain(floor);
     expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain(floor);
     expect(screen.getByRole('combobox', { name: 'Sort' }).className).toContain(floor);
-    // The clear button grows inside the taller field.
+    // The clear button grows inside the taller field, and the text's end padding grows past it
+    // (end-1 plus 36 px is 39.75 px; pe-11 is 41.25 px), so the button never covers the query.
     expect(screen.getByRole('button', { name: 'Clear search' }).className).toContain('pointer-coarse:size-[calc(36rem/15)]');
+    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain('pointer-coarse:pe-11');
     // The track takes the floor and its segments stretch to fill it.
     expect(screen.getByRole('radiogroup', { name: 'View' }).className).toContain(floor);
     const pills = screen.getByRole('tablist', { name: 'Kind' });

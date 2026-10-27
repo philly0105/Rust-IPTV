@@ -238,6 +238,7 @@ function renderSearch(path: string) {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/s/:sourceId/movie/:itemId" element={<BackStub />} />
             <Route path="/s/:sourceId/series/:itemId" element={<BackStub />} />
+            <Route path="/epg" element={<BackStub />} />
           </Routes>
         </MemoryRouter>
       </I18nextProvider>
@@ -290,9 +291,11 @@ describe('search programmes on several channels', () => {
     expect(within(first!).getByText('Starling 1 · Northwind')).toBeTruthy();
     const also = within(first!).getByTestId('search-programme-also');
     expect(within(also).getAllByRole('button').map((b) => b.textContent)).toEqual(['Starling 2 · Northwind', 'Starling 3 · Northwind']);
-    // On the air now: LIVE beside its time; the later airing has none.
-    expect(first!.querySelector('[data-live-pill]')).toBeTruthy();
+    // On the air now: LIVE beside its title, so the row keeps its height; the later airing has none.
+    expect(within(first!).getAllByText('Glass Harbor Blues')[0]!.parentElement?.querySelector('[data-live-pill]')).toBeTruthy();
     expect(second!.querySelector('[data-live-pill]')).toBeNull();
+    // Under a finger each channel link is a full touch target, not a line of small text.
+    for (const link of within(also).getAllByRole('button')) expect(link.className).toContain('pointer-coarse:min-h-');
     // Past eight other channels the rest wait behind Show all (covered below).
     expect(within(also).queryByRole('button', { name: /Show all/ })).toBeNull();
     fireEvent.click(within(also).getByRole('button', { name: 'Starling 3 · Northwind' }));
@@ -311,12 +314,32 @@ describe('a show on many channels', () => {
     const also = await screen.findByTestId('search-programme-also');
     const links = () => within(also).getAllByRole('button').filter((b) => b.textContent?.startsWith('Starling'));
     expect(links()).toHaveLength(8);
-    const more = within(also).getByRole('button', { name: 'Show all (11)' });
+    // The count takes in the channel the row's title opens, as the palette's "12 channels" does.
+    const more = within(also).getByRole('button', { name: 'Show all (12)' });
     expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(more.className).toContain('pointer-coarse:min-h-');
     fireEvent.click(more);
     expect(links()).toHaveLength(11);
     fireEvent.click(within(also).getByRole('button', { name: 'Show less' }));
     expect(links()).toHaveLength(8);
+  });
+
+  it('Back from the guide to a channel behind Show all puts focus on its link again', async () => {
+    // A channel too, so the page has results to restore its place in.
+    rpcMock.handlers['catalog.search'] = () => ({ live: [channel('src1', 1, 'Harbor TV')], movies: [], series: [] });
+    const first = programme(1, 1, 9, 0);
+    const hits = Array.from({ length: 12 }, (_, i) => ({ ...programme(i + 1, 1, 9, 0), program: { ...first.program, channelId: `c${i + 1}` } }));
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : hits);
+    renderSearch('/search?q=harbor&type=programmes');
+    fireEvent.click(screen.getByRole('link', { name: 'Open search' }));
+    const also = await screen.findByTestId('search-programme-also');
+    fireEvent.click(within(also).getByRole('button', { name: 'Show all (12)' }));
+    const hidden = within(also).getByRole('button', { name: 'Starling 11 · Northwind' });
+    fireEvent.click(hidden);
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+    await screen.findByTestId('search-programme-also');
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('Starling 11 · Northwind'));
+    expect(screen.getByRole('button', { name: 'Show less' }).getAttribute('aria-expanded')).toBe('true');
   });
 });
 

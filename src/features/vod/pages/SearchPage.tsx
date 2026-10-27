@@ -57,7 +57,7 @@ import {
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, LivePill, Page, Poster, PosterCellWidthContext, SectionHeader, Skeleton, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, LivePill, Page, Poster, PosterCellWidthContext, SectionHeader, Skeleton, TOUCH_TARGET, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -666,6 +666,12 @@ function dayStart(at: number): number {
 /** Other channels a folded programme row lists before "Show all". */
 const ALSO_SHOWN = 8;
 
+/**
+ * The rows whose channels were all shown, per history entry (`location.key`), so Back from the
+ * guide to a channel that sat behind "Show all" finds its link again and focus can land on it.
+ */
+const openedRows = new Map<string, ReadonlySet<string>>();
+
 /** One programme row: a hit and its place in the whole list, with the other channels airing the same show at the same time. */
 interface ProgrammeRow {
   hit: GuideSearchHit;
@@ -705,7 +711,8 @@ function programmeDays(hits: readonly GuideSearchHit[], limit = Infinity): { day
  * edge. One opens the guide at the programme, where its row takes the cursor (as a hit of the
  * guide's own search does). A show on several channels at once is one row: the title opens the
  * first channel's, and each of the others is a link of its own on the line under it, so "Inside
- * the NBA" on six channels at 9:00 takes one row, not six. A programme on the air now says LIVE.
+ * the NBA" on six channels at 9:00 takes one row, not six. A programme on the air says LIVE
+ * beside its title, so its row is as tall as the others.
  */
 const ProgrammeList = memo(function ProgrammeList({
   hits,
@@ -729,14 +736,15 @@ const ProgrammeList = memo(function ProgrammeList({
   const days = useMemo(() => programmeDays(hits, limit), [hits, limit]);
   const fmt = useMemo(() => numberFormat(intlLocale(lang)), [lang]);
   // Rows whose other channels are all shown.
-  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
+  const entry = useLocation().key;
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => openedRows.get(entry) ?? new Set());
   const rowKey = (hit: GuideSearchHit, at: number) => `${itemKey(hit.ref)}@${at}`;
-  const toggle = (key: string) =>
-    setOpened((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
+  const toggle = (key: string) => {
+    const next = new Set(opened);
+    if (!next.delete(key)) next.add(key);
+    openedRows.set(entry, next);
+    setOpened(next);
+  };
   const now = Date.now();
   const channelOf = (hit: GuideSearchHit) => {
     const channel = displayChannelName(hit.channelName, stripCountryPrefix);
@@ -782,15 +790,15 @@ const ProgrammeList = memo(function ProgrammeList({
                         also.length > 0 ? 'pt-2.5 pb-1' : 'py-2.5',
                       )}
                     >
-                      <span className="flex flex-col items-start gap-1 pt-0.5">
-                        <span className="text-sm whitespace-nowrap tabular-nums text-fg-muted" data-testid="search-programme-time">
-                          {clockTime(at, lang)}
-                        </span>
-                        {airing && <LivePill size="sm" dot="still" />}
+                      <span className="pt-0.5 text-sm whitespace-nowrap tabular-nums text-fg-muted" data-testid="search-programme-time">
+                        {clockTime(at, lang)}
                       </span>
                       <span className="min-w-0">
-                        <span dir="auto" className="block truncate text-sm font-medium text-fg">
-                          {hit.program.title}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span dir="auto" className="truncate text-sm font-medium text-fg">
+                            {hit.program.title}
+                          </span>
+                          {airing && <LivePill size="sm" dot="none" className="shrink-0" />}
                         </span>
                         <span dir="auto" className="block truncate text-xs text-fg-muted">
                           {channelOf(hit)}
@@ -800,7 +808,10 @@ const ProgrammeList = memo(function ProgrammeList({
                     {also.length > 0 && (
                       // The same show on the other channels, each opening the guide at its own row;
                       // past a few, the rest wait behind "Show all" so one show cannot fill the page.
-                      <span className="col-start-2 flex flex-wrap items-center gap-x-1 pe-3 pb-2" data-testid="search-programme-also">
+                      // The wrapper's pull-in matches the links' padding, so every wrapped line's
+                      // names start under the channel above; under a finger each link is a full
+                      // touch target, not a 15 px line of text.
+                      <span className="col-start-2 -ms-1 flex flex-wrap items-center gap-x-1 gap-y-1 pe-3 pb-2 pointer-coarse:gap-y-1.5" data-testid="search-programme-also">
                         {(opened.has(rowKey(hit, at)) ? also : also.slice(0, ALSO_SHOWN)).map((a) => (
                           <button
                             key={itemKey(a.hit.ref)}
@@ -808,9 +819,9 @@ const ProgrammeList = memo(function ProgrammeList({
                             data-grid-index={a.index}
                             onClick={() => open(a.hit)}
                             dir="auto"
-                            className="max-w-full truncate rounded-xs px-1 text-xs text-fg-muted outline-none first:-ms-1 hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus"
+                            className={cn('inline-flex max-w-full items-center rounded-xs px-1 text-xs text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus', TOUCH_TARGET)}
                           >
-                            {channelOf(a.hit)}
+                            <span className="truncate">{channelOf(a.hit)}</span>
                           </button>
                         ))}
                         {also.length > ALSO_SHOWN && (
@@ -818,9 +829,10 @@ const ProgrammeList = memo(function ProgrammeList({
                             type="button"
                             aria-expanded={opened.has(rowKey(hit, at))}
                             onClick={() => toggle(rowKey(hit, at))}
-                            className="rounded-xs px-1 text-xs font-medium text-fg outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
+                            className={cn('inline-flex items-center rounded-xs px-1 text-xs font-medium text-fg outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus', TOUCH_TARGET)}
                           >
-                            {opened.has(rowKey(hit, at)) ? t('showLess') : `${t('showAll')} (${fmt.format(also.length)})`}
+                            {/* Counts every channel, the one in the row's title too, as the palette's row does. */}
+                            {opened.has(rowKey(hit, at)) ? t('showLess') : `${t('showAll')} (${fmt.format(also.length + 1)})`}
                           </button>
                         )}
                       </span>

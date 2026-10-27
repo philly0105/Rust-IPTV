@@ -346,11 +346,15 @@ describe('palette programmes on several channels', () => {
         ? [hit('1', 'HBO', 'Harbor Lights'), hit('2', 'HBO 2', 'Harbor Lights'), hit('3', 'AMC', 'Harbor Lights'), hit('4', 'TCM', 'Harbor Lights', start + 3_600_000)]
         : [];
     const { palette, router } = await openPaletteWith('harbor');
-    await within(palette).findByText('3 channels');
+    // The count from 640 px up only: on a phone the title needs the room.
+    expect((await within(palette).findByText('3 channels')).className).toContain('max-sm:hidden');
     const rows = within(palette).getAllByText('Harbor Lights');
     expect(rows).toHaveLength(2);
-    // The later airing is on one channel, which its row names.
-    expect(within(palette).getByText('TCM')).toBeTruthy();
+    // The folded row still names the channel Enter opens; the later airing, on one, has no count.
+    expect(within(rows[0]!.closest('[cmdk-item]') as HTMLElement).getByText('HBO')).toBeTruthy();
+    const later = rows[1]!.closest('[cmdk-item]') as HTMLElement;
+    expect(within(later).getByText('TCM')).toBeTruthy();
+    expect(within(later).queryByText(/channels/)).toBeNull();
     // The search page's own limit, so its Programmes open from the cache.
     expect(rpcMock.calls.find((c) => c.cmd === 'epg.search')?.args).toMatchObject({ limit: 50 });
     fireEvent.click(rows[0]!);

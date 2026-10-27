@@ -41,7 +41,7 @@ import { detailHref, normalizeQuery, SEARCH_LIMIT, searchRequestLimit } from '@/
 import { openTour, openWhatsNew } from '@/features/onboarding/store';
 import { lockNow, useParentalStatus } from '@/features/parental/status';
 import { snapshotTitle } from '@/lib/title';
-import { Dialog, Kbd, Poster, toast, errorDescription } from '@/ui';
+import { Dialog, Kbd, Poster, cn, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
 import { LIBRARY_LINKS, readLastSource, watchLinks } from './navigation';
@@ -115,6 +115,8 @@ interface PaletteItem {
   keywords?: string[];
   /** Quiet trailing text: a favourite's or recent item's kind, then its source when there are several. */
   detail?: readonly string[];
+  /** One more detail from 640 px up; a phone's row keeps that room for its title. */
+  wideDetail?: string;
   run(): void;
 }
 
@@ -383,8 +385,9 @@ export function foldProgrammeHits<H extends { program: { title: string; start: s
 /**
  * Guide programmes whose titles match the query (`epg.search` of each source, after a pause in
  * typing, only while the palette is open). One opens the guide at the programme. A show on many
- * channels at once ("Inside the NBA" at 9:00 on six) is one row that counts the channels and
- * opens the guide at the first, where the others share its time column.
+ * channels at once ("Inside the NBA" at 9:00 on six) is one row that opens the guide at the
+ * first, where the others share its time column: it names that channel, so the user sees where
+ * Enter goes, and from 640 px up counts them all (a phone's row has no room left for the title).
  */
 function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
   const { t, i18n } = useTranslation('shell');
@@ -407,7 +410,8 @@ function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
         title: hit.program.title,
         group,
         icon: CalendarRange,
-        detail: [`${formatDay(at, lang)} ${formatClock(at, lang)}`, channels > 1 ? t('countChannels', { count: channels }) : displayChannelName(hit.channelName, prefs.stripCountryPrefix)],
+        detail: [`${formatDay(at, lang)} ${formatClock(at, lang)}`, displayChannelName(hit.channelName, prefs.stripCountryPrefix)],
+        wideDetail: channels > 1 ? t('countChannels', { count: channels }) : undefined,
         // The core matched the title with diacritics folded ("cafe" finds "Café"), which the
         // palette's own filter does not: the typed words count as its keywords.
         keywords: [debounced],
@@ -706,6 +710,7 @@ export function CommandPalette() {
 
   const row = 'flex h-10 cursor-pointer items-center gap-3 rounded-md px-2 text-sm text-fg';
   const iconTile = 'flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md border border-edge bg-surface-2 text-fg-muted';
+  const detailText = 'max-w-40 shrink-0 truncate text-xs text-fg-subtle';
 
   return (
     <Dialog
@@ -782,10 +787,15 @@ export function CommandPalette() {
                     </span>
                     {/* Capped, so a long channel group or source name never squeezes the title. */}
                     {it.detail?.map((d, i) => (
-                      <span key={i} dir="auto" title={d} className="max-w-40 shrink-0 truncate text-xs text-fg-subtle">
+                      <span key={i} dir="auto" title={d} className={detailText}>
                         {d}
                       </span>
                     ))}
+                    {it.wideDetail && (
+                      <span dir="auto" title={it.wideDetail} className={cn(detailText, 'max-sm:hidden')}>
+                        {it.wideDetail}
+                      </span>
+                    )}
                     {it.shortcut && <Kbd combo={it.shortcut} className="pointer-coarse:hidden" />}
                   </Cmdk.Item>
                 );

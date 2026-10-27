@@ -217,7 +217,7 @@ describe('what the banner shows', () => {
     expect(screen.getByTestId('zap-logo-fallback')).toBeTruthy();
   });
 
-  it("names the channel as the lists do: the country tag after the name, quiet on the glass (round 5)", async () => {
+  it("names the channel as the player's titles do, as the provider writes it, so the name holds when the banner hides (round 5)", async () => {
     tune(channel('101', 'US| CBS HD'));
     render(
       <>
@@ -226,16 +226,9 @@ describe('what the banner shows', () => {
       </>,
     );
     await advance(0);
-    const title = screen.getByTestId('zap-title');
-    const tag = within(title).getByTestId('channel-name-tag');
-    expect([tag.previousElementSibling!.textContent, tag.textContent]).toEqual(['CBS HD', 'US']);
-    expect(tag.className).toContain('text-on-glass-muted');
-    expect(tag.className).not.toContain('text-fg-subtle');
-    // The provider's name stays for the tooltip and screen readers.
-    expect(title.getAttribute('title')).toBe('US| CBS HD');
-    expect(title.querySelector('.sr-only')!.textContent).toBe('US| CBS HD');
-    const mini = screen.getByTestId('mini-zap-line');
-    expect(within(mini).getByTestId('channel-name-tag').textContent).toBe('US');
+    expect(screen.getByTestId('zap-title').textContent).toBe('US| CBS HD');
+    expect(screen.getByTestId('mini-zap-line').textContent).toContain('US| CBS HD');
+    expect(screen.queryByTestId('channel-name-tag')).toBeNull();
   });
 
   it('shows the compact one-line version with time left', async () => {

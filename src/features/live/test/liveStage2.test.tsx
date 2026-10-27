@@ -17,6 +17,7 @@ import { ContextMenu, tidyEntries, type MenuEntry } from '../components/ContextM
 import { LivePage } from '../components/LivePage';
 import { preloadScopePickerList, ScopePicker } from '../components/ScopePicker';
 import { StageIdle } from '../components/StageIdle';
+import { channelMenuHeader } from '../hooks/useChannelMenuItems';
 import { LONG_PRESS_MS } from '../hooks/useLongPress';
 import { liveViewOf } from '../hooks/useLiveViewChannels';
 import { HOUR, MINUTE } from '../lib/epgTime';
@@ -125,6 +126,30 @@ describe('the menu (LG-16)', () => {
     expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Add to list…' }));
     fireEvent.keyDown(document.activeElement!, { key: 'a' });
     expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: 'Add to multi-view' }));
+  });
+});
+
+describe("a channel menu's header", () => {
+  const item = (id: string) => ({ id, label: id, onSelect: vi.fn() });
+  it('draws the name as the row does: a place tag after it, quiet, and the provider name for screen readers', () => {
+    const channel = { ...makeChannel(1), name: 'US| ESPN2 FHD' };
+    render(<ContextMenu pos={{ x: 10, y: 10 }} label="US| ESPN2 FHD" header={channelMenuHeader(channel, channel.name, 'NFL Live')} items={[item('Play')]} onClose={() => undefined} />);
+    const header = within(screen.getByRole('menu', { name: 'US| ESPN2 FHD' })).getByTestId('context-menu-header');
+    const tag = within(header).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    // The name leads, the tag follows it.
+    expect(tag.previousElementSibling?.textContent).toBe('ESPN2 FHD');
+    expect(header.querySelector('.sr-only')?.textContent).toBe('US| ESPN2 FHD');
+    expect(header.textContent).toContain('NFL Live');
+  });
+
+  it('with the strip setting on, gets the stripped name and draws no tag', () => {
+    const channel = { ...makeChannel(1), name: 'US| ESPN2 FHD' };
+    render(<ContextMenu pos={{ x: 10, y: 10 }} label="ESPN2 FHD" header={channelMenuHeader(channel, 'ESPN2 FHD')} items={[item('Play')]} onClose={() => undefined} />);
+    const header = within(screen.getByRole('menu', { name: 'ESPN2 FHD' })).getByTestId('context-menu-header');
+    expect(within(header).queryByTestId('channel-name-tag')).toBeNull();
+    expect(header.textContent).toContain('ESPN2 FHD');
+    expect(header.textContent).not.toContain('US');
   });
 });
 

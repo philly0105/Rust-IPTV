@@ -1,6 +1,6 @@
 import { useQueries } from '@tanstack/react-query';
 import type { Virtualizer } from '@tanstack/react-virtual';
-import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, Tv, X } from 'lucide-react';
+import { History, Radio, RotateCw, Search, SearchX, TriangleAlert, X } from 'lucide-react';
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -19,6 +19,7 @@ import { clockTime, dayHeading } from '@/features/recording/lib/schedule';
 import { useParentalStatus } from '@/features/parental/status';
 import type { PlayItemArgs } from '@/features/player';
 import { joinList } from '@/shell/dashboard/cards';
+import { intlLocale, numberFormat } from '@/lib/intl';
 import { snapshotTitle } from '@/lib/title';
 
 import { GridMyListProvider, myListTarget, PosterCard } from '../components/PosterCard';
@@ -56,7 +57,7 @@ import {
 } from '../lib/search';
 import { useCoverWidth } from '../hooks/useCoverWidth';
 import { useRailCardWidth } from '../hooks/useRailCardWidth';
-import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, Page, Poster, PosterCellWidthContext, SectionHeader, Skeleton, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Badge, Button, EmptyState, ErrorState, FilterChip, IconButton, LivePill, Page, Poster, PosterCellWidthContext, SectionHeader, Skeleton, TOUCH_TARGET, Tabs, cn, filterChipClass, gridLayout, tabPanelProps, useListVirtualizer, useScaledPx, useToast, errorDescription } from '@/ui';
 
 /**
  * Pause after the last keystroke before the query runs (L2-perf-ui-5): with `catalog.search`
@@ -662,16 +663,44 @@ function dayStart(at: number): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-/** Programme hits (in start order) grouped by the day they start on, each with its place in the whole list. */
-function programmeDays(hits: readonly GuideSearchHit[]): { day: number; items: { hit: GuideSearchHit; index: number; at: number }[] }[] {
-  const days: { day: number; items: { hit: GuideSearchHit; index: number; at: number }[] }[] = [];
+/** Other channels a folded programme row lists before "Show all". */
+const ALSO_SHOWN = 8;
+
+/**
+ * The rows whose channels were all shown, per history entry (`location.key`), so Back from the
+ * guide to a channel that sat behind "Show all" finds its link again and focus can land on it.
+ */
+const openedRows = new Map<string, ReadonlySet<string>>();
+
+/** One programme row: a hit and its place in the whole list, with the other channels airing the same show at the same time. */
+interface ProgrammeRow {
+  hit: GuideSearchHit;
+  index: number;
+  at: number;
+  also: { hit: GuideSearchHit; index: number }[];
+}
+
+/**
+ * Programme hits (in start order) folded by title and start, so a show on several channels at
+ * once is one row, then grouped by the day they start on; at most `limit` rows. Each hit keeps
+ * its place in the whole list (`index`), which focus and Back's return go by.
+ */
+function programmeDays(hits: readonly GuideSearchHit[], limit = Infinity): { day: number; items: ProgrammeRow[] }[] {
+  const rows = new Map<string, ProgrammeRow>();
   hits.forEach((hit, index) => {
     const at = ms(hit.program.start);
-    const day = dayStart(at);
-    const last = days[days.length - 1];
-    if (last && last.day === day) last.items.push({ hit, index, at });
-    else days.push({ day, items: [{ hit, index, at }] });
+    const key = `${hit.program.title.trim().toLowerCase()}\u0000${at}`;
+    const row = rows.get(key);
+    if (row) row.also.push({ hit, index });
+    else if (rows.size < limit) rows.set(key, { hit, index, at, also: [] });
   });
+  const days: { day: number; items: ProgrammeRow[] }[] = [];
+  for (const row of rows.values()) {
+    const day = dayStart(row.at);
+    const last = days[days.length - 1];
+    if (last && last.day === day) last.items.push(row);
+    else days.push({ day, items: [row] });
+  }
   return days;
 }
 
@@ -680,27 +709,53 @@ function programmeDays(hits: readonly GuideSearchHit[]): { day: number; items: {
  * the time column holds the clock alone ("4:50 AM", "16:50"). One grid serves every row
  * (rows are subgrids): the column takes the widest clock in the locale and the titles share one
  * edge. One opens the guide at the programme, where its row takes the cursor (as a hit of the
- * guide's own search does).
+ * guide's own search does). A show on several channels at once is one row: the title opens the
+ * first channel's, and each of the others is a link of its own on the line under it, so "Inside
+ * the NBA" on six channels at 9:00 takes one row, not six. A programme on the air says LIVE
+ * beside its title, so its row is as tall as the others.
  */
 const ProgrammeList = memo(function ProgrammeList({
   hits,
   sources,
   showSource,
   stripCountryPrefix,
+  limit,
 }: {
   hits: readonly GuideSearchHit[];
   sources: readonly Source[];
   showSource: boolean;
   stripCountryPrefix: boolean;
+  /** Most rows (shows) to list, after folding. */
+  limit?: number;
 }) {
-  const { i18n } = useTranslation('vod');
+  const { t, i18n } = useTranslation('vod');
   const navigate = useNavigate();
   const lang = i18n.language;
   const listId = useId();
   const names = useMemo(() => new Map(sources.map((s) => [s.id, s.name])), [sources]);
-  const days = useMemo(() => programmeDays(hits), [hits]);
+  const days = useMemo(() => programmeDays(hits, limit), [hits, limit]);
+  const fmt = useMemo(() => numberFormat(intlLocale(lang)), [lang]);
+  // Rows whose other channels are all shown.
+  const entry = useLocation().key;
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => openedRows.get(entry) ?? new Set());
+  const rowKey = (hit: GuideSearchHit, at: number) => `${itemKey(hit.ref)}@${at}`;
+  const toggle = (key: string) => {
+    const next = new Set(opened);
+    if (!next.delete(key)) next.add(key);
+    openedRows.set(entry, next);
+    setOpened(next);
+  };
   const now = Date.now();
-  // Up and Down move between the rows; ArrowDown in the search field lands on the first.
+  const channelOf = (hit: GuideSearchHit) => {
+    const channel = displayChannelName(hit.channelName, stripCountryPrefix);
+    const source = showSource ? names.get(hit.ref.sourceId) : undefined;
+    return source ? `${channel} · ${source}` : channel;
+  };
+  const open = (hit: GuideSearchHit) => {
+    const link = guideHitLink(hit);
+    void navigate(link.to, { state: link.state });
+  };
+  // Up and Down move between the rows and the channel links; ArrowDown in the search field lands on the first.
   const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     const all = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-grid-index]')];
@@ -722,30 +777,66 @@ const ProgrammeList = memo(function ProgrammeList({
               {heading.date ? <span className="text-fg-subtle">{heading.date}</span> : null}
             </p>
             <ul aria-labelledby={headingId} className="col-span-full grid grid-cols-subgrid gap-y-1">
-              {items.map(({ hit, index, at }) => {
-                const link = guideHitLink(hit);
-                const channel = displayChannelName(hit.channelName, stripCountryPrefix);
-                const source = showSource ? names.get(hit.ref.sourceId) : undefined;
+              {items.map(({ hit, index, at, also }) => {
+                const airing = at <= now && now < ms(hit.program.end);
                 return (
-                  <li key={`${itemKey(hit.ref)}@${at}`} className="col-span-full grid grid-cols-subgrid">
+                  <li key={`${itemKey(hit.ref)}@${at}`} className="col-span-full grid grid-cols-subgrid" data-testid="search-programme">
                     <button
                       type="button"
                       data-grid-index={index}
-                      onClick={() => void navigate(link.to, { state: link.state })}
-                      className="col-span-full grid grid-cols-subgrid items-start rounded-md px-3 py-2.5 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
+                      onClick={() => open(hit)}
+                      className={cn(
+                        'col-span-full grid grid-cols-subgrid items-start rounded-md px-3 text-start outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus',
+                        also.length > 0 ? 'pt-2.5 pb-1' : 'py-2.5',
+                      )}
                     >
                       <span className="pt-0.5 text-sm whitespace-nowrap tabular-nums text-fg-muted" data-testid="search-programme-time">
                         {clockTime(at, lang)}
                       </span>
                       <span className="min-w-0">
-                        <span dir="auto" className="block truncate text-sm font-medium text-fg">
-                          {hit.program.title}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span dir="auto" className="truncate text-sm font-medium text-fg">
+                            {hit.program.title}
+                          </span>
+                          {airing && <LivePill size="sm" dot="none" className="shrink-0" />}
                         </span>
                         <span dir="auto" className="block truncate text-xs text-fg-muted">
-                          {source ? `${channel} · ${source}` : channel}
+                          {channelOf(hit)}
                         </span>
                       </span>
                     </button>
+                    {also.length > 0 && (
+                      // The same show on the other channels, each opening the guide at its own row;
+                      // past a few, the rest wait behind "Show all" so one show cannot fill the page.
+                      // The wrapper's pull-in matches the links' padding, so every wrapped line's
+                      // names start under the channel above; under a finger each link is a full
+                      // touch target, not a 15 px line of text.
+                      <span className="col-start-2 -ms-1 flex flex-wrap items-center gap-x-1 gap-y-1 pe-3 pb-2 pointer-coarse:gap-y-1.5" data-testid="search-programme-also">
+                        {(opened.has(rowKey(hit, at)) ? also : also.slice(0, ALSO_SHOWN)).map((a) => (
+                          <button
+                            key={itemKey(a.hit.ref)}
+                            type="button"
+                            data-grid-index={a.index}
+                            onClick={() => open(a.hit)}
+                            dir="auto"
+                            className={cn('inline-flex max-w-full items-center rounded-xs px-1 text-xs text-fg-muted outline-none hover:bg-hover hover:text-fg focus-visible:ring-2 focus-visible:ring-focus', TOUCH_TARGET)}
+                          >
+                            <span className="truncate">{channelOf(a.hit)}</span>
+                          </button>
+                        ))}
+                        {also.length > ALSO_SHOWN && (
+                          <button
+                            type="button"
+                            aria-expanded={opened.has(rowKey(hit, at))}
+                            onClick={() => toggle(rowKey(hit, at))}
+                            className={cn('inline-flex items-center rounded-xs px-1 text-xs font-medium text-fg outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus', TOUCH_TARGET)}
+                          >
+                            {/* Counts every channel, the one in the row's title too, as the palette's row does. */}
+                            {opened.has(rowKey(hit, at)) ? t('showLess') : `${t('showAll')} (${fmt.format(also.length + 1)})`}
+                          </button>
+                        )}
+                      </span>
+                    )}
                   </li>
                 );
               })}
@@ -1192,7 +1283,7 @@ function ChannelHitButton({
         <Poster src={h.imageUrl} sourceId={c.ref.sourceId} width={logoWidth} alt={h.title} aspect="square" fit="contain" kind={c.isRadio ? 'radio' : 'live'} rounded="sm" />
       </div>
       <div className="min-w-0 flex-1">
-        <div dir="auto" className="truncate text-body-sm font-medium text-fg text-match-parent">
+        <div dir="auto" title={h.title} className="truncate text-body-sm font-medium text-fg text-match-parent">
           {h.title}
         </div>
         {/* The source as quiet text after the number (no outlined chip); a long name truncates, with a tooltip. */}
@@ -1206,7 +1297,8 @@ function ChannelHitButton({
           )}
         </div>
       </div>
-      {c.isRadio ? <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" /> : <Tv aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
+      {/* Only a station says what it is: a TV glyph on every channel took the width its name lost. */}
+      {c.isRadio && <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
     </button>
   );
 }
@@ -1344,7 +1436,7 @@ function TopResults({
             count={count(programmes.length, programmesMore)}
             seeAll={{ to: typeHref('programmes') }}
           />
-          <ProgrammeList hits={programmes.slice(0, TOP_PROGRAMMES)} sources={sources} showSource={showBadges} stripCountryPrefix={stripCountryPrefix} />
+          <ProgrammeList hits={programmes} limit={TOP_PROGRAMMES} sources={sources} showSource={showBadges} stripCountryPrefix={stripCountryPrefix} />
         </section>
       )}
     </div>

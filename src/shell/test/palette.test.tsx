@@ -57,6 +57,8 @@ beforeEach(() => {
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   // "Backup 1" is the trap: b..b..c across its name and keywords matched "bbc" loosely.
   h['sources.list'] = () => [makeSource('s1', { name: 'Night Portal' }), makeSource('s2', { name: 'Backup 1', position: 1 })];
+  h['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+  h['epg.search'] = () => [];
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['favorites.list'] = (): FavoriteEntry[] => [
     { ref: bbcNews, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: { title: 'BBC News', contentType: 'live' } },
@@ -215,5 +217,148 @@ describe('palette guide programmes (F-SEARCH-PROGRAMMES)', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/epg'));
     expect(router.state.location.search).toBe(`?source=s1&at=${start}`);
     expect((router.state.location.state as { guideHit: { program: { title: string } } }).guideHit.program.title).toBe('Café Society');
+  });
+});
+
+describe('palette library matches', () => {
+  const fox: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '21' };
+  const foxMovie: ItemRef = { sourceId: 's2', contentType: 'movie', itemId: '31' };
+  beforeEach(() => {
+    rpcMock.handlers['catalog.search'] = (a) => {
+      const { query } = a as { query: string };
+      if (query !== 'fox' && query !== 'bbc') return { live: [], movies: [], series: [] };
+      const channel = (ref: ItemRef, name: string) => ({ ref, name, categoryId: 'c1', categoryName: 'US| SPORTS', isRadio: false });
+      return {
+        live: query === 'fox' ? [channel(fox, 'US| FOX HD'), ...Array.from({ length: 6 }, (_, i) => channel({ ...fox, itemId: `f${i}` }, `FOX ${i}`))] : [channel(bbcNews, 'BBC News')],
+        movies: query === 'fox' ? [{ ref: foxMovie, title: 'The Fox Hunt', year: 2019, categoryId: 'm1' }] : [],
+        series: [],
+      };
+    };
+  });
+
+  it("'fox' finds a channel nobody favourited and plays it, with the Search page's own request", async () => {
+    const { palette } = await openPaletteWith('fox');
+    const row = await within(palette).findByText('US| FOX HD');
+    expect(within(palette).getByText('Channels')).toBeTruthy();
+    expect(within(palette).getByText('Movies and series')).toBeTruthy();
+    expect(within(palette).getByText('The Fox Hunt')).toBeTruthy();
+    // A few per type, whatever the core sends; the channel's group names its feed.
+    const channels = within(palette).getByText('Channels').closest('[cmdk-group]') as HTMLElement;
+    expect(channels.querySelectorAll('[cmdk-item]')).toHaveLength(4);
+    expect(within(row.closest('[cmdk-item]') as HTMLElement).getByText('US| SPORTS')).toBeTruthy();
+    // The Search page's first page (every source, 60 and the probe row), so "Search for" opens warm.
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search').map((c) => c.args)).toContainEqual({ query: 'fox', limit: 61 });
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: fox, title: 'US| FOX HD', isLive: true, categoryId: 'c1', sourceKind: 'xtream' })),
+    );
+  });
+
+  it('a library movie opens its detail page', async () => {
+    const { palette, router } = await openPaletteWith('fox');
+    fireEvent.click(await within(palette).findByText('The Fox Hunt'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/s/s2/movie/31'));
+  });
+
+  it('a recent channel leads a library channel that matches better, and Enter plays it', async () => {
+    const nbaTv: ItemRef = { sourceId: 's1', contentType: 'live', itemId: '40' };
+    rpcMock.handlers['recent.list'] = (): RecentEntry[] => [{ ref: nbaTv, viewedAt: '2026-10-11T08:00:00Z', snapshot: { title: 'US| NBA TV FHD', contentType: 'live' } }];
+    rpcMock.handlers['catalog.search'] = (a) => ({
+      live:
+        (a as { query: string }).query === 'nba'
+          ? [{ ref: { sourceId: 's1', contentType: 'live', itemId: '41' }, name: 'NBA 05', categoryId: 'c2', categoryName: 'NBA League Pass', isRadio: false }]
+          : [],
+      movies: [],
+      series: [],
+    });
+    const { palette, input } = await openPaletteWith('nba');
+    // "NBA 05" starts with the query and outscores the recent channel, yet stays under it.
+    await within(palette).findByText('NBA 05');
+    await waitFor(() => {
+      const first = palette.querySelector('[cmdk-item]');
+      expect(first?.textContent).toContain('US| NBA TV FHD');
+      expect(first?.getAttribute('data-selected')).toBe('true');
+    });
+    const headings = [...palette.querySelectorAll('[cmdk-group-heading]')].map((h) => h.textContent);
+    expect(headings.indexOf('Favorites and recent')).toBeLessThan(headings.indexOf('Channels'));
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(playerMock.playItem).toHaveBeenCalledWith(expect.objectContaining({ ref: nbaTv, title: 'US| NBA TV FHD' })));
+  });
+
+  it('a favourite the library also finds is listed once, under Favorites and recent', async () => {
+    const { palette } = await openPaletteWith('bbc');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'catalog.search' && (c.args as { query: string }).query === 'bbc')).toBe(true));
+    // Give the answer a moment to land, then count.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(within(palette).getAllByText('BBC News')).toHaveLength(1);
+    expect(within(palette).queryByText('Channels')).toBeNull();
+  });
+});
+
+describe('palette selection while answers arrive', () => {
+  const programme = (start: number) => ({
+    ref: { sourceId: 's1', contentType: 'live', itemId: '4' },
+    channelName: 'NBA TV',
+    program: { channelId: 'nba', title: 'Inside the NBA', start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() },
+  });
+
+  it('a late answer that ranks above the rows shown takes the selection to the top', async () => {
+    const start = Date.now() + 3_600_000;
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId: string }).sourceId === 's1' ? [programme(start)] : []);
+    const { palette } = await openPaletteWith('nba');
+    // "Sports" answers at once (its keywords hold "nba"), the guide after a pause.
+    await within(palette).findByText('Sports');
+    await within(palette).findByText('Inside the NBA');
+    await waitFor(() => {
+      const first = palette.querySelector('[cmdk-item]');
+      expect(first?.textContent).toContain('Inside the NBA');
+      expect(first?.getAttribute('data-selected')).toBe('true');
+    });
+  });
+
+  it('a row the user moved to keeps the selection when an answer lands', async () => {
+    const start = Date.now() + 3_600_000;
+    let answer: (hits: unknown[]) => void = () => undefined;
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId: string }).sourceId === 's1' ? new Promise((r) => (answer = r)) : []);
+    const { palette, input } = await openPaletteWith('nba');
+    await within(palette).findByText('Sports');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'epg.search')).toBe(true));
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const picked = palette.querySelector('[cmdk-item][data-selected="true"]')?.textContent;
+    expect(picked).toBeTruthy();
+    await act(async () => answer([programme(start)]));
+    await within(palette).findByText('Inside the NBA');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(palette.querySelector('[cmdk-item][data-selected="true"]')?.textContent).toBe(picked);
+  });
+});
+
+describe('palette programmes on several channels', () => {
+  it('a show on several channels at once is one row that counts them', async () => {
+    const start = Date.now() + 2 * 3_600_000;
+    const hit = (itemId: string, channelName: string, title: string, at = start) => ({
+      ref: { sourceId: 's1', contentType: 'live', itemId },
+      channelName,
+      program: { channelId: itemId, title, start: new Date(at).toISOString(), end: new Date(at + 3_600_000).toISOString() },
+    });
+    rpcMock.handlers['epg.search'] = (a) =>
+      (a as { sourceId: string }).sourceId === 's1'
+        ? [hit('1', 'HBO', 'Harbor Lights'), hit('2', 'HBO 2', 'Harbor Lights'), hit('3', 'AMC', 'Harbor Lights'), hit('4', 'TCM', 'Harbor Lights', start + 3_600_000)]
+        : [];
+    const { palette, router } = await openPaletteWith('harbor');
+    // The count from 640 px up only: on a phone the title needs the room.
+    expect((await within(palette).findByText('3 channels')).className).toContain('max-sm:hidden');
+    const rows = within(palette).getAllByText('Harbor Lights');
+    expect(rows).toHaveLength(2);
+    // The folded row still names the channel Enter opens; the later airing, on one, has no count.
+    expect(within(rows[0]!.closest('[cmdk-item]') as HTMLElement).getByText('HBO')).toBeTruthy();
+    const later = rows[1]!.closest('[cmdk-item]') as HTMLElement;
+    expect(within(later).getByText('TCM')).toBeTruthy();
+    expect(within(later).queryByText(/channels/)).toBeNull();
+    // The search page's own limit, so its Programmes open from the cache.
+    expect(rpcMock.calls.find((c) => c.cmd === 'epg.search')?.args).toMatchObject({ limit: 50 });
+    fireEvent.click(rows[0]!);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/epg'));
+    expect((router.state.location.state as { guideHit: { ref: { itemId: string } } }).guideHit.ref.itemId).toBe('1');
   });
 });

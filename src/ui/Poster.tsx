@@ -7,7 +7,7 @@ import { cn } from './cn';
 import { useImageChain } from './image';
 import { gateImage, imageLoadedBefore, noteImageLoaded, resetImageGate } from './imageGate';
 import { pauseWhenOffscreen, releaseOffscreen } from './offscreen';
-import { tintFill } from './tint';
+import { TINT_DARK, TINT_THEME, tintVars } from './tint';
 
 export type PosterAspect = 'poster' | 'wide' | 'square';
 
@@ -48,6 +48,11 @@ export interface PosterProps {
    */
   fallbackSrc?: string | null;
   rounded?: 'sm' | 'md' | 'lg';
+  /**
+   * The fallback tile's tint: `theme` (the default) is pale in the light theme, `dark` keeps the
+   * deep stops in every theme, for a tile on glass (Home's hero).
+   */
+  tint?: 'theme' | 'dark';
 }
 
 const ASPECTS: Record<PosterAspect, string> = {
@@ -206,6 +211,7 @@ export function Poster({
   fallbackSrc,
   rounded = 'md',
   width,
+  tint = 'theme',
 }: PosterProps) {
   const railWidth = useContext(PosterWidthContext);
   const cellWidth = useContext(PosterCellWidthContext);
@@ -266,19 +272,19 @@ export function Poster({
         <div
           aria-hidden
           data-poster-fallback=""
-          className="absolute inset-0 flex flex-col items-center justify-center gap-1 [container-type:size]"
-          style={{ background: tintFill(fallbackText) }}
+          className={cn('absolute inset-0 flex flex-col items-center justify-center gap-1 [container-type:size]', tint === 'dark' ? TINT_DARK : TINT_THEME)}
+          style={tintVars(fallbackText)}
         >
           <span
             className={cn(
-              'font-display font-semibold tracking-wide text-white/90',
+              'font-display font-semibold tracking-wide',
               // text-3xl / text-2xl, with their line heights, capped by the tile.
               aspect === 'poster' ? 'text-[length:min(1.875rem,40cqmin)] leading-[1.2]' : 'text-[length:min(1.5rem,40cqmin)] leading-[calc(4/3)]',
             )}
           >
             {initialsOf(fallbackText)}
           </span>
-          <Glyph size={16} className="size-[min(16px,30cqmin)] shrink-0 text-white/60" />
+          <Glyph size={16} className="size-[min(16px,30cqmin)] shrink-0 opacity-65" />
         </div>
       )}
       {url && (

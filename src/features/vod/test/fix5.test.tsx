@@ -11,7 +11,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { LibraryCard } from '@/features/library/components/LibraryCard';
 import type { MovieEntry } from '@/features/library/lib/myvideos';
-import { hueOf } from '@/ui/Poster';
+import { nameHue } from '@/ui/tint';
 
 import { PosterCard } from '../components/PosterCard';
 import { PosterRail, railEdges } from '../components/PosterRail';
@@ -35,10 +35,10 @@ describe('F1: poster fallback tiles differ per title', () => {
     const a = tileOf('AR');
     const b = tileOf('BR');
     expect(a.getAttribute('aria-hidden')).toBe('true');
-    // jsdom reports the gradient in rgb; distinct hues give distinct tints.
-    expect(hueOf('Arrival')).not.toBe(hueOf('Blade Runner'));
-    expect(a.style.background).toContain('linear-gradient');
-    expect(a.style.background).not.toBe(b.style.background);
+    // Distinct hues give distinct tints (src/ui/tint.ts), on variables the theme picks from.
+    expect(nameHue('Arrival')).not.toBe(nameHue('Blade Runner'));
+    expect(a.style.getPropertyValue('--tint-dark')).toContain('linear-gradient');
+    expect(a.style.getPropertyValue('--tint-dark')).not.toBe(b.style.getPropertyValue('--tint-dark'));
   });
 
   it('keeps the image decorative and falls back to the title when it fails', () => {

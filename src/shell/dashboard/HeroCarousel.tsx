@@ -365,11 +365,12 @@ function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlid
       )}
       {/*
         No artwork at all: the title's own initials tile stands there instead, the one its card
-        shows in the rails, so the slide reads as that title rather than as an empty field.
+        shows in the rails, so the slide reads as that title rather than as an empty field. In its
+        deep stops in every theme: the hero is glass, and a pale tile there read as a hole in it.
       */}
       {image.failed && (
         <div data-hero-poster-fallback="" className={cn(HERO_UPRIGHT, 'overflow-hidden')}>
-          <Poster alt="" label={title} aspect="poster" kind={posterKind(s.ref)} rounded="lg" className="h-full after:hidden" />
+          <Poster alt="" label={title} aspect="poster" kind={posterKind(s.ref)} rounded="lg" tint="dark" className="h-full after:hidden" />
         </div>
       )}
     </div>

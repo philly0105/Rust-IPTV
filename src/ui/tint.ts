@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react';
+
 /**
  * One tint per name, for every tile that has no artwork: posters, channel monograms, source
  * monograms, Home's channel glow and hero, a detail page's wash. Every one of them calls this, so a
@@ -103,3 +105,18 @@ export function tintFill(name: string, scheme: TintScheme = 'dark'): string {
   const [a, b] = tintOf(name)[scheme];
   return `linear-gradient(160deg, ${a}, ${b})`;
 }
+
+/** The custom properties {@link TINT_THEME} and {@link TINT_DARK} read: both gradients and the light ink. */
+export function tintVars(name: string): CSSProperties {
+  return { '--tint-dark': tintFill(name, 'dark'), '--tint-light': tintFill(name, 'light'), '--tint-ink': tintOf(name).ink } as CSSProperties;
+}
+
+/**
+ * A tile in the name's tint ({@link tintVars} on the same element) with its initials in the right
+ * colour: white on the deep stops, and in the light theme the pale stops with the hue's own ink.
+ * Deep slabs were the heaviest things on the light theme's pale page.
+ */
+export const TINT_THEME = '[background-image:var(--tint-dark)] text-white/90 light:[background-image:var(--tint-light)] light:[color:var(--tint-ink)]';
+
+/** The deep stops in every theme, for a tile on glass or over video (Home's hero). */
+export const TINT_DARK = '[background-image:var(--tint-dark)] text-white/90';

@@ -10,7 +10,7 @@ import { MyListButtonView, type MyListButtonProps, type MyListButtonState } from
 import { isRunningPhase, progressFraction, useImportProgressFeed, useSourceProgress } from '@/features/sources/lib/progress';
 import { usePrefetchIntent, type PrefetchTarget } from '@/features/vod/hooks/prefetch';
 import { intlLocale, listSeparator } from '@/lib/intl';
-import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, Tooltip, cn, initialsOf, tintFill, tintOf, useImageChain, withAlpha } from '@/ui';
+import { CARD_ART, CARD_ROOT, MetaLine, Poster, PosterWidthContext, ProgressBar, QUARTER_BLUR, TINT_THEME, Tooltip, cn, initialsOf, tintOf, tintVars, useImageChain, withAlpha } from '@/ui';
 
 import type { RailCardProps } from './DashboardRail';
 import { sourceHomePath } from '../railLinks';
@@ -873,12 +873,15 @@ export function SourceCard({ rail, source }: { rail: RailCardProps; source: Sour
   return (
     <Link to={sourceHomePath(source)} {...rail} className={cardRoot}>
       <div
-        className={cn(CARD_ART, 'flex aspect-video w-full flex-col justify-between p-4')}
-        style={{ background: tintFill(source.name) }}
+        // The source's tint, pale in the light theme, as its monogram in the rail.
+        className={cn(CARD_ART, TINT_THEME, 'flex aspect-video w-full flex-col justify-between p-4')}
+        style={tintVars(source.name)}
       >
         {/* Decorative: the link's name reads the source name first, then its kind (sr-only below). */}
-        <span aria-hidden className="font-display text-4xl font-semibold text-white/90">{initialsOf(source.name)}</span>
-        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white">{t(kindShortKey(source.kind))}</span>
+        <span aria-hidden className="font-display text-4xl font-semibold">{initialsOf(source.name)}</span>
+        <span aria-hidden className="self-start rounded-sm bg-black/35 px-1.5 py-0.5 text-xs font-semibold text-white light:bg-white/70 light:text-fg">
+          {t(kindShortKey(source.kind))}
+        </span>
         {source.lastError && (
           <span aria-hidden className="absolute top-3 end-3 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-black/30" title={t('sourceHasError')} />
         )}

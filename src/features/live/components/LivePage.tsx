@@ -386,8 +386,8 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // ---- sidebar ------------------------------------------------------------
   // The groups are a column beside the list only where the page has room for four columns; on a
   // narrower window, or beside the expanded rail on a tablet, they open as a drawer from the toolbar.
-  const [pageEl, setPageEl] = useState<HTMLDivElement | null>(null);
-  const roomForGroups = useFitsWidth(pageEl, GROUPS_COLUMN_MIN_REM);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const roomForGroups = useFitsWidth(pageRef, GROUPS_COLUMN_MIN_REM);
   const wide = useMediaQuery('(min-width: 1024px)') && roomForGroups;
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -885,7 +885,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const sidebarVisible = wide && !collapsed;
 
   return (
-    <div ref={setPageEl} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
+    <div ref={pageRef} className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-bg md:flex-row" data-testid={isRadio ? 'radio-page' : 'live-page'}>
       {heading}
       {/* groups: a column where the page has room for it, else a drawer */}
       {sidebarVisible ? (

@@ -423,31 +423,89 @@ describe('groups drawer below 1024 px', () => {
 });
 
 describe('groups drawer on a narrow page (beside the expanded rail)', () => {
+  // The page's width reaches the hook through its ResizeObserver, as the browser reports it after
+  // layout; the harness's own stub reports nothing. These observers record what they watch, so a
+  // test can report a width for the Live page alone (the lists' observers stay silent).
+  const original = globalThis.ResizeObserver;
+  let observed: { cb: ResizeObserverCallback; ro: ResizeObserver; el: Element }[] = [];
+  beforeEach(() => {
+    observed = [];
+    globalThis.ResizeObserver = class {
+      constructor(private cb: ResizeObserverCallback) {}
+      observe(el: Element) {
+        observed.push({ cb: this.cb, ro: this as unknown as ResizeObserver, el });
+      }
+      unobserve() {}
+      disconnect() {
+        observed = observed.filter((o) => o.ro !== (this as unknown as ResizeObserver));
+      }
+    } as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    globalThis.ResizeObserver = original;
+  });
+  const reportPageWidth = (width: number) =>
+    act(() => {
+      for (const o of observed.filter((x) => (x.el as HTMLElement).dataset.testid === 'live-page')) {
+        o.cb([{ target: o.el, contentRect: { width } } as unknown as ResizeObserverEntry], o.ro);
+      }
+    });
+
   it('keeps the groups out of a page narrower than 60rem, behind the toolbar toggle, even on a wide window', async () => {
     // The harness answers every min-width query as matching (a wide window); the page itself is
     // 776 px wide, as beside the expanded rail in a 1024 px window.
-    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.dataset.testid === 'live-page' ? 776 : 0;
-    });
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
+    expect(observed.some((o) => (o.el as HTMLElement).dataset.testid === 'live-page')).toBe(true);
+    reportPageWidth(776);
     expect(screen.queryByRole('navigation', { name: 'Groups' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Show groups' }));
     const drawer = await screen.findByTestId('groups-drawer');
     expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
-    width.mockRestore();
   });
 
   it('shows the groups as a column once the page has room for them', async () => {
-    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
-      return this.dataset.testid === 'live-page' ? 1032 : 0;
-    });
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
+    reportPageWidth(1032);
     expect(screen.getByRole('navigation', { name: 'Groups' })).toBeTruthy();
     expect(screen.queryByTestId('groups-drawer')).toBeNull();
     expect(screen.getByRole('button', { name: 'Hide groups' })).toBeTruthy();
-    width.mockRestore();
+  });
+
+  it('reads no layout from the page while it mounts', async () => {
+    // A read in the mount's commit forces the new page's whole layout there (P2-LIVE-1).
+    // Other elements still answer as before; only reads of the page itself are recorded.
+    const reads: string[] = [];
+    const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!.get!;
+    const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')!.get!;
+    const rect = Element.prototype.getBoundingClientRect;
+    const spies = [
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === 'live-page') reads.push('clientWidth');
+        return clientWidth.call(this) as number;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === 'live-page') reads.push('offsetWidth');
+        return offsetWidth.call(this) as number;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        if (this.dataset.testid === 'live-page') reads.push('getBoundingClientRect');
+        return rect.call(this);
+      }),
+    ];
+    try {
+      renderIn('/s/src1/live', LIVE);
+      await screen.findByText('Channel 0');
+      expect(reads).toEqual([]);
+      // Before the observer reports, the page keeps its wide layout; its report moves the groups.
+      expect(screen.getByRole('navigation', { name: 'Groups' })).toBeTruthy();
+      reportPageWidth(776);
+      expect(screen.queryByRole('navigation', { name: 'Groups' })).toBeNull();
+      expect(reads).toEqual([]);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 });
 

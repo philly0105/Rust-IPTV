@@ -9,7 +9,7 @@
  * - Channel: Copy link, Rename / Reset name / Hide, Match guide channel, Lock.
  */
 
-import { Copy, ExternalLink, History, Link2, Play, Star } from 'lucide-react';
+import { Copy, ExternalLink, Heart, History, Link2, Play } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
@@ -130,7 +130,7 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
       {
         id: 'fav',
         label: favorite ? t('removeFavorite') : t('addFavorite'),
-        icon: <Star className="size-4" fill={favorite ? 'currentColor' : 'none'} />,
+        icon: <Heart className="size-4" fill={favorite ? 'currentColor' : 'none'} />,
         // Until the answer is in, the entry would not know which way it goes.
         disabled: favorite === undefined,
         onSelect: () => onToggleFavorite(ch, !!favorite),

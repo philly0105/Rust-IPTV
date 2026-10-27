@@ -36,6 +36,11 @@ export interface LiveStageColumnProps {
  *
  * On a phone the stage is on top, as wide as the screen. Nothing playing is a slim bar above the
  * list, not a black 16:9 box (L2-visual-13); the ribbon comes with playback (L3-visual-4).
+ *
+ * A phone held sideways (a touch screen under 30rem tall) gets this column beside the list too,
+ * but with a 330 px column the rule above left a 68 px picture under a full ribbon, and cut the
+ * idle card. There the screen keeps its 16:9 and the ribbon, at its full height, scrolls in what
+ * is left, so its timeline and catch-up stay in reach.
  */
 export function LiveStageColumn(props: LiveStageColumnProps) {
   const { busy, Stage = PlayerStage } = props;
@@ -52,7 +57,7 @@ export function LiveStageColumn(props: LiveStageColumnProps) {
         data-testid={props.stageTestId}
         data-idle={busy ? undefined : ''}
         className={cn(
-          'relative min-h-0 bg-black md:aspect-video md:shrink',
+          'relative min-h-0 bg-black md:aspect-video md:shrink pointer-coarse:[@media(max-height:30rem)]:md:shrink-0!',
           busy ? 'aspect-video' : 'max-md:h-14 max-md:border-b max-md:border-divider max-md:bg-surface-2',
         )}
       >
@@ -62,7 +67,13 @@ export function LiveStageColumn(props: LiveStageColumnProps) {
       {/* Beside the list the ribbon's surface runs on to the bottom of the column. */}
       <div
         data-testid={props.ribbonTestId}
-        className={cn(props.ribbonOnPhone ? 'max-md:contents' : 'max-md:hidden', 'md:flex md:min-h-0 md:shrink-0 md:grow md:flex-col md:bg-surface')}
+        className={cn(
+          props.ribbonOnPhone ? 'max-md:contents' : 'max-md:hidden',
+          'md:flex md:min-h-0 md:shrink-0 md:grow md:flex-col md:bg-surface',
+          // Block flow there, so the ribbon keeps its full height (timeline included) and scrolls in
+          // here, instead of a flex child squeezed to what is left and its timeline cut to nothing.
+          'pointer-coarse:[@media(max-height:30rem)]:md:block pointer-coarse:[@media(max-height:30rem)]:md:shrink! pointer-coarse:[@media(max-height:30rem)]:md:overflow-y-auto',
+        )}
       >
         {props.ribbon}
       </div>

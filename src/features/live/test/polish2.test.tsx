@@ -12,6 +12,7 @@ import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { queryClient } from '@/api/query';
+import common from '@/i18n/en/common.json';
 import { joinList } from '@/shell/dashboard/cards';
 import type { Category, Channel, EpgNowNext, Page, PageQuery } from '@/api/types';
 
@@ -398,12 +399,26 @@ describe('groups sidebar', () => {
   });
 });
 
+/** A window `width` px wide: min-width queries up to it match. */
+function windowWidth(width: number) {
+  return vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) =>
+      ({
+        matches: Number(/min-width:\s*(\d+)/.exec(query)?.[1] ?? Infinity) <= width,
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent: () => false,
+      }) as unknown as MediaQueryList,
+  );
+}
+
 describe('groups drawer below 1024 px', () => {
   it('moves focus in on open, traps Tab, and gives focus back to the toggle on Escape', async () => {
-    const narrow = vi.spyOn(window, 'matchMedia').mockImplementation(
-      (query: string) =>
-        ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as unknown as MediaQueryList,
-    );
+    const narrow = windowWidth(900);
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
     const toggle = screen.getByRole('button', { name: 'Show groups' });
@@ -419,6 +434,42 @@ describe('groups drawer below 1024 px', () => {
     await waitFor(() => expect(screen.queryByTestId('groups-drawer')).toBeNull());
     expect(document.activeElement).toBe(toggle);
     narrow.mockRestore();
+  });
+
+  it('names the group on the groups button below 768 px, where the header has no room for it', async () => {
+    const phone = windowWidth(390);
+    // The phone's search placeholder is the shared "Search" (common.json); the harness loads live only.
+    i18n.addResourceBundle('en', 'common', common);
+    rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: 200 }), cat(2, { name: 'US| SPORTS', itemCount: 200 })];
+    renderIn('/s/src1/live/g2', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
+    await screen.findByText('Channel 0');
+    const toggle = await screen.findByRole('button', { name: /^Groups:\s*US\| SPORTS$/ });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    // A long name truncates the label, never the icon.
+    expect(toggle.querySelector('.lucide-list-tree')?.getAttribute('class')).toContain('shrink-0');
+    // The button names the group, so the search field beside it says only "Search" and leaves the
+    // button room for a long name. Its accessible name still says what it searches.
+    const field = screen.getByRole('searchbox', { name: 'Search channels' });
+    expect(field.getAttribute('placeholder')).toBe('Search');
+    // The field keeps room for that whole word; the name is what gives way.
+    expect(field.parentElement?.className).toContain('min-w-32');
+    fireEvent.click(toggle);
+    const drawer = await screen.findByTestId('groups-drawer');
+    expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    i18n.removeResourceBundle('en', 'common');
+    phone.mockRestore();
+  });
+
+  it('keeps the groups button an icon from 768 px, where the header names the group', async () => {
+    const tablet = windowWidth(900);
+    rpcMock.handlers['catalog.categories'] = () => [cat(1, { name: 'News', itemCount: 200 }), cat(2, { name: 'US| SPORTS', itemCount: 200 })];
+    renderIn('/s/src1/live/g2', [{ path: '/s/:sourceId/live/:categoryId', element: <LivePage /> }]);
+    await screen.findByText('Channel 0');
+    expect(screen.getByRole('button', { name: 'Show groups' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Groups:/ })).toBeNull();
+    expect(screen.getByRole('searchbox', { name: 'Search channels' }).getAttribute('placeholder')).toBe('Search in US| SPORTS');
+    tablet.mockRestore();
   });
 });
 
@@ -1148,7 +1199,7 @@ describe('guide ribbon follows the list it came from (round 3)', () => {
     // ribbon leaves its own Watch live out.
     await waitFor(() => expect(screen.getByTestId('ribbon-header').textContent).toContain(`Channel ${row}`));
     expect(screen.getByTestId('stage-idle-caption').textContent).toBe('Highlighted');
-    expect(screen.getByTestId('stage-resume').textContent).toContain(`Play Channel ${row}`);
+    expect(screen.getByTestId('stage-resume').getAttribute('aria-label')).toBe(`Play Channel ${row}`);
     expect(screen.queryByTestId('ribbon-back-to-live')).toBeNull();
   };
 

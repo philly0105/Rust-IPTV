@@ -279,7 +279,9 @@ describe('the idle stage (CB-AUTOPLAY-LAST)', () => {
     ];
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     const resume = await screen.findByTestId('stage-resume');
-    expect(resume.textContent).toContain('Resume Channel 7');
+    expect(resume.getAttribute('aria-label')).toBe('Resume Channel 7');
+    // The name is right above it: the button itself says only what a press does.
+    expect(resume.textContent).toBe('Resume');
     expect((rpcMock.calls.find((c) => c.cmd === 'recent.list')!.args as { sourceId: string }).sourceId).toBe('src1');
     fireEvent.click(resume);
     await waitFor(() => expect(fakes.recorded.playItem.at(-1)).toMatchObject({ ref: makeChannel(7).ref }));

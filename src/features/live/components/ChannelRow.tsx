@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import { EllipsisVertical, History, Lock, Star } from 'lucide-react';
+import { EllipsisVertical, Heart, History, Lock } from 'lucide-react';
 import { memo, type MouseEvent, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -82,7 +82,7 @@ export function RowSkeleton({ pulse = false }: { pulse?: boolean }) {
  * focus (a click's focus does not count, or the clicked row would keep them up), and always on
  * touch screens, where nothing hovers. A mouse at rest sees a clean row; the title runs on under
  * where they appear. On touch they sit in the row's flow, so they never cover the time, and only
- * the ⋮ stays: the star is one of its items.
+ * the ⋮ stays: the heart is one of its items.
  */
 const ROW_ACTIONS =
   'absolute inset-y-0 end-1.5 my-auto flex h-fit items-center gap-0.5 rounded-lg border border-edge bg-surface-2 p-0.5 opacity-0 shadow-2 group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 pointer-coarse:static pointer-coarse:me-1 pointer-coarse:border-transparent pointer-coarse:bg-transparent pointer-coarse:opacity-100 pointer-coarse:shadow-none';
@@ -150,7 +150,7 @@ function countedText(t: TFunction<'live'>, key: 'archiveDays' | 'minutesLeft' | 
  * object as last render is not rendered again, so a row's re-render skips its lucide icons.
  */
 const FAVORITE_MARK = (
-  <Star
+  <Heart
     data-testid="row-favorite"
     aria-hidden
     size={12}
@@ -158,8 +158,8 @@ const FAVORITE_MARK = (
   />
 );
 const LOCKED_MARK = <Lock data-testid="row-locked" aria-hidden size={12} className="shrink-0 text-fg-subtle" />;
-const STAR_ON = <Star size={16} className="fill-current text-fg" />;
-const STAR_OFF = <Star size={16} />;
+const HEART_ON = <Heart size={16} className="fill-current text-fg" />;
+const HEART_OFF = <Heart size={16} />;
 const MENU_ICON = <EllipsisVertical size={16} />;
 
 /** A channel row that reads the UI language itself; ChannelList's rows take the list's (ListChannelRow). */
@@ -239,7 +239,7 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
             </span>
             {/* Marks, not slots: an empty row gives their room to the title. */}
             {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
-                It steps aside while the floating actions show their own star. */}
+                It steps aside while the floating actions show their own heart. */}
             {favorite ? FAVORITE_MARK : null}
             {archive ? (
               <span
@@ -328,10 +328,10 @@ const RowActions = memo(function RowActions({
         label={text.favorite}
         tooltip={favorite ? text.removeFavorite : text.addFavorite}
         shortcut="s"
-        icon={favorite ? STAR_ON : STAR_OFF}
+        icon={favorite ? HEART_ON : HEART_OFF}
         onClick={() => onToggleFavorite(channel, favorite)}
-        // A pressed toggle draws the selected fill; the filled star says enough here. On touch the
-        // actions sit in the row's flow, so a 44 px star beside the ⋮ cut a tablet's narrow list to
+        // A pressed toggle draws the selected fill; the filled heart says enough here. On touch the
+        // actions sit in the row's flow, so a 44 px heart beside the ⋮ cut a tablet's narrow list to
         // "M…": the ⋮ menu (and a long press) has Add to favorites, and the row keeps its mark.
         className={cn('aria-pressed:bg-transparent hover:bg-hover', onMenuAt ? 'pointer-coarse:hidden' : 'pointer-coarse:max-sm:hidden')}
       />

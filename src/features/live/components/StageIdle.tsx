@@ -113,16 +113,18 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
               </div>
             ) : null}
           </div>
+          {/* The name is right above the button, so it says only what a press does; its
+              accessible name keeps the channel ("Resume US| ABC HD"). */}
           <Button
             variant="primary"
             size="md"
             icon={<Play size={16} className="fill-current" />}
             className="mt-2 max-w-full max-md:mt-0 max-md:shrink-0"
             onClick={() => onResume?.(channel)}
+            aria-label={t(highlighted ? 'playChannel' : 'resumeChannel', { name })}
             data-testid="stage-resume"
           >
-            <span className="truncate max-md:hidden">{t(highlighted ? 'playChannel' : 'resumeChannel', { name })}</span>
-            <span className="md:hidden">{t(highlighted ? 'play' : 'resume')}</span>
+            {t(highlighted ? 'play' : 'resume')}
           </Button>
           <p className={cn('mt-1 text-caption text-on-glass-muted max-md:hidden', LOW_STAGE)} data-testid="stage-idle-hint">
             {hint ?? t(kind === 'radio' ? 'radioIdleHint' : 'stageIdleHint')}

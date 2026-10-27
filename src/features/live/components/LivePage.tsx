@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Star, Tv } from 'lucide-react';
+import { CalendarClock, ChevronDown, Heart, History, ListPlus, ListTree, Lock, Radio as RadioIcon, Search, Tv } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -391,6 +391,9 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   const pageRef = useRef<HTMLDivElement>(null);
   const roomForGroups = useFitsWidth(pageRef, GROUPS_COLUMN_MIN_REM);
   const wide = useMediaQuery('(min-width: 1024px)') && roomForGroups;
+  // Below md the header has no room for its subtitle, so the group is named on the toolbar's
+  // groups button instead (on a phone it showed nowhere but the search field's placeholder).
+  const groupOnToolbar = !useMediaQuery('(min-width: 768px)');
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_KEY) === '1';
@@ -559,7 +562,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   });
 
   // ---- favorites & menu -----------------------------------------------------
-  // The star flips at once; the core's answer (or a failure) settles it. One toggle per channel is
+  // The heart flips at once; the core's answer (or a failure) settles it. One toggle per channel is
   // in flight at a time, so a double click cannot add and remove in a race.
   const [favOverrides, setFavOverrides] = useState<ReadonlyMap<ItemKey, boolean>>(() => new Map());
   const favInFlight = useRef(new Set<ItemKey>());
@@ -658,7 +661,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   // LG-12: Favorites and Recently watched sit above All channels (one array, so the memoised sidebar stays put).
   const pinnedViews = useMemo(
     () => [
-      { id: LIVE_VIEW_ID.favorites, label: t('favoritesGroup'), icon: <Star size={14} /> },
+      { id: LIVE_VIEW_ID.favorites, label: t('favoritesGroup'), icon: <Heart size={14} /> },
       { id: LIVE_VIEW_ID.recent, label: t('recentGroup'), icon: <History size={14} /> },
     ],
     [t],
@@ -798,7 +801,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
   } else if (listEmpty && liveView) {
     listBody = (
       <EmptyState
-        icon={liveView === 'favorites' ? <Star className="size-6" /> : <History className="size-6" />}
+        icon={liveView === 'favorites' ? <Heart className="size-6" /> : <History className="size-6" />}
         title={liveView === 'favorites' ? t(isRadio ? 'favoritesEmptyStations' : 'favoritesEmpty') : t('recentEmpty')}
         description={liveView === 'favorites' ? t('favoritesEmptyHint') : t('recentEmptyHint')}
         action={
@@ -910,23 +913,53 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
         </>
       ) : null}
 
-      {/* channel list: beside the stage from 768 px, under it on a phone */}
+      {/*
+        channel list: beside the stage from 768 px, under it on a phone. Its width is a share of
+        the page, not of the window: by the window (34vw) the list sat at its 400 px cap on a
+        1280 px window, where the rail and the groups column already take a third of it, and left
+        the stage about 390 px (a 220 px tall picture). 300 px at the least, so a touch row keeps
+        its name beside the menu button.
+      */}
       <section
         aria-label={isRadio ? t('stations') : t('channels')}
-        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(272px,34vw,400px)] md:min-w-60 md:flex-initial md:border-e"
+        className="flex min-h-0 w-full flex-1 flex-col border-divider bg-surface md:w-[clamp(300px,32%,400px)] md:min-w-60 md:flex-initial md:border-e"
         onFocus={onListFocus}
       >
         <div className="flex items-center gap-1 border-b border-divider px-2 py-2">
-          <IconButton
-            size="sm"
-            label={sidebarVisible || drawerOpen ? t('hideGroups') : t('showGroupsPanel')}
-            aria-expanded={sidebarVisible || drawerOpen}
-            icon={<ListTree className="size-4" />}
-            onClick={toggleSidebar}
-          />
+          {groupOnToolbar ? (
+            // The group being browsed, as the button that changes it: one press opens the groups.
+            <Button
+              variant="ghost"
+              size="sm"
+              className="max-w-[55%] min-w-0 shrink gap-1.5 px-2"
+              // A long group name shrinks the label, never the icon.
+              icon={<ListTree className="size-4 shrink-0" />}
+              aria-expanded={drawerOpen}
+              aria-haspopup="dialog"
+              onClick={toggleSidebar}
+              data-testid="live-groups-toggle"
+            >
+              <span className="sr-only">{`${t('groups')}: `}</span>
+              <span dir="auto" className="truncate">
+                {subtitle}
+              </span>
+              <ChevronDown aria-hidden className="size-4 shrink-0 text-fg-muted" />
+            </Button>
+          ) : (
+            <IconButton
+              size="sm"
+              label={sidebarVisible || drawerOpen ? t('hideGroups') : t('showGroupsPanel')}
+              aria-expanded={sidebarVisible || drawerOpen}
+              icon={<ListTree className="size-4" />}
+              onClick={toggleSidebar}
+              data-testid="live-groups-toggle"
+            />
+          )}
           <SearchInput
             size="sm"
-            className="min-w-0 flex-1"
+            // Beside the group's name the field keeps room for its whole "Search"; a long name is
+            // what gives way on a narrow phone.
+            className={groupOnToolbar ? 'min-w-32 flex-1' : 'min-w-0 flex-1'}
             value={search}
             // Clearing (the clear button) commits at once, like Escape.
             onChange={(v) => (v === '' ? clearSearch() : setSearch(v))}
@@ -949,7 +982,15 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
               }
             }}
             ref={searchRef}
-            placeholder={category ? t('searchInGroup', { group: category.name }) : t(isRadio ? 'searchStations' : 'searchChannels')}
+            // On a narrow page the groups button beside it names the group, so the field says only
+            // "Search" and leaves the button room for a long name ("UK| ENTERTAINMENT").
+            placeholder={
+              groupOnToolbar
+                ? t('common:search')
+                : category
+                  ? t('searchInGroup', { group: category.name })
+                  : t(isRadio ? 'searchStations' : 'searchChannels')
+            }
             label={t(isRadio ? 'searchStations' : 'searchChannels')}
           />
           {/* Radio has no picture: its stations are never filtered by quality. */}

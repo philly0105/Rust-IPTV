@@ -261,7 +261,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
               </p>
               {details ? (
                 // The airing programme's progress; the row keeps its height for the others.
-                <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full max-w-sm overflow-hidden rounded-full bg-surface-3 md:block', shownWhen !== 'now' && 'md:invisible')}>
+                <span aria-hidden className={cn('relative my-1.5 hidden h-[3px] w-full overflow-hidden rounded-full bg-surface-3 md:block', shownWhen !== 'now' && 'md:invisible')}>
                   <span className="absolute inset-y-0 start-0 rounded-full bg-accent-mark" style={{ width: `${shownWhen === 'now' ? programProgress(shown, now) * 100 : 0}%` }} />
                 </span>
               ) : null}

@@ -79,7 +79,7 @@ export function MyVideosPage() {
   const location = useLocation();
   const [params, setParams] = useSearchParams();
   const query = useMyVideos();
-  const { byId: sources } = useSourcesById();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const [search, setSearch] = useState(() => params.get('q') ?? '');
   const rawFilter = params.get('filter');
   const filter: LibraryFilter = isFilter(rawFilter) ? rawFilter : 'all';
@@ -206,7 +206,7 @@ export function MyVideosPage() {
               {t('openQueue')}
             </Link>
           ) : (
-            <BrowseMoviesAction sources={sources} />
+            <BrowseMoviesAction sources={sources} loading={sourcesLoading} />
           )
         }
       />

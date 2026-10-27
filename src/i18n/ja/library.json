@@ -307,5 +307,6 @@
   "browseMovies": "映画を見る",
   "removeFromFavorites": "お気に入りから削除",
   "removeFromHistory": "履歴から削除",
-  "minutesLeftShort": "{{count}}分"
+  "minutesLeftShort": "{{count}}分",
+  "browseSeries": "シリーズを見る"
 }

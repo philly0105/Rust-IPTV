@@ -307,5 +307,6 @@
   "browseMovies": "Filmek böngészése",
   "removeFromFavorites": "Eltávolítás a kedvencek közül",
   "removeFromHistory": "Eltávolítás az előzményekből",
-  "minutesLeftShort": "{{count}} p"
+  "minutesLeftShort": "{{count}} p",
+  "browseSeries": "Sorozatok böngészése"
 }

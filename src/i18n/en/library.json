@@ -307,5 +307,6 @@
   "browseMovies": "Browse movies",
   "removeFromFavorites": "Remove from favorites",
   "removeFromHistory": "Remove from history",
-  "minutesLeftShort": "{{count}}m"
+  "minutesLeftShort": "{{count}}m",
+  "browseSeries": "Browse series"
 }

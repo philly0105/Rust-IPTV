@@ -307,5 +307,6 @@
   "browseMovies": "Films bekijken",
   "removeFromFavorites": "Verwijderen uit favorieten",
   "removeFromHistory": "Verwijderen uit geschiedenis",
-  "minutesLeftShort": "{{count}} min"
+  "minutesLeftShort": "{{count}} min",
+  "browseSeries": "Series bekijken"
 }

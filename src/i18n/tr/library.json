@@ -307,5 +307,6 @@
   "browseMovies": "Filmlere göz at",
   "removeFromFavorites": "Favorilerden kaldır",
   "removeFromHistory": "Geçmişten kaldır",
-  "minutesLeftShort": "{{count}} dk"
+  "minutesLeftShort": "{{count}} dk",
+  "browseSeries": "Dizilere göz at"
 }

@@ -307,5 +307,6 @@
   "browseMovies": "영화 둘러보기",
   "removeFromFavorites": "즐겨찾기에서 삭제",
   "removeFromHistory": "시청 기록에서 삭제",
-  "minutesLeftShort": "{{count}}분"
+  "minutesLeftShort": "{{count}}분",
+  "browseSeries": "시리즈 둘러보기"
 }

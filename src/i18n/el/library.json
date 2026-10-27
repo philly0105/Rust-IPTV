@@ -307,5 +307,6 @@
   "browseMovies": "Περιήγηση ταινιών",
   "removeFromFavorites": "Αφαίρεση από τα αγαπημένα",
   "removeFromHistory": "Αφαίρεση από το ιστορικό",
-  "minutesLeftShort": "{{count}} λεπ."
+  "minutesLeftShort": "{{count}} λεπ.",
+  "browseSeries": "Περιήγηση σειρών"
 }

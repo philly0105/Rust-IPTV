@@ -33,6 +33,8 @@ export type { MenuItem, TabsProps } from '@/ui';
 export { useShell, useShortcut } from '@/shell';
 // From its own module, not the barrel: the shared settings query alone (tests stub the barrel).
 export { useSettings } from '@/shell/useSettings';
+// The rail's rule for which sections a source has, so an empty page links only to one the rail shows.
+export { railLinkIds } from '@/shell/railLinks';
 export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 // live: a channel's logo tile (or monogram), so Favorites and Recently watched draw a channel as Live TV does.
 export { ChannelLogo } from '@/features/live/components/ChannelLogo';

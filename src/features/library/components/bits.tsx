@@ -11,7 +11,7 @@ import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 import { SourceMonogram as Monogram } from '@/ui/SourceMonogram';
 
-import { Badge, Button, Dialog, SectionHeader } from '../deps';
+import { Badge, Button, Dialog, SectionHeader, railLinkIds } from '../deps';
 
 /**
  * Source provenance: the rail's monogram (same hue, so a source is recognised at a glance) and
@@ -163,22 +163,30 @@ export function BrowseAction({ sourceId, sources, loading }: { sourceId?: string
 
 /**
  * Empty-state action for Downloads and My Videos: downloads start from a movie's or an episode's
- * page, so the way in is the catalogue, not the other offline page (which is empty too). With no
- * source yet it leads to adding one, as BrowseAction does.
+ * page, so the way in is the catalogue, not the other offline page (which is empty too). It opens
+ * the first source whose Movies the rail shows, else the first with Series; a live-only setup gets
+ * BrowseAction's channels, and no source at all leads to adding one. Like BrowseAction it renders
+ * nothing while sources load, so a deep link never flashes "Add a source".
  */
-export function BrowseMoviesAction({ sources }: { sources: ReadonlyMap<string, Source> }) {
+export function BrowseMoviesAction({ sources, loading }: { sources: ReadonlyMap<string, Source>; loading?: boolean }) {
   const { t } = useTranslation('library');
-  const target = sources.keys().next().value;
-  if (target) {
+  if (loading) return null;
+  const list = [...sources.values()];
+  const movies = list.find((s) => railLinkIds(s).includes('movies'));
+  if (movies) {
     return (
-      <Link to={`/s/${encodeURIComponent(target)}/movies`} className={buttonClass('primary', 'md')} data-testid="library-empty-movies">
+      <Link to={`/s/${encodeURIComponent(movies.id)}/movies`} className={buttonClass('primary', 'md')} data-testid="library-empty-movies">
         {t('browseMovies')}
       </Link>
     );
   }
-  return (
-    <Link to="/sources" className={buttonClass('primary', 'md')} data-testid="library-empty-add-source">
-      {t('addSourceAction')}
-    </Link>
-  );
+  const series = list.find((s) => railLinkIds(s).includes('series'));
+  if (series) {
+    return (
+      <Link to={`/s/${encodeURIComponent(series.id)}/series`} className={buttonClass('primary', 'md')} data-testid="library-empty-series">
+        {t('browseSeries')}
+      </Link>
+    );
+  }
+  return <BrowseAction sources={sources} />;
 }

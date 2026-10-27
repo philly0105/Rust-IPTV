@@ -343,5 +343,6 @@
   "browseMovies": "Смотреть фильмы",
   "removeFromFavorites": "Удалить из избранного",
   "removeFromHistory": "Удалить из истории",
-  "minutesLeftShort": "{{count}} мин"
+  "minutesLeftShort": "{{count}} мин",
+  "browseSeries": "Смотреть сериалы"
 }

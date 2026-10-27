@@ -213,6 +213,38 @@ describe('DownloadsPage', () => {
     expect(browse.getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
   });
 
+  it('opens the first source whose Movies the rail shows, then one with series, then the channels', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    // A live-only playlist comes first: the rail has no Movies for it, so the link passes it by.
+    const liveOnly = { id: 'live-only', kind: 'm3u', name: 'Live only', movieCount: 0, seriesCount: 0 };
+    rpc.handlers['sources.list'] = () => [liveOnly, { id: 'vod', kind: 'm3u', name: 'VOD', movieCount: 12, seriesCount: 3 }];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect((await screen.findByRole('link', { name: 'Browse movies' })).getAttribute('href')).toBe('/s/vod/movies');
+    cleanup();
+
+    rpc.handlers['sources.list'] = () => [liveOnly, { id: 'shows', kind: 'm3u', name: 'Shows', movieCount: 0, seriesCount: 4 }];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect((await screen.findByRole('link', { name: 'Browse series' })).getAttribute('href')).toBe('/s/shows/series');
+    cleanup();
+
+    rpc.handlers['sources.list'] = () => [liveOnly];
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect((await screen.findByRole('link', { name: 'Browse channels' })).getAttribute('href')).toBe('/s/live-only/live');
+    expect(screen.queryByRole('link', { name: 'Browse movies' })).toBeNull();
+  });
+
+  it('offers no way in until the sources load, so a deep link never flashes Add a source', async () => {
+    rpc.handlers['downloads.list'] = () => [];
+    let answer!: (v: unknown) => void;
+    rpc.handlers['sources.list'] = () => new Promise((resolve) => (answer = resolve));
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    expect(await screen.findByText('Nothing is downloading')).toBeTruthy();
+    expect(screen.queryByTestId('library-empty-add-source')).toBeNull();
+    expect(screen.queryByTestId('library-empty-movies')).toBeNull();
+    answer(sources);
+    expect((await screen.findByRole('link', { name: 'Browse movies' })).getAttribute('href')).toBe(`/s/${sources[0]!.id}/movies`);
+  });
+
   it('shows the empty state when only completed items remain', async () => {
     rpc.handlers['downloads.list'] = () => [list[3]];
     renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);

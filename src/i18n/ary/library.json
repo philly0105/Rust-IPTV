@@ -379,5 +379,6 @@
   "browseMovies": "تصفح الأفلام",
   "removeFromFavorites": "حيد من المفضلة",
   "removeFromHistory": "حيد من السجل",
-  "minutesLeftShort": "{{count}} د"
+  "minutesLeftShort": "{{count}} د",
+  "browseSeries": "تصفح السلاسل"
 }

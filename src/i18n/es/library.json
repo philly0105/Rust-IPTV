@@ -325,5 +325,6 @@
   "browseMovies": "Explorar películas",
   "removeFromFavorites": "Quitar de favoritos",
   "removeFromHistory": "Quitar del historial",
-  "minutesLeftShort": "{{count}} min"
+  "minutesLeftShort": "{{count}} min",
+  "browseSeries": "Explorar series"
 }

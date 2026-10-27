@@ -36,7 +36,7 @@ function focusedDownloadId(): number | undefined {
 export function DownloadsPage() {
   const { t, i18n } = useTranslation('library');
   const query = useDownloads();
-  const { byId: sources } = useSourcesById();
+  const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const { pending, perform } = useDownloadActions();
 
   const [confirm, setConfirm] = useState<Pending | null>(null);
@@ -198,7 +198,7 @@ export function DownloadsPage() {
             </Link>
           ) : (
             // Nothing saved either: the catalogue, where a download starts.
-            <BrowseMoviesAction sources={sources} />
+            <BrowseMoviesAction sources={sources} loading={sourcesLoading} />
           )
         }
       />

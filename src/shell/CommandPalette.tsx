@@ -356,12 +356,35 @@ function useStartItems(query: string, open: boolean): PaletteItem[] {
   }, [empty, sources.data, recent.data, resume.data, t]);
 }
 
-/** Most guide programmes the palette lists for one query. */
+/** Most guide programmes the palette lists for one query: distinct shows, after folding. */
 const PROGRAMME_LIMIT = 5;
+/**
+ * Hits asked of each source: the Search page's own Programmes limit (`PROGRAMME_LIMIT` in
+ * SearchPage.tsx), so "Search for" opens on answers already in the cache, and enough that five
+ * distinct shows remain after a show on many channels at once folds into one row.
+ */
+const PROGRAMME_REQUEST_LIMIT = 50;
+
+/**
+ * Programme hits folded by title and start (one show on several channels at once), in first-hit
+ * order, each with how many channels carry it. Exported for tests.
+ */
+export function foldProgrammeHits<H extends { program: { title: string; start: string } }>(hits: readonly H[], limit: number): { hit: H; channels: number }[] {
+  const rows = new Map<string, { hit: H; channels: number }>();
+  for (const hit of hits) {
+    const key = `${hit.program.title.trim().toLowerCase()}\u0000${ms(hit.program.start)}`;
+    const row = rows.get(key);
+    if (row) row.channels += 1;
+    else if (rows.size < limit) rows.set(key, { hit, channels: 1 });
+  }
+  return [...rows.values()];
+}
 
 /**
  * Guide programmes whose titles match the query (`epg.search` of each source, after a pause in
- * typing, only while the palette is open). One opens the guide at the programme.
+ * typing, only while the palette is open). One opens the guide at the programme. A show on many
+ * channels at once ("Inside the NBA" at 9:00 on six) is one row that counts the channels and
+ * opens the guide at the first, where the others share its time column.
  */
 function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
   const { t, i18n } = useTranslation('shell');
@@ -370,13 +393,13 @@ function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
   const prefs = useDisplayPrefs();
   const debounced = useDebounced(query.trim(), 200);
   const ids = useMemo(() => (sources.data ?? []).map((s) => s.id), [sources.data]);
-  const { hits } = useProgrammeSearch(ids, debounced, { enabled: open, limit: PROGRAMME_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
+  const { hits } = useProgrammeSearch(ids, debounced, { enabled: open, limit: PROGRAMME_REQUEST_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
 
   return useMemo(() => {
     if (!query.trim()) return [];
     const group = t('groupProgrammes');
     const lang = i18n.language;
-    return hits.map((hit): PaletteItem => {
+    return foldProgrammeHits(hits, PROGRAMME_LIMIT).map(({ hit, channels }): PaletteItem => {
       const at = ms(hit.program.start);
       const link = guideHitLink(hit);
       return {
@@ -384,7 +407,7 @@ function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
         title: hit.program.title,
         group,
         icon: CalendarRange,
-        detail: [`${formatDay(at, lang)} ${formatClock(at, lang)}`, displayChannelName(hit.channelName, prefs.stripCountryPrefix)],
+        detail: [`${formatDay(at, lang)} ${formatClock(at, lang)}`, channels > 1 ? t('countChannels', { count: channels }) : displayChannelName(hit.channelName, prefs.stripCountryPrefix)],
         // The core matched the title with diacritics folded ("cafe" finds "Café"), which the
         // palette's own filter does not: the typed words count as its keywords.
         keywords: [debounced],

@@ -23,7 +23,7 @@ import { MovieDetailPage } from '../pages/MovieDetailPage';
 import { SearchPage } from '../pages/SearchPage';
 import { SeriesDetailPage } from '../pages/SeriesDetailPage';
 import { CATEGORY_CHIP_LIMIT, CATEGORY_INDEX_KEY, VodLandingPage } from '../pages/VodLandingPage';
-import { i18n, installDomStubs, makeSource, openHeroMenu, renderAt, settings } from './harness';
+import { currentLocation, i18n, installDomStubs, makeSource, openHeroMenu, renderAt, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -263,6 +263,60 @@ describe('search programmes', () => {
     const tomorrow = within(list).getAllByRole('list')[1]!;
     expect(tomorrow.getAttribute('aria-labelledby')).toBe(within(list).getAllByTestId('search-programme-day')[1]!.id);
     expect(within(tomorrow).getAllByRole('button')).toHaveLength(2);
+  });
+});
+
+describe('search programmes on several channels', () => {
+  it('fold a show airing on several channels at once into one row, with a link to each other channel', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    /** Hit `i`, starting `minutes` from now. */
+    const at = (i: number, minutes: number): GuideSearchHit => {
+      const hit = programme(i, 0, 0, 0);
+      const start = Date.now() + minutes * 60_000;
+      return { ...hit, program: { ...hit.program, start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() } };
+    };
+    // On the air now on three channels (one start), and later on a fourth.
+    const now = at(1, -10);
+    const airing = [now, { ...at(2, 0), program: { ...now.program, channelId: 'c2' } }, { ...at(3, 0), program: { ...now.program, channelId: 'c3' } }];
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : [...airing, at(4, 120)]);
+    renderAt('/search?q=harbor&type=programmes', [
+      { path: '/search', element: <SearchPage /> },
+      { path: '/epg', element: <p>guide page</p> },
+    ]);
+    const list = await screen.findByTestId('search-programmes');
+    await waitFor(() => expect(within(list).getAllByTestId('search-programme')).toHaveLength(2));
+    const [first, second] = within(list).getAllByTestId('search-programme');
+    // The first channel names the row; the others are links under it (with their source, as there are two).
+    expect(within(first!).getByText('Starling 1 · Northwind')).toBeTruthy();
+    const also = within(first!).getByTestId('search-programme-also');
+    expect(within(also).getAllByRole('button').map((b) => b.textContent)).toEqual(['Starling 2 · Northwind', 'Starling 3 · Northwind']);
+    // On the air now: LIVE beside its time; the later airing has none.
+    expect(first!.querySelector('[data-live-pill]')).toBeTruthy();
+    expect(second!.querySelector('[data-live-pill]')).toBeNull();
+    // Past eight other channels the rest wait behind Show all (covered below).
+    expect(within(also).queryByRole('button', { name: /Show all/ })).toBeNull();
+    fireEvent.click(within(also).getByRole('button', { name: 'Starling 3 · Northwind' }));
+    await screen.findByText('guide page');
+    expect(currentLocation).toBe(`/epg?source=src1&at=${Date.parse(now.program.start)}`);
+  });
+});
+
+describe('a show on many channels', () => {
+  it('lists eight other channels, and the rest behind Show all', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    const first = programme(1, 1, 9, 0);
+    const hits = Array.from({ length: 12 }, (_, i) => ({ ...programme(i + 1, 1, 9, 0), program: { ...first.program, channelId: `c${i + 1}` } }));
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId?: string }).sourceId === 'src2' ? [] : hits);
+    renderAt('/search?q=harbor&type=programmes', [{ path: '/search', element: <SearchPage /> }]);
+    const also = await screen.findByTestId('search-programme-also');
+    const links = () => within(also).getAllByRole('button').filter((b) => b.textContent?.startsWith('Starling'));
+    expect(links()).toHaveLength(8);
+    const more = within(also).getByRole('button', { name: 'Show all (11)' });
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(more);
+    expect(links()).toHaveLength(11);
+    fireEvent.click(within(also).getByRole('button', { name: 'Show less' }));
+    expect(links()).toHaveLength(8);
   });
 });
 

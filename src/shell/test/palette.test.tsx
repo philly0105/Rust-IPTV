@@ -307,3 +307,29 @@ describe('palette selection while answers arrive', () => {
     expect(palette.querySelector('[cmdk-item][data-selected="true"]')?.textContent).toBe(picked);
   });
 });
+
+describe('palette programmes on several channels', () => {
+  it('a show on several channels at once is one row that counts them', async () => {
+    const start = Date.now() + 2 * 3_600_000;
+    const hit = (itemId: string, channelName: string, title: string, at = start) => ({
+      ref: { sourceId: 's1', contentType: 'live', itemId },
+      channelName,
+      program: { channelId: itemId, title, start: new Date(at).toISOString(), end: new Date(at + 3_600_000).toISOString() },
+    });
+    rpcMock.handlers['epg.search'] = (a) =>
+      (a as { sourceId: string }).sourceId === 's1'
+        ? [hit('1', 'HBO', 'Harbor Lights'), hit('2', 'HBO 2', 'Harbor Lights'), hit('3', 'AMC', 'Harbor Lights'), hit('4', 'TCM', 'Harbor Lights', start + 3_600_000)]
+        : [];
+    const { palette, router } = await openPaletteWith('harbor');
+    await within(palette).findByText('3 channels');
+    const rows = within(palette).getAllByText('Harbor Lights');
+    expect(rows).toHaveLength(2);
+    // The later airing is on one channel, which its row names.
+    expect(within(palette).getByText('TCM')).toBeTruthy();
+    // The search page's own limit, so its Programmes open from the cache.
+    expect(rpcMock.calls.find((c) => c.cmd === 'epg.search')?.args).toMatchObject({ limit: 50 });
+    fireEvent.click(rows[0]!);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/epg'));
+    expect((router.state.location.state as { guideHit: { ref: { itemId: string } } }).guideHit.ref.itemId).toBe('1');
+  });
+});

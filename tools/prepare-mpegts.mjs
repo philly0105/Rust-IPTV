@@ -26,13 +26,14 @@ if (!existsSync(join(checkout, '.git'))) {
 
 run('npm', ['install', '--ignore-scripts']);
 
-// The upstream source repository does not track its generated dist bundle. Build once so the
-// package patch's bundle hunk has the exact upstream file it was generated against.
-const applied = spawnSync('git', ['apply', '--reverse', '--check', patch], { cwd: checkout, stdio: 'ignore' }).status === 0;
+// The patch's dist bundle hunk targets the published npm package, which differs from a fresh
+// build of the upstream tag. Apply the source and type changes here, then generate the bundle.
+const sourcePatch = ['--exclude=dist/mpegts.js', patch];
+const applied = spawnSync('git', ['apply', '--reverse', '--check', ...sourcePatch], { cwd: checkout, stdio: 'ignore' }).status === 0;
 if (!applied) {
   run('npm', ['run', 'build']);
-  run('git', ['apply', '--check', patch]);
-  run('git', ['apply', patch]);
+  run('git', ['apply', '--check', ...sourcePatch]);
+  run('git', ['apply', ...sourcePatch]);
 }
 
 run('npm', ['run', 'build']);

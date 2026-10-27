@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 import { itemKey, type Channel } from '@/api/types';
+import { monogramFill, monogramText } from '@/features/live/lib/monogram';
 import { useImageChain } from '@/ui/image';
 import { gateImage } from '@/ui/imageGate';
 import { useListVirtualizer } from '@/ui/virtualizer';
@@ -20,7 +21,7 @@ import { locateChannel } from './channelPanelLocate';
 
 /**
  * A row's channel logo through the image cache (C3), then its own URL once and the cache again,
- * then a blank tile.
+ * then the channel's coloured monogram, the tile the Live list, the guide and the zap banner draw.
  * Fetched through the shared image gate (ui/imageGate.ts), as ChannelLogo's: at most `maxActive()`
  * at once (4 in server mode, 6 on desktop), the rows in view first, and a row that leaves before
  * its turn asks nothing. `defer` (the list is scrolling) is RowLogo's own latch on top of the gate:
@@ -28,7 +29,7 @@ import { locateChannel } from './channelPanelLocate';
  * rest before it reaches the gate, and one already showing stays, since its <img> is kept while the
  * address is the same.
  */
-function RowLogo({ url, sourceId, defer = false }: { url?: string | null; sourceId: string; defer?: boolean }) {
+function RowLogo({ url, name, sourceId, defer = false }: { url?: string | null; name: string; sourceId: string; defer?: boolean }) {
   const image = useImageChain([safeImageUrl(url ?? undefined)], sourceId, 32);
   const src = image.url;
   // The address last allowed to load: a reused row that shows another channel while `defer` holds waits.
@@ -37,6 +38,18 @@ function RowLogo({ url, sourceId, defer = false }: { url?: string | null; source
   const waiting = defer && allowed !== src;
   // One <img> per address (keyed below): React renders no `src`, the gate sets it.
   const imgRef = useCallback((el: HTMLImageElement | null) => (el && src ? gateImage(el, src) : undefined), [src]);
+  if (!src && name.trim()) {
+    return (
+      <span
+        aria-hidden
+        data-monogram=""
+        className="flex size-8 shrink-0 items-center justify-center rounded-sm font-display text-xs leading-none font-semibold tracking-tight text-white ring-1 ring-white/10"
+        style={{ background: monogramFill(name) }}
+      >
+        {monogramText(name)}
+      </span>
+    );
+  }
   return (
     <span aria-hidden className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-white/5">
       {src && !waiting && (
@@ -592,7 +605,7 @@ export function FullscreenChannelPanel({ available, chromeVisible = false }: { a
                         <span className="w-10 shrink-0 text-end font-numeric text-body-sm text-on-glass-muted tabular-nums">
                           {c.number ?? ''}
                         </span>
-                        <RowLogo url={c.logoUrl} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />
+                        <RowLogo url={c.logoUrl} name={c.name} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />
                         {/* guide: name over the programme on now. */}
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span dir="auto" className={cn('truncate text-body-sm text-match-parent', isCurrent(c) && 'font-medium')}>{c.name}</span>

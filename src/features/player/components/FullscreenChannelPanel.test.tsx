@@ -188,6 +188,22 @@ describe('fullscreen channel panel keyboard (L3-player-6)', () => {
     await waitFor(() => expect(focusedName()).toContain('Channel 0'));
   });
 
+  it('a channel with no logo shows its coloured monogram, as the Live list does, not a blank tile', async () => {
+    const base = rpcMock.handlers['catalog.channels']!;
+    rpcMock.handlers['catalog.channels'] = (a) => {
+      const page = base(a) as { items: Channel[] };
+      return { ...page, items: page.items.map((c) => ({ ...c, logoUrl: null })) };
+    };
+    play(5);
+    mount();
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+    const current = screen.getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+    const tile = current.querySelector('[data-monogram]') as HTMLElement;
+    expect(tile.textContent).toBe('C5');
+    expect(tile.style.background).toContain('linear-gradient');
+    expect(current.querySelector('img')).toBeNull();
+  });
+
   it('a row scrolled into view waits for the scroll to rest before its logo loads (L3-serve-ui-11)', async () => {
     play(5);
     mount();

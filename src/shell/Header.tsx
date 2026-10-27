@@ -48,11 +48,11 @@ export const Header = memo(function Header({
   const windowTitle = header?.documentTitle || header?.title;
   // A detail page names its section until its own large title scrolls away, then the title.
   const showSection = !!header?.section && !titleScrolledAway;
-  // On a phone the section is Back's own label ("<- Movies") instead of a title-sized line beside
-  // a plain Back, so the page's title is the largest type on screen and the header spends one
-  // control on one idea. The title still comes in once the h1 has scrolled away.
-  const backToSection = phone && header?.back && header.section ? header.section : undefined;
-  const shownTitle = showSection ? (backToSection ? undefined : header?.section) : header?.title;
+  // On a phone a detail page's header is Back alone while its h1 is on screen: a title-sized
+  // section line beside it outranked the page's own title. (Back does not take the section's name
+  // either: it goes back in history, which is often Home, Search or another title.) The title
+  // still comes in once the h1 has scrolled away.
+  const shownTitle = showSection ? (phone && header?.back ? undefined : header?.section) : header?.title;
   const appName = t('appName');
 
   const searchField = header?.search ? <HeaderField search={header.search} phone={phone} /> : null;
@@ -83,24 +83,7 @@ export const Header = memo(function Header({
       )}
       {header?.back && (
         // -ms-2: the arrow, not the button's padding, sits on the page gutter, as the content's edge does.
-        <BackButton
-          onClick={header.back.onClick}
-          label={
-            backToSection ? (
-              // Named "Back to Movies", which holds the visible word, so it still reads as Back.
-              <>
-                <span className="sr-only">{t('backToSection', { section: backToSection })}</span>
-                <span aria-hidden className="truncate">
-                  {backToSection}
-                </span>
-              </>
-            ) : (
-              header.back.label
-            )
-          }
-          className={cn('-ms-2 shrink-0', backToSection && 'min-w-0 shrink')}
-          data-testid="header-back"
-        />
+        <BackButton onClick={header.back.onClick} label={header.back.label} className="-ms-2 shrink-0" data-testid="header-back" />
       )}
       {/* Below sm the title gives way to the page search while it is in use (focused or holding a query). */}
       <div

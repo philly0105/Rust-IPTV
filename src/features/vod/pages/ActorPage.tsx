@@ -116,7 +116,7 @@ export function ActorPage() {
             </PosterCellWidthContext.Provider>
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            {/* On a phone the movie and series heroes' size, under a header whose Back names the section. */}
+            {/* On a phone the movie and series heroes' size, the largest type under a header that is just Back. */}
             <h1 ref={nameRef} id="vod-actor-name" className="text-display text-fg max-sm:text-headline">
               {p.name}
             </h1>

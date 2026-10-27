@@ -195,25 +195,27 @@ describe('detail pages: Back in the header, the title once its h1 scrolls away',
     expect(screen.queryByTestId('header-back')).toBeNull();
   });
 
-  it('on a phone Back names the section and the title waits for the h1 to scroll away', async () => {
+  it('on a phone the header is a plain Back while the h1 is on screen, then Back and the title', async () => {
     vi.stubGlobal('IntersectionObserver', FakeObserver);
     media(...PHONE);
     renderRoutes(routes(), '/detail');
     const header = await screen.findByTestId('shell-header');
     await screen.findByRole('heading', { level: 1, name: 'The Copper Meridian' });
-    // One control, "<- Movies", named so it still reads as Back; no section line beside it.
-    const back = within(header).getByRole('button', { name: 'Back to Movies' });
+    // Back goes back in history, so it is named Back, not after the section it may not return to.
+    const back = within(header).getByRole('button', { name: 'Back' });
     expect(back).toBe(screen.getByTestId('header-back'));
-    expect(back.textContent).toContain('Movies');
+    expect(back.textContent).toBe('Back');
+    // No title-sized section line beside it: the page's own h1 is the largest type.
     expect(screen.queryByTestId('page-title')).toBeNull();
+    expect(header.textContent).not.toContain('Movies');
     fireEvent.click(back);
     expect(onBack).toHaveBeenCalledTimes(1);
     expect(document.title).toBe('The Copper Meridian · Tsrust IPTV');
 
-    // Scrolled away: the title comes in after Back, which keeps naming the section.
+    // Scrolled away: the title comes in after Back, which is still just Back.
     report(false, -20);
     expect(screen.getByTestId('page-title').textContent).toBe('The Copper Meridian');
-    expect(within(header).getByRole('button', { name: 'Back to Movies' })).toBeTruthy();
+    expect(within(header).getByRole('button', { name: 'Back' })).toBe(screen.getByTestId('header-back'));
     report(true, 300);
     expect(screen.queryByTestId('page-title')).toBeNull();
   });

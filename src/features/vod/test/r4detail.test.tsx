@@ -93,7 +93,7 @@ describe('a detail hero without artwork', () => {
 });
 
 describe('the hero title on a phone', () => {
-  it('is set at the headline size, a step over the header, which names the section on Back', async () => {
+  it('is set at the headline size, the largest type on the screen, under a header that is just Back', async () => {
     renderAt('/s/src1/movie/m7', detailRoute);
     const h1 = await screen.findByRole('heading', { level: 1, name: 'Harbor Lights' });
     expect(h1.className).toContain('text-display');

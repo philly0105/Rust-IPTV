@@ -57,6 +57,8 @@ beforeEach(() => {
   h['settings.update'] = (a) => settings((a as { patch: object }).patch);
   // "Backup 1" is the trap: b..b..c across its name and keywords matched "bbc" loosely.
   h['sources.list'] = () => [makeSource('s1', { name: 'Night Portal' }), makeSource('s2', { name: 'Backup 1', position: 1 })];
+  h['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+  h['epg.search'] = () => [];
   h['parental.status'] = () => ({ enabled: false, mode: 'hide', autoAdult: true, unlockMinutes: 15, unlocked: false, failedAttempts: 0 });
   h['favorites.list'] = (): FavoriteEntry[] => [
     { ref: bbcNews, addedAt: '2026-10-01T00:00:00Z', position: 0, snapshot: { title: 'BBC News', contentType: 'live' } },
@@ -265,5 +267,43 @@ describe('palette library matches', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(within(palette).getAllByText('BBC News')).toHaveLength(1);
     expect(within(palette).queryByText('Channels')).toBeNull();
+  });
+});
+
+describe('palette selection while answers arrive', () => {
+  const programme = (start: number) => ({
+    ref: { sourceId: 's1', contentType: 'live', itemId: '4' },
+    channelName: 'NBA TV',
+    program: { channelId: 'nba', title: 'Inside the NBA', start: new Date(start).toISOString(), end: new Date(start + 3_600_000).toISOString() },
+  });
+
+  it('a late answer that ranks above the rows shown takes the selection to the top', async () => {
+    const start = Date.now() + 3_600_000;
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId: string }).sourceId === 's1' ? [programme(start)] : []);
+    const { palette } = await openPaletteWith('nba');
+    // "Sports" answers at once (its keywords hold "nba"), the guide after a pause.
+    await within(palette).findByText('Sports');
+    await within(palette).findByText('Inside the NBA');
+    await waitFor(() => {
+      const first = palette.querySelector('[cmdk-item]');
+      expect(first?.textContent).toContain('Inside the NBA');
+      expect(first?.getAttribute('data-selected')).toBe('true');
+    });
+  });
+
+  it('a row the user moved to keeps the selection when an answer lands', async () => {
+    const start = Date.now() + 3_600_000;
+    let answer: (hits: unknown[]) => void = () => undefined;
+    rpcMock.handlers['epg.search'] = (a) => ((a as { sourceId: string }).sourceId === 's1' ? new Promise((r) => (answer = r)) : []);
+    const { palette, input } = await openPaletteWith('nba');
+    await within(palette).findByText('Sports');
+    await waitFor(() => expect(rpcMock.calls.some((c) => c.cmd === 'epg.search')).toBe(true));
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const picked = palette.querySelector('[cmdk-item][data-selected="true"]')?.textContent;
+    expect(picked).toBeTruthy();
+    await act(async () => answer([programme(start)]));
+    await within(palette).findByText('Inside the NBA');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(palette.querySelector('[cmdk-item][data-selected="true"]')?.textContent).toBe(picked);
   });
 });

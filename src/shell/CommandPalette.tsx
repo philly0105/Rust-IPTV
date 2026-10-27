@@ -576,12 +576,15 @@ export function CommandPalette() {
   const contentKeys = useMemo(() => new Set(content.map((it) => it.id.slice('content.'.length))), [content]);
   const catalog = useCatalogItems(query, open, contentKeys);
   const programmes = useProgrammeItems(query, open);
+  // The row Enter runs (cmdk's value); see the reset below.
+  const [selected, setSelected] = useState('');
   // Every way of closing (Esc, the scrim, Ctrl+K again, Back) leaves the next open empty: the
   // query resets as the palette opens, during render, so no frame shows the old filter.
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
     if (open && query !== '') setQuery('');
+    if (open) setSelected('');
   }
 
   // Favourites and recent items lead: a tie with a command goes to the content. With nothing
@@ -616,17 +619,33 @@ export function CommandPalette() {
   // view so Enter never runs an item scrolled out of sight. cmdk re-sorts the DOM in its own
   // effect afterwards and scroll anchoring then nudges the list (about one group heading),
   // so the reset is repeated a frame later, before checking the selected item.
+  // The library and the guide answer after a pause and can rank above the rows already shown.
+  // cmdk keeps its selection on the row it had, so that row slid down and Enter no longer ran
+  // the top match: until the user picks a row (the arrows, the pointer), each new answer puts
+  // the selection back on the first row, as a new query does.
   const listRef = useRef<HTMLDivElement>(null);
+  const steered = useRef(false);
+  const lastQuery = useRef(query);
   useLayoutEffect(() => {
     const list = listRef.current;
-    if (!list) return;
+    if (lastQuery.current !== query) {
+      lastQuery.current = query;
+      steered.current = false;
+    }
+    if (!list || steered.current) return;
     list.scrollTop = 0;
     const raf = requestAnimationFrame(() => {
+      if (steered.current) return;
       list.scrollTop = 0;
+      const first = list.querySelector<HTMLElement>('[cmdk-item]')?.getAttribute('data-value');
+      if (first != null) setSelected(first);
       list.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
     });
     return () => cancelAnimationFrame(raf);
-  }, [query]);
+  }, [query, ranked]);
+  const steer = () => {
+    steered.current = true;
+  };
 
   // The list fades out at its bottom edge while more of it is below, so the row the edge cuts
   // reads as continuing, not as a layout fault (the shortcut reference fades the same way).
@@ -675,7 +694,18 @@ export function CommandPalette() {
         vimBindings off: cmdk's Ctrl+K (move up) would claim the key, and the
         shell's mod+k must reach the registry to toggle the palette closed.
       */}
-      <Cmdk label={t('commandPalette')} loop vimBindings={false} filter={paletteFilter} className="flex flex-col">
+      <Cmdk
+        label={t('commandPalette')}
+        loop
+        vimBindings={false}
+        filter={paletteFilter}
+        value={selected}
+        onValueChange={setSelected}
+        onKeyDown={(e) => {
+          if (['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(e.key)) steer();
+        }}
+        className="flex flex-col"
+      >
         <div className="flex items-center gap-3 border-b border-divider px-4">
           <Search aria-hidden size={18} className="shrink-0 text-fg-subtle" />
           <Cmdk.Input
@@ -689,6 +719,7 @@ export function CommandPalette() {
         </div>
         <Cmdk.List
           ref={listRef}
+          onPointerMove={steer}
           data-fade-bottom={moreBelow || undefined}
           style={railFadeMask(false, moreBelow)}
           // Tall enough on a 900 px window for the first suggested action to show whole.

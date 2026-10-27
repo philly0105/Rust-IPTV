@@ -357,12 +357,21 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
           </span>
         )}
       </div>
-      {/* Touch: one button at the row's end, and its menu holds every action the hover strip has. */}
+      {/* Touch: one button at the row's end, and its menu holds every action the hover strip has.
+          On a phone it is a bottom sheet, as Live TV's channel menu is, headed by the row it
+          covers: the logo or poster, the title and what is on (or what it is). */}
       <Menu
         items={menuItems}
         label={t('entryMenu', { title })}
         align="end"
         triggerClassName="-me-1 shrink-0 not-pointer-coarse:hidden"
+        sheetHeader={{
+          media: playable ? (
+            <ChannelLogo src={snapshot.posterUrl ?? undefined} name={title} size={28} sourceId={entryRef.sourceId} />
+          ) : undefined,
+          title: playable ? <ChannelName name={title} className="truncate text-match-parent" /> : title,
+          subtitle: now ? now.title : resume?.episode ?? t(k('type', type)),
+        }}
       />
     </div>
   );

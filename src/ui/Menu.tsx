@@ -27,6 +27,13 @@ export interface MenuSeparator {
 
 export type MenuItem = MenuAction | MenuSeparator;
 
+/** What a phone's sheet is about, drawn above its items: a row's logo or poster, its title and a line under it. */
+export interface MenuSheetHeader {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  media?: ReactNode;
+}
+
 export interface MenuProps {
   items: MenuItem[];
   /** Accessible name of the trigger. Defaults to "More actions". */
@@ -44,7 +51,26 @@ export interface MenuProps {
    * column such as the collapsed rail. `align` applies to `block` only.
    */
   placement?: 'block' | 'inline-end';
+  /**
+   * Drawn at the top of the phone's sheet only (see `MENU_SHEET_QUERY`): the sheet covers the row
+   * it was opened from, so it names it, as the channel menu's sheet does. A popover opens beside
+   * its trigger, with the row in view, and leaves it out.
+   */
+  sheetHeader?: MenuSheetHeader;
   className?: string;
+}
+
+/**
+ * A phone held in the hand: below sm with a finger for a pointer, the channel menu's rule
+ * (SHEET_QUERY in src/features/live/components/ContextMenu.tsx). There a menu is a bottom sheet
+ * over a scrim, as dialogs are: a popover pinned under a row's button covered the tab bar or the
+ * rows near it, and the same channel opened a sheet from Live TV but a popover from Favorites.
+ * A narrow window driven by a mouse keeps the popover.
+ */
+export const MENU_SHEET_QUERY = '(max-width: 639.98px) and (pointer: coarse)';
+
+function opensAsSheet(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia(MENU_SHEET_QUERY).matches;
 }
 
 /**
@@ -128,11 +154,14 @@ export function placeMenu(
 /**
  * Menu button (WAI-ARIA menu pattern): Enter/Space/ArrowDown open on the
  * first item, ArrowUp opens on the last; roving focus with arrows, Home/End,
- * type-ahead; Escape/Tab close and restore focus to the trigger.
+ * type-ahead; Escape/Tab close and restore focus to the trigger. On a phone
+ * (MENU_SHEET_QUERY) it opens as a bottom sheet with the same items and keys.
  */
-export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltipSide, align = 'end', placement = 'block', className }: MenuProps) {
+export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltipSide, align = 'end', placement = 'block', sheetHeader, className }: MenuProps) {
   const { t } = useTranslation('common');
   const [open, setOpen] = useState(false);
+  // Decided once per opening, so a rotation while it is up does not swap the menu's shape.
+  const [sheet, setSheet] = useState(false);
   const [anchor, setAnchor] = useState<{ rect: MenuAnchor; rtl: boolean } | null>(null);
   const [pos, setPos] = useState<ReturnType<typeof placeMenu> | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -162,6 +191,11 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
       setPos(null);
       return;
     }
+    // A sheet sits on the bottom edge: nothing to measure or place.
+    if (sheet) {
+      setPos({ top: 0, left: 0, side: 'below' });
+      return;
+    }
     const size = menu.getBoundingClientRect();
     setPos(
       placeMenu(anchor.rect, { width: size.width, height: size.height }, { width: window.innerWidth, height: window.innerHeight }, {
@@ -170,10 +204,11 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
         placement,
       }),
     );
-  }, [open, present, anchor, align, placement, items.length]);
+  }, [open, present, anchor, align, placement, items.length, sheet]);
 
   const openMenu = (where: 'first' | 'last') => {
     focusOnOpen.current = where;
+    setSheet(opensAsSheet());
     place();
     setOpen(true);
   };
@@ -187,6 +222,12 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
   const placed = pos !== null;
   useLayoutEffect(() => {
     if (!open || !placed) return;
+    // The sheet itself takes focus, so no item looks chosen before a tap; the arrows start at the
+    // first item (or, from ArrowUp on the trigger, the last).
+    if (sheet && focusOnOpen.current === 'first') {
+      menuRef.current?.focus({ preventScroll: true });
+      return;
+    }
     const nodes = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])');
     if (!nodes || nodes.length === 0) {
       menuRef.current?.focus();
@@ -308,6 +349,18 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
       )}
       {present &&
         anchor &&
+        sheet &&
+        createPortal(
+          // The scrim takes the tap that closes the sheet, so it never goes through to the page.
+          <div
+            aria-hidden
+            data-menu-scrim=""
+            className={cn('fixed inset-0 z-[60] touch-none bg-scrim', closing ? 'pointer-events-none motion-safe:animate-fade-out' : 'motion-safe:animate-fade-in')}
+          />,
+          portalContainer(),
+        )}
+      {present &&
+        anchor &&
         createPortal(
           <div
             ref={menuRef}
@@ -321,17 +374,47 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
             onKeyDown={onMenuKey}
             // Rendered hidden for one layout pass so placeMenu can measure it. A menu placed above its
             // trigger rises from above (--pop-from, read by the pop-in keyframes in globals.css).
+            data-sheet={sheet ? '' : undefined}
             style={
-              pos
-                ? ({ top: pos.top, left: pos.left, '--pop-from': pos.side === 'above' ? '-6px' : '6px' } as CSSProperties)
-                : { top: 0, left: 0, visibility: 'hidden' }
+              sheet
+                ? undefined
+                : pos
+                  ? ({ top: pos.top, left: pos.left, '--pop-from': pos.side === 'above' ? '-6px' : '6px' } as CSSProperties)
+                  : { top: 0, left: 0, visibility: 'hidden' }
             }
             className={cn(
-              'fixed z-[60] min-w-48 max-w-80 rounded-lg border border-edge bg-surface p-1 shadow-2',
-              closing ? 'pointer-events-none motion-safe:animate-pop-out' : 'motion-safe:animate-pop-in',
+              'fixed z-[60] border-edge bg-surface',
+              // The sheet takes focus as a whole; as on the kit Dialog's panel, a ring around all of
+              // it would read as a stray highlight, so the global focus-visible outline is off there.
+              sheet
+                ? 'inset-x-0 bottom-0 max-h-[calc(100dvh-3rem)] overflow-y-auto overscroll-contain rounded-t-xl border-t px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] text-body shadow-3 outline-none focus-visible:shadow-3 focus-visible:outline-none'
+                : 'min-w-48 max-w-80 rounded-lg border p-1 shadow-2',
+              closing
+                ? cn('pointer-events-none', sheet ? 'motion-safe:animate-sheet-out' : 'motion-safe:animate-pop-out')
+                : sheet
+                  ? 'motion-safe:animate-sheet-in'
+                  : 'motion-safe:animate-pop-in',
               className,
             )}
           >
+            {sheet && sheetHeader && (
+              <>
+                <div className="flex min-w-0 items-center gap-2.5 px-2.5 pt-2 pb-2" data-testid="menu-sheet-header">
+                  {sheetHeader.media ? <span className="shrink-0">{sheetHeader.media}</span> : null}
+                  <span className="flex min-w-0 flex-col">
+                    <span dir="auto" className="truncate text-body font-medium text-fg">
+                      {sheetHeader.title}
+                    </span>
+                    {sheetHeader.subtitle ? (
+                      <span dir="auto" className="truncate text-caption text-fg-subtle">
+                        {sheetHeader.subtitle}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+                <div role="separator" className="my-1 h-px bg-divider" />
+              </>
+            )}
             {items.map((item) =>
               isAction(item) ? (
                 <div
@@ -354,7 +437,9 @@ export function Menu({ items, label, trigger, triggerClassName, tooltip, tooltip
                     }
                   }}
                   className={cn(
-                    'flex h-9 cursor-pointer items-center gap-3 rounded-md px-3 text-sm outline-hidden select-none',
+                    // In the sheet the items take the body size, as the channel menu's sheet does.
+                    'flex h-9 cursor-pointer items-center gap-3 rounded-md px-3 outline-hidden select-none',
+                    sheet ? 'text-body' : 'text-sm',
                     TOUCH_TARGET,
                     // The fill follows keyboard focus only: a menu opened by a click or a tap focuses its first
                     // item too, and a filled first item read as already chosen.

@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Heart,
   History,
   LayoutList,
   ListFilter,
@@ -14,7 +15,6 @@ import {
   PanelTopOpen,
   Play,
   Radio,
-  Star,
   Tv,
   X,
   ZoomIn,
@@ -2022,7 +2022,7 @@ const GuideToolbar = memo(function GuideToolbar({
         id: 'views',
         heading: t('pickerViews'),
         options: [
-          { value: `${VIEW_OPTION}${guideViewParam({ kind: 'favorites' })}`, label: tg('viewFavorites'), icon: <Star size={14} /> },
+          { value: `${VIEW_OPTION}${guideViewParam({ kind: 'favorites' })}`, label: tg('viewFavorites'), icon: <Heart size={14} /> },
           ...(lists ?? []).map((l) => ({
             value: `${VIEW_OPTION}${guideViewParam({ kind: 'list', id: l.id })}`,
             label: tg('viewList', { name: l.name }),

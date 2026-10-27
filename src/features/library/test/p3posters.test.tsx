@@ -141,6 +141,28 @@ describe('P2-POSTERS-3: the card grid', () => {
     expect(widths).toEqual(widths.map(() => '192'));
     expect(pictureReads).toEqual([]);
   });
+
+  it('fits its columns inside that padding, so a phone gets the three posters a category grid has', () => {
+    // A 390 px phone: the scroller is 374 px, the list inside My List's px-2 359 px. With the phone's
+    // 80 px column and the 16 px gap, the scroller's width fitted four 79 px posters a row.
+    laidOut = (el) => (el.getAttribute('data-testid') === 'cards' ? 374 : el.getAttribute('role') === 'list' ? 359 : undefined);
+    render(
+      <VirtualCardGrid<Film>
+        items={films}
+        itemKey={(f) => f.id}
+        label="Films"
+        cardLabel={(f) => f.id}
+        onActivate={() => undefined}
+        render={(f) => <Poster src={f.src} alt="" label={f.id} aspect="poster" />}
+        postersFillCells
+        minColumnWidth={80}
+        gap={16}
+        testId="cards"
+      />,
+    );
+    const row = screen.getByRole('list').querySelector<HTMLElement>('[role="listitem"]')!.parentElement!;
+    expect(row.style.gridTemplateColumns).toBe('repeat(3, minmax(0, 1fr))');
+  });
 });
 
 describe('P2-POSTERS-4: the continue rail', () => {

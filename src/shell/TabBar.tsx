@@ -39,7 +39,7 @@ interface Tab {
   label: string;
   icon: LucideIcon;
   active: boolean;
-  tour?: 'search';
+  tour?: 'live' | 'search';
 }
 
 const tabClass = (active: boolean) =>
@@ -81,7 +81,7 @@ export const TabBar = memo(function TabBar() {
   const tabs: Tab[] = [
     { id: 'home', to: '/dashboard', label: t('tabHome'), icon: House, active: pathname === '/dashboard' },
     // No sources yet: the tab leads to adding one, as Home does.
-    { id: 'live', to: live ?? '/sources', label: t('tabLive'), icon: Tv, active: isLiveRoute(pathname) },
+    { id: 'live', to: live ?? '/sources', label: t('tabLive'), icon: Tv, active: isLiveRoute(pathname), tour: 'live' },
     { id: 'guide', to: '/epg', label: t('tabGuide'), icon: CalendarRange, active: pathname === '/epg' || pathname.startsWith('/epg/') },
     { id: 'search', to: '/search', label: t('navSearch'), icon: Search, active: pathname === '/search', tour: 'search' },
   ];

@@ -375,7 +375,6 @@ function SourceEntry({
   active,
   expanded,
   onToggle,
-  tour,
 }: {
   source: Source;
   collapsed: boolean;
@@ -383,7 +382,6 @@ function SourceEntry({
   /** Its links show (the rail's accordion decides; collapsed, the entry is a menu instead). */
   expanded: boolean;
   onToggle: () => void;
-  tour?: 'live';
 }) {
   const { t } = useTranslation('shell');
   const [RailMenu, requestRailMenu] = useRailMenu(collapsed);
@@ -450,7 +448,7 @@ function SourceEntry({
     return (
       // data-rail-current: the menu trigger carries no aria-current, but the rail still scrolls
       // the source of the page on show into view (useRailScroll).
-      <li ref={collapsedItemRef} data-tour={tour} data-rail-current={active || undefined} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
+      <li ref={collapsedItemRef} data-rail-current={active || undefined} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
         {RailMenu ? (
           <RailMenu
             label={label}
@@ -511,7 +509,6 @@ function SourceEntry({
         type="button"
         aria-expanded={expanded}
         aria-controls={listId}
-        data-tour={tour}
         onClick={() => {
           revealOnExpand.current = !expanded;
           onToggle();
@@ -568,7 +565,7 @@ function SourceEntry({
  * Its name ends in "Manage sources", and so does its tooltip, which also carries the full name
  * that the row may cut.
  */
-function LoneSource({ source, collapsed, tour }: { source: Source; collapsed: boolean; tour?: 'live' }) {
+function LoneSource({ source, collapsed }: { source: Source; collapsed: boolean }) {
   const { t } = useTranslation('shell');
   const intent = useRouteIntent('/sources');
   const name = source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name;
@@ -590,7 +587,6 @@ function LoneSource({ source, collapsed, tour }: { source: Source; collapsed: bo
           {...intent}
           to="/sources"
           end
-          data-tour={tour}
           data-rail-source=""
           aria-label={collapsed ? `${name}, ${t('manageSources')}` : undefined}
           className={({ isActive }) => itemClass(isActive, collapsed)}
@@ -641,16 +637,6 @@ function SourceLink({ to, current, children }: { to: string; current: boolean; c
  * the room. A percentage of the rail's middle, which has a definite flexed height.
  */
 const RAIL_PRIMARY_MAX = 'max-h-[max(50%,calc(100%-10rem))]';
-
-/**
- * The source the first-run tour's "Live TV" step points at: the first with live channels and no
- * import error, else the first with live channels at all, else none (the step then shows as a
- * centred card). The first in the list could be one that failed to import (L3-app-6).
- */
-export function liveTourSource(sources: readonly Source[] | undefined): Source | undefined {
-  const watchable = (sources ?? []).filter((s) => s.channelCount > 0);
-  return watchable.find((s) => !s.lastError) ?? watchable[0];
-}
 
 /** Fade masks for the rail's scrolling list: a soft edge where links continue out of view. */
 const FADE = '24px';
@@ -736,7 +722,6 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const scrollKey = `${location.pathname}|${sources.data ? 'ready' : 'pending'}`;
   const primaryFade = useRailScroll(primaryRef, scrollKey, [collapsed]);
   const fade = useRailScroll(scrollRef, scrollKey, [sources.data, collapsed]);
-  const tourSourceId = liveTourSource(sources.data)?.id;
   const sourceCount = sources.data?.length ?? 0;
   const noSources = sources.isSuccess && sourceCount === 0;
   // Live TV, Movies and Series open the source on show, else the one last opened.
@@ -814,7 +799,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   } else if (lone) {
     sourceList = (
       <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
-        <LoneSource source={lone} collapsed={collapsed} tour={lone.id === tourSourceId ? 'live' : undefined} />
+        <LoneSource source={lone} collapsed={collapsed} />
       </ul>
     );
   } else if (sources.data && sources.data.length > 0) {
@@ -828,8 +813,6 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
             active={activeSourceId === s.id}
             expanded={!collapsed && openId === s.id}
             onToggle={() => toggleSource(s.id)}
-            // The tour's "Live TV" step points at a source whose channels are there to watch.
-            tour={s.id === tourSourceId ? 'live' : undefined}
           />
         ))}
       </ul>

@@ -40,7 +40,7 @@ export interface NavLinkDef {
   icon: LucideIcon;
   end?: boolean;
   /** First-run tour anchor (Run 3 C7, `src/features/onboarding/tour/steps.ts`). */
-  tour?: 'vod';
+  tour?: 'live' | 'vod';
   /**
    * Live TV, Movies or Series: the link opens that section of a source, picked for the page on
    * show (`watchLinks`), and is current by `sectionCurrent`. Its `to` here is where it leads while
@@ -69,9 +69,11 @@ export const WATCH_LINKS: readonly NavLinkDef[] = [
   { to: '/search', labelKey: 'navSearch', icon: Search, notInRail: true },
   // A source's sections, with the icons of its own links (railLinks). Most people have one source,
   // and these three, the most used pages, sat in its entry at the foot of the rail, under Library.
-  { to: NO_SOURCES_TARGET, labelKey: 'railLive', icon: Tv, section: 'live' },
+  // The tour's first step points here: Live TV leads to a source with channels to watch (liveTabTarget).
+  { to: NO_SOURCES_TARGET, labelKey: 'railLive', icon: Tv, section: 'live', tour: 'live' },
   { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
-  { to: NO_SOURCES_TARGET, labelKey: 'railMovies', icon: Clapperboard, section: 'movies' },
+  // The tour's movies step points here, or at My List when no source has movies.
+  { to: NO_SOURCES_TARGET, labelKey: 'railMovies', icon: Clapperboard, section: 'movies', tour: 'vod' },
   { to: NO_SOURCES_TARGET, labelKey: 'railSeries', icon: Layers, section: 'series' },
   // Games from ESPN with the channels that carry them; the label is the page's title.
   { to: '/sports', labelKey: 'sports:title', icon: Trophy },
@@ -79,8 +81,8 @@ export const WATCH_LINKS: readonly NavLinkDef[] = [
 ];
 
 export const LIBRARY_LINKS: readonly NavLinkDef[] = [
-  // The tour's "Movies, series and My List" step points here: unlike the Movies and Series links,
-  // which a rail with no movies or series leaves out, it is always on screen, also collapsed.
+  // The tour's "Movies, series and My List" step falls back on this row: unlike Movies, which a
+  // rail with no movies leaves out, it is always on screen, also collapsed.
   { to: '/my-list', labelKey: 'navMyList', icon: Bookmark, tour: 'vod' },
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
   // Run 2: custom channel lists and watch stats reuse their pages' titles.

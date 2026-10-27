@@ -1375,10 +1375,13 @@ describe('Run 3 onboarding wiring', () => {
     renderRoutes(routes(), '/favorites');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
     await within(nav).findByText('Night Portal');
+    // Live TV and Movies, at the top of Watch, not a source's entry at the foot of the rail.
     const live = nav.querySelectorAll('[data-tour="live"]');
     expect(live).toHaveLength(1);
-    expect(live[0]!.textContent).toContain('Night Portal');
-    expect(within(nav).getByRole('link', { name: /My List/ }).getAttribute('data-tour')).toBe('vod');
+    expect(live[0]).toBe(within(nav).getByRole('link', { name: 'Live TV' }));
+    // Movies comes first in the rail, so the tour points there; My List stands in when no source has movies.
+    const vod = nav.querySelectorAll('[data-tour="vod"]');
+    expect([...vod]).toEqual([within(nav).getByRole('link', { name: 'Movies' }), within(nav).getByRole('link', { name: /My List/ })]);
     // The header's one search trigger is the one search anchor, not the rail's Search link.
     const search = document.querySelectorAll('[data-tour="search"]');
     expect(search).toHaveLength(1);
@@ -1439,6 +1442,9 @@ describe('Run 3 onboarding wiring', () => {
       const search = document.querySelectorAll('[data-tour="search"]');
       expect(search).toHaveLength(1);
       expect(screen.getByTestId('tab-bar').contains(search[0]!)).toBe(true);
+      // The Live TV tab holds the first step's anchor.
+      const live = document.querySelectorAll('[data-tour="live"]');
+      expect([...live]).toEqual([within(screen.getByTestId('tab-bar')).getByRole('link', { name: 'Live TV' })]);
       expect(screen.queryByTestId('open-palette')).toBeNull();
       expect(screen.queryByTestId('theme-toggle')).toBeNull();
     });

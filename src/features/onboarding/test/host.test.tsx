@@ -117,7 +117,7 @@ describe('OnboardingHost', () => {
     expect(screen.queryByTestId('tour-dots')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Skip tour' })).toBeNull();
     fireEvent.click(screen.getByTestId('tour-show-around'));
-    expect(screen.getByRole('dialog', { name: 'Your sources' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Live TV' })).toBeTruthy();
     expect(screen.getByTestId('tour-progress').textContent).toBe('Step 1 of 3');
     expect(document.activeElement).toBe(screen.getByTestId('tour-next'));
     for (let i = 0; i < 3; i++) fireEvent.click(screen.getByTestId('tour-next'));

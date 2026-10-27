@@ -71,8 +71,8 @@ Below 1024px the collapse toggle is replaced by "Hide sidebar" (`hideRail`, `tog
 
 Tour anchors (`[data-tour]`, read by the onboarding tour's `findAnchor`, which takes the first laid-out match inside the window):
 
-- `live`: the rail row, collapsed or expanded, of the first source with live channels and no import error, else the first with live channels (`liveTourSource`); with neither, no row has it and the step shows as a centred card. It is always rendered, unlike a source's Live TV sub-link, which only shows while the source is open.
-- `vod`: the My List rail link: always shown, unlike Watch's Movies and Series, which a rail with no movies or series leaves out.
+- `live`: the Watch group's Live TV row, collapsed or expanded, which leads where the phone tab does (`liveTabTarget`: the source last opened, else the first with live channels and no import error); below 640 px the tab bar's Live TV tab. The rail's source entries carried it until Live TV moved to the top of Watch.
+- `vod`: the Watch group's Movies row, and the My List rail link, which `findAnchor` reaches when no source has movies and the rail leaves Movies out. The phone has no Movies tab, so the step shows as a centred card there.
 - `search`: from 640 px up, the header's search field when the page has one, otherwise its "Search everything" button; below 640 px the tab bar's Search tab, and the header's field does not carry it, so exactly one element on screen has the anchor at every width. The automatic first-run tour is a single card on this anchor (onboarding.md).
 
 The palette's Settings group has "Take the tour" (`help.tour`) and "What's new" (`help.whatsNew`); Settings > About has the same two buttons. All four import `openTour` / `openWhatsNew` from `@/features/onboarding/store`, which has no UI imports.

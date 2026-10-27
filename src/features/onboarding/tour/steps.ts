@@ -1,16 +1,17 @@
 /**
  * The three tour steps (contract C7). Each points at a `[data-tour="<id>"]`
- * anchor that the shell puts on the Rail items and the search button; when
- * the anchor is missing or not on screen (phone layout, a collapsed source),
- * the step shows as a centred card instead.
+ * anchor that the shell puts on the Rail items, the phone's tabs and the
+ * search button; when the anchor is missing or not on screen (the phone has
+ * no Movies tab), the step shows as a centred card instead.
  *
- * The `vod` anchor is the rail's My List entry: unlike the Watch group's
- * Movies and Series, which a rail with no movies or series leaves out, it is
- * always there, collapsed or expanded. The step's title, text and icon name
- * My List so the card matches what the spotlight shows.
+ * `live` is the Watch group's Live TV row, or the phone's Live TV tab: the
+ * rail's sources used to carry it, from before Live TV moved to the top of
+ * Watch. `vod` is the Watch group's Movies row, else (a rail with no movies
+ * leaves Movies out) My List, which is always there; the step's title and
+ * text name movies, series and My List, so they match either.
  */
 
-import { Bookmark, Search, Tv, type LucideIcon } from 'lucide-react';
+import { Clapperboard, Search, Tv, type LucideIcon } from 'lucide-react';
 
 export type TourAnchor = 'live' | 'vod' | 'search';
 
@@ -24,7 +25,7 @@ export interface TourStep {
 
 export const TOUR_STEPS: readonly TourStep[] = [
   { anchor: 'live', icon: Tv, titleKey: 'tourLiveTitle', textKey: 'tourLiveText' },
-  { anchor: 'vod', icon: Bookmark, titleKey: 'tourVodTitle', textKey: 'tourVodText' },
+  { anchor: 'vod', icon: Clapperboard, titleKey: 'tourVodTitle', textKey: 'tourVodText' },
   { anchor: 'search', icon: Search, titleKey: 'tourSearchTitle', textKey: 'tourSearchText' },
 ];
 

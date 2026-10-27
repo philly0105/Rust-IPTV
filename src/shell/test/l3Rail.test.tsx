@@ -23,7 +23,7 @@ vi.mock('@/api/events', () => ({
   onConnectionState: () => () => undefined,
 }));
 
-const { Rail, liveTourSource } = await import('../Rail');
+const { Rail } = await import('../Rail');
 
 function routes(collapsed = false) {
   return [
@@ -74,30 +74,19 @@ describe('rail layout (L3-visual-2)', () => {
 });
 
 describe('tour Live anchor (L3-app-6)', () => {
-  it('skips a failed or empty first source', () => {
-    const failed = makeSource('a', { lastError: 'HTTP 404', channelCount: 0 });
-    const empty = makeSource('b', { channelCount: 0 });
-    const healthy = makeSource('c', { channelCount: 40 });
-    const erroredWithChannels = makeSource('d', { channelCount: 10, lastError: 'timeout' });
-    expect(liveTourSource([failed, empty, healthy])?.id).toBe('c');
-    expect(liveTourSource([erroredWithChannels, healthy])?.id).toBe('c');
-    // Only errored sources with channels: the first of them beats none.
-    expect(liveTourSource([failed, erroredWithChannels])?.id).toBe('d');
-    expect(liveTourSource([failed, empty])).toBeUndefined();
-    expect(liveTourSource([])).toBeUndefined();
-  });
-
-  it('puts the one Live anchor on the healthy source in the rail', async () => {
+  it("is the Watch group's Live TV row, which skips a failed or empty first source", async () => {
     rpcMock.handlers['sources.list'] = () => [
       makeSource('bad', { name: 'Header M3U', position: 1, channelCount: 0, lastError: 'HTTP 404' }),
-      makeSource('good', { name: 'Night Portal', position: 2, channelCount: 120 }),
+      makeSource('empty', { name: 'Films', position: 2, channelCount: 0, movieCount: 9 }),
+      makeSource('good', { name: 'Night Portal', position: 3, channelCount: 120 }),
     ];
     renderRoutes(routes(), '/dashboard');
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     await within(nav).findByText('Night Portal');
     const anchors = nav.querySelectorAll('[data-tour="live"]');
     expect(anchors).toHaveLength(1);
-    expect(anchors[0]!.textContent).toContain('Night Portal');
+    expect(anchors[0]!.textContent).toBe('Live TV');
+    expect(anchors[0]!.getAttribute('href')).toBe('/s/good/live');
   });
 });
 

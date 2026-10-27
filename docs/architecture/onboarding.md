@@ -4,7 +4,7 @@ Code: `src/features/onboarding/`. Strings: `src/i18n/<locale>/onboarding.json` (
 
 Two overlays help people find their way (contract C7):
 
-- The tour: three steps that point at the sources, My List (for movies and series), and search. It runs on its own once, after the first source is added, as a single card (the coach mark) on search and the command palette, with "Show me around" for the three steps. A source whose imports have all failed does not count, so it waits for one that imports.
+- The tour: three steps that point at Live TV, Movies (My List when no source has movies), and search. It runs on its own once, after the first source is added, as a single card (the coach mark) on search and the command palette, with "Show me around" for the three steps. A source whose imports have all failed does not count, so it waits for one that imports.
 - What's new: a dialog listing what changed since the version the user last saw, each item with an icon. It shows once per update.
 
 Neither needs the core beyond the two settings markers, `app.info` and `sources.list`. The markers live in settings but are machine-local: they are not in `backup::APP_SETTING_KEYS`, so backups leave them out, unlike the preferences that travel in backups (the split is in [settings.md](settings.md)). They belong to this install.
@@ -64,7 +64,7 @@ None of the feature belongs in the entry chunk:
 
 `tour/Tour.tsx` is portalled to `body`.
 
-- Steps (`tour/steps.ts`): `live` ("Your sources"), `vod` and `search` (`TOUR_STEPS`). Each step anchors to the first laid-out `[data-tour="<id>"]` inside the window. Elements under `[inert]` or `[aria-hidden="true"]` are skipped, and so are elements with an empty box. The shell (the rail, the header's search, the phone's tab bar) carries the anchors; ui-shell.md lists them.
+- Steps (`tour/steps.ts`): `live` ("Live TV"), `vod` ("Movies, series and My List") and `search` (`TOUR_STEPS`). Each step anchors to the first laid-out `[data-tour="<id>"]` inside the window. Elements under `[inert]` or `[aria-hidden="true"]` are skipped, and so are elements with an empty box. The shell (the rail, the header's search, the phone's tab bar) carries the anchors; ui-shell.md lists them.
 - Coach mark (`COACH_STEPS`, SS-6): one card on the `search` anchor, titled "Your source is ready", that names search and the command palette, the two things the screen does not show on its own. It has no step count and no Skip; "Show me around" turns it into step 1 of the three without closing, and Got it closes it.
 - The `vod` anchor is the rail's My List entry, because it is the one movie and series entry that is always there, in the expanded and the icon rail alike; the Watch group's Movies and Series drop out while no source has movies or series. So the step is titled "Movies, series and My List", uses the bookmark icon of the rail entry, and its text says where posters live (under each source) and what My List keeps.
 - Missing anchor: the card is centred over a plain scrim. The tour looks for the anchor again every `ANCHOR_POLL_MS` (300 ms) and on resize and scroll, so an anchor that mounts late is picked up.

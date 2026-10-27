@@ -87,6 +87,11 @@ export function StatsPage() {
     });
 
   const time = (s: number) => formatWatchTime(s, lang);
+  // With nothing watched in either range, 7 days and 30 days would only switch between two empty
+  // pages: the range stays away until there is something to compare (it shows again while a week
+  // is empty but the month is not). Also while an empty week waits to hear about the month, so it
+  // does not show and then vanish.
+  const nothingToRange = data?.totalSeconds === 0 && !(range === 7 && monthHasData === true);
 
   let headline = null;
   let body;
@@ -184,20 +189,22 @@ export function StatsPage() {
       {/* The range sets everything below it, so it leads on its own line, and the KPI row keeps
           the page's full width and one right edge (it used to sit at the row's end, half as tall
           as the tiles beside it). */}
-      <div className="flex flex-col gap-4">
-        <Tabs
-          className="self-start"
-          variant="pill"
-          label={t('range')}
-          value={String(range)}
-          onChange={(id) => setRange(readRange(id))}
-          items={[
-            { id: '7', label: t('week') },
-            { id: '30', label: t('month') },
-          ]}
-        />
-        {headline}
-      </div>
+      {nothingToRange ? null : (
+        <div className="flex flex-col gap-4">
+          <Tabs
+            className="self-start"
+            variant="pill"
+            label={t('range')}
+            value={String(range)}
+            onChange={(id) => setRange(readRange(id))}
+            items={[
+              { id: '7', label: t('week') },
+              { id: '30', label: t('month') },
+            ]}
+          />
+          {headline}
+        </div>
+      )}
       {body}
       <Dialog
         open={confirming}

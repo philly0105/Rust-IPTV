@@ -160,7 +160,8 @@ describe('collapsed rail (L2-shell-2)', () => {
   });
 
   it('an m3u source probes for radio only once the monogram is hovered or focused', async () => {
-    rpcMock.handlers['sources.list'] = () => [makeSource('m', { kind: 'm3u', name: 'Playlist', movieCount: 0 })];
+    // Two sources: a lone one is a plain link to the Sources page, with Radio among the Watch rows.
+    rpcMock.handlers['sources.list'] = () => [makeSource('m', { kind: 'm3u', name: 'Playlist', movieCount: 0 }), makeSource('s2')];
     rpcMock.handlers['catalog.channels'] = () => ({ items: [], total: 3 });
     renderRoutes(routes(true), '/dashboard');
     const trigger = await screen.findByRole('button', { name: 'Playlist' });

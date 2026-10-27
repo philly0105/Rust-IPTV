@@ -19,6 +19,7 @@ import {
   Layers,
   LayoutGrid,
   ListOrdered,
+  Radio,
   Search,
   Trophy,
   Tv,
@@ -39,15 +40,17 @@ export interface NavLinkDef {
   icon: LucideIcon;
   end?: boolean;
   /** First-run tour anchor (Run 3 C7, `src/features/onboarding/tour/steps.ts`). */
-  tour?: 'vod';
+  tour?: 'live' | 'vod';
   /**
    * Live TV, Movies or Series: the link opens that section of a source, picked for the page on
    * show (`watchLinks`), and is current by `sectionCurrent`. Its `to` here is where it leads while
    * there are no sources.
    */
   section?: SourceSection;
-  /** Stepped back: a section link while there are no sources, where it leads to adding one. */
+  /** Stepped back: there are no sources, and the page has nothing to show until one is added. */
   dim?: boolean;
+  /** Its page is of use with no sources (Home's welcome, Search, Sports, Lists): never stepped back. */
+  noSourceNeeded?: boolean;
   /**
    * Left out of the rail, kept in the palette's Go to list: the header's search box stands for
    * it on every page from sm up, and Ctrl+F opens the page (Search). Phones have their Search tab.
@@ -57,33 +60,50 @@ export interface NavLinkDef {
   more?: boolean;
 }
 
-/** Where Live TV, Movies and Series lead with no sources: the Sources page, as the phone tab's Live TV. */
-const NO_SOURCES_TARGET = '/sources';
+/**
+ * Where Live TV, Movies or Series leads with no sources: the Sources page, as the phone tab's Live
+ * TV, saying which row led there (`for`), so that row stays current there (sectionCurrent) rather
+ * than giving its mark to Manage sources.
+ */
+export function noSourcesTarget(section: SourceSection): string {
+  return `/sources?for=${section}`;
+}
+
+/** The section whose row led to the Sources page (`/sources?for=…`), else null. */
+export function sourcesFor(pathname: string, search: string): SourceSection | null {
+  if (pathname !== '/sources') return null;
+  const section = new URLSearchParams(search).get('for');
+  return section === 'live' || section === 'movies' || section === 'series' ? section : null;
+}
 
 // Home is a house, not a layout glyph: collapsed, the rail is icons only, and a
 // tile-shaped Home would echo Multi-view's grid (LayoutGrid, as in its page and menus).
 export const WATCH_LINKS: readonly NavLinkDef[] = [
-  { to: '/dashboard', labelKey: 'navDashboard', icon: House },
+  { to: '/dashboard', labelKey: 'navDashboard', icon: House, noSourceNeeded: true },
   // The header's search box sat a hand's width away from this row on every page: one way in is enough.
-  { to: '/search', labelKey: 'navSearch', icon: Search, notInRail: true },
+  { to: '/search', labelKey: 'navSearch', icon: Search, notInRail: true, noSourceNeeded: true },
   // A source's sections, with the icons of its own links (railLinks). Most people have one source,
   // and these three, the most used pages, sat in its entry at the foot of the rail, under Library.
-  { to: NO_SOURCES_TARGET, labelKey: 'railLive', icon: Tv, section: 'live' },
+  // The tour's first step points here: Live TV leads to a source with channels to watch (liveTabTarget).
+  { to: noSourcesTarget('live'), labelKey: 'railLive', icon: Tv, section: 'live', tour: 'live' },
   { to: '/epg', labelKey: 'navGuide', icon: CalendarRange },
-  { to: NO_SOURCES_TARGET, labelKey: 'railMovies', icon: Clapperboard, section: 'movies' },
-  { to: NO_SOURCES_TARGET, labelKey: 'railSeries', icon: Layers, section: 'series' },
+  // The tour's movies step points here, or at My List when no source has movies.
+  { to: noSourcesTarget('movies'), labelKey: 'railMovies', icon: Clapperboard, section: 'movies', tour: 'vod' },
+  { to: noSourcesTarget('series'), labelKey: 'railSeries', icon: Layers, section: 'series' },
   // Games from ESPN with the channels that carry them; the label is the page's title.
-  { to: '/sports', labelKey: 'sports:title', icon: Trophy },
+  // ESPN's games show with no sources too, only without channels to watch them on.
+  { to: '/sports', labelKey: 'sports:title', icon: Trophy, noSourceNeeded: true },
   { to: '/multiview', labelKey: 'navMultiview', icon: LayoutGrid },
 ];
 
 export const LIBRARY_LINKS: readonly NavLinkDef[] = [
-  // The tour's "Movies, series and My List" step points here: unlike the Movies and Series links,
-  // which a rail with no movies or series leaves out, it is always on screen, also collapsed.
+  // The tour's "Movies, series and My List" step falls back on this row: unlike Movies, which a
+  // rail with no movies leaves out, it is always on screen, also collapsed.
   { to: '/my-list', labelKey: 'navMyList', icon: Bookmark, tour: 'vod' },
   { to: '/favorites', labelKey: 'navFavorites', icon: Heart },
   // Run 2: custom channel lists and watch stats reuse their pages' titles.
-  { to: '/lists', labelKey: 'lists:title', icon: ListOrdered },
+  // A list can be created before any source is added.
+  { to: '/lists', labelKey: 'lists:title', icon: ListOrdered, noSourceNeeded: true },
   { to: '/recent', labelKey: 'navRecent', icon: History },
   // The rest are visited now and then, not every evening: the rail folds them under More.
   { to: '/downloads', labelKey: 'navDownloads', icon: Download, more: true },
@@ -167,17 +187,22 @@ export function vodTarget(sources: readonly Source[] | undefined, section: 'movi
  * the section.
  */
 export function sectionTarget(section: SourceSection, sources: readonly Source[] | undefined, preferredId: string | null): string | null {
-  if (!sources?.length) return NO_SOURCES_TARGET;
+  if (!sources?.length) return noSourcesTarget(section);
   return section === 'live' ? liveTabTarget(sources, preferredId) : vodTarget(sources, section, preferredId);
 }
 
 /**
  * Whether the page on show belongs to a section link, in any source: Live TV stands for the live
- * and radio pages and the archive (isLiveRoute, as the phone tab), Movies and Series for what
- * railLinkCurrent counts for a source's own link (a movie's detail and player beside Movies).
+ * pages and the archive (isLiveRoute without radio, which has its own row), Movies and Series for what
+ * railLinkCurrent counts for a source's own link (a movie's detail and player beside Movies). With
+ * no sources, the Sources page the link led to (`search` holds its `for`). Callers pass `search`
+ * only while there are no sources: `for` outlives the first add, and then the page is the sources'.
  */
-export function sectionCurrent(section: SourceSection, pathname: string): boolean {
-  if (section === 'live') return isLiveRoute(pathname);
+export function sectionCurrent(section: SourceSection, pathname: string, search = ''): boolean {
+  if (sourcesFor(pathname, search) === section) return true;
+  // Radio has a row of its own (the lone source's in Watch, a source's own link otherwise), so
+  // Live TV leaves its pages to that row rather than lighting up beside it.
+  if (section === 'live') return isLiveRoute(pathname) && !/^\/s\/[^/]+\/radio(\/|$)/.test(pathname);
   // The route's own source segment, as it is in the path: decoding and encoding it again could
   // spell it differently.
   const base = /^\/s\/[^/?#]+/.exec(pathname)?.[0];
@@ -186,13 +211,28 @@ export function sectionCurrent(section: SourceSection, pathname: string): boolea
 
 /**
  * The Watch links as the rail and the palette offer them: Live TV, Movies and Series pointed at a
- * source by sectionTarget, Movies or Series left out while no source has them, and all three
- * stepped back (`dim`) while there are no sources.
+ * source by sectionTarget, Movies or Series left out while no source has them, and every link
+ * whose page needs a source stepped back (`dim`) while there are none.
  */
 export function watchLinks(sources: readonly Source[] | undefined, preferredId: string | null): NavLinkDef[] {
+  const none = sources?.length === 0;
   return WATCH_LINKS.flatMap((l) => {
-    if (!l.section) return [l];
+    const dim = none && !l.noSourceNeeded;
+    if (!l.section) return [dim ? { ...l, dim } : l];
     const to = sectionTarget(l.section, sources, preferredId);
-    return to === null ? [] : [{ ...l, to, dim: sources?.length === 0 }];
+    return to === null ? [] : [{ ...l, to, dim }];
   });
+}
+
+/**
+ * Radio as a Watch link, for the rail and the phone's More sheet: only with exactly one source,
+ * whose entry is then a single row to the Sources page (its other links were Watch's and
+ * Library's own pages over again), and only when that source has stations by railLinkIds' rules.
+ * Null otherwise: with two or more sources each one's Radio stays in its own entry.
+ */
+export function loneSourceRadio(sources: readonly Source[] | undefined): NavLinkDef | null {
+  if (sources?.length !== 1) return null;
+  const only = sources[0]!;
+  if (!railLinkIds(only, { hasRadio: only.radioCount > 0 }).includes('radio')) return null;
+  return { to: `${sourceBasePath(only.id)}/radio`, labelKey: 'railRadio', icon: Radio };
 }

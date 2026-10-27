@@ -3,7 +3,7 @@
  * Settings out of reach (L3-visual-2); the tour's Live step points at a source that has channels
  * (L3-app-6); a cut-off source name shows in full on hover (L3-visual-12).
  */
-import { cleanup, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { Outlet } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,7 +23,7 @@ vi.mock('@/api/events', () => ({
   onConnectionState: () => () => undefined,
 }));
 
-const { Rail, liveTourSource } = await import('../Rail');
+const { Rail } = await import('../Rail');
 
 function routes(collapsed = false) {
   return [
@@ -74,41 +74,53 @@ describe('rail layout (L3-visual-2)', () => {
 });
 
 describe('tour Live anchor (L3-app-6)', () => {
-  it('skips a failed or empty first source', () => {
-    const failed = makeSource('a', { lastError: 'HTTP 404', channelCount: 0 });
-    const empty = makeSource('b', { channelCount: 0 });
-    const healthy = makeSource('c', { channelCount: 40 });
-    const erroredWithChannels = makeSource('d', { channelCount: 10, lastError: 'timeout' });
-    expect(liveTourSource([failed, empty, healthy])?.id).toBe('c');
-    expect(liveTourSource([erroredWithChannels, healthy])?.id).toBe('c');
-    // Only errored sources with channels: the first of them beats none.
-    expect(liveTourSource([failed, erroredWithChannels])?.id).toBe('d');
-    expect(liveTourSource([failed, empty])).toBeUndefined();
-    expect(liveTourSource([])).toBeUndefined();
-  });
-
-  it('puts the one Live anchor on the healthy source in the rail', async () => {
+  it("is the Watch group's Live TV row, which skips a failed or empty first source", async () => {
     rpcMock.handlers['sources.list'] = () => [
       makeSource('bad', { name: 'Header M3U', position: 1, channelCount: 0, lastError: 'HTTP 404' }),
-      makeSource('good', { name: 'Night Portal', position: 2, channelCount: 120 }),
+      makeSource('empty', { name: 'Films', position: 2, channelCount: 0, movieCount: 9 }),
+      makeSource('good', { name: 'Night Portal', position: 3, channelCount: 120 }),
     ];
     renderRoutes(routes(), '/dashboard');
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     await within(nav).findByText('Night Portal');
     const anchors = nav.querySelectorAll('[data-tour="live"]');
     expect(anchors).toHaveLength(1);
-    expect(anchors[0]!.textContent).toContain('Night Portal');
+    expect(anchors[0]!.textContent).toBe('Live TV');
+    expect(anchors[0]!.getAttribute('href')).toBe('/s/good/live');
   });
 });
 
 describe('source names (L3-visual-12)', () => {
   it('a long name carries its full text as a tooltip', async () => {
     const name = 'A very long provider name that the rail has to cut off';
-    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name })];
+    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name }), makeSource('s2')];
     renderRoutes(routes(), '/dashboard');
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     const label = await within(nav).findByText(name);
     expect(label.getAttribute('title')).toBe(name);
     expect(label.className).toMatch(/\btruncate\b/);
+  });
+
+  it("the only source's row shows its full name and where it leads in its tooltip", async () => {
+    const name = 'A very long provider name that the rail has to cut off';
+    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name })];
+    renderRoutes(routes(), '/dashboard');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const row = await within(nav).findByRole('link', { name: new RegExp(`^${name}`) });
+    expect(within(row).getByText(name).className).toMatch(/\btruncate\b/);
+    fireEvent.mouseEnter(row);
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe(`${name}Manage sources`);
+  });
+
+  it.each([false, true])("the only source's tooltip says what its red dot means (icon rail: %s)", async (collapsed) => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name: 'Broken One', lastError: 'HTTP 404' })];
+    renderRoutes(routes(collapsed), '/dashboard');
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const row = await within(nav).findByRole('link', { name: /^Broken One/ });
+    fireEvent.mouseEnter(row);
+    const tip = await screen.findByRole('tooltip');
+    expect(tip.textContent).toBe('Broken OneThe last refresh failedManage sources');
+    expect(within(tip).getByText('The last refresh failed').className).toMatch(/\btext-danger\b/);
   });
 });

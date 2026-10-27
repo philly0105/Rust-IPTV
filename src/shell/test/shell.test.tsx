@@ -983,7 +983,8 @@ describe('B7 shell fixes', () => {
   });
 
   it('rail source errors are spoken, and ids with spaces stay valid IDREFs', async () => {
-    rpcMock.handlers['sources.list'] = () => [makeSource('my source', { name: 'Broken One', lastError: 'boom' } as never)];
+    // Two sources: the only one is a single link (its error is spoken there too, below).
+    rpcMock.handlers['sources.list'] = () => [makeSource('my source', { name: 'Broken One', lastError: 'boom' } as never), makeSource('s2')];
     renderRoutes(routes(), '/favorites');
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     const btn = await within(nav).findByRole('button', { name: /Broken One.*The last refresh failed/ });
@@ -998,6 +999,18 @@ describe('B7 shell fixes', () => {
     const nav2 = screen.getByRole('navigation', { name: 'Main navigation' });
     // Collapsed, the monogram opens the source's links in a menu (L2-shell-2); the error rides on its name.
     expect(await within(nav2).findByRole('button', { name: 'Broken One, The last refresh failed' })).toBeTruthy();
+    cleanup();
+    // The only source's row says it too, expanded and collapsed, and is still the way to Sources.
+    rpcMock.handlers['sources.list'] = () => [makeSource('my source', { name: 'Broken One', lastError: 'boom' } as never)];
+    renderRoutes(routes(), '/favorites');
+    const nav3 = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(await within(nav3).findByRole('link', { name: 'Broken One, The last refresh failed, Manage sources' })).toBeTruthy();
+    cleanup();
+    act(() => useShellStore.setState({ railCollapsed: false }));
+    renderRoutes(routes(), '/favorites');
+    const nav4 = screen.getByRole('navigation', { name: 'Main navigation' });
+    const row = await within(nav4).findByRole('link', { name: /^Broken One/ });
+    expect(row.textContent).toMatch(/^BOBroken One, Xtream, The last refresh failed, Manage sources$/);
   });
 
   it('saves the last screen at once when the window hides inside the debounce', async () => {
@@ -1362,10 +1375,13 @@ describe('Run 3 onboarding wiring', () => {
     renderRoutes(routes(), '/favorites');
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
     await within(nav).findByText('Night Portal');
+    // Live TV and Movies, at the top of Watch, not a source's entry at the foot of the rail.
     const live = nav.querySelectorAll('[data-tour="live"]');
     expect(live).toHaveLength(1);
-    expect(live[0]!.textContent).toContain('Night Portal');
-    expect(within(nav).getByRole('link', { name: /My List/ }).getAttribute('data-tour')).toBe('vod');
+    expect(live[0]).toBe(within(nav).getByRole('link', { name: 'Live TV' }));
+    // Movies comes first in the rail, so the tour points there; My List stands in when no source has movies.
+    const vod = nav.querySelectorAll('[data-tour="vod"]');
+    expect([...vod]).toEqual([within(nav).getByRole('link', { name: 'Movies' }), within(nav).getByRole('link', { name: /My List/ })]);
     // The header's one search trigger is the one search anchor, not the rail's Search link.
     const search = document.querySelectorAll('[data-tour="search"]');
     expect(search).toHaveLength(1);
@@ -1426,6 +1442,9 @@ describe('Run 3 onboarding wiring', () => {
       const search = document.querySelectorAll('[data-tour="search"]');
       expect(search).toHaveLength(1);
       expect(screen.getByTestId('tab-bar').contains(search[0]!)).toBe(true);
+      // The Live TV tab holds the first step's anchor.
+      const live = document.querySelectorAll('[data-tour="live"]');
+      expect([...live]).toEqual([within(screen.getByTestId('tab-bar')).getByRole('link', { name: 'Live TV' })]);
       expect(screen.queryByTestId('open-palette')).toBeNull();
       expect(screen.queryByTestId('theme-toggle')).toBeNull();
     });

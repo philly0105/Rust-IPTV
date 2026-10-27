@@ -138,13 +138,20 @@ describe('rail (SH-rail-ia)', () => {
     expect(within(nav).getByRole('button', { name: /Night Portal, Xtream/ })).toBeTruthy();
   });
 
-  it('leaves the only source closed: its Live TV, Movies and Series are in the Watch group', async () => {
+  it('makes the only source one row to the Sources page: its Live TV, Radio, Movies and Series are in the Watch group', async () => {
     handlers([makeSource('s1', { name: 'Only One' })]);
     renderRoutes(routes(), '/favorites');
-    const entry = await screen.findByRole('button', { name: /Only One/ });
-    expect(entry.getAttribute('aria-expanded')).toBe('false');
+    const row = await screen.findByRole('link', { name: /^Only One.*Manage sources$/ });
+    expect(row.getAttribute('href')).toBe('/sources');
+    expect(screen.queryByRole('button', { name: /Only One/ })).toBeNull();
+    // It stands for Manage sources, which no longer has a row of its own.
+    const sources = screen.getByRole('group', { name: 'Sources' });
+    expect(within(sources).getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(['/sources?add=1', '/sources']);
     const watch = screen.getByRole('group', { name: 'Watch' });
     expect(within(watch).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live');
+    // Radio was the one link of the source's own that no Watch or Library row had: it follows Live TV.
+    expect(within(watch).getByRole('link', { name: 'Radio' }).getAttribute('href')).toBe('/s/s1/radio');
+    expect(within(watch).getAllByRole('link').map((l) => l.textContent).slice(1, 4)).toEqual(['Live TV', 'Radio', 'TV guide']);
     expect(within(watch).getByRole('link', { name: 'Movies' }).getAttribute('href')).toBe('/s/s1/movies');
     expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('href')).toBe('/s/s1/series');
   });
@@ -156,19 +163,31 @@ describe('rail (SH-rail-ia)', () => {
     const add = await within(nav).findByTestId('rail-add-source');
     expect(add.getAttribute('href')).toBe('/sources?add=1');
     expect(add.className).toContain('border-dashed');
-    expect(within(nav).getByRole('link', { name: 'My List' }).className).toContain('text-fg-subtle');
+    // The rows whose pages need a source step back; Lists, Home and Sports work without one.
+    const dimmed = (name: string) => within(nav).getByRole('link', { name }).className.includes('text-fg-subtle');
+    // (Favorites is the page on show, so it wears the current mark instead.)
+    for (const name of ['My List', 'Recently watched', 'TV guide', 'Multi-view']) expect(dimmed(name), name).toBe(true);
+    for (const name of ['Lists', 'Home', 'Sports']) expect(dimmed(name), name).toBe(false);
     // Live TV, Movies and Series step back too, and lead to the Sources page, as the phone tab does.
     const watch = within(nav).getByRole('group', { name: 'Watch' });
     for (const name of ['Live TV', 'Movies', 'Series']) {
       const link = within(watch).getByRole('link', { name });
-      expect(link.getAttribute('href'), name).toBe('/sources');
+      expect(link.getAttribute('href'), name).toBe(`/sources?for=${name === 'Live TV' ? 'live' : name.toLowerCase()}`);
       expect(link.className, name).toContain('text-fg-subtle');
     }
-    expect(within(watch).getByRole('link', { name: 'TV guide' }).className).not.toContain('text-fg-subtle');
     // No "+" beside the Sources label: the row is the one way in.
     expect(within(within(nav).getByRole('group', { name: 'Sources' })).queryByRole('link', { name: 'Add source' })).toBe(add);
     await act(() => router.navigate('/dashboard'));
     expect(within(nav).queryByTestId('rail-add-source')).toBeNull();
+    // The row the user picked keeps the mark on the Sources page, not Manage sources.
+    fireEvent.click(within(watch).getByRole('link', { name: 'Movies' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
+    expect(within(watch).getByRole('link', { name: 'Movies' }).getAttribute('aria-current')).toBe('page');
+    expect(within(watch).getByRole('link', { name: 'Live TV' }).getAttribute('aria-current')).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'Manage sources' }).getAttribute('aria-current')).toBeNull();
+    await act(() => router.navigate('/sources'));
+    expect(within(nav).getByRole('link', { name: 'Manage sources' }).getAttribute('aria-current')).toBe('page');
+    expect(within(watch).getByRole('link', { name: 'Movies' }).getAttribute('aria-current')).toBeNull();
   });
 });
 
@@ -238,16 +257,6 @@ describe('rail at laptop heights (stage 2)', () => {
     renderRoutes(routes(), '/dashboard');
     expect((await screen.findByRole('button', { name: /^Backup/ })).getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: /^Night Portal/ }).getAttribute('aria-expanded')).toBe('false');
-    // The only source stays closed until the user opens it, and then stays open next launch.
-    cleanup();
-    handlers([makeSource('s1', { name: 'Night Portal' })]);
-    renderRoutes(routes(), '/dashboard');
-    const only = await screen.findByRole('button', { name: /^Night Portal/ });
-    expect(only.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(only);
-    cleanup();
-    renderRoutes(routes(), '/dashboard');
-    expect((await screen.findByRole('button', { name: /^Night Portal/ })).getAttribute('aria-expanded')).toBe('true');
   });
 
   it('collapsed: the footer keeps Settings and the toggle, and the current source is marked for the scroll', async () => {
@@ -324,7 +333,7 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     expect(readLastSource()).toBe('b');
   });
 
-  it('follows the source the user opened, and More holds the Library, the sources and Settings', async () => {
+  it('follows the source the user opened, and More holds the Watch pages without a tab, the Library, the sources and Settings', async () => {
     media(...PHONE);
     const { router } = renderRoutes(routes(), '/s/s2/movies');
     const bar = await screen.findByTestId('tab-bar');
@@ -335,9 +344,19 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     fireEvent.click(more);
     const sheet = await screen.findByRole('dialog', { name: 'More' });
     expect(more.getAttribute('aria-expanded')).toBe('true');
+    // The Watch pages the bar has no tab for lead the sheet: Movies and Series of the source on
+    // show, marked current as in the rail, then Sports and Multi-view.
+    const watch = within(sheet).getByRole('region', { name: 'Watch' });
+    const tiles = within(watch).getAllByRole('link');
+    expect(tiles.map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Movies', '/s/s2/movies'],
+      ['Series', '/s/s2/series'],
+      ['Sports', '/sports'],
+      ['Multi-view', '/multiview'],
+    ]);
+    expect(tiles.map((l) => l.getAttribute('aria-current'))).toEqual(['page', null, null, null]);
     expect(within(sheet).getByRole('link', { name: 'My List' })).toBeTruthy();
-    // Sports is a Watch page the bar has no tab for: phones reach it here.
-    expect(within(sheet).getByRole('link', { name: 'Sports' }).getAttribute('href')).toBe('/sports');
+    expect(within(sheet).getByRole('link', { name: 'Manage sources' }).getAttribute('href')).toBe('/sources');
     expect(within(sheet).getByRole('link', { name: 'Settings' })).toBeTruthy();
     const backup = within(sheet).getByRole('list', { name: 'Backup' });
     // What the source holds; its favourites and history are in Library above.
@@ -346,6 +365,111 @@ describe('phone tab bar (CB-PHONE-NAV)', () => {
     fireEvent.click(within(sheet).getByRole('link', { name: 'My List' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/my-list'));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'More' })).toBeNull());
+  });
+});
+
+describe('phone tab bar with no sources', () => {
+  it('Live TV leads to the Sources page and stays the current tab there', async () => {
+    media(...PHONE);
+    handlers([]);
+    const { router } = renderRoutes(routes(), '/favorites');
+    const bar = await screen.findByTestId('tab-bar');
+    const live = within(bar).getByRole('link', { name: 'Live TV' });
+    await waitFor(() => expect(live.getAttribute('href')).toBe('/sources?for=live'));
+    fireEvent.click(live);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
+    expect(live.getAttribute('aria-current')).toBe('page');
+    expect(within(bar).getByRole('button', { name: 'More' }).getAttribute('aria-current')).toBeNull();
+    // Nor does the sheet's Manage sources row say it is current, as it is not drawn so.
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    const manage = within(sheet).getByRole('link', { name: 'Manage sources' });
+    expect(manage.getAttribute('aria-current')).toBeNull();
+    expect(manage.className).not.toContain('bg-selected');
+  });
+});
+
+describe('phone More sheet with one source', () => {
+  it("is one row to the Sources page, its Radio, Movies and Series Watch tiles, and no chips", async () => {
+    media(...PHONE);
+    handlers([makeSource('s1', { name: 'Night Portal', radioCount: 4 })]);
+    const { router } = renderRoutes(routes(), '/s/s1/series');
+    const bar = await screen.findByTestId('tab-bar');
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    const watch = within(sheet).getByRole('region', { name: 'Watch' });
+    await waitFor(() => expect(within(watch).getAllByRole('link').map((l) => l.textContent)).toEqual(['Radio', 'Movies', 'Series', 'Sports', 'Multi-view']));
+    expect(within(watch).getByRole('link', { name: 'Radio' }).getAttribute('href')).toBe('/s/s1/radio');
+    expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('aria-current')).toBe('page');
+    // The source's row stands for Manage sources; a card of chips would repeat the tiles and the Live TV tab.
+    const row = within(sheet).getByRole('link', { name: 'Night Portal, Manage sources' });
+    expect(row.getAttribute('href')).toBe('/sources');
+    expect(within(sheet).queryByRole('list', { name: 'Night Portal' })).toBeNull();
+    expect(within(sheet).getAllByRole('link', { name: /Manage sources/ })).toEqual([row]);
+    fireEvent.click(row);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/sources'));
+  });
+
+  it("says the Movies tile is current on a movie's detail page, as it draws it", async () => {
+    media(...PHONE);
+    handlers([makeSource('s1', { name: 'Night Portal' })]);
+    renderRoutes(routes(), '/s/s1/movie/9');
+    const bar = await screen.findByTestId('tab-bar');
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    const watch = within(sheet).getByRole('region', { name: 'Watch' });
+    const movies = await within(watch).findByRole('link', { name: 'Movies' });
+    expect(movies.getAttribute('href')).toBe('/s/s1/movies');
+    // The path is not under /s/s1/movies: only the section's own rule makes the tile current.
+    expect(movies.className).toContain('bg-selected');
+    expect(movies.getAttribute('aria-current')).toBe('page');
+    expect(within(watch).getByRole('link', { name: 'Series' }).getAttribute('aria-current')).toBeNull();
+  });
+});
+
+describe('the Sources page a Watch row led to, once a source exists', () => {
+  // `for` outlives the first add (the Sources page keeps it when its dialog closes), but once there
+  // is a source the page is the sources' own again: one current row, never two.
+  const currentLinks = (el: HTMLElement) => within(el).queryAllByRole('link').filter((l) => l.getAttribute('aria-current') === 'page');
+
+  it("marks only the lone source's row in the rail", async () => {
+    handlers([makeSource('s1', { name: 'Night Portal' })]);
+    renderRoutes(routes(), '/sources?for=live');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    const row = await within(nav).findByRole('link', { name: /^Night Portal/ });
+    expect(currentLinks(nav)).toEqual([row]);
+  });
+
+  it('marks Manage sources, not Movies, with two sources', async () => {
+    renderRoutes(routes(), '/sources?for=movies');
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' });
+    await within(nav).findByText('Backup');
+    expect(currentLinks(nav)).toEqual([within(nav).getByRole('link', { name: 'Manage sources' })]);
+  });
+
+  it("marks only the lone source's row on a phone, under More", async () => {
+    media(...PHONE);
+    handlers([makeSource('s1', { name: 'Night Portal' })]);
+    renderRoutes(routes(), '/sources?for=live');
+    const bar = await screen.findByTestId('tab-bar');
+    await waitFor(() => expect(within(bar).getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/s1/live'));
+    expect(currentLinks(bar)).toEqual([]);
+    const more = within(bar).getByRole('button', { name: 'More' });
+    expect(more.getAttribute('aria-current')).toBe('true');
+    fireEvent.click(more);
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    expect(currentLinks(sheet)).toEqual([within(sheet).getByRole('link', { name: 'Night Portal, Manage sources' })]);
+  });
+
+  it('marks Manage sources in the sheet, not the Movies tile, with two sources', async () => {
+    media(...PHONE);
+    renderRoutes(routes(), '/sources?for=movies');
+    const bar = await screen.findByTestId('tab-bar');
+    fireEvent.click(within(bar).getByRole('button', { name: 'More' }));
+    const sheet = await screen.findByRole('dialog', { name: 'More' });
+    await within(sheet).findByRole('list', { name: 'Backup' });
+    expect(currentLinks(sheet)).toEqual([within(sheet).getByRole('link', { name: 'Manage sources' })]);
+    expect(within(within(sheet).getByRole('region', { name: 'Watch' })).getByRole('link', { name: 'Movies' }).className).not.toContain('bg-selected');
   });
 });
 

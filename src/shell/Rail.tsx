@@ -9,7 +9,7 @@ import type { Source } from '@/api/types';
 import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/ui';
 
 import { useOffline } from './connection';
-import { LIBRARY_LINKS, readLastSource, sectionCurrent, watchLinks, type NavLinkDef } from './navigation';
+import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
@@ -198,6 +198,7 @@ function RailGroup({
   collapsed,
   dim,
   first,
+  noSources,
 }: {
   id: string;
   label: string;
@@ -206,8 +207,13 @@ function RailGroup({
   dim?: boolean;
   /** The first group sits straight under the brand row: no rule above it when collapsed. */
   first?: boolean;
+  /**
+   * There are no sources, so the row that led to the Sources page (its `for`) is current there.
+   * The query outlives the first add, and from then on the page is the sources' own again.
+   */
+  noSources?: boolean;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const moreId = useId();
   const main = links.filter((l) => !l.more);
   const more = links.filter((l) => l.more);
@@ -233,8 +239,9 @@ function RailGroup({
         end={l.end}
         tour={l.tour}
         collapsed={collapsed}
-        dim={dim || l.dim}
-        current={l.section ? sectionCurrent(l.section, pathname) : undefined}
+        // `dim` is the group's: with no sources, the rows whose pages need one.
+        dim={(dim && !l.noSourceNeeded) || l.dim}
+        current={l.section ? sectionCurrent(l.section, pathname, noSources ? search : '') : undefined}
       />
     </li>
   );
@@ -375,7 +382,6 @@ function SourceEntry({
   active,
   expanded,
   onToggle,
-  tour,
 }: {
   source: Source;
   collapsed: boolean;
@@ -383,7 +389,6 @@ function SourceEntry({
   /** Its links show (the rail's accordion decides; collapsed, the entry is a menu instead). */
   expanded: boolean;
   onToggle: () => void;
-  tour?: 'live';
 }) {
   const { t } = useTranslation('shell');
   const [RailMenu, requestRailMenu] = useRailMenu(collapsed);
@@ -450,7 +455,7 @@ function SourceEntry({
     return (
       // data-rail-current: the menu trigger carries no aria-current, but the rail still scrolls
       // the source of the page on show into view (useRailScroll).
-      <li ref={collapsedItemRef} data-tour={tour} data-rail-current={active || undefined} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
+      <li ref={collapsedItemRef} data-rail-current={active || undefined} onPointerEnter={() => setWarm(true)} onFocus={() => setWarm(true)}>
         {RailMenu ? (
           <RailMenu
             label={label}
@@ -511,7 +516,6 @@ function SourceEntry({
         type="button"
         aria-expanded={expanded}
         aria-controls={listId}
-        data-tour={tour}
         onClick={() => {
           revealOnExpand.current = !expanded;
           onToggle();
@@ -560,6 +564,64 @@ function SourceEntry({
   );
 }
 
+/**
+ * The Sources group's one row when there is one source: its monogram and name, leading to the
+ * Sources page. The entry used to take three rows (the source, its links, Manage sources), and
+ * every link it opened was a Watch or Library row already; Radio, the one that was not, joins
+ * Watch (loneSourceRadio). Collapsed it is the monogram alone, no longer a menu of those links.
+ * Its name ends in "Manage sources", and so does its tooltip, which also carries the full name
+ * that the row may cut and, after a failed refresh, what the red dot means.
+ */
+function LoneSource({ source, collapsed }: { source: Source; collapsed: boolean }) {
+  const { t } = useTranslation('shell');
+  const intent = useRouteIntent('/sources');
+  const name = source.lastError ? `${source.name}, ${t('sourceHasError')}` : source.name;
+  return (
+    <li>
+      <Tooltip
+        content={
+          <>
+            <span dir="auto" className="block font-medium">
+              {source.name}
+            </span>
+            {/* What the red dot means: to a mouse user the reason is otherwise only a colour. */}
+            {source.lastError && <span className="block text-danger">{t('sourceHasError')}</span>}
+            <span className="block text-fg-muted">{t('manageSources')}</span>
+          </>
+        }
+        side="inline-end"
+        describe={false}
+      >
+        <NavLink
+          {...intent}
+          to="/sources"
+          end
+          data-rail-source=""
+          aria-label={collapsed ? `${name}, ${t('manageSources')}` : undefined}
+          className={({ isActive }) => itemClass(isActive, collapsed)}
+        >
+          {/* The collapsed rail has no room for the error dot beside the name: it rides on the monogram. */}
+          <SourceMark source={source} errorDot={collapsed && !!source.lastError} />
+          {!collapsed && (
+            <>
+              <span dir="auto" className="min-w-0 flex-1 truncate text-match-parent">
+                {source.name}
+              </span>
+              <span className="sr-only">{`, ${t(kindShortKey(source.kind))}`}</span>
+              {source.lastError && (
+                <span className="h-2 w-2 shrink-0 rounded-full bg-danger">
+                  <span className="sr-only">{`, ${t('sourceHasError')}`}</span>
+                </span>
+              )}
+              <span className="sr-only">{`, ${t('manageSources')}`}</span>
+            </>
+          )}
+        </NavLink>
+      </Tooltip>
+    </li>
+  );
+}
+
 /** One of an open source's links (Live TV, Movies, …); a rest on it starts the page's code and first data. */
 function SourceLink({ to, current, children }: { to: string; current: boolean; children: ReactNode }) {
   const intent = useRouteIntent(to);
@@ -584,16 +646,6 @@ function SourceLink({ to, current, children }: { to: string; current: boolean; c
  * the room. A percentage of the rail's middle, which has a definite flexed height.
  */
 const RAIL_PRIMARY_MAX = 'max-h-[max(50%,calc(100%-10rem))]';
-
-/**
- * The source the first-run tour's "Live TV" step points at: the first with live channels and no
- * import error, else the first with live channels at all, else none (the step then shows as a
- * centred card). The first in the list could be one that failed to import (L3-app-6).
- */
-export function liveTourSource(sources: readonly Source[] | undefined): Source | undefined {
-  const watchable = (sources ?? []).filter((s) => s.channelCount > 0);
-  return watchable.find((s) => !s.lastError) ?? watchable[0];
-}
 
 /** Fade masks for the rail's scrolling list: a soft edge where links continue out of view. */
 const FADE = '24px';
@@ -679,12 +731,16 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const scrollKey = `${location.pathname}|${sources.data ? 'ready' : 'pending'}`;
   const primaryFade = useRailScroll(primaryRef, scrollKey, [collapsed]);
   const fade = useRailScroll(scrollRef, scrollKey, [sources.data, collapsed]);
-  const tourSourceId = liveTourSource(sources.data)?.id;
   const sourceCount = sources.data?.length ?? 0;
   const noSources = sources.isSuccess && sourceCount === 0;
   // Live TV, Movies and Series open the source on show, else the one last opened.
   // Search is left out: the header's search box is the way in (notInRail).
-  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource()).filter((l) => !l.notInRail);
+  // With one source its Radio is a Watch row, after Live TV (its entry is a single row then).
+  const radio = loneSourceRadio(sources.data);
+  const watch = watchLinks(sources.data, activeSourceId ?? readLastSource())
+    .filter((l) => !l.notInRail)
+    .flatMap((l) => (l.section === 'live' && radio ? [l, radio] : [l]));
+  const lone = sourceCount === 1 ? sources.data![0] : undefined;
   // With two or more sources, the source of the page on show opens. A lone source stays as the
   // user left it: the Watch links already lead to its sections and mark its pages.
   const pageSource = sourceCount > 1 ? activeSourceId : undefined;
@@ -749,6 +805,12 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
         />
       </div>
     );
+  } else if (lone) {
+    sourceList = (
+      <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
+        <LoneSource source={lone} collapsed={collapsed} />
+      </ul>
+    );
   } else if (sources.data && sources.data.length > 0) {
     sourceList = (
       <ul className="flex flex-col gap-0.5" data-testid="rail-sources">
@@ -760,8 +822,6 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
             active={activeSourceId === s.id}
             expanded={!collapsed && openId === s.id}
             onToggle={() => toggleSource(s.id)}
-            // The tour's "Live TV" step points at a source whose channels are there to watch.
-            tour={s.id === tourSourceId ? 'live' : undefined}
           />
         ))}
       </ul>
@@ -823,7 +883,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           style={railFadeMask(primaryFade.top, primaryFade.bottom)}
           className={cn('shrink-0 overflow-y-auto overflow-x-hidden px-2 pb-1', RAIL_PRIMARY_MAX)}
         >
-          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={watch} collapsed={collapsed} first />
+          <RailGroup id="rail-watch-heading" label={t('navGroupWatch')} links={watch} collapsed={collapsed} first noSources={noSources} />
         </div>
 
         <div
@@ -835,7 +895,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
           style={railFadeMask(false, fade.bottom, '3rem')}
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
         >
-          {/* With no sources every Library page opens empty: the group steps back (SH-welcome-generic). */}
+          {/* With no sources Library's pages open empty, but for Lists: they step back (SH-welcome-generic). */}
           <RailGroup id="rail-library-heading" label={t('navGroupLibrary')} links={LIBRARY_LINKS} collapsed={collapsed} dim={noSources} />
           <div role="group" aria-labelledby="rail-sources-heading" className="flex flex-col gap-0.5">
             <GroupLabel
@@ -845,7 +905,18 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
               action={noSources || (sources.isError && !offline) ? undefined : addSource}
             />
             {sourceList}
-            <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />
+            {/* One source: its own row leads to the Sources page. */}
+            {!lone && (
+              <RailNavLink
+                to="/sources"
+                labelKey="manageSources"
+                icon={ListVideo}
+                collapsed={collapsed}
+                end
+                // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.
+                current={noSources && sourcesFor(location.pathname, location.search) ? false : undefined}
+              />
+            )}
           </div>
         </div>
       </div>

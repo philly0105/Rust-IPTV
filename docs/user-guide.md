@@ -36,7 +36,7 @@ No channels or other content come with the app. Add a source first:
 - An Xtream Codes account: server URL, username and password. Pasting a full `get.php` link fills in the fields for you.
 - A Stalker (Ministra) portal: the portal address ending in `/c/` and the MAC address registered with your provider.
 
-On first start, Home shows the three kinds side by side; pick one to open its form. Once the first source has imported, the app opens its live channels (or its movies or series if it has no channels), and a card points out search and the command palette. Got it closes it; Show me around turns it into a three-step tour of your sources, My List (movies and series) and search (Next, Back, Skip; Esc skips). After an update, What's new lists what changed since the version you last used. Both show once; "Take the tour" and "What's new" in the command palette (Ctrl+K) and Settings > About open them again. See [onboarding.md](architecture/onboarding.md).
+On first start, Home shows the three kinds side by side; pick one to open its form. Once the first source has imported, the app opens its live channels (or its movies or series if it has no channels), and a card points out search and the command palette. Got it closes it; Show me around turns it into a three-step tour of Live TV, movies and series (or My List when no source has movies) and search (Next, Back, Skip; Esc skips). After an update, What's new lists what changed since the version you last used. Both show once; "Take the tour" and "What's new" in the command palette (Ctrl+K) and Settings > About open them again. See [onboarding.md](architecture/onboarding.md).
 
 ## Sources
 
@@ -203,7 +203,7 @@ To use a phone, turn on "Allow phones on this network" under Settings > Remote (
 
 ## Phones and touch screens
 
-Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists the Library pages, each source's pages, Sports, Multi-view and Settings. The theme switch is then in Settings > Appearance and the command palette. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
+Below 640 px a tab bar at the bottom replaces the side rail: Home, Live TV (the source you last opened), the TV guide, Search, and More, which lists Movies, Series, Sports and Multi-view first, then the Library pages, your sources and Settings. The theme switch is then in Settings > Appearance and the command palette. On a narrow window (640 to 1024 px), "Hide sidebar" at the bottom of the side rail hides it, and the button at the start of the header brings it back. Below 640 px the mini player sits above the tab bar, is narrower (45 % of the width, at least 190 px) and shows play, mute, the time and fullscreen. A tap on the video shows or hides the controls instead of pausing; use the play button to pause. Mouse clicks still pause, and a double tap or double click goes fullscreen.
 
 ## Appearance, language and startup
 

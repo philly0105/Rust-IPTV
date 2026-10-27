@@ -362,6 +362,29 @@ describe('HeroCarousel', () => {
     expect(within(controls).getAllByRole('tab')[1]!.firstElementChild!.className).toContain('w-1.5');
   });
 
+  it('stands about two fifths of a desktop window tall, so the first rail starts in its top half', async () => {
+    const { HERO_BODY } = await import('../HeroSkeleton');
+    // From sm: 40vh, capped by the width and at 30rem (360 px of a 1440 x 900 window, was 504).
+    expect(HERO_BODY).toContain('sm:min-h-[clamp(18rem,min(40vh,32vw),30rem)]');
+    // A phone's stays taller (artwork over copy) but stops at 28rem, 420 px of an 844 px phone (was 510).
+    expect(HERO_BODY).toMatch(/(^| )min-h-\[clamp\(22rem,56vh,28rem\)\]( |$)/);
+  });
+
+  it('a poster standing in for the backdrop ends above the slide controls in its corner', () => {
+    const { hero } = renderHero([slide('a', { posterUrl: 'https://img.test/upright.jpg' }), slide('b')]);
+    const layer = hero.querySelector('[data-hero-backdrop]')!;
+    fireEvent.load(layer.querySelector('img')!);
+    const poster = layer.querySelector<HTMLElement>('[data-hero-poster]')!;
+    // Top 8 % plus 56 % leaves the bottom 36 % to the controls (lg:bottom-14, level with the buttons).
+    expect(poster.className).toContain('top-[8%]');
+    expect(poster.className).toContain('h-[56%]');
+    const controls = screen.getByTestId('hero-controls');
+    expect(controls.className).toContain('lg:bottom-14');
+    // Both end on the page gutter, so the poster stands flush over the controls' pill.
+    expect(poster.className).toMatch(/(^| )end-\(--page-gutter\)( |$)/);
+    expect(controls.className).toMatch(/(^| )lg:end-\(--page-gutter\)( |$)/);
+  });
+
   it('never rotates under reduced motion, and the controls still move by hand', () => {
     stubReducedMotion(true);
     vi.useFakeTimers();
@@ -537,6 +560,23 @@ describe('HeroCarousel', () => {
     const poster = layer.querySelector<HTMLImageElement>('[data-hero-poster]')!;
     expect(poster.getAttribute('src')).toBe(layer.querySelector('img')!.getAttribute('src'));
     expect(poster.className).toContain('lg:block');
+  });
+
+  it('a slide with no artwork shows its initials tile upright at the inline end, over its tint', () => {
+    const { hero } = renderHero([slide('a', { title: 'Harbor Lights' }), slide('b', { backdropUrl: 'https://img.test/b-wide.jpg' })]);
+    const layer = hero.querySelector<HTMLElement>('[data-hero-backdrop]')!;
+    expect(layer.style.background).toContain('gradient');
+    const tile = layer.querySelector<HTMLElement>('[data-hero-poster-fallback]')!;
+    // The rails' fallback tile for the same title: its initials and the movie glyph.
+    expect(tile.querySelector('[data-poster-fallback]')!.textContent).toBe('HL');
+    expect(tile.className).toContain('lg:block');
+    expect(tile.className).toContain('hidden');
+    // Decoration only: the layer is hidden from assistive tech and the tile has no text alternative.
+    expect(layer.getAttribute('aria-hidden')).toBe('true');
+    // A slide with a picture gets no tile.
+    fireEvent.click(screen.getByRole('tab', { name: 'Title b' }));
+    const other = hero.querySelector<HTMLElement>('[data-hero-backdrop="s1|movie|b"]')!;
+    expect(other.querySelector('[data-hero-poster-fallback]')).toBeNull();
   });
 
   it('titles a new arrival with titleBase like its detail page, and the year line follows what is shown', () => {

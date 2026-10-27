@@ -749,9 +749,10 @@ describe('guide grid', () => {
     // part of the cell that is on screen so it ends in an ellipsis there.
     expect(text.className).toContain('sticky');
     expect(parseFloat(text.style.maxWidth)).toBeGreaterThan(0);
-    // The source picker (LG-11): same accessible name, with a chevron like the kit Select's.
-    const source = screen.getByRole('combobox', { name: 'Source' });
-    expect(source.querySelector('svg.lucide-chevron-down')).toBeTruthy();
+    // The guide's pickers (LG-11): same accessible name, with a chevron like the kit Select's. One
+    // source here, so the group picker leads (the source picker shows only with a choice).
+    const group = screen.getByRole('combobox', { name: 'Group' });
+    expect(group.querySelector('svg.lucide-chevron-down')).toBeTruthy();
   });
 });
 

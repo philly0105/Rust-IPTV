@@ -541,14 +541,15 @@ export const CardMenuContext = createContext<((request: CardMenuRequest) => void
  * 16:9 artwork for a title that may only have a poster: the backdrop when there is one; else
  * the poster stands upright at the inline start over a soft field made from its own colours,
  * the cheap quarter-size blur (C5), so a resume rail of posters still reads as one row of
- * stills.
+ * stills. With neither, the title's initials tile, as its poster card shows it elsewhere: a bare
+ * tint left a blank frame that only the caption named.
  */
 function WideArt({ title, backdropUrl, posterUrl, sourceId }: { title: string; backdropUrl?: string; posterUrl?: string; sourceId?: string }) {
   const railWidth = useContext(PosterWidthContext);
   // The upright poster is the frame's height at 2:3: 3/8 of the card's width.
   const posterWidth = railWidth ? Math.round((railWidth * 3) / 8) : undefined;
   const field = useImageChain([backdropUrl ? undefined : posterUrl], sourceId, posterWidth);
-  if (backdropUrl) {
+  if (backdropUrl || !posterUrl) {
     return <Poster src={backdropUrl} fallbackSrc={posterUrl} sourceId={sourceId} alt="" label={title} aspect="wide" className="h-full after:hidden" rounded="sm" />;
   }
   const hue = hueOf(title);

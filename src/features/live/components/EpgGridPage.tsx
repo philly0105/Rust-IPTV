@@ -2038,6 +2038,10 @@ const GuideToolbar = memo(function GuideToolbar({
   );
   const stacked = bar !== 'full';
   const phone = bar === 'phone';
+  // One source with channels and it is on show (most accounts): a picker with one entry chose
+  // nothing and took a phone's row from the group picker. The header names the source. While
+  // the list loads the picker holds its place, so the toolbar does not shift for two sources.
+  const sourcePicker = !sources || sources.length > 1 || (sources[0] !== undefined && sources[0].id !== sourceId);
   const range = formatTimeRange(start, end, lang);
   // The phone's folded field takes focus as it unfolds; it folds again once left empty.
   const searchToggle = useRef<HTMLButtonElement>(null);
@@ -2064,16 +2068,18 @@ const GuideToolbar = memo(function GuideToolbar({
       {/* A phone puts the two pickers side by side on one row, of equal width, with the search
           folded into a button at its end: unfolded, the field covers the row (as the header's
           search does), so the guide starts two rows lower, not three. */}
-      <div className={phone ? 'relative grid w-full grid-cols-[1fr_1fr_auto] items-center gap-2' : 'contents'}>
-        <ScopePicker
-          label={t('guideSource')}
-          value={sourceId}
-          sections={sourceSections}
-          onChange={(v) => onQuery('source', v)}
-          filterLabel={t('filterSources')}
-          className={bar === 'phone' ? 'h-9' : 'w-48'}
-          testId="guide-source"
-        />
+      <div className={phone ? cn('relative grid w-full items-center gap-2', sourcePicker ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]') : 'contents'}>
+        {sourcePicker ? (
+          <ScopePicker
+            label={t('guideSource')}
+            value={sourceId}
+            sections={sourceSections}
+            onChange={(v) => onQuery('source', v)}
+            filterLabel={t('filterSources')}
+            className={bar === 'phone' ? 'h-9' : 'w-48'}
+            testId="guide-source"
+          />
+        ) : null}
         <ScopePicker
           label={t('guideGroup')}
           value={view ? `${VIEW_OPTION}${guideViewParam(view)}` : (categoryId ?? '')}

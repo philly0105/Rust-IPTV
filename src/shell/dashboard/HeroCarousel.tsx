@@ -28,7 +28,8 @@
  * The hero runs edge to edge under the header (the cinematic full-bleed hero):
  * the artwork fills the frame, and two glass gradients, from the bottom and from
  * the inline start, keep the copy readable on any picture in every theme; a
- * slide with no artwork gets a per-title tint instead. Gradients only, no blur
+ * slide with no artwork gets a per-title tint instead, with the title's initials tile upright at
+ * the inline end from lg up (where a poster would stand). Gradients only, no blur
  * over the picture and no backdrop filter (C5), so nothing re-samples the page
  * while the hero is on screen. A slide that has only a poster shows it upright
  * at the inline end over a soft field made from its own colours (the cheap
@@ -47,7 +48,7 @@ import { Link } from 'react-router';
 import { useRpcQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
-import { MetaLine, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
+import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, hueOf, useImageChain, whenIdle } from '@/ui';
 import { intlLocale, numberFormat } from '@/lib/intl';
 
 import { useReducedMotion } from '../theme';
@@ -289,6 +290,15 @@ function DetailedBackdrop(props: BackdropProps) {
   return <BackdropView {...props} s={useSlideDetails(props.slide, true)} />;
 }
 
+/**
+ * The upright poster at the hero's inline end (lg up): from near the top to above the slide
+ * controls, which sit level with the button row at the same end. It shares the controls' end
+ * inset (the page gutter), so the two stack on one edge the way the copy and the buttons share
+ * their start edge.
+ */
+const HERO_UPRIGHT =
+  'absolute end-(--page-gutter) top-[8%] z-[3] hidden aspect-[2/3] h-[56%] w-auto rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block';
+
 function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlide }) {
   const image = useImageChain([s.backdropUrl, s.posterUrl], s.ref.sourceId);
   const [loaded, setLoaded] = useState<string | null>(null);
@@ -335,7 +345,8 @@ function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlid
       {/*
         A poster standing in for the backdrop also stands upright at the inline end, from lg
         up, so the wide frame is not an empty colour field. Mounted once the picture has
-        loaded, so it comes from the memory cache and never shows a broken image.
+        loaded, so it comes from the memory cache and never shows a broken image. It ends above
+        the slide controls, which sit level with the buttons in that corner.
       */}
       {!wide && shown && (
         <img
@@ -345,11 +356,25 @@ function BackdropView({ slide, active, title, s }: BackdropProps & { s: HeroSlid
           decoding="async"
           referrerPolicy="no-referrer"
           data-hero-poster=""
-          className="absolute end-[max(var(--page-gutter),6%)] top-1/2 z-[3] hidden aspect-[2/3] h-[72%] w-auto -translate-y-1/2 rounded-lg object-cover shadow-3 ring-1 ring-glass-border lg:block"
+          className={HERO_UPRIGHT}
         />
+      )}
+      {/*
+        No artwork at all: the title's own initials tile stands there instead, the one its card
+        shows in the rails, so the slide reads as that title rather than as an empty field.
+      */}
+      {image.failed && (
+        <div data-hero-poster-fallback="" className={cn(HERO_UPRIGHT, 'overflow-hidden')}>
+          <Poster alt="" label={title} aspect="poster" kind={posterKind(s.ref)} rounded="lg" className="h-full after:hidden" />
+        </div>
       )}
     </div>
   );
+}
+
+/** The glyph of a title's initials tile. */
+function posterKind(ref: ItemRef): 'movie' | 'live' | 'radio' {
+  return ref.contentType === 'live' ? 'live' : ref.contentType === 'radio' ? 'radio' : 'movie';
 }
 
 /** The hero's secondary buttons on glass: Details and the slide's menu. */

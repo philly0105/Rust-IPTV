@@ -236,6 +236,18 @@ describe('the ruler', () => {
   });
 });
 
+describe('programme cells', () => {
+  it('set the title at the dense-row size and the times at caption size, not 11 px', async () => {
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    const cell = await screen.findByRole('button', { name: /^c0 P0,/ });
+    const [title, times] = Array.from(within(cell).getByTestId('cell-text').children) as HTMLElement[];
+    expect(title!.className).toContain('text-body-sm');
+    expect(title!.className).not.toContain('text-xs');
+    expect(times!.className).toContain('text-caption');
+    expect(times!.className).not.toContain('11rem');
+  });
+});
+
 describe('the preview band (CB-GUIDE-PREVIEW)', () => {
   it('is hidden on short or narrow windows', async () => {
     renderGuide({ path: '/epg?source=src1', routes: GRID });
@@ -289,18 +301,21 @@ describe('sources without live channels (LG-11)', () => {
     ];
     renderGuide({ path: '/epg', routes: GRID });
     await screen.findByRole('button', { name: /^c0 P0,/ });
-    const picker = screen.getByRole('combobox', { name: 'Source' });
-    expect(picker.textContent).toBe('Demo');
-    fireEvent.click(picker);
-    expect(screen.getByRole('option', { name: /^Demo/ })).toBeTruthy();
-    expect(screen.queryByRole('option', { name: /Films only/ })).toBeNull();
-    fireEvent.keyDown(screen.getByRole('option', { name: /^Demo/ }), { key: 'Escape' });
+    // Films only is not offered: Demo is the one source with channels, so there is nothing to
+    // pick and no Source picker at all (the header names the source).
+    expect(screen.queryByRole('combobox', { name: 'Source' })).toBeNull();
+    expect(screen.queryByText('Films only')).toBeNull();
     cleanup();
 
     rpc.handlers['catalog.channels'] = () => ({ items: [], total: 0, offset: 0, limit: 120 });
     renderGuide({ path: '/epg?source=vod', routes: GRID });
     expect(await screen.findByText('This source has no live channels')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open Demo' })).toBeTruthy();
+    // On a source without channels the picker is back, so Demo is one choice away there too.
+    const picker = screen.getByRole('combobox', { name: 'Source' });
+    expect(picker.textContent).toBe('Films only');
+    fireEvent.click(picker);
+    expect(screen.getByRole('option', { name: /^Demo/ })).toBeTruthy();
   });
 });
 

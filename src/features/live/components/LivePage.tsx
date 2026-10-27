@@ -77,12 +77,14 @@ import { StageIdle } from './StageIdle';
 const SIDEBAR_KEY = 'live.sidebarCollapsed';
 /**
  * The page width, in rem, under which the groups leave their column for the drawer, whatever the
- * window's width. Beside the expanded rail a 1024 px window leaves the page about 52rem: four
- * columns there cut the channel names to "US| NBC Sports ..." and the stage to a 170 px strip.
- * The page of a 1280 px window (about 69rem) and of 1024 px with the icon rail (about 63rem) keep
- * the column.
+ * window's width. The channel list takes up to 400 px and the stage has a 300 px floor, so on a
+ * page under about 66rem (990 px at 100%) four columns pin the stage near that floor: a 170 px
+ * tall strip whose idle card loses all but the channel name and a cut Resume. At 66rem the column
+ * comes back only where the stage keeps about 365 px (205 px tall). Beside the expanded rail that
+ * is a window of about 1240 px, so 1280 px (a 69rem page) keeps the column and a tablet held
+ * sideways (1180 or 1194 px) gets the drawer; beside the icon rail, about 1065 px.
  */
-export const GROUPS_COLUMN_MIN_REM = 60;
+export const GROUPS_COLUMN_MIN_REM = 66;
 const EMPTY_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 /**
  * Typing pauses this long before the list searches. `catalog.channels` answers a 20k list in
@@ -385,7 +387,7 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
 
   // ---- sidebar ------------------------------------------------------------
   // The groups are a column beside the list only where the page has room for four columns; on a
-  // narrower window, or beside the expanded rail on a tablet, they open as a drawer from the toolbar.
+  // narrower window, or a page under GROUPS_COLUMN_MIN_REM, they open as a drawer from the toolbar.
   const pageRef = useRef<HTMLDivElement>(null);
   const roomForGroups = useFitsWidth(pageRef, GROUPS_COLUMN_MIN_REM);
   const wide = useMediaQuery('(min-width: 1024px)') && roomForGroups;

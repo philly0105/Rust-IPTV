@@ -451,7 +451,7 @@ describe('groups drawer on a narrow page (beside the expanded rail)', () => {
       }
     });
 
-  it('keeps the groups out of a page narrower than 60rem, behind the toolbar toggle, even on a wide window', async () => {
+  it('keeps the groups out of a page narrower than 66rem, behind the toolbar toggle, even on a wide window', async () => {
     // The harness answers every min-width query as matching (a wide window); the page itself is
     // 776 px wide, as beside the expanded rail in a 1024 px window.
     renderIn('/s/src1/live', LIVE);
@@ -464,10 +464,20 @@ describe('groups drawer on a narrow page (beside the expanded rail)', () => {
     expect(within(drawer).getByRole('navigation', { name: 'Groups' })).toBeTruthy();
   });
 
+  it('gives a tablet held sideways beside the expanded rail the drawer too', async () => {
+    // 1180 px (an iPad Air in landscape) less the 248 px rail: four columns would leave the stage
+    // its 300 px floor.
+    renderIn('/s/src1/live', LIVE);
+    await screen.findByText('Channel 0');
+    reportPageWidth(932);
+    expect(screen.queryByRole('navigation', { name: 'Groups' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show groups' })).toBeTruthy();
+  });
+
   it('shows the groups as a column once the page has room for them', async () => {
     renderIn('/s/src1/live', LIVE);
     await screen.findByText('Channel 0');
-    reportPageWidth(1032);
+    reportPageWidth(1100);
     expect(screen.getByRole('navigation', { name: 'Groups' })).toBeTruthy();
     expect(screen.queryByTestId('groups-drawer')).toBeNull();
     expect(screen.getByRole('button', { name: 'Hide groups' })).toBeTruthy();

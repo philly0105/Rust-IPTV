@@ -244,6 +244,26 @@ describe('Continue watching (CB-CONTINUE-MENU)', () => {
       expect(within(rail).getAllByRole('button', { name: /^Resume / }).map((b) => b.getAttribute('aria-label'))).toEqual(['Resume Cold Harbor', 'Resume North Light']);
       expect(within(rail).getByRole('link', { name: 'See all' }).getAttribute('href')).toBe('/recent');
     });
+
+    it('keeps every title in the rail when the shared error takes the hero\'s place', async () => {
+      home({ continue: cards });
+      renderRoutes(routes(), '/dashboard');
+      await screen.findByTestId('dashboard-hero');
+      // A background refetch while the server is briefly gone: every rail fails the same way and
+      // the cached titles in progress stay, but the hero that held them gives way to the error.
+      const h = rpcMock.handlers;
+      for (const cmd of ['positions.continueWatching', 'favorites.list', 'recent.list', 'catalog.recentlyAdded']) {
+        h[cmd] = () => {
+          throw { code: 'network', message: 'down' };
+        };
+      }
+      await act(() => queryClient.refetchQueries());
+      await screen.findByTestId('dashboard-error');
+      expect(screen.queryByTestId('dashboard-hero')).toBeNull();
+      const rail = await screen.findByTestId('dashboard-rail-continue-watching');
+      expect(within(rail).getByRole('button', { name: 'Resume Harbor Nine' })).toBeTruthy();
+      expect(within(rail).getByRole('button', { name: 'Resume The Long Signal' })).toBeTruthy();
+    });
   });
 
   it("the hero's continue slide offers the same menu behind a third button", async () => {

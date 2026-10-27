@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { rpc } from '@/api/transport';
 import { itemKey, type Channel } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { monogramFill, monogramText } from '@/features/live/lib/monogram';
 import { useImageChain } from '@/ui/image';
 import { gateImage } from '@/ui/imageGate';
@@ -13,7 +14,7 @@ import { Tooltip } from '@/ui/Tooltip';
 import { cn } from '../cn';
 import { focusIsLost, safeImageUrl } from '../format';
 import { useMediaStore } from '../media';
-import { playChannel, usePlayerStore } from '../store';
+import { peekSettings, playChannel, usePlayerStore } from '../store';
 import { fetchChannelInfo } from '../zapBanner';
 import { PanelArchiveButton, PanelNowLines } from './ChannelPanelGuide';
 import { locateChannel } from './channelPanelLocate';
@@ -432,6 +433,9 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
   };
 
   if (!available) return null;
+  // Read as the player names what it plays (the store's channel titles): the panel can be drawn
+  // outside the app's query provider, and it draws again each time it opens.
+  const strip = peekSettings()?.stripCountryPrefix;
 
   const isCurrent = (c: Channel): boolean =>
     !!current && c.ref.itemId === current.itemId && c.ref.sourceId === current.sourceId;
@@ -581,7 +585,13 @@ export function FullscreenChannelPanel({ available }: { available: boolean }) {
                         <RowLogo url={c.logoUrl} name={c.name} sourceId={c.ref.sourceId} defer={virtualizer.isScrolling} />
                         {/* guide: name over the programme on now. */}
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <span dir="auto" className={cn('truncate text-body-sm text-match-parent', isCurrent(c) && 'font-medium')}>{c.name}</span>
+                          {/* Named as the channel lists name it: the country tag after the name, quiet, or none with the setting. */}
+                          <ChannelName
+                            name={c.name}
+                            strip={strip}
+                            className={cn('truncate text-body-sm text-match-parent', isCurrent(c) && 'font-medium')}
+                            tagClassName="text-on-glass-muted"
+                          />
                           {nowFor(c.ref) ? (
                             <span dir="auto" className="truncate text-caption text-on-glass-muted text-match-parent" data-testid="panel-now">
                               {nowFor(c.ref)?.title}

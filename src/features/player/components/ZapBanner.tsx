@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { itemKey, type EpgNowNext, type ItemRef } from '@/api/types';
+import { ChannelName } from '@/features/live/components/ChannelLogo';
 import { formatClock, formatTimeRange, ms } from '@/features/live/lib/epgTime';
 import { monogramFill, monogramText } from '@/features/live/lib/monogram';
 import { useImageChain } from '@/ui/image';
@@ -287,9 +288,14 @@ function ZapChip({
             {number}
           </span>
         )}
-        <span data-testid="zap-title" className="max-w-[60%] shrink-0 truncate text-body-sm leading-tight font-medium" title={title}>
-          {title}
-        </span>
+        {/* Named as the channel lists name it: the country tag after the name, quiet. */}
+        <ChannelName
+          name={title}
+          testId="zap-title"
+          title={title}
+          className="max-w-[60%] shrink-0 truncate text-body-sm leading-tight font-medium"
+          tagClassName="text-on-glass-muted"
+        />
         {locked ? (
           <span data-testid="zap-locked" className="player-on-glass-muted min-w-0 flex-1 truncate text-caption">
             {t('zapLocked')}
@@ -411,13 +417,13 @@ export function ZapBanner({ compact = false, chip = false, className }: { compac
                 {number}
               </span>
             )}
-            <span
-              data-testid="zap-title"
-              className={cn('min-w-0 truncate leading-tight', compact ? 'text-body-sm font-medium' : 'text-title-sm')}
+            <ChannelName
+              name={source.title}
+              testId="zap-title"
               title={source.title}
-            >
-              {source.title}
-            </span>
+              className={cn('min-w-0 truncate leading-tight', compact ? 'text-body-sm font-medium' : 'text-title-sm')}
+              tagClassName="text-on-glass-muted"
+            />
           </div>
           <GuideRows guide={guide} now={now} compact={compact} locked={locked} />
         </div>
@@ -451,9 +457,11 @@ export function ZapHeaderLine({ title }: { title: string }) {
             {number}
           </span>
         )}
-        <span className={cn('min-w-0 truncate', shown && current && 'max-w-[60%] shrink-0 @max-[14rem]:max-w-none @max-[14rem]:shrink')} title={title}>
-          {title}
-        </span>
+        <ChannelName
+          name={title}
+          title={title}
+          className={cn('min-w-0 truncate', shown && current && 'max-w-[60%] shrink-0 @max-[14rem]:max-w-none @max-[14rem]:shrink')}
+        />
         {locked && (
           <span data-testid="zap-locked" className="flex shrink-0 self-center text-fg-muted motion-safe:animate-fade-in">
             <Lock aria-hidden className="size-3.5" />

@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { Check, House } from 'lucide-react';
 import { useState } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -570,6 +571,43 @@ describe('SourceMonogram', () => {
     expect(hueOf('Night Portal HD')).not.toBe(hueOf('Riverside'));
     expect(mark.getAttribute('style')).toBe(screen.getByTestId('same').getAttribute('style'));
     expect(mark.getAttribute('style')).not.toBe(screen.getByTestId('other').getAttribute('style'));
+  });
+});
+
+describe('icon stroke (DS-ICON-STROKE)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  // The selector list of the rule that sets this stroke, as the browser reads it.
+  const selectorFor = (stroke: string) => {
+    const m = [...globals.matchAll(/([^{}]+)\{\s*stroke-width:\s*([\d.]+);\s*\}/g)].find((r) => r[2] === stroke);
+    return (m?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  };
+  const strokeOf = (el: Element) => (el.matches(selectorFor('1.5')) ? '1.5' : el.matches(selectorFor('1.75')) ? '1.75' : 'own');
+
+  it('draws icons from 18 px with a lighter line, and leaves small icons, own strokes and the player alone', () => {
+    const { container } = render(
+      <>
+        <House data-i="16" size={16} />
+        <House data-i="18" size={18} />
+        <House data-i="24" size={24} />
+        <House data-i="32" size={32} />
+        <House data-i="class-4" className="size-4" />
+        <House data-i="class-5" className="size-5" />
+        <Check data-i="own" size={18} strokeWidth={2.25} />
+        <div data-player-host="">
+          <House data-i="player" size={20} />
+        </div>
+      </>,
+    );
+    const icon = (k: string) => container.querySelector(`[data-i="${k}"]`)!;
+    expect(strokeOf(icon('16'))).toBe('own');
+    expect(strokeOf(icon('18'))).toBe('1.75');
+    expect(strokeOf(icon('24'))).toBe('1.75');
+    expect(strokeOf(icon('32'))).toBe('1.5');
+    // A size class renders at its own size whatever Lucide's 24 px width attribute says.
+    expect(strokeOf(icon('class-4'))).toBe('own');
+    expect(strokeOf(icon('class-5'))).toBe('1.75');
+    expect(strokeOf(icon('own'))).toBe('own');
+    expect(strokeOf(icon('player'))).toBe('own');
   });
 });
 

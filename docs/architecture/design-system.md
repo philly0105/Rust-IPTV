@@ -92,6 +92,8 @@ Weights are 400, 500 and 600 only. Headings track in by -0.01 to -0.02 em (the c
 
 Lucide, sized with the `size` prop on this scale: 12 (inline metadata), 14 (dense rows), 16 (buttons, menus; the default), 18 (rail, header, dialog close), 24 (hero and large art). A rule in `globals.css` restates each size in rem, so icons grow with the UI scale like the text beside them; a size utility on the icon (`size-4`) still wins. `EmptyState` sizes its own icon. Icons are `aria-hidden` unless they are the only content of something without a label.
 
+The line stays about as thin as the text's stems (DS-ICON-STROKE): Lucide's 2-unit stroke scales with the icon, so from 18 px (`size={18}` to `24`, or `size-5`, `size-6`) `globals.css` draws it at 1.75 units and from 28 px at 1.5; 16 px and smaller keep 2. The rule only replaces the default stroke, so an icon that passes `strokeWidth` keeps it, and it leaves the player's glyphs (inside `[data-player-host]`) at full weight, since a thin line gets lost over moving pictures. `kit.test.tsx` checks the selectors.
+
 ## Motion
 
 Durations `--duration-fast` 120 ms, `--duration-base` 180 ms, `--duration-slow` 280 ms (`duration-(--duration-fast)`); curves `ease-enter`, `ease-exit`. Enter animations: `animate-fade-in`, `animate-pop-in`, `animate-toast-in`, `animate-drawer-in`, `animate-sheet-in`; each has an `-out` twin that holds its last frame. Always behind `motion-safe:`.

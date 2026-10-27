@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import { itemKey, type Channel, type EpgNowNext, type ItemRef, type RecentEntry } from '@/api/types';
 import { Button } from '@/ui/Button';
+import { ChannelName } from '@/ui/ChannelName';
 import { cn } from '@/ui/cn';
 
 import { displayChannelName } from '../lib/channelName';
@@ -94,8 +95,9 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
             <p className={cn('text-caption text-on-glass-muted max-md:hidden', TINY_STAGE)} data-testid="stage-idle-caption">
               {t(highlighted ? 'highlightedChannel' : kind === 'radio' ? 'lastStation' : 'lastWatched')}
             </p>
-            <p dir="auto" className="max-w-full truncate text-title-sm text-on-glass max-md:text-body-sm max-md:font-medium max-md:text-fg">
-              {name}
+            <p className="max-w-full truncate text-title-sm text-on-glass max-md:text-body-sm max-md:font-medium max-md:text-fg">
+              {/* On the dark stage the tag takes the glass's quiet tone; on a phone's idle bar, the theme's. */}
+              <ChannelName name={channel.name} strip={stripPrefix} tagClassName="text-on-glass-muted max-md:text-fg-subtle" />
             </p>
             {locked ? (
               <p className="mt-1 inline-flex items-center gap-1.5 text-body-sm text-on-glass-muted max-md:mt-0 max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-locked">

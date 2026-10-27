@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import type { Channel, EpgNowNext, SourceKind } from '@/api/types';
 import { listSeparator } from '@/lib/intl';
 import { IconButton } from '@/ui/Button';
+import { ChannelName } from '@/ui/ChannelName';
 import { cn } from '@/ui/cn';
 
 import { useLongPress } from '../hooks/useLongPress';
@@ -237,9 +238,11 @@ export const ListChannelRow = memo(function ListChannelRow(props: ChannelRowProp
         {!compact ? <ChannelLogo src={channel.logoUrl} name={name} size={props.station ? 44 : 40} sourceId={channel.ref.sourceId} /> : null}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span dir="auto" className={cn('truncate text-body-sm text-match-parent text-fg', playing ? 'font-semibold' : 'font-medium')}>
-              {name}
-            </span>
+            <ChannelName
+              name={channel.name}
+              strip={props.stripPrefix}
+              className={cn('truncate text-body-sm text-match-parent text-fg', playing ? 'font-semibold' : 'font-medium')}
+            />
             {/* Marks, not slots: an empty row gives their room to the title. */}
             {/* A favourite is a state, so its mark is neutral (never amber or the warning tone).
                 It steps aside while the floating actions show their own heart. */}

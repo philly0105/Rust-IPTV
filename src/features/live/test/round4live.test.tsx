@@ -1,0 +1,91 @@
+/**
+ * Review round 4, Live: calmer channel rows (no rule under each, a hairline track) and the
+ * provider's country tag drawn after the name, quiet, with the raw name kept for assistive tech.
+ */
+
+import { cleanup, render, screen, within } from '@testing-library/react';
+import { I18nextProvider } from 'react-i18next';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+
+import { ChannelName } from '@/ui/ChannelName';
+
+import { ChannelRow } from '../components/ChannelRow';
+import { MINUTE } from '../lib/epgTime';
+import { i18n, installDomStubs, makeChannel, program } from './harness';
+
+beforeAll(installDomStubs);
+afterEach(cleanup);
+
+function row(over: Partial<Parameters<typeof ChannelRow>[0]> = {}) {
+  const now = Date.now();
+  return render(
+    <I18nextProvider i18n={i18n}>
+      <ChannelRow
+        index={0}
+        channel={{ ...makeChannel(0), name: 'US| ESPN HD' }}
+        nowNext={{ now: program('Morning Mix', now - 10 * MINUTE, now + 50 * MINUTE) }}
+        favorite={false}
+        playing={false}
+        active={false}
+        now={now}
+        onActivate={() => undefined}
+        onToggleFavorite={() => undefined}
+        onContextMenu={() => undefined}
+        {...over}
+      />
+    </I18nextProvider>,
+  );
+}
+
+describe('channel rows without ruled lines (review round 4)', () => {
+  it('draws no divider under a row and a hairline track with a neutral fill', () => {
+    const { container } = row();
+    expect((container.firstElementChild as HTMLElement).className).not.toMatch(/\bborder-b\b/);
+    const track = screen.getByTestId('channel-progress-track');
+    expect(track.className).toContain('h-0.5');
+    expect(track.className).toContain('bg-fg/7');
+    expect(screen.getByTestId('channel-progress').className).toContain('bg-fg-subtle/50');
+  });
+
+  it('keeps the firmer accent bar on the playing row', () => {
+    row({ playing: true });
+    const track = screen.getByTestId('channel-progress-track');
+    expect(track.className).toContain('h-[3px]');
+    expect(track.className).not.toContain('h-0.5');
+    expect(screen.getByTestId('channel-progress').className).toContain('bg-accent-mark');
+  });
+});
+
+describe('the country tag after the name (review round 4)', () => {
+  it('draws the name first and the tag as a quiet suffix, and reads the provider name as it is', () => {
+    row();
+    const button = screen.getByRole('button', { name: /US\| ESPN HD/ });
+    const tag = within(button).getByTestId('channel-name-tag');
+    expect(tag.textContent).toBe('US');
+    expect(tag.className).toContain('text-fg-subtle');
+    expect(tag.className).toContain('text-caption');
+    // The drawn name and tag are hidden from assistive tech; the raw name is there instead.
+    const drawn = tag.parentElement!;
+    expect(drawn.getAttribute('aria-hidden')).toBe('true');
+    expect(drawn.textContent).toBe('ESPN HDUS');
+    expect(drawn.firstChild?.textContent).toBe('ESPN HD');
+    expect(within(button).getByText('US| ESPN HD').className).toContain('sr-only');
+  });
+
+  it('leaves the tag out with the strip setting on, and draws a name without a tag as plain text', () => {
+    row({ stripPrefix: true });
+    expect(screen.queryByTestId('channel-name-tag')).toBeNull();
+    expect(screen.getByRole('button', { name: /^1, ESPN HD/ })).toBeTruthy();
+    cleanup();
+    render(<ChannelName name="NCIS: LA" testId="n" />);
+    expect(screen.getByTestId('n').textContent).toBe('NCIS: LA');
+    expect(screen.queryByTestId('channel-name-tag')).toBeNull();
+  });
+
+  it('takes a tone for the tag where the theme tone does not apply', () => {
+    render(<ChannelName name="UK| BBC One" tagClassName="text-on-glass-muted" />);
+    const tag = screen.getByTestId('channel-name-tag');
+    expect(tag.className).toContain('text-on-glass-muted');
+    expect(tag.className).not.toContain('text-fg-subtle');
+  });
+});

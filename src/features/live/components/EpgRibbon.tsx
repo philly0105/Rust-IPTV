@@ -10,6 +10,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
 import { Button, cn, IconButton, LivePill, SegmentedControl, Skeleton, TEXT_LINK, Tooltip, useImageChain, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { ChannelName } from '@/ui/ChannelName';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -216,9 +217,7 @@ export function EpgRibbon(props: EpgRibbonProps) {
                 <p className="mb-0.5 flex min-w-0 items-center gap-1.5 text-caption text-fg-muted" data-testid="ribbon-channel">
                   <ChannelLogo src={channel.logoUrl} name={channelName} size={20} sourceId={channel.ref.sourceId} />
                   {channel.number !== undefined ? <span className="shrink-0 font-numeric tabular-nums">{channel.number}</span> : null}
-                  <span dir="auto" className="min-w-0 truncate text-match-parent">
-                    {channelName}
-                  </span>
+                  <ChannelName name={channel.name} strip={prefs.stripCountryPrefix} className="min-w-0 truncate text-match-parent" />
                 </p>
               ) : null}
               {/* Clipped, never overflowing, and numbers are never cut: a narrow pane says "27m" for

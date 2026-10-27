@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { ItemSnapshot, ItemRef, Source } from '@/api/types';
 import { snapshotTitle } from '@/lib/title';
+import { ChannelName } from '@/ui/ChannelName';
 import { cn } from '@/ui/cn';
 
 import { ChannelLogo, IconButton, Menu, Poster, PosterCellWidthContext, ProgressBar, Skeleton, usePosterWidthBox, useScaledPx, type MenuItem } from '../deps';
@@ -144,9 +145,14 @@ function EntryRowImpl({ entryRef, snapshot, source, showSource, time, removeLabe
         )}
       </div>
       <button type="button" tabIndex={-1} onClick={onOpen} className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-start">
-        <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg">
-          {title}
-        </span>
+        {/* A channel's provider tag trails its name, quiet, as in Live TV's rows. */}
+        {playable ? (
+          <ChannelName name={title} className="w-full truncate text-match-parent text-body-sm font-medium text-fg" />
+        ) : (
+          <span dir="auto" className="w-full truncate text-match-parent text-body-sm font-medium text-fg">
+            {title}
+          </span>
+        )}
         {now ? (
           // What is on now, as Live TV's rows say it: a guide answers "what is this?" better than
           // "Live channel" under a heading that already says so.

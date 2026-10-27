@@ -3,7 +3,7 @@ import { memo, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { BackButton, IconButton, Kbd, SearchInput, cn } from '@/ui';
+import { BackButton, IconButton, Kbd, SearchInput, TOUCH_TARGET, cn } from '@/ui';
 
 import { useShellStore, type HeaderState } from './store';
 import { useTheme } from './theme';
@@ -185,8 +185,10 @@ export const Header = memo(function Header({
               data-testid="open-palette"
               className={cn(
                 HEADER_SEARCH_WIDTH,
-                // Looks like the page's field (its fill and control border) but opens the palette.
+                // Looks like the page's field (its fill and control border) but opens the palette,
+                // and is as tall as one on a touch screen too (TOUCH_TARGET).
                 'me-1 flex h-8 items-center gap-2 rounded-md border border-border bg-surface-2 ps-3 pe-1.5 text-sm text-fg-subtle',
+                TOUCH_TARGET,
                 'hover:border-fg-subtle hover:text-fg-muted active:bg-surface-3 motion-safe:transition-colors',
               )}
             >
@@ -225,7 +227,9 @@ function HeaderField({ search, phone }: { search: NonNullable<HeaderState['searc
           only narrow and borderless, so a click, Tab or Ctrl+F still lands in it.
           Focused or holding a query, it unfolds over the title's space.
         */
-        'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0',
+        // A touch screen's field is 44 px tall (fieldClass), so the folded one is a 44 px square
+        // like the icon buttons beside it.
+        'max-sm:w-8 max-sm:min-w-0 max-sm:shrink-0 max-sm:pointer-coarse:w-[calc(44rem/15)]',
         'max-sm:focus-within:flex-1 max-sm:has-[input:not(:placeholder-shown)]:flex-1',
         'max-sm:[&:not(:focus-within):has(input:placeholder-shown)>svg]:start-[calc(50%-8px)]',
         'max-sm:[&:not(:focus-within)>input:placeholder-shown]:cursor-pointer max-sm:[&:not(:focus-within)>input:placeholder-shown]:border-transparent max-sm:[&:not(:focus-within)>input:placeholder-shown]:bg-transparent',

@@ -81,6 +81,8 @@ Scale (rem against the 15 px root, so it follows the UI scale; size / line heigh
 
 Weights are 400, 500 and 600 only. Headings track in by -0.01 to -0.02 em (the classes set it). Prefer these over `text-[calc(…rem/15)]` in new code; a new `@theme` text size must also go into `src/ui/cn.ts`, or `cn()` treats it as a colour.
 
+The stock `text-xs` and `text-sm` are aliases of `text-caption` and `text-body-sm` (`globals.css` sets them to the same size and line height), so the small end of the type is 10 (`text-2xs`, key caps), 12, 13.5 and 15 px. Stock, they were 11.25 and 13.1 px, a fraction off the sizes beside them. New code uses the token names.
+
 ## Radii, elevation, spacing
 
 - Radii: `rounded-xs` 4 (badges, checkboxes, key caps), `rounded-sm` 6 (segments, small status chips on artwork), `rounded-md` 8 (buttons, inputs, rows, menu items, segmented tracks), `rounded-lg` 12 (cards, posters, menus, toasts, panels, settings groups), `rounded-xl` 16 (dialogs, the hero frame, sheets), `rounded-full` (filter chips, the watched mark, sliders, dots, avatars). Bare `rounded` is a mistake; use `rounded-xs`.
@@ -91,6 +93,8 @@ Weights are 400, 500 and 600 only. Headings track in by -0.01 to -0.02 em (the c
 ## Icons
 
 Lucide, sized with the `size` prop on this scale: 12 (inline metadata), 14 (dense rows), 16 (buttons, menus; the default), 18 (rail, header, dialog close), 24 (hero and large art). A rule in `globals.css` restates each size in rem, so icons grow with the UI scale like the text beside them; a size utility on the icon (`size-4`) still wins. `EmptyState` sizes its own icon. Icons are `aria-hidden` unless they are the only content of something without a label.
+
+The line stays about as thin as the text's stems (DS-ICON-STROKE): Lucide's 2-unit stroke scales with the icon, so from 18 px (`size={18}` to `24`, or `size-5`, `size-6`) `globals.css` draws it at 1.75 units and from 28 px at 1.5; 16 px and smaller keep 2. The rule only replaces the default stroke, so an icon that passes `strokeWidth` keeps it, and it leaves the player's glyphs (inside `[data-player-host]`) at full weight, since a thin line gets lost over moving pictures. `kit.test.tsx` checks the selectors.
 
 ## Motion
 
@@ -110,7 +114,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 ## Focus and touch
 
 - Focus: the global `:focus-visible` rule draws a 2 px focus outline with a soft glow. Text fields draw a focus border and a 3 px glow instead. That field rule sits in `@layer base`, so any `border-*` colour utility on the field outranks its focus border: a field built by hand that sets its own border colour must also set `focus-visible:border-focus` (or its own focus ring), or take `fieldClass`. `kit.test.tsx` flags text fields that do neither. Forced-colours mode gets a system outline on every focused control, so `outline-none` plus a ring is safe. A scroll container holding fields keeps a little padding so the glow is not clipped (Dialog's body does).
-- Touch: under `(pointer: coarse)` Button `sm`/`md`, IconButton, menu items and the toast's dismiss button grow to 44 px (`TOUCH_TARGET`, exported for hand-built controls). Keyboard-only hints use `pointer-coarse:hidden`.
+- Touch: under `(pointer: coarse)` Button `sm`/`md`, IconButton, menu items, the toast's dismiss button, every field (`fieldClass`, Input, Select, SearchInput, whose clear button grows to 36 px and whose end padding grows to `pe-11` so the text stops short of it), SegmentedControl at both sizes and both Tabs variants grow to 44 px (`TOUCH_TARGET`, exported for hand-built controls), so a touch toolbar of buttons, fields and segments is one height. It is a minimum height, so the mouse sizes stay; a page that sizes a field square itself (an icon-only picker trigger) adds `pointer-coarse:min-w-[calc(44rem/15)]`. Filter chips grow to 36 px and reach 44 px with an invisible band above and below. Keyboard-only hints use `pointer-coarse:hidden`.
 
 ## Components
 
@@ -128,7 +132,7 @@ Treat `closing` as closed for everything but drawing: focus goes back and scroll
 
 - `Page`: side padding from `--page-gutter`, `py-6`, and a width cap: `narrow` 56rem (settings, forms), `default` 80rem (lists, stats), `wide` 120rem (grids, rails), `full` (the guide, the player). It starts at the gutter, on the header title's line, and is not centred. A page root that pads itself (`px-6`) or centres itself (`mx-auto max-w-…`) leaves that line, so the title and the content no longer share a left edge; a full-height page passes its own height and padding (`className="flex h-[calc(100dvh-var(--header-height))] flex-col pt-4 pb-4"`).
 - `PageHeader`: h1 in `text-title`, optional `count` (muted, formatted by the caller), `subtitle` and `actions`. Most pages set their title in the shell header with `usePageHeader` and keep a visually hidden h1; use PageHeader when the title belongs in the content.
-- `SectionHeader`: h2 in `text-title-sm` with optional `count`, `action` (rail arrows, a sort menu) and `seeAll={{ to, label? }}` ("See all" and a chevron).
+- `SectionHeader`: h2 in `text-title-sm` with optional `count`, `action` (rail arrows, a sort menu) and `seeAll={{ to, label? }}` ("See all" and a chevron; on touch an invisible band takes the link's target to 44 px). A row that builds its own heading (a Home rail with a meta line beside the title) styles its link with `SEE_ALL_LINK`, so it gets the same band.
 - `BackButton`: `<BackButton to="/movies" label={t('movies')} />`, or `onClick={goBack}` (with `to` as well, the link still shows where back is and opens in a new tab). `tone="glass"` over artwork.
 
 ### Buttons and links
@@ -201,7 +205,7 @@ Keep native `title` only for text cut by truncation (a long channel name) and fo
 - `LivePill`: the only LIVE mark. `dot="still"` in rails of many cards (a running animation per card keeps the compositor busy).
 - `MetaLine`: joins metadata with one drawn separator (spoken as commas); empty items drop out. Each separator is one unit with the item after it, so a wrapped line never ends on a dot. `as="span"` inside a button.
 - `ProgressBar`: `tone` accent (default, the mark tone), success, danger, fg, glass (every bar on artwork); `indeterminate`. It reports a percentage (0 to 100) whatever `max` is, so `value={0.63} max={1}` reads 63 %; `valueText` says the value in words ("16 minutes left"). `decorative` hides it from assistive tech, for a bar inside a control whose name already gives the share (a poster card's link ends in "18% watched", an episode button); every other bar takes a `label`.
-- `FilterChip`: a pill that turns a filter on or off (aria-pressed) in a row of others: `h-8` (the height of an `sm` button or field, so a chip row lines up with the controls beside it), `rounded-full`, a `text-body-sm` label in the full text tone on `bg-surface-2` with the edge at rest, inverted (`bg-fg text-bg`) when on, never amber. `dot` (a colour) or `icon` leads, `count` trails in the quiet tone; the label truncates and takes `dir="auto"`, so pass the whole text as `title` when it can be cut. `filterChipClass(on, extra)` styles a link as a chip. Chips that only inform (where a list's channels come from) are not filter chips: show the source's `SourceMonogram` with the count.
+- `FilterChip`: a pill that turns a filter on or off (aria-pressed) in a row of others: `h-8` (the height of an `sm` button or field, so a chip row lines up with the controls beside it; 36 px with a 44 px target on touch; a row that scrolls sideways clips that band unless it keeps `py-1.5`, with `-my-1.5` to stay the same height, as VodFilterBar does), `rounded-full`, a `text-body-sm` label in the full text tone on `bg-surface-2` with the edge at rest, inverted (`bg-fg text-bg`) when on, never amber. `dot` (a colour) or `icon` leads, `count` trails in the quiet tone; the label truncates and takes `dir="auto"`, so pass the whole text as `title` when it can be cut. `filterChipClass(on, extra)` styles a link as a chip. Chips that only inform (where a list's channels come from) are not filter chips: show the source's `SourceMonogram` with the count.
 - `WatchedChip`: the one watched mark on artwork, a 20 px round glass tick in the top-end corner of posters, My List cards and episode thumbnails. A watched title shows it instead of a progress bar. Hidden from assistive tech; the card's name says "Watched".
 - `Kbd`: key caps in the UI language (`comboKeys` for the strings). `size="sm"` (19 px, a 10 px label, the tooltip's caps) for a cap inside a 30 px control, as the header's search slot has; the default 22.5 px cap filled that field to its edges.
 - `EmptyState` (`icon`, `title`, `description`, `action`, `size="page" | "inline"`) and `ErrorState` (`error`, `onRetry`, `action`, `hint`). For a core error the translated hint for its code leads; an error the UI raised itself (a plain `Error`) leads with its own message.

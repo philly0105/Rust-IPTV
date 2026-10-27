@@ -9,7 +9,7 @@ import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 
 // The gate module itself, not the parental barrel (which pulls in the settings section and dialogs).
 import { ensureUnlocked } from '@/features/parental/gate';
-import { Button, cn, IconButton, LivePill, SegmentedControl, Skeleton, TEXT_LINK, Tooltip, useImageChain, useListVirtualizer, useToast, errorDescription } from '@/ui';
+import { Button, cn, IconButton, LivePill, SegmentedControl, Skeleton, TEXT_LINK, TOUCH_TARGET, Tooltip, useImageChain, useListVirtualizer, useToast, errorDescription } from '@/ui';
 import { useChannelPrograms } from '../hooks/useChannelPrograms';
 import { useParentalLocks } from '../hooks/useParentalLocks';
 import { useShortEpgEnabled } from '../hooks/useShortEpg';
@@ -297,11 +297,14 @@ export function EpgRibbon(props: EpgRibbonProps) {
             </Button>
           </Tooltip>
         ) : null}
+        {/* On touch the track is 44 px tall, and its two icon segments would be 30 x 40 slivers;
+            a minimum width keeps them square-ish. */}
         <SegmentedControl<Mode>
           size="sm"
           label={t('guideView')}
           value={mode}
           onChange={(m) => void setMode(m)}
+          itemClassName="pointer-coarse:min-w-[calc(40rem/15)]"
           options={[
             { value: 'timeline', label: t('timelineView'), content: <ChartGantt aria-hidden className="size-4" /> },
             { value: 'list', label: t('listView'), content: <LayoutList aria-hidden className="size-4" /> },
@@ -312,7 +315,12 @@ export function EpgRibbon(props: EpgRibbonProps) {
             <Link
               to={props.guideHref}
               aria-label={t('openGuide')}
-              className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
+              // The icon buttons' 44 px touch square, so the row reads 44 px across on a touch screen.
+              className={cn(
+                'inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus',
+                TOUCH_TARGET,
+                'pointer-coarse:min-w-[calc(44rem/15)]',
+              )}
             >
               <CalendarClock className="size-4" />
             </Link>

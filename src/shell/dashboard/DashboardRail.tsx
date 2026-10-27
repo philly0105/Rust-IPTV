@@ -4,7 +4,7 @@ import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { ErrorState, PosterWidthContext, SectionHeader, Skeleton, cn, useScaledPx } from '@/ui';
+import { ErrorState, PosterWidthContext, SEE_ALL_LINK, SectionHeader, Skeleton, cn, useScaledPx } from '@/ui';
 
 import { PHONE_QUERY } from '../navigation';
 import { useMediaQuery } from '../useMediaQuery';
@@ -330,10 +330,8 @@ export function DashboardRail<T>({
             {meta}
           </div>
           {seeAll && (
-            <Link
-              to={seeAll.to}
-              className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-sm font-medium text-fg-muted hover:text-fg active:text-accent-pressed motion-safe:transition-colors"
-            >
+            // The kit's See all link, with its 44 px touch band, as SectionHeader draws it.
+            <Link to={seeAll.to} className={cn(SEE_ALL_LINK, 'shrink-0')}>
               {seeAll.label ?? t('seeAll')}
               <ChevronRight aria-hidden size={16} className="rtl:rotate-180" />
             </Link>

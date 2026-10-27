@@ -6,6 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { Check, House } from 'lucide-react';
 import { useState } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,21 +17,27 @@ import {
   BackButton,
   Checkbox,
   Dialog,
+  FilterChip,
   IconButton,
+  Input,
   LivePill,
   Menu,
   MetaLine,
   Page,
   PageHeader,
   RadioGroup,
+  SEE_ALL_LINK,
+  SearchInput,
   SectionHeader,
   SegmentedControl,
+  Select,
   SourceMonogram,
   Switch,
   Tabs,
   Toggle,
   Tooltip,
   buttonClass,
+  fieldClass,
   useTooltip,
 } from '..';
 import { SWITCH_TONES } from '../Field';
@@ -234,6 +241,47 @@ describe('IconButton tooltip', () => {
     expect(cls).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
     expect(buttonClass('secondary', 'md')).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
   });
+
+  it('gives fields, segmented controls and pill tabs the same 44 px floor, so a touch toolbar lines up', () => {
+    const floor = 'pointer-coarse:min-h-[calc(44rem/15)]';
+    render(
+      <>
+        <Input aria-label="Name" />
+        <SearchInput size="sm" value="q" onChange={() => {}} label="Filter" />
+        <Select aria-label="Sort" options={[{ value: 'a', label: 'A' }]} />
+        <SegmentedControl size="sm" label="View" value="a" onChange={() => {}} options={[{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }]} />
+        <Tabs variant="pill" label="Kind" value="all" onChange={() => {}} items={[{ id: 'all', label: 'All' }, { id: 'movies', label: 'Movies' }]} />
+        <Tabs label="Section" value="one" onChange={() => {}} items={[{ id: 'one', label: 'One' }]} />
+      </>,
+    );
+    expect(fieldClass('sm')).toContain(floor);
+    expect(screen.getByRole('textbox', { name: 'Name' }).className).toContain(floor);
+    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain(floor);
+    expect(screen.getByRole('combobox', { name: 'Sort' }).className).toContain(floor);
+    // The clear button grows inside the taller field, and the text's end padding grows past it
+    // (end-1 plus 36 px is 39.75 px; pe-11 is 41.25 px), so the button never covers the query.
+    expect(screen.getByRole('button', { name: 'Clear search' }).className).toContain('pointer-coarse:size-[calc(36rem/15)]');
+    expect(screen.getByRole('searchbox', { name: 'Filter' }).className).toContain('pointer-coarse:pe-11');
+    // The track takes the floor and its segments stretch to fill it.
+    expect(screen.getByRole('radiogroup', { name: 'View' }).className).toContain(floor);
+    const pills = screen.getByRole('tablist', { name: 'Kind' });
+    expect(pills.className).toContain(floor);
+    expect(within(pills).getByRole('tab', { name: 'All' }).className).toContain('pointer-coarse:self-stretch');
+    expect(within(screen.getByRole('tablist', { name: 'Section' })).getByRole('tab', { name: 'One' }).className).toContain(floor);
+  });
+
+  it('grows a filter chip to 36 px on touch and takes its target to 44 px with an invisible band', () => {
+    render(
+      <FilterChip pressed={false} onClick={() => {}}>
+        Sports
+      </FilterChip>,
+    );
+    const cls = screen.getByRole('button', { name: 'Sports' }).className;
+    expect(cls).toContain('h-8');
+    expect(cls).toContain('pointer-coarse:min-h-[calc(36rem/15)]');
+    expect(cls).toContain('relative');
+    expect(cls).toContain('pointer-coarse:before:-inset-y-[calc(4rem/15)]');
+  });
 });
 
 describe('Tooltip', () => {
@@ -380,7 +428,13 @@ describe('page scaffold', () => {
     expect(page.className).toContain('max-w-[56rem]');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Downloads12');
     expect(screen.getByRole('heading', { level: 2 }).className).toContain('text-title-sm');
-    expect(screen.getByRole('link', { name: 'See all' }).getAttribute('href')).toBe('/recent');
+    const seeAll = screen.getByRole('link', { name: 'See all' });
+    expect(seeAll.getAttribute('href')).toBe('/recent');
+    // A 44 px touch target around the 19 px link, drawn by nothing. The classes are the exported
+    // SEE_ALL_LINK, which a rail that builds its own heading row uses too.
+    expect(seeAll.className).toBe(SEE_ALL_LINK);
+    expect(SEE_ALL_LINK).toContain('relative');
+    expect(SEE_ALL_LINK).toContain('pointer-coarse:after:-inset-y-[calc(12.5rem/15)]');
   });
 
   it('BackButton names its destination and can go back in history while showing the link', () => {
@@ -526,6 +580,57 @@ describe('SourceMonogram', () => {
     expect(hueOf('Night Portal HD')).not.toBe(hueOf('Riverside'));
     expect(mark.getAttribute('style')).toBe(screen.getByTestId('same').getAttribute('style'));
     expect(mark.getAttribute('style')).not.toBe(screen.getByTestId('other').getAttribute('style'));
+  });
+});
+
+describe('type scale (DS-TYPE-SCALE)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  const token = (name: string) => new RegExp(`--text-${name}:\\s*([^;]+);`).exec(globals)?.[1]?.replace(/\/\*.*?\*\//g, '').trim();
+
+  it('draws the stock text-xs and text-sm at the scale’s caption and body-sm sizes', () => {
+    expect(token('caption')).toBe('calc(12rem / 15)');
+    expect(token('xs')).toBe(token('caption'));
+    expect(token('xs--line-height')).toBe(token('caption--line-height'));
+    expect(token('body-sm')).toBe('calc(13.5rem / 15)');
+    expect(token('sm')).toBe(token('body-sm'));
+    expect(token('sm--line-height')).toBe(token('body-sm--line-height'));
+  });
+});
+
+describe('icon stroke (DS-ICON-STROKE)', () => {
+  const globals = readFileSync(join(__dirname, '..', '..', 'styles', 'globals.css'), 'utf8');
+  // The selector list of the rule that sets this stroke, as the browser reads it.
+  const selectorFor = (stroke: string) => {
+    const m = [...globals.matchAll(/([^{}]+)\{\s*stroke-width:\s*([\d.]+);\s*\}/g)].find((r) => r[2] === stroke);
+    return (m?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').trim();
+  };
+  const strokeOf = (el: Element) => (el.matches(selectorFor('1.5')) ? '1.5' : el.matches(selectorFor('1.75')) ? '1.75' : 'own');
+
+  it('draws icons from 18 px with a lighter line, and leaves small icons, own strokes and the player alone', () => {
+    const { container } = render(
+      <>
+        <House data-i="16" size={16} />
+        <House data-i="18" size={18} />
+        <House data-i="24" size={24} />
+        <House data-i="32" size={32} />
+        <House data-i="class-4" className="size-4" />
+        <House data-i="class-5" className="size-5" />
+        <Check data-i="own" size={18} strokeWidth={2.25} />
+        <div data-player-host="">
+          <House data-i="player" size={20} />
+        </div>
+      </>,
+    );
+    const icon = (k: string) => container.querySelector(`[data-i="${k}"]`)!;
+    expect(strokeOf(icon('16'))).toBe('own');
+    expect(strokeOf(icon('18'))).toBe('1.75');
+    expect(strokeOf(icon('24'))).toBe('1.75');
+    expect(strokeOf(icon('32'))).toBe('1.5');
+    // A size class renders at its own size whatever Lucide's 24 px width attribute says.
+    expect(strokeOf(icon('class-4'))).toBe('own');
+    expect(strokeOf(icon('class-5'))).toBe('1.75');
+    expect(strokeOf(icon('own'))).toBe('own');
+    expect(strokeOf(icon('player'))).toBe('own');
   });
 });
 

@@ -382,10 +382,17 @@ export function WatchedChip({ className, testId }: WatchedChipProps) {
  * categories" button or the sort menu beside it, and its label is body text in the full text tone:
  * a caption in the muted tone read as a disabled tag rather than something to press. A count after
  * the label stays quiet (FilterChip).
+ *
+ * On a touch screen a chip grows to 36 px, and an invisible band above and below takes its target
+ * to the buttons' 44 px: a row of 44 px pills was heavy, a 30 px one a small target beside the
+ * 44 px buttons there. A chip row that scrolls sideways clips the band to its padding box, so
+ * such a row keeps `py-1.5` (with `-my-1.5` to stay the same height), as VodFilterBar does;
+ * without it the target stays 36 px.
  */
 export function filterChipClass(on: boolean, className?: string): string {
   return cn(
-    'inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-body-sm font-medium motion-safe:transition-colors',
+    'relative inline-flex h-8 min-w-0 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-body-sm font-medium motion-safe:transition-colors',
+    'pointer-coarse:min-h-[calc(36rem/15)] pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-[calc(4rem/15)]',
     // A chosen filter is inverted, never amber: amber marks actions and progress.
     on ? 'border-transparent bg-fg text-bg hover:bg-fg/90' : 'border-edge bg-surface-2 text-fg hover:bg-surface-3 active:bg-pressed',
     className,

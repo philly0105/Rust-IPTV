@@ -218,7 +218,8 @@ export function ScopePicker({
             ? fieldClass(
                 'sm',
                 cn(
-                  'inline-flex size-9 shrink-0 items-center justify-center px-0',
+                  // Square on a touch screen too, where the field's floor makes it 44 px tall.
+                  'inline-flex size-9 shrink-0 items-center justify-center px-0 pointer-coarse:min-w-[calc(44rem/15)]',
                   value ? 'border-fg bg-fg text-bg hover:bg-fg/90' : 'text-fg-muted hover:text-fg',
                   className,
                 ),

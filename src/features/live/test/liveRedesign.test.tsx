@@ -441,6 +441,26 @@ describe('the ribbon (LG-02, LG-06, LG-17)', () => {
     expect(screen.queryByTestId('up-next')).toBeNull();
     expect(screen.queryByTestId('ribbon-phone-line')).toBeNull();
   });
+
+  it('on touch the view switch and the guide link are as tall as the buttons beside them, and not slivers', async () => {
+    rpcMock.handlers['epg.programs'] = () => list;
+    renderAt('/', [
+      {
+        path: '/',
+        element: <EpgRibbon channel={makeChannel(1)} sourceKind="xtream" watchingLive onPlayLive={() => undefined} onMapEpg={() => undefined} details guideHref="/epg?source=src1" />,
+      },
+    ]);
+    await screen.findByRole('button', { name: /^Afternoon Film/ });
+    // The 44 px track's icon segments keep a 40 px width instead of 30 x 40.
+    for (const segment of within(screen.getByRole('radiogroup', { name: 'Guide view' })).getAllByRole('radio')) {
+      expect(segment.className).toContain('pointer-coarse:min-w-[calc(40rem/15)]');
+    }
+    // The hand-built guide link takes the icon buttons' 44 px touch square.
+    const guide = screen.getByRole('link', { name: 'TV guide' });
+    expect(guide.getAttribute('href')).toBe('/epg?source=src1');
+    expect(guide.className).toContain('pointer-coarse:min-h-[calc(44rem/15)]');
+    expect(guide.className).toContain('pointer-coarse:min-w-[calc(44rem/15)]');
+  });
 });
 
 describe('catch-up downloads (FW-ARCHIVE-DOWNLOAD-UNBOUNDED)', () => {

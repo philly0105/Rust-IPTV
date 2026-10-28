@@ -13,7 +13,7 @@ import { PROGRAMME_CHUNK_MS, programmeChunks, sameProgrammeChunk } from '../prog
 import { nextGuideRenderWindow } from '../renderWindow';
 import { i18n, makeChannel, program } from './harness';
 
-vi.mock('../../components/ChannelLogo', () => ({ ChannelLogo: () => null }));
+vi.mock('../../components/ChannelLogo', async (original) => ({ ...(await original<object>()), ChannelLogo: () => null }));
 
 afterEach(cleanup);
 

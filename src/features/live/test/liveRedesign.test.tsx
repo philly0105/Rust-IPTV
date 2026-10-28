@@ -303,7 +303,8 @@ describe('the idle stage (CB-AUTOPLAY-LAST)', () => {
     rpcMock.handlers['xtream.catchupUrl'] = () => ({ url: 'http://fresh.example/archive', kind: 'direct' });
     renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
     const resume = await screen.findByTestId('stage-resume');
-    await waitFor(() => expect(resume.textContent).toContain('Resume Yesterday News'));
+    await waitFor(() => expect(resume.getAttribute('aria-label')).toBe('Resume Yesterday News'));
+    expect(resume.textContent).toBe('Resume');
     expect(screen.getByTestId('stage-idle-catchup').textContent).toContain('30 min in');
     fireEvent.click(resume);
     await waitFor(() => expect(fakes.recorded.playSource.at(-1)).toMatchObject({

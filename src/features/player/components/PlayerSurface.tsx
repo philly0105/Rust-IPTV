@@ -482,6 +482,7 @@ function Tuning({ label }: { label: string }) {
 function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   const { t } = useTranslation('player');
   const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
+  const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const status = usePlayerStore((s) => s.status);
   const title = usePlayerStore((s) => s.source?.title);
   const pip = usePipStore((s) => s.active);
@@ -544,7 +545,9 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   }, [overlay, poke]);
 
   // A stall keeps the chrome up, like a pause: its readout is the only sign of it over the video.
-  const chromeShown = !overlay || !idle || onBar || volumeDragging || menuOpen || focusPin.pinned || buffering || status !== 'playing';
+  // A Fill window click leaves the pointer over the bar. Its hover state must not hold the
+  // chrome open forever when the pointer rests there; activity still restarts the idle timer.
+  const chromeShown = !overlay || !idle || (onBar && !isWindowFilled) || volumeDragging || menuOpen || focusPin.pinned || buffering || status !== 'playing';
   // The PiP bar's title, while it is drawn (hiding it sends no pointerleave).
   const titleHover = useZapHover(overlay && pip && chromeShown && !buffering);
 
@@ -801,6 +804,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
+  const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const panelOpen = useMediaStore((s) => s.channelPanelOpen);
   const statsOpen = useStreamInfoStore((s) => s.open);
   const pip = usePipStore((s) => s.active);
@@ -844,7 +848,7 @@ export function PlayerSurface({ compact, channelPanelAvailable, thumb = false }:
   // The bar comes back when the chip goes, the stream fails, or the pointer moves over the
   // picture, which takes the chip down (see `onPointerActivity`).
   const zapChip = smallPlayer && !compact && !pip && zapShown;
-  const inUse = menuOpen || focusPin.pinned || onBar || volumeDragging || panelOpen;
+  const inUse = menuOpen || focusPin.pinned || (onBar && !isWindowFilled) || volumeDragging || panelOpen;
   const chromeVisible = inUse || (zapChip ? !playing && status !== 'loading' : !idle || !playing);
   // The title takes the pointer only while the chrome shows it.
   const titleHover = useZapHover(chromeVisible);

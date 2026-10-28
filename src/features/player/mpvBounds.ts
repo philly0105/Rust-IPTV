@@ -302,6 +302,22 @@ export interface MpvLayout {
   holes: Bounds[];
 }
 
+/** The pieces of `rect` outside `cut`. Keeps the native cutouts disjoint: macOS uses an
+ * even-odd layer mask, which would paint the video again where two holes overlap. */
+function outside(rect: Bounds, cut: Bounds): Bounds[] {
+  const left = Math.max(rect.x, cut.x);
+  const top = Math.max(rect.y, cut.y);
+  const right = Math.min(rect.x + rect.width, cut.x + cut.width);
+  const bottom = Math.min(rect.y + rect.height, cut.y + cut.height);
+  if (right <= left || bottom <= top) return [rect];
+  return [
+    { x: rect.x, y: rect.y, width: rect.width, height: top - rect.y },
+    { x: rect.x, y: bottom, width: rect.width, height: rect.y + rect.height - bottom },
+    { x: rect.x, y: top, width: left - rect.x, height: bottom - top },
+    { x: right, y: top, width: rect.x + rect.width - right, height: bottom - top },
+  ].filter((piece) => piece.width > 0 && piece.height > 0);
+}
+
 /** `cuts` that overlap `bounds`, relative to its top-left, rounded outward so no pixel row of the chrome is covered. */
 function holesIn(bounds: Bounds, cuts: Rect[]): Bounds[] {
   const frame = rectOf({ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height });
@@ -311,7 +327,10 @@ function holesIn(bounds: Bounds, cuts: Rect[]): Bounds[] {
     if (!r) continue;
     const left = Math.floor(r.left);
     const top = Math.floor(r.top);
-    holes.push({ x: left - bounds.x, y: top - bounds.y, width: Math.ceil(r.right) - left, height: Math.ceil(r.bottom) - top });
+    const next = { x: left - bounds.x, y: top - bounds.y, width: Math.ceil(r.right) - left, height: Math.ceil(r.bottom) - top };
+    let pieces = [next];
+    for (const hole of holes) pieces = pieces.flatMap((piece) => outside(piece, hole));
+    holes.push(...pieces);
   }
   return holes;
 }

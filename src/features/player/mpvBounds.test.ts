@@ -224,6 +224,20 @@ describe('computeMpvOverlay', () => {
       holes: [{ x: 800, y: 350, width: 200, height: 250 }],
     });
   });
+
+  it('keeps a tooltip crossing the control bar cut out without overlapping holes', () => {
+    const surface = { left: 0, top: 0, right: 800, bottom: 500 };
+    const bar = { left: 0, top: 440, right: 800, bottom: 500 };
+    const tooltip = { left: 250, top: 420, right: 480, bottom: 455 };
+    expect(computeMpvLayout(surface, { reserved: [bar], overlays: [tooltip], float: true })).toEqual({
+      bounds: { x: 0, y: 0, width: 800, height: 500 },
+      // macOS' even-odd mask would show video again in the 15 px overlap.
+      holes: [
+        { x: 0, y: 440, width: 800, height: 60 },
+        { x: 250, y: 420, width: 230, height: 20 },
+      ],
+    });
+  });
 });
 
 describe('measureMpvLayout in picture-in-picture', () => {

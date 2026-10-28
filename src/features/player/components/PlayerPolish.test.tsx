@@ -369,6 +369,20 @@ describe('DOM player overlay timing', () => {
     await advance(3000);
     expect(hidden()).toBe(true);
   });
+
+  it('hides after entering Fill window even if the pointer still rests on the bar', async () => {
+    vi.useFakeTimers();
+    render(
+      <div data-player-host="">
+        <PlayerSurface compact={false} channelPanelAvailable={false} />
+      </div>,
+    );
+    fireEvent.pointerEnter(screen.getByTestId('overlay-chrome'));
+    fireEvent.click(screen.getByRole('button', { name: 'Fill window' }));
+    expect(usePlayerStore.getState().isWindowFilled).toBe(true);
+    await advance(3000);
+    expect(hidden()).toBe(true);
+  });
 });
 
 describe('resume notice', () => {

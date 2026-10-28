@@ -280,7 +280,7 @@ describe('MpvSurface bounds', () => {
     await tick(100);
     const last = lastLayout()!;
     expect(last.bounds).toEqual({ x: 0, y: 0, width: 800, height: 440 });
-    expect(last.holes).toEqual([{ x: 0, y: 400, width: 800, height: 40 }, { x: 500, y: 200, width: 225, height: 240 }]);
+    expect(last.holes).toEqual([{ x: 0, y: 400, width: 800, height: 40 }, { x: 500, y: 200, width: 225, height: 200 }]);
     document.querySelector('[data-test-rect="menu"]')!.remove();
   });
 
@@ -733,6 +733,21 @@ describe('fullscreen overlay chrome', () => {
 
     fireEvent.pointerMove(document.querySelector('[data-mpv-surface]')!);
     expect(screen.getByTestId('mpv-overlay-chrome')).toBeTruthy();
+  });
+
+  it('hides window-fill controls after a click leaves the pointer resting on the bar', async () => {
+    vi.useFakeTimers();
+    cursor = { x: 300, y: 200 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    render(surfaceTree);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fill window' }));
+    expect(usePlayerStore.getState().isWindowFilled).toBe(true);
+    fireEvent.pointerEnter(screen.getByTestId('mpv-overlay-chrome'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeNull();
   });
 
   const startFullscreen = async (): Promise<(ms: number) => Promise<void>> => {

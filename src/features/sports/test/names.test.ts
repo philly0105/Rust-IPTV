@@ -8,6 +8,7 @@ import {
   affiliateMarket,
   foreignFeed,
   hasMatchup,
+  inMarkets,
   isBackupFeed,
   isSportsGroup,
   isStationSpinOff,
@@ -129,6 +130,21 @@ describe('nameTokens', () => {
       expect(isBackupFeed(n), n).toBe(true);
     }
     for (const n of ['US| ESPN HD', 'NBA: BOSTON CELTICS ᴴᴰ', 'MLB 07: SD @ LAD', 'ALTITUDE', 'NBC Sports Boston']) expect(isBackupFeed(n), n).toBe(false);
+  });
+
+  it('counts overflow and alternate channels and alternate telecasts with the backups', () => {
+    for (const n of [
+      'TV: BIG TEN NETWORK OVERFLOW 2 ᴿᴬᵂ',
+      'TV: MONUMENTAL SPORTS NETWORK ALTERNATE ᴿᴬᵂ',
+      'US (Peacock 001) | Performance View: DET vs. NYK (2026-10-27 19:00:05)',
+      'US (ESPN+ 201) | ESPN Unlimited: Above the Rim: PHI vs. IND',
+      'ESPN2 ManningCast',
+    ]) {
+      expect(isBackupFeed(n), n).toBe(true);
+    }
+    for (const n of ['US: BIG TEN NETWORK HD', 'US (Peacock 002) | Pistons vs. Knicks (2026-10-27 19:00:05)', 'Rim Rockers vs Above Average']) {
+      expect(isBackupFeed(n), n).toBe(false);
+    }
   });
 
   it('keeps tags inside the name when stripping would cut a real word', () => {
@@ -760,6 +776,20 @@ describe('broadcast network stations', () => {
     expect(teamMarkets({ location: 'New England' })).toEqual([['new', 'england'], ['boston']]);
     expect(teamMarkets({ location: 'Detroit' })).toEqual([['detroit']]);
   });
+
+  it("tells a team's city from a namesake by the state a station names after it", () => {
+    const portland = teamMarkets({ location: 'Portland' });
+    const market = (name: string) => affiliateMarket(nameTokens(name))!;
+    expect(inMarkets(market('US: NBC 8 (KGW) PORTLAND, OR (D) ᴿᴬᵂ'), portland)).toBe(true);
+    expect(inMarkets(market('US: NBC 6 (WCSH) PORTLAND (H) ᴿᴬᵂ'), portland)).toBe(true);
+    expect(inMarkets(market('US: NBC (WCSH) PORTLAND, ME (D) ᴿᴬᵂ'), portland)).toBe(false);
+    expect(inMarkets(market('US: NBC 2 (WLBZ/WCSH) BANGOR / PORTLAND, ME (D) ᴿᴬᵂ'), portland)).toBe(false);
+    const washington = teamMarkets({ location: 'Washington' });
+    expect(inMarkets(market('US: NBC (WRC) WASHINGTON DC (D) ᴿᴬᵂ'), washington)).toBe(true);
+    expect(inMarkets(market('US: NBC (WITN) WASHINGTON, NC (D) ᴿᴬᵂ'), washington)).toBe(false);
+    // Elsewhere a state changes nothing.
+    expect(inMarkets(market('US: NBC 10 (WBTS) BOSTON, MA HD'), teamMarkets({ location: 'Boston' }))).toBe(true);
+  });
 });
 
 describe("a station's spin-offs", () => {
@@ -779,6 +809,15 @@ describe("a station's spin-offs", () => {
     expect(isStationSpinOff('ktrk', 'RK: KTRK ABC13 HOUSTON ᴿᴬᵂ')).toBe(true);
     expect(isStationSpinOff('fox', 'US: FOX 26 HOUSTON', 'US| ROKU ᴿᴬᵂ ⁶⁰ᶠᵖˢ')).toBe(true);
     expect(isStationSpinOff('fox', 'US: FOX 26 (KRIV) HOUSTON HD', 'US| FOX ᴴᴰ/ᴿᴬᵂ ⁶⁰ᶠᵖˢ')).toBe(false);
+  });
+
+  it('are its sister channels, named after its number', () => {
+    for (const n of ['US: FOX 9 PLUS HD [MINNEAPOLIS]', 'US: FOX 10 XTRA HD [PHOENIX]', 'US: FOX 5 PLUS HD [WASHINGTON]', 'FOX 35+ Orlando']) {
+      expect(isStationSpinOff('fox', n), n).toBe(true);
+    }
+    for (const n of ['US: FOX 9 (KMSP) MINNEAPOLIS HD', 'US: CW PLUS', 'US: NBC 12 (KBMT-DT2) BEAUMONT/PORT ARTHUR (H) ᴿᴬᵂ']) {
+      expect(isStationSpinOff(n.includes('NBC') ? 'nbc' : n.includes('CW') ? 'cw' : 'fox', n), n).toBe(false);
+    }
   });
 
   it('are only broadcast stations: other networks on a lineup are the networks', () => {

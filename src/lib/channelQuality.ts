@@ -45,17 +45,24 @@ function higher(a: ChannelQuality | null, b: ChannelQuality | null | undefined):
   return b && (!a || ORDER[b] > ORDER[a]) ? b : a;
 }
 
-/** The highest marker among the words; an HD marker right after "full" is Full HD, after "ultra" 4K. */
+/**
+ * The highest marker among the words; an HD marker right after "full" is Full HD, after "ultra" 4K. "8K
+ * EXCLUSIVE" is no marker: a provider's brand on every one of its event channels, placeholders included.
+ */
 function wordsQuality(text: string): ChannelQuality | null {
   let best: ChannelQuality | null = null;
   let lead: ChannelQuality | null = null;
+  // An "8K" waits for the next word, which may make it the brand.
+  let eightK = false;
   for (const w of words(text)) {
-    const q = MARKERS.get(w);
+    if (eightK && w !== 'exclusive') best = higher(best, 'uhd');
+    eightK = w === '8k';
+    const q = eightK ? undefined : MARKERS.get(w);
     best = higher(best, q);
     if (q === 'hd') best = higher(best, lead);
     lead = w === 'full' ? 'fhd' : w === 'ultra' ? 'uhd' : null;
   }
-  return best;
+  return eightK ? higher(best, 'uhd') : best;
 }
 
 /** The highest quality marker in a channel name, its country or group tag included; null when it names none. */

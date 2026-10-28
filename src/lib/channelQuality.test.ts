@@ -42,6 +42,16 @@ describe('channelQuality', () => {
     expect(channelQuality('UK: SKY SPORT MAIN EVENT ⁸ᴷ ⁶⁰ᶠᵖˢ')).toBeNull();
   });
 
+  it('reads no quality in the "8K EXCLUSIVE" brand of a provider\'s event channels', () => {
+    expect(channelQuality('NEXT | BOS - CELTICS VS BKN - NETS | Tue 27 Oct 18:30 EDT (US) | 8K EXCLUSIVE | US: NBA PASS PPV 1')).toBeNull();
+    expect(channelQuality('NO EVENT STREAMING NOW - | 8K EXCLUSIVE | US: DAZN PPV 1')).toBeNull();
+    expect(channelQuality('Sky 8K EXCLUSIVE HD')).toBe('hd');
+    // 8K anywhere else is still 4K or better.
+    expect(channelQuality('Sky 8K')).toBe('uhd');
+    expect(channelQuality('Sky 8K Demo')).toBe('uhd');
+    expect(channelQuality('8K | Sky')).toBe('uhd');
+  });
+
   it('orders the qualities', () => {
     expect([qualityOrder('sd'), qualityOrder('hd'), qualityOrder('fhd'), qualityOrder('uhd')]).toEqual([1, 2, 3, 4]);
   });

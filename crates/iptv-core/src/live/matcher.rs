@@ -145,18 +145,30 @@ fn tag_quality(tag: &str) -> Option<Quality> {
 /// [`signature`]'s `h.265` rewrite, which changes no marker: it only joins
 /// `h` and `265` into one word, and no marker ends in `h`, starts with
 /// `264` or `265`, or contains `h26`.
+///
+/// "8K EXCLUSIVE" is no marker: a provider's brand on every one of its event
+/// channels, placeholders included, whatever they carry.
 fn words_quality(tag: Option<Quality>, folded: &str) -> Option<Quality> {
     let mut best = tag;
     // What an HD marker right after the previous word names ("Full HD").
     let mut lead = None;
+    // An "8K" waits for the next word, which may make it the brand.
+    let mut eight_k = false;
     each_token(folded, |t| {
-        let q = quality_of(t);
+        if eight_k && t != "exclusive" {
+            best = best.max(Some(Quality::Uhd));
+        }
+        eight_k = t == "8k";
+        let q = if eight_k { None } else { quality_of(t) };
         best = best.max(q);
         if q == Some(Quality::Hd) {
             best = best.max(lead);
         }
         lead = pair_lead(t);
     });
+    if eight_k {
+        best = best.max(Some(Quality::Uhd));
+    }
     best
 }
 
@@ -602,6 +614,9 @@ mod tests {
             "DE: ProSieben HD backup 2",
             "SKY SPORTS 1 (backup) 576i",
             "Straße HQ",
+            "NEXT | BOS - CELTICS VS BKN - NETS | 8K EXCLUSIVE | US: NBA PASS PPV 1",
+            "Sky 8K EXCLUSIVE HD",
+            "Sky 8K",
             "   ",
         ];
         let tables = STRIP_CASES
@@ -630,6 +645,16 @@ mod tests {
             ("Full Moon HD", Some(Quality::Hd)),
             ("Full HD", Some(Quality::Fhd)),
             ("Sky Sports 1 H.265", None),
+            // A provider's brand on its event channels, not a resolution.
+            (
+                "NEXT | BOS - CELTICS VS BKN - NETS | Tue 27 Oct 18:30 EDT (US) | 8K EXCLUSIVE | US: NBA PASS PPV 1",
+                None,
+            ),
+            ("NO EVENT STREAMING NOW - | 8K EXCLUSIVE | US: DAZN PPV 1", None),
+            ("Sky 8K EXCLUSIVE HD", Some(Quality::Hd)),
+            ("Sky 8K", Some(Quality::Uhd)),
+            ("8K | Sky", Some(Quality::Uhd)),
+            ("Sky 8K Demo", Some(Quality::Uhd)),
             ("Film4 +1", None),
             ("BBC One", None),
             ("", None),

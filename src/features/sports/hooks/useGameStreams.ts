@@ -15,7 +15,7 @@ import { useNow } from '@/features/parental/time';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
 import { gameWindow } from '../lib/espn';
-import { isCurrentGame, isEventChannel, matchGame, prepareMatch, type StreamMatch } from '../lib/match';
+import { isCurrentGame, isEventChannel, matchGame, prepareMatch, sharedNetworks, type StreamMatch } from '../lib/match';
 import type { Game, GameTeam, League } from '../lib/types';
 import { sportsRead } from './sportsRead';
 import { toIndexed, useChannelIndex, type IndexedChannel } from './useChannelIndex';
@@ -116,8 +116,12 @@ function fallbackMatches(game: Game, hits: readonly Channel[], sources: readonly
 interface Cached {
   /** `isCurrentGame` when matched: the only thing `matchGame` reads `now` for. */
   current: boolean;
+  /** The networks the game shared with another game when matched (`sharedNetworks`), joined. */
+  shared: string;
   list: StreamMatch[];
 }
+
+const NO_NETWORKS: ReadonlySet<string> = new Set();
 
 interface Prepared {
   channels: readonly IndexedChannel[];
@@ -168,26 +172,30 @@ export function useGameStreams(
   const current = ready || (prepared !== null && prepared.complete && prepared.from === from && prepared.to === to);
 
   // A new cache whenever the prepared index or guide changes; between those, a game object a poll left as it
-  // was keeps its matches, and the minute tick re-matches only a game that stopped or started being current.
+  // was keeps its matches, and the minute tick re-matches only a game that stopped or started being current,
+  // or whose networks another game's move started or stopped sharing.
   const preparedChannels = prepared?.channels ?? NO_CHANNELS;
   const preparedPrograms = prepared?.programs ?? NO_PROGRAMS;
   const inputs = useMemo(
     () => ({ channels: preparedChannels, programs: preparedPrograms, byGame: new WeakMap<Game, Cached>() }),
     [preparedChannels, preparedPrograms],
   );
+  const shared = useMemo(() => sharedNetworks(games), [games]);
   const matched = useMemo(() => {
     const out = new Map<string, StreamMatch[]>();
     for (const g of games) {
       const current = isCurrentGame(g, now);
+      const networks = shared.get(g.key) ?? NO_NETWORKS;
+      const sharedKey = [...networks].sort().join(' ');
       let cached = inputs.byGame.get(g);
-      if (!cached || cached.current !== current) {
-        cached = { current, list: matchGame(g, inputs.channels, inputs.programs, now) };
+      if (!cached || cached.current !== current || cached.shared !== sharedKey) {
+        cached = { current, shared: sharedKey, list: matchGame(g, inputs.channels, inputs.programs, now, networks) };
         inputs.byGame.set(g, cached);
       }
       out.set(g.key, cached.list);
     }
     return out;
-  }, [games, inputs, now]);
+  }, [games, inputs, now, shared]);
 
   const settled = on && complete && current;
   const wanted = useMemo(

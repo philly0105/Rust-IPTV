@@ -224,6 +224,20 @@ describe('computeMpvOverlay', () => {
       holes: [{ x: 800, y: 350, width: 200, height: 250 }],
     });
   });
+
+  it('keeps a tooltip crossing the control bar cut out without overlapping holes', () => {
+    const surface = { left: 0, top: 0, right: 800, bottom: 500 };
+    const bar = { left: 0, top: 440, right: 800, bottom: 500 };
+    const tooltip = { left: 250, top: 420, right: 480, bottom: 455 };
+    expect(computeMpvLayout(surface, { reserved: [bar], overlays: [tooltip], float: true })).toEqual({
+      bounds: { x: 0, y: 0, width: 800, height: 500 },
+      // macOS' even-odd mask would show video again in the 15 px overlap.
+      holes: [
+        { x: 0, y: 440, width: 800, height: 60 },
+        { x: 250, y: 420, width: 230, height: 20 },
+      ],
+    });
+  });
 });
 
 describe('measureMpvLayout in picture-in-picture', () => {
@@ -382,6 +396,47 @@ describe('measureMpvLayout: menus, tooltips and dialogs anywhere in the document
       menu: { left: 600, top: 300, width: 225, height: 283 },
     });
     expect(measureMpvLayout(surface).holes).toEqual([]);
+  });
+
+  it('ignores covered app chrome in window fill but cuts out a body-portalled menu', () => {
+    document.body.innerHTML = `
+      <div data-mpv-reserved-global="" id="header"></div>
+      <div data-player-window-layer=""><div data-player-host=""><div data-mpv-surface="" id="surface"></div></div></div>
+      <div role="menu" id="menu" style="z-index: 60"></div>`;
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(600);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const rect = this.id === 'header'
+        ? { left: 0, top: 0, width: 1000, height: 50 }
+        : this.id === 'menu'
+          ? { left: 700, top: 100, width: 200, height: 150 }
+          : { left: 0, top: 0, width: 1000, height: 600 };
+      return { ...rect, x: rect.left, y: rect.top, right: rect.left + rect.width, bottom: rect.top + rect.height, toJSON: () => rect } as DOMRect;
+    });
+    expect(measureMpvLayout(document.getElementById('surface')!)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 600 },
+      holes: [{ x: 700, y: 100, width: 200, height: 150 }],
+    });
+  });
+
+  it('cuts the control bar out of the native video in window fill', () => {
+    document.body.innerHTML = `
+      <div data-player-window-layer=""><div data-player-host="">
+        <div data-mpv-surface="" id="surface"></div>
+        <div data-player-controls="" id="controls"></div>
+      </div></div>`;
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(600);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const rect = this.id === 'controls'
+        ? { left: 0, top: 500, width: 1000, height: 100 }
+        : { left: 0, top: 0, width: 1000, height: 600 };
+      return { ...rect, x: rect.left, y: rect.top, right: rect.left + rect.width, bottom: rect.top + rect.height, toJSON: () => rect } as DOMRect;
+    });
+    expect(measureMpvLayout(document.getElementById('surface')!)).toEqual({
+      bounds: { x: 0, y: 0, width: 1000, height: 600 },
+      holes: [{ x: 0, y: 500, width: 1000, height: 100 }],
+    });
   });
 });
 

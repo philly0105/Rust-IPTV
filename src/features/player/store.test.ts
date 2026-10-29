@@ -26,6 +26,7 @@ vi.mock('@/features/vod/lib/watchedQueries', async (importOriginal) => ({
 }));
 
 const store = await import('./store');
+const { CATCHUP_RESUME_KEY, readCatchupResume } = await import('./catchupResume');
 const media = await import('./media');
 const nowNext = await import('./nowNext');
 const { queryClient, rpcKey } = await import('@/api/query');
@@ -85,6 +86,12 @@ afterEach(() => {
 });
 
 describe('store transitions', () => {
+  it('uses an archive source duration for the initial seek timeline', async () => {
+    await usePlayerStore.getState().play(vod('1', { durationSeconds: 25 * 60 }));
+
+    expect(usePlayerStore.getState().durationSeconds).toBe(25 * 60);
+  });
+
   it('play -> loading in the mini dock, recent.add, then stop -> idle', async () => {
     await usePlayerStore.getState().play(vod('1'));
     let s = usePlayerStore.getState();
@@ -132,6 +139,15 @@ describe('store transitions', () => {
     expect(usePlayerStore.getState().muted).toBe(true);
   });
 
+  it('shows the minute reached when an archive engine snaps a seek', async () => {
+    const ctl = { play: vi.fn(), pause: vi.fn(), seekTo: vi.fn((seconds: number) => Math.floor(seconds / 60) * 60), setVolume: vi.fn(), setMuted: vi.fn() };
+    store.setController(ctl);
+    await usePlayerStore.getState().play(vod('1'));
+    usePlayerStore.getState().seekTo(139 * 60 + 35);
+    expect(ctl.seekTo).toHaveBeenLastCalledWith(139 * 60 + 35);
+    expect(usePlayerStore.getState().positionSeconds).toBe(139 * 60);
+  });
+
   it('external player setting opens vlc and hides the dock (desktop)', async () => {
     env.desktop = true;
     try {
@@ -146,6 +162,27 @@ describe('store transitions', () => {
         { player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }) },
       ]);
       expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+    } finally {
+      env.desktop = false;
+    }
+  });
+
+  it('selects live, catch-up, and movie or series players independently', async () => {
+    const choices = { player: 'embedded-mpv', livePlayer: 'embedded-mpv', catchupPlayer: 'html5', vodPlayer: 'vlc' } as const;
+    expect(store.playerForSource(choices, { isLive: true, isRadio: false })).toBe('embedded-mpv');
+    expect(store.playerForSource(choices, { isLive: false, isRadio: false, catchupProgramStart: '2026-10-25T10:00:00Z' })).toBe('html5');
+    expect(store.playerForSource(choices, { isLive: false, isRadio: false })).toBe('vlc');
+    expect(store.playerForSource(choices, { isLive: false, isRadio: true })).toBe('embedded-mpv');
+    expect(store.playerForSource({ player: 'mpv' }, { isLive: false, isRadio: false })).toBe('mpv');
+    env.desktop = true;
+    try {
+      handlers['settings.get'] = () => choices;
+      handlers['player.openExternal'] = () => undefined;
+      await usePlayerStore.getState().play(vod('1'));
+      expect(usePlayerStore.getState().mode).toBe('external');
+      expect(calls('player.openExternal')).toEqual([{
+        player: 'vlc', source: expect.objectContaining({ url: 'http://h/movie/1.mp4' }),
+      }]);
     } finally {
       env.desktop = false;
     }
@@ -204,7 +241,21 @@ describe('store transitions', () => {
 });
 
 describe('startup and stall watchdog', () => {
-  const { reportStatus, STARTUP_TIMEOUT_MS } = store;
+  const { reportStatus, STARTUP_TIMEOUT_MS, CATCHUP_STARTUP_TIMEOUT_MS } = store;
+
+  it('allows a slow catch-up programme longer to show its first frame', async () => {
+    vi.useFakeTimers();
+    await usePlayerStore.getState().play(vod('1', {
+      ref: liveRef,
+      url: 'http://h/timeshift/1.ts',
+      catchupProgramStart: '2026-10-25T10:00:00Z',
+      durationSeconds: 3600,
+    }));
+    await vi.advanceTimersByTimeAsync(STARTUP_TIMEOUT_MS);
+    expect(usePlayerStore.getState().status).toBe('loading');
+    await vi.advanceTimersByTimeAsync(CATCHUP_STARTUP_TIMEOUT_MS - STARTUP_TIMEOUT_MS);
+    expect(usePlayerStore.getState().status).toBe('error');
+  });
 
   it('a stream that never starts (401 Basic, no engine event) ends in a timeout error with Retry', async () => {
     vi.useFakeTimers();
@@ -405,6 +456,28 @@ describe('up next and queue advance', () => {
 });
 
 describe('resume persistence', () => {
+  it('keeps an archived live programme and its position across a restart without saving its URL', async () => {
+    vi.useFakeTimers();
+    const start = new Date('2026-10-23T10:00:00Z').toISOString();
+    await usePlayerStore.getState().play({
+      url: 'http://provider.example/archive?password=secret', kind: 'direct', title: 'Channel 1',
+      subtitle: 'Morning Show', ref: liveRef, isLive: false, isRadio: false,
+      catchupProgramStart: start, durationSeconds: 3600,
+    });
+    store.reportStatus('playing');
+    store.reportProgress(1800, 3600);
+    vi.advanceTimersByTime(SAVE_INTERVAL_MS);
+    expect(readCatchupResume()).toMatchObject({
+      ref: liveRef, program: { title: 'Morning Show', start }, positionSeconds: 1800,
+    });
+    expect(localStorage.getItem(CATCHUP_RESUME_KEY)).not.toContain('password=secret');
+    usePlayerStore.getState().stop();
+    expect(readCatchupResume()?.positionSeconds).toBe(1800);
+    expect(sessionStorage.getItem(RESUME_KEY)).toBeNull();
+    await usePlayerStore.getState().play({ url: 'http://h/live.m3u8', kind: 'hls', title: 'Live', isLive: true, isRadio: false, ref: liveRef });
+    expect(readCatchupResume()).toBeNull();
+  });
+
   it('writes sessionStorage on play and positions.set every 5 s for VOD', async () => {
     vi.useFakeTimers();
     await usePlayerStore.getState().play(vod('1'));
@@ -1179,6 +1252,22 @@ describe('settings and the first-frame watchdog', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(usePlayerStore.getState().status).toBe('error');
     expect(media.useMediaStore.getState().errorCode).toBe('timeout');
+  });
+
+  it('does not time out live mpv playback whose position advances while mpv reports paused', async () => {
+    vi.useFakeTimers();
+    handlers['xtream.streamUrl'] = () => ({ url: 'http://x/live/101.ts', kind: 'mpegts', title: 'News', isLive: true, isRadio: false });
+    await playItem({ title: 'News', isLive: true, ref: liveRef, sourceKind: 'xtream' });
+    usePlayerStore.setState({ mode: 'embedded-mpv' });
+    store.reportStatus('paused');
+    media.useMediaStore.setState({ waiting: false });
+    await vi.advanceTimersByTimeAsync(5_000);
+    store.reportProgress(5);
+    await vi.advanceTimersByTimeAsync(store.LIVE_STARTUP_TIMEOUT_MS - 5_000);
+    expect(usePlayerStore.getState().status).toBe('paused');
+    expect(media.useMediaStore.getState().errorCode).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(store.LIVE_STARTUP_TIMEOUT_MS * 2);
+    expect(usePlayerStore.getState().status).toBe('paused');
   });
 
   it('a pause the user asked for before the first frame is not a hang', async () => {

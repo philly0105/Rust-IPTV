@@ -11,7 +11,9 @@ import {
   History,
   Lock,
   Maximize,
+  Maximize2,
   Minimize,
+  Minimize2,
   PanelLeftOpen,
   Pause,
   PictureInPicture2,
@@ -233,14 +235,39 @@ const ICON = {
 };
 
 /** Memoized with the row's icons (P2-PLAYER-4): it follows the volume itself. */
-const VolumeControl = memo(function VolumeControl({ compact }: { compact?: boolean }) {
+const VolumeControl = memo(function VolumeControl({ compact, onDragChange }: { compact?: boolean; onDragChange?(dragging: boolean): void }) {
   const { t } = useTranslation('player');
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  useEffect(() => () => {
+    if (draggingRef.current) onDragChange?.(false);
+  }, [onDragChange]);
+  const drag = useCallback((active: boolean): void => {
+    if (draggingRef.current === active) return;
+    draggingRef.current = active;
+    setDragging(active);
+    onDragChange?.(active);
+  }, [onDragChange]);
+  useEffect(() => {
+    if (!dragging) return;
+    const endDrag = () => drag(false);
+    window.addEventListener('pointerup', endDrag, true);
+    window.addEventListener('pointercancel', endDrag, true);
+    window.addEventListener('mouseup', endDrag, true);
+    window.addEventListener('blur', endDrag);
+    return () => {
+      window.removeEventListener('pointerup', endDrag, true);
+      window.removeEventListener('pointercancel', endDrag, true);
+      window.removeEventListener('mouseup', endDrag, true);
+      window.removeEventListener('blur', endDrag);
+    };
+  }, [dragging, drag]);
   const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const shown = muted ? 0 : volume;
   const percent = Math.round(shown * 100);
   return (
-    <div data-vol="" className="group/vol flex items-center">
+    <div data-vol="" data-dragging={dragging ? '' : undefined} className="group/vol flex items-center">
       <CtlButton id="mute" shortcut="mute" label={muted ? t('unmute') : t('mute')} onClick={() => usePlayerStore.getState().toggleMute()}>
         {shown === 0 ? ICON.muted : shown < 0.5 ? ICON.quiet : ICON.loud}
       </CtlButton>
@@ -254,7 +281,13 @@ const VolumeControl = memo(function VolumeControl({ compact }: { compact?: boole
         aria-valuetext={t('volumePercent', { percent })}
         onChange={(e) => usePlayerStore.getState().setVolume(Number(e.target.value) / 100)}
         onKeyDown={(e) => e.stopPropagation()}
-        className="player-range w-0 opacity-0 group-focus-within/vol:w-24 group-focus-within/vol:opacity-100 group-hover/vol:w-24 group-hover/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-(--duration-base)"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          drag(true);
+        }}
+        onPointerUp={() => drag(false)}
+        onPointerCancel={() => drag(false)}
+        className="player-range w-0 opacity-0 group-focus-within/vol:w-24 group-focus-within/vol:opacity-100 group-hover/vol:w-24 group-hover/vol:opacity-100 group-data-[dragging]/vol:w-24 group-data-[dragging]/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-(--duration-base)"
         style={{ ['--fill' as string]: `${percent}%` }}
       />
       {/* The level as a number while the slider is out (the slider itself announces it). */}
@@ -262,7 +295,7 @@ const VolumeControl = memo(function VolumeControl({ compact }: { compact?: boole
         <span
           aria-hidden
           data-testid="volume-readout"
-          className="w-0 overflow-hidden text-end font-numeric text-caption whitespace-nowrap text-on-glass-muted tabular-nums opacity-0 group-focus-within/vol:w-10 group-focus-within/vol:opacity-100 group-hover/vol:w-10 group-hover/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-(--duration-base)"
+          className="w-0 overflow-hidden text-end font-numeric text-caption whitespace-nowrap text-on-glass-muted tabular-nums opacity-0 group-focus-within/vol:w-10 group-focus-within/vol:opacity-100 group-hover/vol:w-10 group-hover/vol:opacity-100 group-data-[dragging]/vol:w-10 group-data-[dragging]/vol:opacity-100 motion-safe:transition-[width,opacity] motion-safe:duration-(--duration-base)"
         >
           {percent}%
         </span>
@@ -963,6 +996,7 @@ export interface ControlsProps {
    */
   short?: boolean;
   onMenuOpenChange?(open: boolean): void;
+  onVolumeDragChange?(dragging: boolean): void;
   /** Dock bar: a lasting status (embedded mpv buffering) shown in the readout when no transient one is up. */
   readoutIdle?: ReactNode;
   /** The fullscreen channel panel can open here (`FullscreenChannelPanel`): the bar gets its button. */
@@ -1222,7 +1256,7 @@ function RecordMenuAction({ onDone }: { onDone(): void }) {
  * While the volume slider is out in a narrow bar, the live badge or the time steps aside for it
  * (the row has no room for both).
  */
-const NARROW_YIELD_TO_VOLUME = '[[data-ctl-row]:has([data-vol]:hover)_&]:hidden [[data-ctl-row]:has([data-vol]:focus-within)_&]:hidden';
+const NARROW_YIELD_TO_VOLUME = '[[data-ctl-row]:has([data-vol]:hover)_&]:hidden [[data-ctl-row]:has([data-vol]:focus-within)_&]:hidden [[data-ctl-row]:has([data-vol][data-dragging])_&]:hidden';
 
 /** The buttons a narrow row can do without (the options menu takes them), by group. */
 type Spare = 'zap' | 'jump' | 'captions' | 'pip' | 'skip';
@@ -1262,7 +1296,7 @@ function useSpareSlots(row: HTMLElement | null, active: boolean): { slots: numbe
   const measure = useRef<() => void>(() => undefined);
   measure.current = () => {
     if (!row || !active) return;
-    if (row.querySelector('[data-vol]')?.matches(':hover, :focus-within')) return;
+    if (row.querySelector('[data-vol]')?.matches(':hover, :focus-within, [data-dragging]')) return;
     const width = row.clientWidth;
     if (!width) return;
     let free = showing.current * SPARE_SLOT_PX - Math.max(0, row.scrollWidth - width);
@@ -1323,7 +1357,7 @@ function jump(seconds: number): void {
  * what the bar does not show (the pointer resting on it, the chrome's idle timer, a stall), which
  * re-rendered every button, tooltip and icon with it (P2-PLAYER-3).
  */
-export const Controls = memo(function Controls({ variant, visible, compact, short, onMenuOpenChange, readoutIdle, channelPanel = false }: ControlsProps) {
+export const Controls = memo(function Controls({ variant, visible, compact, short, onMenuOpenChange, onVolumeDragChange, readoutIdle, channelPanel = false }: ControlsProps) {
   const { t } = useTranslation('player');
   const source = usePlayerStore((s) => s.source);
   const status = usePlayerStore((s) => s.status);
@@ -1332,6 +1366,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const hasPosition = usePlayerStore((s) => s.positionSeconds > 0);
   const duration = usePlayerStore((s) => s.durationSeconds);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const mode = usePlayerStore((s) => s.mode);
   const mpvAttached = useMediaStore((s) => !!s.mpv?.attached);
   const ended = usePlayerStore(selectEnded);
@@ -1475,7 +1510,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   // An iPhone has no element fullscreen; its video goes fullscreen natively (PL-IOS-FULLSCREEN).
   const showFullscreen = !windowPip && canEnterFullscreen();
   // Fullscreen: larger controls, further in from the edges, read from across a room.
-  const scale: ChromeScale = compact ? 'mini' : isFullscreen && !windowPip ? 'big' : 'normal';
+  const scale: ChromeScale = compact ? 'mini' : (isFullscreen || isWindowFilled) && !windowPip ? 'big' : 'normal';
   const big = scale === 'big';
   // The 10 s skips (PL-BAR-HIERARCHY): VOD with a known length, outside the mini player.
   const canJump = isVod && !!duration && !compact && !ended && !failed;
@@ -1713,7 +1748,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                   they stay together at the start, as on a wide bar. */}
               {(!narrow || panelOwnsError) && channelsButton}
               {(!narrow || (panelOwnsError && inRow('zap'))) && zapButtons}
-              {!panelOwnsError && <VolumeControl compact={compact || narrow} />}
+              {!panelOwnsError && <VolumeControl compact={compact || narrow} onDragChange={onVolumeDragChange} />}
               {/* With the volume, the channel list steps aside while its slider is out. Right of it, like
                   the spares, so the volume button does not move under the finger that opened it. */}
               {narrow && !panelOwnsError && channelsButton}
@@ -1763,7 +1798,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                     id="captions"
                     className={spareClass}
                     // In live fullscreen, C opens the channel list instead.
-                    shortcut={isLive && isFullscreen ? undefined : 'captions'}
+                    shortcut={isLive && (isFullscreen || isWindowFilled) ? undefined : 'captions'}
                     label={t('captions')}
                     tooltip={captionsOn ? t('captionsOn') : t('captionsOff')}
                     pressed={captionsOn}
@@ -1789,7 +1824,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                   </CtlButton>
                 )}
               </div>
-              {(showPip && (windowPip || inRow('pip'))) || showFullscreen ? (
+              {(showPip && (windowPip || inRow('pip'))) || showFullscreen || (!compact && !windowPip) ? (
                 <div className={cn('flex items-center', big ? 'ms-4 gap-2' : 'gap-1', !compact && !big && 'ms-1 sm:ms-2')}>
                   {showPip && (windowPip || inRow('pip')) && (
                     <CtlButton
@@ -1800,6 +1835,15 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                       onClick={() => commands?.togglePip()}
                     >
                       {ICON.pip}
+                    </CtlButton>
+                  )}
+                  {!compact && !windowPip && (
+                    <CtlButton
+                      id="window-fill"
+                      label={isWindowFilled ? t('exitWindowFill') : t('windowFill')}
+                      onClick={() => store.toggleWindowFill()}
+                    >
+                      {isWindowFilled ? <Minimize2 /> : <Maximize2 />}
                     </CtlButton>
                   )}
                   {showFullscreen && (

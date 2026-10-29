@@ -20,7 +20,9 @@ pub mod store;
 pub mod transfer;
 
 use crate::error::{CoreError, CoreResult};
-use crate::model::{Download, DownloadStatus, ItemRef, PlayerKind, PlayerSource, RequestHeaders};
+use crate::model::{
+    ContentType, Download, DownloadStatus, ItemRef, PlayerKind, PlayerSource, RequestHeaders,
+};
 use crate::state::AppState;
 use manager::{StopReason, Stopped};
 use std::path::{Path, PathBuf};
@@ -67,11 +69,44 @@ fn notify(state: &AppState) {
     state.emit("downloads.update", serde_json::json!({}));
 }
 
-/// Caps each transfer's speed (bytes per second; `None` = unlimited). Takes
-/// effect on running transfers at their next chunk. Used by tests to make
-/// pause points deterministic; not a C4 command.
+/// Sets the in-memory global default (bytes/s; `None` = unlimited). Takes
+/// effect on running transfers that inherit it at their next chunk. Used by
+/// tests for deterministic pause points; does not persist or emit an event.
 pub fn set_rate_limit(state: &AppState, bytes_per_second: Option<u64>) {
-    manager::manager(state).set_rate_limit(bytes_per_second);
+    state.settings.write().download_rate_limit_bps = bytes_per_second.unwrap_or(0);
+}
+
+/// Maximum accepted cap: 1 GiB/s. Zero means unlimited.
+pub const MAX_RATE_LIMIT_BPS: u64 = 1024 * 1024 * 1024;
+
+pub fn validate_rate_limit(bps: u64) -> CoreResult<()> {
+    if bps > MAX_RATE_LIMIT_BPS {
+        return Err(CoreError::invalid(
+            "Download speed must be between 0 and 1073741824 bytes/s (0 means unlimited)",
+        ));
+    }
+    Ok(())
+}
+
+/// Persists an override and applies it to an active transfer without restarting it.
+pub async fn set_download_rate_limit(
+    state: &Arc<AppState>,
+    id: i64,
+    bps: Option<u64>,
+) -> CoreResult<()> {
+    if let Some(bps) = bps {
+        validate_rate_limit(bps)?;
+    }
+    let mgr = manager::manager(state);
+    state
+        .db_write(move |c| {
+            store::set_rate_limit(c, id, bps)?;
+            mgr.set_download_rate_limit(id, bps);
+            Ok(())
+        })
+        .await?;
+    notify(state);
+    Ok(())
 }
 
 /// Overrides how long pause/cancel/remove wait for a running transfer to stop
@@ -201,6 +236,7 @@ pub struct StartRequest {
     pub headers: Option<RequestHeaders>,
     pub poster_url: Option<String>,
     pub file_name_hint: Option<String>,
+    pub duration_seconds: Option<i64>,
 }
 
 /// Scheme check everywhere; in server mode also the SSRF guard, trusting
@@ -261,6 +297,7 @@ pub async fn start(state: &Arc<AppState>, req: StartRequest) -> CoreResult<Downl
                 url: req.url.trim(),
                 poster_url: req.poster_url.as_deref(),
                 headers: &headers,
+                duration_seconds: req.duration_seconds.filter(|s| *s > 0),
             };
             let id = match store::find_by_ref(c, &item_ref, episode_id.as_deref())? {
                 Some(existing) => {
@@ -586,6 +623,49 @@ pub async fn play_source(state: &Arc<AppState>, id: i64) -> CoreResult<PlayerSou
         url,
         kind: PlayerKind::File,
         headers: None,
+        title: d.title,
+        subtitle: d.subtitle,
+        poster_url: d.poster_url,
+        item_ref: Some(d.item_ref),
+        episode_id: d.episode_id,
+        resume_seconds: (d.position_seconds > 0).then_some(d.position_seconds),
+        is_live: false,
+        is_radio: false,
+    })
+}
+
+/// The provider stream for a catch-up transfer that has not finished yet.
+/// Playback uses its own request so the growing `.part` never has to masquerade
+/// as a seekable, complete file (which many MP4 players cannot read).
+pub async fn active_play_source(state: &Arc<AppState>, id: i64) -> CoreResult<PlayerSource> {
+    let row = state.db_call(move |c| store::get(c, id)).await?;
+    let d = row.download;
+    if d.item_ref.content_type != ContentType::Live
+        || !d
+            .episode_id
+            .as_deref()
+            .is_some_and(|e| e.starts_with("catchup:"))
+    {
+        return Err(CoreError::Conflict(
+            "Only a catch-up download can be watched from this queue.".into(),
+        ));
+    }
+    // The queue may finish between rendering its Watch button and the click.
+    if d.status == DownloadStatus::Completed {
+        return play_source(state, id).await;
+    }
+    if !matches!(
+        d.status,
+        DownloadStatus::Queued | DownloadStatus::Downloading | DownloadStatus::Paused
+    ) {
+        return Err(CoreError::Conflict(
+            "This catch-up download is no longer available to watch.".into(),
+        ));
+    }
+    Ok(PlayerSource {
+        url: d.url,
+        kind: PlayerKind::Direct,
+        headers: (!row.headers.is_empty()).then_some(row.headers),
         title: d.title,
         subtitle: d.subtitle,
         poster_url: d.poster_url,

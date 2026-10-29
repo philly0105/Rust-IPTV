@@ -372,6 +372,7 @@ pub fn normalize(mut s: Settings) -> Settings {
 /// `current`, so a player that was uninstalled later does not block unrelated
 /// edits (the UI shows it through `settings.detectPlayers`).
 pub fn validate(current: &Settings, next: Settings) -> CoreResult<Settings> {
+    crate::downloads::validate_rate_limit(next.download_rate_limit_bps)?;
     if !LANGUAGES.contains(&next.language.as_str()) {
         return Err(CoreError::invalid(format!(
             "unsupported language \"{}\"; expected one of {}",

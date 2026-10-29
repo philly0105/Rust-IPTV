@@ -83,7 +83,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("the guide's Favorites view (GD-FAV-GRID)", () => {
-  it('asks the grid once per chunk, with every favorite in it from the start', async () => {
+  it('asks complete favorite chunks for the visible slice and adjacent time slices', async () => {
     renderGuide({ path: `/epg?source=src1&view=favorites&at=${defaultStart(Date.now())}`, routes: GRID });
     await screen.findByTestId('epg-grid');
     await waitFor(() => {
@@ -91,16 +91,17 @@ describe("the guide's Favorites view (GD-FAV-GRID)", () => {
     });
     const commitsToCells = commits;
     await new Promise((r) => setTimeout(r, 200));
-    const grids = rpc.of('epg.grid') as { refs: ItemRef[] }[];
+    const grids = rpc.of('epg.grid') as { refs: ItemRef[]; from: string; to: string }[];
     console.log(
       `[measure GD-FAV-GRID] epg.grid ${grids.length} (${grids.map((g) => g.refs.length).join(', ')} refs), ` +
         `catalog.item ${rpc.of('catalog.item').length}, catalog.items ${rpc.of('catalog.items').length}, EpgGridPage commits to cells ${commitsToCells}`,
     );
     const asked = (first: number) => grids.filter((g) => indexOf(g.refs[0]!) === first).map((g) => g.refs.map(indexOf));
     const rows = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i);
-    expect(asked(0)).toEqual([rows(0, GRID_CHUNK)]);
+    expect(asked(0)).toEqual([rows(0, GRID_CHUNK), rows(0, GRID_CHUNK), rows(0, GRID_CHUNK)]);
+    expect(new Set(grids.filter((g) => indexOf(g.refs[0]!) === 0).map((g) => `${g.from}|${g.to}`)).size).toBe(3);
     // The chunk below is read ahead at rest, once: its refs are known too.
     expect(asked(GRID_CHUNK)).toEqual([rows(GRID_CHUNK, FAVORITES)]);
-    expect(grids).toHaveLength(2);
+    expect(grids).toHaveLength(4);
   });
 });

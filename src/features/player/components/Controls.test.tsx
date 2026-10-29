@@ -287,6 +287,9 @@ describe('Controls live rewind', () => {
     render(<Controls variant="dock" visible />);
     expect(screen.getByTestId('live-badge')).toBeTruthy();
     expect(screen.getByRole('slider', { name: /seek/i }).getAttribute('aria-valuetext')).not.toMatch(/behind/);
+    act(() => usePlayerStore.setState({ positionSeconds: 1079 }));
+    expect(screen.getByRole('button', { name: 'Jump to live' })).toBeTruthy();
+    expect(screen.getByRole('slider', { name: /seek/i }).getAttribute('aria-valuetext')).toMatch(/behind/);
   });
 });
 
@@ -368,6 +371,29 @@ describe('Controls volume', () => {
   it('the compact bar has no room for the readout', () => {
     render(<Controls variant="dock" visible compact />);
     expect(screen.queryByTestId('volume-readout')).toBeNull();
+  });
+
+  it('keeps the slider expanded until a drag ends outside it', () => {
+    act(() => usePlayerStore.setState({ volume: 0.42, muted: false }));
+    const onDragChange = vi.fn();
+    render(<Controls variant="dock" visible onVolumeDragChange={onDragChange} />);
+    const slider = screen.getByRole('slider', { name: 'Volume' }) as HTMLInputElement;
+    const group = slider.closest('[data-vol]')!;
+    slider.setPointerCapture = vi.fn();
+
+    fireEvent.pointerDown(slider, { button: 0, pointerId: 7 });
+    fireEvent.blur(slider);
+    fireEvent.pointerLeave(group);
+    expect(group.hasAttribute('data-dragging')).toBe(true);
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.42, muted: false });
+    expect(onDragChange).toHaveBeenCalledWith(true);
+    expect(slider.setPointerCapture).not.toHaveBeenCalled();
+
+    fireEvent.change(slider, { target: { value: '62' } });
+    expect(usePlayerStore.getState()).toMatchObject({ volume: 0.62, muted: false });
+    fireEvent.pointerUp(window, { pointerId: 7 });
+    expect(group.hasAttribute('data-dragging')).toBe(false);
+    expect(onDragChange).toHaveBeenLastCalledWith(false);
   });
 });
 

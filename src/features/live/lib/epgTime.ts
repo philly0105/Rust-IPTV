@@ -398,9 +398,9 @@ export const CELL_TEXT_MIN_PX = 48;
  * past its own start with the track scrolled `scroll` px from its inline start: a show that began
  * before the visible edge has its text moved just past the edge, until only
  * {@link CELL_TEXT_MIN_PX} of it is left. A cell sits at left + 1 with a 1 px border and 8 px
- * padding, so its text starts at left + 10 and should start 8 px past the edge. Guide cells and
- * ribbon blocks pin their text there with `position: sticky`; this is the room the text gives up,
- * so its box (and its ellipsis) ends where the cell does.
+ * padding, so its text starts at left + 10 and should start 8 px past the edge. The ribbon's
+ * sticky blocks give up this room so their text box and ellipsis end inside the block. The guide
+ * uses native sticky positioning with clipping at the programme boundary instead.
  */
 export function cellTextPadPx(scroll: number, left: number, width: number): number {
   const max = Math.max(0, width - 20 - CELL_TEXT_MIN_PX);

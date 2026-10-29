@@ -32,6 +32,7 @@ import {
 import { Button, buttonClass, EmptyState, ErrorState, IconButton, SearchInput, useRowHeight, useToast, errorDescription } from '@/ui';
 import { PlayerStage, useChannelZap, usePlayerStore } from '@/features/player';
 import { canZap, isPendingZap } from '@/features/player/store';
+import { catchupResumeFor } from '@/features/player/catchupResume';
 import { hideZapBanner } from '@/features/player/zapBanner';
 import { preloadChannelEditDialogs, useChannelEditShortcuts, useHiddenChannelCount } from '@/features/channeledit';
 import { ListsSidebarSection, openAddGroupToList, useAddToListShortcut } from '@/features/lists';
@@ -58,8 +59,8 @@ import { useRemoteBridge } from '../hooks/useRemoteBridge';
 import { useShortEpg, useShortEpgEnabled } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { nowNextFrom, preferNowNext } from '../lib/epgMerge';
-import { MINUTE } from '../lib/epgTime';
-import { playChannel } from '../lib/playback';
+import { canCatchUp, MINUTE } from '../lib/epgTime';
+import { playCatchup, playChannel } from '../lib/playback';
 import { needsFallback } from '../lib/shortEpg';
 import { rememberGuideSource } from '../guide/lastSource';
 import { CategorySidebar } from './CategorySidebar';
@@ -721,16 +722,25 @@ export function LivePage({ mode = 'live' }: { mode?: 'live' | 'radio' }) {
       : lastChannel
         ? { channel: lastChannel, nowNext: last?.nowNext }
         : undefined;
+  const savedCatchup = !isRadio && !cursorChannel ? catchupResumeFor(lastChannel?.ref) : null;
+  const resumeCatchup = savedCatchup && lastChannel && canCatchUp(savedCatchup.program, lastChannel, kind, now) ? savedCatchup : null;
+  const onResume = (channel: Channel) => {
+    if (!resumeCatchup || !kind || !sameRef(channel.ref, resumeCatchup.ref)) return onPlayLive(channel);
+    const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
+    void playCatchup(channel, kind, resumeCatchup.program, Date.now(), name, resumeCatchup.positionSeconds)
+      .catch((err: unknown) => toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }));
+  };
   const idle = (
     <StageIdle
       kind={isRadio ? 'radio' : 'live'}
       last={idleCard}
+      resumeProgram={resumeCatchup?.program && { title: resumeCatchup.program.title, positionSeconds: resumeCatchup.positionSeconds }}
       highlighted={!isRadio && !!cursorChannel}
       locked={locks.channelLocked(idleCard?.channel)}
       now={now}
       stripPrefix={prefs.stripCountryPrefix}
       epgOffsetMinutes={prefs.epgOffsetMinutes}
-      onResume={onPlayLive}
+      onResume={onResume}
       // Radio's stage has room below Resume: the other stations played lately, one press each.
       // Not the list's first stations when nothing was played: they repeated the list beside it.
       recent={isRadio ? last?.others : undefined}

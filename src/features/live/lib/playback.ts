@@ -67,6 +67,21 @@ export async function openChannelSource(
   return resolveChannelSource(channel, source, displayName);
 }
 
+/** Resolve a programme's archive for an external player after the same channel lock check. */
+export async function openCatchupSource(
+  channel: Channel,
+  kind: SourceKind,
+  program: EpgProgram,
+  now: number,
+  displayName?: string,
+): Promise<PlayerSource | null> {
+  const allowed = await ensureUnlocked([
+    { ref: channel.ref, title: displayName || channel.name, ...(channel.categoryId ? { categoryId: channel.categoryId } : {}) },
+  ]);
+  if (!allowed) return null;
+  return catchupPlaybackSource(channel, kind, program, now, displayName);
+}
+
 /**
  * `displayName`: the name the live views show (`settings.stripCountryPrefix`); it titles the player and history.
  * The row goes along, so an M3U channel with its URL plays without a `catalog.item` lookup.
@@ -127,6 +142,20 @@ export async function catchupSource(channel: Channel, kind: SourceKind, program:
   throw new Error('Catch-up is not available for this source.');
 }
 
+async function catchupPlaybackSource(channel: Channel, kind: SourceKind, program: EpgProgram, now: number, displayName?: string): Promise<PlayerSource> {
+  const src = await catchupSource(channel, kind, program, now);
+  return {
+    ...src,
+    title: displayName || src.title || channel.name,
+    subtitle: program.title,
+    catchupProgramStart: program.start,
+    posterUrl: src.posterUrl ?? channel.logoUrl,
+    ref: src.ref ?? channel.ref,
+    isLive: false,
+    isRadio: false,
+  };
+}
+
 /**
  * Plays an archived programme: the portal's timeshift link, or the M3U `catchup` URL.
  * `displayName` (the name the live views show) titles the player when given.
@@ -137,16 +166,12 @@ export async function playCatchup(
   program: EpgProgram,
   now = Date.now(),
   displayName?: string,
+  resumeSeconds?: number,
 ): Promise<void> {
-  const src = await catchupSource(channel, kind, program, now);
+  const src = await catchupPlaybackSource(channel, kind, program, now, displayName);
   await playSource({
     ...src,
-    title: displayName || src.title || channel.name,
-    subtitle: program.title,
-    posterUrl: src.posterUrl ?? channel.logoUrl,
-    ref: src.ref ?? channel.ref,
-    isLive: false,
-    isRadio: false,
+    ...(resumeSeconds !== undefined ? { resumeSeconds } : {}),
   });
 }
 
@@ -194,6 +219,7 @@ export async function catchupDownloadArgs(
     subtitle: opts.subtitle,
     url: src.url,
     fileNameHint: `${title} - ${opts.subtitle.replace(/\s*·\s*/g, ' - ')}.${ext}`,
+    durationSeconds: src.durationSeconds ?? durationMinutes(program) * 60,
   };
   if (src.headers) args.headers = src.headers;
   if (channel.logoUrl) args.posterUrl = channel.logoUrl;

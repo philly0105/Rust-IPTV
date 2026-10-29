@@ -9,7 +9,7 @@ import { buildScheduleIndex } from '@/features/recording/lib/schedule';
 
 import { defaultStart, GRID_ROW } from '../../components/EpgGridPage';
 import { HOUR, MINUTE } from '../../lib/epgTime';
-import { fitCellText, GuideRow, type GuideRowProps } from '../GuideRow';
+import { createStickyTitleManager, GuideRow, type GuideRowProps } from '../GuideRow';
 import { createRpcMock, i18n, installDomStubs, makeChannel, program, renderGuide } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -47,7 +47,6 @@ describe('rows (P2-GUIDE-5)', () => {
       now: at + 10 * MINUTE,
       pxPerMin: 5,
       channelCol: 220,
-      trackWidth: 1800,
       compact: false,
       rtl: false,
       kind: 'm3u',
@@ -60,7 +59,7 @@ describe('rows (P2-GUIDE-5)', () => {
       lang: 'en',
       stripCountryPrefix: false,
       schedule: buildScheduleIndex(),
-      handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(), fitText: vi.fn(), press: vi.fn(), hover: vi.fn() },
+      handlers: { play: vi.fn(), open: vi.fn(), focusCell: vi.fn(), menu: vi.fn(), trackTitles: vi.fn(() => vi.fn()), press: vi.fn(), hover: vi.fn() },
     };
   }
 
@@ -79,27 +78,17 @@ describe('rows (P2-GUIDE-5)', () => {
     expect(screen.getByRole('button', { name: /^c0 P0, .*, On now$/ })).toBeTruthy();
   });
 
-  it('fitCellText writes no style to a cell it never capped while the cell stays clear of the edge', () => {
+  it('primes only titles near the visible edge for native sticky positioning', () => {
     const root = document.createElement('div');
-    root.innerHTML = '<span data-pad-left="600" data-pad-width="300"></span>';
-    const el = root.querySelector('span')!;
-    const writes: string[] = [];
-    const style = el.style;
-    Object.defineProperty(el, 'style', {
-      value: new Proxy(style, {
-        set(target, prop, value) {
-          writes.push(`${String(prop)}=${String(value)}`);
-          (target as unknown as Record<string | symbol, unknown>)[prop] = value;
-          return true;
-        },
-      }),
-    });
-    fitCellText(root, 0);
-    fitCellText(root, 300);
-    expect(writes).toEqual([]);
-    fitCellText(root, 700);
-    expect(writes).toEqual(['maxWidth=182px']);
-    fitCellText(root, 0);
-    expect(writes).toEqual(['maxWidth=182px', 'maxWidth=']);
+    root.innerHTML = '<span data-pad-left="600" data-pad-width="300"></span><span data-pad-left="900" data-pad-width="300"></span>';
+    const cells = root.querySelectorAll('span');
+    const titles = createStickyTitleManager();
+    const unregister = titles.register(root, 0);
+    expect(cells[0]!.classList.contains('sticky')).toBe(false);
+    titles.update(700);
+    expect(cells[0]!.classList.contains('sticky')).toBe(true);
+    titles.update(1500);
+    expect(cells[0]!.classList.contains('sticky')).toBe(false);
+    unregister();
   });
 });

@@ -61,6 +61,14 @@ describe('window picture-in-picture', () => {
     expect(usePlayerStore.getState().isFullscreen).toBe(true);
   });
 
+  it('restores window fill after picture in picture', async () => {
+    usePlayerStore.setState({ source: movie, isWindowFilled: true });
+    await enterPip();
+    expect(usePlayerStore.getState().isWindowFilled).toBe(false);
+    await exitPip();
+    expect(usePlayerStore.getState()).toMatchObject({ isWindowFilled: true, isFullscreen: false });
+  });
+
   it('stays windowed on exit when playback stopped (PiP close button)', async () => {
     usePlayerStore.setState({ source: movie, isFullscreen: true });
     await enterPip();

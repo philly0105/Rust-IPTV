@@ -47,6 +47,7 @@ use rusqlite::{OpenFlags, OptionalExtension};
 use serde::Deserialize;
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 use target::{find_blocked, Authority, GuardedClients, NetGuard, TargetError};
 use url::Url;
 
@@ -57,6 +58,8 @@ pub const SANDBOX_CSP: &str = "sandbox; default-src 'none'";
 pub const MAX_REDIRECTS: usize = 5;
 /// Attempts for the initial upstream request (connect errors and timeouts only).
 pub const ATTEMPTS: u32 = 3;
+/// A timeshift provider may need longer to prepare the requested programme or range.
+pub const ARCHIVE_HEADER_TIMEOUT: Duration = Duration::from_secs(45);
 /// Bytes read before deciding whether an untyped response is a playlist.
 const SNIFF_BYTES: usize = 16;
 /// Wait of [`load_source`]'s own connection on a busy database (a WAL reader
@@ -122,6 +125,9 @@ pub struct ProxyQuery {
     /// (park.rs). Only mpegts.js's non-live loads ask: that player resumes
     /// such a body and releases it, while hls.js does neither.
     pub park: Option<u8>,
+    /// A programme archive request may wait longer for upstream response headers.
+    #[serde(default)]
+    pub archive: bool,
 }
 
 /// Source headers with the non-empty query overrides applied.
@@ -227,6 +233,7 @@ pub(crate) struct Upstream {
     guard: Arc<NetGuard>,
     trusted: Option<Authority>,
     headers: RequestHeaders,
+    header_timeout: Duration,
 }
 
 impl Upstream {
@@ -263,6 +270,7 @@ impl Upstream {
                 &self.headers,
                 client_headers,
                 forward_range,
+                self.header_timeout,
             )
             .await?;
             let location = resp
@@ -383,6 +391,11 @@ async fn proxy(
         guard: Arc::clone(&s.proxy.guard),
         headers: merge_headers(&access.headers, &q),
         trusted: access.authority,
+        header_timeout: if q.archive {
+            ARCHIVE_HEADER_TIMEOUT
+        } else {
+            HEADER_TIMEOUT
+        },
     };
     // Any request for the source lets go of what is parked for it; a reader
     // of this very URL is handed over, to continue below or be let go too.
@@ -441,6 +454,7 @@ async fn proxy(
         ("ua", q.ua.as_deref().unwrap_or("").trim()),
         ("referer", q.referer.as_deref().unwrap_or("").trim()),
         ("origin", q.origin.as_deref().unwrap_or("").trim()),
+        ("archive", if q.archive { "true" } else { "" }),
     ];
     let head = method == Method::HEAD;
     let rewriter =
@@ -461,6 +475,7 @@ async fn proxy(
         &upstream.headers,
         headers,
         false,
+        upstream.header_timeout,
     )
     .await?;
     check_upstream_status(resp.status())?;
@@ -512,6 +527,7 @@ async fn send(
     source_headers: &RequestHeaders,
     client_headers: &HeaderMap,
     forward_range: bool,
+    header_timeout: Duration,
 ) -> Result<reqwest::Response, Fail> {
     let upstream_method = if *method == Method::HEAD {
         reqwest::Method::HEAD
@@ -530,7 +546,7 @@ async fn send(
             }
         }
         let host = url.host_str().unwrap_or("the stream server").to_owned();
-        let sent = match tokio::time::timeout(HEADER_TIMEOUT, req.send()).await {
+        let sent = match tokio::time::timeout(header_timeout, req.send()).await {
             Ok(r) => r,
             Err(_) if attempt + 1 < ATTEMPTS => {
                 tokio::time::sleep(backoff_delay(attempt)).await;
@@ -540,7 +556,7 @@ async fn send(
             Err(_) => {
                 return Err(Fail::coded(RpcError::timeout(format!(
                     "{host} accepted the connection but did not answer within {} s. Check the stream address and that the server is online, then try again.",
-                    HEADER_TIMEOUT.as_secs()
+                    header_timeout.as_secs()
                 ))))
             }
         };
@@ -857,7 +873,16 @@ mod tests {
 
     async fn get(up: &Upstream, url: &Url) -> Result<reqwest::Response, Fail> {
         let (client, none) = (up.client_for(url), HeaderMap::new());
-        send(client, &Method::GET, url, &up.headers, &none, false).await
+        send(
+            client,
+            &Method::GET,
+            url,
+            &up.headers,
+            &none,
+            false,
+            up.header_timeout,
+        )
+        .await
     }
 
     /// GPT review (trusted-host-dns-rebinding): a request for the source on
@@ -877,6 +902,7 @@ mod tests {
             guard: Arc::clone(&proxy.guard),
             trusted,
             headers: RequestHeaders::default(),
+            header_timeout: HEADER_TIMEOUT,
         };
         let own = Url::parse(&format!("http://localhost:{own_port}/a")).unwrap();
         let ok = get(&up, &own).await;

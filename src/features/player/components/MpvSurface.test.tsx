@@ -90,18 +90,17 @@ const { PlayerSurface } = await import('./PlayerSurface');
 const reconnect = await import('../reconnect');
 const { useAlternatesStore } = await import('../failover');
 
-/**
- * A deliberately hostile layout: the surface element claims the full 800x500 box, so the
- * control bar (bottom 60 px) and the notice strip (40 px above it) overlap it on screen.
- * The bounds sent to mpv must still exclude both.
- */
+/** A deliberately hostile layout: controls overlap the surface and notices float over it. */
 const RECTS: [string, { left: number; top: number; width: number; height: number }][] = [
   ['[data-mpv-surface]', { left: 0, top: 0, width: 800, height: 500 }],
   ['[data-player-controls]', { left: 0, top: 440, width: 800, height: 60 }],
+  ['[data-mpv-notices]', { left: 0, top: 400, width: 800, height: 40 }],
   ['[data-mpv-reserved]', { left: 0, top: 400, width: 800, height: 40 }],
   // Overlays the tests add over the video.
   ['[data-test-rect="small"]', { left: 300, top: 100, width: 200, height: 150 }],
   ['[data-test-rect="menu"]', { left: 500, top: 200, width: 225, height: 283 }],
+  ['[data-test-rect="seek-a"]', { left: 300, top: 360, width: 64, height: 24 }],
+  ['[data-test-rect="seek-b"]', { left: 540, top: 360, width: 64, height: 24 }],
 ];
 const BOX = { left: 0, top: 0, width: 800, height: 500 };
 const reservedRects = RECTS.slice(1, 3).map(([, r]) => rectOf(r));
@@ -198,14 +197,14 @@ describe('MpvSurface bounds', () => {
     // At attach time only the control bar exists below the surface.
     expect((attach?.[1] as { bounds: Bounds }).bounds).toEqual({ x: 0, y: 0, width: 800, height: 440 });
 
-    // Attached but not loaded: the "opening" notice strip is laid out in flow, outside the surface.
+    // The opening notice is a hole over the picture; the video keeps its full height.
     expect(screen.getByText('Opening the stream in MPV').closest('[data-mpv-reserved]')).toBeTruthy();
     await tick(100);
-    expect(sent().at(-1)).toEqual({ x: 0, y: 0, width: 800, height: 400 });
+    expect(sent().at(-1)).toEqual({ x: 0, y: 0, width: 800, height: 440 });
 
-    // The control bar is excluded from every rectangle; the strip from every one sent after it appeared.
+    // The control bar remains outside the rectangle; the notice is cut out as a hole.
     for (const b of sent()) expect(boundsClear(b, reservedRects.slice(0, 1))).toBe(true);
-    expect(boundsClear(sent().at(-1)!, reservedRects)).toBe(true);
+    expect((rpcMock.mock.calls.filter((c) => c[0] === 'mpv.setBounds').at(-1)?.[1] as { holes: Bounds[] }).holes).toContainEqual({ x: 0, y: 400, width: 800, height: 40 });
   });
 
   it('moves the native window off screen while a modal dialog is open', async () => {
@@ -235,11 +234,11 @@ describe('MpvSurface bounds', () => {
     const before = sent().at(-1);
     document.body.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true" data-test-rect="small"></div>');
     await tick(100);
-    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 300, y: 100, width: 200, height: 150 }] });
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 0, y: 400, width: 800, height: 40 }, { x: 300, y: 100, width: 200, height: 150 }] });
     // Closing it gives the whole video back.
     document.querySelector('[data-test-rect="small"]')!.remove();
     await tick(100);
-    expect(lastLayout()).toEqual({ bounds: before, holes: [] });
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 0, y: 400, width: 800, height: 40 }] });
   });
 
   it("dims the video under a dialog's backdrop like the scrim dims the page, and undims it on close (L3-desktop-10)", async () => {
@@ -263,7 +262,7 @@ describe('MpvSurface bounds', () => {
     expect(overlays()[0]).toEqual(expect.arrayContaining(['osd-overlay', 63, 'ass-events']));
     expect(String(overlays()[0]?.[3])).toContain('\\1c&H100804&\\1a&H47&');
     // The panel is still a hole in the dimmed video.
-    expect(lastLayout()?.holes).toEqual([{ x: 300, y: 100, width: 200, height: 150 }]);
+    expect(lastLayout()?.holes).toEqual([{ x: 0, y: 400, width: 800, height: 40 }, { x: 300, y: 100, width: 200, height: 150 }]);
     document.getElementById('palette')!.remove();
     await tick(100);
     expect(overlays()).toHaveLength(2);
@@ -280,8 +279,8 @@ describe('MpvSurface bounds', () => {
     document.body.insertAdjacentHTML('beforeend', '<div role="menu" data-test-rect="menu"></div>');
     await tick(100);
     const last = lastLayout()!;
-    expect(last.bounds).toEqual({ x: 0, y: 0, width: 800, height: 400 });
-    expect(last.holes).toEqual([{ x: 500, y: 200, width: 225, height: 200 }]);
+    expect(last.bounds).toEqual({ x: 0, y: 0, width: 800, height: 440 });
+    expect(last.holes).toEqual([{ x: 0, y: 400, width: 800, height: 40 }, { x: 500, y: 200, width: 225, height: 200 }]);
     document.querySelector('[data-test-rect="menu"]')!.remove();
   });
 
@@ -325,10 +324,26 @@ describe('MpvSurface bounds', () => {
     document.querySelector('[data-player-host]')!.insertAdjacentHTML('beforeend', '<div data-mpv-overlay="" data-test-rect="small"></div>');
     // Well under the 400 ms poll: the mount itself re-measures in the next frame.
     await tick(40);
-    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 300, y: 100, width: 200, height: 150 }] });
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 0, y: 400, width: 800, height: 40 }, { x: 300, y: 100, width: 200, height: 150 }] });
     document.querySelector('[data-test-rect="small"]')!.remove();
     await tick(40);
-    expect(lastLayout()).toEqual({ bounds: before, holes: [] });
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 0, y: 400, width: 800, height: 40 }] });
+  });
+
+  it('keeps the seek preview visible above the native video as it follows the pointer', async () => {
+    render(<div data-player-host=""><PlayerSurface compact={false} channelPanelAvailable={false} /></div>);
+    await tick(100);
+    const before = lastLayout()!.bounds;
+    const bar = document.querySelector('[data-player-controls]')!;
+    bar.insertAdjacentHTML('beforeend', '<div data-mpv-overlay="" data-mpv-seek-preview="" data-test-rect="seek-a" style="left: 300px"></div>');
+    await tick(40);
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 0, y: 400, width: 800, height: 40 }, { x: 300, y: 360, width: 64, height: 24 }] });
+
+    const preview = bar.querySelector('[data-mpv-seek-preview]') as HTMLElement;
+    preview.dataset.testRect = 'seek-b';
+    preview.style.left = '540px';
+    await tick(40);
+    expect(lastLayout()).toEqual({ bounds: before, holes: [{ x: 0, y: 400, width: 800, height: 40 }, { x: 540, y: 360, width: 64, height: 24 }] });
   });
 
   it('a live stream that mpv reports as dropped becomes a player error, so recovery can retry it (L2-desktop-2)', async () => {
@@ -381,6 +396,32 @@ const surfaceTree = (
 const calls = (name: string): unknown[][] => rpcMock.mock.calls.filter((c) => c[0] === name);
 
 describe('MpvSurface attach', () => {
+  it('keeps the same mpv session and load when filling and restoring the window', async () => {
+    render(surfaceTree);
+    await tick();
+    const surface = document.querySelector('[data-mpv-surface]');
+    expect(calls('mpv.attach')).toHaveLength(1);
+    expect(calls('mpv.load')).toHaveLength(1);
+
+    act(() => usePlayerStore.setState({ isWindowFilled: true }));
+    await tick();
+    expect(document.querySelector('[data-mpv-surface]')).toBe(surface);
+    expect(surface?.parentElement?.classList.contains('absolute')).toBe(true);
+    expect(surface?.parentElement?.classList.contains('relative')).toBe(false);
+    expect(calls('mpv.attach')).toHaveLength(1);
+    expect(calls('mpv.detach')).toHaveLength(0);
+    expect(calls('mpv.load')).toHaveLength(1);
+
+    act(() => usePlayerStore.setState({ isWindowFilled: false }));
+    await tick();
+    expect(document.querySelector('[data-mpv-surface]')).toBe(surface);
+    expect(surface?.parentElement?.classList.contains('relative')).toBe(true);
+    expect(surface?.parentElement?.classList.contains('absolute')).toBe(false);
+    expect(calls('mpv.attach')).toHaveLength(1);
+    expect(calls('mpv.detach')).toHaveLength(0);
+    expect(calls('mpv.load')).toHaveLength(1);
+  });
+
   it('starts mpv at the saved volume and writes no properties before attach resolves', async () => {
     let open!: () => void;
     attachGate = new Promise((r) => (open = r));
@@ -434,6 +475,67 @@ describe('MpvSurface attach', () => {
       ['seek', 110, 'absolute'],
       ['seek', 160, 'absolute'],
     ]);
+  });
+
+  it('opens Xtream catch-up at the resumed minute and keeps the programme clock', async () => {
+    const archive = {
+      url: 'http://h/timeshift/u/p/180/2026-10-25:18-00/101.ts?token=x',
+      kind: 'direct' as const, title: 'Archive', isLive: false, isRadio: false,
+      catchupProgramStart: '2026-10-25T18:00:00Z', durationSeconds: 10_800,
+      resumeSeconds: 8_375,
+    };
+    act(() => usePlayerStore.setState({ source: archive, positionSeconds: 8_375 }));
+    render(surfaceTree);
+    await tick();
+    expect((calls('mpv.load')[0]?.[1] as { source: typeof archive }).source).toMatchObject({
+      url: 'http://h/timeshift/u/p/180/2026-10-25:20-19/101.ts?token=x',
+    });
+    expect((calls('mpv.load')[0]?.[1] as { source: typeof archive }).source.resumeSeconds).toBeUndefined();
+    act(() => emitState({ ...mpvState, loaded: true, timePos: 5, duration: 10_800, seekable: { start: 0, end: 30 } }));
+    expect(usePlayerStore.getState()).toMatchObject({ positionSeconds: 8_345, durationSeconds: 10_800 });
+    expect(useMediaStore.getState().seekable).toEqual({ start: 8_340, end: 8_370 });
+  });
+
+  it('reopens Xtream catch-up at a target minute outside the cache and seeks locally inside it', async () => {
+    const archive = {
+      url: 'http://h/timeshift/u/p/180/2026-10-25:18-00/101.ts',
+      kind: 'direct' as const, title: 'Archive', isLive: false, isRadio: false,
+      catchupProgramStart: '2026-10-25T18:00:00Z', durationSeconds: 10_800,
+    };
+    act(() => usePlayerStore.setState({ source: archive }));
+    render(surfaceTree);
+    await tick();
+    act(() => emitState({ ...mpvState, loaded: true, timePos: 40, seekable: { start: 0, end: 80 } }));
+    act(() => usePlayerStore.getState().seekTo(8_375));
+    expect(usePlayerStore.getState().positionSeconds).toBe(8_340);
+    expect(screen.getByText('Buffering')).toBeTruthy();
+    expect((calls('mpv.load').at(-1)?.[1] as { source: typeof archive }).source.url)
+      .toBe('http://h/timeshift/u/p/180/2026-10-25:20-19/101.ts');
+    expect(calls('mpv.load')).toHaveLength(2);
+    await tick();
+    act(() => emitState({ ...mpvState, loaded: true, timePos: 15, seekable: { start: 0, end: 40 } }));
+    expect(usePlayerStore.getState().positionSeconds).toBe(8_355);
+    act(() => usePlayerStore.getState().seekTo(8_360));
+    expect((calls('mpv.command').at(-1)?.[1] as { cmd: unknown[] }).cmd).toEqual(['seek', 20, 'absolute']);
+    expect(calls('mpv.load')).toHaveLength(2);
+    act(() => usePlayerStore.getState().seekTo(7_800));
+    expect((calls('mpv.load').at(-1)?.[1] as { source: typeof archive }).source.url)
+      .toBe('http://h/timeshift/u/p/180/2026-10-25:20-10/101.ts');
+  });
+
+  it('keeps a paused Xtream archive paused when a seek opens a new minute', async () => {
+    act(() => usePlayerStore.setState({ source: {
+      url: 'http://h/timeshift/u/p/60/2026-10-25:18-00/101.ts',
+      kind: 'direct', title: 'Archive', isLive: false, isRadio: false,
+      catchupProgramStart: '2026-10-25T18:00:00Z', durationSeconds: 3_600,
+    } }));
+    render(surfaceTree);
+    await tick();
+    act(() => emitState({ ...mpvState, loaded: true, paused: true, timePos: 10 }));
+    act(() => usePlayerStore.getState().seekTo(1_850));
+    expect(usePlayerStore.getState().status).toBe('paused');
+    await tick();
+    expect(calls('mpv.setProperty').map((c) => c[1])).toContainEqual({ name: 'pause', value: true });
   });
 
   it('a click on the video toggles play and pause once attached', async () => {
@@ -618,6 +720,36 @@ describe('fullscreen overlay chrome', () => {
     expect(chrome()).toBeTruthy();
   });
 
+  it('shows window-fill controls when the pointer moves over the macOS video view', async () => {
+    vi.useFakeTimers();
+    cursor = { x: 300, y: 200 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isWindowFilled: true, status: 'playing' }));
+    render(surfaceTree);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeNull();
+
+    fireEvent.pointerMove(document.querySelector('[data-mpv-surface]')!);
+    expect(screen.getByTestId('mpv-overlay-chrome')).toBeTruthy();
+  });
+
+  it('hides window-fill controls after a click leaves the pointer resting on the bar', async () => {
+    vi.useFakeTimers();
+    cursor = { x: 300, y: 200 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    render(surfaceTree);
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fill window' }));
+    expect(usePlayerStore.getState().isWindowFilled).toBe(true);
+    fireEvent.pointerEnter(screen.getByTestId('mpv-overlay-chrome'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(screen.queryByTestId('mpv-overlay-chrome')).toBeNull();
+  });
+
   const startFullscreen = async (): Promise<(ms: number) => Promise<void>> => {
     vi.useFakeTimers();
     cursor = { x: 10, y: 10 };
@@ -728,7 +860,7 @@ describe('embedded mpv readouts and errors', () => {
     vi.useRealTimers();
   });
 
-  it('shows a buffering strip when mpv stalls mid-stream, and clears it when data returns', async () => {
+  it('shows buffering in the docked bar without resizing the native surface', async () => {
     mpvState = { ...mpvState, loaded: true, duration: 600 };
     render(surfaceTree);
     await tick();
@@ -736,9 +868,7 @@ describe('embedded mpv readouts and errors', () => {
     expect(useMediaStore.getState().waiting).toBe(true);
     const label = screen.getByTestId('mpv-buffering');
     expect(label.textContent).toBe('Buffering');
-    // Docked: an in-flow reserved strip, never over the native surface.
-    expect(label.closest('[data-mpv-reserved]')).toBeTruthy();
-    expect(screen.queryByTestId('bar-readout')?.contains(label)).toBe(false);
+    expect(screen.getByTestId('bar-readout').contains(label)).toBe(true);
 
     act(() => emitState({ ...mpvState, loaded: true, buffering: false }));
     expect(screen.queryByTestId('mpv-buffering')).toBeNull();
@@ -970,6 +1100,17 @@ describe('embedded mpv recovery', () => {
     expect(calls('mpv.setProperty').map((c) => c[1])).toContainEqual({ name: 'pause', value: true });
   });
 
+  it('does not reopen a failed movie when the mpv surface remounts', async () => {
+    act(() => usePlayerStore.setState({ status: 'error', error: 'stream timed out' }));
+    const first = render(surfaceTree);
+    await tick();
+    expect(calls('mpv.load')).toHaveLength(0);
+    first.unmount();
+    render(surfaceTree);
+    await tick();
+    expect(calls('mpv.load')).toHaveLength(0);
+  });
+
   /** The built-in player takes over after a fallback; jsdom has no media playback. */
   const stubMedia = (): void => {
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
@@ -1084,6 +1225,7 @@ describe('wheel and context menu over the native video', () => {
     // The same rows as the built-in player's menu (PL-NATIVE-CONTEXT-MENU): Speed for VOD, Picture.
     expect(items).toEqual([
       'Pause',
+      'Fill window',
       'Fullscreen',
       'Picture in picture',
       'SubtitlesOff',

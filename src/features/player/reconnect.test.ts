@@ -44,6 +44,13 @@ const movie: PlayerSource = {
   isRadio: false,
   ref: { sourceId: 's1', contentType: 'movie', itemId: '201' },
 };
+const catchup: PlayerSource = {
+  ...movie,
+  url: 'http://h/timeshift/101.ts',
+  ref: live.ref,
+  catchupProgramStart: '2026-10-25T10:00:00Z',
+  durationSeconds: 3600,
+};
 
 const retry = vi.fn();
 let unbind: () => void = () => undefined;
@@ -219,6 +226,19 @@ describe('smart reconnect', () => {
     expect(usePlayerStore.getState().positionSeconds).toBe(600);
   });
 
+  it('releases an embedded movie that never played once its quick retry fails too', async () => {
+    handlers['mpv.unload'] = () => undefined;
+    sessionStorage.setItem(store.RESUME_KEY, 'failed movie');
+    usePlayerStore.setState({ source: movie, mode: 'embedded-mpv', status: 'loading' });
+    fail('Network error');
+    vi.advanceTimersByTime(RECONNECT_DELAYS_MS[0]);
+    expect(retry).toHaveBeenCalledTimes(1);
+    fail('Network error again');
+    expect(usePlayerStore.getState().status).toBe('error');
+    await vi.waitFor(() => expect(rpcMock.mock.calls.some(([name]) => name === 'mpv.unload')).toBe(true));
+    expect(sessionStorage.getItem(store.RESUME_KEY)).toBeNull();
+  });
+
   it('treats a stream that stops moving while playing as a drop', () => {
     start(live, 10);
     for (let s = 1; s <= 5; s++) {
@@ -295,6 +315,32 @@ describe('smart reconnect', () => {
     vi.advanceTimersByTime(LIVE_STALL_MS + 2000);
     expect(phase()).toBe('idle');
     vi.advanceTimersByTime(STALL_MS);
+    expect(phase()).toBe('retrying');
+  });
+
+  it('waits through a slow catch-up gap and gives its reconnect time to answer', () => {
+    start(catchup, 600);
+    media.useMediaStore.setState({ waiting: true });
+    vi.advanceTimersByTime(reconnect.CATCHUP_STALL_MS - 1);
+    expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(1);
+    expect(phase()).toBe('retrying');
+    vi.advanceTimersByTime(RECONNECT_DELAYS_MS[0]);
+    expect(retry).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(ATTEMPT_TIMEOUT_MS);
+    expect(useReconnectStore.getState().attempt).toBe(1);
+    vi.advanceTimersByTime(reconnect.CATCHUP_ATTEMPT_TIMEOUT_MS - ATTEMPT_TIMEOUT_MS);
+    expect(useReconnectStore.getState()).toMatchObject({ phase: 'retrying', attempt: 2 });
+  });
+
+  it('does not reconnect during a catch-up seek while MPEG-TS bytes are still arriving', () => {
+    start(catchup, 600);
+    media.useMediaStore.setState({ waiting: true });
+    vi.advanceTimersByTime(55_000);
+    media.useMediaStore.setState({ archiveNetworkAt: Date.now() });
+    vi.advanceTimersByTime(5_000);
+    expect(phase()).toBe('idle');
+    vi.advanceTimersByTime(reconnect.CATCHUP_STALL_MS);
     expect(phase()).toBe('retrying');
   });
 

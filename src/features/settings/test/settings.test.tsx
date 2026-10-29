@@ -84,6 +84,19 @@ describe('Settings page states', () => {
 });
 
 describe('Settings patch shape', () => {
+  it('saves a catch-up player without changing the live or VOD choices', async () => {
+    current = settings({ player: 'embedded-mpv' });
+    rpcMock.handlers['player.capabilities'] = () => ({ embeddedMpv: true });
+    renderAt(settingsRoutes, '/settings/playback');
+    const catchup = await screen.findByTestId('select-catchupPlayer') as HTMLSelectElement;
+    expect((screen.getByTestId('select-livePlayer') as HTMLSelectElement).value).toBe('embedded-mpv');
+    expect((screen.getByTestId('select-vodPlayer') as HTMLSelectElement).value).toBe('embedded-mpv');
+    fireEvent.change(catchup, { target: { value: 'html5' } });
+    await waitFor(() => expect(rpcMock.callsOf('settings.update')).toEqual([{ patch: { catchupPlayer: 'html5' } }]));
+    expect((screen.getByTestId('select-livePlayer') as HTMLSelectElement).value).toBe('embedded-mpv');
+    expect((screen.getByTestId('select-vodPlayer') as HTMLSelectElement).value).toBe('embedded-mpv');
+  });
+
   it('a boolean toggle sends just that key', async () => {
     renderAt(settingsRoutes, '/settings/playback');
     await screen.findByTestId('settings-playback');
@@ -118,11 +131,12 @@ describe('Settings patch shape', () => {
     renderAt(settingsRoutes, '/settings/playback');
     await screen.findByTestId('settings-playback');
     await waitFor(() => expect(rpcMock.callsOf('player.capabilities')).toHaveLength(1));
-    expect(screen.queryByTestId('player-embedded-mpv')).toBeNull();
+    expect(screen.queryByTestId('select-livePlayer')).toBeNull();
     cleanup();
     rpcMock.handlers['player.capabilities'] = () => ({ embeddedMpv: true });
     renderAt(settingsRoutes, '/settings/playback');
-    expect(await screen.findByTestId('player-embedded-mpv')).toBeTruthy();
+    const select = await screen.findByTestId('select-livePlayer') as HTMLSelectElement;
+    expect(select.querySelector('option[value="embedded-mpv"]')).toBeTruthy();
   });
 
   it('rejects an out-of-range remote port inline without saving', async () => {
@@ -239,7 +253,7 @@ describe('Section-level error states', () => {
     const err = await screen.findByTestId('player-caps-error');
     fail = false;
     fireEvent.click(within(err).getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByTestId('player-embedded-mpv')).toBeTruthy();
+    expect((await screen.findByTestId('select-livePlayer') as HTMLSelectElement).querySelector('option[value="embedded-mpv"]')).toBeTruthy();
   });
 
   it('remote status failure shows a retry', async () => {

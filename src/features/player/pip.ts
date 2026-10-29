@@ -23,6 +23,7 @@ let target: boolean | null = null;
 let running: Promise<void> | null = null;
 /** The player was fullscreen when PiP started; leaving PiP goes back to fullscreen. */
 let wasFullscreen = false;
+let wasWindowFilled = false;
 let releaseEscape: (() => void) | null = null;
 
 /** Reads the playing video's aspect (width / height); set by the surface that owns the video. */
@@ -70,14 +71,18 @@ async function videoAspect(): Promise<number | undefined> {
 async function turnOn(): Promise<void> {
   const player = usePlayerStore.getState();
   wasFullscreen = player.isFullscreen || document.fullscreenElement != null;
+  wasWindowFilled = player.isWindowFilled;
   if (player.isFullscreen) player.toggleFullscreen();
+  if (player.isWindowFilled) player.toggleWindowFill();
   const aspect = aspectSource ? await videoAspect() : undefined;
   if (document.fullscreenElement) await document.exitFullscreen().catch(() => undefined);
   if (!(await enterPipWindow(aspect))) {
     // Nothing changed after all: put the player back in fullscreen if it was.
     const now = usePlayerStore.getState();
     if (player.isFullscreen && now.source && !now.isFullscreen) now.toggleFullscreen();
+    if (wasWindowFilled && now.source && !now.isWindowFilled) now.toggleWindowFill();
     wasFullscreen = false;
+    wasWindowFilled = false;
     return;
   }
   lockedAspect = aspect ?? PIP_DEFAULT_ASPECT;
@@ -98,10 +103,13 @@ async function turnOff(): Promise<void> {
   usePipStore.setState({ active: false });
   await exitPipWindow();
   const backToFullscreen = wasFullscreen;
+  const backToWindowFill = wasWindowFilled;
   wasFullscreen = false;
+  wasWindowFilled = false;
   // Only when something is still playing: the PiP close button stops playback first.
   const player = usePlayerStore.getState();
   if (backToFullscreen && player.source && !player.isFullscreen) player.toggleFullscreen();
+  if (backToWindowFill && player.source && !player.isWindowFilled) player.toggleWindowFill();
 }
 
 async function drain(): Promise<void> {
@@ -164,6 +172,7 @@ export function __resetPipForTests(): void {
   target = null;
   running = null;
   wasFullscreen = false;
+  wasWindowFilled = false;
   releaseEscape?.();
   releaseEscape = null;
   aspectSource = null;

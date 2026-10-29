@@ -34,6 +34,15 @@ const WRITE_BUFFER: usize = 256 * 1024;
 /// noticed quickly even when one chunk is worth seconds at the old rate.
 pub(super) const THROTTLE_SLICE: Duration = Duration::from_millis(200);
 
+fn is_catchup(row: &DownloadRow) -> bool {
+    row.download.item_ref.content_type == ContentType::Live
+        && row
+            .download
+            .episode_id
+            .as_deref()
+            .is_some_and(|e| e.starts_with("catchup:"))
+}
+
 /// How a run ended.
 #[derive(Debug, Clone)]
 pub enum Outcome {
@@ -135,7 +144,7 @@ pub async fn run(state: &Arc<AppState>, id: i64, ctl: &TaskCtl, mgr: &DownloadMa
     // (a file without resume) gets the row no further.
     let had = row.download.bytes_downloaded;
     loop {
-        match attempt(state, &row, &dest, ctl, &mut rep, mgr).await {
+        match attempt(state, &row, &dest, ctl, mgr, &mut rep).await {
             AttemptEnd::Done(bytes) => return finalize(&dest, bytes).await,
             AttemptEnd::Stopped(bytes) => {
                 return Outcome::Stopped {
@@ -537,8 +546,8 @@ async fn attempt(
     row: &DownloadRow,
     dest: &Dest,
     ctl: &TaskCtl,
-    rep: &mut Representation,
     mgr: &DownloadManager,
+    rep: &mut Representation,
 ) -> AttemptEnd {
     let id = row.download.id;
     let error = |err: CoreError, start: i64, bytes: i64| AttemptEnd::Error {
@@ -607,7 +616,7 @@ async fn attempt(
     // A file may go over several connections: a fresh start asks for a range
     // too, since only a `206` with a total and a validator shows it can.
     let source = row.download.item_ref.source_id.as_str();
-    let splittable = may_split(state, source, mgr, rep.one_connection);
+    let splittable = !is_catchup(row) && may_split(state, source, ctl, rep.one_connection);
     let ranged = resume_from > 0 || splittable;
     if resume_from > 0 {
         req = req.header(RANGE, format!("bytes={resume_from}-"));
@@ -767,7 +776,8 @@ async fn attempt(
     let started_at = offset;
     let mut progress = Progress::new(offset);
     let mut stream = resp.bytes_stream().boxed();
-    let mut pace = Pace::new(mgr.rate_limit(), offset);
+    let catchup = is_catchup(row);
+    let mut pace = Pace::new(rate_limit(state, ctl), offset);
     let mut split_checked = Instant::now();
     let mut hand_over = false;
 
@@ -792,12 +802,13 @@ async fn attempt(
                 offset += chunk.len() as i64;
                 ctl.bytes.store(offset, Ordering::Relaxed);
                 progress.tick(state, id, offset, rep.total);
-                if throttle(&mut pace, mgr, ctl, offset).await {
+                if throttle(&mut pace, state, ctl, offset).await {
                     break None;
                 }
                 if worth_splitting(offset) && split_checked.elapsed() >= SPLIT_CHECK {
                     split_checked = Instant::now();
-                    if may_split(state, source, mgr, rep.one_connection)
+                    if !catchup
+                        && may_split(state, source, ctl, rep.one_connection)
                         && mgr.connection_allowance(ctl) >= 2
                     {
                         // Asked before the stream is let go: a file system
@@ -913,11 +924,11 @@ const SPLIT_CHECK: Duration = Duration::from_secs(1);
 pub(super) fn may_split(
     state: &AppState,
     source: &str,
-    mgr: &DownloadManager,
+    ctl: &TaskCtl,
     one_connection: bool,
 ) -> bool {
     !one_connection
-        && mgr.rate_limit().is_none()
+        && rate_limit(state, ctl).is_none()
         && !state
             .settings
             .read()
@@ -1022,7 +1033,7 @@ async fn segmented(
     }
 }
 
-/// Per-attempt speed pacing against the manager's live rate limit. The
+/// Per-attempt speed pacing against the transfer's live effective limit. The
 /// baseline restarts whenever the limit changes, so a new cap neither
 /// "repays" bytes sent at the old rate nor bursts to catch up.
 #[derive(Debug)]
@@ -1063,10 +1074,15 @@ impl Pace {
     }
 }
 
+// Keep the settings read guard inside this function, never across a throttle await.
+fn rate_limit(state: &AppState, ctl: &TaskCtl) -> Option<u64> {
+    ctl.rate_limit(state.settings.read().download_rate_limit_bps)
+}
+
 /// Sleeps as the rate limit requires, re-reading it every
 /// [`THROTTLE_SLICE`]. Returns true when the transfer was asked to stop.
-async fn throttle(pace: &mut Pace, mgr: &DownloadManager, ctl: &TaskCtl, offset: i64) -> bool {
-    while let Some(wait) = pace.delay(mgr.rate_limit(), offset, Instant::now()) {
+async fn throttle(pace: &mut Pace, state: &AppState, ctl: &TaskCtl, offset: i64) -> bool {
+    while let Some(wait) = pace.delay(rate_limit(state, ctl), offset, Instant::now()) {
         tokio::select! {
             biased;
             _ = ctl.token.cancelled() => return true,

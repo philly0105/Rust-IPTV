@@ -1,11 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { HOUR, MINUTE, canCatchUp, layoutBlocks, lookbackMs, programIndexAt, programProgress, programWhen } from '../lib/epgTime';
+import { HOUR, MINUTE, canCatchUp, formatRange, formatTimeRange, layoutBlocks, lookbackMs, programIndexAt, programProgress, programWhen } from '../lib/epgTime';
 
 const p = (title: string, s: number, e: number) => ({ channelId: 'c', title, start: new Date(s).toISOString(), end: new Date(e).toISOString() });
 const NOW = Date.UTC(2026, 9, 11, 12, 0);
 
 describe('epgTime', () => {
+  it('shares formatted slot labels across channels and keeps locales separate', () => {
+    // A slot no other test formats, so the label cache starts cold for it.
+    const slot = p('one', NOW + 7 * MINUTE + 17_000, NOW + 53 * MINUTE + 17_000);
+    const parts = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
+    try {
+      const english = formatRange(slot, 'en');
+      const first = parts.mock.calls.length;
+      expect(first).toBeGreaterThan(0);
+      for (let i = 0; i < 100; i++) expect(formatRange({ ...slot, channelId: `c${i}` }, 'en')).toBe(english);
+      expect(parts).toHaveBeenCalledTimes(first);
+      const german = formatRange(slot, 'de');
+      expect(parts.mock.calls.length).toBeGreaterThan(first);
+      expect(german).toBe(formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), 'de'));
+    } finally {
+      parts.mockRestore();
+    }
+  });
   it('classifies and measures programmes', () => {
     const cur = p('now', NOW - 30 * MINUTE, NOW + 30 * MINUTE);
     expect(programWhen(cur, NOW)).toBe('now');

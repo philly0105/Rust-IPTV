@@ -1,5 +1,5 @@
-//! Guide slice: `epg.shortEpg` (cached Xtream fallback), `catchup.programs`
-//! (Xtream archive table), the M3U catch-up override on channel rows, and the
+//! Guide slice: `epg.shortEpg` (cached Xtream fallback), `catchup.table` and
+//! `catchup.programs` (Xtream archive table), the M3U catch-up override on channel rows, and the
 //! backup round trip of the override and `epgShortFallback`.
 
 #[path = "m3u_support.rs"]
@@ -183,6 +183,18 @@ async fn archive_programs_come_from_the_panel_table() {
     assert!(list
         .windows(2)
         .all(|w| secs(&w[0]["start"]) <= secs(&w[1]["start"])));
+
+    // The guide can ask once for every date of this channel without another panel call.
+    let full = call(
+        &r,
+        &state,
+        "catchup.table",
+        json!({"ref": live(&sid, "101")}),
+    )
+    .await;
+    let full = full.as_array().unwrap();
+    assert!(full.len() > list.len());
+    assert_eq!(api_hits(&mock).await, before + 1);
 
     // Another day of the same channel reuses the cached table.
     let from2 = (now - chrono::Duration::hours(1)).to_rfc3339();

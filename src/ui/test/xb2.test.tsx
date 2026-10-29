@@ -36,6 +36,25 @@ describe('Tooltip in element fullscreen (XB2-20)', () => {
   });
 });
 
+describe('Tooltip in Fill window', () => {
+  it('paints inside the raised player layer instead of underneath it', async () => {
+    const stage = document.body.appendChild(document.createElement('div'));
+    stage.dataset['testStage'] = '';
+    stage.dataset['playerWindowLayer'] = '';
+    render(
+      <Tooltip content="Exit Fill window" delay={0} tone="glass">
+        <button type="button">Fill</button>
+      </Tooltip>,
+    );
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Fill' }));
+    await act(() => new Promise((r) => setTimeout(r, 10)));
+    const tip = screen.getByRole('tooltip');
+    expect(stage.contains(tip)).toBe(true);
+    expect(tip.textContent).toBe('Exit Fill window');
+    expect(tip.className).toContain('z-[70]');
+  });
+});
+
 describe('Badge text truncates (XB2-24)', () => {
   it('puts text in a shrinking, truncating span so a max-w shows an ellipsis', () => {
     render(

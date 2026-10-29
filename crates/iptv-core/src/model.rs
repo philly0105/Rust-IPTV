@@ -802,6 +802,8 @@ pub struct Download {
     pub file_available: Option<bool>,
     #[serde(default)]
     pub position_seconds: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<i64>,
     /// Why a queued row waits, when it is more than its turn (live, never
     /// stored).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -809,6 +811,9 @@ pub struct Download {
     /// Connections a running transfer holds, when more than one (live).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connections: Option<usize>,
+    /// None inherits the global default; Some(0) is unlimited; otherwise bytes/s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_bps: Option<u64>,
 }
 
 /// Why a queued download waits (`Download.waiting`).
@@ -1141,6 +1146,13 @@ impl Default for RemoteControlSettings {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub player: VideoPlayer,
+    /// Per-content player choices. None preserves the legacy `player` setting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_player: Option<VideoPlayer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catchup_player: Option<VideoPlayer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vod_player: Option<VideoPlayer>,
     pub stream_format: StreamFormat,
     pub epg_urls: Vec<String>,
     pub language: String,
@@ -1159,6 +1171,8 @@ pub struct Settings {
     pub show_captions: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub downloads_dir: Option<String>,
+    /// Default cap per download, in bytes/s; zero is unlimited.
+    pub download_rate_limit_bps: u64,
     pub tmdb: TmdbSettings,
     pub dashboard_rails: DashboardRails,
     pub remote_control: RemoteControlSettings,
@@ -1275,6 +1289,9 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             player: VideoPlayer::Html5,
+            live_player: None,
+            catchup_player: None,
+            vod_player: None,
             stream_format: StreamFormat::Auto,
             epg_urls: Vec::new(),
             language: "en".to_string(),
@@ -1289,6 +1306,7 @@ impl Default for Settings {
             open_stream_on_double_click: false,
             show_captions: false,
             downloads_dir: None,
+            download_rate_limit_bps: 0,
             tmdb: TmdbSettings::default(),
             dashboard_rails: DashboardRails::default(),
             remote_control: RemoteControlSettings::default(),
@@ -1787,6 +1805,24 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn player_choices_preserve_legacy_settings_and_round_trip() {
+        let mut settings: Settings =
+            serde_json::from_value(serde_json::json!({ "player": "embedded-mpv" })).unwrap();
+        assert_eq!(settings.player, VideoPlayer::EmbeddedMpv);
+        assert_eq!(settings.live_player, None);
+        assert_eq!(settings.catchup_player, None);
+        assert_eq!(settings.vod_player, None);
+        settings.live_player = Some(VideoPlayer::EmbeddedMpv);
+        settings.catchup_player = Some(VideoPlayer::Html5);
+        settings.vod_player = Some(VideoPlayer::Vlc);
+        let restored: Settings =
+            serde_json::from_value(serde_json::to_value(settings).unwrap()).unwrap();
+        assert_eq!(restored.live_player, Some(VideoPlayer::EmbeddedMpv));
+        assert_eq!(restored.catchup_player, Some(VideoPlayer::Html5));
+        assert_eq!(restored.vod_player, Some(VideoPlayer::Vlc));
+    }
 
     #[test]
     fn enums_are_kebab_case() {
@@ -2297,6 +2333,9 @@ mod tests {
             vlc_path: Some("vlc".into()),
             downloads_dir: Some("d".into()),
             recordings_dir: Some("r".into()),
+            live_player: Some(VideoPlayer::EmbeddedMpv),
+            catchup_player: Some(VideoPlayer::EmbeddedMpv),
+            vod_player: Some(VideoPlayer::EmbeddedMpv),
             ..Settings::default()
         };
         let v = serde_json::to_value(&full).unwrap();

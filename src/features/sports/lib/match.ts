@@ -21,6 +21,7 @@ import type { IndexedChannel } from '../hooks/useChannelIndex';
 import { ET_ZONE, TYPICAL_LENGTH_MS, gameWindow } from './espn';
 import {
   hasLeagueWord,
+  inMarkets,
   mentionsBoth,
   mentionsTeam,
   networkAlias,
@@ -340,15 +341,52 @@ function isShow(title: readonly string[]): boolean {
   return false;
 }
 
+/**
+ * Words a guide marks a recording with, in its title or description: Serbian and Croatian (a real guide's
+ * "Brewers - Rays, finale G2 | snimak" aired during game 4), German, Dutch, French, Italian, Polish, Slovenian.
+ */
+const REPLAY_WORDS = new Set(['snimak', 'snimka', 'wiederholung', 'herhaling', 'rediffusion', 'differita', 'powtorka', 'ponovitev']);
+/** English ones count in titles only: a description may retell a game ("after a replay review"). */
+const REPLAY_TITLE_WORDS = new Set(['replay', 'rerun', 'rebroadcast', 'encore']);
+
+function isReplay(words: ProgrammeWords): boolean {
+  return words.title.some((w) => REPLAY_WORDS.has(w) || REPLAY_TITLE_WORDS.has(w)) || words.description.some((w) => REPLAY_WORDS.has(w));
+}
+
+/** The game of a playoff series ESPN's note gives ("World Series - Game 4"); null for any other game. */
+function seriesGame(game: Game): number | null {
+  const m = game.note ? /\bgame (\d{1,2})\b/i.exec(game.note) : null;
+  return m ? Number(m[1]) : null;
+}
+
+/** The series games a text names: "Game 4", "Gm 4", "G4". */
+function namedGames(tokens: readonly string[]): number[] {
+  const out: number[] = [];
+  tokens.forEach((t, i) => {
+    const g = /^g(\d{1,2})$/.exec(t);
+    if (g) out.push(Number(g[1]));
+    else if ((t === 'game' || t === 'gm') && /^\d{1,2}$/.test(tokens[i + 1] ?? '')) out.push(Number(tokens[i + 1]));
+  });
+  return out;
+}
+
+/** False when a programme names other games of the series and not this one ("finale G2" during game 4). */
+function sameSeriesGame(words: ProgrammeWords, game: number | null): boolean {
+  if (game === null) return true;
+  const named = [...namedGames(words.title), ...namedGames(words.description)];
+  return named.length === 0 || named.includes(game);
+}
+
 /** The least a programme must overlap a timed game: this long, or half the programme when it is shorter. */
 const MIN_GUIDE_OVERLAP = 30 * MINUTE;
 
 /**
- * The programme of `list` that is this game: it names both teams, is not a pregame or postgame show, and
- * covers the game itself (for a timed game, at least 30 minutes or half the programme of [start, start +
- * typical length], so a show that only touches the window does not count); the most overlap wins.
+ * The programme of `list` that is this game: it names both teams, is not a pregame or postgame show or a
+ * recording (`isReplay`, or another game of the series: `sameSeriesGame`), and covers the game itself (for a
+ * timed game, at least 30 minutes or half the programme of [start, start + typical length], so a show that only
+ * touches the window does not count); the most overlap wins.
  */
-function guideProgramme(list: readonly EpgProgram[], game: Game, window: { from: number; to: number }): EpgProgram | null {
+function guideProgramme(list: readonly EpgProgram[], game: Game, window: { from: number; to: number }, series: number | null): EpgProgram | null {
   const timed = game.timeValid && !game.timeNote;
   const core = timed ? { from: game.startMs, to: game.startMs + TYPICAL_LENGTH_MS[game.league] } : window;
   let best: EpgProgram | null = null;
@@ -359,7 +397,7 @@ function guideProgramme(list: readonly EpgProgram[], game: Game, window: { from:
     const overlap = Math.min(t.end, core.to) - Math.max(t.start, core.from);
     if (timed && overlap < Math.min(MIN_GUIDE_OVERLAP, (t.end - t.start) / 2)) continue;
     const words = programmeWords(p, t);
-    if (isShow(words.title) || !programmeNames(words, game)) continue;
+    if (isShow(words.title) || isReplay(words) || !sameSeriesGame(words, series) || !programmeNames(words, game)) continue;
     if (overlap > bestOverlap) {
       best = p;
       bestOverlap = overlap;
@@ -377,16 +415,17 @@ function isSunday(day: string): boolean {
 
 /**
  * The game's networks that count for a network match, each with whether it is regional: a regional sports
- * network or local station, a home or away market listing, or an NFL regular-season Sunday game on CBS or
- * FOX only (ESPN lists those as national, but each market gets its own game).
+ * network or local station, a home or away market listing, a network `shared` with another game at the same
+ * time (`sharedNetworks`), or an NFL regular-season Sunday game on CBS or FOX only (ESPN lists those as
+ * national, but each market gets its own game).
  */
-function gameNetworks(game: Game): Map<string, boolean> {
+function gameNetworks(game: Game, shared?: ReadonlySet<string>): Map<string, boolean> {
   const out = new Map<string, boolean>();
   for (const b of game.broadcasts) {
     const id = networkIdForBroadcast(b.name);
     const alias = id ? networkAlias(id) : undefined;
     if (!id || !alias || alias.kind === 'package') continue;
-    const regional = alias.kind === 'rsn' || alias.kind === 'local' || b.market !== 'national';
+    const regional = alias.kind === 'rsn' || alias.kind === 'local' || b.market !== 'national' || !!shared?.has(id);
     out.set(id, (out.get(id) ?? true) && regional);
   }
   const sundayWindow = game.league === 'nfl' && game.seasonType === 2 && isSunday(game.etDate);
@@ -396,16 +435,52 @@ function gameNetworks(game: Game): Map<string, boolean> {
   return out;
 }
 
-/** Stations outside the teams' markets that a national game lists when the network has no feed of its own. */
-const SPARE_STATIONS = 3;
+/** Starts closer than this put two games of one network on the air at once. */
+const SAME_SLOT_MS = 2 * HOUR;
+
+/**
+ * Per game key, the networks the game shares with another game of its league starting less than 2 hours
+ * apart: two Big Ten games at 4:15 on BTN, two FOX games at noon. The network shows one of them, the other
+ * goes out on an overflow channel or in other markets, so for each game the network's own feed may show the
+ * other one (`gameNetworks` makes it regional). Postponed and canceled games and games without a set time
+ * share nothing.
+ */
+export function sharedNetworks(games: readonly Game[]): Map<string, Set<string>> {
+  const timed = games
+    .filter((g) => g.timeValid && !g.timeNote && g.phase !== 'postponed' && g.phase !== 'canceled')
+    .map((g) => ({ game: g, networks: [...gameNetworks(g).keys()] }));
+  const out = new Map<string, Set<string>>();
+  const add = (key: string, id: string) => {
+    let set = out.get(key);
+    if (!set) out.set(key, (set = new Set()));
+    set.add(id);
+  };
+  for (let i = 0; i < timed.length; i++) {
+    const a = timed[i]!;
+    for (let j = i + 1; j < timed.length; j++) {
+      const b = timed[j]!;
+      if (a.game.league !== b.game.league || Math.abs(a.game.startMs - b.game.startMs) >= SAME_SLOT_MS) continue;
+      for (const id of a.networks) {
+        if (!b.networks.includes(id)) continue;
+        add(a.game.key, id);
+        add(b.game.key, id);
+      }
+    }
+  }
+  return out;
+}
+
+/** Local stations a national game keeps of each network, its own feed aside. */
+const NATIONAL_STATIONS = 3;
 
 /**
  * Whether a channel is one of the game's networks, and regional; undefined when it is none of them. A local
- * station of a broadcast network (`IndexedChannel.affiliate`) counts in one of the teams' markets, where it
- * carries the game whatever else the network shows. Elsewhere it may show another game (a regional window)
- * or the same one as the network's own feed, so it counts only for a national game on an index that has no
- * feed of the network's own, as a 'spare': a big provider's network group lists a station for nearly every
- * market, and the first few of them are as good as all.
+ * station of a broadcast network (`IndexedChannel.affiliate`) in one of the teams' markets carries the game
+ * whatever else the network shows: surely for a regional game, and for a national one as a 'market' station,
+ * since every station shows it then. Elsewhere it may show another game (a regional window) or the same one
+ * as the network's own feed, so it counts only for a national game on an index that has no feed of the
+ * network's own, as a 'spare'. A big provider's network group lists a station for nearly every market (and
+ * some of them several times over), and of a national game's stations the first few are as good as all.
  */
 function networkMatch(
   ch: IndexedChannel,
@@ -413,15 +488,15 @@ function networkMatch(
   locals: readonly string[][],
   markets: readonly string[][],
   ownFeeds: ReadonlySet<string>,
-): boolean | 'spare' | undefined {
-  // A station's news stream or free streaming copy, whatever its call sign says.
+): boolean | 'market' | 'spare' | undefined {
+  // A station's news stream, sister channel or free streaming copy, whatever its call sign says.
   if (ch.spinOff) return undefined;
   if (ch.network !== null) {
     const regional = networks.get(ch.network);
     const market = ch.affiliate;
     if (regional !== undefined && (!market || market.length === 0)) return regional;
     if (regional !== undefined && market) {
-      if (markets.some((p) => hasRun(market, p))) return false;
+      if (inMarkets(market, markets)) return regional ? false : 'market';
       if (!regional && !ownFeeds.has(ch.network)) return 'spare';
     }
   }
@@ -438,13 +513,14 @@ function hasRun(tokens: readonly string[], phrase: readonly string[]): boolean {
 }
 
 /**
- * A local station, outside both teams' markets, of a network that carries the game nationally (Monday night on
- * ABC): it shows the game as every other station does, so the first few of them are as good as all, even when
- * each one's guide names the game.
+ * A local station of a network that carries the game nationally (Monday night on ABC), whose guide names the
+ * game: it shows it as every other station does, so it is one of the few `networkMatch` keeps all the same,
+ * a 'market' station in a team's market and a 'spare' elsewhere. Null for any other channel.
  */
-function spareStation(ch: IndexedChannel, networks: Map<string, boolean>, markets: readonly string[][]): boolean {
+function nationalStation(ch: IndexedChannel, networks: Map<string, boolean>, markets: readonly string[][]): 'market' | 'spare' | null {
   const market = ch.affiliate;
-  return ch.network !== null && networks.get(ch.network) === false && !!market && market.length > 0 && !markets.some((p) => hasRun(market, p));
+  if (ch.network === null || networks.get(ch.network) !== false || !market || market.length === 0) return null;
+  return inMarkets(market, markets) ? 'market' : 'spare';
 }
 
 const nameWords = new WeakMap<IndexedChannel, string[]>();
@@ -610,6 +686,8 @@ interface GameRoutes {
   national: boolean;
   /** The markets ESPN lists a broadcast in besides the national ones ('home', 'away'). */
   marketsListed: ReadonlySet<string>;
+  /** `seriesGame`: which game of a playoff series it is. */
+  series: number | null;
 }
 
 /**
@@ -619,14 +697,15 @@ interface GameRoutes {
  */
 const EXCLUSIVE_STREAMERS = new Set(['prime-video', 'peacock', 'netflix', 'apple-tv']);
 
-function routesOf(game: Game): GameRoutes {
-  const networks = gameNetworks(game);
+function routesOf(game: Game, shared?: ReadonlySet<string>): GameRoutes {
+  const networks = gameNetworks(game, shared);
   const locals = [...networks.keys()].flatMap((id) => (networkAlias(id)?.kind === 'local' ? networkAlias(id)!.phrases : []));
   const national =
     [...networks.values()].some((regional) => !regional) ||
     game.broadcasts.some((b) => b.market === 'national' && EXCLUSIVE_STREAMERS.has(networkIdForBroadcast(b.name) ?? ''));
   const marketsListed = new Set(game.broadcasts.map((b) => b.market).filter((m) => m !== 'national'));
-  return { window: gameWindow(game), networks, locals, markets: [...teamMarkets(game.home), ...teamMarkets(game.away)], national, marketsListed };
+  const markets = [...teamMarkets(game.home), ...teamMarkets(game.away)];
+  return { window: gameWindow(game), networks, locals, markets, national, marketsListed, series: seriesGame(game) };
 }
 
 const HOME = 1;
@@ -685,19 +764,21 @@ interface Found {
  * The channels that carry `game`, one entry per channel with its strongest route (a guide match on a
  * network channel is a guide match and not regional). Ordered so the first is the best to watch: feeds from
  * abroad last, then within each, the matches that surely show this game before the regional ones, main
- * feeds before backup feeds and SD copies, the higher quality the name gives first, then by route (guide,
- * event, team, network), the sources' order and channel name. `now` is read only by `isCurrentGame` (for event
- * names without a date), so a result stays good for as long as that answer does. Only the channels that can
- * match are checked (`candidatePositions`), from a map built once per index and programmes (`prepareMatch`
- * builds it ahead, in slices).
+ * feeds before backup feeds, SD copies and alternate telecasts, the higher quality the name gives first, then
+ * by route (guide, event, team, network), the sources' order and channel name. `now` is read only by
+ * `isCurrentGame` (for event names without a date), so a result stays good for as long as that answer does.
+ * `shared` holds the game's networks that another game is on at the same time (`sharedNetworks`). Only the
+ * channels that can match are checked (`candidatePositions`), from a map built once per index and programmes
+ * (`prepareMatch` builds it ahead, in slices).
  */
 export function matchGame(
   game: Game,
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now?: number,
+  shared?: ReadonlySet<string>,
 ): StreamMatch[] {
-  const routes = routesOf(game);
+  const routes = routesOf(game, shared);
   return matchAt(game, routes, index, programs, now, candidatePositions(candidatesOf(index, programs), index.length, game, routes));
 }
 
@@ -707,13 +788,43 @@ export function matchGameScanForTests(
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now?: number,
+  shared?: ReadonlySet<string>,
 ): StreamMatch[] {
-  return matchAt(game, routesOf(game), index, programs, now, index.keys());
+  return matchAt(game, routesOf(game, shared), index, programs, now, index.keys());
+}
+
+/** A national game's station, held back until every channel is seen: `pickStations` keeps the best few. */
+interface HeldStation {
+  key: ItemKey;
+  found: Found;
+  /** In one of the teams' markets. */
+  market: boolean;
+  /** Its first market word, mostly its call sign: the provider's copies of one station share it. */
+  station: string;
+}
+
+/**
+ * The stations a national game keeps of one network: the teams' markets' first, then the highest quality the
+ * names give, then guide matches; one per station before any station's second copy, and index order between
+ * equals (the sorts are stable), which the candidate map and a full scan see alike.
+ */
+function pickStations(held: Iterable<HeldStation>): HeldStation[] {
+  const ranked = [...held].sort((a, b) => Number(b.market) - Number(a.market) || b.found.quality - a.found.quality || a.found.rank - b.found.rank);
+  const picked: HeldStation[] = [];
+  const stations = new Set<string>();
+  for (const h of ranked) {
+    if (picked.length < NATIONAL_STATIONS && !stations.has(h.station)) {
+      picked.push(h);
+      stations.add(h.station);
+    }
+  }
+  for (const h of ranked) if (picked.length < NATIONAL_STATIONS && !picked.includes(h)) picked.push(h);
+  return picked;
 }
 
 function matchAt(
   game: Game,
-  { window, networks, locals, markets, national, marketsListed }: GameRoutes,
+  { window, networks, locals, markets, national, marketsListed, series }: GameRoutes,
   index: readonly IndexedChannel[],
   programs: ReadonlyMap<ItemKey, EpgProgram[]>,
   now: number | undefined,
@@ -726,20 +837,20 @@ function matchAt(
     const prev = found.get(key);
     if (!prev || f.rank < prev.rank) found.set(key, f);
   };
-  // Spare stations per network, held back until every channel is seen: the best few of them stay.
-  const spares = new Map<string, Map<ItemKey, Found>>();
+  // A national game's stations per network, held back until every channel is seen: the best few of them stay.
+  const stations = new Map<string, Map<ItemKey, HeldStation>>();
   for (const i of positions) {
     const ch = index[i]!;
     const key = meta.keys[i]!;
     // A spin-off's guide is its station's, mapped by name: the spin-off shows none of it.
     const list = ch.spinOff ? undefined : programs.get(key);
-    const program = list ? guideProgramme(list, game, window) : null;
+    const program = list ? guideProgramme(list, game, window, series) : null;
     let reason: MatchReason;
     let regional = false;
-    let spare = false;
+    let station: 'market' | 'spare' | null = null;
     if (program) {
       reason = 'guide';
-      spare = spareStation(ch, networks, markets);
+      station = nationalStation(ch, networks, markets);
     } else if (isEventChannel(ch, game, now)) reason = 'event';
     else if (isTeamChannel(ch, game)) {
       reason = 'team';
@@ -753,26 +864,21 @@ function matchAt(
       if (r === undefined) continue;
       reason = 'network';
       regional = r === true;
-      spare = r === 'spare';
+      if (r === 'market' || r === 'spare') station = r;
     }
     // A team channel that may be blacked out ranks with the regional networks, after the national one.
     const rank = reason === 'team' && regional ? REASON_RANK.network * 2 + 1 : REASON_RANK[reason] * 2 + Number(regional);
     const { channel, sourceId, sourceKind, sourceName } = ch;
     const f = { match: { channel, sourceId, sourceKind, sourceName, reason, regional, program }, rank, foreign: ch.foreign, backup: ch.backup, quality: qualityRank(ch.quality) };
-    if (!spare) {
+    if (station === null) {
       add(key, f);
       continue;
     }
-    let held = spares.get(ch.network!);
-    if (!held) spares.set(ch.network!, (held = new Map()));
-    if (!held.has(key)) held.set(key, f);
+    let held = stations.get(ch.network!);
+    if (!held) stations.set(ch.network!, (held = new Map()));
+    if (!held.has(key)) held.set(key, { key, found: f, market: station === 'market', station: ch.affiliate![0]! });
   }
-  // Of each network's spare stations, the ones whose names give the highest quality, in index order between
-  // equals (the sort is stable), which the candidate map and a full scan see alike.
-  for (const held of spares.values()) {
-    const best = [...held].sort(([, a], [, b]) => b.quality - a.quality).slice(0, SPARE_STATIONS);
-    for (const [key, f] of best) add(key, f);
-  }
+  for (const held of stations.values()) for (const h of pickStations(held.values())) add(h.key, h.found);
   return [...found.values()]
     .sort(
       (a, b) =>

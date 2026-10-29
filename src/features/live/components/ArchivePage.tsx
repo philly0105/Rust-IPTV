@@ -21,7 +21,9 @@ import {
   archiveProgramState,
   canBrowseArchive,
   dayRange,
+  dayStart,
   initialProgramIndex,
+  programsInDay,
   type ArchiveProgramState,
 } from '../lib/archive';
 import { displayChannelName } from '../lib/channelName';
@@ -116,26 +118,57 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   const now = useNow(30_000);
   const shortEpg = useShortEpgEnabled(kind);
   const count = archiveDayCount(channel);
+  // The player is the source of truth when Expand opens this page from catch-up. The advertised
+  // archive window can be shorter than the programmes the provider actually lets us play.
+  const playerSource = usePlayerStore((st) => st.source);
+  const playingStart = playerSource && !playerSource.isLive && sameRef(playerSource.ref, channel.ref) ? playerSource.catchupProgramStart : undefined;
+  const playingStartMs = ms(playingStart);
+  const playingDay = playingStartMs > 0 ? dayStart(playingStartMs) : undefined;
   // Day boundaries follow the clock but only change at midnight.
   const todayKey = new Date(now).toDateString();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const days = useMemo(() => archiveDays(now, count), [todayKey, count]);
-  const [dayIndex, setDayIndex] = useState(0);
-  const selected = Math.min(dayIndex, days.length - 1);
+  const days = useMemo(() => {
+    const available = archiveDays(now, count);
+    if (playingDay !== undefined && !available.includes(playingDay) && playingDay < available[available.length - 1]!) available.push(playingDay);
+    return available;
+  }, [todayKey, count, playingDay]);
+  const [selectedDay, setSelectedDay] = useState(() => playingDay ?? days[0] ?? now);
+  // Follow a newly started archive programme, but leave a manually selected tab alone until
+  // playback changes. Use the day, not its index, so midnight cannot retarget a selected tab.
+  useEffect(() => {
+    setSelectedDay(playingDay ?? days[0] ?? now);
+  }, [playingStart, playingDay, days, channel.ref.sourceId, channel.ref.itemId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selected = Math.max(0, days.indexOf(selectedDay));
   const day = days[selected] ?? days[0] ?? now;
   const { start, end } = dayRange(day);
 
   const query = useArchiveDay({ ref: channel.ref, kind, start, end, offsetMinutes, isToday: selected === 0, shortEpg });
+  // The provider can still play a programme its XMLTV data omits. Keep that programme in the
+  // selected day's list using the metadata already attached to the player, without another API call.
+  const playingProgram = useMemo<EpgProgram | undefined>(() => {
+    if (!playingStartMs || !playerSource?.subtitle || !playerSource.durationSeconds || !Number.isFinite(playerSource.durationSeconds)) return undefined;
+    return {
+      channelId: channel.ref.itemId,
+      start: new Date(playingStartMs).toISOString(),
+      end: new Date(playingStartMs + playerSource.durationSeconds * 1000).toISOString(),
+      title: playerSource.subtitle,
+    };
+  }, [playingStartMs, playerSource?.subtitle, playerSource?.durationSeconds, channel.ref.itemId]);
+  const listed = useMemo(() => {
+    const rows = query.data ?? [];
+    if (day !== playingDay || !playingProgram || rows.some((p) => ms(p.start) === playingStartMs)) return rows;
+    return programsInDay([...rows, playingProgram], start, end);
+  }, [query.data, day, playingDay, playingProgram, playingStartMs, start, end]);
   // No guide at all for the day: hourly slots across the archive window, so a channel that
   // advertises catch-up can still be rewound to a time.
-  const slotted = !!query.data && query.data.length === 0;
+  const slotted = !!query.data && listed.length === 0;
   const slots = useMemo(
     () => (slotted ? archiveHourSlots(start, end, now, channel, (s) => t('archiveSlotTitle', { time: formatClock(s, i18n.language) })) : []),
     // `now` moves every 30 s; the slots only change when a new hour starts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [slotted, start, end, Math.floor(now / HOUR), channel, t, i18n.language],
   );
-  const programs = useMemo(() => (slotted ? slots : (query.data ?? [])), [slotted, slots, query.data]);
+  const programs = useMemo(() => (slotted ? slots : listed), [slotted, slots, listed]);
   const states = useMemo(() => programs.map((p) => archiveProgramState(p, channel, kind, now)), [programs, channel, kind, now]);
   const fromProvider = programs.some((p) => p.fromProvider);
 
@@ -147,12 +180,13 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   // ---- programme list (roving focus) ---------------------------------------------
   const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [active, setActive] = useState(-1);
-  const initial = initialProgramIndex(states);
+  const playingIndex = playingStartMs ? programs.findIndex((p) => ms(p.start) === playingStartMs) : -1;
+  const initial = playingIndex >= 0 ? playingIndex : initialProgramIndex(states);
   const current = active >= 0 && active < programs.length ? active : initial;
   // A new day starts at its airing or latest playable programme.
   useEffect(() => {
     setActive(-1);
-  }, [day, query.data]);
+  }, [day, query.data, playingStart]);
   // Opens on the airing (or latest playable) programme by scrolling the list alone. scrollIntoView
   // scrolled every ancestor too, which pushed the channel header and day tabs out of view.
   const panelRef = useRef<HTMLElement>(null);
@@ -179,23 +213,16 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
     e.preventDefault();
   };
 
-  // LG-09: the programme playing from here is marked in the list while the player holds it.
-  const [playedStart, setPlayedStart] = useState<string | null>(null);
-  const playerSource = usePlayerStore((st) => st.source);
-  const playingStart =
-    playedStart && playerSource && !playerSource.isLive && playerSource.ref && sameRef(playerSource.ref, channel.ref) ? playedStart : null;
+  // The player owns the selection, including a catch-up started from another guide view.
   const play = (p: EpgProgram, state: ArchiveProgramState) => {
     if (state === 'live') {
-      setPlayedStart(null);
       playChannel(channel, kind, p.title, name).catch((err: unknown) =>
         toast({ title: t('playFailed', { name }), description: errorDescription(err), variant: 'error' }),
       );
       return;
     }
     if (state !== 'playable' && state !== 'airing') return;
-    setPlayedStart(p.start);
     playCatchup(channel, kind, p, now, name).catch((err: unknown) => {
-      setPlayedStart(null);
       toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' });
     });
   };
@@ -236,6 +263,7 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
   const shownState = current >= 0 ? (states[current] ?? 'future') : 'future';
   // What airs now, beside the logo (today only).
   const airing = selected === 0 ? programs.find((_, i) => states[i] === 'airing' || states[i] === 'live') : undefined;
+  const watchingTitle = playingStart ? (playerSource?.subtitle || programs[playingIndex]?.title) : undefined;
 
   return (
     <>
@@ -252,10 +280,10 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
               airing one, this line would say it twice, so it steps aside (keeping its room). */}
           <p
             dir="auto"
-            className={cn('min-w-0 flex-1 truncate text-body-sm text-fg-muted', airing && shownProgram === airing && 'lg:invisible')}
+            className={cn('min-w-0 flex-1 truncate text-body-sm text-fg-muted', !watchingTitle && airing && shownProgram === airing && 'lg:invisible')}
             data-testid="archive-airing"
           >
-            {airing ? t('idleNowOn', { title: airing.title, left: t('minutesLeft', { count: minutesLeft(airing, now) }) }) : null}
+            {watchingTitle ? t('archiveWatching', { title: watchingTitle }) : airing ? t('idleNowOn', { title: airing.title, left: t('minutesLeft', { count: minutesLeft(airing, now) }) }) : null}
           </p>
           <Button variant="secondary" icon={<Radio className="size-4" />} onClick={() => void watchLive()} className="shrink-0 @max-[24rem]/archive:w-full">
             {t('watchLive')}
@@ -278,7 +306,7 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
           <ProgramDetails
             program={shownProgram}
             state={shownState}
-            playing={playingStart === shownProgram.start}
+            playing={!!playingStartMs && playingStartMs === ms(shownProgram.start)}
             onPlay={() => play(shownProgram, shownState)}
             onDownload={shownState === 'playable' && downloadable ? () => download(shownProgram) : undefined}
           />
@@ -290,7 +318,7 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
           <Tabs
             items={dayItems}
             value={String(selected)}
-            onChange={(id) => setDayIndex(Number(id))}
+            onChange={(id) => setSelectedDay(days[Number(id)] ?? days[0] ?? now)}
             label={t('archiveDayPicker')}
             panelIdPrefix={panelPrefix}
           />
@@ -330,7 +358,7 @@ function ArchiveBrowser({ channel, kind, name, offsetMinutes }: BrowserProps) {
                     key={`${p.start}-${i}`}
                     program={p}
                     state={states[i] ?? 'future'}
-                    playing={playingStart === p.start}
+                    playing={!!playingStartMs && playingStartMs === ms(p.start)}
                     tabIndex={i === current ? 0 : -1}
                     buttonRef={(el) => {
                       rowRefs.current[i] = el;
@@ -385,9 +413,10 @@ function useRowAction(state: ArchiveProgramState): { icon: ReactNode; label: str
 function ProgramRow({ program, state, playing, tabIndex, buttonRef, onFocus, onPlay, onDownload }: RowProps) {
   const { t, i18n } = useTranslation('live');
   const disabled = state === 'future' || state === 'expired';
+  const dimmed = disabled && !playing;
   const action = useRowAction(state);
   // The time column already says when a future programme starts: only expiry needs a note.
-  const note = state === 'expired' ? t('archiveExpired') : null;
+  const note = state === 'expired' && !playing ? t('archiveExpired') : null;
   const onNow = state === 'airing' || state === 'live';
   // The airing row always shows its action, in its own flow; the others float theirs on hover.
   const floating = (action && !playing && !onNow) || onDownload;
@@ -407,15 +436,15 @@ function ProgramRow({ program, state, playing, tabIndex, buttonRef, onFocus, onP
         className={cn(
           // A phone stacks it (time and action on top, the programme below); from sm it is one line.
           'flex w-full min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 rounded-md px-3 py-2.5 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset sm:flex-nowrap motion-safe:transition-colors',
-          disabled ? 'cursor-default text-fg-subtle' : cn('text-fg', !(playing || onNow) && 'hover:bg-hover'),
+          dimmed ? 'cursor-default text-fg-subtle' : cn('text-fg', !disabled && !(playing || onNow) && 'hover:bg-hover'),
         )}
       >
-        <span className={cn('order-1 shrink-0 font-numeric text-sm whitespace-nowrap tabular-nums sm:w-32', disabled ? 'text-fg-subtle' : 'text-fg-muted')}>
+        <span className={cn('order-1 shrink-0 font-numeric text-sm whitespace-nowrap tabular-nums sm:w-32', dimmed ? 'text-fg-subtle' : 'text-fg-muted')}>
           {formatRange(program, i18n.language)}
         </span>
         <span className="order-3 min-w-0 basis-full sm:order-2 sm:basis-0 sm:flex-1">
           <span className="flex items-center gap-2">
-            <span dir="auto" className={cn('truncate text-body-sm', disabled ? '' : 'font-medium')}>
+            <span dir="auto" className={cn('truncate text-body-sm', dimmed ? '' : 'font-medium')}>
               {program.title}
             </span>
             {onNow ? <LivePill size="sm" dot="none" /> : null}
@@ -428,7 +457,7 @@ function ProgramRow({ program, state, playing, tabIndex, buttonRef, onFocus, onP
           </span>
           {program.description ? (
             // A programme that cannot play steps back as a whole: its description is no brighter than its title.
-            <span dir="auto" className={cn('mt-0.5 line-clamp-2 text-caption', disabled ? 'text-fg-subtle' : 'text-fg-muted')} data-testid="archive-description">
+            <span dir="auto" className={cn('mt-0.5 line-clamp-2 text-caption', dimmed ? 'text-fg-subtle' : 'text-fg-muted')} data-testid="archive-description">
               {program.description}
             </span>
           ) : null}
@@ -502,7 +531,7 @@ function ProgramDetails({
         <span className="tabular-nums">
           {formatDay(at, i18n.language)} {formatRange(program, i18n.language)}
         </span>
-        {state === 'expired' ? <span>{t('archiveExpired')}</span> : null}
+        {playing ? <span className="text-accent">{t('playingNow')}</span> : state === 'expired' ? <span>{t('archiveExpired')}</span> : null}
       </p>
       <h2 dir="auto" className="text-title-sm text-fg">
         {program.title}

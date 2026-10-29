@@ -42,6 +42,7 @@ import type { EngineError } from './engines';
 import { browserOnline, classifyStreamError, rpcErrorCode, type StreamErrorClass, type StreamErrorInput } from './errors';
 import { bindLiveFailover, failoverLive, failoverVod, isChannelRef, isUntriedSwitch } from './failover';
 import { useMediaStore } from './media';
+import { traceTimeshift } from './timeshiftDiagnostics';
 import {
   errorMessage,
   isPendingZap,
@@ -49,6 +50,7 @@ import {
   MIN_RESUME_SECONDS,
   peekSettings,
   resolveSource,
+  releaseFailedEmbeddedVod,
   retryResolve,
   usePlayerStore,
   type PlayerState,
@@ -61,13 +63,18 @@ export const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 export const RECONNECT_WINDOW_MS = 20_000;
 /** A retry that has not reached playback by then failed. */
 export const ATTEMPT_TIMEOUT_MS = 8_000;
+/** Slow catch-up providers get time to answer a retried timeshift request. */
+export const CATCHUP_ATTEMPT_TIMEOUT_MS = 150_000;
+export const CATCHUP_RECONNECT_WINDOW_MS = 180_000;
 /** A playing stream whose position has not moved for this long has stalled. */
 export const STALL_MS = 12_000;
+/** A finite timeshift stream may pause between archive chunks without having failed. */
+export const CATCHUP_STALL_MS = 60_000;
 /**
  * A live stream whose engine says it is waiting for data (the element's `waiting`, mpv's
  * `paused-for-cache`) has stalled once its position stood this long: live has no buffer left
  * to come back to, and the frozen frame under a spinner is what the user watches meanwhile.
- * VOD and catch-up keep STALL_MS (a slow server there often catches up).
+ * VOD uses STALL_MS; catch-up gets a longer pause for slow archive responses.
  */
 export const LIVE_STALL_MS = 5_000;
 /**
@@ -253,7 +260,12 @@ function fail(ses: Session, src: PlayerSource, cls: StreamErrorClass, info: Fail
   const now = Date.now();
   if (!ses.windowStart) ses.windowStart = now;
   const delay = nextDelay(ses);
-  const canRetry = reconnectOn && r.retry && delay !== undefined && now - ses.windowStart + delay <= RECONNECT_WINDOW_MS;
+  const windowMs = src.catchupProgramStart ? CATCHUP_RECONNECT_WINDOW_MS : RECONNECT_WINDOW_MS;
+  const canRetry = reconnectOn && r.retry && delay !== undefined && now - ses.windowStart + delay <= windowMs;
+  traceTimeshift(src, 'reconnect decision', {
+    class: cls, message: info.message, code: info.code, attempt: ses.attempts,
+    canRetry, delay, position, playedBefore: playedKey === ses.key,
+  });
   // A copy failover just switched to that fails before it ever played: the next copy, no retries.
   const freshSwitch = isUntriedSwitch(src);
   // A live start that timed out: a hung provider stays hung, so another copy goes first.
@@ -309,13 +321,14 @@ function recovering(ses: Session): boolean {
 function attempt(ses: Session): void {
   const src = sameItem(ses);
   if (!src || !recovering(ses)) return;
+  traceTimeshift(src, 'reconnect attempt', { attempt: ses.attempts, resumeAt: ses.resumeAt });
   attemptTimer = setTimeout(() => {
     attemptTimer = null;
     const cur = sameItem(ses);
     const s = usePlayerStore.getState();
     if (!cur || !recovering(ses)) return;
     fail(ses, cur, 'timeout', { message: TIMEOUT_MESSAGE, code: 'timeout' }, s.positionSeconds);
-  }, ATTEMPT_TIMEOUT_MS);
+  }, src.catchupProgramStart ? CATCHUP_ATTEMPT_TIMEOUT_MS : ATTEMPT_TIMEOUT_MS);
 
   // The stream URL lookup itself failed: look it up again.
   if (!src.url) {
@@ -353,11 +366,13 @@ function showError(ses: Session): void {
 }
 
 function giveUp(ses: Session, src: PlayerSource): void {
+  traceTimeshift(src, 'reconnect gave up', { attempt: ses.attempts, message: ses.last?.message });
   ses.gaveUp = true;
   retryTimer = clear(retryTimer);
   attemptTimer = clear(attemptTimer);
   setPhase('idle');
   if (usePlayerStore.getState().status !== 'error' && sameItem(ses)) showError(ses);
+  if (sameItem(ses)) releaseFailedEmbeddedVod();
   if (!src.isLive) failoverVod(src);
 }
 
@@ -385,6 +400,7 @@ function onPlaying(ses: Session, position: number): void {
     if (position === ses.stallPos) return;
     ses.stallPos = null;
   }
+  if (attemptTimer) traceTimeshift(sameItem(ses), 'reconnect playback resumed', { position, attempt: ses.attempts });
   attemptTimer = clear(attemptTimer);
   setPhase('idle');
   // This run of failures is over; the retry count lasts until playback has held for a while.
@@ -445,16 +461,27 @@ function tick(): void {
     lastMoveAt = now;
     return;
   }
-  // Bytes still coming in don't hold a live stream past STALL_MS: one that sends but never plays recovers too.
+  // A slow archive seek may scan tens of megabytes before it can append a frame. The loader's
+  // network speed confirms that it is making progress even while the media buffer is empty.
+  const archiveNetworkAt = useMediaStore.getState().archiveNetworkAt;
+  if (s.source.catchupProgramStart && archiveNetworkAt && now - archiveNetworkAt < 3_000) {
+    lastMoveAt = now;
+    return;
+  }
   const downloading = now - lastBytesAt < LIVE_DATA_GRACE_MS;
-  const stallAfter = s.source.isLive && useMediaStore.getState().waiting && !downloading ? LIVE_STALL_MS : STALL_MS;
-  if (now - lastMoveAt < stallAfter || !(peekSettings()?.streamReconnect ?? true)) return;
+  const stallAfter = s.source.catchupProgramStart ? CATCHUP_STALL_MS : s.source.isLive && useMediaStore.getState().waiting && !downloading ? LIVE_STALL_MS : STALL_MS;
+  const inactiveMs = now - lastMoveAt;
+  if (inactiveMs < stallAfter || !(peekSettings()?.streamReconnect ?? true)) return;
   lastMoveAt = now;
   const key = keyOf(s.source);
   if (!session || session.key !== key) session = newSession(key);
   // A recovery under way (a stalled mpv stream keeps saying `playing`) has its own timeout.
   if (session.busy || session.gaveUp || retryTimer || attemptTimer) return;
   session.stallPos = s.positionSeconds;
+  traceTimeshift(s.source, 'reconnect stalled position', {
+    position: s.positionSeconds, heldUntil: held, waiting: useMediaStore.getState().waiting,
+    millisecondsWithoutProgress: inactiveMs,
+  });
   fail(session, s.source, 'timeout', { message: STALL_MESSAGE, code: 'timeout' }, s.positionSeconds);
 }
 

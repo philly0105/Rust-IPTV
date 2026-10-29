@@ -249,7 +249,14 @@ pub fn vlc_external_args(
 /// for each attach (player/embedded.rs), so the pipe mpv opens is
 /// `\\.\pipe\tsrust-iptv-mpv-<pid>-<session>`.
 pub fn mpv_pipe_name(pid: u32) -> String {
-    format!(r"\\.\pipe\tsrust-iptv-mpv-{pid}")
+    #[cfg(windows)]
+    {
+        format!(r"\\.\pipe\tsrust-iptv-mpv-{pid}")
+    }
+    #[cfg(not(windows))]
+    {
+        format!("/tmp/tsrust-iptv-mpv-{pid}")
+    }
 }
 
 /// Arguments for the embedded mpv process. The user's `mpvArgs` go first so

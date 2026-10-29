@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 
-const EXPECTED: [&str; 14] = [
+const EXPECTED: [&str; 15] = [
     "mpv.addSubtitle",
     "mpv.attach",
     "mpv.command",
@@ -26,6 +26,7 @@ const EXPECTED: [&str; 14] = [
     "mpv.setProperty",
     "mpv.state",
     "mpv.stats",
+    "mpv.unload",
     "player.capabilities",
     "player.detect",
     "player.openExternal",
@@ -72,6 +73,7 @@ async fn server_mode_refuses_every_player_command() {
             json!({"bounds": bounds, "volume": 50, "muted": false}),
         ),
         ("mpv.load", json!({"source": src})),
+        ("mpv.unload", Value::Null),
         ("mpv.command", json!({"cmd": ["get_property", "pause"]})),
         ("mpv.setProperty", json!({"name": "pause", "value": true})),
         ("mpv.setBounds", json!({"bounds": bounds})),
@@ -181,7 +183,7 @@ async fn capabilities_without_window_factory() {
         .unwrap();
     assert_eq!(caps["embeddedMpv"], json!(false));
     let reason = caps["reason"].as_str().unwrap();
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "macos")) {
         assert!(reason.contains("desktop app"), "{reason}");
     } else {
         assert!(reason.contains("only available on Windows"), "{reason}");
@@ -193,7 +195,11 @@ fn unavailable_reasons() {
     use player::embedded_unavailable_reason as r;
     assert!(r(false, true, true).unwrap().contains("Windows"));
     assert!(r(true, true, false).unwrap().contains("desktop"));
-    assert!(r(true, false, true).unwrap().contains("vendor"));
+    assert!(r(true, false, true).unwrap().contains(if cfg!(windows) {
+        "vendor"
+    } else {
+        "Install mpv"
+    }));
     assert_eq!(r(true, true, true), None);
 }
 
@@ -243,7 +249,7 @@ async fn mpv_commands_without_session() {
     let src =
         json!({"url": "http://h/x", "kind": "hls", "title": "x", "isLive": true, "isRadio": false});
     let bounds = json!({"bounds": {"x": 0, "y": 0, "width": 10, "height": 10}});
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "macos")) {
         // No window factory (server mode): attach explains why.
         let err = r
             .dispatch(Arc::clone(&state), "mpv.attach", bounds.clone())
@@ -292,7 +298,7 @@ async fn mpv_commands_without_session() {
 /// Embedded mpv is Windows-only: elsewhere every `mpv.*` call is Unsupported
 /// before any argument is looked at.
 fn on_windows(code: RpcErrorCode) -> RpcErrorCode {
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "macos")) {
         code
     } else {
         RpcErrorCode::Unsupported

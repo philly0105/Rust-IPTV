@@ -43,6 +43,8 @@ export interface MediaState {
   canPip: boolean;
   inPip: boolean;
   waiting: boolean;
+  /** Last time the main player's catch-up MPEG-TS loader reported incoming bytes. */
+  archiveNetworkAt?: number;
   mpv?: MpvState;
   /** Embedded mpv: when the current `mpv.record` began (ms epoch), for the REC timer. */
   recordStartedAt?: number;
@@ -100,6 +102,7 @@ export function resetMedia(): void {
     rate: 1,
     inPip: false,
     waiting: false,
+    archiveNetworkAt: undefined,
     upNext: undefined,
     errorCode: undefined,
   });

@@ -1,6 +1,6 @@
 /** /downloads: the transfer queue. Completed items leave this page for My Videos. */
 
-import { Download as DownloadIcon, Eraser, Library } from 'lucide-react';
+import { Download as DownloadIcon, Eraser, Gauge, Library } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
@@ -9,17 +9,20 @@ import { invalidate } from '@/api/query';
 import { isDesktop } from '@/api/transport';
 import type { Download } from '@/api/types';
 import { buttonClass } from '@/ui/Button';
+import { errorDescription, toast } from '@/ui';
 import { formatList } from '@/lib/intl';
 
-import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useShortcut } from '../deps';
+import { Button, EmptyState, ErrorState, Page, SkeletonList, Toggle, useSettings, useShortcut } from '../deps';
 import { BrowseMoviesAction, ConfirmDialog, PageTitle, SectionHeading } from '../components/bits';
 import { DOWNLOAD_ROW_HEIGHT, DownloadRow } from '../components/DownloadRow';
+import { DownloadSpeedDialog, MIB } from '../components/DownloadSpeedDialog';
 import { FolderBar } from '../components/FolderBar';
 import { VirtualRows, type RowRenderInfo } from '../components/VirtualRows';
 import { useDownloadActions } from '../hooks/useDownloadActions';
 import { useDownloads, useSourcesById } from '../hooks/useLibraryData';
 import { usePageHeader } from '../hooks/usePageHeader';
 import { actionsFor, buildQueueRows, queueCounts, type QueueAction, type QueueRow } from '../lib/queue';
+import { playActiveCatchupDownload } from '../lib/playDownload';
 
 const HEADER_HEIGHT = 52;
 
@@ -36,6 +39,10 @@ function focusedDownloadId(): number | undefined {
 export function DownloadsPage() {
   const { t, i18n } = useTranslation('library');
   const query = useDownloads();
+  const settings = useSettings();
+  const globalLimit = settings.data?.downloadRateLimitBps ?? 0;
+  const [speedTarget, setSpeedTarget] = useState<Download | 'global' | null>(null);
+  const editSpeed = useCallback((download: Download) => setSpeedTarget(download), []);
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
   const { pending, perform } = useDownloadActions();
 
@@ -75,6 +82,12 @@ export function DownloadsPage() {
     },
     [perform],
   );
+
+  const onPlayCatchup = useCallback((d: Download) => {
+    void playActiveCatchupDownload(d).catch((err: unknown) =>
+      toast({ title: t('playFailed', { title: d.subtitle?.split(' · ')[0] || d.title }), description: errorDescription(err), variant: 'error' }),
+    );
+  }, [t]);
 
   const runFocused = (pick: (d: Download, actions: readonly QueueAction[]) => QueueAction | undefined) => {
     const id = focusedDownloadId();
@@ -163,11 +176,14 @@ export function DownloadsPage() {
           busy={pending.has(d.id)}
           tabbable={info.tabStop}
           onAction={onAction}
+          onPlayCatchup={onPlayCatchup}
+          onSpeedLimit={editSpeed}
+          globalRateLimitBps={globalLimit}
         />
       );
     },
     // Each row subscribes to its own live sample (VD-4): a progress event re-renders that row only.
-    [mixedSources, onAction, pending, sources, t],
+    [mixedSources, onAction, onPlayCatchup, pending, sources, t, editSpeed, globalLimit],
   );
 
   let body;
@@ -234,7 +250,29 @@ export function DownloadsPage() {
         <FolderBar pageError={query.isError} />
         {myVideosLink}
       </div>
+      {/* A page that failed to load has one Retry, its error state's. */}
+      {!query.isError && <div className="flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-muted">
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<Gauge size={16} aria-hidden />}
+          disabled={!settings.data}
+          onClick={() => setSpeedTarget('global')}
+        >
+          {t('speedGlobalButton', { speed: settings.data ? (globalLimit === 0 ? t('speedUnlimited') : t('speedValue', { value: (globalLimit / MIB).toLocaleString(i18n.language, { maximumFractionDigits: 6 }) })) : '…' })}
+        </Button>
+        {settings.isError ? (
+          <Button size="sm" variant="ghost" onClick={() => void settings.refetch()}>{t('speedLoadRetry')}</Button>
+        ) : <span>{t('speedGlobalSummary')}</span>}
+      </div>}
       {body}
+      {speedTarget !== null && (
+        <DownloadSpeedDialog
+          download={speedTarget === 'global' ? undefined : speedTarget}
+          globalLimit={globalLimit}
+          onClose={() => setSpeedTarget(null)}
+        />
+      )}
       <ConfirmDialog
         open={confirm !== null}
         onClose={() => setConfirm(null)}

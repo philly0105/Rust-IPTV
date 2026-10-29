@@ -75,6 +75,12 @@
   "railMyList": "Moja lista",
 
   "player": "Odtwarzacz",
+  "livePlayer": "Telewizja na żywo",
+  "livePlayerHint": "Używany dla kanałów nadających teraz, także przy przełączaniu kanałów.",
+  "catchupPlayer": "Archiwum TV",
+  "catchupPlayerHint": "Używany dla minionych programów otwieranych z przewodnika TV.",
+  "vodPlayer": "Filmy i seriale",
+  "vodPlayerHint": "Używany dla filmów i odcinków na żądanie.",
   "playerBuiltIn": "Wbudowany odtwarzacz",
   "playerBuiltInHint": "Odtwarza w aplikacji. Obsługuje większość strumieni HLS.",
   "playerEmbeddedMpv": "Osadzony mpv",

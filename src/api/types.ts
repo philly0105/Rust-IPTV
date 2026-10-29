@@ -392,10 +392,13 @@ export interface Download {
   completedAt?: string;
   fileAvailable?: boolean;
   positionSeconds: number;
+  durationSeconds?: number;
   /** Why a queued row waits, when it is more than its turn (live, never stored). */
   waiting?: DownloadWait;
   /** Connections a running transfer holds, when more than one (live). */
   connections?: number;
+  /** Absent follows the global default; zero is unlimited; otherwise bytes/s. */
+  rateLimitBps?: number;
 }
 
 /**
@@ -424,6 +427,8 @@ export interface PlayerSource {
   ref?: ItemRef;
   episodeId?: string;
   resumeSeconds?: number;
+  /** Display-time EPG start of the catch-up programme selected for this stream. */
+  catchupProgramStart?: string;
   isLive: boolean;
   isRadio: boolean;
   /** ClearKey DRM (UI only; the core never sets it). Such a source plays in the built-in player. */
@@ -546,6 +551,10 @@ export interface RemoteControlSettings {
 
 export interface Settings {
   player: VideoPlayer;
+  /** Per-content choices; omitted by older settings and resolved through `player`. */
+  livePlayer?: VideoPlayer;
+  catchupPlayer?: VideoPlayer;
+  vodPlayer?: VideoPlayer;
   streamFormat: StreamFormat;
   epgUrls: string[];
   language: string;
@@ -560,6 +569,8 @@ export interface Settings {
   openStreamOnDoubleClick: boolean;
   showCaptions: boolean;
   downloadsDir?: string;
+  /** Default cap per download in bytes/s; zero is unlimited. */
+  downloadRateLimitBps: number;
   tmdb: TmdbSettings;
   dashboardRails: DashboardRails;
   remoteControl: RemoteControlSettings;
@@ -671,6 +682,7 @@ export interface Settings {
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
 export const DEFAULT_SETTINGS: Settings = {
+  downloadRateLimitBps: 0,
   player: 'html5',
   streamFormat: 'auto',
   epgUrls: [],

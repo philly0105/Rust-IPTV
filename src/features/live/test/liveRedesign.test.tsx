@@ -11,6 +11,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Channel, EpgProgram, Page, PageQuery } from '@/api/types';
 import { tintFill } from '@/ui/tint';
+import { CATCHUP_RESUME_KEY } from '@/features/player/catchupResume';
 
 import { ChannelLogo } from '../components/ChannelLogo';
 import { resetChannelListMemory } from '../components/ChannelList';
@@ -64,6 +65,7 @@ beforeAll(() => {
   installDomStubs();
 });
 beforeEach(() => {
+  localStorage.removeItem(CATCHUP_RESUME_KEY);
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   rpcMock.calls.length = 0;
@@ -291,6 +293,24 @@ describe('the idle stage (CB-AUTOPLAY-LAST)', () => {
     expect((rpcMock.calls.find((c) => c.cmd === 'recent.list')!.args as { sourceId: string }).sourceId).toBe('src1');
     fireEvent.click(resume);
     await waitFor(() => expect(fakes.recorded.playItem.at(-1)).toMatchObject({ ref: makeChannel(7).ref }));
+  });
+
+  it('resumes the saved catch-up programme at its position after relaunch', async () => {
+    const channel = makeChannel(1);
+    const savedProgram = program('Yesterday News', Date.now() - 24 * HOUR, Date.now() - 23 * HOUR);
+    localStorage.setItem(CATCHUP_RESUME_KEY, JSON.stringify({ ref: channel.ref, program: savedProgram, positionSeconds: 1800 }));
+    rpcMock.handlers['recent.list'] = () => [{ ref: channel.ref, viewedAt: '', snapshot: { title: channel.name, contentType: 'live' } }];
+    rpcMock.handlers['xtream.catchupUrl'] = () => ({ url: 'http://fresh.example/archive', kind: 'direct' });
+    renderAt('/s/src1/live', [{ path: '/s/:sourceId/live', element: <LivePage /> }]);
+    const resume = await screen.findByTestId('stage-resume');
+    await waitFor(() => expect(resume.getAttribute('aria-label')).toBe('Resume Yesterday News'));
+    expect(resume.textContent).toBe('Resume');
+    expect(screen.getByTestId('stage-idle-catchup').textContent).toContain('30 min in');
+    fireEvent.click(resume);
+    await waitFor(() => expect(fakes.recorded.playSource.at(-1)).toMatchObject({
+      url: 'http://fresh.example/archive', isLive: false, catchupProgramStart: savedProgram.start, resumeSeconds: 1800,
+    }));
+    expect(rpcMock.calls.filter((c) => c.cmd === 'xtream.catchupUrl')).toHaveLength(1);
   });
 });
 

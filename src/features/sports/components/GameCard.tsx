@@ -158,7 +158,7 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
   return (
     <li
       className={cn(
-        'row-span-4 mb-3 grid min-w-0 grid-rows-subgrid rounded-lg border bg-surface p-3.5',
+        'row-span-4 mb-3 grid min-w-0 grid-cols-1 grid-rows-subgrid rounded-lg border bg-surface p-3.5',
         game.phase === 'live' ? 'border-live/40' : 'border-edge',
       )}
       data-testid="sports-game"
@@ -223,7 +223,7 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
         />
       ) : null}
       {showStreams && playable ? (
-        <div className="row-start-4 -mx-1 mt-2.5 border-t border-divider px-1 pt-1">
+        <div className="row-start-4 -mx-1 mt-2.5 min-w-0 border-t border-divider px-1 pt-1">
           <StreamList game={game} title={title} streams={streams} loading={streamsLoading} ctx={ctx} />
         </div>
       ) : null}

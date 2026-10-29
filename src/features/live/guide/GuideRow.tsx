@@ -3,66 +3,105 @@
  * the programme popover re-renders only the rows whose props changed. Cells are plain elements:
  * the schedule index and every label come from the page, so a cell subscribes to nothing.
  *
- * Cells are laid out from a fixed origin, not from the window's start, and the page moves every
- * row's cells to the window with one CSS variable ({@link GRID_SHIFT_VAR}): a window move at the
- * edge of a sideways scroll leaves the rows' props alone, so no row re-renders inside the scroll
- * event (L3-perf-ui-4). The track clips the cells that fall outside the window.
- *
- * A row keeps its layout to itself (P2-GUIDE-3): it is sized from its props, so CSS layout
- * containment lets the browser lay out a row whose cells or channel arrive without laying out
- * the grid and the page around it again.
+ * Cells are laid out from the fixed origin of the native horizontal track. A horizontal gesture
+ * scrolls the track itself, so the rows' props and cell positions stay still.
  */
 
 import { AudioLines, History } from 'lucide-react';
-import { memo, useLayoutEffect, useRef, type MouseEvent } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 
 import type { Channel, EpgProgram, SourceKind } from '@/api/types';
 import { cn, Skeleton } from '@/ui';
-import { ScheduleMarkView, type ScheduleIndex } from '@/features/recording';
+import { markFor, ScheduleMarkView, type ScheduleIndex } from '@/features/recording';
 
 import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import { useLongPress } from '../hooks/useLongPress';
 import { displayChannelName } from '../lib/channelName';
-import { MINUTE, canCatchUp, cellTextMaxPx, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
+import { MINUTE, canCatchUp, formatRange, hasUsableArchive, layoutBlocks, ms, programWhen } from '../lib/epgTime';
 import { inlineStart } from '../lib/rtl';
 import { genreColor, genreOf, type Genre } from './genre';
+import type { GuideHydrator, HydrationTicket } from './hydration';
+import { programmeChunks, sameProgrammeChunk, type ProgrammeChunk } from './programmeChunks';
+import type { GuideRenderWindow } from './renderWindow';
 
 export { CELL_TEXT_MIN_PX, cellTextPadPx } from '../lib/epgTime';
 
-/** The CSS variable the page sets to the window's offset from the rows' origin, in px (0 or less after a later move). */
-export const GRID_SHIFT_VAR = '--grid-shift';
 /**
- * The CSS variable the page sets to "now", in px from the rows' origin: an airing cell's progress
- * strip reads it, so the strip grows with the clock without the memoised row re-rendering.
+ * The CSS variable set only on an airing cell's two clock markers, in px from the rows' origin.
+ * Keeping it off the canvas avoids invalidating inherited styles across every programme tile.
  */
 export const GRID_NOW_VAR = '--grid-now';
 
-const fitted = new WeakMap<HTMLElement, number | undefined>();
-
-/**
- * Fits the text of the cells under `root` to a track scrolled `scroll` px, with the cells moved
- * `shift` px from their origin (see {@link GRID_SHIFT_VAR}). The text itself sticks just past the
- * sticky channel column (position: sticky: the compositor moves it with the scroll, and it is
- * never a layout shift, L3-perf-ui-4). A cell that began before the visible edge only gets a
- * narrower text box here, so a long title ends in an ellipsis inside the cell instead of starting
- * under the column. Writes only the cells whose width changes; reads nothing from layout.
- * A cell it never capped has no cap to clear: a new row's cells away from the edge are not
- * written at all (P2-GUIDE-5).
- */
-export function fitCellText(root: ParentNode, scroll: number, shift = 0): void {
-  for (const el of root.querySelectorAll<HTMLElement>('[data-pad-left]')) {
-    const max = cellTextMaxPx(scroll, Number(el.getAttribute('data-pad-left')) + shift, Number(el.getAttribute('data-pad-width')));
-    if (fitted.get(el) === max) continue;
-    fitted.set(el, max);
-    el.style.maxWidth = max === undefined ? '' : `${max}px`;
+/** Advance only the mounted clock markers; memoised rows and all their other styles stay put. */
+export function updateGuideClock(root: ParentNode, nowPosition: number): void {
+  const value = `${nowPosition}px`;
+  for (const marker of root.querySelectorAll<HTMLElement>('[data-guide-clock]')) {
+    if (marker.style.getPropertyValue(GRID_NOW_VAR) !== value) marker.style.setProperty(GRID_NOW_VAR, value);
   }
 }
 
 /**
- * A row's words in the UI language, one stable object from the page (P2-GUIDE-5): a translation
- * hook per row built react-i18next's wrapper on every row's mount and read its state again on
- * every render, and a fling mounts hundreds of rows.
+ * Keep the titles at and beside the viewport edge native-sticky. The next and previous
+ * programmes are primed before they cross the edge, so one wheel step needs no JS position
+ * update. Offscreen titles remain ordinary text; making all of them sticky was costly.
+ * Cached cell positions are used only to switch this small set when the edge changes.
  */
+export function createStickyTitleManager() {
+  type Cell = { el: HTMLElement; left: number; width: number };
+  type Row = { cells: Cell[]; sticky: Cell[] };
+  // A wheel notch may cross a nearby programme boundary before the next frame runs.
+  const primePx = 160;
+  // A narrower cell cannot show a useful title at the clipped viewport edge.
+  // Sticky positioning on hundreds of such cells makes WebKit's scroll paint costly.
+  const minStickyWidth = 64;
+  const rows = new Map<HTMLElement, Row>();
+  const updateRow = (row: Row, scroll: number) => {
+    // Programme cells are in time order and do not overlap. Find the first one whose
+    // end reaches the visible edge, then prime its immediate neighbours too.
+    let lo = 0;
+    let hi = row.cells.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const cell = row.cells[mid]!;
+      if (cell.left + cell.width <= scroll) lo = mid + 1;
+      else hi = mid;
+    }
+    const covering = lo < row.cells.length && row.cells[lo]!.left <= scroll;
+    const next = row.cells
+      .slice(Math.max(0, lo - 1), Math.min(row.cells.length, lo + 2))
+      .filter((cell) => {
+        // A neighbouring programme can live in another time group. Prime it as far
+        // as its own width, while short offscreen cells keep only a wheel-step margin.
+        const reach = Math.max(primePx, cell.width);
+        return covering || (cell.left <= scroll + reach && cell.left + cell.width >= scroll - reach);
+      });
+    if (row.sticky.length === next.length && row.sticky.every((cell, i) => cell === next[i])) return;
+    for (const cell of row.sticky) if (!next.includes(cell)) cell.el.classList.remove('sticky');
+    for (const cell of next) if (!row.sticky.includes(cell)) cell.el.classList.add('sticky');
+    row.sticky = next;
+  };
+  return {
+    register(row: HTMLElement, scroll: number) {
+      const cells = Array.from(row.querySelectorAll<HTMLElement>('[data-pad-left]'), (el) => ({
+        el,
+        left: Number(el.dataset.padLeft),
+        width: Number(el.dataset.padWidth),
+      })).filter((cell) => cell.width >= minStickyWidth);
+      if (cells.length === 0) return () => {};
+      const entry: Row = { cells, sticky: [] };
+      rows.set(row, entry);
+      updateRow(entry, scroll);
+      return () => {
+        rows.delete(row);
+      };
+    },
+    update(scroll: number) {
+      for (const row of rows.values()) updateRow(row, scroll);
+    },
+  };
+}
+
+/** The row's UI strings are translated once by the page. */
 export interface GuideRowLabels {
   onNow: string;
   archive: string;
@@ -76,13 +115,15 @@ export interface GuideRowHandlers {
   play(channel: Channel): void;
   open(row: number, channel: Channel, program: EpgProgram, el: HTMLElement): void;
   focusCell(row: number, program: EpgProgram): void;
-  menu(channel: Channel, x: number, y: number): void;
-  /** Fits the text of the row's cells to the grid's current scroll (fitCellText). */
-  fitText(row: HTMLElement): void;
+  menu(channel: Channel, x: number, y: number, program?: EpgProgram): void;
+  /** Tracks the few programme titles that should stick at the visible edge. */
+  trackTitles(row: HTMLElement): () => void;
   /** A press on a cell, before its click opens the detail: the detail's data can be fetched ahead. */
   press(channel: Channel, program: EpgProgram): void;
   /** The pointer is over a cell (undefined: it left the row): the preview band follows it. */
   hover(row: number, channel: Channel, program: EpgProgram | undefined): void;
+  /** Populates far-offscreen time groups without one large synchronous DOM insertion. */
+  hydration?: GuideHydrator;
 }
 
 export interface GuideRowProps {
@@ -94,20 +135,22 @@ export interface GuideRowProps {
   /** Display-time programmes; undefined while loading, [] when the guide has none. */
   programs: EpgProgram[] | undefined;
   /**
-   * The time the cells are laid out from (fixed for the page's life). The page moves the cells to
-   * the window with {@link GRID_SHIFT_VAR}, so a window move does not change this prop.
+   * The time the cells are laid out from. Native scrolling does not change this prop.
    */
   origin: number;
+  /** Only mount programme cells close to this visible-time window. */
+  renderWindow?: GuideRenderWindow;
   now: number;
   pxPerMin: number;
   channelCol: number;
-  trackWidth: number;
   compact: boolean;
   rtl: boolean;
   kind: SourceKind | undefined;
   highlighted: boolean;
   /** The channel playing in the app (LG-01): its channel cell carries the tick and a playing mark. */
   playing: boolean;
+  /** Start of the programme playing on this channel, if it is in the guide. */
+  playingProgramStart?: string;
   /** The genre the guide is filtered to: cells of other genres step back (CB-GUIDE-GENRE). */
   genreFilter: Genre | null;
   /** Each genre's name in the UI language: a cell's accessible name ends with its genre. */
@@ -131,15 +174,16 @@ export const GuideRow = memo(function GuideRow({
   channel: ch,
   programs,
   origin,
+  renderWindow,
   now,
   pxPerMin,
   channelCol,
-  trackWidth,
   compact,
   rtl,
   kind,
   highlighted,
   playing,
+  playingProgramStart,
   genreFilter,
   genreNames,
   labels,
@@ -149,44 +193,46 @@ export const GuideRow = memo(function GuideRow({
   schedule,
   handlers,
 }: GuideRowProps) {
-  const ref = useRef<HTMLDivElement>(null);
   // LG-04: touch has no right click; a long press on the channel cell opens the same menu.
   const longPress = useLongPress((x, y) => {
     if (ch) handlers.menu(ch, x, y);
   });
   const chName = displayChannelName(ch?.name, stripCountryPrefix);
-  const { onNow } = labels;
-  // Catch-up is no badge on the logo: one on nearly every row repeated the History glyph its
-  // ended cells carry. The channel's name and tooltip still say it.
+  // Catch-up remains in the accessible name and tooltip.
   const archive = !!ch && hasUsableArchive(ch, kind);
-  // Cells this render added get their text fitted before paint.
-  useLayoutEffect(() => {
-    if (ref.current) handlers.fitText(ref.current);
-  });
+  const channelKey = ch ? `${ch.ref.sourceId}|${ch.ref.contentType}|${ch.ref.itemId}` : null;
 
   // Cells sit at their true times, from the row's first programme (or the origin, if later): one
   // that began before the window is clipped by the track, and its text sticks at the visible edge.
-  let from = origin;
-  for (const p of programs ?? []) {
-    const s = ms(p.start);
-    if (s < from) from = s;
-  }
-  const blocks = programs && programs.length > 0 ? layoutBlocks(programs, from, Infinity, pxPerMin, now) : [];
+  const { from, chunks } = useMemo(() => {
+    let from = origin;
+    for (const p of programs ?? []) {
+      const s = ms(p.start);
+      if (s < from) from = s;
+    }
+    const blocks = programs?.length ? layoutBlocks(programs, from, Infinity, pxPerMin, now) : [];
+    return { from, chunks: programmeChunks(blocks) };
+  }, [programs, origin, pxPerMin, now]);
   /** px from the origin to `from` (0 or less): where the row's cell layer starts. */
   const base = ((from - origin) / MINUTE) * pxPerMin;
-  const layer = `calc(var(${GRID_SHIFT_VAR}, 0px) + ${base}px)`;
+  const layer = `${base}px`;
+  const renderLeft = renderWindow ? (renderWindow[0] - origin) / MINUTE * pxPerMin : Number.NEGATIVE_INFINITY;
+  const renderRight = renderWindow ? (renderWindow[1] - origin) / MINUTE * pxPerMin : Number.POSITIVE_INFINITY;
   return (
     <div
-      ref={ref}
       role="row"
       aria-rowindex={index + 2}
       className="absolute start-0 flex border-b border-divider [contain:size_layout]"
-      style={{ top, height, width: channelCol + trackWidth }}
+      style={{ top, height, width: 'var(--grid-total-width)', contain: 'size layout style' }}
       // Right click anywhere on the row (its channel cell or a programme): the channel's menu.
       onContextMenu={(e: MouseEvent) => {
         if (!ch) return;
         e.preventDefault();
-        handlers.menu(ch, e.clientX, e.clientY);
+        // Keep the programme under the pointer when the context menu is opened from a cell. The
+        // row itself still opens the channel menu, while a programme can resolve its archive URL.
+        const cell = e.target instanceof Element ? e.target.closest<HTMLButtonElement>('button[data-start]') : null;
+        const program = cell ? programs?.find((p) => p.start === cell.dataset.start) : undefined;
+        handlers.menu(ch, e.clientX, e.clientY, program);
       }}
     >
       <div
@@ -255,7 +301,7 @@ export const GuideRow = memo(function GuideRow({
       </div>
       {/* Clips the cells outside the window without becoming a scroll container, so the cell text
           still sticks to the grid's own scroll. */}
-      <div role="gridcell" className="relative overflow-x-clip" style={{ width: trackWidth }}>
+      <div role="gridcell" className="relative overflow-x-clip" style={{ width: 'var(--grid-track-width)' }}>
         {programs === undefined ? (
           // Guide data still on its way: a cell-shaped skeleton, like the channel column's, so a row
           // that waits after a fast fling does not read as an empty guide (L4-live-3).
@@ -283,115 +329,32 @@ export const GuideRow = memo(function GuideRow({
               if (ch) handlers.hover(index, ch, undefined);
             }}
           >
-            {blocks.map((b) => {
-              const p = b.program;
-              const catchupOk = ch ? canCatchUp(p, ch, kind, now) : false;
-              const range = formatRange(p, lang);
-              const genre = genreOf(p.category);
-              // Filtered to a genre: the others step back to plain text on no fill.
-              const muted = !!genreFilter && genre !== genreFilter;
-              return (
-                <button
-                  key={p.start}
-                  type="button"
-                  data-cell-row={index}
-                  data-start={p.start}
-                  tabIndex={cursorStart === p.start ? 0 : -1}
-                  // The genre too: the filter dims cells, which a screen reader does not see.
-                  aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}${genre ? `, ${genreNames[genre]}` : ''}`}
-                  // The full title on hover: a narrow or clipped cell truncates it (L3-visual-12).
-                  title={p.title}
-                  onPointerDown={() => {
-                    if (ch) handlers.press(ch, p);
-                  }}
-                  onClick={(e) => {
-                    if (ch) handlers.open(index, ch, p, e.currentTarget);
-                  }}
-                  onFocus={() => handlers.focusCell(index, p)}
-                  onMouseEnter={() => {
-                    if (ch) handlers.hover(index, ch, p);
-                  }}
-                  data-genre={genre ?? undefined}
-                  // overflow-clip, not hidden: the cell is then no scroll container, so its text can stick.
-                  // Flat fills with 2 px gutters, no outlines: a wall of boxed cells read as a spreadsheet.
-                  className={cn(
-                    'absolute top-1 bottom-1 overflow-clip rounded-md px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus',
-                    // Every cell a now line can cross is opaque: the line (drawn before the rows)
-                    // shows only in the gutters, the ruler and the airing cell's foot, so it never
-                    // strikes through a title or a time. A see-through airing cell let it through
-                    // every glyph gap.
-                    muted
-                      ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
-                        'bg-bg text-fg-subtle hover:bg-surface'
-                      : // What airs now reads as one band down the grid. On now: the raised cell (white
-                        // with a lifted shadow in light, the raised fill in dark), never a grey or
-                        // amber wash. Later and ended: one step down on surface-2, which keeps an edge
-                        // against the page in every theme. dark:bg-surface would be the page's own
-                        // black under OLED, and an unfilled ended cell left catch-up hours as loose
-                        // text. Ended cells step back by their quiet text and the History glyph only.
-                        b.when === 'now'
-                        ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
-                        : b.when === 'past'
-                          ? 'bg-surface-2 text-fg-subtle hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3'
-                          : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
-                  )}
-                  style={{ ...inlineStart(b.left + 1, rtl), width: Math.max(2, b.width - 2) }}
-                >
-                  {/* CB-GUIDE-GENRE: the bucket's stripe on the inline start. */}
-                  {genre && !muted ? (
-                    <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
-                  ) : null}
-                  {/* The airing programme's progress along its foot (LG-18). In the accent's mark tone
-                      only on the playing channel's row, where it means "here", as in the Live list;
-                      an amber foot on every airing cell stacked into stripes beside the red now line.
-                      The rest are neutral: the cell prints its times, so the foot only hints. */}
-                  {b.when === 'now' && !muted ? (
-                    <span
-                      aria-hidden
-                      data-testid="cell-progress"
-                      className={cn('absolute start-0 bottom-0 h-0.5', playing ? 'bg-accent-mark' : 'bg-fg-subtle/55')}
-                      style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
-                    />
-                  ) : null}
-                  {/* The now line's stub at the cell's foot: the line runs on in the gutters
-                      above and below, and the opaque cell keeps it off the title. */}
-                  {b.when === 'now' ? (
-                    <span
-                      aria-hidden
-                      data-testid="cell-now-tick"
-                      className="absolute bottom-0 h-1.5 w-0.5 bg-live"
-                      style={{ insetInlineStart: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 2}px))` }}
-                    />
-                  ) : null}
-                  {/* A show that began before the visible edge keeps its title readable: the text sticks
-                      8 px past the sticky channel column until the cell's end pushes it out, and
-                      fitCellText narrows it so the title ends in an ellipsis inside the cell. */}
-                  <span
-                    data-testid="cell-text"
-                    className="sticky block w-max max-w-full"
-                    style={{ insetInlineStart: channelCol + 8 }}
-                    data-pad-left={b.left + base}
-                    data-pad-width={b.width}
-                  >
-                    {/* The title at the dense-row size (13.5 px) and the times at caption size: at 11 px
-                        a desktop guide was the smallest text in the app. Both lines fit the row in
-                        compact density too (20 + 16 px of the cell's 41). What airs now is set
-                        semibold, the rest medium. */}
-                    <span className={cn('flex items-center gap-1 truncate text-body-sm', b.when === 'now' && !muted ? 'font-semibold' : 'font-medium')}>
-                      {b.when === 'past' && catchupOk ? <History className="size-3.5 shrink-0" aria-hidden /> : null}
-                      <span dir="auto" className="truncate text-match-parent">
-                        {p.title}
-                      </span>
-                      {/* recording: */}
-                      <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
-                    </span>
-                    {/* Times are the quiet line under every title; an ended or stepped-back cell's are
-                        already in its quiet text tone. */}
-                    <span className={cn('block truncate text-caption tabular-nums', !muted && b.when !== 'past' && 'text-fg-muted')}>{range}</span>
-                  </span>
-                </button>
-              );
-            })}
+            {chunks.filter((chunk) => {
+              const left = base + chunk.left;
+              const right = left + chunk.width;
+              return left < renderRight && right > renderLeft;
+            }).map((chunk) => (
+              <GuideProgrammeChunk
+                key={`${channelKey}:${chunk.key}`}
+                chunk={chunk}
+                base={base}
+                index={index}
+                channelCol={channelCol}
+                channel={ch}
+                kind={kind}
+                now={now}
+                lang={lang}
+                genreFilter={genreFilter}
+                genreNames={genreNames}
+                labels={labels}
+                playing={playing}
+                playingProgramStart={chunk.blocks.some((b) => b.program.start === playingProgramStart) ? playingProgramStart : undefined}
+                cursorStart={chunk.blocks.some((b) => b.program.start === cursorStart) ? cursorStart : null}
+                rtl={rtl}
+                schedule={schedule}
+                handlers={handlers}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -413,6 +376,187 @@ function sameRow(prev: GuideRowProps, next: GuideRowProps): boolean {
   for (const p of next.programs ?? []) {
     if (programWhen(p, prev.now) !== programWhen(p, next.now)) return false;
     if (ch && canCatchUp(p, ch, next.kind, prev.now) !== canCatchUp(p, ch, next.kind, next.now)) return false;
+  }
+  return true;
+}
+
+type ProgrammeChunkProps = Pick<GuideRowProps,
+  'index' | 'channelCol' | 'channel' | 'kind' | 'now' | 'lang' | 'genreFilter' | 'genreNames' |
+  'labels' | 'playing' | 'playingProgramStart' | 'cursorStart' | 'rtl' | 'schedule' | 'handlers'> & {
+  chunk: ProgrammeChunk;
+  base: number;
+};
+
+/** Buffer edges mount independently; the overlapping hours do not rebuild their cell trees. */
+const GuideProgrammeChunk = memo(function GuideProgrammeChunk({
+  chunk, base, index, channelCol, channel: ch, kind, now, lang, genreFilter, genreNames, labels,
+  playing, playingProgramStart, cursorStart, rtl, schedule, handlers,
+}: ProgrammeChunkProps) {
+  const { onNow, playingNow } = labels;
+  const ref = useRef<HTMLDivElement>(null);
+  const hydration = handlers.hydration;
+  const left = base + chunk.left;
+  const right = left + chunk.width;
+  const [ready, setReady] = useState(() => !hydration || cursorStart !== null || hydration.isVisible({ left, right, row: index }));
+  // A keyboard target must exist in this commit: the page's focus effect runs before a
+  // child-only ready update could make it visible, and would otherwise remain pending.
+  const renderReady = ready || cursorStart !== null || !hydration;
+  const granted = useRef<HydrationTicket | null>(null);
+  useLayoutEffect(() => {
+    if (ready) return;
+    if (!hydration || cursorStart !== null) {
+      setReady(true);
+      return;
+    }
+    const ticket = hydration.enqueue({ left, right, row: index }, (grant) => {
+      granted.current = grant;
+      setReady(true);
+    });
+    return () => {
+      // The granted group releases the global budget only after its DOM has committed.
+      if (granted.current !== ticket) ticket.cancel();
+    };
+  }, [ready, hydration, cursorStart, left, right, index]);
+  useLayoutEffect(() => () => granted.current?.cancel(), []);
+  useLayoutEffect(() => {
+    if (!renderReady || !ref.current) return;
+    const unregister = handlers.trackTitles(ref.current);
+    granted.current?.committed();
+    granted.current = null;
+    return unregister;
+  });
+  return (
+    <div
+      ref={ref}
+      data-programme-chunk={chunk.key}
+      className="absolute"
+      // Reserve the entire group's bounds before its cells hydrate. Each later insertion
+      // stays inside this existing layout/paint boundary instead of invalidating the track.
+      // Four pixels around it preserve the cells' focus rings and raised-cell shadows.
+      style={{ ...inlineStart(chunk.left - 4, rtl), width: chunk.width + 8, top: -4, bottom: -4, contain: 'strict' }}
+    >
+      <div className="absolute" style={{ inset: 4 }}>
+        {renderReady && chunk.blocks.map((b) => {
+          const p = b.program;
+          const catchupOk = ch ? canCatchUp(p, ch, kind, now) : false;
+          const range = formatRange(p, lang);
+          const genre = genreOf(p.category);
+          // Filtered to a genre: the others step back to plain text on no fill.
+          const muted = !!genreFilter && genre !== genreFilter;
+          const isPlaying = p.start === playingProgramStart;
+          return (
+            <button
+              key={p.start}
+              type="button"
+              data-cell-row={index}
+              data-start={p.start}
+              data-playing={isPlaying ? '' : undefined}
+              aria-current={isPlaying ? 'true' : undefined}
+              tabIndex={cursorStart === p.start ? 0 : -1}
+              // The genre too: the filter dims cells, which a screen reader does not see.
+              aria-label={`${p.title}, ${range}${b.when === 'now' ? `, ${onNow}` : ''}${isPlaying ? `, ${playingNow}` : ''}${genre ? `, ${genreNames[genre]}` : ''}`}
+              // The full title on hover: a narrow or clipped cell truncates it (L3-visual-12).
+              title={p.title}
+              onPointerDown={() => {
+                if (ch) handlers.press(ch, p);
+              }}
+              onClick={(e) => {
+                if (ch) handlers.open(index, ch, p, e.currentTarget);
+              }}
+              onFocus={() => handlers.focusCell(index, p)}
+              onMouseEnter={() => {
+                if (ch) handlers.hover(index, ch, p);
+              }}
+              data-genre={genre ?? undefined}
+              // Clip shifted labels at the programme boundary without creating a scroll container.
+              // Flat fills with 2 px gutters, no outlines: a wall of boxed cells read as a spreadsheet.
+              className={cn(
+                'absolute top-1 bottom-1 overflow-clip rounded-md px-2 py-1 text-start outline-none focus-visible:ring-2 focus-visible:ring-focus',
+                // Every cell a now line can cross is opaque: the line (drawn before the rows)
+                // shows only in the gutters, the ruler and the airing cell's foot, so it never
+                // strikes through a title or a time. A see-through airing cell let it through
+                // every glyph gap.
+                isPlaying
+                  ? 'bg-selected font-medium text-fg ring-1 ring-accent-mark ring-inset hover:bg-selected'
+                  : muted
+                  ? // Filtered to another genre: plain text on the page's own colour, no fill to see.
+                    'bg-bg text-fg-subtle hover:bg-surface'
+                  : // On now: the raised cell (white with a shadow in light, the next surface step
+                    // in dark), never a grey or amber wash. Light rows sit on the grey page:
+                    // there a cell is the white panel; dark keeps the lifted surface step.
+                    b.when === 'now'
+                    ? 'bg-surface text-fg shadow-2 hover:bg-surface-3 dark:bg-raised dark:shadow-1 dark:hover:bg-pressed'
+                    : b.when === 'past'
+                      ? 'bg-surface-2 text-fg-subtle hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3'
+                      : 'bg-surface-2 text-fg hover:bg-surface-3 dark:bg-surface-2 dark:hover:bg-surface-3',
+              )}
+              style={{ ...inlineStart(b.left - chunk.left + 1, rtl), width: Math.max(2, b.width - 2) }}
+            >
+              {/* CB-GUIDE-GENRE: the bucket's stripe on the inline start. */}
+              {genre && !muted && !isPlaying ? (
+                <span aria-hidden data-testid="cell-genre" className="absolute inset-y-1 start-0 w-[3px] rounded-e-full" style={{ background: genreColor(genre) }} />
+              ) : null}
+              {/* The airing programme's progress along its foot (LG-18): the accent's mark tone, a mark of progress. */}
+              {b.when === 'now' && !muted ? (
+                <span
+                  aria-hidden
+                  data-testid="cell-progress"
+                  data-guide-clock=""
+                  className={cn('absolute start-0 bottom-0 h-0.5', playing ? 'bg-accent-mark' : 'bg-fg-subtle/55')}
+                  style={{ width: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 1}px))` }}
+                />
+              ) : null}
+              {/* The now line's stub at the cell's foot: the line runs on in the gutters
+                  above and below, and the opaque cell keeps it off the title. */}
+              {b.when === 'now' ? (
+                <span
+                  aria-hidden
+                  data-testid="cell-now-tick"
+                  data-guide-clock=""
+                  className="absolute bottom-0 h-1.5 w-0.5 bg-live"
+                  style={{ insetInlineStart: `max(0px, calc(var(${GRID_NOW_VAR}, 0px) - ${base + b.left + 2}px))` }}
+                />
+              ) : null}
+              {/* Only titles near the visible edge receive the sticky class. The browser moves
+                  those titles with native scrolling, and the cell clips them at its end. */}
+              <span
+                data-testid="cell-text"
+                className="block w-max max-w-full"
+                style={{ insetInlineStart: channelCol + 8 }}
+                data-pad-left={b.left + base}
+                data-pad-width={b.width}
+              >
+                <span className={cn('flex items-center gap-1 truncate text-body-sm', b.when === 'now' && !muted ? 'font-semibold' : 'font-medium')}>
+                  {b.when === 'past' && catchupOk ? <History className="size-3.5 shrink-0" aria-hidden /> : null}
+                  <span dir="auto" className="truncate text-match-parent">
+                    {p.title}
+                  </span>
+                  {/* recording: */}
+                  <ScheduleMarkView index={schedule} channelRef={ch?.ref} program={p} />
+                </span>
+                <span className={cn('block truncate text-caption tabular-nums', !muted && b.when !== 'past' && 'text-fg-muted')}>{range}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}, sameChunk);
+
+function sameChunk(prev: ProgrammeChunkProps, next: ProgrammeChunkProps): boolean {
+  for (const key of Object.keys(next) as (keyof ProgrammeChunkProps)[]) {
+    if (key !== 'chunk' && key !== 'now' && key !== 'schedule' && prev[key] !== next[key]) return false;
+  }
+  if (!sameProgrammeChunk(prev.chunk, next.chunk)) return false;
+  for (const { program } of next.chunk.blocks) {
+    if (prev.now !== next.now && next.channel &&
+      canCatchUp(program, next.channel, next.kind, prev.now) !== canCatchUp(program, next.channel, next.kind, next.now)) return false;
+    if (prev.schedule !== next.schedule) {
+      const before = markFor(prev.schedule, prev.channel?.ref, program);
+      const after = markFor(next.schedule, next.channel?.ref, program);
+      if (before.reminder !== after.reminder || before.recording !== after.recording) return false;
+    }
   }
   return true;
 }

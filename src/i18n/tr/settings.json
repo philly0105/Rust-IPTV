@@ -75,6 +75,12 @@
   "railMyList": "Listem",
 
   "player": "Oynatıcı",
+  "livePlayer": "Canlı TV",
+  "livePlayerHint": "Şu anda yayında olan kanallar için, kanal değiştirme dahil.",
+  "catchupPlayer": "Geri izleme TV",
+  "catchupPlayerHint": "TV rehberinden açılan geçmiş programlar için.",
+  "vodPlayer": "Filmler ve diziler",
+  "vodPlayerHint": "İsteğe bağlı filmler ve bölümler için.",
   "playerBuiltIn": "Yerleşik oynatıcı",
   "playerBuiltInHint": "Uygulama içinde oynatır. Çoğu HLS yayınında çalışır.",
   "playerEmbeddedMpv": "Gömülü mpv",

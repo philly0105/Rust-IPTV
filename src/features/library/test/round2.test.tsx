@@ -176,7 +176,7 @@ describe('download rows', () => {
 
   it('reserve the widest row\'s actions column on every row, so bars and badges end on one line', () => {
     row(makeDownload({ id: 3, status: 'paused' }), ['resume', 'remove']);
-    expect(screen.getByTestId('download-actions').className).toContain('pointer-fine:w-[calc(3*2rem+2*0.125rem)]');
+    expect(screen.getByTestId('download-actions').className).toContain('pointer-fine:w-[calc(4*2rem+3*0.125rem)]');
   });
 });
 

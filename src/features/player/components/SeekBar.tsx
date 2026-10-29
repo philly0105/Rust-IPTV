@@ -165,6 +165,8 @@ export function SeekBar({ min, max, value, buffered, live, edgeSlack, onSeek, cl
         <div
           aria-hidden
           data-testid="seek-preview"
+          data-mpv-overlay=""
+          data-mpv-seek-preview=""
           className={cn(SEEK_LABEL, '-translate-x-1/2')}
           // Kept inside the bar so the ends never clip at the player's edge.
           style={{ left: clampTip(hover.x, trackRef.current?.getBoundingClientRect().width ?? 0) }}

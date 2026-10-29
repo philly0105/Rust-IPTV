@@ -228,6 +228,7 @@ export interface DownloadStartArgs {
   headers?: RequestHeaders;
   posterUrl?: string;
   fileNameHint?: string;
+  durationSeconds?: number;
 }
 
 export interface DetectedPlayers {
@@ -542,6 +543,7 @@ export interface RpcMap {
   'downloads.list': Cmd<void, Download[]>;
   'downloads.get': Cmd<{ id: number }, Download>;
   'downloads.start': Cmd<DownloadStartArgs, Download>;
+  'downloads.playSource': Cmd<{ id: number }, PlayerSource>;
   'downloads.pause': Cmd<{ id: number }, void>;
   'downloads.resume': Cmd<{ id: number }, void>;
   'downloads.cancel': Cmd<{ id: number }, void>;
@@ -550,6 +552,7 @@ export interface RpcMap {
   'downloads.reveal': Cmd<{ id: number }, void>;
   'downloads.setDir': Cmd<{ path: string }, void>;
   'downloads.dir': Cmd<void, { path: string }>;
+  'downloads.setRateLimit': Cmd<{ id: number; bytesPerSecond: number | null }, void>;
   'downloads.setPosition': Cmd<{ id: number; positionSeconds: number }, void>;
   /** "Download next": a queued row moves to the front of the queue (saved, so a restart keeps it). */
   'downloads.prioritize': Cmd<{ id: number }, void>;
@@ -607,6 +610,7 @@ export interface RpcMap {
   /** `volume` (0..100) and `muted` are applied before the first state event. */
   'mpv.attach': Cmd<{ bounds: Bounds; volume?: number; muted?: boolean }, MpvState>;
   'mpv.load': Cmd<{ source: PlayerSource }, void>;
+  'mpv.unload': Cmd<void, void>;
   /** Raw mpv JSON IPC command. */
   'mpv.command': Cmd<{ cmd: MpvArg[] }, unknown>;
   'mpv.setProperty': Cmd<{ name: string; value: unknown }, void>;
@@ -642,6 +646,8 @@ export interface RpcMap {
   'epg.shortEpg': Cmd<{ ref: ItemRef; limit?: number }, EpgProgram[]>;
   /** Xtream archive table (`get_simple_data_table`) overlapping [from, to); [] for other kinds. */
   'catchup.programs': Cmd<{ ref: ItemRef; from: string; to: string }, EpgProgram[]>;
+  /** The complete Xtream archive table of one live channel; [] for other kinds. */
+  'catchup.table': Cmd<{ ref: ItemRef }, EpgProgram[]>;
 
   // recording:
   'reminders.list': Cmd<void, Reminder[]>;
@@ -877,6 +883,7 @@ export const RPC_COMMANDS = [
   'downloads.list',
   'downloads.get',
   'downloads.start',
+  'downloads.playSource',
   'downloads.pause',
   'downloads.resume',
   'downloads.cancel',
@@ -885,6 +892,7 @@ export const RPC_COMMANDS = [
   'downloads.reveal',
   'downloads.setDir',
   'downloads.dir',
+  'downloads.setRateLimit',
   'downloads.setPosition',
   'downloads.prioritize',
   'downloads.playback',
@@ -914,6 +922,7 @@ export const RPC_COMMANDS = [
   'player.stopExternal',
   'mpv.attach',
   'mpv.load',
+  'mpv.unload',
   'mpv.command',
   'mpv.setProperty',
   'mpv.setBounds',
@@ -928,6 +937,7 @@ export const RPC_COMMANDS = [
   'sources.schedule',
   'epg.shortEpg',
   'catchup.programs',
+  'catchup.table',
   'reminders.list',
   'reminders.add',
   'reminders.remove',

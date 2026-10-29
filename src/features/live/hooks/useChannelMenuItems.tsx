@@ -9,14 +9,16 @@
  * - Channel: Copy link, Rename / Reset name / Hide, Match guide channel, Lock.
  */
 
-import { Copy, ExternalLink, Heart, History, Link2, Play } from 'lucide-react';
+import { Copy, Download, ExternalLink, Heart, History, Link2, Play } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router';
 
-import { isDesktop } from '@/api/transport';
-import type { Channel, Source } from '@/api/types';
+import { rpc, isDesktop } from '@/api/transport';
+import { invalidate } from '@/api/query';
+import type { Channel, EpgProgram, Source } from '@/api/types';
 import { errorDescription, toast } from '@/ui';
+import { copyText } from '@/lib/clipboard';
 import { useChannelEditMenuItems } from '@/features/channeledit';
 import { useAddToListMenuItem } from '@/features/lists/hooks/useAddToList';
 import { channelInput } from '@/features/multiview/addChannel';
@@ -29,7 +31,8 @@ import { ChannelLogo, ChannelName } from '../components/ChannelLogo';
 import type { MenuEntry, MenuHeader, MenuItem } from '../components/ContextMenu';
 import { archivePath, canBrowseArchive } from '../lib/archive';
 import { displayChannelName } from '../lib/channelName';
-import { openChannelSource } from '../lib/playback';
+import { canCatchUp, formatClock, formatDay, ms, programWhen } from '../lib/epgTime';
+import { canDownloadCatchup, catchupDownloadArgs, catchupSource, openCatchupSource, openChannelSource, playCatchup } from '../lib/playback';
 import { useDisplayPrefs } from './useDisplayPrefs';
 
 export interface ChannelMenuOptions {
@@ -48,6 +51,12 @@ export interface ChannelMenuOptions {
    * list rows); the guide does not.
    */
   editHints?: boolean;
+  /** Programme under the pointer, when this menu was opened from an EPG cell. */
+  programme?: EpgProgram;
+  /** Current wall-clock time, used to avoid offering archive links for future programmes. */
+  now?: number;
+  /** Receives a resolved programme URL for display when clipboard access is unavailable. */
+  onProgrammeLink?(url: string): void;
 }
 
 const sep = (id: string): MenuEntry => ({ id, type: 'separator' });
@@ -58,7 +67,7 @@ function plain(a: MenuItem, hints: boolean): MenuItem {
 }
 
 export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOptions): MenuEntry[] {
-  const { t } = useTranslation('live');
+  const { t, i18n } = useTranslation('live');
   const navigate = useNavigate();
   const { stripCountryPrefix } = useDisplayPrefs();
   const name = channel ? displayChannelName(channel.name, stripCountryPrefix) : '';
@@ -73,17 +82,20 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
     channel ? { sourceId: channel.ref.sourceId, contentType: channel.ref.contentType, kind: 'item', targetId: channel.ref.itemId, name } : null,
     { categoryId: channel?.categoryId },
   );
-  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, editHints = false } = opts;
+  const { source, favorite, onPlay, onToggleFavorite, onMapGuide, organize, editHints = false, programme, now = Date.now(), onProgrammeLink } = opts;
 
   return useMemo((): MenuEntry[] => {
     if (!channel) return [];
     const ch = channel;
     const src = source && source.id === ch.ref.sourceId ? source : undefined;
+    const playableProgramme = !!src && !!programme && programWhen(programme, now) === 'past' && canCatchUp(programme, ch, src.kind, now);
     const external = async (player: 'mpv' | 'vlc') => {
       if (!src) return;
       try {
         // C2: a locked channel or group asks for the PIN first, as inline playback does.
-        const s = await openChannelSource(ch, src, name);
+        const s = playableProgramme && programme
+          ? await openCatchupSource(ch, src.kind, programme, now, name)
+          : await openChannelSource(ch, src, name);
         if (!s) return;
         // The stage says what plays where, with Stop and Reopen (the player's ExternalStage), instead
         // of "Nothing playing"; the in-app player gives way to it (L2-desktop-9). The store opens it and
@@ -107,14 +119,65 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
           toast({ title: t('copyFailed'), variant: 'error' });
           return;
         }
-        await navigator.clipboard.writeText(s.url);
+        await copyText(s.url);
         toast({ title: t('urlCopied'), variant: 'success' });
       } catch (err) {
         toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
       }
     };
+    const copyProgramme = async () => {
+      if (!src || !programme) return;
+      try {
+        const s = await catchupSource(ch, src.kind, programme, now);
+        // Timeshift URLs from Xtream/Stalker must retain the provider login in their path so that
+        // VLC/MPV can open them. Ordinary channel copies still use the stricter policy.
+        if (!canShareSource(s, () => src.kind, { allowCredentials: true })) {
+          toast({ title: t('copyFailed'), variant: 'error' });
+          return;
+        }
+        if (onProgrammeLink) {
+          onProgrammeLink(s.url);
+          return;
+        }
+        await copyText(s.url);
+        toast({ title: t('urlCopied'), variant: 'success' });
+      } catch (err) {
+        toast({ title: t('copyFailed'), description: errorDescription(err), variant: 'error' });
+      }
+    };
+    const downloadProgramme = async () => {
+      if (!src || !programme) return;
+      try {
+        const at = ms(programme.start);
+        const subtitle = `${programme.title} · ${formatDay(at, i18n.language)} ${formatClock(at, i18n.language)}`;
+        const args = await catchupDownloadArgs(ch, src.kind, programme, {
+          now, displayName: name, subtitle, notFileMessage: t('downloadNotFile', { ns: 'vod' }),
+        });
+        if (!args) return;
+        await rpc('downloads.start', args);
+        void invalidate('downloads.');
+        toast({
+          title: t('downloadQueued', { ns: 'vod' }),
+          description: `${name}  ${programme.title}`,
+          variant: 'success',
+          action: { label: t('openDownloads', { ns: 'vod' }), onClick: () => void navigate('/downloads') },
+        });
+      } catch (err) {
+        toast({ title: t('downloadFailed', { ns: 'vod' }), description: errorDescription(err), variant: 'error' });
+      }
+    };
+    const watchProgramme = () => {
+      if (!src || !programme) return;
+      void playCatchup(ch, src.kind, programme, now, name).catch((err: unknown) =>
+        toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
+      );
+    };
     const out: MenuEntry[] = [
       { id: 'play', label: t('play'), icon: <Play className="size-4" />, onSelect: () => onPlay(ch) },
+      ...(playableProgramme ? [{ id: 'watch-programme', label: t('watchCatchup'), icon: <Play className="size-4" />, onSelect: watchProgramme }] : []),
+      ...(playableProgramme && src && programme && canDownloadCatchup(ch, src.kind)
+        ? [{ id: 'download-programme', label: t('downloadCatchup', { title: programme.title }), icon: <Download className="size-4" />, onSelect: () => void downloadProgramme() }]
+        : []),
       // guide: the channel's catch-up archive browser.
       ...(src && canBrowseArchive(ch, src.kind)
         ? [{ id: 'archive', label: t('browseArchive'), icon: <History className="size-4" />, onSelect: () => void navigate(archivePath(ch.ref)) }]
@@ -141,15 +204,18 @@ export function useChannelMenuItems(channel: Channel | null, opts: ChannelMenuOp
       sep('sep-channel'),
       // Xtream and Stalker links carry the login (and so can a playlist link): only a link with no
       // credentials in it is offered, and the resolved link is checked again before it is copied.
-      ...(src?.kind === 'm3u' && !!ch.url && isShareableUrl(ch.url)
+      ...(!programme && src?.kind === 'm3u' && !!ch.url && isShareableUrl(ch.url)
         ? [{ id: 'copy', label: t('copyUrl'), icon: <Copy className="size-4" />, onSelect: () => void copy() }]
+        : []),
+      ...(src && programme && canCatchUp(programme, ch, src.kind, now)
+        ? [{ id: 'copy-programme', label: t('copyUrl'), icon: <Copy className="size-4" />, onSelect: () => void copyProgramme() }]
         : []),
       ...editItems.map((a) => plain(a, editHints)),
       ...(onMapGuide ? [{ id: 'epg', label: t('mapEpg'), icon: <Link2 className="size-4" />, onSelect: () => onMapGuide(ch) }] : []),
       ...lockItems.map((a) => plain(a, false)),
     ];
     return out;
-  }, [channel, source, favorite, name, live, t, navigate, onPlay, onToggleFavorite, onMapGuide, organize, editHints, multiviewItem, addToListItem, editItems, lockItems]);
+  }, [channel, source, favorite, name, live, t, i18n.language, navigate, onPlay, onToggleFavorite, onMapGuide, organize, editHints, multiviewItem, addToListItem, editItems, lockItems, programme, now, onProgrammeLink]);
 }
 
 /**

@@ -7,6 +7,7 @@ import { isDesktop, rpc } from '@/api/transport';
 import { itemKey, type Bounds, type MpvState, type MpvTrack, type PlayerSource } from '@/api/types';
 
 import { useToast } from '@/ui/Toast';
+import { archiveRequest } from '../archiveRequest';
 import { cn } from '../cn';
 import { trackLanguageName, type EngineTracks, type TrackOption } from '../engines';
 import { classifyStreamError, rpcErrorCode } from '../errors';
@@ -41,6 +42,9 @@ export const MPV_FALLBACK_TOAST = 'mpv-fallback';
 /** Settings > External players, where the mpv path is set. */
 const PLAYER_SETTINGS_PATH = '/settings/players';
 
+/** AppKit's video view lets pointer events reach WebKit; Windows mpv handles them itself. */
+const MAC_DOM_VIDEO_EVENTS = isDesktop && typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
+
 /** Off-screen bounds while a modal dialog covers most of the video (the native surface paints above the DOM). */
 export const HIDDEN_BOUNDS: Bounds = { x: -16000, y: -16000, width: 16, height: 16 };
 
@@ -72,7 +76,11 @@ function touchesNode(n: Node): boolean {
 
 /** The mutation can move the native window's rectangle or holes. */
 function touchesLayout(r: MutationRecord): boolean {
-  if (r.type === 'attributes') return true;
+  if (r.type === 'attributes') {
+    // The seek preview moves by changing `left` while the pointer crosses the bar.
+    // Observe only its style changes; unrelated inline styles update every frame.
+    return r.attributeName !== 'style' || (r.target instanceof Element && r.target.matches('[data-mpv-seek-preview]'));
+  }
   // An overlay's content changed (a menu switching to its subtitle or sleep view): its hole resizes.
   if (r.target instanceof Element && r.target.closest(OVERLAY_SELECTOR)) return true;
   for (const n of Array.from(r.addedNodes)) if (touchesNode(n)) return true;
@@ -137,6 +145,7 @@ export function MpvSurface({ className }: { className?: string }) {
   const { t } = useTranslation('player');
   const { toast } = useToast();
   const ref = useRef<HTMLDivElement>(null);
+  const surfaceEvents = useRef<{ click: () => void; doubleClick: () => void; wheel: (delta: number) => void; menu: (x: number, y: number) => void }>({ click: () => undefined, doubleClick: () => undefined, wheel: () => undefined, menu: () => undefined });
   const source = usePlayerStore((s) => s.source);
   const [attached, setAttached] = useState(false);
   /** Bumped per successful attach (first start and every restart after a crash): the load effect reloads. */
@@ -149,6 +158,10 @@ export function MpvSurface({ className }: { className?: string }) {
    * position, pause and end must not be credited to the new item.
    */
   const loadedKey = useRef<string | null>(null);
+  /** Xtream archive URLs start at a programme minute; mpv's clock starts again at zero. */
+  const archiveOffset = useRef(0);
+  const archiveRun = useRef(0);
+  const archivePending = useRef<{ key: string; offset: number; paused: boolean } | null>(null);
   /** Where the video's context menu is open (viewport CSS px), or null. */
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const menuOpen = useRef(false);
@@ -225,7 +238,7 @@ export function MpvSurface({ className }: { className?: string }) {
 
     const send = (): void => {
       raf = 0;
-      if (disposed || !ref.current) return;
+      if (disposed || !ready || !ref.current) return;
       // Menus, tooltips and dialogs over the video (and fullscreen chrome) are cut out of the
       // native window as holes instead of shrinking or hiding it.
       const { bounds: b, holes } = surfaceLayout(ref.current);
@@ -261,7 +274,7 @@ export function MpvSurface({ className }: { className?: string }) {
     const mo = new MutationObserver((records) => {
       if (records.some(touchesLayout)) schedule();
     });
-    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal', 'open', 'hidden', 'role'] });
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-modal', 'open', 'hidden', 'role', 'style'] });
     // A popover that pops in (or the tour card that glides) settles at its final rect: measure it again then.
     const onSettle = (e: Event): void => {
       if (e.target instanceof Element && e.target.closest(OVERLAY_SELECTOR)) schedule();
@@ -293,7 +306,7 @@ export function MpvSurface({ className }: { className?: string }) {
       if (replayTimer) clearTimeout(replayTimer);
       replayTimer = null;
     };
-    const unClick = onAppEvent('mpv.click', () => {
+    const onVideoClick = () => {
       if (disposed || !ready) return;
       // A click on the video while its menu is open only closes the menu.
       if (menuOpen.current) {
@@ -317,8 +330,9 @@ export function MpvSurface({ className }: { className?: string }) {
       }
       lastClick = { at: Date.now(), wasPaused: useMediaStore.getState().mpv?.paused ?? false };
       st.togglePlay();
-    });
-    const unDouble = onAppEvent('mpv.dblclick', () => {
+    };
+    const unClick = onAppEvent('mpv.click', onVideoClick);
+    const onVideoDoubleClick = () => {
       if (disposed || !ready || Date.now() < swallowDoubleUntil) return;
       cancelReplay();
       if (lastClick && Date.now() - lastClick.at < DOUBLE_CLICK_MS) {
@@ -327,17 +341,21 @@ export function MpvSurface({ className }: { className?: string }) {
       lastClick = null;
       if (usePipStore.getState().active) void exitPip();
       else usePlayerStore.getState().toggleFullscreen();
-    });
+    };
+    const unDouble = onAppEvent('mpv.dblclick', onVideoDoubleClick);
     // The wheel over the native video steps the volume like the arrow keys, with the same readout.
-    const unWheel = onAppEvent('mpv.wheel', ({ delta }) => {
+    const onVideoWheel = (delta: number) => {
       if (disposed || !ready || !Number.isFinite(delta) || delta === 0) return;
       stepVolume(Math.max(-MAX_WHEEL_NOTCHES, Math.min(MAX_WHEEL_NOTCHES, delta)), t);
-    });
-    const unMenu = onAppEvent('mpv.contextmenu', ({ x, y }) => {
+    };
+    const unWheel = onAppEvent('mpv.wheel', ({ delta }) => onVideoWheel(delta));
+    const onVideoMenu = (x: number, y: number) => {
       if (disposed || !ready || !Number.isFinite(x) || !Number.isFinite(y)) return;
       if (!usePlayerStore.getState().source) return;
       setMenuAt({ x, y });
-    });
+    };
+    const unMenu = onAppEvent('mpv.contextmenu', ({ x, y }) => onVideoMenu(x, y));
+    surfaceEvents.current = { click: onVideoClick, doubleClick: onVideoDoubleClick, wheel: onVideoWheel, menu: onVideoMenu };
     // PiP opens in the video's shape (mpv's display size, 16:9 when it has none yet).
     const unAspect = setPipAspectSource(async () =>
       ready ? aspectFromVideoParams(await rpc('mpv.command', { cmd: ['get_property', 'video-params'] })) : undefined,
@@ -353,18 +371,29 @@ export function MpvSurface({ className }: { className?: string }) {
 
     const applyState = (st: MpvState, initial = false): void => {
       const prev = useMediaStore.getState().mpv;
+      const src = usePlayerStore.getState().source;
+      const current = !!src && loadedKey.current === mpvLoadKey(src);
+      const offset = current ? archiveOffset.current : 0;
+      const shown: MpvState = offset ? {
+        ...st,
+        timePos: st.timePos + offset,
+        duration: src?.durationSeconds ?? (st.duration === undefined ? undefined : st.duration + offset),
+        seekable: st.seekable && { start: st.seekable.start + offset, end: st.seekable.end + offset },
+      } : st;
+      // Events for the old response can arrive while a replacement is opening.
+      const pending = archivePending.current !== null;
+      const mediaState = pending ? { ...shown, loaded: false, seekable: undefined } : shown;
       const tracks = mpvTracks(st, { audio: (i) => t('audioFallback', { index: i }), sub: (i) => t('subtitleFallback', { index: i }) });
       const shownTracks = useMediaStore.getState().tracks;
       useMediaStore.setState({
-        mpv: st,
+        mpv: mediaState,
         tracks: sameTracks(tracks, shownTracks) ? shownTracks : tracks,
         captionsOn: st.tracks.some((x) => x.type === 'sub' && x.selected),
         // Mid-stream stalls (mpv's paused-for-cache) count as waiting too.
-        waiting: !st.loaded || !!st.buffering,
-        seekable: st.seekable,
+        waiting: pending || !st.loaded || !!st.buffering,
+        seekable: mediaState.seekable,
         recordStartedAt: st.recording ? (prev?.recording ? useMediaStore.getState().recordStartedAt : undefined) ?? Date.now() : undefined,
       });
-      const src = usePlayerStore.getState().source;
       // The attach reply may predate the volume/mute we sent with it; the store keeps the saved values.
       if (!initial) reportVolume(st.volume / 100, st.muted);
       // mpv died: always surface it, whatever item it was loading.
@@ -373,11 +402,13 @@ export function MpvSurface({ className }: { className?: string }) {
         return;
       }
       if (!src || loadedKey.current === null || loadedKey.current !== mpvLoadKey(src)) return;
-      reportProgress(st.timePos, src.isLive ? undefined : st.duration);
+      // Stopping a file clears mpv's time-pos to zero. Keep the outgoing VOD
+      // position until the next item is ready so its resume save stays correct.
+      if (st.loaded) reportProgress(shown.timePos, src.isLive ? undefined : src.durationSeconds ?? shown.duration);
       if (st.error) reportStatus('error', st.error);
       else if (st.loaded) reportStatus(st.paused ? 'paused' : 'playing');
       // The first frame of a new item is up: in PiP, the window follows its shape.
-      if (st.loaded && st.timePos > 0 && aspectFollowed !== loadedKey.current) {
+      if (st.loaded && shown.timePos > 0 && aspectFollowed !== loadedKey.current) {
         aspectFollowed = loadedKey.current;
         void refreshPipAspect();
       }
@@ -391,7 +422,7 @@ export function MpvSurface({ className }: { className?: string }) {
         }
       }
       // keep-open pauses at EOF instead of ending: treat "paused at the end" as ended, once.
-      const atEnd = !!st.duration && st.timePos >= st.duration - ENDED_EPSILON && st.paused;
+      const atEnd = !!shown.duration && shown.timePos >= shown.duration - ENDED_EPSILON && st.paused;
       const wasAtEnd = !!prev?.duration && prev.timePos >= prev.duration - ENDED_EPSILON && prev.paused;
       if (!src.isLive && atEnd && !wasAtEnd) handleEnded();
     };
@@ -423,6 +454,9 @@ export function MpvSurface({ className }: { className?: string }) {
       session = mine;
       ready = false;
       loadedKey.current = null;
+      archiveRun.current++;
+      archivePending.current = null;
+      archiveOffset.current = 0;
       if (restart) {
         setAttached(false);
         lastSent = null;
@@ -446,13 +480,72 @@ export function MpvSurface({ className }: { className?: string }) {
           // Only now can property writes reach mpv (before attach they fail with "not attached").
           unController();
           unController = setController({
-            play: () => void rpc('mpv.setProperty', { name: 'pause', value: false }).catch(() => undefined),
-            pause: () => void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined),
-            seekTo: (s) => void rpc('mpv.command', { cmd: ['seek', s, 'absolute'] }).catch(() => undefined),
+            play: () => {
+              if (archivePending.current) {
+                archivePending.current.paused = false;
+                reportStatus('loading');
+              }
+              void rpc('mpv.setProperty', { name: 'pause', value: false }).catch(() => undefined);
+            },
+            pause: () => {
+              if (archivePending.current) {
+                archivePending.current.paused = true;
+                reportStatus('paused');
+              }
+              void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined);
+            },
+            seekTo: (seconds) => {
+              const src = usePlayerStore.getState().source;
+              const request = src && archiveRequest(src, seconds);
+              if (!src || !request) {
+                void rpc('mpv.command', { cmd: ['seek', seconds, 'absolute'] }).catch(() => undefined);
+                return;
+              }
+              const key = mpvLoadKey(src);
+              const held = useMediaStore.getState().mpv?.seekable;
+              if (!archivePending.current && loadedKey.current === key && seconds >= archiveOffset.current &&
+                  held && seconds >= held.start && seconds < held.end) {
+                void rpc('mpv.command', { cmd: ['seek', seconds - archiveOffset.current, 'absolute'] }).catch(() => undefined);
+                return;
+              }
+              if (archivePending.current?.key === key && archivePending.current.offset === request.offset) return request.offset;
+              const run = ++archiveRun.current;
+              const paused = archivePending.current?.paused ?? usePlayerStore.getState().status === 'paused';
+              archivePending.current = { key, offset: request.offset, paused };
+              loadedKey.current = null;
+              captionsApplied = null;
+              aspectFollowed = null;
+              useMediaStore.setState({ seekable: undefined, waiting: true });
+              if (!paused) reportStatus('loading');
+              const { resumeSeconds: _resume, ...bare } = src;
+              void rpc('mpv.load', { source: { ...bare, url: request.url } })
+                .then(() => {
+                  if (disposed || run !== archiveRun.current || mpvLoadKey(usePlayerStore.getState().source ?? { url: '' }) !== key) return;
+                  archiveOffset.current = request.offset;
+                  loadedKey.current = key;
+                  const shouldPause = archivePending.current?.paused;
+                  archivePending.current = null;
+                  if (shouldPause) void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined);
+                  void sendSubtitleStyle();
+                  // The file may have loaded or failed before the command reply reached us.
+                  void rpc('mpv.state').then((snapshot) => {
+                    if (!disposed && run === archiveRun.current && snapshot) applyState(snapshot);
+                  }).catch(() => undefined);
+                })
+                .catch((err: unknown) => {
+                  if (disposed || run !== archiveRun.current) return;
+                  archivePending.current = null;
+                  loadedKey.current = key;
+                  useMediaStore.setState({ errorCode: rpcErrorCode(err) });
+                  reportStatus('error', err instanceof Error ? err.message : String(err));
+                });
+              return request.offset;
+            },
             // mpv's demuxer cache: a seek inside it reads nothing from the network.
             holds: (s) => {
+              if (archivePending.current) return false;
               const r = useMediaStore.getState().mpv?.seekable;
-              return !!r && s >= r.start && s < r.end;
+              return s >= archiveOffset.current && !!r && s >= r.start && s < r.end;
             },
             setVolume: (v) => void rpc('mpv.setProperty', { name: 'volume', value: Math.round(v * 100) }).catch(() => undefined),
             setMuted: (m) => void rpc('mpv.setProperty', { name: 'mute', value: m }).catch(() => undefined),
@@ -497,9 +590,12 @@ export function MpvSurface({ className }: { className?: string }) {
       unDouble();
       unWheel();
       unMenu();
+      surfaceEvents.current = { click: () => undefined, doubleClick: () => undefined, wheel: () => undefined, menu: () => undefined };
       unAspect();
       remeasure.current = () => undefined;
       unController();
+      archiveRun.current++;
+      archivePending.current = null;
       unExtras();
       unCommands();
       useMediaStore.setState({ mpv: undefined, recordStartedAt: undefined });
@@ -524,18 +620,27 @@ export function MpvSurface({ className }: { className?: string }) {
       void rpc('mpv.setProperty', { name: 'pause', value: true }).catch(() => undefined);
       return;
     }
+    // An error screen retains its source URL for the Retry button. A remount
+    // (for example, moving the player dock) must not reopen that failed file.
+    if (usePlayerStore.getState().status === 'error') return;
     let stale = false;
+    const run = ++archiveRun.current;
+    archivePending.current = null;
     loadedKey.current = null;
+    const request = archiveRequest(src, src.resumeSeconds ?? 0);
+    archiveOffset.current = request?.offset ?? 0;
+    const { resumeSeconds: _resume, ...bare } = src;
+    const loadSource = request ? { ...bare, url: request.url } : src;
     const load = (): void => {
-      rpc('mpv.load', { source: src })
+      rpc('mpv.load', { source: loadSource })
         .then(() => {
-          if (stale) return;
+          if (stale || run !== archiveRun.current) return;
           loadedKey.current = loadKey;
           // The subtitle look again for the new file (C6).
           void sendSubtitleStyle();
         })
         .catch((err: unknown) => {
-          if (stale) return;
+          if (stale || run !== archiveRun.current) return;
           if (engineMissing(err)) {
             fallBack.current(err instanceof Error ? err.message : '', true);
             return;
@@ -582,7 +687,15 @@ export function MpvSurface({ className }: { className?: string }) {
   return (
     <>
     {inRouter && <NavigateBridge to={navigateRef} />}
-    <div ref={ref} data-mpv-surface="" className={cn('relative h-full w-full bg-black', className)}>
+    <div
+      ref={ref}
+      data-mpv-surface=""
+      className={cn('relative h-full w-full bg-black', className)}
+      onClick={(e) => { if (MAC_DOM_VIDEO_EVENTS && attached && e.button === 0) surfaceEvents.current.click(); }}
+      onDoubleClick={() => { if (MAC_DOM_VIDEO_EVENTS && attached) surfaceEvents.current.doubleClick(); }}
+      onWheel={(e) => { if (MAC_DOM_VIDEO_EVENTS && attached && e.deltaY !== 0) surfaceEvents.current.wheel(e.deltaY < 0 ? 1 : -1); }}
+      onContextMenu={(e) => { if (MAC_DOM_VIDEO_EVENTS && attached) { e.preventDefault(); surfaceEvents.current.menu(e.clientX, e.clientY); } }}
+    >
       {/* Only before the native window exists: once attached it paints over this element. */}
       {!attached && (
         <div

@@ -14,7 +14,7 @@ class FakeTsPlayer {
   cleanupCheck = vi.fn(() => true);
   _player_engine = { _mse_controller: { _needCleanupSourceBuffer: this.cleanupCheck } };
   constructor(
-    public source: { type: string; isLive?: boolean; url?: string },
+    public source: { type: string; isLive?: boolean; url?: string; duration?: number },
     public config: Record<string, unknown>,
   ) {
     FakeTsPlayer.created.push(this);
@@ -226,6 +226,45 @@ describe('engine selection', () => {
     const p = FakeTsPlayer.created[0]!;
     expect(p.source.url).toBe(new URL('/api/proxy?url=x', window.location.href).href);
     expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, enableStashBuffer: true });
+  });
+
+  it('bounds finite catch-up TS read-ahead while retaining the programme duration', async () => {
+    const onArchiveActivity = vi.fn();
+    await createEngine(video(), src('http://h/archive.ts', { isLive: false, durationSeconds: 3720, catchupProgramStart: '2026-10-25T10:00:00Z' }), 'http://h/archive.ts', { ...cb(), onArchiveActivity }, {
+      captions: false,
+    });
+    const p = FakeTsPlayer.created[0]!;
+    expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, lazyLoadRecoverDuration: 20, expectedDuration: 3_720_000, archiveStallTimeout: 45_000, archiveScanMaxGap: 30_000, archiveSkipTimestampGaps: true, enableStashBuffer: false });
+    expect(p.config.enableArchiveByteRangeSeek).toBe(true);
+    expect(p.source.duration).toBe(3_720_000);
+    p.emit(mpegtsMock.Events.STATISTICS_INFO, { speed: 256 });
+    p.emit(mpegtsMock.Events.STATISTICS_INFO, { speed: 0 });
+    expect(onArchiveActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('reopens an Xtream archive at a requested minute instead of scanning the full response', async () => {
+    const el = video();
+    const source = src('http://h/timeshift/u/p/180/2026-10-25:18-00/101.ts', {
+      isLive: false, durationSeconds: 10_800, catchupProgramStart: '2026-10-25T18:00:00Z',
+    });
+    const engine = await createEngine(el, source, source.url, cb(), { captions: false });
+    expect(FakeTsPlayer.created[0]?.config.archiveScanMaxGap).toBeUndefined();
+    expect(FakeTsPlayer.created[0]?.config.enableArchiveByteRangeSeek).toBe(false);
+    expect(engine.seekTo?.(2 * 3600 + 19 * 60 + 35)).toBe(8340);
+    expect(FakeTsPlayer.created[0]?.destroyed).toBe(true);
+    expect(FakeTsPlayer.created[1]?.source).toMatchObject({
+      url: 'http://h/timeshift/u/p/180/2026-10-25:20-19/101.ts', duration: 2_460_000,
+    });
+    expect(FakeTsPlayer.created[1]?.config.expectedDuration).toBe(2_460_000);
+    expect(engine.timeOffset?.()).toBe(8340);
+    el.dispatchEvent(new Event('loadedmetadata'));
+    expect(el.currentTime).toBe(0);
+    expect(engine.timeOffset?.()).toBe(8340);
+    Object.defineProperty(el, 'buffered', { value: { length: 1, start: () => 0, end: () => 300 } });
+    expect(engine.seekTo?.(2 * 3600 + 20 * 60 + 35)).toBe(8400);
+    expect(FakeTsPlayer.created[1]?.destroyed).toBe(true);
+    expect(FakeTsPlayer.created[2]?.source.url).toBe('http://h/timeshift/u/p/180/2026-10-25:20-20/101.ts');
+    engine.destroy();
   });
 
   it('forceMpegts routes an extensionless stream through mpegts.js', async () => {
@@ -644,24 +683,34 @@ describe('mpegts.js engine recovery', () => {
 
   it('maps errors: any HTTP status fails at once (the player reconnect owns retries), codec errors are unsupported', async () => {
     vi.useFakeTimers();
-    const callbacks = cb();
-    await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
-    const p2 = FakeTsPlayer.created[0]!;
+    const emitFatal = async (type: string, detail: string, info: Record<string, unknown>, kind: string, message?: string): Promise<void> => {
+      const callbacks = cb();
+      await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
+      const player = FakeTsPlayer.created.at(-1)!;
+      player.emit('error', type, detail, info);
+      expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ kind, ...(message ? { message } : {}) }));
+      await Promise.resolve();
+      expect(player.destroyed).toBe(true);
+    };
     // A 503 used to restart here as well, stacking on the player's own retries (L2-live-5).
-    p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 503 });
-    expect(callbacks.onError).toHaveBeenLastCalledWith(
-      expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 503)' }),
-    );
+    await emitFatal('NetworkError', 'HttpStatusCodeInvalid', { code: 503 }, 'network', 'HttpStatusCodeInvalid (HTTP 503)');
     await vi.advanceTimersByTimeAsync(tsRestartDelay(1) * 4);
     expect(FakeTsPlayer.created).toHaveLength(1);
-    p2.emit('error', 'NetworkError', 'HttpStatusCodeInvalid', { code: 403 });
-    expect(callbacks.onError).toHaveBeenLastCalledWith(
-      expect.objectContaining({ kind: 'network', message: 'HttpStatusCodeInvalid (HTTP 403)' }),
-    );
-    p2.emit('error', 'MediaError', 'CodecUnsupported', { msg: 'hevc' });
-    expect(callbacks.onError).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'unsupported' }));
-    p2.emit('error', 'MediaError', 'FormatError', {});
-    expect(callbacks.onError).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'media' }));
+    await emitFatal('NetworkError', 'HttpStatusCodeInvalid', { code: 403 }, 'network', 'HttpStatusCodeInvalid (HTTP 403)');
+    await emitFatal('MediaError', 'CodecUnsupported', { msg: 'hevc' }, 'unsupported');
+    await emitFatal('MediaError', 'FormatError', {}, 'media');
+  });
+
+  it('stops a failed MPEG-TS loader and reports an MSE decode error once without an HTTP label', async () => {
+    const callbacks = cb();
+    await createEngine(video(), src('http://h/a.ts'), 'http://h/a.ts', callbacks, { captions: false });
+    const player = FakeTsPlayer.created[0]!;
+    for (let i = 0; i < 100; i++) player.emit('error', 'MediaError', 'MediaMSEError', { code: 11, msg: 'The object is in an invalid state.' });
+    expect(callbacks.onError).toHaveBeenCalledTimes(1);
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ kind: 'media', message: 'MediaMSEError' }));
+    await Promise.resolve();
+    expect(player.destroyed).toBe(true);
+    expect(player.loaded).toBe(false);
   });
 
   it('keeps the displayed live position monotonic across reconnects', async () => {

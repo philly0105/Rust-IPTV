@@ -1,6 +1,6 @@
 import type { Channel, EpgProgram, ItemRef, SourceKind } from '@/api/types';
 
-import { addLocalDays, canCatchUp, floorLocal, hasUsableArchive, HOUR, ms, programWhen } from './epgTime';
+import { addLocalDays, canCatchUp, hasUsableArchive, HOUR, localDayStart, ms, programWhen } from './epgTime';
 
 /** Days the archive browser offers when the channel does not say how long its archive is. */
 export const DEFAULT_ARCHIVE_DAYS = 1;
@@ -27,7 +27,7 @@ export function archiveDayCount(channel: Pick<Channel, 'archive'> & { catchup?: 
 
 /** Local midnight of the day holding `t`. */
 export function dayStart(t: number): number {
-  return floorLocal(t, 24 * 60);
+  return localDayStart(t);
 }
 
 /**

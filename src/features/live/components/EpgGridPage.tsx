@@ -23,7 +23,6 @@ import {
 import {
   memo,
   useCallback,
-  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -32,16 +31,16 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
-import { createPortal, flushSync } from 'react-dom';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router';
 
 import { guideCategoriesArgs, setGuideGridPrefetch } from '@/api/bootPrefetch';
 import { invalidate, queryClient as appQueryClient, rpcKey, useRpcQuery } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, type ItemKey, type ItemRef, type Settings, type Source, type SourceKind } from '@/api/types';
 
-import { Button, buttonClass, cn, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
+import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
 import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
 import { joinList } from '@/shell/dashboard/cards';
@@ -55,9 +54,12 @@ import { useNow } from '../hooks/useNow';
 import { usePagedChannels } from '../hooks/usePagedChannels';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useStalkerPreviews } from '../hooks/useStalkerPreviews';
+import { useXtreamGridPrograms } from '../hooks/useXtreamGridPrograms';
 import { useShortEpgEnabled, useShortEpgPreviews } from '../hooks/useShortEpg';
 import { displayChannelName } from '../lib/channelName';
 import { mergePrograms } from '../lib/epgMerge';
+import { hasGuideGap } from '../lib/guideCoverage';
+import { hasProgramInRange, programsInRange } from '../lib/guideProgramIndex';
 import { markFromProvider } from '../lib/shortEpg';
 import {
   HOUR,
@@ -99,7 +101,11 @@ import { JumpToDialog } from '../guide/JumpToDialog';
 import { defaultGuideSource, rememberGuideSource } from '../guide/lastSource';
 import { findChannelIndex, groupForHit } from '../guide/search';
 import { isGuideHitState } from '../guide/programmeSearch';
-import { fitCellText, GRID_NOW_VAR, GRID_SHIFT_VAR, GuideRow, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
+import { createStickyTitleManager, updateGuideClock, GuideRow, type GuideRowHandlers, type GuideRowLabels } from '../guide/GuideRow';
+import { createGuideHydrator } from '../guide/hydration';
+import { attachGuideDragPan } from '../guide/dragPan';
+import { nextGuideRenderWindow } from '../guide/renderWindow';
+import { createGuideWheelScroller, guideWheelMotionAllowed, isWheelStep } from '../guide/wheelScroll';
 import { GENRES, genreColor, genreOf, storedGenreFilter, storeGenreFilter, type Genre } from '../guide/genre';
 import { GuidePreview, storedPreviewOpen, storePreviewOpen } from '../guide/GuidePreview';
 import { useStable } from '../guide/useStable';
@@ -118,10 +124,15 @@ export const GRID_SLOT_MIN = 30;
 export const GRID_SLOT_PX = 150;
 export const GRID_WINDOW = 6 * HOUR;
 export const GRID_CHUNK = 40;
-const PX_PER_MIN = GRID_SLOT_PX / GRID_SLOT_MIN;
 const HEADER_H = 36;
 /** How long a window's guide answer counts as fresh (also for the windows prefetched beside it). */
 const GRID_STALE_MS = 5 * 60_000;
+/** Keep adjacent programme slices ready for a return scroll. */
+const GRID_CACHE_MS = 15 * 60_000;
+/** Keep toolbar updates off the browser's scroll frames. Data-window crossings still publish at once. */
+const GRID_VIEWPORT_PUBLISH_MS = 100;
+/** Delay optional buffer replacement until a horizontal gesture settles. */
+export const GRID_HORIZONTAL_IDLE_MS = 180;
 /** Portal programmes per row: enough to fill the 6 h window from now. */
 const STALKER_GRID_LIMIT = 12;
 
@@ -145,33 +156,22 @@ export function gridWindowFor(width: number, channelCol: number, slotPx: number 
   return Math.max(GRID_WINDOW, slots * GRID_SLOT_MIN * MINUTE);
 }
 
-/** How far the window moves when a horizontal scroll (or a key) runs into its edge. */
+/** Time increment used by the guide's three-hour navigation controls. */
 export const GRID_EXTEND = 3 * HOUR;
-/** Scrolling within this many px of the window's edge, toward it, moves the window on. */
-export const GRID_EXTEND_EDGE_PX = GRID_SLOT_PX;
-/**
- * Room the window keeps beyond the page width, so a scroll that moves the window by
- * {@link GRID_EXTEND} can hold the view still (the scroll position moves by the same px)
- * without landing in the other edge's zone, at any page width.
- */
-export function gridScrollRoomPx(pxPerMin: number): number {
-  return (GRID_EXTEND / MINUTE) * pxPerMin + 2 * GRID_EXTEND_EDGE_PX;
+/** Fixed horizontal canvas: enough room for the full archive and future guide without resizing mid-gesture. */
+export const GRID_TRACK_BEFORE = (MAX_LOOKBACK_HOURS + 6) * HOUR;
+export const GRID_TRACK_AFTER = 14 * 24 * HOUR;
+/** At rest, programme data extends at least six hours beyond either visible edge. */
+export const GRID_DATA_STEP = 2 * GRID_EXTEND;
+export const GRID_DATA_BEFORE = GRID_DATA_STEP;
+export const GRID_DATA_LENGTH = 4 * GRID_DATA_STEP;
+/** UTC-aligned data slices keep their six-hour buffer even across daylight-saving changes. */
+export function guideDataStart(viewAt: number): number {
+  return Math.floor(viewAt / GRID_DATA_STEP) * GRID_DATA_STEP - GRID_DATA_BEFORE;
 }
-/** {@link gridScrollRoomPx} at the default scale. */
-export const GRID_SCROLL_ROOM_PX = gridScrollRoomPx(PX_PER_MIN);
-
-/**
- * Which way a horizontal scroll to `x` px from the inline start (moving `dx` px since the last
- * one) should move the window: +1 later, -1 earlier, 0 not at all. `max` is the farthest the
- * track scrolls.
- */
-export function extendDirection(x: number, dx: number, max: number): 1 | -1 | 0 {
-  if (max <= 0) return 0;
-  if (dx > 0 && x >= max - GRID_EXTEND_EDGE_PX) return 1;
-  if (dx < 0 && x <= GRID_EXTEND_EDGE_PX) return -1;
-  return 0;
+export function guideDataLength(viewportMs: number): number {
+  return Math.max(GRID_DATA_LENGTH, Math.ceil(viewportMs / GRID_DATA_STEP) * GRID_DATA_STEP + 2 * GRID_DATA_BEFORE + GRID_DATA_STEP);
 }
-
 /** Channel column of a phone-width guide: the logo and number only, so the track gets the room. */
 export const GRID_CHANNEL_COMPACT = 72;
 
@@ -191,6 +191,15 @@ export const NOW_PILL_LEAD_PX = 40;
  */
 export function nowScroll(now: number, start: number, pxPerMin: number, view: number): number {
   return nowRestLeft(now, start, pxPerMin, view, NOW_PILL_LEAD_PX);
+}
+
+/** The times under the visible track, rounded outward to five minutes for a steady toolbar label. */
+export function visibleGuideTime(start: number, scroll: number, width: number, channelCol: number, pxPerMin: number, end: number): Span {
+  if (width <= channelCol) return [start, end];
+  const step = 5 * MINUTE;
+  const first = start + (Math.max(0, scroll) / pxPerMin) * MINUTE;
+  const last = Math.min(end, first + ((width - channelCol) / pxPerMin) * MINUTE);
+  return [Math.floor(first / step) * step, Math.min(end, Math.ceil(last / step) * step)];
 }
 
 /** Portal programmes per row for a window: 12 for 6 h, more for a longer window. */
@@ -291,7 +300,12 @@ interface Selection {
 
 /** Ctrl+scroll zooms at most one step this often (a trackpad pinch sends a burst of wheel events). */
 export const WHEEL_ZOOM_MS = 150;
-
+/** A physical wheel can report lines or pages instead of pixels. */
+function wheelDeltaPx(delta: number, mode: number, pagePx: number): number {
+  if (mode === WheelEvent.DOM_DELTA_LINE) return delta * 40;
+  if (mode === WheelEvent.DOM_DELTA_PAGE) return delta * pagePx;
+  return delta;
+}
 /** The pointer rests on a cell this long before the preview band follows it (CB-GUIDE-PREVIEW). */
 export const PREVIEW_HOVER_MS = 150;
 
@@ -314,8 +328,7 @@ interface Reveal {
 }
 
 /**
- * How long key and scroll moves of the window must pause before the URL follows them
- * (L2-perf-ui-4): the window moves at once in the page's state, the router hears of it once.
+ * How long scrolling must pause before the URL follows the browser's native position.
  */
 export const GRID_URL_SETTLE_MS = 400;
 /**
@@ -406,6 +419,7 @@ const gridHashes = new WeakMap<readonly ItemRef[], { from: string; to: string; h
  */
 function gridKeyHash(key: QueryKey): string {
   const args = key[1] as Partial<ReturnType<typeof gridArgs>> | null | undefined;
+  if (args?.refs?.length === 0) return 'epg.grid:empty';
   if (!args?.refs || args.from === undefined || args.to === undefined) return hashKey(key);
   const hit = gridHashes.get(args.refs);
   if (hit && hit.from === args.from && hit.to === args.to) return hit.hash;
@@ -437,7 +451,7 @@ let lastWindowMs = 0;
  */
 function prefetchFirstChunk(refs: ItemRef[], params: URLSearchParams, settings: Settings | undefined): void {
   if (lastWindowMs <= 0) return;
-  const start = parseWindowAt(params.get('at')) ?? defaultStart(Date.now());
+  const start = guideDataStart(parseWindowAt(params.get('at')) ?? defaultStart(Date.now()));
   const offsetMs = displayPrefsOf(settings).epgOffsetMinutes * MINUTE;
   const args = gridArgs(refs.slice(0, GRID_CHUNK), new Date(start - offsetMs).toISOString(), new Date(start + lastWindowMs - offsetMs).toISOString());
   void appQueryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS });
@@ -453,6 +467,8 @@ export function EpgGridPage() {
   const { t: tg } = useTranslation('guide');
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const navigationType = useNavigationType();
   const now = useNow(30_000);
   const prefs = useDisplayPrefs();
   const wide = useMediaQuery('(min-width: 1024px)');
@@ -469,6 +485,7 @@ export function EpgGridPage() {
   const slotPx = GUIDE_ZOOM_SLOT_PX[zoom] ?? GRID_SLOT_PX;
   const pxPerMin = slotPx / GRID_SLOT_MIN;
   const queryClient = useQueryClient();
+  const [prefetchVersion, setPrefetchVersion] = useState(0);
   // Reminders, recordings, rules and recording support load with the page (L2-guide-library-15).
   const schedule = useScheduleIndex();
   usePrefetchSchedule();
@@ -492,42 +509,72 @@ export function EpgGridPage() {
   const categories = useRpcQuery('catalog.categories', guideCategoriesArgs(sourceId), { enabled: !!sourceId });
 
   // ---- the window ----------------------------------------------------------
-  // The window start comes from the URL (`at`, epoch ms on a 30-minute slot), so back and forward
-  // restore it, and lives in state, so every move shows at once. Clicks push a history entry; a
-  // key or scroll that runs into the window's edge moves the state alone, and the URL follows once
-  // those moves pause (L2-perf-ui-4, L2-guide-library-5: a router navigation per move re-rendered
-  // the shell and, while it was pending, dropped scroll distance). Without `at` the window
-  // follows "now" as it was when the page opened or Jump to now was last pressed.
+  // The browser owns the visible time through scrollLeft. Explicit jumps add a URL history entry;
+  // scrolling updates the URL only after it settles. Without `at` the guide opens at now and
+  // follows it until the user moves the viewport.
   const atParam = parseWindowAt(params.get('at'));
   const [winAt, setWinAt] = useState(atParam);
-  // `seen`: the URL's `at` this page last rendered; `wrote`: the one it last wrote (or adopted).
-  // A URL change that is not the echo of a write (back, forward, a link) moves the window.
-  const [url, setUrl] = useState({ seen: atParam, wrote: atParam });
-  if (atParam !== url.seen) {
-    const external = atParam !== url.wrote;
-    setUrl({ seen: atParam, wrote: external ? atParam : url.wrote });
-    if (external) setWinAt(atParam);
-  }
   const [nowStart, setNowStart] = useState(() => defaultStart(Date.now()));
-  const start = winAt ?? nowStart;
+  // This anchor changes only for an explicit jump outside the canvas. URL updates from scrolling
+  // and guide data responses cannot move the native track underneath an ongoing gesture.
+  const [trackBase, setTrackBase] = useState(atParam ?? nowStart);
+  const [requestedView, setRequestedView] = useState<{ id: number; time: number; live: boolean } | null>(null);
+  const requestId = useRef(0);
+  const viewAtRef = useRef(atParam ?? nowStart);
+  const manualView = useRef(false);
+  const navigationAt = useRef(atParam ?? nowStart);
+  // A URL change that is not the echo of a write (back, forward, a link) moves the window.
+  const [urlSeen, setUrlSeen] = useState(atParam);
+  const urlOwner = useRef(Math.random().toString(36).slice(2));
+  if (atParam !== urlSeen) {
+    // The router may commit replaces out of order. Navigation state identifies writes made by
+    // this page; POP still restores the time even when it returns to one of our own entries.
+    const ownWrite = navigationType !== 'POP' &&
+      (location.state as { guideUrlOwner?: string } | null)?.guideUrlOwner === urlOwner.current;
+    setUrlSeen(atParam);
+    if (!ownWrite) {
+      const target = atParam ?? defaultStart(Date.now());
+      setWinAt(atParam);
+      manualView.current = false;
+      navigationAt.current = target;
+      if (target < trackBase - GRID_TRACK_BEFORE + 6 * HOUR || target > trackBase + GRID_TRACK_AFTER - 6 * HOUR) setTrackBase(target);
+      setRequestedView({ id: ++requestId.current, time: target, live: atParam === null });
+    }
+  }
+  const baseStart = winAt ?? nowStart;
   const [measurePage, pageWidth, pageMeasured] = useElementWidth();
-  // Measured pages get room to scroll past the page width, so horizontal scrolling can move the window on.
-  const windowMs = gridWindowFor(pageWidth > 0 ? pageWidth + gridScrollRoomPx(pxPerMin) : 0, channelCol, slotPx);
-  const end = start + windowMs;
+  const baseWindowMs = gridWindowFor(pageWidth, channelCol, slotPx);
+  const start = trackBase - GRID_TRACK_BEFORE;
+  const end = trackBase + GRID_TRACK_AFTER;
+  const [shownTime, setShownTime] = useState<Span>([baseStart, baseStart + baseWindowMs]);
+  const [renderWindow, setRenderWindow] = useState(() => nextGuideRenderWindow(baseStart, baseStart + baseWindowMs));
+  const renderWindowRef = useRef(renderWindow);
+  const renderWindowGeometry = useRef<{ width: number; pxPerMin: number; channelCol: number } | null>(null);
+  // Every row, slot and marker uses one fixed position on the native horizontal track.
+  // Data may change while scrolling, but neither the track width nor its origin changes.
+  const origin = start;
+  const trackWidth = ((end - start) / MINUTE) * pxPerMin;
+  // A rolling 24-hour programme slice extends at least six hours beyond each viewport edge.
+  // It advances only every six hours, and never changes the native track's geometry.
+  const viewportMs = ((Math.max(0, pageWidth - channelCol) / pxPerMin) * MINUTE);
+  const dataWindowMs = guideDataLength(viewportMs);
   useEffect(() => {
-    if (pageMeasured) lastWindowMs = windowMs;
-  }, [pageMeasured, windowMs]);
-  // Rows lay their cells out from this fixed time; the window's offset from it is one CSS
-  // variable on the grid, so a window move leaves every row's props alone (L3-perf-ui-4).
-  const [origin] = useState(start);
-  const gridShift = ((origin - start) / MINUTE) * pxPerMin;
-  const shiftPx = useRef(gridShift);
-  shiftPx.current = gridShift;
-  // The window the guide is asked for follows the one on screen at a lower priority: a move at
-  // the edge of a sideways scroll renders the header, the now line and the scroll at once, and the
-  // rows' new programmes in a background render that a scroll event can interrupt (L3-perf-ui-4).
-  const dataStart = useDeferredValue(start);
-  const dataEnd = useDeferredValue(end);
+    if (pageMeasured) lastWindowMs = dataWindowMs;
+  }, [pageMeasured, dataWindowMs]);
+  const wantedDataStart = guideDataStart(shownTime[0]);
+  const wantedDataEnd = wantedDataStart + dataWindowMs;
+  const horizontalScrolling = useRef(false);
+  const [bufferStart, setBufferStart] = useState(wantedDataStart);
+  const dataStart = bufferStart;
+  const dataEnd = dataStart + dataWindowMs;
+  useEffect(() => {
+    if (wantedDataStart === dataStart) return;
+    // Replenish with six hours of lead time. New offscreen chunks share a frame budget;
+    // waiting until the last hour would force them all to mount when fast scrolling arrives.
+    if (!horizontalScrolling.current || shownTime[0] < dataStart + GRID_DATA_BEFORE || shownTime[1] > dataEnd - GRID_DATA_BEFORE) {
+      setBufferStart(wantedDataStart);
+    }
+  }, [shownTime, wantedDataStart, dataStart, dataEnd]);
 
   // A view pages nothing from the source: the source's own list stays idle meanwhile.
   const sourcePaged = usePagedChannels({ sourceId: view ? '' : sourceId, categoryId, withExtras: false });
@@ -538,8 +585,9 @@ export function EpgGridPage() {
   const quality = useLiveQuality();
 
   // ---- what plays, the genre filter, the preview band ----------------------------
-  // LG-01: the channel playing in the app is marked in its row.
-  const playingRef = usePlayerStore((s) => s.source?.ref);
+  // Subscribe to the source itself: switching catch-up programmes on one channel must update its cell.
+  const playingSource = usePlayerStore((s) => s.source);
+  const playingRef = playingSource?.ref;
   const playingKey = playingRef && playingRef.contentType === 'live' ? itemKey(playingRef) : null;
   // Its catalog row says whether a group on screen holds it and gives "Go to playing" its number,
   // so the row is found in a few page reads (a view knows its entries itself).
@@ -562,7 +610,9 @@ export function EpgGridPage() {
     // the query cache for each one outside the loaded pages, about 150 ms inside the click.
     let matching = 0;
     for (const { index } of paged.loaded) {
-      for (const p of windowPrograms(index)) if (genreOf(p.category) === g) matching++;
+      for (const p of windowPrograms(index)) {
+        if (ms(p.start) < shownTime[1] && ms(p.end) > shownTime[0] && genreOf(p.category) === g) matching++;
+      }
     }
     setGenreNote(tg('genreFilterOn', { genre: tg(`genre_${g}`), count: matching }));
   });
@@ -657,6 +707,9 @@ export function EpgGridPage() {
   const lastChunkMove = useRef(0);
   /** The last vertical scroll event: when, where, and how fast (px/ms) since the one before. */
   const vScroll = useRef({ t: Number.NEGATIVE_INFINITY, y: 0, v: Number.POSITIVE_INFINITY });
+  const verticalIdleTimer = useRef(0);
+  const [verticalIdleVersion, setVerticalIdleVersion] = useState(0);
+  useEffect(() => () => window.clearTimeout(verticalIdleTimer.current), []);
   useEffect(() => {
     if (atRest) return;
     const t0 = performance.now();
@@ -679,18 +732,8 @@ export function EpgGridPage() {
   // covers keep their programmes and the no-guide notice does not blink. Rows it does not
   // cover show as loading (see `programsFor`). Nothing is asked before the page is measured: the
   // first measurement sets the window's length (L2-perf-desktop-12).
-  const gridA = useRpcQuery('epg.grid', gridArgs(refsA, fromIso, toIso), {
-    enabled: pageMeasured && refsA.length > 0,
-    staleTime: GRID_STALE_MS,
-    keepPrevious: true,
-    queryKeyHashFn: gridKeyHash,
-  });
-  const gridB = useRpcQuery('epg.grid', gridArgs(refsB, fromIso, toIso), {
-    enabled: pageMeasured && refsB.length > 0,
-    staleTime: GRID_STALE_MS,
-    keepPrevious: true,
-    queryKeyHashFn: gridKeyHash,
-  });
+  const gridA = useRpcQuery('epg.grid', gridArgs(refsA, fromIso, toIso), { enabled: pageMeasured && refsA.length > 0, staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS, keepPrevious: true, queryKeyHashFn: gridKeyHash });
+  const gridB = useRpcQuery('epg.grid', gridArgs(refsB, fromIso, toIso), { enabled: pageMeasured && refsB.length > 0, staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS, keepPrevious: true, queryKeyHashFn: gridKeyHash });
   const keysA = refKeys(refsA);
   const keysB = refKeys(refsB);
 
@@ -701,7 +744,7 @@ export function EpgGridPage() {
     // A chunk whose channels are not all loaded yet would be asked again once they are.
     if (refs.length < Math.min(GRID_CHUNK, count - c * GRID_CHUNK)) return;
     const args = gridArgs(refs, fromIso, toIso);
-    void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS });
+    void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS });
   });
   const gridsLoaded = !!gridA.data && !gridA.isPlaceholderData && (refsB.length === 0 || (!!gridB.data && !gridB.isPlaceholderData));
   useEffect(() => {
@@ -713,8 +756,8 @@ export function EpgGridPage() {
     return () => window.clearTimeout(id);
   }, [atRest, gridsLoaded, chunkA, chunkB, fromIso, toIso, prefetchChunk]);
 
-  // The rows the portal and the short guide are asked for follow the visible rows once they hold
-  // still: a fling would otherwise queue a portal call for rows it has already passed (LV-4).
+  // Per-channel provider requests follow the visible rows once they hold still: a fling would
+  // otherwise queue calls for rows it has already passed (LV-4).
   const rowsShown = vItems.length > 0;
   const [shortRows, setShortRows] = useState({ first, last, shown: rowsShown });
   useEffect(() => {
@@ -740,7 +783,7 @@ export function EpgGridPage() {
     }
     return [plain, archive];
   }, [isStalker, shortRows, getChannel]);
-  const portalLimit = stalkerGridLimit(windowMs);
+  const portalLimit = stalkerGridLimit(dataEnd - dataStart);
   const archiveQuery = stalkerArchiveQuery(dataStart - offsetMs, dataEnd - offsetMs, now, portalLimit);
   const plainPortal = useStalkerPreviews(sourceId, isStalker, plainRefs, now, portalLimit);
   const archivePortal = useStalkerPreviews(sourceId, isStalker, archiveRefs, now, archiveQuery.limit, archiveQuery.from);
@@ -762,6 +805,65 @@ export function EpgGridPage() {
     { q: gridA, keys: keysA, span: spanOf(gridA, spanA) },
     { q: gridB, keys: keysB, span: spanOf(gridB, spanB) },
   ] as const;
+  // A fast fling may outrun the exact six-hour slice while its RPC is still pending. Any
+  // cached slice for these exact channel chunks that covers the visible viewport can supply
+  // the cells meanwhile. The cache search runs once per render, not once per row.
+  const outerShift = dataWindowMs - GRID_DATA_STEP;
+  const refSignatures = new Set([refsA, refsB].filter((refs) => refs.length > 0).map((refs) => refs.map(itemKey).join('|')));
+  const cachedAnswers = (gridsLoaded ? [] : queryClient.getQueriesData<Record<ItemKey, EpgProgram[]>>({ queryKey: ['epg.grid'] }))
+    .flatMap(([key, data]) => {
+      const args = key[1] as ReturnType<typeof gridArgs> | undefined;
+      if (!data || !args || !refSignatures.has(args.refs.map(itemKey).join('|')) || args.withDescription !== false) return [];
+      const span = [Date.parse(args.from) + offsetMs, Date.parse(args.to) + offsetMs] as Span;
+      // Different EPG offsets can leave answers for the same refs in the cache. Only a slice
+      // aligned with this view's six-hour grid belongs to its current offset.
+      return span[1] - span[0] === dataWindowMs && (span[0] - dataStart) % GRID_DATA_STEP === 0 &&
+        span[0] <= shownTime[0] && span[1] >= shownTime[1] ? [{ data, span }] : [];
+    })
+    .sort((a, b) => Math.abs(a.span[0] - dataStart) - Math.abs(b.span[0] - dataStart));
+  // A fast scroll can land before its full 40-channel / 24-hour answer is ready. Ask only for
+  // the rows actually on screen and the nearby hours, so those tiles do not wait behind the
+  // full slice. The short idle delay avoids issuing a request for every position in a fling.
+  const visibleTop = virtualizer.scrollOffset ?? 0;
+  // The virtualizer already observes this size. Reading clientHeight during React renders can
+  // force layout of newly mounted rows in the middle of a vertical scroll.
+  const visibleBottom = visibleTop + (virtualizer.scrollRect?.height || 720);
+  const visibleRefs = vItems
+    .filter((v) => v.start + v.size >= visibleTop && v.start <= visibleBottom)
+    .map((v) => paged.getChannel(v.index)?.ref)
+    .filter((ref): ref is ItemRef => !!ref);
+  const missingVisible = visibleRefs.some((ref) => {
+    const k = itemKey(ref);
+    const current = answers.some(({ q, span }) =>
+      !!q.data && !!span && span[0] <= shownTime[0] && span[1] >= shownTime[1] && Object.prototype.hasOwnProperty.call(q.data, k));
+    return !current && !cachedAnswers.some(({ data }) => Object.prototype.hasOwnProperty.call(data, k));
+  });
+  const quickStart = Math.floor(shownTime[0] / GRID_EXTEND) * GRID_EXTEND - GRID_EXTEND;
+  const quickEnd = Math.ceil(shownTime[1] / GRID_EXTEND) * GRID_EXTEND + GRID_EXTEND;
+  const quickKey = `${listKey}|${quickStart}|${quickEnd}|${visibleRefs.map(itemKey).join('|')}`;
+  const [quickRequest, setQuickRequest] = useState<{ key: string; start: number; end: number; refs: ItemRef[] } | null>(null);
+  useEffect(() => {
+    if (!pageMeasured || !missingVisible || visibleRefs.length === 0) return;
+    const id = window.setTimeout(() => setQuickRequest({ key: quickKey, start: quickStart, end: quickEnd, refs: visibleRefs }), GRID_SCROLL_IDLE_MS);
+    return () => window.clearTimeout(id);
+  }, [pageMeasured, quickKey, missingVisible]); // eslint-disable-line react-hooks/exhaustive-deps
+  const quickCurrent = quickRequest?.key === quickKey;
+  const quickArgs = gridArgs(
+    quickRequest?.refs ?? [],
+    new Date((quickRequest?.start ?? quickStart) - offsetMs).toISOString(),
+    new Date((quickRequest?.end ?? quickEnd) - offsetMs).toISOString(),
+  );
+  const quickGrid = useRpcQuery('epg.grid', quickArgs, {
+    enabled: pageMeasured && quickCurrent && missingVisible,
+    staleTime: GRID_STALE_MS,
+    gcTime: GRID_CACHE_MS,
+    keepPrevious: true,
+    queryKeyHashFn: gridKeyHash,
+  });
+  // A small move can change the request's bucket or visible row set while its previous answer
+  // still covers the screen. Retain that answer, with its actual query span, until replaced.
+  const quickSpan = useRef<Span | null>(null);
+  if (quickGrid.data && !quickGrid.isPlaceholderData) quickSpan.current = [Date.parse(quickArgs.from), Date.parse(quickArgs.to)];
   /**
    * A row's XMLTV programmes, and whether they are the answer for the window on screen (`fresh`).
    * While that answer loads, the row keeps what an answer for an overlapping window said (the
@@ -770,13 +872,30 @@ export function EpgGridPage() {
    */
   const gridEntry = (k: ItemKey): { list: EpgProgram[] | undefined; fresh: boolean } => {
     for (const { q, keys, span } of answers) {
-      if (!q.data || !span || !(span[0] < end && span[1] > start)) continue;
+      if (!q.data || !span || !(span[0] < shownTime[1] && span[1] > shownTime[0])) continue;
       const list = q.data[k];
       const own = !q.isPlaceholderData;
-      if (own && span[0] === start && span[1] === end && (list || keys.has(k))) return { list: list ?? NO_PROGRAMS, fresh: true };
-      if (list) return { list, fresh: false };
-      // An answer for these channels (not a placeholder for others) that had nothing for the row.
-      if (own && keys.has(k)) return { list: NO_PROGRAMS, fresh: false };
+      if (own && span[0] === dataStart && span[1] === dataEnd && (list || keys.has(k))) return { list: list ?? NO_PROGRAMS, fresh: true };
+    }
+    // A rolling query's previous answer often still covers the entire screen. Keep its
+    // existing tiles until the replacement arrives, instead of switching to a distant
+    // prefetched slice and rebuilding the row twice for one navigation.
+    for (const { q, span } of answers) {
+      if (q.data && span && span[0] <= shownTime[0] && span[1] >= shownTime[1] && Object.prototype.hasOwnProperty.call(q.data, k)) {
+        return { list: q.data[k] ?? NO_PROGRAMS, fresh: false };
+      }
+    }
+    for (const { data } of cachedAnswers) {
+      if (Object.prototype.hasOwnProperty.call(data, k)) return { list: data[k] ?? NO_PROGRAMS, fresh: true };
+    }
+    if (quickGrid.data && quickSpan.current && quickSpan.current[0] + offsetMs <= shownTime[0] && quickSpan.current[1] + offsetMs >= shownTime[1] &&
+        Object.prototype.hasOwnProperty.call(quickGrid.data, k)) {
+      return { list: quickGrid.data[k] ?? NO_PROGRAMS, fresh: false };
+    }
+    for (const { q, keys, span } of answers) {
+      if (!q.data || !span || !(span[0] < shownTime[1] && span[1] > shownTime[0])) continue;
+      if (q.data[k]) return { list: q.data[k], fresh: false };
+      if (!q.isPlaceholderData && keys.has(k)) return { list: NO_PROGRAMS, fresh: false };
     }
     return { list: undefined, fresh: false };
   };
@@ -792,30 +911,66 @@ export function EpgGridPage() {
     }
     return out;
     // gridList reads gridA/gridB, listed by their answers, and the window.
-  }, [shortEpgOn, shortRows, getChannel, gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData, start, end]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shortEpgOn, shortRows, getChannel, gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData, quickGrid.data, shownTime, dataStart, dataEnd, prefetchVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const shortFor = useShortEpgPreviews(sourceId, shortEpgOn, shortRefs, now);
   const hasShortData = shortRefs.some((r) => (shortFor(r)?.length ?? 0) > 0);
+  // Xtream's simple data table can reach days before the bulk XMLTV download. Warm visible rows
+  // when XMLTV has a gap within the six-hour scroll buffer, before a horizontal move exposes it.
+  // A vertical fling still drops queued offscreen calls; at most two are in flight.
+  const xtreamOn = kind === 'xtream';
+  const xtreamRefs = useMemo(() => {
+    const out: ItemRef[] = [];
+    if (!xtreamOn || !pageMeasured || dataStart !== wantedDataStart || dataEnd !== wantedDataEnd ||
+        shortRows.first !== first || shortRows.last !== last) return out;
+    const probeStart = Math.max(dataStart, shownTime[0] - GRID_DATA_BEFORE) - offsetMs;
+    const probeEnd = Math.min(dataEnd, shownTime[1] + GRID_DATA_BEFORE) - offsetMs;
+    // This endpoint is the archive table; a future-only window gains nothing from it.
+    if (probeStart >= now) return out;
+    for (let i = shortRows.first; i <= shortRows.last; i++) {
+      const ch = getChannel(i);
+      if (!ch) continue;
+      const entry = gridEntry(itemKey(ch.ref));
+      if (entry.fresh && hasGuideGap(entry.list ?? NO_PROGRAMS, probeStart, probeEnd)) out.push(ch.ref);
+    }
+    return out;
+    // gridEntry reads the two grid answers and their windows.
+  }, [xtreamOn, pageMeasured, dataStart, dataEnd, wantedDataStart, wantedDataEnd, shortRows, first, last, shownTime, offsetMs, now, getChannel,
+    gridA.data, gridB.data, gridA.isPlaceholderData, gridB.isPlaceholderData, prefetchVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const xtreamFor = useXtreamGridPrograms(sourceId, xtreamOn, xtreamRefs, now);
+  const hasXtreamData = xtreamRefs.some((ref) => {
+    const programs = xtreamFor(ref);
+    return !!programs && hasProgramInRange(programs, shownTime[0] - offsetMs, shownTime[1] - offsetMs);
+  });
   // Each row's display list is kept while its sources are the same objects, so a memoised row
   // sees the same array from render to render (L2-perf-ui-1).
-  const programsCache = useRef(new Map<ItemKey, { list?: EpgProgram[]; portal?: EpgProgram[]; short?: readonly EpgProgram[]; offset: number; out: EpgProgram[] | undefined }>());
+  const programsCache = useRef(new Map<ItemKey, { list?: EpgProgram[]; portal?: EpgProgram[]; xtream?: EpgProgram[]; short?: readonly EpgProgram[]; offset: number; start: number; end: number; out: EpgProgram[] | undefined }>());
   const programsFor = (ch: Channel | undefined): EpgProgram[] | undefined => {
     if (!ch) return undefined;
     const k = itemKey(ch.ref);
     const list = gridList(k);
     const portal = isStalker ? (ch.archive?.enabled ? archivePortal : plainPortal).get(ch.ref) : undefined;
+    const xtream = xtreamFor(ch.ref);
     // guide: an empty XMLTV row takes the provider's short guide.
     const short = !(portal && portal.length > 0) && shortEpgOn && list?.length === 0 ? shortFor(ch.ref) : undefined;
     const offset = prefs.epgOffsetMinutes;
+    const tableStart = xtream?.length ? dataStart : 0;
+    const tableEnd = xtream?.length ? dataEnd : 0;
     const cache = programsCache.current;
     const hit = cache.get(k);
-    if (hit && hit.list === list && hit.portal === portal && hit.short === short && hit.offset === offset) return hit.out;
+    if (hit && hit.list === list && hit.portal === portal && hit.xtream === xtream && hit.short === short && hit.offset === offset && hit.start === tableStart && hit.end === tableEnd) return hit.out;
     let out: EpgProgram[] | undefined;
     // The portal's programmes are the provider's guide (no series rules, no guide search).
     if (portal && portal.length > 0) out = shiftPrograms(mergePrograms(markFromProvider(portal), list ?? []), offset);
+    else if (xtream && xtream.length > 0) {
+      // The table may contain weeks of listings. Select only the rolling data window;
+      // programme groups prepare its new edges without changing the native track.
+      const provider = markFromProvider(programsInRange(xtream, dataStart - offsetMs, dataEnd - offsetMs));
+      out = shiftPrograms(mergePrograms(list ?? [], short?.length ? mergePrograms(provider, short) : provider), offset);
+    }
     else if (short && short.length > 0) out = shiftPrograms([...short], offset);
     else if (list) out = list.length === 0 ? NO_PROGRAMS : shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), offset);
     if (cache.size >= PROGRAMS_CACHE_MAX) cache.clear();
-    cache.set(k, { list, portal, short, offset, out });
+    cache.set(k, { list, portal, xtream, short, offset, start: tableStart, end: tableEnd, out });
     return out;
   };
   const gridError = gridA.error ?? gridB.error;
@@ -823,9 +978,25 @@ export function EpgGridPage() {
   // channel to its guide channel, not adding another XMLTV address.
   const guides = useRpcQuery('epg.sources', undefined, { staleTime: 60_000 });
   const guidesLoaded = !!guides.data?.some((g) => g.enabled && g.programCount > 0);
+  // A moved window can briefly hold the previous empty XMLTV answer while its new one loads.
+  // Xtream also has per-channel table/short-guide work in flight. Neither is proof that the
+  // visible time is empty until every row and requested provider answer has settled.
+  const xtreamGuideSettled = !xtreamOn || (
+    pageMeasured && dataStart === wantedDataStart && dataEnd === wantedDataEnd &&
+    shortRows.first === first && shortRows.last === last &&
+    vItems.every((v) => {
+      const ch = getChannel(v.index);
+      return !!ch && gridEntry(itemKey(ch.ref)).fresh;
+    }) &&
+    xtreamRefs.every((ref) => xtreamFor(ref) !== undefined) &&
+    shortRefs.every((ref) => shortFor(ref) !== undefined)
+  );
   const noEpgAnywhere =
     !isStalker &&
+    gridsLoaded &&
+    xtreamGuideSettled &&
     !hasShortData && // guide
+    !hasXtreamData &&
     !!gridA.data && Object.values(gridA.data).every((l) => l.length === 0) && (!gridB.data || Object.values(gridB.data).every((l) => l.length === 0));
 
   // ---- navigation ---------------------------------------------------------
@@ -849,14 +1020,29 @@ export function EpgGridPage() {
     if (at === null) next.delete('at');
     else next.set('at', String(at));
     latestParams.current = next;
-    setUrl((u) => (u.wrote === at ? u : { ...u, wrote: at }));
-    setParams(next, { replace });
+    setParams(next, { replace, state: { guideUrlOwner: urlOwner.current } });
+  };
+  /** Explicit navigation can re-centre the fixed canvas, but a wheel gesture never does. */
+  const requestView = (time: number, live: boolean) => {
+    const recenter = time < start + 6 * HOUR || time > end - 6 * HOUR;
+    const root = scroller.current;
+    // An existing native canvas can move in the input handler. Waiting for a React commit
+    // made the scroll compete with router updates and programme-buffer replacement.
+    if (!recenter && root && laidRoot.current === root && laidTrack.current === trackBase && laidPx.current === pxPerMin && laidRtl.current === rtl) {
+      const target = live ? time + nowScroll(now, time, pxPerMin, (viewWidth.current || pageWidth) - channelCol) / pxPerMin * MINUTE : time;
+      moveViewTo(target, root, false, true);
+    } else {
+      if (recenter) setTrackBase(time);
+      setRequestedView({ id: ++requestId.current, time, live });
+    }
   };
   /** Moves the window to `at` (floored to its slot), with a new history entry. `category: null` also shows all channels. */
   const goTo = useStable((at: number, opts: { category?: null } = {}) => {
     const slot = floorLocal(at, GRID_SLOT_MIN);
-    startRef.current = slot;
+    startRef.current = slot - GRID_TRACK_BEFORE;
+    navigationAt.current = slot;
     setWinAt(slot);
+    requestView(slot, false);
     writeUrl((p) => {
       if (opts.category === null) {
         p.delete('category');
@@ -865,36 +1051,32 @@ export function EpgGridPage() {
       }
     }, slot, false);
   });
-  const keepView = useRef(false);
-  /**
-   * A key or scroll ran into the window's edge: the window moves by `delta` at once and the view
-   * stays put (keepView); the URL follows once such moves pause.
-   */
-  const drift = (delta: number) => {
-    const slot = floorLocal(startRef.current + delta, GRID_SLOT_MIN);
-    startRef.current = slot;
-    keepView.current = true;
-    setWinAt(slot);
+  /** Keep the URL near the visible time without making router renders part of a wheel gesture. */
+  const settleScrollUrl = (time: number) => {
+    const slot = floorLocal(time, GRID_SLOT_MIN);
+    navigationAt.current = slot;
     window.clearTimeout(urlTimer.current);
-    // Back, forward or a link in the meantime wins: the URL is then no longer the one this move left.
     const base = latestParams.current.toString();
     urlTimer.current = window.setTimeout(() => {
       if (latestParams.current.toString() === base) writeUrl(() => undefined, slot, true);
     }, GRID_URL_SETTLE_MS);
   };
-  const shift = useStable((delta: number) => goTo(startRef.current + delta));
+  const shift = useStable((delta: number) => goTo(navigationAt.current + delta));
   // A calendar day, not 24 h: across a DST change the window keeps its wall-clock time.
-  const shiftDay = useStable((days: number) => goTo(addLocalDays(startRef.current, days)));
+  const shiftDay = useStable((days: number) => goTo(addLocalDays(navigationAt.current, days)));
   const toNow = useStable(() => {
     const s = defaultStart(Date.now());
+    manualView.current = false;
     setNowStart(s);
-    startRef.current = s;
+    startRef.current = s - GRID_TRACK_BEFORE;
+    navigationAt.current = s;
     setWinAt(null);
+    requestView(s, true);
     window.clearTimeout(urlTimer.current);
     if (latestParams.current.has('at')) writeUrl(() => undefined, null, false);
   });
   // Back to an entry without `at` (or a link without it): the window follows now again.
-  const followsNow = winAt === null;
+  const followsNow = winAt === null && !manualView.current;
   useEffect(() => {
     if (followsNow) setNowStart(defaultStart(Date.now()));
   }, [followsNow]);
@@ -912,7 +1094,7 @@ export function EpgGridPage() {
         if (key === 'category') p.delete('view');
         if (key === 'view') p.delete('category');
       },
-      winAt === null ? null : startRef.current,
+      manualView.current ? floorLocal(viewAtRef.current, GRID_SLOT_MIN) : winAt === null ? null : navigationAt.current,
       true,
     );
   });
@@ -920,7 +1102,7 @@ export function EpgGridPage() {
   // ---- keyboard cursor ------------------------------------------------------
   const [cursor, setCursor] = useState<{ row: number; time: number }>({ row: 0, time: now });
   const focusPending = useRef(false);
-  const windowPrograms = (row: number) => (programsFor(paged.getChannel(row)) ?? []).filter((p) => ms(p.end) > start && ms(p.start) < end);
+  const windowPrograms = (row: number) => (programsFor(paged.getChannel(row)) ?? []).filter((p) => ms(p.end) > dataStart && ms(p.start) < dataEnd);
   const cursorProgram = (row: number, time: number) => {
     const inWindow = windowPrograms(row);
     const i = programIndexAt(inWindow, time);
@@ -934,7 +1116,7 @@ export function EpgGridPage() {
   const rowReady = (row: number) => {
     const ch = paged.getChannel(row);
     // A guide that failed is not coming: the row is as ready as it gets (its channel cell takes the cursor).
-    return !!ch && dataStart === start && dataEnd === end && (gridEntry(itemKey(ch.ref)).fresh || !!gridError);
+    return !!ch && dataStart === wantedDataStart && dataEnd === wantedDataEnd && (gridEntry(itemKey(ch.ref)).fresh || !!gridError);
   };
 
   // Key repeat can outrun renders: keys read the cursor from here, not from a stale render.
@@ -944,45 +1126,211 @@ export function EpgGridPage() {
   const lastFocused = useRef<HTMLElement | null>(null);
   /** The cell the cursor is on; null while its row's guide for this window is still loading. */
   const cursorElement = (row: number, time: number) => {
-    if (!rowReady(row)) return null;
     const p = cursorProgram(row, time);
+    // A programme already in the overlapping cached slice remains valid while the next slice
+    // loads. Only an absent programme needs to wait for the new answer.
+    if (!p && !rowReady(row)) return null;
     const sel = p ? `[data-cell-row="${row}"][data-start="${p.start}"]` : `[data-channel-row="${row}"]`;
     return scroller.current?.querySelector<HTMLElement>(sel) ?? null;
   };
 
-  // When the window moves (or the grid first mounts after loading), put the scroll at the track's
-  // inline-start edge, or just before now. A move that keeps the view (a scroll or a key that ran
-  // into the window's edge) moves the scroll by the same px instead, so the screen stays put.
-  // RTL scrollers count scrollLeft down from 0. Declared before the focus effect, which then only
-  // has to bring the cursor cell into view.
+  // The browser owns horizontal scrolling. This canvas never changes width during a gesture,
+  // and scroll events only observe its position for the toolbar and rolling guide queries.
   const gridMounted = !paged.error && !paged.isLoading && !!sourceId && count > 0;
-  const laidStart = useRef(start);
-  /** The scroll's distance from the inline start, at the last scroll event or scroll write. */
-  const scrollX = useRef(0);
-  /** The scroller's clientWidth at the last scroll event or scroll write (read with the scroll, never after a write). */
-  const viewWidth = useRef(0);
-  // A new zoom step keeps the time at the track's visible start where it was (worked out from the
-  // last scroll position: reading the scroll now would give one the narrower track has clamped).
-  const laidPx = useRef(pxPerMin);
+  const stickyTitles = useRef(createStickyTitleManager());
+  const clockPosition = ((now - origin) / MINUTE) * pxPerMin;
+  const clockPositionRef = useRef(clockPosition);
+  clockPositionRef.current = clockPosition;
   useLayoutEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const moved = start - laidStart.current;
-    laidStart.current = start;
-    const zoomedFrom = laidPx.current;
-    laidPx.current = pxPerMin;
-    if (keepView.current) {
-      keepView.current = false;
-      el.scrollLeft = scrollLeftFor(Math.max(0, scrollStart(el) - (moved / MINUTE) * pxPerMin), rtl);
-    } else if (moved === 0 && zoomedFrom !== pxPerMin) {
-      el.scrollLeft = scrollLeftFor((scrollX.current * pxPerMin) / zoomedFrom, rtl);
-    } else {
-      el.scrollLeft = scrollLeftFor(now > start && now < end ? nowScroll(now, start, pxPerMin, el.clientWidth - channelCol) : 0, rtl);
+    if (scroller.current) updateGuideClock(scroller.current, clockPosition);
+  }, [clockPosition, gridMounted]);
+  const [hydration] = useState(createGuideHydrator);
+  const wheelScroller = useRef(createGuideWheelScroller());
+  const viewWidth = useRef(0);
+  const scrollX = useRef(0);
+  const observedScrollX = useRef(0);
+  const nativeScrollSnapshot = useRef<{ root: HTMLElement; x: number; y: number } | null>(null);
+  const scrollFrame = useRef(0);
+  const viewportPublishAt = useRef(0);
+  const viewportTimer = useRef(0);
+  const horizontalIdleTimer = useRef(0);
+  const programmaticX = useRef<number | null>(null);
+  const laidRoot = useRef<HTMLElement | null>(null);
+  const laidTrack = useRef(trackBase);
+  const laidPx = useRef(pxPerMin);
+  const laidRtl = useRef(rtl);
+  const laidRequest = useRef(0);
+  const laidWidth = useRef(false);
+  const publishHydrationViewport = useStable((root: HTMLElement, x: number, width: number, knownY?: number) => {
+    const y = knownY ?? root.scrollTop;
+    const height = virtualizer.scrollRect?.height || 720;
+    // Until the track has a measured width, assume a typical one, as the height does, so the
+    // first screen renders at once instead of one offscreen group per frame.
+    const trackView = width > channelCol ? width - channelCol : 1280;
+    hydration.setViewport({
+      left: x,
+      right: x + trackView,
+      firstRow: Math.max(0, Math.floor(y / rowH)),
+      lastRow: Math.min(count - 1, Math.floor((y + height - headerH - 1) / rowH)),
+    });
+  });
+  useLayoutEffect(() => {
+    const root = scroller.current;
+    if (root) publishHydrationViewport(root, scrollX.current, viewWidth.current || pageWidth);
+  }, [gridMounted, virtualizer.scrollRect?.height, rowH, headerH, count, publishHydrationViewport, pageWidth]);
+  const publishViewport = useStable((root: HTMLElement, immediate = false, fromFrame = false, known?: { x: number; y: number }) => {
+    const width = viewWidth.current || root.clientWidth || pageWidth;
+    viewWidth.current = width;
+    const max = Math.max(0, channelCol + trackWidth - width);
+    // Native scroll events already read both offsets before changing any styles. Reuse that
+    // snapshot through the animation frame rather than forcing layout after our own writes.
+    // Idle and resize callers omit it to observe native motion whose event has not arrived.
+    const x = Math.min(max, known?.x ?? scrollStart(root, rtl));
+    const y = known?.y ?? root.scrollTop;
+    nativeScrollSnapshot.current = { root, x, y };
+    scrollX.current = x;
+    publishHydrationViewport(root, x, width, y);
+    const time = start + x / pxPerMin * MINUTE;
+    viewAtRef.current = time;
+    root.dataset.viewAt = String(time);
+    const visibleMs = width > channelCol ? (width - channelCol) / pxPerMin * MINUTE : baseWindowMs;
+    // Replace the initial planning span on measurement, and recenter after a resize or zoom.
+    // Ordinary scrolls reuse the same window until they enter its guard band.
+    const geometry = renderWindowGeometry.current;
+    const sameGeometry = geometry?.width === width && geometry.pxPerMin === pxPerMin && geometry.channelCol === channelCol;
+    const nextRenderWindow = nextGuideRenderWindow(time, time + visibleMs,
+      sameGeometry ? renderWindowRef.current : undefined);
+    if (width > channelCol && !sameGeometry) renderWindowGeometry.current = { width, pxPerMin, channelCol };
+    if (nextRenderWindow !== renderWindowRef.current) {
+      renderWindowRef.current = nextRenderWindow;
+      setRenderWindow(nextRenderWindow);
     }
-    scrollX.current = scrollStart(el);
-    viewWidth.current = el.clientWidth;
-    fitCellText(el, scrollX.current, shiftPx.current); // before first paint: cells already clipped by the edge fit their text
-  }, [start, rtl, gridMounted, pxPerMin]);
+    const publish = () => {
+      const visibleWidth = width > channelCol ? width : channelCol + baseWindowMs / MINUTE * pxPerMin;
+      const next = visibleGuideTime(start, x, visibleWidth, channelCol, pxPerMin, end);
+      stickyTitles.current.update(x);
+      const crossing = guideDataStart(next[0]) !== guideDataStart(shownTime[0]);
+      const elapsed = performance.now() - viewportPublishAt.current;
+      if (immediate || crossing || elapsed >= GRID_VIEWPORT_PUBLISH_MS) {
+        window.clearTimeout(viewportTimer.current);
+        viewportTimer.current = 0;
+        viewportPublishAt.current = performance.now();
+        setShownTime((prev) => prev[0] === next[0] && prev[1] === next[1] ? prev : next);
+      } else if (!viewportTimer.current) {
+        viewportTimer.current = window.setTimeout(() => {
+          viewportTimer.current = 0;
+          const latest = nativeScrollSnapshot.current;
+          publishViewport(root, true, false, latest?.root === root ? latest : undefined);
+        }, GRID_VIEWPORT_PUBLISH_MS - elapsed);
+      }
+    };
+    if (immediate) {
+      cancelAnimationFrame(scrollFrame.current);
+      scrollFrame.current = 0;
+      publish();
+    } else if (fromFrame) {
+      publish();
+    } else if (!scrollFrame.current) {
+      scrollFrame.current = requestAnimationFrame(() => {
+        scrollFrame.current = 0;
+        const latest = nativeScrollSnapshot.current;
+        publishViewport(root, false, true, latest?.root === root ? latest : undefined);
+      });
+    }
+    return { x, time };
+  });
+  const observeHorizontalInput = useStable((markGesture: boolean = true) => {
+    // Mark continuous motion for diagnostics. CSS sticky keeps clipped titles in place.
+    // This marker has no CSS dependents: ancestor hover rules made every tile restyle here.
+    if (markGesture && scroller.current && scroller.current.dataset.guideScrolling === undefined) scroller.current.dataset.guideScrolling = '';
+    horizontalScrolling.current = true;
+    window.clearTimeout(horizontalIdleTimer.current);
+    horizontalIdleTimer.current = window.setTimeout(() => {
+      // Read the final native offset even if its scroll event has not yet been delivered.
+      if (scroller.current) publishViewport(scroller.current, true);
+      horizontalScrolling.current = false;
+      if (scroller.current) delete scroller.current.dataset.guideScrolling;
+      setBufferStart(guideDataStart(viewAtRef.current));
+    }, GRID_HORIZONTAL_IDLE_MS);
+  });
+  useEffect(() => () => {
+    cancelAnimationFrame(scrollFrame.current);
+    window.clearTimeout(viewportTimer.current);
+    window.clearTimeout(horizontalIdleTimer.current);
+    hydration.reset();
+  }, []);
+  useLayoutEffect(() => {
+    const root = scroller.current;
+    if (!root || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      // The grid's client width can also change when a channel filter removes its scrollbar.
+      const width = root.clientWidth || pageWidth;
+      if (width === viewWidth.current) return;
+      viewWidth.current = width;
+      publishViewport(root, true);
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [gridMounted, pageWidth, publishViewport]);
+  const moveViewTo = useStable((time: number, root: HTMLElement, updateUrl = true, deferBuffer = false) => {
+    if (!Number.isFinite(time)) return;
+    const y = root.scrollTop;
+    const width = viewWidth.current || root.clientWidth || pageWidth;
+    viewWidth.current = width;
+    const max = Math.max(0, channelCol + trackWidth - width);
+    const x = Math.max(0, Math.min(max, (time - start) / MINUTE * pxPerMin));
+    wheelScroller.current.cancel(root);
+    // A button jump moves the native viewport immediately. The buffer effect and shared
+    // hydration queue prepare its surrounding hours without replacing overlapping tiles.
+    // Update sticky title eligibility immediately for jumps, or once per frame for gestures.
+    if (deferBuffer) observeHorizontalInput(false);
+    else {
+      window.clearTimeout(horizontalIdleTimer.current);
+      horizontalScrolling.current = false;
+      delete root.dataset.guideScrolling;
+      setBufferStart(guideDataStart(time));
+    }
+    programmaticX.current = x;
+    observedScrollX.current = x;
+    root.scrollLeft = scrollLeftFor(x, rtl);
+    publishViewport(root, true, false, { x, y });
+    if (updateUrl) {
+      manualView.current = true;
+      settleScrollUrl(viewAtRef.current);
+    }
+  });
+  useLayoutEffect(() => {
+    const root = scroller.current;
+    if (!root) {
+      laidRoot.current = null;
+      return;
+    }
+    viewWidth.current = root.clientWidth || pageWidth;
+    const first = laidRoot.current !== root;
+    const trackChanged = laidTrack.current !== trackBase;
+    const scaleChanged = laidPx.current !== pxPerMin || laidRtl.current !== rtl;
+    const jump = requestedView && requestedView.id !== laidRequest.current ? requestedView : null;
+    const firstWidth = !laidWidth.current && root.clientWidth > 0;
+    laidRoot.current = root;
+    laidTrack.current = trackBase;
+    laidPx.current = pxPerMin;
+    laidRtl.current = rtl;
+    if (jump) laidRequest.current = jump.id;
+    if (root.clientWidth > 0) laidWidth.current = true;
+    if (jump) {
+      const time = jump.live
+        ? jump.time + nowScroll(now, jump.time, pxPerMin, root.clientWidth - channelCol) / pxPerMin * MINUTE
+        : jump.time;
+      moveViewTo(time, root, false, true);
+    } else if (first && viewAtRef.current === baseStart && winAt === null) {
+      // The first live view places now inside the track; later remounts keep their last time.
+      const time = baseStart + nowScroll(now, baseStart, pxPerMin, root.clientWidth - channelCol) / pxPerMin * MINUTE;
+      moveViewTo(time, root, false);
+    } else if (first || trackChanged || scaleChanged || firstWidth) {
+      // Zoom, direction and a deliberate re-centre preserve the time at the viewport edge.
+      moveViewTo(viewAtRef.current, root, false);
+    }
+  }, [trackBase, requestedView, gridMounted, pageWidth, channelCol, pxPerMin, rtl]);
 
   // ---- zoom -----------------------------------------------------------------
   const zoomRef = useRef(zoom);
@@ -994,29 +1342,71 @@ export function EpgGridPage() {
     storeGuideZoom(next);
     setZoom(next);
   });
-  // Ctrl+scroll over the grid zooms the time scale instead of the page (a native listener: React's
-  // wheel handlers are passive and cannot stop the page zoom).
   const lastWheelZoom = useRef(Number.NEGATIVE_INFINITY);
   useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
+    const root = scroller.current;
+    if (!root) return;
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.deltaY === 0) return;
-      e.preventDefault();
-      const t = performance.now();
-      if (t - lastWheelZoom.current < WHEEL_ZOOM_MS) return;
-      lastWheelZoom.current = t;
-      zoomBy(e.deltaY < 0 ? 1 : -1);
+      if (e.ctrlKey || e.metaKey) {
+        wheelScroller.current.cancel(root);
+        if (e.deltaY === 0) return;
+        e.preventDefault();
+        const at = performance.now();
+        if (at - lastWheelZoom.current >= WHEEL_ZOOM_MS) {
+          lastWheelZoom.current = at;
+          zoomBy(e.deltaY < 0 ? 1 : -1);
+        }
+      } else {
+        if (e.deltaX !== 0 || (e.shiftKey && e.deltaY !== 0)) {
+          observeHorizontalInput();
+          // User scrolling takes precedence over a pending keyboard focus reveal, even if a
+          // guide answer renders before the browser delivers its next scroll event.
+          manualView.current = true;
+          focusPending.current = false;
+        }
+        // Some systems have already put Shift-wheel on deltaX; others leave it on deltaY.
+        // Larger wheel steps need motion between events, not one instantaneous jump per notch.
+        const raw = e.deltaX || e.deltaY;
+        const step = isWheelStep(raw, e.deltaMode);
+        if (e.shiftKey && raw !== 0 && (e.deltaX === 0 || step)) {
+          e.preventDefault();
+          const page = e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? (viewWidth.current || root.clientWidth || pageWidth) : 0;
+          const delta = wheelDeltaPx(raw, e.deltaMode, page);
+          const max = Math.max(0, channelCol + trackWidth - (viewWidth.current || root.clientWidth || pageWidth));
+          wheelScroller.current.move(root, delta, max, rtl, step && guideWheelMotionAllowed());
+        } else {
+          // Trackpad/native wheel input takes over immediately from any unfinished wheel step.
+          wheelScroller.current.cancel(root);
+        }
+      }
     };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [gridMounted, zoomBy]);
+    const cancelWheel = () => wheelScroller.current.cancel(root);
+    const settleWheel = () => wheelScroller.current.settled(root);
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) cancelWheel();
+    };
+    root.addEventListener('wheel', onWheel, { passive: false });
+    root.addEventListener('pointerdown', cancelWheel, { passive: true });
+    root.addEventListener('touchstart', cancelWheel, { passive: true });
+    root.addEventListener('keydown', onKey);
+    root.addEventListener('scrollend', settleWheel);
+    return () => {
+      root.removeEventListener('wheel', onWheel);
+      root.removeEventListener('pointerdown', cancelWheel);
+      root.removeEventListener('touchstart', cancelWheel);
+      root.removeEventListener('keydown', onKey);
+      root.removeEventListener('scrollend', settleWheel);
+      cancelWheel();
+    };
+  }, [gridMounted, zoomBy, rtl, observeHorizontalInput, channelCol, trackWidth, pageWidth]);
+  useEffect(() => {
+    const root = scroller.current;
+    if (root) return attachGuideDragPan(root);
+  }, [gridMounted]);
 
-  /** Scrolls the track so that `x` px from its inline start is at the visible start. */
+  /** Put a time measured from the fixed track origin at the visible edge. */
   const scrollTrackTo = (root: HTMLElement, x: number) => {
-    root.scrollLeft = scrollLeftFor(Math.max(0, x), rtl);
-    scrollX.current = Math.max(0, x);
-    fitCellText(root, scrollX.current, shiftPx.current);
+    moveViewTo(start + x / pxPerMin * MINUTE, root);
   };
 
   // Focus never sits on a cell that is about to unmount: while the cursor's row is off screen or
@@ -1027,7 +1417,9 @@ export function EpgGridPage() {
     const focused = document.activeElement;
     if (lastFocused.current && !lastFocused.current.isConnected && (focused === document.body || focused === null)) {
       lastFocused.current = null;
-      focusPending.current = true;
+      // A rolling data slice may remove the focused programme after a native wheel gesture.
+      // Keep keyboard focus on the grid without revealing that old programme again.
+      if (!manualView.current) focusPending.current = true;
       root.focus({ preventScroll: true });
     }
     if (!focusPending.current) return;
@@ -1050,9 +1442,9 @@ export function EpgGridPage() {
     // (L2-guide-library-3): the sticky channel column covers the track's inline start.
     const p = cursorProgram(cursor.row, cursor.time);
     if (!p) return;
-    const left = ((Math.max(ms(p.start), start) - start) / MINUTE) * pxPerMin;
-    const right = ((Math.min(ms(p.end), end) - start) / MINUTE) * pxPerMin;
-    const x = scrollX.current;
+    const left = ((ms(p.start) - start) / MINUTE) * pxPerMin;
+    const right = ((ms(p.end) - start) / MINUTE) * pxPerMin;
+    const x = ((viewAtRef.current - start) / MINUTE) * pxPerMin;
     const view = (viewWidth.current || root.clientWidth) - channelCol;
     if (left < x) scrollTrackTo(root, left - 8);
     else if (right > x + view) scrollTrackTo(root, x + Math.min(right - x - view + 8, left - x));
@@ -1076,7 +1468,8 @@ export function EpgGridPage() {
   };
 
   // ---- channel row menu (C2: rename and hide from the guide, plus the Live page's other entries) ----
-  const [rowMenu, setRowMenu] = useState<{ pos: { x: number; y: number }; channel: Channel } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ pos: { x: number; y: number }; channel: Channel; programme?: EpgProgram } | null>(null);
+  const [programmeLink, setProgrammeLink] = useState<string | null>(null);
   const closeRowMenu = useCallback(() => setRowMenu(null), []);
   // "Match guide channel" from the row menu and the no-match notice, as on the Live page.
   const [mapping, setMapping] = useState<Channel | null>(null);
@@ -1117,7 +1510,7 @@ export function EpgGridPage() {
     const step = timeStep(e.key, rtl);
     const key = step > 0 ? 'later' : step < 0 ? 'earlier' : e.key;
     // The row's guide for this window is still loading and nothing shown holds the cursor's time
-    // (it just crossed the window's edge): which programme comes next is not known yet, and a
+    // (it just crossed the queried slice): which programme comes next is not known yet, and a
     // guess would skip one. The press waits for the answer instead (L3-guide-library-1). A guide
     // that failed answers nothing: the keys then step by slot as before.
     if (step !== 0 && !gridError && !rowReady(row) && !(cur && ms(cur.start) <= time && time < ms(cur.end)) && paged.getChannel(row)) {
@@ -1137,19 +1530,15 @@ export function EpgGridPage() {
       case 'PageUp':
         row = Math.max(0, row - 8);
         break;
-      // Past the window's edge the window moves on and the view stays put; the focus effect then
-      // brings the cell into view.
+      // The focus effect brings the next or previous programme into view.
       case 'later': {
         const nextT = cur ? ms(cur.end) : time + GRID_SLOT_MIN * MINUTE;
-        if (nextT >= startRef.current + windowMs) drift(GRID_EXTEND);
         time = nextT;
         break;
       }
       case 'earlier': {
         const prevT = cur ? ms(cur.start) - 1 : time - GRID_SLOT_MIN * MINUTE;
-        const from = startRef.current;
-        if (prevT < from) drift(-GRID_EXTEND);
-        time = Math.max(prevT, from - GRID_EXTEND);
+        time = prevT;
         break;
       }
       case 'Home':
@@ -1159,10 +1548,10 @@ export function EpgGridPage() {
         time = Date.now();
         break;
       case 'End': {
-        // End: the last programme of this row in the window; Ctrl+End also goes to the last channel.
+        // End: the last programme of this row in the visible time range.
         if (e.ctrlKey || e.metaKey) row = count - 1;
-        const last = windowPrograms(row).at(-1);
-        time = last ? Math.max(ms(last.start), start) : end - 1;
+        const last = windowPrograms(row).filter((p) => ms(p.start) < shownTime[1] && ms(p.end) > shownTime[0]).at(-1);
+        time = last ? Math.max(ms(last.start), shownTime[0]) : shownTime[1] - 1;
         break;
       }
       default:
@@ -1172,60 +1561,91 @@ export function EpgGridPage() {
     cursorRef.current = { row, time };
     focusPending.current = true;
     virtualizer.scrollToIndex(row, { align: 'auto' });
+    // A keyboard target beyond the mounted time window has no cell for the focus effect to
+    // measure. Move the viewport first so that the target mounts in the same update.
+    if ((time < renderWindowRef.current[0] || time >= renderWindowRef.current[1] ||
+      time < dataStart || time >= dataEnd) && scroller.current) {
+      const view = (viewWidth.current || scroller.current.clientWidth) - channelCol;
+      scrollTrackTo(scroller.current, ((time - start) / MINUTE) * pxPerMin - Math.max(0, view / 3));
+    }
     // A row that isn't rendered yet (or still loading) has no cell to take focus: the grid holds it.
     if (!cursorElement(row, time)) scroller.current?.focus({ preventScroll: true });
     setCursor({ row, time });
-    // Within a programme of the window's edge, the window past it is fetched now, so the press
-    // that crosses the edge finds it drawn (L3-guide-library-1).
+    // Fetch beside the current slice before the next press crosses it.
     const shown = windowPrograms(row);
     const at = programIndexAt(shown, time);
-    if (at >= 0 && at >= shown.length - 2 && ms(shown.at(-1)!.end) >= startRef.current + windowMs) prefetchWindow(GRID_EXTEND);
-    if (at >= 0 && at <= 1 && ms(shown[0]!.start) <= startRef.current) prefetchWindow(-GRID_EXTEND);
+    if (at >= 0 && at >= shown.length - 2) prefetchWindow(GRID_DATA_STEP);
+    if (at >= 0 && at <= 1) prefetchWindow(-GRID_DATA_STEP);
   };
 
-  /** Fetches the visible chunks' guide for the window `delta` from this one, before a move needs it. */
-  const prefetchWindow = (delta: number) => {
-    const s = startRef.current + delta;
+  /** Fill the query cache without changing the displayed slice or rebuilding programme rows. */
+  const prefetchSlice = useStable((s: number) => {
+    const e = s + dataWindowMs;
+    if (!pageMeasured || (s === dataStart && e === dataEnd)) return;
     const from = new Date(s - offsetMs).toISOString();
-    const to = new Date(s + windowMs - offsetMs).toISOString();
+    const to = new Date(e - offsetMs).toISOString();
     for (const refs of [refsA, refsB]) {
       if (refs.length === 0) continue;
       const args = gridArgs(refs, from, to);
-      void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS });
+      void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS })
+        .then(() => setPrefetchVersion((v) => v + 1));
     }
-  };
-  // Horizontal scrolling runs on past the window: near an edge, scrolling toward it moves the
-  // window by GRID_EXTEND (the layout effect above keeps the view still), and within a screen of
-  // the edge the next window's guide is fetched ahead, so it arrives drawn. Layout is read once,
-  // before anything is written (L2-guide-library-2).
+  });
+  /** Keyboard moves can request a slice before their destination becomes visible. */
+  const prefetchWindow = useStable((delta: number) => prefetchSlice(guideDataStart(shownTime[0] + delta)));
+  const prefetchRefsKey = [...refsA, ...refsB].map(itemKey).join('|');
+  const horizontalPrefetchTimer = useRef(0);
+  // The displayed answer takes priority. One outer slice per direction covers a long fling,
+  // with only six hours of overlap instead of repeatedly fetching nearly identical 24h slices.
+  useEffect(() => {
+    if (!atRest || !gridsLoaded || dataStart !== wantedDataStart || dataEnd !== wantedDataEnd) return;
+    // Vertical flings change the channel chunks repeatedly. Wait until those rows have held
+    // still before warming distant times for them; otherwise each passed chunk costs two RPCs.
+    const verticalIdleMs = performance.now() - vScroll.current.t;
+    const delay = Math.max(500, 1000 - verticalIdleMs);
+    const id = window.setTimeout(() => {
+      horizontalPrefetchTimer.current = 0;
+      prefetchSlice(dataStart - outerShift);
+      prefetchSlice(dataStart + outerShift);
+    }, delay);
+    horizontalPrefetchTimer.current = id;
+    return () => {
+      window.clearTimeout(id);
+      if (horizontalPrefetchTimer.current === id) horizontalPrefetchTimer.current = 0;
+    };
+  }, [atRest, gridsLoaded, dataStart, dataEnd, wantedDataStart, wantedDataEnd, outerShift, prefetchRefsKey, prefetchSlice, verticalIdleVersion]);
+  // Both axes scroll natively. Only the vertical axis changes which channel rows are mounted.
   const onGridScroll = (el: HTMLDivElement) => {
-    const x = scrollStart(el);
-    const max = el.scrollWidth - el.clientWidth;
-    viewWidth.current = el.clientWidth;
-    const dx = x - scrollX.current;
-    scrollX.current = x;
+    const nativeX = scrollStart(el, rtl);
     const y = el.scrollTop;
+    // Width is observed at layout/resize, never measured in the wheel or scroll hot path.
+    const x = Math.min(Math.max(0, channelCol + trackWidth - (viewWidth.current || pageWidth)), nativeX);
+    nativeScrollSnapshot.current = { root: el, x, y };
+    // Idle and resize observations can precede delivery of a scroll event. Track delivered
+    // events separately so that those observations cannot make a gesture look idle.
+    if (x !== observedScrollX.current) {
+      observedScrollX.current = x;
+      const programmatic = programmaticX.current !== null && Math.abs(x - programmaticX.current) < 1;
+      programmaticX.current = null;
+      if (!programmatic) observeHorizontalInput();
+      publishViewport(el, false, false, { x, y });
+      if (!programmatic) {
+        manualView.current = true;
+        focusPending.current = false;
+        settleScrollUrl(start + x / pxPerMin * MINUTE);
+      }
+    }
     const vs = vScroll.current;
     if (y !== vs.y) {
+      publishHydrationViewport(el, x, viewWidth.current || pageWidth, y);
+      window.clearTimeout(horizontalPrefetchTimer.current);
+      horizontalPrefetchTimer.current = 0;
+      window.clearTimeout(verticalIdleTimer.current);
+      verticalIdleTimer.current = window.setTimeout(() => setVerticalIdleVersion((v) => v + 1), 600);
       const t = performance.now();
       vs.v = Math.abs(y - vs.y) / Math.max(1, t - vs.t);
       vs.t = t;
       vs.y = y;
-    }
-    // A vertical scroll leaves the cell text as it is: rows it brings in fit theirs.
-    if (dx === 0) return;
-    fitCellText(el, x, shiftPx.current);
-    const dir = extendDirection(x, dx, max);
-    if (dir !== 0) {
-      // Rendered and scrolled back at once, so the next wheel step lands on the moved window
-      // instead of the clamped edge (L2-guide-library-5). The synchronous render is the header,
-      // the now line and the track's shift: the rows keep their props (cells sit from a fixed
-      // origin, and the guide for the new window renders deferred), L3-perf-ui-4.
-      flushSync(() => drift(dir * GRID_EXTEND));
-    } else if (dx > 0 && x >= max - GRID_EXTEND_EDGE_PX - el.clientWidth) {
-      prefetchWindow(GRID_EXTEND);
-    } else if (dx < 0 && x <= GRID_EXTEND_EDGE_PX + el.clientWidth) {
-      prefetchWindow(-GRID_EXTEND);
     }
   };
 
@@ -1270,7 +1690,6 @@ export function EpgGridPage() {
   // A programme opened from the global search or the palette (`guideHitLink`): the URL already
   // holds its source and window, and its row is found like a hit of the search panel. Once per
   // history entry, so a re-render does not move the cursor back to it.
-  const location = useLocation();
   const handledHit = useRef<string | null>(null);
   useEffect(() => {
     if (!isGuideHitState(location.state) || handledHit.current === location.key) return;
@@ -1454,10 +1873,13 @@ export function EpgGridPage() {
     setSelection({ channel, program, anchor: el });
   });
   const focusCell = useStable((row: number, program: EpgProgram) =>
-    setCursor((c) => (c.row === row && c.time >= ms(program.start) && c.time < ms(program.end) ? c : { row, time: Math.max(ms(program.start), start) })),
+    setCursor((c) => (c.row === row && c.time >= ms(program.start) && c.time < ms(program.end) ? c : { row, time: ms(program.start) })),
   );
-  const rowMenuAt = useStable((channel: Channel, x: number, y: number) => setRowMenu({ pos: { x, y }, channel }));
-  const fitText = useCallback((row: HTMLElement) => fitCellText(row, scrollX.current, shiftPx.current), []);
+  const rowMenuAt = useStable((channel: Channel, x: number, y: number, programme?: EpgProgram) => setRowMenu({ pos: { x, y }, channel, programme }));
+  const trackTitles = useCallback((row: HTMLElement) => {
+    updateGuideClock(row, clockPositionRef.current);
+    return stickyTitles.current.register(row, scrollX.current);
+  }, []);
   const pressCell = useStable((channel: Channel, program: EpgProgram) => prefetchProgramDescription(queryClient, channel.ref, program, offsetMs));
   // The preview band follows the pointer after it rests a moment (a sweep across the grid does
   // not re-render the band per cell), and goes back to the keyboard cursor when it leaves.
@@ -1467,7 +1889,11 @@ export function EpgGridPage() {
   const hoverCell = useStable((_row: number, channel: Channel, program: EpgProgram | undefined) => {
     if (!showPreview) return;
     window.clearTimeout(hoverTimer.current);
-    hoverTimer.current = window.setTimeout(() => setHovered(program ? { channel, program } : null), PREVIEW_HOVER_MS);
+    const publish = () => {
+      if (horizontalScrolling.current) hoverTimer.current = window.setTimeout(publish, PREVIEW_HOVER_MS);
+      else setHovered(program ? { channel, program } : null);
+    };
+    hoverTimer.current = window.setTimeout(publish, PREVIEW_HOVER_MS);
   });
   // The band keeps a hovered programme while the pointer is on it. The way from a cell up to the
   // band's Watch, Record or Remind leaves the grid, and the band used to go back to the cursor's
@@ -1478,19 +1904,24 @@ export function EpgGridPage() {
     hoverTimer.current = window.setTimeout(() => setHovered(null), PREVIEW_HOVER_MS);
   });
   const rowHandlers = useMemo<GuideRowHandlers>(
-    () => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt, fitText, press: pressCell, hover: hoverCell }),
-    [playLive, openCell, focusCell, rowMenuAt, fitText, pressCell, hoverCell],
+    () => ({ play: playLive, open: openCell, focusCell, menu: rowMenuAt, trackTitles, press: pressCell, hover: hoverCell, hydration }),
+    [playLive, openCell, focusCell, rowMenuAt, trackTitles, pressCell, hoverCell, hydration],
   );
 
   // ---- render ---------------------------------------------------------------
+  // Give the ruler the same six-hour buffers as the programme slice. Keeping days of sticky
+  // labels offscreen still adds compositor work, even after programme titles are ordinary text.
+  // Local half hours preserve ticks in time zones whose offset includes fractional hours.
+  const rulerStart = Math.max(start, floorLocal(dataStart, GRID_SLOT_MIN));
+  const rulerEnd = Math.min(end, floorLocal(dataEnd, GRID_SLOT_MIN) + GRID_SLOT_MIN * MINUTE);
   const slots = useMemo(() => {
     const out: number[] = [];
-    for (let s = start; s < end; s += GRID_SLOT_MIN * MINUTE) out.push(s);
+    for (let s = rulerStart; s < rulerEnd; s += GRID_SLOT_MIN * MINUTE) out.push(s);
     return out;
-  }, [start, end]);
+  }, [rulerStart, rulerEnd]);
   const labels = useMemo(() => slotLabels(slots, i18n.language), [slots, i18n.language]);
-  const trackWidth = (windowMs / MINUTE) * pxPerMin;
   const nowInWindow = now >= start && now < end;
+  const nowInViewport = now >= shownTime[0] && now < shownTime[1];
   const nowX = ((now - start) / MINUTE) * pxPerMin;
 
   const bar = guideBarLayout(pageWidth);
@@ -1575,9 +2006,9 @@ export function EpgGridPage() {
         view={view}
         lists={lists.data}
         bar={bar}
-        start={start}
-        end={end}
-        nowInWindow={nowInWindow}
+        start={shownTime[0]}
+        end={shownTime[1]}
+        nowInWindow={nowInViewport}
         now={now}
         onQuery={setQuery}
         onShift={shift}
@@ -1607,7 +2038,7 @@ export function EpgGridPage() {
           onPointerLeave={releaseHover}
         />
       ) : null}
-      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={start} now={now} onJump={goTo} onNow={toNow} />
+      <MemoJumpToDialog open={jumpOpen} onClose={closeJump} start={shownTime[0]} now={now} onJump={goTo} onNow={toNow} />
 
       {gridError ? (
         <div role="alert" className="border-b border-divider bg-surface-2 px-3 py-2 text-sm text-danger">
@@ -1684,10 +2115,12 @@ export function EpgGridPage() {
               lastFocused.current = e.target as HTMLElement;
             }}
             data-testid="epg-grid"
+            data-view-at={viewAtRef.current}
             // The ring shows only once the grid has held focus for 150 ms: the brief holds of a
             // window shift (16-98 ms) would otherwise flash a frame around the whole grid. It goes
             // at once when a cell takes focus (no delay out of the focused state).
-            className="relative min-h-0 flex-1 overflow-auto overscroll-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset focus-visible:delay-150"
+            className="relative min-h-0 flex-1 cursor-grab overflow-auto overscroll-x-none overscroll-y-contain outline-none transition-shadow duration-0 focus-visible:ring-2 focus-visible:ring-focus focus-visible:delay-150"
+            style={{ overflowAnchor: 'none' }}
           >
             <div
               // Sized from its style, so a row added or removed by a scroll is laid out in here
@@ -1698,10 +2131,8 @@ export function EpgGridPage() {
                   width: channelCol + trackWidth,
                   height: virtualizer.getTotalSize() + headerH,
                   position: 'relative',
-                  // Moves every row's cells to the window (GuideRow lays them out from `origin`).
-                  [GRID_SHIFT_VAR]: `${gridShift}px`,
-                  // Now from the rows' origin: the airing cells' progress strips read it.
-                  [GRID_NOW_VAR]: `${((now - origin) / MINUTE) * pxPerMin}px`,
+                  '--grid-total-width': `${channelCol + trackWidth}px`,
+                  '--grid-track-width': `${trackWidth}px`,
                 } as CSSProperties
               }
             >
@@ -1709,6 +2140,7 @@ export function EpgGridPage() {
                 height={headerH}
                 slots={slots}
                 labels={labels}
+                start={start}
                 channelCol={channelCol}
                 trackWidth={trackWidth}
                 slotPx={slotPx}
@@ -1737,6 +2169,13 @@ export function EpgGridPage() {
                   forced layout and again at the width it found (P2-GUIDE-2). */}
               {pageMeasured && vItems.map((v) => {
                 const ch = paged.getChannel(v.index);
+                const programs = programsFor(ch);
+                const playing = !!ch && playingKey === itemKey(ch.ref);
+                const playingProgramStart = playing
+                  ? playingSource?.isLive
+                    ? programs?.find((p) => ms(p.start) <= now && now < ms(p.end))?.start
+                    : playingSource?.catchupProgramStart
+                  : undefined;
                 return (
                   <GuideRow
                     key={v.key}
@@ -1744,17 +2183,18 @@ export function EpgGridPage() {
                     top={headerH + v.start}
                     height={rowH}
                     channel={ch}
-                    programs={programsFor(ch)}
+                    programs={programs}
                     origin={origin}
+                    renderWindow={renderWindow}
                     now={now}
                     pxPerMin={pxPerMin}
                     channelCol={channelCol}
-                    trackWidth={trackWidth}
                     compact={compact}
                     rtl={rtl}
                     kind={kind}
                     highlighted={!!ch && highlight === itemKey(ch.ref)}
-                    playing={!!ch && playingKey === itemKey(ch.ref)}
+                    playing={playing}
+                    playingProgramStart={playingProgramStart}
                     genreFilter={genreFilter}
                     genreNames={genreNames}
                     labels={rowLabels}
@@ -1768,7 +2208,7 @@ export function EpgGridPage() {
               })}
             </div>
           </div>
-          {noEpgAnywhere && nowInWindow && !guidesLoaded ? (
+          {noEpgAnywhere && nowInViewport && !guidesLoaded ? (
             // LG-10: no guide at all. A proper empty state over the (quiet, flat) rows, not a pill
             // cut short at the foot of a wall of empty cells; the channels stay under it.
             <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-bg/60 p-4 pt-12">
@@ -1799,8 +2239,8 @@ export function EpgGridPage() {
                 className="pointer-events-auto flex max-w-xl items-center gap-3 rounded-lg border border-edge bg-surface px-4 py-2 text-sm text-fg-muted shadow-2 motion-safe:animate-fade-in"
               >
                 {/* Away from now, an empty window is past the guide's end, not a missing guide (L4-live-1). */}
-                <span className="min-w-0">{nowInWindow ? t(guidesLoaded ? 'guideNoMatch' : 'guideNoData') : t('guideNoDataHere')}</span>
-                {nowInWindow && guidesLoaded ? (
+                <span className="min-w-0">{nowInViewport ? t(guidesLoaded ? 'guideNoMatch' : 'guideNoData') : t('guideNoDataHere')}</span>
+                {nowInViewport && guidesLoaded ? (
                   // The cursor row's channel (the first one until the keys moved it).
                   <button
                     type="button"
@@ -1810,7 +2250,7 @@ export function EpgGridPage() {
                   >
                     {t('mapEpg')}
                   </button>
-                ) : nowInWindow ? (
+                ) : nowInViewport ? (
                   <Link to="/settings/epg" className={cn(TEXT_LINK, 'shrink-0')}>
                     {t('epgSettings')}
                   </Link>
@@ -1831,6 +2271,9 @@ export function EpgGridPage() {
           source={rowMenu.channel.ref.sourceId === source?.id ? source : undefined}
           // The grid shows the channel's programmes anyway; the header names the airing one.
           nowTitle={programsFor(rowMenu.channel)?.find((p) => ms(p.start) <= now && ms(p.end) > now)?.title}
+          programme={rowMenu.programme}
+          now={now}
+          onProgrammeLink={setProgrammeLink}
           onPlay={playLive}
           onMapGuide={setMapping}
           onToggleFavorite={toggleFavorite}
@@ -1838,6 +2281,21 @@ export function EpgGridPage() {
         />
       ) : null}
       <MemoMappingDialog channel={mapping} onClose={closeMapping} />
+      <Dialog open={programmeLink !== null} onClose={() => setProgrammeLink(null)} title={t('copyUrl')} size="lg">
+        <p className="mb-2 text-sm text-fg-muted">Select the stream address and copy it manually.</p>
+        <input
+          type="text"
+          readOnly
+          value={programmeLink ?? ''}
+          aria-label={t('copyUrl')}
+          data-autofocus
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full rounded-md border border-edge bg-bg px-3 py-2 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        />
+        <div className="mt-3 flex justify-end">
+          <Button onClick={() => setProgrammeLink(null)}>{t('close')}</Button>
+        </div>
+      </Dialog>
 
       {selection ? (
         <ProgramPopover
@@ -1884,6 +2342,7 @@ const GuideHeader = memo(function GuideHeader({
   height,
   slots,
   labels,
+  start,
   channelCol,
   trackWidth,
   slotPx,
@@ -1895,6 +2354,7 @@ const GuideHeader = memo(function GuideHeader({
   height: number;
   slots: readonly number[];
   labels: readonly string[];
+  start: number;
   channelCol: number;
   trackWidth: number;
   /** Px per 30-minute slot at the zoom step. */
@@ -1908,7 +2368,7 @@ const GuideHeader = memo(function GuideHeader({
 }) {
   const { t } = useTranslation('live');
   return (
-    <div role="row" className="sticky top-0 z-20 flex border-b border-divider bg-surface" style={{ height, width: channelCol + trackWidth }}>
+    <div role="row" className="sticky top-0 z-20 border-b border-divider bg-surface" style={{ height, width: channelCol + trackWidth }}>
       {nowLabel ? (
         // The now line's labelled head: it used to be a dot the ruler painted over. Under the
         // sticky channel column (z-10 here) when the track is scrolled past now.
@@ -1922,17 +2382,16 @@ const GuideHeader = memo(function GuideHeader({
           {nowLabel}
         </span>
       ) : null}
-      <div role="columnheader" className="sticky start-0 z-10 flex items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
+      <div role="columnheader" className="sticky start-0 z-10 flex h-full items-center border-e border-divider bg-surface px-3 text-xs text-fg-subtle" style={{ width: channelCol }}>
         <span className={compact ? 'sr-only' : undefined}>{t('channels')}</span>
       </div>
-      {/* Keyed by place, not time: a window move at the edge of a sideways scroll relabels the
-          slots where they stand instead of moving them while the scroll makes up for it, which
-          counted as a layout shift on every move (L4-live-4). */}
-      {slots.map((_, i) => {
+      {/* Slot keys keep nearby ruler labels stable as the visible time changes. */}
+      {slots.map((slot, i) => {
         // The now pill stands on the ruler: a label it would cover, even in part, steps aside.
-        const covered = !!nowLabel && rulerLabelCovered(nowX, nowLabel, i * slotPx, labels[i] ?? '');
+        const slotX = ((slot - start) / (GRID_SLOT_MIN * MINUTE)) * slotPx;
+        const covered = !!nowLabel && rulerLabelCovered(nowX, nowLabel, slotX, labels[i] ?? '');
         return (
-          <div role="columnheader" key={i} className="flex items-center border-s border-divider text-xs tabular-nums text-fg-muted" style={{ width: slotPx }}>
+          <div role="columnheader" key={slot} data-slot={slot} className="absolute top-0 flex h-full items-center border-s border-divider text-xs tabular-nums text-fg-muted" style={{ ...inlineStart(channelCol + slotX, rtl), width: slotPx }}>
             {/* Sticky past the channel column: the slot the window starts in keeps its time in
                 view while the column covers its start, so the left of the grid is never unlabelled. */}
             <span className={cn('sticky px-2 whitespace-nowrap', covered && 'invisible')} style={{ insetInlineStart: channelCol }} data-testid="ruler-label">
@@ -2090,7 +2549,7 @@ const GuideToolbar = memo(function GuideToolbar({
           goes to them, so the picker stays at its name's width), and a row of their own when they
           wrap under a long group name. */}
       <div
-        className={oneRow ? 'flex min-w-0 grow-[999] items-center gap-1' : stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex items-center gap-1'}
+        className={oneRow ? 'flex min-w-0 grow-[999] items-center gap-1' : stacked ? 'flex w-full min-w-0 items-center gap-1' : 'ms-auto flex max-w-full items-center gap-1'}
         role="group"
         aria-label={t('guideTime')}
         data-testid="guide-time"
@@ -2112,11 +2571,11 @@ const GuideToolbar = memo(function GuideToolbar({
               data-testid="guide-window"
               className={cn(
                 'inline-flex h-8 items-center justify-center rounded-md px-2 tabular-nums text-fg outline-none active:bg-surface-3 focus-visible:ring-2 focus-visible:ring-focus motion-safe:transition-colors',
-                stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'min-w-36 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
+                stacked ? 'min-w-0 flex-1 bg-surface-2 hover:bg-surface-3' : 'w-80 min-w-0 gap-1.5 text-sm whitespace-nowrap hover:bg-surface-2',
               )}
             >
               {stacked ? null : <CalendarClock className="size-3.5 shrink-0 text-fg-subtle" aria-hidden />}
-              <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : undefined}>
+              <span aria-live="polite" className={stacked ? 'flex max-w-full min-w-0 flex-col items-center leading-tight' : 'min-w-0 truncate'}>
                 <span className={stacked ? 'max-w-full truncate text-[calc(11rem/15)] text-fg-muted' : undefined}>{formatDay(start, lang)}</span>{' '}
                 <span className={stacked ? 'max-w-full truncate text-[calc(13rem/15)] font-medium' : undefined}>{range}</span>
               </span>
@@ -2301,14 +2760,20 @@ function GuideRowMenu({
   menu,
   source,
   nowTitle,
+  programme,
+  now,
+  onProgrammeLink,
   onPlay,
   onMapGuide,
   onToggleFavorite,
   onClose,
 }: {
-  menu: { pos: { x: number; y: number }; channel: Channel };
+  menu: { pos: { x: number; y: number }; channel: Channel; programme?: EpgProgram };
   source: Source | undefined;
   nowTitle: string | undefined;
+  programme?: EpgProgram;
+  now: number;
+  onProgrammeLink(url: string): void;
   onPlay(channel: Channel): void;
   onMapGuide(channel: Channel): void;
   onToggleFavorite(channel: Channel, wasFavorite: boolean): void;
@@ -2319,7 +2784,7 @@ function GuideRowMenu({
   const name = displayChannelName(ch.name, stripCountryPrefix);
   const favorites = useRpcQuery('favorites.contains', { refs: [ch.ref] });
   const favorite = favorites.data ? favorites.data.some((r) => sameRef(r, ch.ref)) : undefined;
-  const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide });
+  const items = useChannelMenuItems(ch, { source, favorite, onPlay, onToggleFavorite, onMapGuide, programme, now, onProgrammeLink });
   return <ContextMenu pos={menu.pos} items={items} header={channelMenuHeader(ch, name, nowTitle)} label={name} onClose={onClose} />;
 }
 

@@ -168,6 +168,14 @@ describe('proxiedUrl (web)', () => {
     expect(params.get('origin')).toBe('http://o.example');
   });
 
+  it('marks catch-up proxy requests for a longer provider response window', () => {
+    const source = { ...base, ref: { sourceId: 's1', contentType: 'live' as const, itemId: '1' }, headers: { userAgent: 'UA' }, catchupProgramStart: '2026-10-25T10:00:00Z' };
+    const params = new URLSearchParams(proxiedUrl(source).split('?')[1]);
+    expect(params.get('archive')).toBe('true');
+    expect(params.get('sourceId')).toBe('s1');
+    expect(new URLSearchParams(proxiedUrl({ ...source, catchupProgramStart: undefined }).split('?')[1]).has('archive')).toBe(false);
+  });
+
   it('leaves relative urls alone', () => {
     expect(proxiedUrl({ ...base, url: '/api/files/3', kind: 'file', headers: { userAgent: 'UA' } })).toBe('/api/files/3');
   });

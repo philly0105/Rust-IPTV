@@ -11,7 +11,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { itemKey, type Category, type Channel, type EpgProgram, type GuideSearchHit, type Page, type PageQuery } from '@/api/types';
 import { useToastStore } from '@/ui';
 
-import { defaultStart, EpgGridPage, GRID_SLOT_MIN, HIGHLIGHT_MS } from '../../components/EpgGridPage';
+import { defaultStart, EpgGridPage, GRID_SLOT_MIN, GRID_TRACK_BEFORE, guideDataStart, HIGHLIGHT_MS } from '../../components/EpgGridPage';
 import { addLocalDays, floorLocal, formatClockBare, formatDay, HOUR, MINUTE } from '../../lib/epgTime';
 import { findChannelIndex, LOCATE_PAGE } from '../search';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, router, settings } from './harness';
@@ -81,7 +81,9 @@ const GRID = [
     ),
   },
 ];
+// The guide fetch begins before the URL's nominal time so earlier cards are ready to scroll into view.
 const gridFroms = () => rpc.of('epg.grid').map((a) => Date.parse((a as { from: string }).from));
+const dataFrom = guideDataStart;
 /** The window the toolbar shows starts at `s`. */
 // The window's start: its AM/PM is named once, at the range's end, when both ends share it.
 const showsWindow = (s: number) => expect(screen.getByTestId('guide-window').textContent).toContain(`${formatDay(s, 'en')} ${formatClockBare(s, 'en')}`);
@@ -89,20 +91,47 @@ const atOf = () => {
   const v = new URLSearchParams(router.location!.search).get('at');
   return v === null ? null : Number(v);
 };
+// The live placement can cross a data bucket, and prefetches may be the latest RPC. Verify
+// the actual viewport is near now and that its data was requested, independent of call order.
+const showsLiveData = () => {
+  const at = Number(screen.getByTestId('epg-grid').dataset.viewAt);
+  expect(at).toBeLessThanOrEqual(Date.now());
+  expect(at).toBeGreaterThan(Date.now() - HOUR);
+  expect(gridFroms()).toContain(dataFrom(at));
+};
 
 describe('the window in the URL', () => {
+  it('stays three hours earlier when moving back from the live window', async () => {
+    const live = defaultStart(Date.now());
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByText('Channel 0');
+    const grid = screen.getByTestId('epg-grid');
+    showsWindow(Number(grid.dataset.viewAt));
+
+    fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
+    expect(atOf()).toBe(live - 3 * HOUR);
+    await waitFor(() => showsWindow(live - 3 * HOUR));
+    expect(Number(grid.dataset.viewAt)).toBe(live - 3 * HOUR);
+    expect(grid.scrollLeft).toBe(GRID_TRACK_BEFORE / MINUTE * 5 - 3 * HOUR / MINUTE * 5);
+    await waitFor(() => expect(gridFroms()).toContain(dataFrom(live - 3 * HOUR)));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+    showsWindow(live - 3 * HOUR);
+    expect(atOf()).toBe(live - 3 * HOUR);
+    expect(Number(grid.dataset.viewAt)).toBe(live - 3 * HOUR);
+  });
+
   it('opens at `at`, and back/forward restore each move of the chevrons and day buttons', async () => {
     const base = defaultStart(Date.now()) + 6 * HOUR;
     renderGuide({ path: `/epg?source=src1&at=${base}`, routes: GRID });
     await screen.findByText('Channel 0');
-    await waitFor(() => expect(gridFroms().at(-1)).toBe(base));
+    await waitFor(() => expect(gridFroms().at(-1)).toBe(dataFrom(base)));
     expect(screen.getByTestId('guide-window').textContent).toContain(formatDay(base, 'en'));
 
     fireEvent.click(screen.getByRole('button', { name: '3 hours later' }));
     expect(atOf()).toBe(base + 3 * HOUR);
     fireEvent.click(screen.getByRole('button', { name: 'Next day' }));
     expect(atOf()).toBe(addLocalDays(base + 3 * HOUR, 1));
-    await waitFor(() => expect(gridFroms().at(-1)).toBe(addLocalDays(base + 3 * HOUR, 1)));
+    await waitFor(() => expect(gridFroms().at(-1)).toBe(dataFrom(addLocalDays(base + 3 * HOUR, 1))));
     // Other parameters stay.
     expect(new URLSearchParams(router.location!.search).get('source')).toBe('src1');
 
@@ -135,7 +164,7 @@ describe('the window in the URL', () => {
     showsWindow(away);
     fireEvent.click(screen.getByRole('button', { name: 'Now' }));
     expect(atOf()).toBeNull();
-    await waitFor(() => showsWindow(defaultStart(Date.now())));
+    await waitFor(() => showsWindow(Number(screen.getByTestId('epg-grid').dataset.viewAt)));
     act(() => void router.navigate!(-1));
     expect(atOf()).toBe(away);
     await waitFor(() => showsWindow(away));
@@ -144,14 +173,14 @@ describe('the window in the URL', () => {
   it('an unusable `at` falls back to now', async () => {
     renderGuide({ path: '/epg?at=yesterday', routes: GRID });
     await screen.findByText('Channel 0');
-    await waitFor(() => expect(gridFroms().at(-1)).toBe(defaultStart(Date.now())));
+    await waitFor(showsLiveData);
   });
 
   it('`at` off the 30-minute grid is floored to its slot', async () => {
     const t = defaultStart(Date.now()) + 2 * HOUR + 17 * MINUTE;
     renderGuide({ path: `/epg?at=${t}`, routes: GRID });
     await screen.findByText('Channel 0');
-    await waitFor(() => expect(gridFroms().at(-1)).toBe(floorLocal(t, GRID_SLOT_MIN)));
+    await waitFor(() => expect(gridFroms().at(-1)).toBe(dataFrom(floorLocal(t, GRID_SLOT_MIN))));
   });
 });
 
@@ -170,7 +199,7 @@ describe('Jump to date and time', () => {
     fireEvent.click(within(dialog).getByTestId('guide-jump-go'));
     expect(screen.queryByTestId('guide-jump')).toBeNull();
     expect(atOf()).toBe(target);
-    await waitFor(() => expect(gridFroms().at(-1)).toBe(target));
+    await waitFor(() => expect(gridFroms().at(-1)).toBe(dataFrom(target)));
     act(() => void router.navigate!(-1));
     expect(atOf()).toBe(base);
   });
@@ -181,7 +210,7 @@ describe('Jump to date and time', () => {
     fireEvent.click(screen.getByTestId('guide-window'));
     fireEvent.click(await screen.findByTestId('guide-jump-now'));
     expect(atOf()).toBeNull();
-    await waitFor(() => expect(gridFroms().at(-1)).toBe(defaultStart(Date.now())));
+    await waitFor(showsLiveData);
   });
 
   it('`t` does nothing while typing in the search field', async () => {

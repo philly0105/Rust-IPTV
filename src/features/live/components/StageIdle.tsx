@@ -14,6 +14,8 @@ export interface StageIdleProps {
   kind: 'live' | 'radio';
   /** The channel last watched here, offered with Resume; none: a short prompt. */
   last?: { channel: Channel; nowNext?: EpgNowNext };
+  /** Archived programme saved for this channel across application restarts. */
+  resumeProgram?: { title: string; positionSeconds: number };
   /**
    * `last` is the list's cursor row, not the channel last watched: once the user moves through
    * the list the card follows the cursor (as the ribbon under it does), says so, and offers Play.
@@ -60,7 +62,7 @@ const TINY_STAGE = 'md:[@container_(max-height:8rem)]:hidden';
  * stage gets shorter (a laptop's or tablet's stage column is 170 to 230 px tall): the hint first,
  * then the logo, so the name and Resume are never cut off.
  */
-export function StageIdle({ kind, last, highlighted = false, locked = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
+export function StageIdle({ kind, last, resumeProgram, highlighted = false, locked = false, now, stripPrefix, epgOffsetMinutes = 0, onResume, hint, recent, onPlayRef }: StageIdleProps) {
   const { t } = useTranslation('live');
   const channel = last?.channel;
   const name = channel ? displayChannelName(channel.name, stripPrefix) : '';
@@ -104,6 +106,10 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
                 <Lock aria-hidden className="size-3.5 shrink-0" />
                 {t('locked')}
               </p>
+            ) : resumeProgram ? (
+              <p dir="auto" className="mt-1 max-w-full truncate text-body-sm text-on-glass-muted max-md:mt-0 max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-catchup">
+                {t('idleCatchupAt', { title: resumeProgram.title, count: Math.floor(resumeProgram.positionSeconds / 60) })}
+              </p>
             ) : cur ? (
               <div className={cn('mt-1 flex w-80 max-w-full flex-col gap-1.5 max-md:mt-0 max-md:w-full max-md:gap-1', kind === 'live' && 'md:hidden')}>
                 <p dir="auto" className="truncate text-body-sm text-on-glass-muted max-md:text-caption max-md:text-fg-muted" data-testid="stage-idle-now">
@@ -123,7 +129,7 @@ export function StageIdle({ kind, last, highlighted = false, locked = false, now
             icon={<Play size={16} className="fill-current" />}
             className="mt-2 max-w-full max-md:mt-0 max-md:shrink-0"
             onClick={() => onResume?.(channel)}
-            aria-label={t(highlighted ? 'playChannel' : 'resumeChannel', { name })}
+            aria-label={t(highlighted ? 'playChannel' : 'resumeChannel', { name: resumeProgram && !locked ? resumeProgram.title : name })}
             data-testid="stage-resume"
           >
             {t(highlighted ? 'play' : 'resume')}

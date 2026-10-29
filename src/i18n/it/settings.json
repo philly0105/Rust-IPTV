@@ -75,6 +75,12 @@
   "railMyList": "La mia lista",
 
   "player": "Lettore",
+  "livePlayer": "TV in diretta",
+  "livePlayerHint": "Usato per i canali in onda ora, anche durante il cambio canale.",
+  "catchupPlayer": "TV in catch-up",
+  "catchupPlayerHint": "Usato per i programmi passati aperti dalla guida TV.",
+  "vodPlayer": "Film e serie",
+  "vodPlayerHint": "Usato per film ed episodi on demand.",
   "playerBuiltIn": "Lettore interno",
   "playerBuiltInHint": "Riproduce all'interno dell'app. Funziona con la maggior parte degli stream HLS.",
   "playerEmbeddedMpv": "mpv integrato",

@@ -292,7 +292,7 @@ export function SleepPrompt({ small = false, className }: { small?: boolean; cla
   const { t } = useTranslation('player');
   const warning = useSleepTimerExtras((s) => s.warning);
   const endsAt = useSleepTimer((s) => s.endsAt);
-  const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const isFullscreen = usePlayerStore((s) => s.isFullscreen || s.isWindowFilled);
   const pip = usePipStore((s) => s.active);
   const show = warning && (isFullscreen || pip);
   const now = useTick(show);

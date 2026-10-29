@@ -4,12 +4,13 @@
  * passes under the blocks' text.
  */
 
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EpgRibbon, RIBBON_NOW_LEAD_PX, RIBBON_PX_PER_MIN } from '../../components/EpgRibbon';
-import { floorLocal, HOUR, MINUTE } from '../../lib/epgTime';
+import { floorLocal, HOUR, MINUTE, nowRestLeft, lookbackMs } from '../../lib/epgTime';
 import { installDomStubs, makeChannel, program, renderAt, settings } from '../../test/harness';
+import { usePlayerStore } from '../../test/fakes';
 
 const rpcMock = vi.hoisted(() => {
   const handlers: Record<string, (args: unknown) => unknown> = {};
@@ -36,6 +37,7 @@ vi.mock('@/features/player/remote', async () => await import('../../test/fakes')
 
 beforeAll(installDomStubs);
 beforeEach(() => {
+  usePlayerStore.setState({ source: undefined, positionSeconds: 0 });
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   h['sources.get'] = () => ({ id: 'src1', kind: 'm3u', name: 'Demo', epg: { detectedUrls: [], manualUrls: [], disabledUrls: [] } });
@@ -52,6 +54,110 @@ function renderRibbon() {
 }
 
 describe('ribbon timeline text', () => {
+  it('opens the mini guide at catch-up playback and shows that programme in the details card', async () => {
+    const now = Date.now();
+    const channel = makeChannel(0);
+    const past = program('Earlier show', now - 6 * HOUR, now - 5 * HOUR);
+    const scrolls: number[] = [];
+    const spy = vi.spyOn(Element.prototype, 'scrollTo').mockImplementation(function (this: Element, _options?: ScrollToOptions | number) {
+      const options = _options as ScrollToOptions;
+      if (this.getAttribute('data-testid') === 'ribbon-timeline') scrolls.push(options.left ?? 0);
+    });
+    // XMLTV has no archive entry for this show. Playback metadata must still anchor the ribbon.
+    rpcMock.handlers['epg.programs'] = () => [program('On now', now - 20 * MINUTE, now + 40 * MINUTE)];
+    usePlayerStore.setState({ source: {
+      url: 'http://archive/earlier', kind: 'hls', title: 'Channel 0', subtitle: past.title,
+      ref: channel.ref, catchupProgramStart: past.start, durationSeconds: 3600, isLive: false, isRadio: false,
+    }, positionSeconds: 15 * 60 });
+    try {
+      renderRibbon();
+      const header = await screen.findByTestId('ribbon-header');
+      await waitFor(() => expect(header.textContent).toContain('Earlier show'));
+      expect(header.textContent).not.toContain('On now');
+      expect(within(header).getByTestId('ribbon-playing')).toBeTruthy();
+      expect(within(header).queryByText('LIVE')).toBeNull();
+      expect(screen.getByRole('button', { name: /^Earlier show,/ }).hasAttribute('data-playing')).toBe(true);
+
+      const from = Math.floor(now / (15 * MINUTE)) * 15 * MINUTE - lookbackMs(channel);
+      const playbackAt = new Date(past.start).getTime() + 15 * MINUTE;
+      expect(scrolls.at(-1)).toBe(nowRestLeft(playbackAt, from, RIBBON_PX_PER_MIN, 1200, RIBBON_NOW_LEAD_PX));
+      fireEvent.click(screen.getByRole('button', { name: 'Now' }));
+      expect(scrolls.at(-1)).toBe(nowRestLeft(now, from, RIBBON_PX_PER_MIN, 1200, RIBBON_NOW_LEAD_PX));
+      fireEvent.click(screen.getByRole('button', { name: 'Go to playing' }));
+      expect(scrolls.at(-1)).toBe(nowRestLeft(playbackAt, from, RIBBON_PX_PER_MIN, 1200, RIBBON_NOW_LEAD_PX));
+
+      const next = program('Another archive show', now - 4 * HOUR, now - 3 * HOUR);
+      act(() => usePlayerStore.setState({ source: {
+        url: 'http://archive/next', kind: 'hls', title: 'Channel 0', subtitle: next.title,
+        ref: channel.ref, catchupProgramStart: next.start, durationSeconds: 3600, isLive: false, isRadio: false,
+      }, positionSeconds: 0 }));
+      expect(header.textContent).toContain(next.title);
+      expect(scrolls.at(-1)).toBe(nowRestLeft(new Date(next.start).getTime(), from, RIBBON_PX_PER_MIN, 1200, RIBBON_NOW_LEAD_PX));
+
+      act(() => usePlayerStore.setState({ source: {
+        url: 'http://live/channel', kind: 'hls', title: 'Channel 0', ref: channel.ref, isLive: true, isRadio: false,
+      }, positionSeconds: 0 }));
+      await waitFor(() => expect(header.textContent).toContain('On now'));
+      expect(within(header).queryByTestId('ribbon-playing')).toBeNull();
+      expect(scrolls.at(-1)).toBe(nowRestLeft(now, from, RIBBON_PX_PER_MIN, 1200, RIBBON_NOW_LEAD_PX));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('uses the Xtream archive table for a show absent from XMLTV', async () => {
+    const now = Date.now();
+    const past = { ...program('Provider archive show', now - 3 * HOUR, now - 2 * HOUR), description: 'An archived programme.' };
+    rpcMock.handlers['epg.programs'] = () => [program('On now', now - 20 * MINUTE, now + 40 * MINUTE)];
+    rpcMock.handlers['catchup.table'] = () => [past];
+    usePlayerStore.setState({ source: {
+      url: 'http://archive/provider', kind: 'direct', title: 'Channel 0', subtitle: past.title,
+      ref: makeChannel(0).ref, catchupProgramStart: past.start, durationSeconds: 3600, isLive: false, isRadio: false,
+    } });
+    renderAt('/', [{ path: '/', element: <EpgRibbon channel={makeChannel(0)} sourceKind="xtream" watchingLive={false} watchingArchive onPlayLive={() => undefined} onMapEpg={() => undefined} details /> }]);
+    const header = await screen.findByTestId('ribbon-header');
+    await waitFor(() => expect(screen.getByTestId('ribbon-description').textContent).toBe('An archived programme.'));
+    expect(header.textContent).toContain(past.title);
+    expect(screen.getByRole('button', { name: /^Provider archive show,/ }).hasAttribute('data-playing')).toBe(true);
+  });
+
+  it('marks the selected catch-up programme instead of the airing one', async () => {
+    const now = Date.now();
+    const past = program('Earlier show', now - 2 * HOUR, now - HOUR);
+    rpcMock.handlers['epg.programs'] = () => [past, program('On now', now - 20 * MINUTE, now + 40 * MINUTE)];
+    renderRibbon();
+    const earlier = await screen.findByRole('button', { name: /^Earlier show,/ });
+    const airing = screen.getByRole('button', { name: /^On now,/ });
+
+    act(() => usePlayerStore.setState({ source: {
+      url: 'http://archive/earlier', kind: 'hls', title: 'Channel 0', ref: makeChannel(0).ref,
+      catchupProgramStart: past.start, isLive: false, isRadio: false,
+    } }));
+    expect(earlier.hasAttribute('data-playing')).toBe(true);
+    expect(earlier.className).toContain('ring-accent-mark');
+    expect(earlier.getAttribute('aria-label')).toContain('playing');
+    expect(airing.hasAttribute('data-playing')).toBe(false);
+  });
+
+  it('marks the same catch-up programme in list mode', async () => {
+    const now = Date.now();
+    const past = program('Earlier show', now - 2 * HOUR, now - HOUR);
+    rpcMock.handlers['settings.get'] = () => settings({ epgViewMode: 'list' });
+    rpcMock.handlers['epg.programs'] = () => [past, program('On now', now - 20 * MINUTE, now + 40 * MINUTE)];
+    usePlayerStore.setState({ source: {
+      url: 'http://archive/earlier', kind: 'hls', title: 'Channel 0', ref: makeChannel(0).ref,
+      catchupProgramStart: past.start, isLive: false, isRadio: false,
+    } });
+    renderRibbon();
+
+    const earlier = await screen.findByRole('button', { name: /^Earlier show,.*playing$/ });
+    expect(earlier.getAttribute('aria-current')).toBe('true');
+    expect(earlier.getAttribute('tabindex')).toBe('0');
+    expect(earlier.className).toContain('tuning-tick');
+    expect(screen.getByTestId('ribbon-header').textContent).toContain('Earlier show');
+    expect(screen.getByRole('button', { name: /On now/ }).className).not.toContain('tuning-tick');
+  });
+
   it('a programme that began before the visible edge keeps its title on screen, ending inside the block', async () => {
     const now = Date.now();
     rpcMock.handlers['epg.programs'] = () => [

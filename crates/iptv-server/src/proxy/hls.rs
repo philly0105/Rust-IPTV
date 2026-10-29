@@ -281,6 +281,13 @@ mod tests {
     }
 
     #[test]
+    fn carries_archive_marker_to_segments() {
+        let mut rw = HlsRewriter::with_params(base(), &[("archive", "true")]);
+        let out = rw.push(b"seg.ts\n").unwrap();
+        assert!(std::str::from_utf8(&out).unwrap().contains("&archive=true"));
+    }
+
+    #[test]
     fn at_path_points_uris_at_another_proxy_route() {
         let mut rw = HlsRewriter::new(base(), None).at_path("/T/api/proxy");
         let out = rw

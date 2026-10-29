@@ -61,8 +61,8 @@ export function stepSyncDelay(kind: DelayKind, steps: number, t: TFunction<'play
  * inside the player.
  */
 export function playerOwnsPageKeys(e: KeyboardEvent): boolean {
-  const { dock, isFullscreen } = usePlayerStore.getState();
-  if (dock === 'stage' || isFullscreen || usePipStore.getState().active) return true;
+  const { dock, isFullscreen, isWindowFilled } = usePlayerStore.getState();
+  if (dock === 'stage' || isFullscreen || isWindowFilled || usePipStore.getState().active) return true;
   const target = e.target;
   return target instanceof Element && target.closest('[data-player-mini], [data-player-host], [data-pip-layer]') !== null;
 }
@@ -78,6 +78,7 @@ export function playerOwnsPageKeys(e: KeyboardEvent): boolean {
 export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): void {
   const { t, i18n } = useTranslation('player');
   const active = usePlayerStore((s) => !!s.source && s.mode !== 'external');
+  const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const live = usePlayerStore((s) => !!s.source?.isLive);
   // Live TV, or catch-up of a channel: channel up/down leaves the archive for the neighbour live.
   const zappable = usePlayerStore(canZap);
@@ -149,6 +150,18 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     ...base,
     description: t('shortcutFullscreen'),
   });
+  useShortcut('shift+f', once(() => s().toggleWindowFill()), {
+    ...base,
+    description: t('shortcutWindowFill'),
+    when: () => !usePipStore.getState().active,
+  });
+  useShortcut('escape', () => s().toggleWindowFill(), {
+    ...base,
+    enabled: active && isWindowFilled,
+    description: t('exitWindowFill'),
+    priority: 1,
+    when: () => document.querySelector('[aria-modal="true"]') === null,
+  });
   const seek = (delta: number) => () => {
     if (!seekWindow()) return;
     s().seekBy(delta);
@@ -201,7 +214,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
     once(
       guard('letter', () => {
         const media = useMediaStore.getState();
-        if (opts.channelPanelAvailable && s().isFullscreen) {
+        if (opts.channelPanelAvailable && (s().isFullscreen || s().isWindowFilled)) {
           useMediaStore.setState({ channelPanelOpen: !media.channelPanelOpen });
           return;
         }

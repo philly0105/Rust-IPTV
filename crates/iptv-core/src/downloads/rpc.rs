@@ -13,6 +13,7 @@ pub const COMMANDS: &[&str] = &[
     "downloads.list",
     "downloads.get",
     "downloads.start",
+    "downloads.playSource",
     "downloads.pause",
     "downloads.resume",
     "downloads.cancel",
@@ -24,6 +25,7 @@ pub const COMMANDS: &[&str] = &[
     "downloads.setPosition",
     "downloads.prioritize",
     "downloads.playback",
+    "downloads.setRateLimit",
     "myvideos.list",
     "myvideos.playSource",
 ];
@@ -51,6 +53,8 @@ pub struct StartArgs {
     pub poster_url: Option<String>,
     #[serde(default)]
     pub file_name_hint: Option<String>,
+    #[serde(default)]
+    pub duration_seconds: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +92,14 @@ pub struct PlaybackArgs {
 /// Most sources one player reports at once (a multi-view wall has four).
 const MAX_PLAYBACK_SOURCES: usize = 16;
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRateLimitArgs {
+    pub id: i64,
+    /// null/missing inherits the global default; zero is unlimited.
+    pub bytes_per_second: Option<u64>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirResult {
@@ -114,8 +126,18 @@ pub fn register(r: &mut RpcRouter) {
             headers: a.headers,
             poster_url: a.poster_url,
             file_name_hint: a.file_name_hint,
+            duration_seconds: a.duration_seconds,
         };
         Ok::<_, RpcError>(super::start(&s, req).await?)
+    });
+    r.add(
+        "downloads.setRateLimit",
+        |s: S, a: SetRateLimitArgs| async move {
+            Ok::<_, RpcError>(super::set_download_rate_limit(&s, a.id, a.bytes_per_second).await?)
+        },
+    );
+    r.add("downloads.playSource", |s: S, a: IdArgs| async move {
+        Ok::<_, RpcError>(super::active_play_source(&s, a.id).await?)
     });
     r.add("downloads.pause", |s: S, a: IdArgs| async move {
         Ok::<_, RpcError>(super::pause(&s, a.id).await?)

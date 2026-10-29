@@ -1,10 +1,9 @@
 //! Embedded mpv session (`mpv.*`).
 //!
-//! Windows only. `mpv.attach` asks the registered [`ChildWindowFactory`] for a
-//! child HWND inside the main window, starts `mpv.exe --wid=<hwnd>
-//! --input-ipc-server=\\.\pipe\tsrust-iptv-mpv-<pid>-<session> ...` (a new
-//! session number per attach), connects to the named pipe (retrying for up
-//! to 5 s), observes the playback properties, and
+//! On Windows, `mpv.attach` creates a child HWND and starts `mpv.exe --wid`
+//! with a named-pipe JSON IPC server. On macOS it creates an AppKit view and
+//! uses libmpv's render API in process, bridging commands and events to the
+//! same IPC client. Both backends observe the playback properties and
 //! pushes throttled `mpv.state` events (4/s). A watcher task notices when mpv
 //! exits on its own (crash, killed) and turns that into `state.error` plus a
 //! full detach. Everything lives in one [`MpvManager`] stored in
@@ -13,14 +12,17 @@
 //! Every operation is serialized by the manager's op lock, so attach, load,
 //! and detach never interleave.
 
-use super::args::{embedded_mpv_args, loadfile_options, mpv_pipe_name, UserProbeOptions};
+#[cfg(windows)]
+use super::args::{embedded_mpv_args, mpv_pipe_name};
+use super::args::{loadfile_options, UserProbeOptions};
+#[cfg(windows)]
 use super::detect::{find_mpv, DetectEnv};
 use super::ipc::MpvClient;
 use super::mpv_state::OBSERVED_PROPERTIES;
 use super::stats::{MpvStats, STATS_PROPERTIES};
 use super::{embedded_unavailable_reason, window_factory, Bounds, ChildWindowFactory};
 use crate::error::{CoreError, CoreResult};
-use crate::model::{MpvState, PlayerSource};
+use crate::model::{ContentType, MpvState, PlayerSource};
 use crate::state::AppState;
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -38,6 +40,7 @@ pub const MPV_EXT_KEY: &str = "mpv";
 pub const STATE_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How long `mpv.attach` waits for mpv's IPC pipe.
+#[cfg(windows)]
 const PIPE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long `mpv.detach` waits for mpv to quit before killing it.
@@ -260,7 +263,9 @@ struct Session {
     hwnd: isize,
     factory: Arc<dyn ChildWindowFactory>,
     client: Arc<MpvClient>,
-    child: Mutex<tokio::process::Child>,
+    child: Mutex<Option<tokio::process::Child>>,
+    #[cfg(target_os = "macos")]
+    native: Option<platform::NativeSession>,
     pid: u32,
     detaching: AtomicBool,
     emitter: Mutex<Option<JoinHandle<()>>>,
@@ -275,7 +280,14 @@ struct Session {
 
 impl Session {
     fn exited(&self) -> bool {
-        matches!(self.child.lock().try_wait(), Ok(Some(_)) | Err(_))
+        #[cfg(target_os = "macos")]
+        if let Some(native) = &self.native {
+            return !native.is_alive();
+        }
+        self.child
+            .lock()
+            .as_mut()
+            .is_none_or(|child| matches!(child.try_wait(), Ok(Some(_)) | Err(_)))
     }
 
     fn state(&self) -> MpvState {
@@ -316,9 +328,9 @@ fn not_attached() -> CoreError {
     )
 }
 
-/// Returns `Unsupported` off Windows.
+/// Returns `Unsupported` outside Windows and macOS.
 pub fn ensure_platform() -> CoreResult<()> {
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "macos")) {
         Ok(())
     } else {
         Err(CoreError::Unsupported(
@@ -450,7 +462,9 @@ async fn attach_locked(
         CoreError::Unsupported(embedded_unavailable_reason(true, true, false).unwrap_or_default())
     })?;
     let settings = state.settings_snapshot();
+    #[cfg(windows)]
     let configured = settings.mpv_path.clone();
+    #[cfg(windows)]
     let mpv =
         tokio::task::spawn_blocking(move || find_mpv(configured.as_deref(), &DetectEnv::current()))
             .await?
@@ -468,6 +482,7 @@ async fn attach_locked(
     // A fresh pipe name per session: an old mpv that survived its kill keeps
     // its pipe, and reusing the name would connect us to that process.
     let session_id = mgr.next_id.fetch_add(1, Ordering::Relaxed);
+    #[cfg(windows)]
     let pipe = format!("{}-{session_id}", mpv_pipe_name(std::process::id()));
     let (initial_volume, initial_muted) = {
         let mut last = mgr.last.lock();
@@ -479,6 +494,7 @@ async fn attach_locked(
         }
         (last.volume, last.muted)
     };
+    #[cfg(windows)]
     let args = embedded_mpv_args(
         hwnd,
         &pipe,
@@ -486,7 +502,19 @@ async fn attach_locked(
         initial_volume,
         initial_muted,
     );
-    let started = platform::start(&mpv, &args, &pipe).await;
+    #[cfg(windows)]
+    let started = platform::start(&mpv, &args, &pipe)
+        .await
+        .map(|(child, stream)| (Some(child), stream));
+    #[cfg(target_os = "macos")]
+    let started = platform::start(hwnd, &settings.mpv_args, initial_volume, initial_muted)
+        .await
+        .map(|(native, stream)| (native, stream));
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let started = platform::start(Path::new(""), &[], "")
+        .await
+        .map(|(child, stream)| (Some(child), stream));
+    #[cfg(windows)]
     let (child, stream) = match started {
         Ok(v) => v,
         Err(e) => {
@@ -494,7 +522,22 @@ async fn attach_locked(
             return Err(e);
         }
     };
-    let pid = child.id().unwrap_or(0);
+    #[cfg(target_os = "macos")]
+    let (native, stream) = match started {
+        Ok(v) => v,
+        Err(e) => {
+            destroy_window(&factory, hwnd).await;
+            return Err(e);
+        }
+    };
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let (child, stream) = started?;
+    #[cfg(windows)]
+    let pid = child.as_ref().and_then(|child| child.id()).unwrap_or(0);
+    #[cfg(target_os = "macos")]
+    let pid = std::process::id();
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let pid = child.as_ref().and_then(|child| child.id()).unwrap_or(0);
 
     let last = mgr.last.lock().clone();
     let client = MpvClient::new(
@@ -511,7 +554,18 @@ async fn attach_locked(
         hwnd,
         factory,
         client: Arc::clone(&client),
-        child: Mutex::new(child),
+        child: Mutex::new({
+            #[cfg(target_os = "macos")]
+            {
+                None
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                child
+            }
+        }),
+        #[cfg(target_os = "macos")]
+        native: Some(native),
         pid,
         detaching: AtomicBool::new(false),
         emitter: Mutex::new(None),
@@ -576,6 +630,20 @@ pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()
     if s.client.state().recording {
         stop_recording(&s).await;
     }
+    // mpv's loadfile "replace" reply can precede the old file's shutdown.
+    // For a movie or episode, finish that shutdown before opening the next
+    // provider stream. Live and catch-up (a channel's ref, so seeks reopen the
+    // archive) keep their fast replace path. A stop that does not finish in
+    // time falls back to replace rather than failing the load.
+    let vod = source
+        .item_ref
+        .as_ref()
+        .is_some_and(|r| matches!(r.content_type, ContentType::Movie | ContentType::Series));
+    if vod && !source.is_live {
+        if let Err(error) = stop_file(&s).await {
+            tracing::warn!(%error, "embedded mpv did not close the previous stream; replacing it");
+        }
+    }
     *s.title.lock() = source.title.trim().to_string();
     s.client.update_state(|st| {
         st.loaded = false;
@@ -594,7 +662,7 @@ pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()
         json!(-1),
         Value::Object(opts.clone()),
     ];
-    match s.client.command(modern).await {
+    let loaded = match s.client.command(modern).await {
         Ok(_) => Ok(()),
         Err(CoreError::Invalid(_)) => {
             // Older mpv: `loadfile url flags "k=v,..."` with `%len%` escaping.
@@ -607,7 +675,69 @@ pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()
             s.client.command(legacy).await.map(|_| ())
         }
         Err(e) => Err(e),
+    };
+    loaded?;
+    #[cfg(target_os = "macos")]
+    {
+        // libmpv can retain its global pause flag when a file's `pause=no`
+        // option is applied through loadfile. Set the actual property too, so
+        // the observed pause state matches the playing video and controls.
+        if let Err(error) = s.client.set_property("pause", json!(false)).await {
+            tracing::warn!(%error, "could not clear macOS libmpv pause state after load");
+        }
     }
+    Ok(())
+}
+
+/// Close the current demuxer before another VOD stream is opened. `stop` is
+/// asynchronous inside mpv, so its command reply alone does not establish
+/// that the provider connection has gone away.
+async fn stop_file(s: &Session) -> CoreResult<()> {
+    let idle = s.client.get_property("idle-active").await?.as_bool() == Some(true);
+    if idle {
+        return Ok(());
+    }
+    // time-pos can become unavailable before end-file arrives. Mark the old
+    // file unloaded first so UI state never saves its reset position as zero.
+    s.client.update_state(|st| st.loaded = false);
+    let began = std::time::Instant::now();
+    s.client.command(vec![json!("stop")]).await?;
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if s.client.get_property("idle-active").await?.as_bool() == Some(true) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(CoreError::Timeout(
+            "mpv did not close the previous stream in time".into(),
+        ))
+    });
+    if closed.is_ok() {
+        tracing::info!(
+            elapsed_ms = began.elapsed().as_millis(),
+            "embedded mpv closed previous stream"
+        );
+    }
+    closed
+}
+
+/// Stop the current file but keep the embedded player ready for the next one.
+/// Used as soon as a new movie or episode is selected, while its URL resolves.
+pub async fn unload(state: &Arc<AppState>) -> CoreResult<()> {
+    ensure_platform()?;
+    let mgr = manager(state);
+    let _op = mgr.op.lock().await;
+    let Some(s) = current(&mgr) else {
+        return Ok(());
+    };
+    if s.client.state().recording {
+        stop_recording(&s).await;
+    }
+    stop_file(&s).await
 }
 
 /// Encodes per-file options in mpv's legacy `key=value,...` form; every value
@@ -1020,7 +1150,7 @@ pub async fn detach(state: &Arc<AppState>) -> CoreResult<()> {
 
 /// Async shutdown for app exit: same as `mpv.detach`, ignoring errors.
 pub async fn shutdown(state: &Arc<AppState>) {
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "macos")) {
         let _ = detach(state).await;
     }
 }
@@ -1034,7 +1164,14 @@ pub fn kill_embedded(state: &AppState) {
     let session = mgr.session.lock().take();
     if let Some(s) = session {
         s.detaching.store(true, Ordering::SeqCst);
-        let _ = s.child.lock().start_kill();
+        #[cfg(target_os = "macos")]
+        if let Some(native) = &s.native {
+            native.stop();
+        }
+        #[cfg(not(target_os = "macos"))]
+        if let Some(child) = s.child.lock().as_mut() {
+            let _ = child.start_kill();
+        }
         s.client.shutdown();
         s.stop_tasks(false);
     }
@@ -1052,8 +1189,15 @@ async fn teardown(
     from_watcher: bool,
 ) {
     s.detaching.store(true, Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    if let Some(native) = &s.native {
+        native.stop();
+    }
     if !wait_exit(s, QUIT_GRACE).await {
-        let _ = s.child.lock().start_kill();
+        #[cfg(not(target_os = "macos"))]
+        if let Some(child) = s.child.lock().as_mut() {
+            let _ = child.start_kill();
+        }
         if !wait_exit(s, Duration::from_secs(2)).await {
             tracing::warn!(pid = s.pid, "embedded mpv did not exit after kill");
         }
@@ -1147,7 +1291,15 @@ async fn watch_session(state: Arc<AppState>, s: Arc<Session>) {
                 return;
             }
         }
-        let status = s.child.lock().try_wait();
+        #[cfg(not(target_os = "macos"))]
+        let status = s
+            .child
+            .lock()
+            .as_mut()
+            .map(|child| child.try_wait())
+            .unwrap_or(Ok(None));
+        #[cfg(target_os = "macos")]
+        let status: std::io::Result<Option<std::process::ExitStatus>> = Ok(None);
         let reason = match status {
             Ok(Some(st)) => Some(match st.code() {
                 Some(code) => format!("mpv stopped unexpectedly (exit code {code}). Start playback again to restart it."),
@@ -1156,6 +1308,8 @@ async fn watch_session(state: Arc<AppState>, s: Arc<Session>) {
             Ok(None) if s.client.is_closed() => {
                 Some("Lost the connection to mpv. Start playback again to restart it.".to_string())
             }
+            #[cfg(target_os = "macos")]
+            Ok(None) if s.exited() => Some("Embedded mpv stopped unexpectedly. Start playback again.".to_string()),
             Ok(None) => None,
             Err(e) => Some(format!("mpv could not be monitored ({e}). Start playback again.")),
         };
@@ -1392,12 +1546,179 @@ pub fn job_assign(process: std::os::windows::io::RawHandle) -> std::io::Result<(
     platform::job::assign(process)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use crate::error::{CoreError, CoreResult};
+    use std::ffi::{c_char, c_void, CStr, CString};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
+
+    unsafe extern "C" {
+        fn iptv_mpv_mac_available() -> i32;
+        fn iptv_mpv_mac_session_open(
+            host: *mut c_void,
+            options: *const c_char,
+            volume: f64,
+            muted: i32,
+            error: *mut *mut c_char,
+        ) -> *mut c_void;
+        fn iptv_mpv_mac_command(session: *mut c_void, command: *const c_char) -> *mut c_char;
+        fn iptv_mpv_mac_next_event(session: *mut c_void) -> *mut c_char;
+        fn iptv_mpv_mac_wait_frame(session: *mut c_void, timeout_ms: i32);
+        fn iptv_mpv_mac_render(session: *mut c_void) -> i32;
+        fn iptv_mpv_mac_session_close(session: *mut c_void);
+        fn iptv_mpv_mac_free(text: *mut c_char);
+    }
+
+    pub fn available() -> bool {
+        unsafe { iptv_mpv_mac_available() != 0 }
+    }
+
+    pub struct NativeSession {
+        stop: Arc<AtomicBool>,
+        alive: Arc<AtomicBool>,
+    }
+
+    impl NativeSession {
+        pub fn is_alive(&self) -> bool {
+            self.alive.load(Ordering::Acquire)
+        }
+        pub fn stop(&self) {
+            self.stop.store(true, Ordering::Release);
+        }
+    }
+
+    impl Drop for NativeSession {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    fn take_text(ptr: *mut c_char) -> Option<String> {
+        if ptr.is_null() {
+            return None;
+        }
+        let value = unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { iptv_mpv_mac_free(ptr) };
+        Some(value)
+    }
+
+    pub async fn start(
+        host: isize,
+        user_args: &str,
+        volume: f64,
+        muted: bool,
+    ) -> CoreResult<(NativeSession, DuplexStream)> {
+        let options = serde_json::to_string(&super::super::args::split_shell_args(user_args))?;
+        let options =
+            CString::new(options).map_err(|_| CoreError::invalid("invalid mpv options"))?;
+        let raw = tokio::task::spawn_blocking(move || {
+            let mut error = std::ptr::null_mut();
+            let session = unsafe {
+                iptv_mpv_mac_session_open(
+                    host as *mut c_void,
+                    options.as_ptr(),
+                    volume,
+                    i32::from(muted),
+                    &mut error,
+                )
+            };
+            (session as usize, take_text(error))
+        })
+        .await?;
+        if raw.0 == 0 {
+            return Err(CoreError::EngineMissing(
+                raw.1.unwrap_or_else(|| "could not start libmpv".into()),
+            ));
+        }
+        let (client, server) = tokio::io::duplex(1024 * 1024);
+        let stop = Arc::new(AtomicBool::new(false));
+        let alive = Arc::new(AtomicBool::new(true));
+        let worker_stop = Arc::clone(&stop);
+        let worker_alive = Arc::clone(&alive);
+        // libmpv recommends keeping its render API off the thread that calls
+        // the normal client API. Software rendering can take longer than one
+        // frame, and previously held up pause/volume commands and state events.
+        let render_stop = Arc::clone(&stop);
+        let render_raw = raw.0;
+        let renderer = std::thread::Builder::new()
+            .name("iptv-mpv-render".into())
+            .spawn(move || {
+                while !render_stop.load(Ordering::Acquire) {
+                    // mpv wakes us for each new frame. The timeout checks view
+                    // size while paused and bounds shutdown latency to 50 ms.
+                    unsafe { iptv_mpv_mac_wait_frame(render_raw as *mut c_void, 50) };
+                    if render_stop.load(Ordering::Acquire) {
+                        break;
+                    }
+                    let _ = unsafe { iptv_mpv_mac_render(render_raw as *mut c_void) };
+                }
+            })
+            .map_err(|error| {
+                unsafe { iptv_mpv_mac_session_close(raw.0 as *mut c_void) };
+                CoreError::EngineMissing(format!("could not start mpv renderer: {error}"))
+            })?;
+        tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(server);
+            let mut read = BufReader::new(read);
+            let mut line = String::new();
+            let mut tick = tokio::time::interval(Duration::from_millis(33));
+            while !worker_stop.load(Ordering::Acquire) {
+                tokio::select! {
+                    read_result = read.read_line(&mut line) => {
+                        match read_result {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {
+                                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&line) {
+                                    let id = request.get("request_id").cloned().unwrap_or(serde_json::Value::Null);
+                                    let args = request.get("command").cloned().unwrap_or(serde_json::Value::Null);
+                                    if let Ok(command) = CString::new(args.to_string()) {
+                                        let reply = take_text(unsafe { iptv_mpv_mac_command(raw.0 as *mut c_void, command.as_ptr()) });
+                                        if let Some(reply) = reply.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
+                                            let mut reply = reply;
+                                            reply["request_id"] = id;
+                                            if write.write_all(format!("{reply}\n").as_bytes()).await.is_err() { break; }
+                                        }
+                                    }
+                                }
+                                line.clear();
+                            }
+                        }
+                    }
+                    _ = tick.tick() => {
+                        for _ in 0..32 {
+                            let Some(event) = take_text(unsafe { iptv_mpv_mac_next_event(raw.0 as *mut c_void) }) else { break; };
+                            if write.write_all(format!("{event}\n").as_bytes()).await.is_err() { break; }
+                        }
+                    }
+                }
+            }
+            worker_stop.store(true, Ordering::Release);
+            // The render context and mpv handle must outlive the render thread.
+            // Joining here is bounded by a frame and the 50 ms wait above.
+            let _ = renderer.join();
+            unsafe { iptv_mpv_mac_session_close(raw.0 as *mut c_void) };
+            worker_alive.store(false, Ordering::Release);
+        });
+        Ok((NativeSession { stop, alive }, client))
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn native_available() -> bool {
+    platform::available()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
     use crate::error::{CoreError, CoreResult};
     use std::path::Path;
 
-    /// Embedded mpv is Windows-only; this is never reached because
+    /// Embedded mpv is unavailable on this platform; this is never reached because
     /// `ensure_platform` fails first.
     pub async fn start(
         _mpv: &Path,
@@ -1405,7 +1726,7 @@ mod platform {
         _pipe: &str,
     ) -> CoreResult<(tokio::process::Child, tokio::io::DuplexStream)> {
         Err(CoreError::Unsupported(
-            "embedded mpv is only available on Windows".into(),
+            "embedded mpv is only available on Windows and macOS".into(),
         ))
     }
 }

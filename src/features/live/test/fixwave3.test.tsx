@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { Channel, ItemRef, Page, PageQuery, Settings, SourceKind } from '@/api/types';
 
-import { EpgGridPage, GRID_WINDOW } from '../components/EpgGridPage';
+import { EpgGridPage, GRID_DATA_LENGTH, guideDataStart } from '../components/EpgGridPage';
 import { LivePage } from '../components/LivePage';
 import { HOUR, MINUTE, floorTo, ms } from '../lib/epgTime';
 import { StalkerPreviewQueue, resetStalkerPreviewSources } from '../lib/stalkerPreviewQueue';
@@ -104,11 +104,11 @@ describe('/epg grid under an EPG offset (R1 F1)', () => {
     };
     const now = Date.now();
     renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
-    const start = gridStart(now);
-    const want = { from: new Date(start - offset * MINUTE).toISOString(), to: new Date(start + GRID_WINDOW - offset * MINUTE).toISOString() };
+    const start = guideDataStart(gridStart(now));
+    const want = { from: new Date(start - offset * MINUTE).toISOString(), to: new Date(start + GRID_DATA_LENGTH - offset * MINUTE).toISOString() };
     await waitFor(() => {
-      const last = callsOf('epg.grid').at(-1)?.args as { from: string; to: string } | undefined;
-      expect(last && { from: last.from, to: last.to }).toEqual(want);
+      const calls = callsOf('epg.grid').map((c) => c.args as { from: string; to: string });
+      expect(calls.some((a) => a.from === want.from && a.to === want.to)).toBe(true);
     }, WAIT);
     // Shifted for display, the programme airing now is in the window (it was blank before the fix).
     expect(await screen.findByRole('button', { name: /Airing c0/ }, WAIT)).toBeTruthy();
@@ -116,13 +116,14 @@ describe('/epg grid under an EPG offset (R1 F1)', () => {
 
   it('asks the Stalker archive rows for the window start moved back by the offset', async () => {
     handlers('stalker', { epgOffsetMinutes: 120 } as Partial<Settings>);
-    const now = Date.now();
     renderAt('/epg?source=src1', [{ path: '/epg', element: <EpgGridPage /> }]);
-    const want = new Date(gridStart(now) - 120 * MINUTE).toISOString();
     // Channels c0..c2 have an archive: their requests carry `from`.
     await waitFor(() => {
+      // Live positioning can cross a bucket after initial layout; check the actual viewport.
+      const at = Number(screen.getByTestId('epg-grid').dataset.viewAt);
+      const want = new Date(guideDataStart(at) - 120 * MINUTE).toISOString();
       const froms = callsOf('stalker.epg').map((c) => (c.args as { from?: string }).from).filter(Boolean);
-      expect(froms.at(-1)).toBe(want);
+      expect(froms).toContain(want);
     }, WAIT);
   });
 });

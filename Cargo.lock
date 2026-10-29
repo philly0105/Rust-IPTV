@@ -2182,6 +2182,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bytes",
+ "cc",
  "chrono",
  "dashmap",
  "dirs 6.0.0",
@@ -2284,6 +2285,7 @@ name = "iptv-tauri"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "cc",
  "iptv-core",
  "iptv-server",
  "parking_lot",

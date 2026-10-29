@@ -1,4 +1,6 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { promisify } from 'node:util';
@@ -11,6 +13,12 @@ import { defineConfig, type Plugin } from 'vite';
 const host = process.env['TAURI_DEV_HOST'];
 // Web-mode dev: `/api` is proxied to a running iptv-server (default 7180).
 const apiTarget = process.env['IPTV_API'] ?? 'http://127.0.0.1:7180';
+// WebKit keeps Vite's optimized dependencies across desktop dev relaunches. Change the
+// optimization cache key whenever our committed mpegts patch changes, so the player cannot
+// silently run an older bundle after node_modules has been updated.
+const mpegtsPatchHash = createHash('sha256')
+  .update(readFileSync(fileURLToPath(new URL('./patches/mpegts.js@1.8.2.patch', import.meta.url))))
+  .digest('hex');
 
 /** node_modules package -> vendor chunk name (first match wins). */
 const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly string[]]> = [
@@ -120,6 +128,29 @@ function precompress(): Plugin {
   };
 }
 
+/** Local development trace sink for the built-in MPEG-TS timeshift player. */
+function timeshiftTrace(): Plugin {
+  const dir = resolve('scratch');
+  const file = join(dir, 'timeshift-debug.log');
+  let pending = Promise.resolve();
+  return {
+    name: 'tsrust-timeshift-trace',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__timeshift_trace', (req, res) => {
+        if (req.method !== 'POST') { res.writeHead(405).end(); return; }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); if (body.length > 4096) req.destroy(); });
+        req.on('end', () => {
+          pending = pending.then(async () => { await mkdir(dir, { recursive: true }); await appendFile(file, `${body}\n`); }).catch(() => undefined);
+          res.writeHead(204).end();
+        });
+      });
+      server.config.logger.info(`Timeshift diagnostics: ${file}`);
+    },
+  };
+}
+
 /**
  * react-router 7.18's exports map has no `production` condition, so every build resolved
  * `dist/development`, which ships with `ENABLE_DEV_WARNINGS = true` (performance audit
@@ -169,7 +200,10 @@ function serviceWorkerAssets(): Plugin {
 }
 
 export default defineConfig(({ command }) => ({
-  plugins: [react(), tailwindcss(), serviceWorkerAssets(), precompress()],
+  plugins: [react(), tailwindcss(), serviceWorkerAssets(), precompress(), timeshiftTrace()],
+  optimizeDeps: {
+    esbuildOptions: { banner: { js: `/* mpegts patch ${mpegtsPatchHash} */` } },
+  },
   resolve: {
     alias: [
       { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },

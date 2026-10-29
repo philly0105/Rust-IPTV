@@ -75,6 +75,12 @@
   "railMyList": "My List",
 
   "player": "Player",
+  "livePlayer": "Live TV",
+  "livePlayerHint": "Used for channels playing now, including channel switching.",
+  "catchupPlayer": "Catch-up TV",
+  "catchupPlayerHint": "Used for past programmes opened from the TV guide.",
+  "vodPlayer": "Movies and series",
+  "vodPlayerHint": "Used for movies and episodes on demand.",
   "playerBuiltIn": "Built-in player",
   "playerBuiltInHint": "Plays inside the app. Works for most HLS streams.",
   "playerEmbeddedMpv": "Embedded mpv",

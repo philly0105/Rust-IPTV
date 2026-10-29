@@ -8,6 +8,10 @@ export const PREVIEW_FETCH_SIZE = 3;
 export interface PreviewQueueOptions {
   /** How long an answer is reused while its first programme is still airing. */
   ttlMs?: number;
+  /** Refresh at the next airing programme boundary (previews do; complete guide tables do not). */
+  expireAtProgramBoundary?: boolean;
+  /** Keep the last answer on screen while an expired entry is refreshed. */
+  staleWhileRevalidate?: boolean;
   /** How long a failed or empty answer suppresses a new request. */
   emptyTtlMs?: number;
   concurrency?: number;
@@ -113,6 +117,8 @@ export class StalkerPreviewQueue {
     this.scope = scope;
     this.opts = {
       ttlMs: 5 * 60_000,
+      expireAtProgramBoundary: true,
+      staleWhileRevalidate: false,
       emptyTtlMs: 60_000,
       concurrency: 2,
       delayMs: 150,
@@ -128,7 +134,7 @@ export class StalkerPreviewQueue {
   get(ref: ItemRef): EpgProgram[] | undefined {
     const e = this.shared.cache.get(this.cacheKey(itemKey(ref)));
     if (!e) return undefined;
-    return this.usable(e) ? e.programs : undefined;
+    return this.opts.staleWhileRevalidate || this.usable(e) ? e.programs : undefined;
   }
 
   /**
@@ -249,6 +255,7 @@ export class StalkerPreviewQueue {
     const now = this.opts.clock();
     if (e.programs.length === 0) return now - e.at < this.opts.emptyTtlMs;
     if (now - e.at >= this.opts.ttlMs) return false;
+    if (!this.opts.expireAtProgramBoundary) return true;
     // A programme boundary always triggers a fresh request instead of serving the one that ended.
     // The boundary is the end of the programme airing when the answer came; archived programmes
     // before it (an answer asked with `from`) are already over and never make the entry stale.

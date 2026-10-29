@@ -1,7 +1,7 @@
 /** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
-import { ArrowUpToLine, FolderOpen, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowUpToLine, FolderOpen, Gauge, MonitorPlay, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -47,6 +47,9 @@ export interface DownloadRowProps {
    */
   tabbable?: boolean;
   onAction: (action: QueueAction, d: Download) => void;
+  onPlayCatchup?: (d: Download) => void;
+  onSpeedLimit?: (d: Download) => void;
+  globalRateLimitBps?: number;
 }
 
 /**
@@ -137,18 +140,23 @@ const ART_SM_PX = 45;
 /** Tailwind's `sm` breakpoint. */
 const SM_QUERY = '(min-width: 40rem)';
 
-function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction }: DownloadRowProps) {
+function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, globalRateLimitBps = 0 }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
   const lang = i18n.language;
   const pct = percentOf(progress.bytesDownloaded, progress.totalBytes);
   const isActive = d.status === 'downloading';
+  const canPlayCatchup = d.ref.contentType === 'live' && d.episodeId?.startsWith('catchup:') &&
+    (d.status === 'queued' || d.status === 'downloading' || d.status === 'paused');
   const eta = isActive ? etaSeconds(progress.bytesDownloaded, progress.totalBytes, progress.bytesPerSecond) : undefined;
   const sizeText = progress.totalBytes
     ? t('bytesOf', { done: formatBytes(progress.bytesDownloaded, lang), total: formatBytes(progress.totalBytes, lang) })
     : progress.bytesDownloaded > 0
       ? formatBytes(progress.bytesDownloaded, lang)
       : '';
+  const limit = d.rateLimitBps ?? globalRateLimitBps;
+  const speed = limit === 0 ? t('speedUnlimited') : t('speedValue', { value: (limit / (1024 * 1024)).toLocaleString(lang, { maximumFractionDigits: 6 }) });
+  const speedLabel = d.rateLimitBps === undefined ? t('speedInherited', { speed }) : speed;
   const tone = isActive ? 'accent' : d.status === 'failed' ? 'danger' : 'muted';
   // P2-POSTERS-2: the artwork's width is known, so it does not read its frame as it mounts.
   const artWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? ART_SM_PX : ART_PX, true));
@@ -209,20 +217,45 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
           >
             {detail}
           </span>
+          {onSpeedLimit && (
+            <button
+              type="button"
+              className="ms-auto inline-flex shrink-0 items-center gap-1 rounded-sm text-caption text-fg-muted hover:text-fg focus-visible:text-fg"
+              aria-label={t('speedEditAria', { title: d.subtitle || d.title, speed: speedLabel })}
+              title={t('speedEditAria', { title: d.subtitle || d.title, speed: speedLabel })}
+              tabIndex={tabbable ? 0 : -1}
+              onClick={() => onSpeedLimit(d)}
+            >
+              <Gauge size={12} aria-hidden />
+              <span>{speedLabel}</span>
+            </button>
+          )}
           {showSource && <SourceBadge source={source} className="ms-auto hidden shrink-0 lg:inline-flex" />}
         </div>
       </div>
       {/* Ghost icon buttons. A row that is waiting or paused shows them on hover or focus (fine
           pointers); a failed row always shows Retry and Remove, since it is there to be dealt with.
-          The column is as wide as the most a row has (three), shown or not, so every bar, badge
+          The column is as wide as the most a row has (four), shown or not, so every bar, badge
           and button ends on the same line. */}
       <div
         className={cn(
-          'flex shrink-0 items-center justify-end gap-0.5 pointer-fine:w-[calc(3*2rem+2*0.125rem)]',
+          'flex shrink-0 items-center justify-end gap-0.5 pointer-fine:w-[calc(4*2rem+3*0.125rem)]',
           !isActive && d.status !== 'failed' && REVEAL_ON_FINE,
         )}
         data-testid="download-actions"
       >
+        {canPlayCatchup && onPlayCatchup && (
+          <IconButton
+            size="sm"
+            label={t('actionWatchCatchupAria', { title: d.subtitle?.split(' · ')[0] || d.title })}
+            tooltip={t('actionWatchCatchup')}
+            icon={<MonitorPlay size={16} aria-hidden />}
+            disabled={busy}
+            tabIndex={tabbable ? 0 : -1}
+            data-action="watch"
+            onClick={() => onPlayCatchup(d)}
+          />
+        )}
         {actions.map((a) => {
           const Icon = ICONS[a];
           return (

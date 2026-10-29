@@ -1,8 +1,9 @@
 /**
  * The container overlays (toasts, dialogs, menus) portal into. In element fullscreen (the
  * player, the multi-view wall) the browser paints only the fullscreen element's subtree, so a
- * layer portaled to <body> sits behind it, unseen and out of reach. One shared host follows
- * `document.fullscreenElement` and goes back to <body> when fullscreen ends. Moving the host
+ * layer portaled to <body> sits behind it, unseen and out of reach. Window fill similarly has a
+ * raised layer that can cover body-portaled tooltips. One shared host follows the visible layer
+ * and goes back to <body> when it ends. Moving the host
  * node keeps every portal's React state; focus inside it is put back after the move.
  */
 
@@ -12,7 +13,9 @@ function target(): HTMLElement {
   const fs = document.fullscreenElement;
   // A <video> or <iframe> in fullscreen paints none of its children.
   const usable = fs instanceof HTMLElement && fs.isConnected && !(fs instanceof HTMLMediaElement) && !(fs instanceof HTMLIFrameElement);
-  return usable ? fs : document.body;
+  if (usable) return fs;
+  const windowFill = document.querySelector<HTMLElement>('[data-player-window-layer]:not([hidden])');
+  return windowFill?.isConnected ? windowFill : document.body;
 }
 
 function place(): void {

@@ -52,6 +52,7 @@ beforeEach(() => {
   rpc.reset();
   rpc.handlers['sources.list'] = () => sources;
   rpc.handlers['downloads.dir'] = () => ({ path: 'D:/Videos' });
+  rpc.handlers['settings.get'] = () => ({ downloadRateLimitBps: 1024 * 1024 });
   fakePlayer.usePlayerStore.setState({ source: undefined, positionSeconds: 0 });
   fakePlayer.played.length = 0;
 });
@@ -96,6 +97,66 @@ describe('DownloadsPage', () => {
     expect(screen.getByRole('progressbar', { name: 'Download progress for Title downloading' })).toBeTruthy();
   });
 
+  it('edits the global default and each download can override it or inherit again', async () => {
+    const mib = 1024 * 1024;
+    let globalLimit = mib;
+    let download = makeDownload({ id: 51, title: 'News', status: 'paused' });
+    rpc.handlers['downloads.list'] = () => [download];
+    rpc.handlers['settings.get'] = () => ({ downloadRateLimitBps: globalLimit });
+    rpc.handlers['settings.update'] = (args) => {
+      globalLimit = (args as { patch: { downloadRateLimitBps: number } }).patch.downloadRateLimitBps;
+      return { downloadRateLimitBps: globalLimit };
+    };
+    rpc.handlers['downloads.setRateLimit'] = (args) => {
+      download = { ...download, rateLimitBps: (args as { bytesPerSecond: number | null }).bytesPerSecond ?? undefined };
+    };
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Default speed: 1 MiB/s' }));
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '2.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(rpc.callsOf('settings.update')).toEqual([{ patch: { downloadRateLimitBps: 2.5 * mib } }]));
+    const openRow = async () => fireEvent.click(await screen.findByRole('button', { name: /Change download speed for News/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByText('Default: 2.5 MiB/s')).toBeTruthy();
+    await openRow();
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('default');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rpc.callsOf('downloads.setRateLimit')).toEqual([{ id: 51, bytesPerSecond: 4 * mib }]);
+    await openRow();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'unlimited' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rpc.callsOf('downloads.setRateLimit').at(-1)).toEqual({ id: 51, bytesPerSecond: 0 });
+    await openRow();
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'default' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rpc.callsOf('downloads.setRateLimit').at(-1)).toEqual({ id: 51, bytesPerSecond: null });
+    expect(screen.getByText('Default: 2.5 MiB/s')).toBeTruthy();
+  });
+
+  it('rejects invalid speeds and keeps the editor open when saving fails', async () => {
+    rpc.handlers['downloads.list'] = () => [makeDownload({ title: 'News', status: 'paused' })];
+    rpc.handlers['downloads.setRateLimit'] = () => { throw new Error('Could not save speed'); };
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: /Change download speed for News/ }));
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
+    for (const value of ['0', '-1', '1025', '']) {
+      fireEvent.change(screen.getByRole('spinbutton'), { target: { value } });
+      expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(rpc.callsOf('downloads.setRateLimit')).toEqual([]);
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.setRateLimit')).toHaveLength(1));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect((screen.getByRole('spinbutton') as HTMLInputElement).value).toBe('3');
+  });
+
   it('calls the matching rpc for row actions', async () => {
     rpc.handlers['downloads.list'] = () => list;
     rpc.handlers['downloads.pause'] = () => undefined;
@@ -115,6 +176,36 @@ describe('DownloadsPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Download Title queued next' }));
     await waitFor(() => expect(rpc.callsOf('downloads.prioritize')).toEqual([{ id: 10 }]));
+  });
+
+  it('watches a catch-up stream while its download continues', async () => {
+    const d = makeDownload({
+      id: 31,
+      ref: { sourceId: 'src1', contentType: 'live', itemId: '3307' },
+      episodeId: 'catchup:2026-10-18T20:00:00Z',
+      title: 'Channel 1',
+      subtitle: 'Evening news · Sun 18 Oct 8:00 PM',
+      status: 'downloading',
+      durationSeconds: 1800,
+      positionSeconds: 300,
+    });
+    rpc.handlers['downloads.list'] = () => [d];
+    rpc.handlers['downloads.playSource'] = () => ({
+      url: 'http://provider.test/timeshift/1.ts', kind: 'direct', title: d.title,
+      headers: { userAgent: 'Test' }, ref: d.ref, isLive: false, isRadio: false,
+    });
+    renderAt('/downloads', [{ path: '/downloads', element: <DownloadsPage /> }]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Watch Evening news while downloading' }));
+    await waitFor(() => expect(rpc.callsOf('downloads.playSource')).toEqual([{ id: 31 }]));
+    expect(fakePlayer.played.at(-1)).toMatchObject({
+      url: 'http://provider.test/timeshift/1.ts',
+      headers: { userAgent: 'Test' },
+      durationSeconds: 1800,
+      catchupProgramStart: '2026-10-18T20:00:00Z',
+      resumeSeconds: 300,
+      subtitle: 'Evening news',
+    });
+    expect(screen.getByRole('button', { name: 'Pause Channel 1' })).toBeTruthy();
   });
 
   it('offers Try again on a retryable failure and re-issues the command', async () => {

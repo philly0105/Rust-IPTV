@@ -25,7 +25,7 @@ import {
 import { type CatchupChannel, resolveM3uCatchupUrl } from '../lib/catchup';
 import { HOUR, MINUTE } from '../lib/epgTime';
 import { hasAiring, markFromProvider, needsFallback, shortEpgEnabled } from '../lib/shortEpg';
-import { lastHeader, recorded } from './fakes';
+import { lastHeader, recorded, usePlayerStore } from './fakes';
 import { installDomStubs, makeChannel, program, renderAt, settings } from './harness';
 
 configure({ asyncUtilTimeout: 10_000 });
@@ -323,6 +323,7 @@ describe('ArchivePage', () => {
     rpcMock.calls.length = 0;
     recorded.playSource.length = 0;
     recorded.playItem.length = 0;
+    usePlayerStore.setState({ source: undefined });
     rpcMock.handlers['settings.get'] = () => settings();
     rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'xtream', name: 'Panel' });
     rpcMock.handlers['catalog.item'] = () => ch({ archive: { enabled: true, durationHours: 30 } });
@@ -406,7 +407,7 @@ describe('ArchivePage', () => {
     fireEvent.click(list[2]!);
     fireEvent.click(list[0]!);
     await waitFor(() => expect(recorded.playSource).toHaveLength(1));
-    expect(recorded.playSource[0]).toMatchObject({ url: 'http://arc/x.ts', subtitle: 'Morning show', isLive: false });
+    expect(recorded.playSource[0]).toMatchObject({ url: 'http://arc/x.ts', subtitle: 'Morning show', catchupProgramStart: new Date(NOW - 3 * HOUR).toISOString(), isLive: false });
     const call = rpcMock.calls.find((c) => c.cmd === 'xtream.catchupUrl');
     expect(call?.args).toMatchObject({ ref: REF, start: new Date(NOW - 3 * HOUR).toISOString(), durationMinutes: 60 });
   });
@@ -492,6 +493,56 @@ describe('ArchivePage', () => {
     expect(screen.getByRole('link', { name: 'Live TV' }).getAttribute('href')).toBe('/s/src1/live');
   });
 
+  it('marks a catch-up programme started from another guide view', async () => {
+    usePlayerStore.setState({ source: {
+      url: 'http://arc/x.ts', kind: 'direct', title: 'Channel 0', ref: REF,
+      catchupProgramStart: new Date(NOW - 3 * HOUR).toISOString(), isLive: false, isRadio: false,
+    } });
+    renderAt('/live/archive/src1/c0', ROUTE);
+    const list = await rows();
+    expect(list[0]!.getAttribute('aria-current')).toBe('true');
+    expect(list[1]!.hasAttribute('data-playing')).toBe(false);
+  });
+
+  it('opens on the playing catch-up day and programme instead of the live day', async () => {
+    const start = new Date(yesterday + 20 * HOUR).toISOString();
+    usePlayerStore.setState({ source: {
+      url: 'http://arc/x.ts', kind: 'direct', title: 'Channel 0', subtitle: 'Old match', ref: REF,
+      catchupProgramStart: start, durationSeconds: 2 * 3600, isLive: false, isRadio: false,
+    } });
+    renderAt('/live/archive/src1/c0', ROUTE);
+    const tabs = within(await screen.findByTestId('archive-days')).getAllByRole('tab');
+    await waitFor(() => expect(tabs[1]?.getAttribute('aria-selected')).toBe('true'));
+    const list = await rows();
+    expect(list[0]?.getAttribute('aria-current')).toBe('true');
+    expect(list[0]?.textContent).toContain('Old match');
+    expect(screen.getByTestId('archive-airing').textContent).toBe('Watching: Old match');
+  });
+
+  it('adds the playing date beyond the listed archive days and shows its programme without guide data', async () => {
+    const start = new Date(NOW - 5 * 24 * HOUR).toISOString();
+    rpcMock.handlers['catchup.programs'] = () => [];
+    usePlayerStore.setState({ source: {
+      url: 'http://arc/old.ts', kind: 'direct', title: 'Channel 0', subtitle: 'Five days ago', ref: REF,
+      catchupProgramStart: start, durationSeconds: 3600, isLive: false, isRadio: false,
+    } });
+    renderAt('/live/archive/src1/c0', ROUTE);
+    const tabs = within(await screen.findByTestId('archive-days')).getAllByRole('tab');
+    expect(tabs).toHaveLength(4);
+    expect(tabs[3]?.getAttribute('aria-selected')).toBe('true');
+    const list = await rows();
+    expect(list).toHaveLength(1);
+    expect(list[0]?.textContent).toContain('Five days ago');
+    expect(list[0]?.getAttribute('aria-current')).toBe('true');
+    expect(within(list[0]!).getByTestId('archive-playing')).toBeTruthy();
+    expect(list[0]?.textContent).not.toContain('No longer in catch-up');
+    expect(screen.getByTestId('archive-airing').textContent).toBe('Watching: Five days ago');
+    // Browsing Today remains possible without changing the programme playing in the player.
+    fireEvent.click(tabs[0]!);
+    await waitFor(() => expect(tabs[0]?.getAttribute('aria-selected')).toBe('true'));
+    expect(screen.getByTestId('archive-airing').textContent).toBe('Watching: Five days ago');
+  });
+
   it('offers no download for an M3U archive that would stream on into live (FW-ARCHIVE-DOWNLOAD-UNBOUNDED)', async () => {
     rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'm3u', name: 'Playlist' });
     // No catch-up type: the `shift` form, ?utc=<start>&lutc=<now>, which has no end.
@@ -527,6 +578,7 @@ describe('ArchivePage, review round 2', () => {
     for (const k of Object.keys(rpcMock.handlers)) delete rpcMock.handlers[k];
     rpcMock.calls.length = 0;
     recorded.playSource.length = 0;
+    usePlayerStore.setState({ source: undefined });
     rpcMock.handlers['settings.get'] = () => settings();
     rpcMock.handlers['sources.get'] = () => ({ id: 'src1', kind: 'xtream', name: 'Panel' });
     rpcMock.handlers['catalog.item'] = () => ch({ archive: { enabled: true, durationHours: 30 } });

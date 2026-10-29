@@ -64,13 +64,24 @@ export function textTokens(text: string): string[] {
   return words;
 }
 
+/** A channel's other picture of a game: an overflow or alternate channel, or an alternate telecast. */
+const ALTERNATE_WORDS = new Set(['alternate', 'overflow', 'manningcast', 'megacast', 'altcast']);
+const ALTERNATE_PHRASES = ['performance view', 'above the rim', 'alt cast'].map((p) => p.split(' '));
+
 /**
  * True for a backup feed or an SD copy ("ESPN (Backup)", "ESPN BKP", "BIG TEN NETWORK ALT", "CELTICS SD"):
- * `textTokens` drops those markers, so the copy reads as the main feed, and the match lists it after.
+ * `textTokens` drops those markers, so the copy reads as the main feed, and the match lists it after. Also for
+ * an overflow or alternate channel ("BIG TEN NETWORK OVERFLOW 2", "MONUMENTAL SPORTS NETWORK ALTERNATE") and
+ * an alternate telecast ("Peacock 001 | Performance View: DET vs. NYK", "ESPN+ 201 | Above the Rim: PHI vs.
+ * IND"), which the main feed goes before.
  */
 export function isBackupFeed(name: string): boolean {
   const words = name.normalize('NFKD').replace(/\p{M}+/gu, '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  return words.some((w) => BACKUP.test(w) || w === 'lq') || words[words.length - 1] === 'sd';
+  return (
+    words.some((w) => BACKUP.test(w) || w === 'lq' || ALTERNATE_WORDS.has(w)) ||
+    words[words.length - 1] === 'sd' ||
+    ALTERNATE_PHRASES.some((p) => findPhrase(words, p) >= 0)
+  );
 }
 
 /**
@@ -861,16 +872,21 @@ export function namesNews(tokens: readonly string[]): boolean {
   return tokens.some((t, i) => t === 'news' && tokens[i - 1] !== 'newport');
 }
 
+/** Words after a station's number that make it the station's sister channel ("FOX 9+", "FOX 10 Xtra"). */
+const SISTER_WORDS = new Set(['plus', 'xtra', 'extra']);
+
 /**
  * True for a broadcast station's spin-off, which carries no network programme and so no game: its news
- * stream ("NBC 4 NEW YORK NEWS", "PRIME: CBS CINCINNATI NEWS (WKRC)"), or any of its channels on a free
- * streaming service's lineup, by the name's tag or its group's ("PRIME: FOX 5 NEW YORK", "RK: ABC 20/20",
- * "PRIME: CW GOLD"). On one real account that was every station named after Prime or Roku. False for every
- * other network: "US: PRIME MLB NETWORK" is MLB Network.
+ * stream ("NBC 4 NEW YORK NEWS", "PRIME: CBS CINCINNATI NEWS (WKRC)"), its sister channel, named after its
+ * number ("FOX 9 PLUS HD [MINNEAPOLIS]", "FOX 10 XTRA HD [PHOENIX]", independent stations its owner brands
+ * so), or any of its channels on a free streaming service's lineup, by the name's tag or its group's ("PRIME:
+ * FOX 5 NEW YORK", "RK: ABC 20/20", "PRIME: CW GOLD"). On one real account that was every station named
+ * after Prime or Roku. False for every other network: "US: PRIME MLB NETWORK" is MLB Network.
  */
 export function isStationSpinOff(network: string, name: string, groupName?: string | null): boolean {
   if (!AFFILIATED.has(network) && networkAlias(network)?.kind !== 'local') return false;
-  if (namesNews(splitName(name).tokens)) return true;
+  const tokens = splitName(name).tokens;
+  if (namesNews(tokens) || tokens.some((t, i) => SISTER_WORDS.has(t) && NUMBER.test(tokens[i - 1] ?? ''))) return true;
   return [...leadWords(name), ...(groupName ? leadWords(groupName) : [])].some((w) => FREE_LINEUPS.has(w));
 }
 
@@ -898,6 +914,34 @@ export function teamMarkets(team: Pick<GameTeam, 'location'>): string[][] {
   const location = textTokens(team.location);
   if (location.length === 0) return [];
   return [location, ...(MARKET_ALIASES[location.join(' ')] ?? []).map(textTokens)];
+}
+
+/** The states of teams' cities that share their name with a city elsewhere (Portland, Maine; Washington, North Carolina). */
+const CITY_STATES: Record<string, readonly string[]> = {
+  portland: ['or', 'oregon'],
+  washington: ['dc'],
+  jacksonville: ['fl', 'florida'],
+};
+const US_STATES = new Set(
+  (
+    'al ak az ar ca co ct de fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt ne nv nh nj nm ny nc nd oh ok or pa ri sc ' +
+    'sd tn tx ut vt va wa wv wi wy dc maine oregon florida texas'
+  ).split(' '),
+);
+
+/**
+ * True when a station's market words (`affiliateMarket`) name one of the `markets` (`teamMarkets`), unless the
+ * state after the city is another than the team's ("NBC (WCSH) PORTLAND, ME" is no Trail Blazers station).
+ */
+export function inMarkets(words: readonly string[], markets: readonly string[][]): boolean {
+  return markets.some((p) => {
+    const states = CITY_STATES[p.join(' ')];
+    for (let at = findPhrase(words, p); at >= 0; at = findPhrase(words, p, undefined, at + 1)) {
+      const next = words[at + p.length];
+      if (!states || next === undefined || !US_STATES.has(next) || states.includes(next)) return true;
+    }
+    return false;
+  });
 }
 
 /** The network of an ESPN broadcast name ("ESPN2", "FanDuel SN West", "KFAA-TV"); null for team apps and the like. */

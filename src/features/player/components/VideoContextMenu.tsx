@@ -1,4 +1,4 @@
-import { Camera, ChevronLeft, Copy, Maximize, Minimize, Pause, PictureInPicture2, Play } from 'lucide-react';
+import { Camera, ChevronLeft, Copy, Maximize, Maximize2, Minimize, Minimize2, Pause, PictureInPicture2, Play } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -40,6 +40,7 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
   const [pos, setPos] = useState(at);
   const status = usePlayerStore((s) => s.status);
   const isFullscreen = usePlayerStore((s) => s.isFullscreen);
+  const isWindowFilled = usePlayerStore((s) => s.isWindowFilled);
   const source = usePlayerStore((s) => s.source);
   const tracks = useMediaStore((s) => s.tracks);
   const commands = useMediaStore((s) => s.commands);
@@ -184,6 +185,13 @@ export function VideoContextMenu({ at, onClose }: { at: { x: number; y: number }
             label={playing ? t('pause') : t('play')}
             onClick={() => pick(() => usePlayerStore.getState().togglePlay())}
           />
+          {!pipActive && (
+            <MenuAction
+              icon={isWindowFilled ? <Minimize2 className={icon} aria-hidden /> : <Maximize2 className={icon} aria-hidden />}
+              label={isWindowFilled ? t('exitWindowFill') : t('windowFill')}
+              onClick={() => pick(() => usePlayerStore.getState().toggleWindowFill())}
+            />
+          )}
           {!pipActive && (
             <MenuAction
               icon={isFullscreen ? <Minimize className={icon} aria-hidden /> : <Maximize className={icon} aria-hidden />}

@@ -75,6 +75,12 @@
   "railMyList": "Minha lista",
 
   "player": "Reprodutor",
+  "livePlayer": "TV ao vivo",
+  "livePlayerHint": "Usado para canais no ar agora, incluindo a troca de canais.",
+  "catchupPlayer": "TV em catch-up",
+  "catchupPlayerHint": "Usado para programas passados abertos pelo guia de TV.",
+  "vodPlayer": "Filmes e séries",
+  "vodPlayerHint": "Usado para filmes e episódios sob demanda.",
   "playerBuiltIn": "Reprodutor integrado",
   "playerBuiltInHint": "Reproduz dentro do aplicativo. Funciona com a maioria dos streams HLS.",
   "playerEmbeddedMpv": "mpv incorporado",

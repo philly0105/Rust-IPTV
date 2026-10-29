@@ -30,6 +30,7 @@ import { displayChannelName } from '@/features/live/lib/channelName';
 import { finishesTitle, invalidateWatched } from '@/features/vod/lib/watchedQueries';
 
 import { parseClearKey } from './clearKey';
+import { clearCatchupResume, syncCatchupResume } from './catchupResume';
 import { preloadEngineFor } from './enginePreload';
 import { enterVideoFullscreen } from './fullscreen';
 import { rpcErrorCode } from './errors';
@@ -38,6 +39,7 @@ import { __resetNowNextForTests, fetchNowNext, holdNowNext, passNowNext, peekNow
 import { ensurePlaybackAllowed, type PlaybackGateItem } from './parentalHook';
 import { hideModeNow, lockedNow, onPlaybackHidden } from './parentalLocks';
 import { reportAnswered } from './playbackReport';
+import { traceTimeshift } from './timeshiftDiagnostics';
 
 export type PlayerMode = 'inline' | 'embedded-mpv' | 'external' | 'radio';
 
@@ -65,6 +67,8 @@ export interface PlayerState {
   status: 'idle' | 'loading' | 'playing' | 'paused' | 'error';
   error?: string;
   isFullscreen: boolean;
+  /** Player covers the app viewport while the desktop window keeps its normal size. */
+  isWindowFilled: boolean;
   dock: 'stage' | 'mini' | 'hidden';
   volume: number;
   muted: boolean;
@@ -102,6 +106,7 @@ export interface PlayerActions {
   adjustVolume(delta: number): void;
   toggleMute(): void;
   toggleFullscreen(): void;
+  toggleWindowFill(): void;
   setDock(d: PlayerState['dock']): void;
   next(): void;
   prev(): void;
@@ -111,7 +116,8 @@ export interface PlayerActions {
 export interface PlaybackController {
   play(): void;
   pause(): void;
-  seekTo(seconds: number): void;
+  /** Return the position reached when the engine snaps a seek to a supported boundary. */
+  seekTo(seconds: number): number | void;
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
   /** The surface holds the media at `seconds` (shown time): a seek there asks the server for nothing. */
@@ -139,6 +145,8 @@ let saveTimer: ReturnType<typeof setInterval> | null = null;
 let playToken = 0;
 /** Incremented by every user-level request (playItem, playSource, play, stop); pending resolutions compare it. */
 let requestSeq = 0;
+/** Preserve selection order when rapid VOD switches close an old mpv file. */
+let pendingMpvUnload: Promise<void> = Promise.resolve();
 let settingsCache: Settings | null = null;
 let settingsPromise: Promise<Settings | null> | null = null;
 const sourceKindCache = new Map<string, SourceKind>();
@@ -244,7 +252,7 @@ export function kindFromUrl(url: string): PlayerKind {
 /** VOD content whose position is tracked (`positions.set`). */
 export function tracksPosition(source: PlayerSource | undefined): source is PlayerSource & { ref: ItemRef } {
   return (
-    !!source?.ref && !source.isLive && (source.ref.contentType === 'movie' || source.ref.contentType === 'series')
+    !!source?.url && !!source.ref && !source.isLive && (source.ref.contentType === 'movie' || source.ref.contentType === 'series')
   );
 }
 
@@ -398,6 +406,17 @@ export function modeForSettings(player: VideoPlayer | undefined, source: Pick<Pl
   return 'inline';
 }
 
+/** Catch-up is recorded live TV but uses a separate provider stream and player choice. */
+export function playerForSource(
+  settings: Pick<Settings, 'player' | 'livePlayer' | 'catchupPlayer' | 'vodPlayer'> | null | undefined,
+  source: Pick<PlayerSource, 'catchupProgramStart' | 'isLive' | 'isRadio'>,
+): VideoPlayer | undefined {
+  if (!settings) return undefined;
+  if (source.catchupProgramStart) return settings.catchupPlayer ?? settings.player;
+  if (source.isLive || source.isRadio) return settings.livePlayer ?? settings.player;
+  return settings.vodPlayer ?? settings.player;
+}
+
 export function errorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === 'string') return err;
@@ -435,6 +454,7 @@ export function readResume(): ResumeRecord | null {
 function writeResume(): void {
   const state = usePlayerStore.getState();
   const { source, positionSeconds, mode } = state;
+  if (!isPendingZap(source)) syncCatchupResume(source, positionSeconds, mode === 'external' || isEndedState(state));
   try {
     // A zap's placeholder names a channel it has not tuned yet: the record keeps what played.
     if (isPendingZap(source)) return;
@@ -560,6 +580,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
   mode: 'inline',
   status: 'idle',
   isFullscreen: false,
+  isWindowFilled: false,
   dock: 'hidden',
   volume: initialVolume.volume,
   muted: initialVolume.muted,
@@ -582,11 +603,15 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     bindUnload();
     // Persist the outgoing item before switching.
     if (get().source) flushProgress();
+    // Direct plays (including VOD failover) also need the previous embedded
+    // file closed. The catalog/queue paths may already have started this.
+    const previousUnloaded = unloadPreviousForVod(source.isLive);
     lastSavedPosition = -1;
 
     const settings = await getSettings();
     if (token !== playToken) return;
-    let mode = opts?.mode ?? modeForSettings(settings?.player, source);
+    const selectedPlayer = playerForSource(settings, source);
+    let mode = opts?.mode ?? modeForSettings(selectedPlayer, source);
     // Embedded mpv needs the desktop shell; everywhere else the built-in player takes over. It can't
     // do ClearKey either.
     if (mode === 'embedded-mpv' && (!isDesktop || source.drm)) mode = 'inline';
@@ -597,6 +622,8 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       if (token !== playToken) return;
       if (mpvUnavailable()) mode = 'inline';
     }
+    await previousUnloaded;
+    if (token !== playToken) return;
     const queue = opts?.queue ?? (get().queue.some((q) => sameSource(q, source)) ? get().queue : []);
 
     resetMedia();
@@ -608,8 +635,9 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       status: 'loading',
       error: undefined,
       positionSeconds: source.resumeSeconds ?? 0,
-      durationSeconds: undefined,
+      durationSeconds: source.durationSeconds,
       dock: mode === 'external' ? 'hidden' : stageCount > 0 ? 'stage' : 'mini',
+      isWindowFilled: mode === 'external' ? false : get().isWindowFilled,
       playGeneration: get().playGeneration + 1,
     });
 
@@ -622,9 +650,10 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     if (mode === 'external') {
       stopSaver();
       clearResume();
+      clearCatchupResume();
       const chosen = opts?.externalPlayer ?? (externalChoice && sameSource(externalChoice.source, source) ? externalChoice.player : undefined);
       externalChoice = chosen ? { source, player: chosen } : null;
-      const player = chosen ?? (settings?.player === 'vlc' ? 'vlc' : 'mpv');
+      const player = chosen ?? (selectedPlayer === 'vlc' ? 'vlc' : 'mpv');
       // downloads: the player connects to the provider itself, so a download holding the
       // connection it needs lets go first.
       const room = reportAnswered(source);
@@ -675,6 +704,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       queue: [],
       dock: 'hidden',
       isFullscreen: false,
+      isWindowFilled: false,
       mode: 'inline',
     });
   },
@@ -716,8 +746,6 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
         upNextHandledFor = undefined;
       }
     }
-    // A step the surface can't serve from what it holds waits for the next one (or a key up):
-    // a held key would otherwise send a request to the provider per repeat.
     if (opts?.step && controller && !controller.holds?.(target)) {
       set({ positionSeconds: target, pendingSeek: target });
       if (seekTimer) clearTimeout(seekTimer);
@@ -726,8 +754,8 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
       return;
     }
     dropPendingSeek();
-    controller?.seekTo(target);
-    set({ positionSeconds: target });
+    const landed = controller?.seekTo(target);
+    set({ positionSeconds: typeof landed === 'number' ? landed : target });
   },
 
   setVolume(v) {
@@ -756,8 +784,16 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     if (!get().source) return;
     // iPhone Safari: no element fullscreen, so the video goes to the system player and the flag
     // stays off (PL-IOS-FULLSCREEN). Everywhere else the dock follows the flag (PlayerDock).
-    if (!get().isFullscreen && enterVideoFullscreen()) return;
-    set({ isFullscreen: !get().isFullscreen });
+    if (!get().isFullscreen && enterVideoFullscreen()) {
+      set({ isWindowFilled: false });
+      return;
+    }
+    set({ isFullscreen: !get().isFullscreen, isWindowFilled: false });
+  },
+
+  toggleWindowFill() {
+    if (!get().source || get().mode === 'external') return;
+    set({ isWindowFilled: !get().isWindowFilled, isFullscreen: false });
   },
 
   setDock(d) {
@@ -831,8 +867,9 @@ export function reportStatus(status: PlayerState['status'], error?: string): voi
   if (!s.source) return;
   // No media yet (a failed lookup): the surface's events are about the media it just dropped,
   // not this item. A zap waiting to tune keeps the last picture up under its banner: that
-  // media's events are not about the channel the placeholder names either.
-  if (isPendingZap(s.source)) return;
+  // media's events are not about the channel the placeholder names either. Nor are they about a
+  // movie or episode shown while the previous file closes and its URL resolves.
+  if (isPendingZap(s.source) || s.source === switchPlaceholder) return;
   if (!s.source.url && status !== 'error' && status !== 'loading') return;
   if (status !== 'error' && useMediaStore.getState().errorCode) useMediaStore.setState({ errorCode: undefined });
   if (s.status === status && s.error === error) return;
@@ -917,13 +954,16 @@ usePlayerStore.subscribe((s, prev) => {
  * event. Until the item's first frame, a timeout is raised after `LIVE_STARTUP_TIMEOUT_MS` (live)
  * or `STARTUP_TIMEOUT_MS` (VOD), whether the surface says `loading` or `paused` (a stream with
  * nothing to show can report a pause it never had); only a pause the user asked for stops it.
- * Once the item played, a re-buffer in `loading` gets `STARTUP_TIMEOUT_MS`. The timeout goes to
+ * Once the item played, a re-buffer in `loading` gets `STARTUP_TIMEOUT_MS`, or the longer catch-up
+ * limit for an archive programme. The timeout goes to
  * smart reconnect, which retries or switches before the error overlay shows its Retry. (The 401
  * itself is not visible from here, so this is a timeout, not an auth error; streams whose 401
  * the engine does report still classify as auth.)
  */
 export const STARTUP_TIMEOUT_MS = 30_000;
 export const LIVE_STARTUP_TIMEOUT_MS = 10_000;
+/** Catch-up providers can take much longer to open a timeshift response or return the next chunk. */
+export const CATCHUP_STARTUP_TIMEOUT_MS = 150_000;
 let stallTimer: ReturnType<typeof setTimeout> | null = null;
 let stallFor: string | undefined;
 /** The media that showed its first frame (`playing` once), by `watchKey`. */
@@ -968,16 +1008,26 @@ usePlayerStore.subscribe((s, prev) => {
   if (!watching || !key) return;
   stallFor = key;
   const firstFrame = startedFor !== key;
+  const positionAtStart = s.positionSeconds;
   stallTimer = setTimeout(
     () => {
       stallTimer = null;
       stallFor = undefined;
       const now = usePlayerStore.getState();
       if (watchKey(now.source) !== key || !waitingOnMedia(now, key)) return;
+      // Some live mpv streams keep reporting pause=true while video and
+      // time-pos advance. Progress over the watchdog interval is proof that
+      // the first frame arrived, even when the pause flag is stale.
+      if (now.mode === 'embedded-mpv' && now.source?.isLive && now.status === 'paused' &&
+          now.positionSeconds > positionAtStart + 0.5 && !useMediaStore.getState().waiting) {
+        startedFor = key;
+        return;
+      }
+      traceTimeshift(now.source, 'player startup watchdog expired', { status: now.status, position: now.positionSeconds });
       useMediaStore.setState({ errorCode: 'timeout' });
       reportStatus('error', 'Timed out waiting for the stream');
     },
-    firstFrame && s.source?.isLive ? LIVE_STARTUP_TIMEOUT_MS : STARTUP_TIMEOUT_MS,
+    s.source?.catchupProgramStart ? CATCHUP_STARTUP_TIMEOUT_MS : firstFrame && s.source?.isLive ? LIVE_STARTUP_TIMEOUT_MS : STARTUP_TIMEOUT_MS,
   );
 });
 
@@ -1024,6 +1074,7 @@ async function playQueued(entry: PlayerSource): Promise<void> {
     const seq = requestSeq;
     if (!(await passGate({ ref: entry.ref, title: entry.title })) || seq !== requestSeq) return;
   }
+  const previousUnloaded = unloadPreviousForVod(entry.isLive);
   const run = async (): Promise<void> => {
     const seq = ++requestSeq;
     let resolved = entry;
@@ -1051,12 +1102,51 @@ async function playQueued(entry: PlayerSource): Promise<void> {
       return;
     }
     if (seq !== requestSeq) return;
+    await previousUnloaded;
+    if (seq !== requestSeq) return;
     // The list owner may have rebuilt or refreshed the queue meanwhile: keep its newest copy.
     const latest = usePlayerStore.getState().queue;
     await usePlayerStore.getState().play(resolved, { queue: latest.some((q) => sameSource(q, entry)) ? latest : queue, mode });
   };
-  if (!entry.url) usePlayerStore.setState({ status: 'loading', error: undefined });
+  if (!entry.isLive) {
+    usePlayerStore.setState({ status: 'loading', error: undefined, source: vodSwitchPlaceholder({ ...entry, url: '' }) });
+  } else if (!entry.url) {
+    usePlayerStore.setState({ status: 'loading', error: undefined });
+  }
   await run();
+}
+
+/** The movie or episode shown, without a URL, while the previous file closes and its URL resolves. */
+let switchPlaceholder: PlayerSource | null = null;
+function vodSwitchPlaceholder(source: PlayerSource): PlayerSource {
+  switchPlaceholder = source;
+  return source;
+}
+
+/** Release an embedded VOD connection while the next item's URL is resolving. */
+function unloadPreviousForVod(nextIsLive: boolean): Promise<void> {
+  const current = usePlayerStore.getState();
+  if (nextIsLive || current.mode !== 'embedded-mpv') return Promise.resolve();
+  // A rapid second selection can arrive after the first replaced the URL with
+  // a placeholder but before its unload RPC has completed.
+  if (!current.source?.url) return pendingMpvUnload;
+  // Capture the outgoing position before mpv clears its time-pos property.
+  flushProgress();
+  // The subsequent mpv.load also waits for idle, so a failed early request
+  // cannot cause two VOD connections to overlap.
+  pendingMpvUnload = pendingMpvUnload.then(() => rpc('mpv.unload').catch(() => undefined));
+  return pendingMpvUnload;
+}
+
+/** Release a failed movie/episode even when the error UI keeps its URL for Retry. */
+export function releaseFailedEmbeddedVod(): void {
+  const current = usePlayerStore.getState();
+  const refType = current.source?.ref?.contentType;
+  if (current.mode !== 'embedded-mpv' || !current.source?.url ||
+      (refType !== 'movie' && refType !== 'series')) return;
+  void unloadPreviousForVod(false);
+  // A title that never recovered must not auto-open again on the next app launch.
+  clearResume();
 }
 
 /** A resolution failed: show the error on the item it was for, and let Retry run it again. */
@@ -1229,7 +1319,7 @@ async function autoLiveFormat(args: PlayItemArgs): Promise<'ts' | undefined> {
   if ((args.ref.contentType !== 'live' && args.ref.contentType !== 'radio') || !liveTsPlayable()) return undefined;
   const settings = peekSettings() ?? (await getSettings());
   if (settings?.streamFormat !== 'auto') return undefined;
-  const mode = modeForSettings(settings.player, { isRadio: !!args.isRadio });
+  const mode = modeForSettings(settings.livePlayer ?? settings.player, { isRadio: !!args.isRadio });
   // play() moves embedded mpv to the built-in player outside the desktop app.
   return mode === 'inline' || mode === 'radio' || (mode === 'embedded-mpv' && !isDesktop) ? 'ts' : undefined;
 }
@@ -1428,22 +1518,23 @@ export async function startItem(
   const gate: PlaybackGateItem = args.categoryId ? { ref: args.ref, categoryId: args.categoryId, title: args.title } : { ref: args.ref, title: args.title };
   if (!(await passGate(gate))) return seq === requestSeq ? 'refused' : 'superseded';
   if (seq !== requestSeq) return 'superseded';
+  const previousUnloaded = unloadPreviousForVod(args.isLive);
   // Any other start replaces a start over's intent (a plain play of the same item resumes).
   startOverKey = args.fromStart ? playKey(args.ref, args.episodeId) : null;
   opts?.onAllowed?.();
   if (!opts?.keepList) leaveListZap(args.ref);
   const queueOpts = opts?.queue ? { queue: opts.queue } : undefined;
+  const placeholder: PlayerSource = {
+    url: '', kind: 'direct', title: args.title, isLive: args.isLive,
+    isRadio: !!args.isRadio, ref: args.ref,
+  };
+  if (args.episodeId) placeholder.episodeId = args.episodeId;
+  if (args.subtitle) placeholder.subtitle = args.subtitle;
+  if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
   usePlayerStore.setState({
     status: 'loading',
     error: undefined,
-    source: usePlayerStore.getState().source ?? {
-      url: '',
-      kind: 'direct',
-      title: args.title,
-      isLive: args.isLive,
-      isRadio: !!args.isRadio,
-      ref: args.ref,
-    },
+    source: args.isLive ? usePlayerStore.getState().source ?? placeholder : placeholder,
     dock: stageCount > 0 ? 'stage' : usePlayerStore.getState().dock === 'hidden' ? 'mini' : usePlayerStore.getState().dock,
   });
   let source: PlayerSource;
@@ -1453,10 +1544,6 @@ export async function startItem(
   } catch (err) {
     // A newer request won the race: do not clobber it.
     if (seq !== requestSeq) return 'superseded';
-    const placeholder: PlayerSource = { url: '', kind: 'direct', title: args.title, isLive: args.isLive, isRadio: !!args.isRadio, ref: args.ref };
-    if (args.episodeId) placeholder.episodeId = args.episodeId;
-    if (args.subtitle) placeholder.subtitle = args.subtitle;
-    if (args.posterUrl) placeholder.posterUrl = args.posterUrl;
     failResolve(err, placeholder, () => playItem(args, queueOpts));
     throw err;
   }
@@ -1464,6 +1551,8 @@ export async function startItem(
     const subtitle = await opts.subtitle;
     if (subtitle) source = { ...source, subtitle };
   }
+  if (seq !== requestSeq) return 'superseded';
+  await previousUnloaded;
   if (seq !== requestSeq) return 'superseded';
   const playing = usePlayerStore.getState().play(source, queueOpts);
   // play() took its own request number before its first await.
@@ -1478,7 +1567,13 @@ export async function playSource(source: PlayerSource): Promise<void> {
   cancelUpNext();
   if (source.ref && !(await passGate({ ref: source.ref, title: source.title }))) return;
   if (seq !== requestSeq) return;
+  const previousUnloaded = unloadPreviousForVod(source.isLive);
+  if (!source.isLive) {
+    usePlayerStore.setState({ status: 'loading', error: undefined, source: vodSwitchPlaceholder({ ...source, url: '' }) });
+  }
   const withPos = await withResume(source);
+  if (seq !== requestSeq) return;
+  await previousUnloaded;
   if (seq !== requestSeq) return;
   await usePlayerStore.getState().play(withPos);
 }
@@ -2320,6 +2415,8 @@ export async function zapToNumber(n: number): Promise<Channel | undefined> {
 export function __resetPlayerForTests(): void {
   playToken = 0;
   requestSeq = 0;
+  pendingMpvUnload = Promise.resolve();
+  switchPlaceholder = null;
   externalChoice = null;
   stageCount = 0;
   controller = null;
@@ -2360,6 +2457,7 @@ export function __resetPlayerForTests(): void {
     status: 'idle',
     error: undefined,
     isFullscreen: false,
+    isWindowFilled: false,
     dock: 'hidden',
     volume: 1,
     muted: false,

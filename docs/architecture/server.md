@@ -117,7 +117,7 @@ anything is subscribed:
 `{"ok": true, "version": "<core version>"}`. No guard beyond the Host check;
 use it for container and Playwright readiness probes.
 
-### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=&park=&release=]`
+### `GET /api/proxy?url=<enc>&sourceId=<id>[&ua=&referer=&origin=&from=&park=&release=&archive=true]`
 Used by the web UI (`proxiedUrl()` in `src/api/transport.ts`) when a stream
 needs source headers or would be mixed content.
 
@@ -146,7 +146,8 @@ needs source headers or would be mixed content.
    instead of being played from its start. Redirects are followed by
    hand, up to 5, and each hop is re-validated. Connect failures and timeouts
    are retried twice with the core's backoff. Response headers must arrive
-   within 15 s.
+   within 15 s, or 45 s when `archive=true` marks a catch-up request. The
+   desktop player sends this marker on catch-up streams too.
 5. Upstream 4xx pass through with their status; 5xx become 502. The body is an
    `RpcError` with `details.upstreamStatus`.
 6. Media responses stream through `reqwest::bytes_stream` with status (200,
@@ -218,7 +219,8 @@ needs source headers or would be mixed content.
    URI line and every `URI="..."` attribute (EXT-X-KEY, EXT-X-MAP,
    EXT-X-MEDIA, EXT-X-I-FRAME-STREAM-INF, EXT-X-PART, ...) is resolved against
    the final URL and replaced with `/api/proxy?url=<absolute>&sourceId=<id>`
-   (plus any `ua`/`referer`/`origin` overrides). The path comes from
+   (plus any `ua`/`referer`/`origin` overrides and the `archive=true` marker,
+   when present). The path comes from
    `ServerOptions::proxy_path`: `/api/proxy` here, `/<token>/api/proxy` on
    the desktop loopback proxy.
    `data:` and `skd:` URIs are left alone. The response is 200

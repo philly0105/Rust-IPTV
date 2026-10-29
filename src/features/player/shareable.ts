@@ -15,6 +15,8 @@ import { knownSourceKind } from './store';
 /** Query parameters that never carry a login (compared decoded and lowercased). */
 const HARMLESS_PARAMS = new Set([
   'format', 'quality', 'lang', 'language', 'output', 'ext', 'res', 'resolution',
+  // Kodi-style catch-up URLs use these to select the programme's archive window.
+  'utc', 'lutc', 'utcstart', 'utcend', 'start', 'end', 'duration',
   // iptvcat.com marks the links it has checked.
   'checkedby',
 ]);
@@ -118,7 +120,22 @@ function hidesLogin(segment: string): boolean {
  * link that carries no credentials. `kindOf` reports the source's kind when this session knows
  * it; Xtream and Stalker links are logins, and an unknown kind could be either.
  */
-export function canShareSource(source: PlayerSource, kindOf: (sourceId: string) => SourceKind | undefined = knownSourceKind): boolean {
+export function canShareSource(
+  source: PlayerSource,
+  kindOf: (sourceId: string) => SourceKind | undefined = knownSourceKind,
+  options: { allowCredentials?: boolean } = {},
+): boolean {
+  // Programme archive links are an explicit user action and may need the provider login in their
+  // path (Xtream/Stalker timeshift). Keep the basic URL checks, but do not apply the normal
+  // shareability/redaction policy used for ordinary channel links.
+  if (options.allowCredentials) {
+    try {
+      const parsed = new URL(source.url);
+      return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && !parsed.hash;
+    } catch {
+      return false;
+    }
+  }
   if (source.ref && kindOf(source.ref.sourceId) !== 'm3u') return false;
   return isShareableUrl(source.url);
 }

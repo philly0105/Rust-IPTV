@@ -27,10 +27,11 @@ export function inlineStart(x: number, rtl: boolean): { left: number } | { right
 
 /**
  * Distance scrolled from the inline-start edge. Chromium, Firefox and WebKit report an RTL
- * scroller's `scrollLeft` as 0 at the start (right) edge and negative toward the left.
+ * scroller's `scrollLeft` as 0 at the start (right) edge and negative toward the left. WebKit
+ * can also report an out-of-range value while a trackpad gesture rubber-bands at either edge.
  */
-export function scrollStart(el: Element): number {
-  return Math.abs(el.scrollLeft);
+export function scrollStart(el: Element, rtl: boolean): number {
+  return Math.max(0, rtl ? -el.scrollLeft : el.scrollLeft);
 }
 
 /** The `scrollLeft` value that puts `x` px from the inline-start edge at the scroller's start. */

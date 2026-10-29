@@ -100,6 +100,7 @@ export const DOCUMENTED_SHORTCUTS: readonly { combo: string; descKey: string; ar
   { combo: 'space', descKey: 'scPlayPause', area: 'Playback' },
   { combo: 'k', descKey: 'scPlayPause', area: 'Playback' },
   { combo: 'f', descKey: 'scFullscreen', area: 'Playback' },
+  { combo: 'shift+f', descKey: 'player:shortcutWindowFill', area: 'Playback' },
   { combo: 'arrowleft', descKey: 'scSeekBack', area: 'Playback' },
   { combo: 'arrowright', descKey: 'scSeekForward', area: 'Playback' },
   { combo: 'n', descKey: 'scNextItem', area: 'Playback' },

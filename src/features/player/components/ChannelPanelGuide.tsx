@@ -103,7 +103,9 @@ function ArchiveButton() {
 
   const open = () => {
     useMediaStore.setState({ channelPanelOpen: false });
-    if (usePlayerStore.getState().isFullscreen) usePlayerStore.getState().toggleFullscreen();
+    const player = usePlayerStore.getState();
+    if (player.isFullscreen) player.toggleFullscreen();
+    if (player.isWindowFilled) player.toggleWindowFill();
     navigate(archivePath(ref));
   };
   return (

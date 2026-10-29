@@ -131,7 +131,7 @@ export const SCRIM_SELECTOR = '[data-scrim], .fixed.inset-0.bg-scrim';
  * Anything whose arrival or removal can change the layout: the mutation filter in MpvSurface
  * re-measures only for these (simple selectors: they are matched against detached nodes too).
  */
-export const LAYOUT_WATCH_SELECTOR = `${OVERLAY_SELECTOR}, ${RESERVED_SELECTOR}, ${SCRIM_SELECTOR}, [aria-modal], [data-toast-id], [data-mpv-reserved-global], [data-pip-layer]`;
+export const LAYOUT_WATCH_SELECTOR = `${OVERLAY_SELECTOR}, ${RESERVED_SELECTOR}, ${SCRIM_SELECTOR}, [aria-modal], [data-toast-id], [data-mpv-reserved-global], [data-pip-layer], [data-player-window-layer]`;
 
 /** A scrim colour: 0-255 channels and 0-1 alpha. */
 export interface Dim {
@@ -155,9 +155,10 @@ export function parseRgb(css: string): Dim | null {
  */
 export function measureScrim(surface: Element): Dim | null {
   const layer = topLayer();
+  const windowLayer = document.querySelector('[data-player-window-layer]:not([hidden])');
   let dim: Dim | null = null;
   for (const node of Array.from(document.querySelectorAll(SCRIM_SELECTOR))) {
-    if (node.contains(surface) || (layer && !layer.contains(node))) continue;
+    if (node.contains(surface) || (layer && !layer.contains(node)) || !aboveWindowFill(node, windowLayer)) continue;
     const b = node.getBoundingClientRect();
     if (b.width <= 0 || b.height <= 0) continue;
     const c = parseRgb(getComputedStyle(node).backgroundColor);
@@ -207,7 +208,8 @@ export function measureMpvBounds(surface: Element): Bounds | null {
 export function measureMpvLayout(surface: Element): MpvLayout {
   const { surfaceRect, clip, reserved, overlays, modals } = measureParts(surface);
   const layer = topLayer();
-  return computeMpvLayout(surfaceRect, { clip, reserved, overlays, modals, float: !!layer && layer.contains(surface) });
+  const windowLayer = document.querySelector('[data-player-window-layer]:not([hidden])');
+  return computeMpvLayout(surfaceRect, { clip, reserved, overlays, modals, float: (!!layer && layer.contains(surface)) || (!!windowLayer && windowLayer.contains(surface)) });
 }
 
 /**
@@ -216,6 +218,17 @@ export function measureMpvLayout(surface: Element): MpvLayout {
  */
 function topLayer(): Element | null {
   return document.fullscreenElement ?? document.querySelector('[data-pip-layer]:not([hidden])');
+}
+
+/** Body portals above window fill remain visible; page chrome below it does not. */
+function aboveWindowFill(node: Element, windowLayer: Element | null): boolean {
+  if (!windowLayer || windowLayer.contains(node)) return true;
+  const layerZ = Number.parseInt(getComputedStyle(windowLayer).zIndex, 10) || 45;
+  for (let el: Element | null = node; el; el = el.parentElement) {
+    const z = Number.parseInt(getComputedStyle(el).zIndex, 10);
+    if (z > layerZ) return true;
+  }
+  return false;
 }
 
 interface Parts {
@@ -231,16 +244,18 @@ interface Parts {
 function measureParts(surface: Element): Parts {
   const clip: Rect[] = [{ left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }];
   const layer = topLayer();
+  const windowLayer = document.querySelector('[data-player-window-layer]:not([hidden])');
   for (let el = surface.parentElement; el && el !== document.documentElement; el = el.parentElement) {
     const cs = getComputedStyle(el);
     if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') clip.push(rectOf(el.getBoundingClientRect()));
     // A fullscreen element sits in the top layer: the ancestors it left behind (the docked
     // stage, the page scroller) no longer clip it, so their rects would pin the video to the
     // old docked rectangle.
-    if (el === layer) break;
+    if (el === layer || el === windowLayer) break;
   }
   /** The on-screen rect of chrome that may overlap the surface, or null when it cannot. */
   const visible = (node: Element): Rect | null => {
+    if (node.hasAttribute('data-mpv-notices') && !node.firstElementChild) return null;
     // The surface's own content, or a container the player itself sits in.
     if (node === surface || surface.contains(node) || node.contains(surface)) return null;
     // In fullscreen only the top layer is visible: chrome left outside it (the docked page's
@@ -248,13 +263,16 @@ function measureParts(surface: Element): Parts {
     // shows. Toasts, dialogs and menus portal into the fullscreen element (`ui/portal.ts`), so
     // they are inside it and cut out like any other overlay.
     if (layer && !layer.contains(node)) return null;
+    // Window fill covers the app chrome, but body-portalled dialogs and player menus may
+    // still sit above it and need holes in the native video.
+    if (!aboveWindowFill(node, windowLayer)) return null;
     const b = node.getBoundingClientRect();
     return b.width > 0 && b.height > 0 ? rectOf(b) : null;
   };
   const host = surface.closest('[data-player-host]') ?? surface.parentElement ?? document.body;
   /** The player's own popovers are holes; other host chrome (the control bar) is reserved. */
   const reservedInHost = (node: Element): boolean =>
-    host.contains(node) && node.matches(RESERVED_SELECTOR) && !node.matches(PLAYER_OVERLAY_SELECTOR);
+    host.contains(node) && node.matches(RESERVED_SELECTOR) && !node.closest(PLAYER_OVERLAY_SELECTOR);
   const overlays: Rect[] = [];
   const modals: Rect[] = [];
   for (const node of Array.from(document.querySelectorAll(OVERLAY_SELECTOR))) {
@@ -284,6 +302,22 @@ export interface MpvLayout {
   holes: Bounds[];
 }
 
+/** The pieces of `rect` outside `cut`. Keeps the native cutouts disjoint: macOS uses an
+ * even-odd layer mask, which would paint the video again where two holes overlap. */
+function outside(rect: Bounds, cut: Bounds): Bounds[] {
+  const left = Math.max(rect.x, cut.x);
+  const top = Math.max(rect.y, cut.y);
+  const right = Math.min(rect.x + rect.width, cut.x + cut.width);
+  const bottom = Math.min(rect.y + rect.height, cut.y + cut.height);
+  if (right <= left || bottom <= top) return [rect];
+  return [
+    { x: rect.x, y: rect.y, width: rect.width, height: top - rect.y },
+    { x: rect.x, y: bottom, width: rect.width, height: rect.y + rect.height - bottom },
+    { x: rect.x, y: top, width: left - rect.x, height: bottom - top },
+    { x: right, y: top, width: rect.x + rect.width - right, height: bottom - top },
+  ].filter((piece) => piece.width > 0 && piece.height > 0);
+}
+
 /** `cuts` that overlap `bounds`, relative to its top-left, rounded outward so no pixel row of the chrome is covered. */
 function holesIn(bounds: Bounds, cuts: Rect[]): Bounds[] {
   const frame = rectOf({ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height });
@@ -293,7 +327,10 @@ function holesIn(bounds: Bounds, cuts: Rect[]): Bounds[] {
     if (!r) continue;
     const left = Math.floor(r.left);
     const top = Math.floor(r.top);
-    holes.push({ x: left - bounds.x, y: top - bounds.y, width: Math.ceil(r.right) - left, height: Math.ceil(r.bottom) - top });
+    const next = { x: left - bounds.x, y: top - bounds.y, width: Math.ceil(r.right) - left, height: Math.ceil(r.bottom) - top };
+    let pieces = [next];
+    for (const hole of holes) pieces = pieces.flatMap((piece) => outside(piece, hole));
+    holes.push(...pieces);
   }
   return holes;
 }

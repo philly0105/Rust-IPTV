@@ -75,6 +75,12 @@
   "railMyList": "我的片單",
 
   "player": "播放器",
+  "livePlayer": "直播電視",
+  "livePlayerHint": "用於正在播出的頻道，包括切換頻道時。",
+  "catchupPlayer": "回看電視",
+  "catchupPlayerHint": "用於從電視節目表開啟的過往節目。",
+  "vodPlayer": "電影和影集",
+  "vodPlayerHint": "用於隨選的電影和影集。",
   "playerBuiltIn": "內建播放器",
   "playerBuiltInHint": "在應用程式內播放。適用於大多數 HLS 串流。",
   "playerEmbeddedMpv": "內嵌 mpv",

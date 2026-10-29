@@ -75,6 +75,12 @@
   "railMyList": "قائمتي",
 
   "player": "المشغل",
+  "livePlayer": "البث المباشر",
+  "livePlayerHint": "يُستخدم للقنوات التي تُبث الآن، بما في ذلك عند تبديل القنوات.",
+  "catchupPlayer": "تلفزيون الأرشيف",
+  "catchupPlayerHint": "يُستخدم للبرامج السابقة المفتوحة من دليل البرامج.",
+  "vodPlayer": "الأفلام والمسلسلات",
+  "vodPlayerHint": "يُستخدم للأفلام والحلقات عند الطلب.",
   "playerBuiltIn": "المشغل المدمج",
   "playerBuiltInHint": "يعمل داخل التطبيق. يناسب معظم بث HLS.",
   "playerEmbeddedMpv": "mpv مدمج",

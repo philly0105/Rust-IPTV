@@ -75,6 +75,12 @@
   "railMyList": "マイリスト",
 
   "player": "プレーヤー",
+  "livePlayer": "ライブTV",
+  "livePlayerHint": "現在放送中のチャンネル（チャンネル切り替えを含む）に使用します。",
+  "catchupPlayer": "アーカイブTV",
+  "catchupPlayerHint": "番組表から開いた過去の番組に使用します。",
+  "vodPlayer": "映画とシリーズ",
+  "vodPlayerHint": "オンデマンドの映画とエピソードに使用します。",
   "playerBuiltIn": "内蔵プレーヤー",
   "playerBuiltInHint": "アプリ内で再生します。ほとんどのHLSストリームに対応しています。",
   "playerEmbeddedMpv": "埋め込みmpv",

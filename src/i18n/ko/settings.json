@@ -75,6 +75,12 @@
   "railMyList": "내 목록",
 
   "player": "플레이어",
+  "livePlayer": "라이브 TV",
+  "livePlayerHint": "채널 전환을 포함해 지금 방송 중인 채널에 사용됩니다.",
+  "catchupPlayer": "아카이브 TV",
+  "catchupPlayerHint": "TV 가이드에서 연 지난 프로그램에 사용됩니다.",
+  "vodPlayer": "영화 및 시리즈",
+  "vodPlayerHint": "주문형 영화와 에피소드에 사용됩니다.",
   "playerBuiltIn": "내장 플레이어",
   "playerBuiltInHint": "앱 안에서 재생합니다. 대부분의 HLS 스트림을 지원합니다.",
   "playerEmbeddedMpv": "내장 mpv",

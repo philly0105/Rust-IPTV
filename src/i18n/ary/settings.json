@@ -75,6 +75,12 @@
   "railMyList": "الليستة ديالي",
 
   "player": "المشغل",
+  "livePlayer": "البث المباشر",
+  "livePlayerHint": "كيتخدم للقنوات اللي كاتدوز دابا، حتى ملي كتبدّل القناة.",
+  "catchupPlayer": "تلفزة الأرشيف",
+  "catchupPlayerHint": "كيتخدم للبرامج اللي فاتت وكتحلّها من دليل البرامج.",
+  "vodPlayer": "الأفلام والسلاسل",
+  "vodPlayerHint": "كيتخدم للأفلام والحلقات عند الطلب.",
   "playerBuiltIn": "المشغل المدمج",
   "playerBuiltInHint": "كيشغّل وسط التطبيق. خدام مع أغلب بث HLS.",
   "playerEmbeddedMpv": "mpv مدمج",

@@ -1,7 +1,7 @@
 /** One queue row on /downloads: artwork, title, status, progress, and actions. */
 
 import { k } from '../lib/keys';
-import { ArrowUpToLine, FolderOpen, Gauge, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
+import { ArrowUpToLine, FolderOpen, Gauge, MonitorPlay, Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { memo, type CSSProperties } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
@@ -140,7 +140,7 @@ const ART_SM_PX = 45;
 /** Tailwind's `sm` breakpoint. */
 const SM_QUERY = '(min-width: 40rem)';
 
-function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, globalRateLimitBps = 1024 * 1024 }: DownloadRowProps) {
+function DownloadRowImpl({ download: d, source, showSource = true, actions, busy, tabbable = false, onAction, onPlayCatchup, onSpeedLimit, globalRateLimitBps = 0 }: DownloadRowProps) {
   const { t, i18n } = useTranslation('library');
   const progress = useLiveProgress(d);
   const lang = i18n.language;
@@ -249,7 +249,7 @@ function DownloadRowImpl({ download: d, source, showSource = true, actions, busy
             size="sm"
             label={t('actionWatchCatchupAria', { title: d.subtitle?.split(' · ')[0] || d.title })}
             tooltip={t('actionWatchCatchup')}
-            icon={<Play size={16} aria-hidden />}
+            icon={<MonitorPlay size={16} aria-hidden />}
             disabled={busy}
             tabIndex={tabbable ? 0 : -1}
             data-action="watch"

@@ -40,7 +40,7 @@ export function DownloadsPage() {
   const { t, i18n } = useTranslation('library');
   const query = useDownloads();
   const settings = useSettings();
-  const globalLimit = settings.data?.downloadRateLimitBps ?? MIB;
+  const globalLimit = settings.data?.downloadRateLimitBps ?? 0;
   const [speedTarget, setSpeedTarget] = useState<Download | 'global' | null>(null);
   const editSpeed = useCallback((download: Download) => setSpeedTarget(download), []);
   const { byId: sources, isLoading: sourcesLoading } = useSourcesById();
@@ -250,7 +250,8 @@ export function DownloadsPage() {
         <FolderBar pageError={query.isError} />
         {myVideosLink}
       </div>
-      <div className="flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-muted">
+      {/* A page that failed to load has one Retry, its error state's. */}
+      {!query.isError && <div className="flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-1 text-caption text-fg-muted">
         <Button
           size="sm"
           variant="ghost"
@@ -263,7 +264,7 @@ export function DownloadsPage() {
         {settings.isError ? (
           <Button size="sm" variant="ghost" onClick={() => void settings.refetch()}>{t('speedLoadRetry')}</Button>
         ) : <span>{t('speedGlobalSummary')}</span>}
-      </div>
+      </div>}
       {body}
       {speedTarget !== null && (
         <DownloadSpeedDialog

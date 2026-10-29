@@ -1306,7 +1306,7 @@ impl Default for Settings {
             open_stream_on_double_click: false,
             show_captions: false,
             downloads_dir: None,
-            download_rate_limit_bps: 1024 * 1024,
+            download_rate_limit_bps: 0,
             tmdb: TmdbSettings::default(),
             dashboard_rails: DashboardRails::default(),
             remote_control: RemoteControlSettings::default(),

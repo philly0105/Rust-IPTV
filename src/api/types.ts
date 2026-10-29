@@ -682,7 +682,7 @@ export interface Settings {
 
 /** Defaults identical to `impl Default for Settings` in model.rs. */
 export const DEFAULT_SETTINGS: Settings = {
-  downloadRateLimitBps: 1024 * 1024,
+  downloadRateLimitBps: 0,
   player: 'html5',
   streamFormat: 'auto',
   epgUrls: [],

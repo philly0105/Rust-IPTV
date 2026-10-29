@@ -1,11 +1,12 @@
 # The same checks as `pnpm check`, plus the production build and its entry-chunk budget.
-# The desktop crate (iptv-tauri) only builds on Windows, so the full Rust pass runs there; Linux
-# tests the crates that do not depend on Tauri. No secrets are used.
+# The desktop crate (iptv-tauri) builds on Windows and macOS, so the full Rust pass runs on both;
+# Linux tests the crates that do not depend on Tauri. No secrets are used.
 #
 # Every push and pull request: frontend, rust-windows, rust-linux and cargo-deny.
 # Pull requests and pushes to master also run the slower jobs: msrv (cargo check with the
-# rust-version from Cargo.toml), docker (builds and starts the server image, no push) and
-# tauri-build (the desktop release build without the installer).
+# rust-version from Cargo.toml), docker (builds and starts the server image, no push),
+# tauri-build (the Windows release build without the installer) and macos (clippy, tests and
+# the universal disk image, uploaded as an artifact).
 # Playwright runs in e2e.yml; releases are built by release.yml.
 name: CI
 
@@ -192,3 +193,65 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: pnpm tauri build --no-bundle
+
+  # The macOS desktop app: clippy and the workspace tests (Apple silicon only; the Intel half is
+  # built but never run), then the universal disk image as release.yml builds it
+  # (tauri.macos.conf.json merged in, ad-hoc signed). The disk image is uploaded as the macos-dmg
+  # artifact, so a build can be tried on a Mac before a tag.
+  macos:
+    name: macOS (clippy, test, disk image)
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/master'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Enable corepack
+        run: corepack enable
+      - name: Locate the pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      # tauri::generate_context! needs dist/; the bundle step below builds it again.
+      - run: pnpm build
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: pnpm tauri build --target universal-apple-darwin
+      # What a Mac user gets from the disk image: both architectures, a valid ad-hoc signature,
+      # macOS 11 as the minimum, App Transport Security off (Info.plist), and the licences.
+      - name: Check the app in the disk image
+        run: |
+          set -euo pipefail
+          dmg=$(ls target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          mkdir -p "$RUNNER_TEMP/dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
+          app=$(ls -d "$RUNNER_TEMP"/dmg/*.app)
+          plist="$app/Contents/Info.plist"
+          exe="$app/Contents/MacOS/$(plutil -extract CFBundleExecutable raw "$plist")"
+          lipo -archs "$exe"
+          lipo "$exe" -verify_arch arm64 x86_64
+          codesign --verify --strict --verbose=2 "$app"
+          signature=$(codesign -dv "$app" 2>&1)
+          grep -q 'Signature=adhoc' <<< "$signature"
+          test "$(plutil -extract LSMinimumSystemVersion raw "$plist")" = 11.0
+          test "$(plutil -extract NSAppTransportSecurity.NSAllowsArbitraryLoads raw "$plist")" = true
+          ls -l "$app/Contents/Resources/LICENSE" "$app/Contents/Resources/NOTICE"
+          hdiutil detach "$RUNNER_TEMP/dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14

@@ -10,8 +10,9 @@
 # (HTTPS and a password). See also docs/architecture/server.md.
 #
 # Build arg VERSION sets the image's version label (the release workflow passes
-# the tag). NOTICE (IPTVnator's copyright and MIT licence) always goes to
-# /usr/share/doc/tsrust-iptv/; a THIRD_PARTY_NOTICES.md in the build context,
+# the tag). LICENSE (this project's MIT licence) and NOTICE (IPTVnator's
+# copyright and MIT licence) always go to /usr/share/doc/tsrust-iptv/; a
+# THIRD_PARTY_NOTICES.md in the build context,
 # written by tools/third-party-notices.mjs, is copied there too.
 
 # ---- 1. Web UI (vite build -> /src/dist) -----------------------------------
@@ -53,17 +54,18 @@ RUN apt-get update \
 
 COPY --from=server /usr/local/bin/iptv-server /usr/local/bin/iptv-server
 COPY --from=web /src/dist /app/dist
-# Required: IPTVnator's licence asks for its notice in every copy.
+# Required: both MIT licences ask for their notice in every copy.
+COPY LICENSE /usr/share/doc/tsrust-iptv/LICENSE
 COPY NOTICE /usr/share/doc/tsrust-iptv/NOTICE
 # Optional: the glob matches nothing when the file was not generated.
 COPY THIRD_PARTY_NOTICES.m[d] /usr/share/doc/tsrust-iptv/
 
 # Declared after the RUN above so that a new version does not rebuild the apt layer.
 ARG VERSION=dev
-# No org.opencontainers.image.licenses yet: the project licence is not chosen.
 LABEL org.opencontainers.image.title="Tsrust IPTV" \
       org.opencontainers.image.description="Tsrust IPTV server mode: the web player for your own M3U playlists, Xtream Codes accounts and Stalker portals, with its API" \
       org.opencontainers.image.source="https://github.com/philly0105/Rust-IPTV" \
+      org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}"
 
 # Bind all interfaces inside the container; the data dir is the volume.

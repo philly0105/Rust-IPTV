@@ -2175,7 +2175,7 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "iptv-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2224,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-fixtures"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "iptv-mock",
@@ -2235,7 +2235,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-mock"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "bytes",
@@ -2282,7 +2282,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-tauri"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "cc",

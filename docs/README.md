@@ -27,7 +27,7 @@ The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`
 | [downloads.md](architecture/downloads.md) | Download queue, range resume, `.part` policy, My Videos |
 | [tmdb.md](architecture/tmdb.md) | TMDB client, matching, cache, attribution |
 | [remote-control.md](architecture/remote-control.md) | Loopback remote control server and page |
-| [players.md](architecture/players.md) | mpv/VLC detection, external launch, embedded mpv on Windows |
+| [players.md](architecture/players.md) | mpv/VLC detection, external launch, embedded mpv on Windows and macOS |
 | [failover.md](architecture/failover.md) | Smart reconnect of dropped streams and live failover to the same channel on another source (`live.alternates`) |
 | [recording.md](architecture/recording.md) | Guide reminders, scheduled recordings (headless mpv or HTTP copy), series recording rules, Scheduled page, My Videos > Recordings |
 | [channel-edits.md](architecture/channel-edits.md) | Hiding and renaming live and radio channels without touching the provider's data, the Hidden channels dialog, F2 and Shift+Delete |
@@ -52,7 +52,7 @@ The desktop shell (`crates/iptv-tauri`) and the web server (`crates/iptv-server`
 | [performance.md](architecture/performance.md) | Query cache timing per command, hover prefetch of VOD details, and the entry chunk budget (`pnpm size:check`) |
 | [onboarding.md](architecture/onboarding.md) | The first-run tour and What's new: the startup decision, the settings markers, release notes, anchors |
 
-The rest of the desktop shell is small enough to read directly: `crates/iptv-tauri/src/lib.rs` (plugins, tray, `rpc` command, event bridge, asset scope for the downloads folder, deep links, exit cleanup), `crates/iptv-tauri/src/mpv_window.rs` (the child window embedded mpv draws into, see players.md), `crates/iptv-tauri/src/proxy.rs` (the loopback media proxy) and `crates/iptv-tauri/src/memory.rs` (idle memory trimming on Windows); desktop.md covers the last two.
+The rest of the desktop shell is small enough to read directly: `crates/iptv-tauri/src/lib.rs` (plugins, tray, `rpc` command, event bridge, asset scope for the downloads folder, deep links, exit cleanup), `crates/iptv-tauri/src/mpv_window.rs` (the Windows child window embedded mpv draws into) and `crates/iptv-tauri/src/mpv_window_mac.rs` with `mpv_window_mac.m` (the macOS view it draws into), see players.md, `crates/iptv-tauri/src/proxy.rs` (the loopback media proxy) and `crates/iptv-tauri/src/memory.rs` (idle memory trimming on Windows); desktop.md covers the last two.
 
 ## Events
 

@@ -1,6 +1,6 @@
 # Tsrust IPTV user guide
 
-This guide covers the desktop app for Windows and the same interface in a browser (server mode). Where the two differ, the section says so. For installing, see the [README](../README.md#download). For running the server for other devices, see [deploy/README.md](../deploy/README.md).
+This guide covers the desktop app for Windows and macOS and the same interface in a browser (server mode). Where the two differ, the section says so. On macOS, press Cmd (⌘) wherever this guide says Ctrl. For installing, see the [README](../README.md#download). For running the server for other devices, see [deploy/README.md](../deploy/README.md).
 
 ## Contents
 
@@ -140,11 +140,11 @@ See [sports.md](architecture/sports.md).
 - Stream info (I, or the settings and right-click menus) shows the engine, codecs, resolution, frame rate, bitrates, channels, hardware decoding, dropped frames, buffer, container and server host. It never shows the full URL or credentials.
 - Subtitle files: in the player's options menu (Shift+C), Subtitles > "Load subtitle file…" takes SRT, WebVTT or ASS/SSA files, and Off turns them off. Settings > Playback sets the subtitle size, colour, background and position with a live preview; the player menu changes the same look in place.
 - Sleep timer (player settings menu, or Z to cycle off, 15, 30, 45, 60 and 90 minutes): stop after a number of minutes, at the end of the programme (live TV, from the guide), or at the end of the episode or movie. A minute before the end a notice offers "Keep watching" or "Cancel timer"; then the sound fades out over the last 30 seconds and live TV stops or a video pauses.
-- Screenshots: the camera button in the player controls, "Take screenshot" in the embedded MPV right-click menu, or S while a video plays saves the current frame as a PNG in `Pictures\Tsrust IPTV` (in `<app data>\screenshots` when there is no Pictures folder), with an Open button in the toast. In the browser the picture goes to your downloads. A stream whose server forbids copying its picture (no CORS) says so. With an external player or radio the button stays but is disabled and says why. See [screenshot.md](architecture/screenshot.md).
+- Screenshots: the camera button in the player controls, "Take screenshot" in the embedded MPV right-click menu, or S while a video plays saves the current frame as a PNG in `Pictures\Tsrust IPTV` on Windows or `~/Pictures/Tsrust IPTV` on macOS (in `screenshots` in the app data folder when there is no Pictures folder), with an Open button in the toast. In the browser the picture goes to your downloads. A stream whose server forbids copying its picture (no CORS) says so. With an external player or radio the button stays but is disabled and says why. See [screenshot.md](architecture/screenshot.md).
 
 ### mpv and VLC
 
-The built-in player is the default. To play inside the window with mpv in the desktop app, make mpv available (put `mpv.exe` in `vendor/mpv/` beside the app, or install it with WinGet, Scoop or Chocolatey), then choose Embedded mpv under Settings > Playback > Player. If the app can't find mpv, set its path in Settings > External players. The same Player setting offers mpv and VLC as external players, in their own window. See [players.md](architecture/players.md) and [mpv not found](#mpv-not-found).
+The built-in player is the default. To play inside the window with mpv in the desktop app, make mpv available (on Windows, put `mpv.exe` in `vendor/mpv/` beside the app, or install it with WinGet, Scoop or Chocolatey; on macOS, install it with Homebrew: `brew install mpv`), then choose Embedded mpv under Settings > Playback > Player. That setting has a row for each kind of content (Live TV, Catch-up TV, and Movies and series), so each can use its own player; a row you have not set uses the player chosen before. On Windows, if the app can't find mpv, set its path in Settings > External players; on macOS, embedded mpv loads Homebrew's `libmpv` and ignores that setting. The same rows offer mpv and VLC as external players, in their own window. See [players.md](architecture/players.md) and [mpv not found](#mpv-not-found).
 
 ## Picture-in-picture
 
@@ -152,7 +152,7 @@ The PiP button in the player controls, or "Picture in picture" in the video's ri
 
 With the built-in player, in the desktop app and in the browser, the video moves into the browser engine's own floating PiP window, which stays on top of other windows. Press the PiP button again, or use the floating window's own controls, to bring the video back. The button is missing when the browser does not support picture-in-picture.
 
-With embedded mpv, the app window itself shrinks to a small always-on-top player. Resizing keeps the video's aspect ratio. Esc, F, or the restore button in the PiP title bar returns to the full window at its previous size and position. If you quit while in PiP, the next launch opens at the normal window size, not the PiP size: the saved window state never records PiP bounds.
+With embedded mpv, the app window itself shrinks to a small always-on-top player. On Windows, resizing keeps the video's aspect ratio; on macOS it does not. Esc, F, or the restore button in the PiP title bar returns to the full window at its previous size and position. If you quit while in PiP, the next launch opens at the normal window size, not the PiP size: the saved window state never records PiP bounds.
 
 ## Multi-view
 
@@ -165,9 +165,9 @@ In the desktop app, embedded mpv can record the playing stream (`mpv.record`). F
 Scheduled recordings and reminders:
 
 - In the TV guide, the programme dialog and the now/next ribbon offer "Remind me" and "Record". The ribbon's record menu can also record the channel for 30 minutes to 3 hours. A bell or a red dot marks those programmes in the grid and list views.
-- Reminders fire a few minutes before the start (Settings > Recording) while the app runs, including when it is hidden in the tray. They show a Windows notification and a toast with "Watch now", or switch to the channel with Undo.
+- Reminders fire a few minutes before the start (Settings > Recording) while the app runs, including when it is hidden in the tray. They show a system notification and a toast with "Watch now", or switch to the channel with Undo.
 - Recordings run without the player, as a direct copy for plain MPEG-TS streams (and Xtream live channels) or through a headless mpv for HLS and DASH, with 1 minute of padding before and 5 after by default. Files are named `<Channel> - <Programme> - <YYYY-MM-DD HHmm>.ts`. A dropped stream is retried into part files. A recording that was due while the app was closed is marked missed.
-- Library > Scheduled lists what is recording now, what is coming up, and recent results. My videos > Recordings plays, shows and deletes the files. A delete waits eight seconds for Undo; closing the app or the page in that time carries it out. On Windows the file goes to the Recycle Bin; on Linux, as in the Docker image, it is deleted for good. Show in folder is in the desktop app only.
+- Library > Scheduled lists what is recording now, what is coming up, and recent results. My videos > Recordings plays, shows and deletes the files. A delete waits eight seconds for Undo; closing the app or the page in that time carries it out. On Windows the file goes to the Recycle Bin; on macOS and on Linux, as in the Docker image, it is deleted for good. Show in folder is in the desktop app only.
 - Series recording rules come from the guide search; see [TV guide](#tv-guide).
 - In the browser (server mode), recording needs mpv on the server. The Docker image includes it; elsewhere, install mpv on the server's `PATH`. Without it Record is hidden. The server records only plain MPEG-TS streams and Xtream live channels; it refuses HLS, DASH and other streams when you schedule them, so record those in the desktop app. Reminders show in the app with "Watch now". The app never asks for permission to show browser notifications. If you allowed notifications for the site in the browser's site settings, a browser notification appears as well; browsers allow that only over HTTPS or on localhost.
 
@@ -319,7 +319,7 @@ Server flags: `iptv-server --port 7180 --data-dir ./.data --static ./dist`. It b
 
 ## Your data
 
-The desktop app keeps everything under the platform app data folder (`%APPDATA%\com.philly.tsrustiptv` on Windows): `iptv.db` (SQLite), `logs/` (rotating JSON logs, secrets redacted), `image-cache/` (cached posters and logos, size-capped), and `downloads/` unless you choose another downloads folder. A corrupt database is moved aside as `iptv.db.corrupt-<timestamp>` and a fresh one is created.
+The desktop app keeps everything under the platform app data folder (`%APPDATA%\com.philly.tsrustiptv` on Windows, `~/Library/Application Support/com.philly.tsrustiptv` on macOS): `iptv.db` (SQLite), `logs/` (rotating JSON logs, secrets redacted), `image-cache/` (cached posters and logos, size-capped), and `downloads/` unless you choose another downloads folder. A corrupt database is moved aside as `iptv.db.corrupt-<timestamp>` and a fresh one is created.
 
 The server keeps its database, logs, image cache and downloads (recordings included) in its data directory (`--data-dir`, `/data` in the Docker image).
 
@@ -327,7 +327,7 @@ The server keeps its database, logs, image cache and downloads (recordings inclu
 
 ### mpv not found
 
-Embedded playback needs mpv. Without it the app says so once ("MPV wasn't found") and plays streams in the built-in player for the rest of the session. Put `mpv.exe` in `vendor/mpv/` or install mpv with WinGet, scoop or choco and restart the app, or set its path in Settings > External players, which makes the next stream try mpv again. When mpv is found but fails to start, the notice offers "Try MPV again".
+Embedded playback needs mpv. Without it the app says so once ("MPV wasn't found") and plays streams in the built-in player for the rest of the session. On Windows, put `mpv.exe` in `vendor/mpv/` or install mpv with WinGet, scoop or choco and restart the app, or set its path in Settings > External players, which makes the next stream try mpv again. On macOS, run `brew install mpv` and restart the app; embedded mpv there loads Homebrew's `libmpv`, so the path setting does not change it. When mpv is found but fails to start, the notice offers "Try MPV again".
 
 ### The window opens off-screen
 
@@ -371,4 +371,4 @@ A failed source shows "Error code: X" on its card.
 
 ### Logs
 
-Logs live in `%APPDATA%\com.philly.tsrustiptv\logs` (Settings > About > "Open log folder"). Secrets are redacted. When you report a problem, see [SECURITY.md](../SECURITY.md) for anything security-related and the issue tracker for the rest.
+Logs live in `%APPDATA%\com.philly.tsrustiptv\logs` on Windows and `~/Library/Application Support/com.philly.tsrustiptv/logs` on macOS (Settings > About > "Open log folder"). Secrets are redacted. When you report a problem, see [SECURITY.md](../SECURITY.md) for anything security-related and the issue tracker for the rest.

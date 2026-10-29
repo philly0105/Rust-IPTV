@@ -3,16 +3,20 @@
 # - prepare: checks that the tag matches the app version, takes the release notes from
 #   CHANGELOG.md, writes THIRD_PARTY_NOTICES.md (tools/third-party-notices.mjs with cargo-about)
 #   and creates a draft GitHub Release with both.
-# - desktop: the Windows NSIS installer, built by tauri-action and attached to that draft. The
-#   installer carries THIRD_PARTY_NOTICES.md beside the app.
+# - desktop: the Windows NSIS installer and the macOS disk image (one universal app for Apple
+#   silicon and Intel), built by tauri-action and attached to that draft. Both carry
+#   THIRD_PARTY_NOTICES.md: the Windows installer puts it beside the app, the macOS app keeps it
+#   inside the bundle (Contents/Resources).
 # - image and image-manifest: the server image for linux/amd64 and linux/arm64, each built on a
 #   native runner, then pushed to ghcr.io/philly0105/tsrust-iptv as <version> only.
 #
 # The draft stays a draft until the owner publishes it. Publishing it runs image-latest.yml,
 # which points the image's latest tag at <version>; until then `docker compose pull` with the
 # default tag keeps getting the previous release. Two things are off on purpose, as owner
-# decisions: code signing (the installer is unsigned, so SmartScreen warns) and the auto-updater
-# (no --features updater, no updater signing key, no latest.json). See CONTRIBUTING.md, "Releases".
+# decisions: code signing (the Windows installer is unsigned, so SmartScreen warns; the macOS app
+# is only ad-hoc signed and not notarized, so Gatekeeper blocks the first open until the user
+# allows it) and the auto-updater (no --features updater, no updater signing key, no
+# latest.json). See CONTRIBUTING.md, "Releases".
 # The only credential is the workflow's own GITHUB_TOKEN.
 name: Release
 
@@ -123,10 +127,28 @@ jobs:
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
   desktop:
-    name: Windows installer
+    name: ${{ matrix.name }}
     needs: prepare
-    runs-on: windows-latest
-    timeout-minutes: 90
+    strategy:
+      # Each leg uploads to the draft on its own; a failed one can be re-run alone.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows installer
+            runner: windows-latest
+            timeout: 90
+            targets: ''
+            args: ''
+          # universal-apple-darwin builds both architectures and joins them with lipo, so one
+          # disk image (..._universal.dmg) covers Apple silicon and Intel Macs. That is two
+          # release builds, hence the longer timeout.
+          - name: macOS disk image
+            runner: macos-latest
+            timeout: 120
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: write
     steps:
@@ -141,10 +163,13 @@ jobs:
         run: corepack enable
       - run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@v2
 
       # An extra config merged over tauri.conf.json for this build only: it adds the notices to
-      # the bundle (installed beside the app). Resource paths are relative to crates/iptv-tauri.
+      # the bundle (beside the app on Windows, in Contents/Resources on macOS). Resource paths are
+      # relative to crates/iptv-tauri.
       - name: Bundle THIRD_PARTY_NOTICES.md
         shell: bash
         run: |
@@ -152,13 +177,18 @@ jobs:
             > release-notices.tauri.json
 
       # tauri build runs beforeBuildCommand (pnpm build) first, so the embedded dist/ is current.
-      # No signing: no certificate, no TAURI_SIGNING_PRIVATE_KEY, updater JSON off.
+      # On macOS, tauri.macos.conf.json is merged in too: only the disk image (so no .app.tar.gz
+      # is uploaded beside it), an ad-hoc signature, macOS 11 or later. No other signing: no
+      # certificate, no APPLE_* secrets, no TAURI_SIGNING_PRIVATE_KEY, updater JSON off.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # tauri-action turns on the Finder script that lays out the disk image window, which
+          # can time out on hosted runners. Off, the image is built the way ci.yml builds it.
+          TAURI_BUNDLER_DMG_IGNORE_CI: 'false'
         with:
           tauriScript: pnpm tauri
-          args: --config release-notices.tauri.json
+          args: ${{ matrix.args }} --config release-notices.tauri.json
           releaseId: ${{ needs.prepare.outputs.release_id }}
           includeUpdaterJson: false
 

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Tauri merges this into the macOS app's Info.plist. Streams and artwork reach the
+	     webview over http, through the loopback proxy (http://127.0.0.1, an IP address
+	     that App Transport Security blocks on macOS 14 and later) or straight from a
+	     provider's http URL, so ATS is turned off. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<!-- Shown when the app first reaches a source on the local network, such as a TV
+	     server at home. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Tsrust IPTV connects to the playlists, guides and streams you add, including those on your local network.</string>
+</dict>
+</plist>

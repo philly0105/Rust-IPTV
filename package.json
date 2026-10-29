@@ -1,9 +1,10 @@
 {
   "name": "tsrust-iptv",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "IPTVnator rebuilt on Tauri 2 with a Rust core",
+  "license": "MIT",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=24",

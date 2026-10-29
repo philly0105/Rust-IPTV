@@ -394,10 +394,11 @@ docker run --rm -p 127.0.0.1:7180:7180 -v tsrust-iptv-data:/data tsrust-iptv
 A `.dockerignore` excluding `**/target/`, `node_modules/`, `dist/` and data
 dirs (`.*-data/`) keeps the build context small.
 
-The runtime stage carries OCI labels (title, description, source, and
-`org.opencontainers.image.version` from the `VERSION` build arg; no licence
-label until the project licence is chosen). `NOTICE` (IPTVnator's copyright
-and MIT licence) is always copied to `/usr/share/doc/tsrust-iptv/`, and so is
+The runtime stage carries OCI labels (title, description, source,
+`org.opencontainers.image.licenses` set to MIT, and
+`org.opencontainers.image.version` from the `VERSION` build arg). `LICENSE`
+(this project's MIT licence) and `NOTICE` (IPTVnator's copyright and MIT
+licence) are always copied to `/usr/share/doc/tsrust-iptv/`, and so is
 `THIRD_PARTY_NOTICES.md` (written by `tools/third-party-notices.mjs`) when the
 build context holds it.
 

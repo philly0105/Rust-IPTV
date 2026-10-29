@@ -2,21 +2,29 @@
 
 Notable changes to Tsrust IPTV. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-No version has been tagged or published yet. 0.1.0 and 0.2.0 are the versions the app reports, and their entries match what its What's new dialog says about them (`src/features/onboarding/notes.ts`). The release workflow uses the section whose heading matches the tag as the release notes, so move the Unreleased entries under a version heading before tagging.
+0.1.0 and 0.2.0 were never tagged or published; they are versions the app reported, and their entries match what its What's new dialog says about them (`src/features/onboarding/notes.ts`). 0.3.0 is the first release built from a tag. The release workflow uses the section whose heading matches the tag as the release notes, so move the Unreleased entries under a version heading before tagging.
 
 ## [Unreleased]
 
-Work after the 0.2.0 notes were written: the redesign, fixes that followed the October 2026 audits, and what a public release needs.
+## [0.3.0] - 2026-10-29
+
+The first public release: the redesign, Sports, more catch-up and guide work, fixes that followed the October 2026 audits, and what a public release needs, including a macOS app and a licence.
 
 ### Added
 
-- Release builds from version tags: the Windows installer on a draft GitHub Release, and the server image for amd64 and arm64 on `ghcr.io/philly0105/tsrust-iptv`.
-- `THIRD_PARTY_NOTICES.md` with the licences of the bundled npm packages and Rust crates and IPTVnator's MIT notice. It ships with each release, in the installer and in the Docker image.
+- Tsrust IPTV is released under the MIT licence (`LICENSE`). The installers and the Docker image include it.
+- A macOS app: each release has a disk image for Apple silicon and Intel Macs, for macOS 11 or later with Safari 16.4 or later. It is not signed with an Apple Developer ID or notarized, so macOS blocks the first open until you allow it; the README's macOS section shows how. Embedded mpv on macOS uses mpv from Homebrew.
+- Release builds from version tags: the Windows installer and the macOS disk image on a draft GitHub Release, and the server image for amd64 and arm64 on `ghcr.io/philly0105/tsrust-iptv`.
+- `THIRD_PARTY_NOTICES.md` with the licences of the bundled npm packages and Rust crates and IPTVnator's MIT notice. It ships with each release, in the Windows installer, the macOS app and the Docker image.
 - A Docker Compose setup in `deploy/` that puts Caddy in front of the server for HTTPS and a password.
-- CI checks for dependency advisories and licences (cargo-deny), the minimum Rust version, the Docker image, the desktop release build, and the Playwright suite.
+- CI checks for dependency advisories and licences (cargo-deny), the minimum Rust version, the Docker image, the desktop release build, the macOS app and disk image, and the Playwright suite.
 - A user guide, a contributing guide and a security policy.
 - A quality filter for live TV: the button next to the channel search hides channels whose name marks a lower quality than the one you pick (HD, Full HD or 4K), and can hide channels with no quality in their name too. The guide, search, zapping, number entry, favorites, recently watched, custom lists and the phone remote follow it. Radio is never filtered.
 - A Sports page (in the side rail, and under More on phones) with NFL, college football, NBA and MLB games from a week ago to a week ahead: live scores, results and start times from ESPN's public scoreboard, and the channels of your sources that carry each game, with Watch while it is on, Replay from the channel's catch-up archive afterwards and Record before it starts. Streams are matched from channel names, the TV guide and the networks ESPN lists, so a game can be missed or matched to another regional broadcast.
+- Catch-up: download a past programme from the guide and play it while it is still downloading, copy a programme's catch-up link from the guide or a channel's menu, and open past programmes in mpv or VLC. Catch-up playback follows the programme it plays in the guide, Live TV and the archive, and resumes where you stopped, also after a restart.
+- A download speed limit on the Downloads page: a default for each download, and a limit of its own for any one download. Changes apply to running downloads. The default is unlimited.
+- A player for each kind of content: in the desktop app, Settings > Playback > Player has rows for Live TV, Catch-up TV, and Movies and series. Each row uses the player chosen before until you pick one for it. A browser has only the built-in player.
+- Window fill: the player can fill the app's window without going fullscreen, from its controls, the video's menu or a shortcut.
 
 ### Changed
 
@@ -36,7 +44,7 @@ Work after the 0.2.0 notes were written: the redesign, fixes that followed the O
 - Ctrl+R opens Recently watched only in the desktop app; in a browser it reloads the page again.
 - In the desktop app the window's title bar follows the app's theme.
 - Rust 1.90 is the minimum version (`rust-version` in Cargo.toml). The locked Tauri 2.12 crates need it.
-- The installer no longer names a licence in its copyright line; the project licence is not chosen yet.
+- The installer no longer names a licence in its copyright line.
 - Sports is simpler to use: the league tabs, the day strip and the filters sit together at the top, each league tab counts the day's games and marks one that is on, and the page shows Live now, Upcoming and Final with each game once. A card shows the best stream with its action, and Show all for the rest. The search field finds teams and networks, "With streams" hides games no channel was found for, and a card's menu follows a team (then "My teams" shows only their games), opens ESPN's Gamecast, and puts a live game on the multi-view wall.
 - Sports finds channels better: team channels ("NBA: Boston Celtics") and network slots ("NCAAF 04: ABC") match their games, a TV service's lineup channel counts as the network it carries ("US: SLING MLB NETWORK"), and a broadcast network's local stations match only the games of their own market, so a FOX game no longer lists every FOX station. It also reads only the groups that can carry the four leagues' games, which on one big account cut the channels it reads from about 22,000 to 7,000.
 - Sports lists fewer wrong streams and puts the best one first. A TV station's news stream and its copies on free streaming services (the Prime Video and Roku channels some providers carry), E!, ESPN's Ocho and other channels filed under a network no longer count as the network that carries a game, and a college slot channel ("NCAAF 06: FOX") no longer counts for another league's games. Feeds from abroad come last, the streams sure to show the game come before regional ones, and among them the higher quality the channel name gives comes first. A channel a provider lists twice under one name shows once. Each stream shows the quality its name gives (SD, 720p, 1080p or 4K), and a "1080p+" button on the page sets the Live TV quality filter to Full HD and up, or turns it off.
@@ -44,6 +52,8 @@ Work after the 0.2.0 notes were written: the redesign, fixes that followed the O
 - "8K EXCLUSIVE", which one provider writes on every event channel, no longer counts as a 4K tag, for the Live TV quality filter or on the Sports page.
 - Live TV's group list has a region picker when most of a source's groups start with a country tag ("US| Sports", "UK: News").
 - Channels and posters without artwork take their initials from the name, not from a country tag or a quality marker ("US| ESPN HD" shows ES, "ESPN2" E2).
+- The guide scrolls and drags smoothly on large lineups, keeps the title of a programme that started earlier in view, and its toolbar shows the time span on screen. Gaps in XMLTV listings are filled from the Xtream account's own guide, and listings from several guide feeds are merged without duplicates.
+- Seeking works in catch-up MPEG-TS archives, and their playback recovers after gaps in the stream.
 - Xtream live channels start faster in the built-in player: the stream format has a new Auto setting, now the default, that plays them as MPEG-TS where the player can and as HLS in mpv, VLC and browsers that can't. Installs still on the old HLS default move to Auto; pick HLS in Settings > Playback to keep it.
 
 ### Fixed

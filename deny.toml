@@ -4,11 +4,13 @@
 # `cargo deny check` from the repository root.
 
 [graph]
-# The desktop app ships for Windows, the server image for Linux on amd64 and
-# arm64. Crates that only build for other platforms (macOS, iOS, Android) are
-# left out of every check.
+# The desktop app ships for Windows and macOS (Apple silicon and Intel), the
+# server image for Linux on amd64 and arm64. Crates that only build for other
+# platforms (iOS, Android) are left out of every check.
 targets = [
     "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
 ]
@@ -53,7 +55,7 @@ confidence-threshold = 0.9
 
 # Workspace crates marked `publish = false` are skipped; every crate in crates/
 # should be (see about.toml). A workspace crate without it is checked against
-# `allow` with the placeholder `license = "MIT"` from Cargo.toml.
+# `allow` with the workspace's `license = "MIT"` from Cargo.toml.
 [licenses.private]
 ignore = true
 

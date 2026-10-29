@@ -54,7 +54,7 @@ All times on the wire are RFC 3339 in display time: the UI sends programme times
 - Adding a reminder that already fired or was missed (same channel and start) arms it again.
 - A fired reminder stays in an in-memory "unhandled" list until a window calls `reminders.ack`. `RecordingWatcher` fetches `reminders.unhandled` on mount, so a reminder that fired at launch or with no browser tab open is still shown while its programme runs. The list does not survive a restart. Each firing (`id` + `firedAt`) is handled once per window.
 - The UI (`RecordingWatcher`, mounted in the shell so it runs while the window is hidden in the tray) handles `reminders.fire`:
-  - `notify`: a native Windows notification through the `native_notify` Tauri command (`tauri-plugin-notification`) and an in-app toast with "Watch now". In server mode only the toast shows, plus a browser notification when permission was already granted. The app never asks for permission.
+  - `notify`: a native system notification (Windows or macOS) through the `native_notify` Tauri command (`tauri-plugin-notification`) and an in-app toast with "Watch now". In server mode only the toast shows, plus a browser notification when permission was already granted. The app never asks for permission.
   - `switch`: tunes to the channel, the desktop shell brings the window forward, and a toast offers Undo, which puts back what was playing (or stops).
 
 ## Recordings

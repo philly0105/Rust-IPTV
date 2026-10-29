@@ -23,10 +23,12 @@ accepted = [
     "MPL-2.0",
 ]
 
-# The same platforms as deny.toml: Windows for the desktop app, Linux amd64 and
-# arm64 for the server image.
+# The same platforms as deny.toml: Windows and macOS for the desktop app, Linux
+# amd64 and arm64 for the server image.
 targets = [
     "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
 ]
@@ -36,7 +38,7 @@ ignore-build-dependencies = true
 ignore-dev-dependencies = true
 
 # Skips crates marked `publish = false`. Every crate in crates/ needs that: they
-# are not third-party software, and their `license` field is a placeholder until
-# the owner chooses a licence. tools/third-party-notices.mjs stops when one of
-# them shows up in the output anyway.
+# are this project's own code, under LICENSE, not third-party software.
+# tools/third-party-notices.mjs stops when one of them shows up in the output
+# anyway.
 private = { ignore = true }

@@ -5,11 +5,11 @@
 <h1 align="center">Tsrust IPTV</h1>
 
 <p align="center">
-  Watch your own M3U playlists, Xtream Codes accounts and Stalker portals on Windows or in a browser, with a full TV guide, movies and series, recording and a phone remote.
+  Watch your own M3U playlists, Xtream Codes accounts and Stalker portals on Windows, on a Mac or in a browser, with a full TV guide, movies and series, recording and a phone remote.
 </p>
 
 <p align="center">
-  <a href="https://github.com/philly0105/Rust-IPTV/releases/latest">Download for Windows</a>
+  <a href="https://github.com/philly0105/Rust-IPTV/releases/latest">Download for Windows and macOS</a>
   ·
   <a href="#run-the-server-with-docker">Run the server with Docker</a>
   ·
@@ -32,7 +32,15 @@ Get the `..._x64-setup.exe` installer from the [latest release](https://github.c
 
 The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC". Choose More info, then Run anyway.
 
-Everything plays in the built-in player unless you choose another. To play inside the window with mpv, install mpv (WinGet, Scoop or Chocolatey) and choose Embedded mpv under Settings > Playback > Player. If the app can't find mpv, set its path in Settings > External players.
+Everything plays in the built-in player unless you choose another. To play inside the window with mpv, install mpv (WinGet, Scoop or Chocolatey), then go to Settings > Playback > Player and choose Embedded mpv in each row you want it for: Live TV, Catch-up TV, and Movies and series. If the app can't find mpv, set its path in Settings > External players.
+
+### macOS
+
+Get the `..._universal.dmg` disk image from the [latest release](https://github.com/philly0105/Rust-IPTV/releases/latest), open it and drag Tsrust IPTV to Applications. The same app runs on Apple silicon and Intel Macs, on macOS 11 Big Sur or later with Safari 16.4 or later (the app's window uses the same engine as Safari).
+
+The app is not signed with an Apple Developer ID or notarized yet, so the first time you open it macOS says it can't verify the app and won't open it. Close the message, open System Settings > Privacy & Security, scroll down to Security, choose Open Anyway next to the message about Tsrust IPTV (it stays there for about an hour), and confirm with your password. On macOS 11 and 12, open System Preferences > Security & Privacy > General instead and click Open Anyway (or Control-click the app in Applications and choose Open). After that it opens like any other app. If macOS says instead that the app is damaged, run `xattr -dr com.apple.quarantine "/Applications/Tsrust IPTV.app"` in Terminal and open it again.
+
+Everything plays in the built-in player unless you choose another. To play inside the window with mpv, install it with [Homebrew](https://brew.sh) (`brew install mpv`), then go to Settings > Playback > Player and choose Embedded mpv in each row you want it for: Live TV, Catch-up TV, and Movies and series.
 
 ### Run the server with Docker
 
@@ -82,7 +90,7 @@ Then open http://127.0.0.1:7180 on the same machine. To use it from phones, tabl
 
 ### Control playback
 
-- The built-in player handles HLS, MPEG-TS and DASH, including ClearKey-protected M3U channels. On Windows, mpv can play inside the window, and mpv or VLC can run as external players.
+- The built-in player handles HLS, MPEG-TS and DASH, including ClearKey-protected M3U channels. In the desktop app, mpv can play inside the window, and mpv or VLC can run as external players.
 - Set aspect ratio, crop and zoom; load subtitle files and style them; shift subtitles in 100 ms steps (audio too, with embedded mpv); see the stream's codecs and bitrates.
 - A sleep timer that fades out, picture-in-picture, and screenshots with S.
 
@@ -99,7 +107,7 @@ Multi-view plays two to four live channels side by side, in a grid of four, or o
 
 ### Record and get reminded
 
-Record a programme or a whole series from the guide, or the next 30 minutes to 3 hours of a channel. Recordings run without the player, with padding and retries, whenever the app is running, also from the tray. A few minutes before a programme you asked to be reminded of, the app shows a message with a button to watch it; the desktop app also shows a Windows notification.
+Record a programme or a whole series from the guide, or the next 30 minutes to 3 hours of a channel. Recordings run without the player, with padding and retries, whenever the app is running, also from the tray. A few minutes before a programme you asked to be reminded of, the app shows a message with a button to watch it; the desktop app also shows a system notification.
 
 ### Use a remote or a phone
 
@@ -150,18 +158,16 @@ pnpm mock        # sample Xtream, Stalker, M3U and XMLTV sources on port 7290
 pnpm check       # typecheck, unit tests, cargo test, clippy and rustfmt
 ```
 
-On macOS, `pnpm tauri build --bundles app --no-sign` creates an unsigned production app in `target/release/bundle/macos/`. Embedded mpv uses the system `libmpv`, so install mpv on the Mac that runs the app.
+On macOS, `pnpm tauri build` creates a disk image of the ad-hoc signed app in `target/release/bundle/dmg/`, and `pnpm tauri build --bundles app --no-sign` an unsigned app in `target/release/bundle/macos/`. Embedded mpv uses the system `libmpv`, so install mpv on the Mac that runs the app.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers every command, the end-to-end and screenshot tooling, CI, style and releases.
 
 ## Credits
 
-Tsrust IPTV was rebuilt from [IPTVnator](https://github.com/4gray/iptvnator) by 4gray. IPTVnator's copyright and MIT licence notice is in [NOTICE](NOTICE), which the installer puts beside the app and the Docker image keeps in `/usr/share/doc/tsrust-iptv/`. Each release also includes `THIRD_PARTY_NOTICES.md` with the licences of IPTVnator and of the npm packages and Rust crates the app is built from.
+Tsrust IPTV was rebuilt from [IPTVnator](https://github.com/4gray/iptvnator) by 4gray. IPTVnator's copyright and MIT licence notice is in [NOTICE](NOTICE), which the Windows installer puts beside the app, the macOS app keeps inside it (`Contents/Resources`) and the Docker image keeps in `/usr/share/doc/tsrust-iptv/`. Each release also includes `THIRD_PARTY_NOTICES.md` with the licences of IPTVnator and of the npm packages and Rust crates the app is built from.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.
 
-<!--
-Licence: the owner has not chosen one yet. Add the licence line here, and a LICENSE file at the
-repository root, once decided. Until then the workspace Cargo.toml's `license = "MIT"` is only a
-placeholder, and the Docker image has no org.opencontainers.image.licenses label.
--->
+## Licence
+
+Tsrust IPTV is released under the [MIT licence](LICENSE). The installers and the Docker image include it.

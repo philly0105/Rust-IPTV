@@ -183,9 +183,9 @@ function rustSection(file) {
   if (!existsSync(file)) fail(`--rust file not found: ${file}`);
   const rust = normalise(readFileSync(file, 'utf8'));
 
-  // The workspace's own crates carry the placeholder `license` from Cargo.toml, so listing one
-  // here would publish a licence the owner has not chosen. cargo-about leaves out crates with
-  // `publish = false` (about.toml, `private.ignore`); this catches a crate that lacks it.
+  // The workspace's own crates are this project's code, covered by LICENSE, not third-party
+  // software. cargo-about leaves out crates with `publish = false` (about.toml,
+  // `private.ignore`); this catches a crate that lacks it.
   // about.hbs writes each licence's users as "Used by: <name> <version>, <name> <version>".
   const listed = new Set();
   for (const line of rust.split('\n')) {
@@ -201,7 +201,7 @@ function rustSection(file) {
 
   return [
     'The desktop app and the server are compiled from the Rust crates below. The list covers the',
-    'whole workspace for Windows and Linux, so the server image contains only part of it.',
+    'whole workspace for Windows, macOS and Linux, so each build contains only part of it.',
     '',
     rust,
     '',
@@ -241,14 +241,16 @@ const doc = [
   rustSection(opts.rust),
   '## Programs outside this list',
   '',
-  '- mpv is not linked into Tsrust IPTV; the app starts it as a separate program. The installer',
-  '  built with `pnpm tauri:build:mpv` ships an mpv build under GPL-2.0-or-later, with its licence,',
-  '  source links and written offer in `vendor/mpv/LICENSE.txt` beside `mpv.exe`. The standard',
-  '  installer contains no mpv.',
+  '- On Windows, mpv is not linked into Tsrust IPTV; the app starts it as a separate program. The',
+  '  installer built with `pnpm tauri:build:mpv` ships an mpv build under GPL-2.0-or-later, with its',
+  '  licence, source links and written offer in `vendor/mpv/LICENSE.txt` beside `mpv.exe`. The',
+  '  standard installer contains no mpv.',
+  '- The macOS app contains no mpv. Embedded mpv there loads the libmpv the user installed (with',
+  '  Homebrew) into the app at run time; external mpv runs as a separate program.',
   '- The server image is based on Debian and installs Debian packages, mpv among them, for',
   '  recording. Their licences are in `/usr/share/doc/<package>/copyright` inside the image.',
-  '- The Microsoft Edge WebView2 runtime that draws the desktop window is part of Windows and is not',
-  '  shipped with the app.',
+  '- The Microsoft Edge WebView2 runtime that draws the window on Windows, and WebKit on macOS, are',
+  '  part of the operating system and are not shipped with the app.',
   '',
 ].join('\n');
 

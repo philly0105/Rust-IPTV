@@ -21,10 +21,13 @@ import {
   Download,
   Gamepad2,
   Gauge,
+  Hd,
+  History,
   Languages,
   LayoutGrid,
   ListPlus,
   Maximize,
+  Maximize2,
   MoonStar,
   Palette,
   RefreshCw,
@@ -32,6 +35,7 @@ import {
   ShieldCheck,
   Smartphone,
   TextSearch,
+  Trophy,
   Wrench,
   Zap,
   type LucideIcon,
@@ -55,6 +59,19 @@ export interface ReleaseNotes {
 }
 
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
+  {
+    // The redesign, Sports, the quality filter, and the catch-up, guide and download work.
+    version: '0.3.0',
+    items: [
+      { key: 'noteRedesign', icon: Palette },
+      { key: 'noteSports', icon: Trophy },
+      { key: 'noteQualityFilter', icon: Hd },
+      { key: 'noteCatchupMore', icon: History },
+      { key: 'noteWindowFill', icon: Maximize2 },
+      { key: 'noteDownloadSpeed', icon: Gauge },
+      { key: 'noteGuideSmooth', icon: CalendarClock },
+    ],
+  },
   {
     // Loops 1-5 and the feature and performance audit fixes.
     version: '0.2.0',

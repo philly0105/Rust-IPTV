@@ -276,7 +276,7 @@ function fail(ses: Session, src: PlayerSource, cls: StreamErrorClass, info: Fail
     return;
   }
   if (canRetry && delay !== undefined) {
-    scheduleRetry(ses, src, delay);
+    scheduleRetry(ses, delay);
     return;
   }
   giveUp(ses, src);
@@ -291,11 +291,11 @@ async function switchOver(ses: Session, src: PlayerSource, thenRetry: boolean, c
   // Switched (the new copy has its own session), or the user moved on.
   if (switched || !sameItem(ses)) return;
   const delay = nextDelay(ses);
-  if (thenRetry && delay !== undefined) scheduleRetry(ses, src, delay);
+  if (thenRetry && delay !== undefined) scheduleRetry(ses, delay);
   else giveUp(ses, src);
 }
 
-function scheduleRetry(ses: Session, src: PlayerSource, delay: number): void {
+function scheduleRetry(ses: Session, delay: number): void {
   ses.attempts++;
   hold();
   setPhase('retrying', ses.attempts, budgetOf(ses));

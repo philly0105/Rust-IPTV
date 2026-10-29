@@ -188,9 +188,16 @@ describe('what is playing (LG-01)', () => {
 
   it('moves the playing mark between catch-up programmes on the same channel', async () => {
     renderGuide({ path: `/epg?source=src1&at=${defaultStart(Date.now() - 2 * HOUR)}`, routes: GRID });
-    const first = await screen.findByRole('button', { name: /^c2 P-3,/ });
-    const second = await screen.findByRole('button', { name: /^c2 P-2,/ });
-    const otherChannel = await screen.findByRole('button', { name: /^c1 P-3,/ });
+    // A role query over the 30-row guide on every mutation starves its hydration frames.
+    const cell = (name: string) =>
+      waitFor(() => {
+        const el = document.querySelector<HTMLElement>(`button[aria-label^="${name},"]`);
+        if (!el) throw new Error(`no cell ${name}`);
+        return el;
+      });
+    const first = await cell('c2 P-3');
+    const second = await cell('c2 P-2');
+    const otherChannel = await cell('c1 P-3');
     const source = { url: 'http://archive/first', kind: 'hls', title: 'Channel 2', ref: makeChannel(2).ref, isLive: false, isRadio: false };
 
     act(() => fakes.usePlayerStore.setState({ source: { ...source, catchupProgramStart: first.dataset.start } } as never));

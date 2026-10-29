@@ -2333,6 +2333,9 @@ mod tests {
             vlc_path: Some("vlc".into()),
             downloads_dir: Some("d".into()),
             recordings_dir: Some("r".into()),
+            live_player: Some(VideoPlayer::EmbeddedMpv),
+            catchup_player: Some(VideoPlayer::EmbeddedMpv),
+            vod_player: Some(VideoPlayer::EmbeddedMpv),
             ..Settings::default()
         };
         let v = serde_json::to_value(&full).unwrap();

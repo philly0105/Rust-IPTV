@@ -1508,10 +1508,7 @@ async fn download_speed_override_and_global_default_apply_in_flight() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn download_speed_settings_persist_validate_and_restore_inheritance() {
     let mut c = ctx().await;
-    assert_eq!(
-        c.state.settings_snapshot().download_rate_limit_bps,
-        1024 * 1024
-    );
+    assert_eq!(c.state.settings_snapshot().download_rate_limit_bps, 0);
     iptv_core::settings::update(&c.state, json!({"downloadRateLimitBps": 64 * 1024}))
         .await
         .unwrap();

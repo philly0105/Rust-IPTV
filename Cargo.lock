@@ -2180,7 +2180,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "cc",
  "chrono",
@@ -2238,7 +2238,7 @@ name = "iptv-mock"
 version = "0.3.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "clap",

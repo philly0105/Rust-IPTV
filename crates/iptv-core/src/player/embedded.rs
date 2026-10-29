@@ -507,9 +507,7 @@ async fn attach_locked(
         .await
         .map(|(child, stream)| (Some(child), stream));
     #[cfg(target_os = "macos")]
-    let started = platform::start(hwnd, &settings.mpv_args, initial_volume, initial_muted)
-        .await
-        .map(|(native, stream)| (native, stream));
+    let started = platform::start(hwnd, &settings.mpv_args, initial_volume, initial_muted).await;
     #[cfg(not(any(windows, target_os = "macos")))]
     let started = platform::start(Path::new(""), &[], "")
         .await

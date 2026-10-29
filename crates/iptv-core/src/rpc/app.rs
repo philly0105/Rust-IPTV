@@ -446,6 +446,7 @@ mod tests {
                 "{ext}"
             );
         }
+        #[cfg_attr(not(windows), allow(unused_mut))]
         let mut shapes = vec![r"\\server\share", r"\\?\UNC\server\share", "//server/share"];
         // Review round 2: mixed separators are UNC on Windows too, and the
         // verbatim and device forms never reach the filesystem.

@@ -57,6 +57,7 @@ impl Rect {
     }
 
     /// Whether this rectangle covers all of `other`.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn contains(&self, other: &Rect) -> bool {
         self.x <= other.x
             && self.y <= other.y
@@ -128,6 +129,7 @@ pub fn place_on_screen(rect: Rect, areas: &[Rect], slack: i32) -> Rect {
 
 /// Moves `rect` (keeping its size) so it lies inside `area`; a rectangle
 /// larger than the area keeps its top-left corner on it.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn clamp_into(rect: Rect, area: Rect) -> Rect {
     let x = clamp_low(
         i64::from(rect.x),
@@ -144,6 +146,7 @@ pub fn clamp_into(rect: Rect, area: Rect) -> Rect {
 
 /// Pulls `rect` flush against any edge of `area` it is within `threshold`
 /// pixels of, so a dragged PiP window docks neatly into a corner.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn snap_to_edges(rect: Rect, area: Rect, threshold: i32) -> Rect {
     let t = i64::from(threshold.max(0));
     let mut out = rect;
@@ -162,6 +165,7 @@ pub fn snap_to_edges(rect: Rect, area: Rect, threshold: i32) -> Rect {
 
 /// Window position while it is dragged: where it started plus how far the
 /// cursor moved since.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn drag_position(
     window: (i32, i32),
     cursor_start: (i32, i32),
@@ -178,6 +182,7 @@ pub fn drag_position(
 /// Keeps a `cx` x `cy` size at `aspect` (width / height) by deriving the
 /// height from the width. Sizes already within a pixel of the ratio, empty
 /// sizes and invalid ratios pass through unchanged.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn enforce_aspect(cx: i32, cy: i32, aspect: f64) -> (i32, i32) {
     if cx <= 0 || cy <= 0 || !aspect.is_finite() || aspect <= 0.0 {
         return (cx, cy);
@@ -220,6 +225,7 @@ pub fn fit_move(rect: Rect, placed: Rect, maximized: bool) -> FitMove {
 }
 
 /// `WS_MAXIMIZE` (winuser.h).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const WS_MAXIMIZE: u32 = 0x0100_0000;
 
 /// The window style to write just before a hidden window is shown, or None
@@ -231,6 +237,7 @@ pub const WS_MAXIMIZE: u32 = 0x0100_0000;
 /// it either, and it comes up zoomed at its restored rectangle. Without the
 /// bit, that same call does a real maximize to the work area. A visible
 /// window is left alone: its maximize really happened.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn style_before_show(style: u32, visible: bool) -> Option<u32> {
     (!visible && style & WS_MAXIMIZE != 0).then_some(style & !WS_MAXIMIZE)
 }

@@ -101,9 +101,9 @@ fn fixed_time() -> chrono::DateTime<chrono::Utc> {
     chrono::Utc.with_ymd_and_hms(2026, 10, 14, 9, 5, 7).unwrap()
 }
 
-/// Embedded mpv is Windows-only: elsewhere `screenshot.mpv` is Unsupported.
+/// Embedded mpv runs on Windows and macOS: elsewhere `screenshot.mpv` is Unsupported.
 fn on_windows(code: RpcErrorCode) -> RpcErrorCode {
-    if cfg!(windows) {
+    if cfg!(any(windows, target_os = "macos")) {
         code
     } else {
         RpcErrorCode::Unsupported
@@ -709,7 +709,7 @@ async fn mpv_without_a_session_is_a_conflict() {
             on_windows(RpcErrorCode::Conflict),
             "{args}: {err:?}"
         );
-        if cfg!(windows) {
+        if cfg!(any(windows, target_os = "macos")) {
             assert!(err.message.contains("not attached"), "{}", err.message);
         }
     }

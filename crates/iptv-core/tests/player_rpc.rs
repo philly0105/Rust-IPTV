@@ -579,6 +579,7 @@ async fn open_external_unrunnable_player_is_engine_missing() {
 }
 
 /// Records window calls; hands mpv a dummy HWND (video output is null).
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Default)]
 struct FakeFactory {
     calls: Mutex<Vec<String>>,

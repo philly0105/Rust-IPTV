@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
 
 type Controller = {
@@ -15,9 +17,13 @@ type Controller = {
   _searchSegmentIndexContains: ReturnType<typeof vi.fn>;
 };
 const vendorModule = '../../../vendor/mpegts.js/src/core/' + 'transmuxing-controller';
-const { default: TransmuxingController } = await vi.importActual<{ default: { prototype: Controller } }>(vendorModule);
+// The fork checkout comes from `node tools/prepare-mpegts.mjs`; without it these tests skip.
+const vendored = existsSync(new URL('../../../vendor/mpegts.js/src', import.meta.url));
+const { default: TransmuxingController } = vendored
+  ? await vi.importActual<{ default: { prototype: Controller } }>(vendorModule)
+  : { default: undefined as unknown as { prototype: Controller } };
 
-describe('archive byte-range seek with a reset TS clock', () => {
+describe.skipIf(!vendored)('archive byte-range seek with a reset TS clock', () => {
   it('reuses the valid range with a rebased clock instead of seeking past EOF', async () => {
     const target = 8_348_000;
     const actual = -34_452_340;
@@ -45,7 +51,7 @@ describe('archive byte-range seek with a reset TS clock', () => {
   });
 });
 
-describe('archive URLs with their own seek position', () => {
+describe.skipIf(!vendored)('archive URLs with their own seek position', () => {
   it('does not seek the old response by byte range', () => {
     const controller = Object.create(TransmuxingController.prototype) as Controller;
     controller._config = { expectedDuration: 14_400_000, enableArchiveByteRangeSeek: false };

@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 type GapHandler = {
@@ -8,9 +10,15 @@ type GapHandler = {
 type GapHandlerCtor = new (config: Record<string, boolean>, video: HTMLMediaElement, onSeek: () => void) => GapHandler;
 // Load the vendored TypeScript with Vite; the application tsconfig does not type-check vendor sources.
 const vendorModule = '../../../vendor/mpegts.js/src/player/' + 'seeking-handler';
-const { default: SeekingHandler } = await vi.importActual<{ default: GapHandlerCtor }>(vendorModule);
+// The fork checkout comes from `node tools/prepare-mpegts.mjs`; without it these tests skip.
+const vendored = existsSync(new URL('../../../vendor/mpegts.js/src', import.meta.url));
+const { default: SeekingHandler } = vendored
+  ? await vi.importActual<{ default: GapHandlerCtor }>(vendorModule)
+  : { default: undefined as unknown as GapHandlerCtor };
 const remuxerModule = '../../../vendor/mpegts.js/src/remux/' + 'mp4-remuxer';
-const { default: MP4Remuxer } = await vi.importActual<{ default: new (config: Record<string, boolean>) => Record<string, unknown> }>(remuxerModule);
+const { default: MP4Remuxer } = vendored
+  ? await vi.importActual<{ default: new (config: Record<string, boolean>) => Record<string, unknown> }>(remuxerModule)
+  : { default: undefined as unknown as new (config: Record<string, boolean>) => Record<string, unknown> };
 
 class FakeVideo extends EventTarget {
   currentTime = 8;
@@ -36,7 +44,7 @@ function watch(syncs: number[]) {
 
 afterEach(() => vi.useRealTimers());
 
-describe('catch-up timestamp gap recovery', () => {
+describe.skipIf(!vendored)('catch-up timestamp gap recovery', () => {
   it('finds a gap between video samples before the playback clock reaches it', () => {
     const remuxer = new MP4Remuxer({ archiveSkipTimestampGaps: true }) as {
       _dtsBase: number;

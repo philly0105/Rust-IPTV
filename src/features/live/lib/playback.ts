@@ -105,15 +105,7 @@ export function playChannel(channel: Channel, kind: SourceKind, nowTitle?: strin
 export function m3uCatchupSource(channel: Channel, program: EpgProgram, now: number, sourceHeaders?: RequestHeaders): PlayerSource {
   const url = resolveM3uCatchupUrl(channel as Channel & CatchupChannel, { start: ms(program.start), end: ms(program.end), now });
   if (!url) throw new Error('This channel has no usable catch-up address.');
-  const out: PlayerSource = {
-    url,
-    kind: guessKind(url),
-    title: channel.name,
-    ref: channel.ref,
-    durationSeconds: durationMinutes(program) * 60,
-    isLive: false,
-    isRadio: false,
-  };
+  const out: PlayerSource = { url, kind: guessKind(url), title: channel.name, ref: channel.ref, isLive: false, isRadio: false };
   const headers = mergeHeaders(sourceHeaders, channel.headers);
   if (headers) out.headers = headers;
   // A ClearKey channel's archive is encrypted with the same keys.

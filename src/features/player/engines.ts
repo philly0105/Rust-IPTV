@@ -1157,9 +1157,9 @@ async function mpegtsEngine(
     autoCleanupSourceBuffer: true,
     autoCleanupMaxBackwardDuration: profile === 'tile' ? 10 : 60,
     autoCleanupMinBackwardDuration: profile === 'tile' ? 5 : 30,
-    // Keep archive reads close to playback. Reading hours ahead can exhaust WebKit's
+    // Keep VOD and archive reads close to playback. Reading hours ahead can exhaust WebKit's
     // SourceBuffer and make providers that limit fast catch-up downloads close the stream.
-    lazyLoad: !isLive && !!source.durationSeconds,
+    lazyLoad: !isLive,
     lazyLoadMaxDuration: 60,
     lazyLoadRecoverDuration: 20,
     expectedDuration: source.durationSeconds ? source.durationSeconds * 1000 : 0,

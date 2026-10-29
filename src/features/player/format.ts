@@ -18,8 +18,8 @@ export const SEEK_STEP_JL = 10;
 
 /** Seconds behind the end of the seekable window that still count as live (the element's buffer). */
 export const LIVE_EDGE_SLACK = 6;
-/** mpv's seekable cache can run well ahead of playback during normal live viewing. */
-export const LIVE_EDGE_SLACK_MPV = 30;
+/** mpv's cache runs a few seconds ahead of playback even at the live edge. */
+export const LIVE_EDGE_SLACK_MPV = 10;
 
 /**
  * "4:20 / 45:00" for VOD; for live "Live" at the edge or "1:20 behind live". The edge uses the

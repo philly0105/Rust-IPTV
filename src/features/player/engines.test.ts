@@ -225,7 +225,7 @@ describe('engine selection', () => {
     await createEngine(video(), src('http://h/a.ts', { isLive: false }), '/api/proxy?url=x', cb(), { captions: false });
     const p = FakeTsPlayer.created[0]!;
     expect(p.source.url).toBe(new URL('/api/proxy?url=x', window.location.href).href);
-    expect(p.config).toMatchObject({ lazyLoad: false, lazyLoadMaxDuration: 60, enableStashBuffer: true });
+    expect(p.config).toMatchObject({ lazyLoad: true, lazyLoadMaxDuration: 60, enableStashBuffer: true });
   });
 
   it('bounds finite catch-up TS read-ahead while retaining the programme duration', async () => {

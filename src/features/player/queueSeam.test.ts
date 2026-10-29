@@ -223,7 +223,8 @@ describe('series queue and Up next', () => {
     // e11 was finished meanwhile: the core dropped its row.
     saved = {};
     usePlayerStore.getState().prev();
-    await vi.waitFor(() => expect(usePlayerStore.getState().source?.episodeId).toBe('e11'));
+    // The entry shows with an empty URL while it resolves; wait for the resolved source.
+    await vi.waitFor(() => expect(usePlayerStore.getState().source).toMatchObject({ episodeId: 'e11', url: expect.stringMatching(/./) }));
     expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
     expect(usePlayerStore.getState().positionSeconds).toBe(0);
   });
@@ -241,7 +242,8 @@ describe('series queue and Up next', () => {
     expect(usePlayerStore.getState().queue[0]?.url).toBe('');
     handlers['positions.get'] = (a) => ((a as { episodeId?: string }).episodeId === 'e11' ? watchedRow('e11') : null);
     usePlayerStore.getState().prev();
-    await vi.waitFor(() => expect(usePlayerStore.getState().source?.episodeId).toBe('e11'));
+    // The entry shows with an empty URL while it resolves; wait for the resolved source.
+    await vi.waitFor(() => expect(usePlayerStore.getState().source).toMatchObject({ episodeId: 'e11', url: expect.stringMatching(/./) }));
     expect(usePlayerStore.getState().source?.url).toMatch(/^http:\/\/x\/e11\.mkv/);
     expect(usePlayerStore.getState().source?.resumeSeconds).toBeUndefined();
     expect(usePlayerStore.getState().positionSeconds).toBe(0);

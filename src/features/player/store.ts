@@ -865,10 +865,12 @@ export function reportProgress(positionSeconds: number, durationSeconds?: number
 export function reportStatus(status: PlayerState['status'], error?: string): void {
   const s = usePlayerStore.getState();
   if (!s.source) return;
-  // No media yet (a failed lookup or a VOD switch): surface events still belong to the
-  // previous file. A zap waiting to tune keeps that last picture under its banner too.
-  if (isPendingZap(s.source)) return;
-  if (!s.source.url) return;
+  // No media yet (a failed lookup): the surface's events are about the media it just dropped,
+  // not this item. A zap waiting to tune keeps the last picture up under its banner: that
+  // media's events are not about the channel the placeholder names either. Nor are they about a
+  // movie or episode shown while the previous file closes and its URL resolves.
+  if (isPendingZap(s.source) || s.source === switchPlaceholder) return;
+  if (!s.source.url && status !== 'error' && status !== 'loading') return;
   if (status !== 'error' && useMediaStore.getState().errorCode) useMediaStore.setState({ errorCode: undefined });
   if (s.status === status && s.error === error) return;
   usePlayerStore.setState(status === 'error' ? { status, error } : { status, error: undefined });
@@ -1066,7 +1068,7 @@ export function cancelUpNext(): void {
  * Either way the entry picks up its saved position.
  */
 async function playQueued(entry: PlayerSource): Promise<void> {
-  const { queue } = usePlayerStore.getState();
+  const { queue, mode } = usePlayerStore.getState();
   // A queue of different items (not episodes of one series) asks the gate before the entry shows.
   if (entry.ref && !gatePassed(entry.ref)) {
     const seq = requestSeq;
@@ -1104,14 +1106,21 @@ async function playQueued(entry: PlayerSource): Promise<void> {
     if (seq !== requestSeq) return;
     // The list owner may have rebuilt or refreshed the queue meanwhile: keep its newest copy.
     const latest = usePlayerStore.getState().queue;
-    await usePlayerStore.getState().play(resolved, { queue: latest.some((q) => sameSource(q, entry)) ? latest : queue });
+    await usePlayerStore.getState().play(resolved, { queue: latest.some((q) => sameSource(q, entry)) ? latest : queue, mode });
   };
   if (!entry.isLive) {
-    usePlayerStore.setState({ status: 'loading', error: undefined, source: { ...entry, url: '' } });
+    usePlayerStore.setState({ status: 'loading', error: undefined, source: vodSwitchPlaceholder({ ...entry, url: '' }) });
   } else if (!entry.url) {
     usePlayerStore.setState({ status: 'loading', error: undefined });
   }
   await run();
+}
+
+/** The movie or episode shown, without a URL, while the previous file closes and its URL resolves. */
+let switchPlaceholder: PlayerSource | null = null;
+function vodSwitchPlaceholder(source: PlayerSource): PlayerSource {
+  switchPlaceholder = source;
+  return source;
 }
 
 /** Release an embedded VOD connection while the next item's URL is resolving. */
@@ -1560,7 +1569,7 @@ export async function playSource(source: PlayerSource): Promise<void> {
   if (seq !== requestSeq) return;
   const previousUnloaded = unloadPreviousForVod(source.isLive);
   if (!source.isLive) {
-    usePlayerStore.setState({ status: 'loading', error: undefined, source: { ...source, url: '' } });
+    usePlayerStore.setState({ status: 'loading', error: undefined, source: vodSwitchPlaceholder({ ...source, url: '' }) });
   }
   const withPos = await withResume(source);
   if (seq !== requestSeq) return;
@@ -1578,7 +1587,7 @@ export async function restorePlayback(): Promise<boolean> {
   const source: PlayerSource = { ...rec.source };
   if (!source.isLive && rec.positionSeconds > 0) source.resumeSeconds = rec.positionSeconds;
   else delete source.resumeSeconds;
-  await usePlayerStore.getState().play(source);
+  await usePlayerStore.getState().play(source, { mode: rec.mode });
   return true;
 }
 
@@ -2407,6 +2416,7 @@ export function __resetPlayerForTests(): void {
   playToken = 0;
   requestSeq = 0;
   pendingMpvUnload = Promise.resolve();
+  switchPlaceholder = null;
   externalChoice = null;
   stageCount = 0;
   controller = null;

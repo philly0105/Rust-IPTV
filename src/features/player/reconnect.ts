@@ -11,7 +11,7 @@
  *    connectionLimit, and server) switch a live channel to another copy at once
  *    (`failover.ts`). For auth and connectionLimit, which concern the whole account, copies on
  *    other sources go first (connectionLimit skips the failed source's copies).
- * 2. Live and catch-up errors are retried quietly with backoff (1 s, 2 s, 4 s; at most three tries, all
+ * 2. Anything else is retried quietly with backoff (1 s, 2 s, 4 s; at most three tries, all
  *    started within 20 s of the first failure). The player shows "Reconnecting" instead of the
  *    error. A VOD item comes back at the position it dropped at. Stalker links are resolved
  *    again first, since they expire. While the first retry waits, the account's connections
@@ -21,10 +21,9 @@
  * 3. When the retries give up, a live channel switches to another copy; a movie gets the VOD
  *    failover. Otherwise the error shows as before.
  *
- * A live or catch-up stream that never played gets one quick retry (STARTUP_RETRIES), not the
- * ladder. A movie or episode that never played gets no automatic retries: repeated failed opens
- * can occupy a provider's connection slots. One that played gets at most one automatic retry.
- * A live start that timed out tries another copy first. The
+ * A stream that never played gets one quick retry (STARTUP_RETRIES), not the ladder: a provider
+ * that answers 503 or does not answer at all on the first try rarely does on the fourth, and
+ * the user is waiting on a spinner. A live start that timed out tries another copy first. The
  * engines leave retries to this module (mpegts.js only restarts a stream that played), so the
  * "Reconnecting n of m" count is the real number of reloads. While a stream that never played
  * is still loading after SLOW_START_MS, the phase is `connecting` ("Still connecting", with
@@ -90,8 +89,6 @@ export const HEALTHY_MS = 30_000;
 export const STARTUP_RETRIES = 1;
 /** A stream that never played and is still loading after this long says so ("Still connecting"). */
 export const SLOW_START_MS = 4_000;
-/** A stuck embedded movie open must release its provider connection without waiting forever. */
-export const VOD_STARTUP_TIMEOUT_MS = 20_000;
 const TICK_MS = 1_000;
 
 const STALL_MESSAGE = 'The stream stopped sending data';
@@ -192,7 +189,6 @@ let lastBytesAt = 0;
 let playedKey: string | null = null;
 let slowTimer: ReturnType<typeof setTimeout> | null = null;
 let slowFor: string | null = null;
-let vodStartupTimer: ReturnType<typeof setTimeout> | null = null;
 
 function keyOf(src: PlayerSource): string {
   return src.ref ? `${itemKey(src.ref)}|${src.episodeId ?? ''}` : `url|${src.url}`;
@@ -208,18 +204,14 @@ function setPhase(phase: ReconnectPhase, attempt = 0, max?: number): void {
   if (cur.phase !== phase || cur.attempt !== attempt || cur.max !== nextMax) useReconnectStore.setState({ phase, attempt, max: nextMax });
 }
 
-/** Movies/episodes use a smaller budget because failed opens can hold provider slots. */
-function budgetOf(ses: Session, src: PlayerSource): number {
-  if (!src.isLive && !src.catchupProgramStart &&
-      (src.ref?.contentType === 'movie' || src.ref?.contentType === 'series' || !src.ref)) {
-    return playedKey === ses.key ? 1 : 0;
-  }
+/** Retries this session allows: the ladder once the item played, else one quick try. */
+function budgetOf(ses: Session): number {
   return playedKey === ses.key ? RECONNECT_DELAYS_MS.length : STARTUP_RETRIES;
 }
 
 /** The wait before the session's next retry, or undefined when its budget is spent. */
-function nextDelay(ses: Session, src: PlayerSource): number | undefined {
-  return ses.attempts < budgetOf(ses, src) ? RECONNECT_DELAYS_MS[ses.attempts] : undefined;
+function nextDelay(ses: Session): number | undefined {
+  return ses.attempts < budgetOf(ses) ? RECONNECT_DELAYS_MS[ses.attempts] : undefined;
 }
 
 function clear(t: ReturnType<typeof setTimeout> | null): null {
@@ -267,7 +259,7 @@ function fail(ses: Session, src: PlayerSource, cls: StreamErrorClass, info: Fail
   const r = recoveryFor(cls);
   const now = Date.now();
   if (!ses.windowStart) ses.windowStart = now;
-  const delay = nextDelay(ses, src);
+  const delay = nextDelay(ses);
   const windowMs = src.catchupProgramStart ? CATCHUP_RECONNECT_WINDOW_MS : RECONNECT_WINDOW_MS;
   const canRetry = reconnectOn && r.retry && delay !== undefined && now - ses.windowStart + delay <= windowMs;
   traceTimeshift(src, 'reconnect decision', {
@@ -298,7 +290,7 @@ async function switchOver(ses: Session, src: PlayerSource, thenRetry: boolean, c
   ses.busy = false;
   // Switched (the new copy has its own session), or the user moved on.
   if (switched || !sameItem(ses)) return;
-  const delay = nextDelay(ses, src);
+  const delay = nextDelay(ses);
   if (thenRetry && delay !== undefined) scheduleRetry(ses, src, delay);
   else giveUp(ses, src);
 }
@@ -306,7 +298,7 @@ async function switchOver(ses: Session, src: PlayerSource, thenRetry: boolean, c
 function scheduleRetry(ses: Session, src: PlayerSource, delay: number): void {
   ses.attempts++;
   hold();
-  setPhase('retrying', ses.attempts, budgetOf(ses, src));
+  setPhase('retrying', ses.attempts, budgetOf(ses));
   retryTimer = setTimeout(() => {
     retryTimer = null;
     attempt(ses);
@@ -516,7 +508,6 @@ function syncSlowStart(s: PlayerState, key: string | null): void {
   const want = !!key && s.status === 'loading' && !!s.source?.url && s.mode !== 'external' && playedKey !== key;
   if (!want) {
     slowTimer = clear(slowTimer);
-    vodStartupTimer = clear(vodStartupTimer);
     slowFor = null;
     if (useReconnectStore.getState().phase === 'connecting') setPhase('idle');
     return;
@@ -524,19 +515,7 @@ function syncSlowStart(s: PlayerState, key: string | null): void {
   // Already counting (or already said so) for this item.
   if (slowFor === key) return;
   slowTimer = clear(slowTimer);
-  vodStartupTimer = clear(vodStartupTimer);
   slowFor = key;
-  const source = s.source;
-  if (source && s.mode === 'embedded-mpv' && !source.isLive && !source.catchupProgramStart &&
-      (source.ref?.contentType === 'movie' || source.ref?.contentType === 'series' || !source.ref)) {
-    vodStartupTimer = setTimeout(() => {
-      vodStartupTimer = null;
-      const cur = usePlayerStore.getState();
-      if (cur.source?.url !== source.url || keyOf(cur.source) !== key || cur.status !== 'loading' || cur.mode !== 'embedded-mpv') return;
-      const ses = session?.key === key ? session : (session = newSession(key));
-      fail(ses, cur.source, 'timeout', { message: TIMEOUT_MESSAGE, code: 'timeout' }, cur.positionSeconds);
-    }, VOD_STARTUP_TIMEOUT_MS);
-  }
   slowTimer = setTimeout(() => {
     slowTimer = null;
     const cur = usePlayerStore.getState();
@@ -632,7 +611,6 @@ export function __resetReconnect(): void {
   followed = false;
   playedKey = null;
   slowTimer = clear(slowTimer);
-  vodStartupTimer = clear(vodStartupTimer);
   slowFor = null;
   if (tickTimer) clearInterval(tickTimer);
   tickTimer = null;

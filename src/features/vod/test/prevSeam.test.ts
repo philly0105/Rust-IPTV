@@ -74,7 +74,8 @@ describe('B4-vod-D12: Prev from the series queue (real player store)', () => {
     expect(queueIds()).toEqual(['e11', 'e12', 'e13', 'e21']);
     saved = { e11: 300 };
     usePlayerStore.getState().prev();
-    await vi.waitFor(() => expect(usePlayerStore.getState().source?.episodeId).toBe('e11'));
+    // The entry shows with an empty URL while it resolves; wait for the resolved source.
+    await vi.waitFor(() => expect(usePlayerStore.getState().source).toMatchObject({ episodeId: 'e11', url: expect.stringMatching(/./) }));
     const src = usePlayerStore.getState().source!;
     expect(src.url).toBe('http://x/e11.mkv');
     expect(src.resumeSeconds).toBe(300);

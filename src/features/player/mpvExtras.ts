@@ -16,11 +16,16 @@ import { useSyncStore } from './sync';
  * notice per zap. The verdict ends when the player choice or the mpv path in Settings changes,
  * or with Try MPV again (`clearMpvUnavailable`).
  */
-let unavailable: { player: string | undefined; mpvPath: string | undefined } | null = null;
+let unavailable: { players: string; mpvPath: string | undefined } | null = null;
+
+/** Every player choice in Settings (the default and the per-content ones) as one comparable value. */
+function playerChoices(s: ReturnType<typeof peekSettings>): string {
+  return JSON.stringify([s?.player, s?.livePlayer, s?.catchupPlayer, s?.vodPlayer]);
+}
 
 export function markMpvUnavailable(): void {
   const s = peekSettings();
-  unavailable = { player: s?.player, mpvPath: s?.mpvPath };
+  unavailable = { players: playerChoices(s), mpvPath: s?.mpvPath };
 }
 
 export function clearMpvUnavailable(): void {
@@ -30,7 +35,7 @@ export function clearMpvUnavailable(): void {
 /** True while embedded mpv is known not to start (see `markMpvUnavailable`). */
 export function mpvUnavailable(): boolean {
   const s = peekSettings();
-  if (unavailable && (s?.player !== unavailable.player || s?.mpvPath !== unavailable.mpvPath)) unavailable = null;
+  if (unavailable && (playerChoices(s) !== unavailable.players || s?.mpvPath !== unavailable.mpvPath)) unavailable = null;
   return unavailable !== null;
 }
 

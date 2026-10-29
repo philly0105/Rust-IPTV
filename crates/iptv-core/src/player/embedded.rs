@@ -22,7 +22,7 @@ use super::mpv_state::OBSERVED_PROPERTIES;
 use super::stats::{MpvStats, STATS_PROPERTIES};
 use super::{embedded_unavailable_reason, window_factory, Bounds, ChildWindowFactory};
 use crate::error::{CoreError, CoreResult};
-use crate::model::{MpvState, PlayerSource};
+use crate::model::{ContentType, MpvState, PlayerSource};
 use crate::state::AppState;
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -631,10 +631,18 @@ pub async fn load(state: &Arc<AppState>, source: &PlayerSource) -> CoreResult<()
         stop_recording(&s).await;
     }
     // mpv's loadfile "replace" reply can precede the old file's shutdown.
-    // For VOD, finish that shutdown before opening the next provider stream.
-    // Live loads (including catch-up seeks) retain their fast replace path.
-    if !source.is_live {
-        stop_file(&s).await?;
+    // For a movie or episode, finish that shutdown before opening the next
+    // provider stream. Live and catch-up (a channel's ref, so seeks reopen the
+    // archive) keep their fast replace path. A stop that does not finish in
+    // time falls back to replace rather than failing the load.
+    let vod = source
+        .item_ref
+        .as_ref()
+        .is_some_and(|r| matches!(r.content_type, ContentType::Movie | ContentType::Series));
+    if vod && !source.is_live {
+        if let Err(error) = stop_file(&s).await {
+            tracing::warn!(%error, "embedded mpv did not close the previous stream; replacing it");
+        }
     }
     *s.title.lock() = source.title.trim().to_string();
     s.client.update_state(|st| {

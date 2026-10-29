@@ -1500,7 +1500,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const captionsOn = tracks.text.some((x) => x.selected);
   const episodic = !!source.episodeId;
 
-  // mpv's seekable cache can run ahead of playback even at the live edge.
+  // mpv's cache runs a few seconds ahead of playback even at the live edge.
   const edgeSlack = mode === 'embedded-mpv' ? LIVE_EDGE_SLACK_MPV : LIVE_EDGE_SLACK;
   const showSeek = isVod ? !!duration : isLive && liveWindowed;
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.

@@ -7,18 +7,18 @@ const NOW = Date.UTC(2026, 9, 11, 12, 0);
 
 describe('epgTime', () => {
   it('shares formatted slot labels across channels and keeps locales separate', () => {
-    const slot = p('one', NOW + 7 * MINUTE, NOW + 53 * MINUTE);
-    const english = formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), 'en');
-    const german = formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), 'de');
+    // A slot no other test formats, so the label cache starts cold for it.
+    const slot = p('one', NOW + 7 * MINUTE + 17_000, NOW + 53 * MINUTE + 17_000);
     const parts = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts');
     try {
-      expect(formatRange(slot, 'en')).toBe(english);
+      const english = formatRange(slot, 'en');
       const first = parts.mock.calls.length;
       expect(first).toBeGreaterThan(0);
       for (let i = 0; i < 100; i++) expect(formatRange({ ...slot, channelId: `c${i}` }, 'en')).toBe(english);
       expect(parts).toHaveBeenCalledTimes(first);
-      expect(formatRange(slot, 'de')).toBe(german);
+      const german = formatRange(slot, 'de');
       expect(parts.mock.calls.length).toBeGreaterThan(first);
+      expect(german).toBe(formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), 'de'));
     } finally {
       parts.mockRestore();
     }

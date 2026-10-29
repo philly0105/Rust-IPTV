@@ -312,18 +312,8 @@ export function formatClockZone(t: number, locale?: string): string {
   return f.format(t);
 }
 
-// Many channels share slot times. Reuse their labels when virtual rows mount or a rolling
-// query returns new programme objects, instead of repeating Intl.formatToParts per tile.
-const rangeLabels = new Map<string, string>();
-const MAX_RANGE_LABELS = 4096;
 export function formatRange(p: EpgProgram, locale?: string): string {
-  const key = `${locale ?? ''}|${p.start}|${p.end}`;
-  const hit = rangeLabels.get(key);
-  if (hit !== undefined) return hit;
-  const label = formatTimeRange(ms(p.start), ms(p.end), locale);
-  if (rangeLabels.size >= MAX_RANGE_LABELS) rangeLabels.delete(rangeLabels.keys().next().value!);
-  rangeLabels.set(key, label);
-  return label;
+  return formatTimeRange(ms(p.start), ms(p.end), locale);
 }
 
 /**

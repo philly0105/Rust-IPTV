@@ -105,9 +105,9 @@ describe('EpgGridPage on a Stalker portal without XMLTV', () => {
     // The buffered guide window can exceed six hours, so its request limit scales with it.
     expect(first.limit).toBeGreaterThanOrEqual(12);
 
-    // Moving the window back refetches with the new window start.
+    // The data window keeps six hours buffered before the view, so moving back needs no refetch.
+    expect(start0).toBeLessThanOrEqual(Date.now() - 6 * HOUR);
     fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
-    await waitFor(() => expect(epgCalls('c0').some((c) => !!c.from && Date.parse(c.from) === start0 - 3 * HOUR)).toBe(true));
     const morning = await screen.findByRole('button', { name: /^Morning c0,/ });
 
     // The past programme offers catch-up, through the portal.

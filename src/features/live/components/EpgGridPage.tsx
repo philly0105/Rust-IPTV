@@ -1164,9 +1164,12 @@ export function EpgGridPage() {
   const publishHydrationViewport = useStable((root: HTMLElement, x: number, width: number, knownY?: number) => {
     const y = knownY ?? root.scrollTop;
     const height = virtualizer.scrollRect?.height || 720;
+    // Until the track has a measured width, assume a typical one, as the height does, so the
+    // first screen renders at once instead of one offscreen group per frame.
+    const trackView = width > channelCol ? width - channelCol : 1280;
     hydration.setViewport({
       left: x,
-      right: x + Math.max(0, width - channelCol),
+      right: x + trackView,
       firstRow: Math.max(0, Math.floor(y / rowH)),
       lastRow: Math.min(count - 1, Math.floor((y + height - headerH - 1) / rowH)),
     });

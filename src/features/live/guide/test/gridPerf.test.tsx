@@ -268,7 +268,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     const at = Date.UTC(2026, 9, 23, 12, 30);
     rpc.handlers['epg.grid'] = hourlyWindow(at - 30 * MINUTE);
     renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
-    const cell = await screen.findByRole('button', { name: /^c1 P-1,/ });
+    const cell = await screen.findByRole('button', { name: /^c1 P0,/ });
     const grid = screen.getByTestId('epg-grid');
     const earlier = screen.getByRole('button', { name: '3 hours earlier' });
     const initial = grid.scrollLeft;
@@ -284,7 +284,7 @@ describe('memoised rows (L2-perf-ui-1)', () => {
       expect(layoutBlocks).not.toHaveBeenCalled();
       expect(rpc.of('epg.grid')).toHaveLength(0);
     });
-    expect(screen.getByRole('button', { name: /^c1 P-1,/ })).toBe(cell);
+    expect(screen.getByRole('button', { name: /^c1 P0,/ })).toBe(cell);
     // A wheel gesture immediately after the jump still enables the continuous-scroll treatment.
     fireEvent.wheel(grid, { deltaX: 8 });
     expect(grid.hasAttribute('data-guide-scrolling')).toBe(true);
@@ -778,11 +778,17 @@ describe('guide requests', () => {
     }
     await screen.findByRole('button', { name: new RegExp(`^c${8 * GRID_CHUNK} P6,`) });
     await new Promise((r) => setTimeout(r, 300));
-    const firstRows = (rpc.of('epg.grid') as { refs: Channel['ref'][] }[]).map((a) => Number(a.refs[0]!.itemId.slice(1)));
+    const asked = rpc.of('epg.grid') as { refs: Channel['ref'][]; from: string }[];
+    const firstRow = (a: { refs: Channel['ref'][] }) => Number(a.refs[0]!.itemId.slice(1));
+    const shown = asked.filter((a) => a.from === asked[0]!.from);
+    const firstRows = shown.map(firstRow);
     // Eight chunks passed. Asked for: the first one scrolled into (shown at once), the one it stopped
     // on and the one before it, fetched ahead; a slow test run may add one in passing.
     expect(firstRows.length, JSON.stringify(firstRows)).toBeLessThan(6);
     expect(firstRows).toContain(8 * GRID_CHUNK);
+    // The six-hour buffers either side of the window only go to the chunks it stopped by.
+    const stopped = [7 * GRID_CHUNK, 8 * GRID_CHUNK];
+    expect(asked.filter((a) => !shown.includes(a)).every((a) => stopped.includes(firstRow(a)))).toBe(true);
   }, 30_000);
 
   it('a later visit asks for no window the page is not going to show (L2-perf-desktop-12)', async () => {

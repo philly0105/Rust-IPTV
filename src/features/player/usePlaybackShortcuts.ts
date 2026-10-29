@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useShortcut } from '@/shell/shortcuts';
-import { LIVE_EDGE_SLACK, positionReadout, SEEK_STEP, SEEK_STEP_JL, SEEK_STEP_LARGE, targetOwnsKey, type KeyKind } from './format';
+import { LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, positionReadout, SEEK_STEP, SEEK_STEP_JL, SEEK_STEP_LARGE, targetOwnsKey, type KeyKind } from './format';
 import { playPreviousChannel, setHistoryOpen, useHistoryStore } from './history';
 import { showOsd, useMediaStore } from './media';
 import { exitPip, usePipStore } from './pip';
@@ -122,7 +122,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
   };
   /** Transient readout after an arrow seek: the step, then where playback now is. */
   const seekOsd = (delta: number): void => {
-    const { positionSeconds, durationSeconds, source } = s();
+    const { positionSeconds, durationSeconds, source, mode } = s();
     const w = useMediaStore.getState().seekable;
     showOsd(
       t(delta < 0 ? 'seekBack' : 'seekForward', { count: Math.abs(delta) }),
@@ -130,7 +130,7 @@ export function usePlaybackShortcuts(opts: { channelPanelAvailable: boolean }): 
         position: positionSeconds,
         duration: durationSeconds,
         liveEnd: source?.isLive && w ? w.end : undefined,
-        edgeSlack: LIVE_EDGE_SLACK,
+        edgeSlack: mode === 'embedded-mpv' ? LIVE_EDGE_SLACK_MPV : LIVE_EDGE_SLACK,
       }),
     );
   };

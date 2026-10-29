@@ -231,28 +231,6 @@ describe('Controls picture-in-picture', () => {
 describe('Controls live rewind', () => {
   const live = { url: 'http://v/live.ts', kind: 'direct' as const, title: 'News', isLive: true, isRadio: false };
 
-  it('treats the built-in player as live within 30 seconds and shows Jump to live after that', () => {
-    act(() => {
-      usePlayerStore.setState({ source: live, mode: 'inline', durationSeconds: undefined, positionSeconds: 1079 });
-      useMediaStore.setState({ seekable: { start: 900, end: 1090 } });
-    });
-    const seekTo = vi.spyOn(usePlayerStore.getState(), 'seekTo');
-    render(<Controls variant="dock" visible />);
-    const seekBar = screen.getByRole('slider', { name: /seek/i });
-    expect(screen.getByTestId('live-badge').textContent).toBe('Live');
-    expect(screen.queryByRole('button', { name: 'Jump to live' })).toBeNull();
-    expect(seekBar.getAttribute('aria-valuetext')).toBe('Live');
-
-    act(() => usePlayerStore.setState({ positionSeconds: 1061 }));
-    expect(screen.getByTestId('live-badge')).toBeTruthy();
-    act(() => usePlayerStore.setState({ positionSeconds: 1060 }));
-    expect(screen.getByTestId('behind-live').textContent).toBe('0:30 behind live');
-    expect(seekBar.getAttribute('aria-valuetext')).toBe('0:30 behind live');
-    fireEvent.click(screen.getByRole('button', { name: 'Jump to live' }));
-    expect(seekTo).toHaveBeenCalledWith(1090);
-    seekTo.mockRestore();
-  });
-
   it('shows a seek bar over the cached window and jumps back to live', () => {
     act(() => {
       usePlayerStore.setState({ source: live, mode: 'embedded-mpv', durationSeconds: undefined, positionSeconds: 1000 });

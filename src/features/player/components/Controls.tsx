@@ -54,7 +54,7 @@ import { useToast } from '@/ui/Toast';
 import { Tooltip } from '@/ui/Tooltip';
 import { errorDescription } from '@/ui/States';
 import { cn } from '../cn';
-import { focusFromPointer, formatTime, LIVE_EDGE_SLACK, pressKeepsFocus, SEEK_STEP_JL } from '../format';
+import { focusFromPointer, formatTime, LIVE_EDGE_SLACK, LIVE_EDGE_SLACK_MPV, pressKeepsFocus, SEEK_STEP_JL } from '../format';
 import { setHistoryOpen, useHistoryStore } from '../history';
 import { useMediaStore, type TimeRange } from '../media';
 import { noteMenuDismissed } from '../menuDismiss';
@@ -1500,6 +1500,8 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
   const captionsOn = tracks.text.some((x) => x.selected);
   const episodic = !!source.episodeId;
 
+  // mpv's seekable cache can run ahead of playback even at the live edge.
+  const edgeSlack = mode === 'embedded-mpv' ? LIVE_EDGE_SLACK_MPV : LIVE_EDGE_SLACK;
   const showSeek = isVod ? !!duration : isLive && liveWindowed;
   // Nothing known yet: no "0:00 / 0:00" while the stream (or the mpv session) is still starting.
   const showTime = !!duration || hasPosition || status !== 'loading';
@@ -1732,7 +1734,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                 shown={visible}
                 live={isLive}
                 duration={duration}
-                edgeSlack={LIVE_EDGE_SLACK}
+                edgeSlack={edgeSlack}
                 times={!compact}
                 onSeek={(s, step) => store.seekTo(s, { step })}
               />
@@ -1759,7 +1761,7 @@ export const Controls = memo(function Controls({ variant, visible, compact, shor
                   short={!!compact || narrow}
                   narrow={narrow}
                   tiny={tiny}
-                  edgeSlack={LIVE_EDGE_SLACK}
+                  edgeSlack={edgeSlack}
                   mpv={mode === 'embedded-mpv'}
                 />
               ) : source.isRadio ? (

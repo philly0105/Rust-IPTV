@@ -16,8 +16,10 @@ export const SEEK_STEP_LARGE = 30;
 /** Seconds J and L skip, and the bar's 10 s buttons and a double tap on touch (PL-BAR-HIERARCHY). */
 export const SEEK_STEP_JL = 10;
 
-/** Seconds behind the seekable end that still count as normal live playback. */
-export const LIVE_EDGE_SLACK = 30;
+/** Seconds behind the end of the seekable window that still count as live (the element's buffer). */
+export const LIVE_EDGE_SLACK = 6;
+/** mpv's seekable cache can run well ahead of playback during normal live viewing. */
+export const LIVE_EDGE_SLACK_MPV = 30;
 
 /**
  * "4:20 / 45:00" for VOD; for live "Live" at the edge or "1:20 behind live". The edge uses the

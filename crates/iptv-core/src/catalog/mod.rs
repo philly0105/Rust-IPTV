@@ -54,6 +54,13 @@ pub const FALLBACK_CATEGORY_NAME: &str = "Uncategorized";
 /// `tmdbId` (number), `catchup` (object `{type, days?, source?}`; enables
 /// archive when [`catchup_usable`]), `headers` (object with
 /// userAgent/referrer/origin; per-channel overrides).
+///
+/// An importer may hand the writer `extra` already serialized in
+/// `extra_json` instead (then `extra` is `Null`): a `serde_json::Map` is a
+/// BTreeMap whose first insert allocates a 632-byte leaf, so a mapped Xtream
+/// row's three-key extra held 662 B where its text takes 51 B, and the
+/// writer serialized and freed every map inside the write transaction.
+/// Readers never set it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ItemRow {
     pub source_id: String,
@@ -75,6 +82,9 @@ pub struct ItemRow {
     pub is_radio: bool,
     pub archive_hours: Option<i64>,
     pub extra: serde_json::Value,
+    /// `extra` as the JSON text to store, when the importer serialized it
+    /// already; [`CatalogWriter::insert`] stores it as is and ignores `extra`.
+    pub extra_json: Option<Box<str>>,
     pub position: i64,
 }
 
@@ -100,9 +110,21 @@ impl Default for ItemRow {
             is_radio: false,
             archive_hours: None,
             extra: serde_json::Value::Object(Default::default()),
+            extra_json: None,
             position: 0,
         }
     }
+}
+
+/// `extra` as the text [`ItemRow::extra_json`] holds: `None` for an empty
+/// object, which the writer stores as `{}` anyway. Importers serialize small
+/// borrowing structs whose fields are declared in key order, so the stored
+/// bytes are those a `serde_json::Map` would write.
+pub fn extra_text<T: serde::Serialize>(extra: &T) -> Option<Box<str>> {
+    serde_json::to_string(extra)
+        .ok()
+        .filter(|s| s != "{}")
+        .map(String::into_boxed_str)
 }
 
 impl ItemRow {
@@ -737,11 +759,20 @@ impl<'c> CatalogWriter<'c> {
             Some((base, y)) => (Some(base.as_str()), item.year.or(*y)),
             None => (item.title_base.as_deref(), item.year),
         };
-        let extra = if item.extra.as_object().is_some_and(|o| o.is_empty()) || item.extra.is_null()
-        {
-            "{}".to_string()
-        } else {
-            item.extra.to_string()
+        // Text the importer serialized on the blocking pool is bound as is:
+        // no tree to serialize or free while the write lock is held.
+        let serialized;
+        let extra: &str = match item.extra_json.as_deref() {
+            Some(text) => text,
+            None if item.extra.is_null()
+                || item.extra.as_object().is_some_and(|o| o.is_empty()) =>
+            {
+                "{}"
+            }
+            None => {
+                serialized = item.extra.to_string();
+                &serialized
+            }
         };
         let verdict = language::title_verdict(&item.title);
         let undecided = matches!(
@@ -1405,6 +1436,7 @@ pub(crate) fn read_named(r: &Row<'_>) -> rusqlite::Result<NamedRow> {
             is_radio: r.get(16)?,
             archive_hours: r.get(17)?,
             extra,
+            extra_json: None,
             position: r.get(19)?,
         },
         category_name: r.get(20)?,

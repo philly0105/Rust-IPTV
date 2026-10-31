@@ -37,7 +37,7 @@ use crate::sources::{progress, progress_step, ProgressGate, SaveStep};
 use crate::state::AppState;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -868,10 +868,55 @@ fn split_categories(
     (live_cats, radio_cats)
 }
 
-fn put(extra: &mut Map<String, Value>, key: &str, v: Option<impl Into<Value>>) {
-    if let Some(v) = v {
-        extra.insert(key.to_string(), v.into());
-    }
+// The mapped rows carry their `extra` as JSON text (`ItemRow::extra_json`),
+// serialized here on the blocking pool from these borrowing structs. Their
+// fields are declared in the key order a `serde_json::Map` (a BTreeMap)
+// writes, so the stored bytes are the same as before (IN-3 remainder, R3-1).
+// With a map (a 632-byte leaf on its first insert) a mapped row retained
+// 1,160-1,570 B, now 530-790 B: about 160 MB less at 50k channels, 180k
+// movies and 20k series, held from the decode to the write. The writer no
+// longer serializes and frees a map per row inside the write transaction.
+
+/// `extra` of a live or radio row.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveExtra<'a> {
+    /// Only when there is more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category_ids: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    custom_sid: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_adult: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_type: Option<&'a str>,
+    /// 0 or 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tv_archive: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tv_archive_duration: Option<i64>,
+}
+
+/// `extra` of a movie or series row.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VodExtra<'a> {
+    /// Only when there is more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category_ids: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    genres: Option<Vec<&'a str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_adult: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plot: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tmdb_id: Option<i64>,
+}
+
+/// `categoryIds` of `extra`: only for an item in more than one category.
+fn extra_category_ids(ids: &[String]) -> Option<&[String]> {
+    (ids.len() > 1).then_some(ids)
 }
 
 fn clean_url(u: Option<String>) -> Option<String> {
@@ -885,35 +930,36 @@ fn rating(r: Option<f64>, r5: Option<f64>) -> Option<f64> {
         .map(|v| (v.min(10.0) * 10.0).round() / 10.0)
 }
 
-fn split_genres(g: Option<&str>) -> Option<Value> {
-    let v: Vec<Value> = g?
+fn split_genres(g: Option<&str>) -> Option<Vec<&str>> {
+    let v: Vec<&str> = g?
         .split([',', '/', '|'])
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|s| Value::String(s.to_string()))
         .collect();
-    (!v.is_empty()).then_some(Value::Array(v))
+    (!v.is_empty()).then_some(v)
 }
 
-pub fn live_row(source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
+// The mappers leave `source_id` empty: the writer stores its own
+// (`CatalogWriter::insert`), so a copy of the 36-byte id per row is waste.
+// The parameter stays for callers of these public functions.
+
+pub fn live_row(_source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
     let id = r.stream_id?;
     let is_radio = r.stream_type.as_deref().is_some_and(|t| {
         t.eq_ignore_ascii_case("radio_streams") || t.eq_ignore_ascii_case("radio")
     });
     let archive = r.tv_archive == Some(true);
     let days = r.tv_archive_duration.filter(|d| *d > 0);
-    let mut extra = Map::new();
-    put(&mut extra, "tvArchive", r.tv_archive.map(i64::from));
-    put(&mut extra, "tvArchiveDuration", days);
-    put(&mut extra, "isAdult", r.is_adult);
-    put(&mut extra, "customSid", r.custom_sid);
-    put(&mut extra, "streamType", r.stream_type);
-    if r.category_ids.len() > 1 {
-        extra.insert("categoryIds".into(), r.category_ids.clone().into());
-    }
+    let extra_json = catalog::extra_text(&LiveExtra {
+        category_ids: extra_category_ids(&r.category_ids),
+        custom_sid: r.custom_sid.as_deref(),
+        is_adult: r.is_adult,
+        stream_type: r.stream_type.as_deref(),
+        tv_archive: r.tv_archive.map(i64::from),
+        tv_archive_duration: days,
+    });
     let title = r.name.unwrap_or_else(|| format!("Channel {id}"));
     Some(ItemRow {
-        source_id: source_id.to_string(),
         content_type: if is_radio {
             ContentType::Radio
         } else {
@@ -932,28 +978,27 @@ pub fn live_row(source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
         archive_hours: archive
             .then(|| super::meta::archive_days_to_hours(days.unwrap_or(1)))
             .flatten(),
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json,
         position,
         item_id: id,
         ..ItemRow::default()
     })
 }
 
-pub fn vod_row(source_id: &str, position: i64, r: RawVod) -> Option<ItemRow> {
+pub fn vod_row(_source_id: &str, position: i64, r: RawVod) -> Option<ItemRow> {
     let tmdb_id = r.tmdb_id();
     let id = r.stream_id?;
     let title = r.name.or(r.title).unwrap_or_else(|| format!("Movie {id}"));
-    let mut extra = Map::new();
-    put(&mut extra, "tmdbId", tmdb_id);
-    put(&mut extra, "plot", r.plot);
-    put(&mut extra, "genres", split_genres(r.genre.as_deref()));
-    put(&mut extra, "isAdult", r.is_adult);
-    if r.category_ids.len() > 1 {
-        extra.insert("categoryIds".into(), r.category_ids.clone().into());
-    }
+    let extra_json = catalog::extra_text(&VodExtra {
+        category_ids: extra_category_ids(&r.category_ids),
+        genres: split_genres(r.genre.as_deref()),
+        is_adult: r.is_adult,
+        plot: r.plot.as_deref(),
+        tmdb_id,
+    });
     let poster = clean_url(r.stream_icon).or(clean_url(r.cover));
     Some(ItemRow {
-        source_id: source_id.to_string(),
         content_type: ContentType::Movie,
         category_id: item_category(r.category_id, &r.category_ids),
         title,
@@ -963,32 +1008,31 @@ pub fn vod_row(source_id: &str, position: i64, r: RawVod) -> Option<ItemRow> {
         added: added_to_rfc3339(r.added.as_deref()),
         year: r.year.filter(|y| (1900..=2100).contains(y)),
         container_extension: clean_extension(r.container_extension.as_deref()),
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json,
         position,
         item_id: id,
         ..ItemRow::default()
     })
 }
 
-pub fn series_row(source_id: &str, position: i64, r: RawSeries) -> Option<ItemRow> {
+pub fn series_row(_source_id: &str, position: i64, r: RawSeries) -> Option<ItemRow> {
     let tmdb_id = r.tmdb_id();
     let release = r.release().map(str::to_owned);
     let id = r.series_id?;
     let title = r.name.or(r.title).unwrap_or_else(|| format!("Series {id}"));
-    let mut extra = Map::new();
-    put(&mut extra, "tmdbId", tmdb_id);
-    put(&mut extra, "plot", r.plot);
-    put(&mut extra, "genres", split_genres(r.genre.as_deref()));
-    put(&mut extra, "isAdult", r.is_adult);
-    if r.category_ids.len() > 1 {
-        extra.insert("categoryIds".into(), r.category_ids.clone().into());
-    }
+    let extra_json = catalog::extra_text(&VodExtra {
+        category_ids: extra_category_ids(&r.category_ids),
+        genres: split_genres(r.genre.as_deref()),
+        is_adult: r.is_adult,
+        plot: r.plot.as_deref(),
+        tmdb_id,
+    });
     let year = r
         .year
         .filter(|y| (1900..=2100).contains(y))
         .or_else(|| year_from_date(release.as_deref()));
     Some(ItemRow {
-        source_id: source_id.to_string(),
         content_type: ContentType::Series,
         category_id: item_category(r.category_id, &r.category_ids),
         title,
@@ -998,7 +1042,8 @@ pub fn series_row(source_id: &str, position: i64, r: RawSeries) -> Option<ItemRo
         rating: rating(r.rating, r.rating_5based),
         added: added_to_rfc3339(r.last_modified.as_deref()),
         year,
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json,
         position,
         item_id: id,
         ..ItemRow::default()
@@ -1012,6 +1057,193 @@ mod tests {
 
     fn parse<T: serde::de::DeserializeOwned>(v: Value) -> T {
         serde_json::from_value(v).unwrap()
+    }
+
+    /// A mapped row's `extra`, parsed from the text it carries.
+    fn extra_value(row: &ItemRow) -> Value {
+        assert!(row.extra.is_null(), "mapped rows carry text only");
+        serde_json::from_str(row.extra_json.as_deref().unwrap_or("{}")).unwrap()
+    }
+
+    /// The text the writer stores for a mapped row.
+    fn stored_extra(row: &ItemRow) -> &str {
+        row.extra_json.as_deref().unwrap_or("{}")
+    }
+
+    // The extras as the mappers built them before R3-1, through a
+    // `serde_json::Map`, for the equivalence test below.
+
+    fn put(extra: &mut serde_json::Map<String, Value>, key: &str, v: Option<impl Into<Value>>) {
+        if let Some(v) = v {
+            extra.insert(key.to_string(), v.into());
+        }
+    }
+
+    fn old_genres(g: Option<&str>) -> Option<Value> {
+        split_genres(g).map(|v| v.into_iter().map(|s| Value::String(s.into())).collect())
+    }
+
+    fn old_live_extra(r: &RawLive) -> String {
+        let days = r.tv_archive_duration.filter(|d| *d > 0);
+        let mut extra = serde_json::Map::new();
+        put(&mut extra, "tvArchive", r.tv_archive.map(i64::from));
+        put(&mut extra, "tvArchiveDuration", days);
+        put(&mut extra, "isAdult", r.is_adult);
+        put(&mut extra, "customSid", r.custom_sid.clone());
+        put(&mut extra, "streamType", r.stream_type.clone());
+        if r.category_ids.len() > 1 {
+            extra.insert("categoryIds".into(), r.category_ids.clone().into());
+        }
+        old_text(extra)
+    }
+
+    fn old_vod_extra(
+        tmdb_id: Option<i64>,
+        plot: &Option<String>,
+        genre: &Option<String>,
+        is_adult: Option<bool>,
+        category_ids: &[String],
+    ) -> String {
+        let mut extra = serde_json::Map::new();
+        put(&mut extra, "tmdbId", tmdb_id);
+        put(&mut extra, "plot", plot.clone());
+        put(&mut extra, "genres", old_genres(genre.as_deref()));
+        put(&mut extra, "isAdult", is_adult);
+        if category_ids.len() > 1 {
+            extra.insert("categoryIds".into(), category_ids.to_vec().into());
+        }
+        old_text(extra)
+    }
+
+    /// What `CatalogWriter::insert` stored for an `extra` map.
+    fn old_text(extra: serde_json::Map<String, Value>) -> String {
+        if extra.is_empty() {
+            "{}".into()
+        } else {
+            Value::Object(extra).to_string()
+        }
+    }
+
+    /// R3-1: the mappers serialize `extra` through borrowing structs; the
+    /// stored text is byte for byte what the `serde_json::Map` path wrote,
+    /// for every combination of present and missing keys, escapes and
+    /// non-ASCII text included.
+    #[test]
+    fn mapped_extra_text_matches_the_map_it_replaced() {
+        let plots = [
+            json!(null),
+            json!("A \"quoted\" plot\nwith a newline, a tab\t, a \\ and ünïcødé 映画 🎬"),
+            json!(""),
+        ];
+        let genres = [
+            json!(null),
+            json!("Drama, Crime / Thriller|  "),
+            json!(" , / "),
+        ];
+        let cats = [json!(null), json!(["7"]), json!([3, "4", "x\"y"])];
+        let mut checked = 0;
+        for plot in &plots {
+            for genre in &genres {
+                for (i, cat) in cats.iter().enumerate() {
+                    for adult in [json!(null), json!(0), json!("1")] {
+                        let flag = i % 2 == 0;
+                        let live = json!({
+                            "stream_id": 1, "category_ids": cat, "is_adult": adult,
+                            "tv_archive": if flag { json!(1) } else { json!(null) },
+                            "tv_archive_duration": if flag { json!("5") } else { json!(-1) },
+                            "custom_sid": if flag { json!("sid:1") } else { json!(null) },
+                            "stream_type": if flag { json!("live") } else { json!(null) },
+                        });
+                        let r: RawLive = parse(live.clone());
+                        let want = old_live_extra(&r);
+                        let row = live_row("s", 0, parse(live)).unwrap();
+                        assert_eq!(stored_extra(&row), want);
+
+                        let vod = json!({
+                            "stream_id": 2, "category_ids": cat, "is_adult": adult,
+                            "plot": plot, "genre": genre,
+                            "tmdb": if flag { json!("550") } else { json!(null) },
+                        });
+                        let r: RawVod = parse(vod.clone());
+                        let want = old_vod_extra(
+                            r.tmdb_id(),
+                            &r.plot,
+                            &r.genre,
+                            r.is_adult,
+                            &r.category_ids,
+                        );
+                        let row = vod_row("s", 0, parse(vod)).unwrap();
+                        assert_eq!(stored_extra(&row), want);
+
+                        let series = json!({
+                            "series_id": 3, "category_ids": cat, "is_adult": adult,
+                            "plot": plot, "genre": genre,
+                            "tmdb_id": if flag { json!(77) } else { json!(null) },
+                        });
+                        let r: RawSeries = parse(series.clone());
+                        let want = old_vod_extra(
+                            r.tmdb_id(),
+                            &r.plot,
+                            &r.genre,
+                            r.is_adult,
+                            &r.category_ids,
+                        );
+                        let row = series_row("s", 0, parse(series)).unwrap();
+                        assert_eq!(stored_extra(&row), want);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(checked, 81);
+    }
+
+    /// R3-1: mapped rows leave `source_id` to the writer, which stores its own.
+    #[test]
+    fn mapped_rows_are_written_with_the_writers_source_id_and_extra() {
+        let sid = "s-x";
+        let mut conn = catalog_db(sid);
+        let live = live_row(
+            sid,
+            0,
+            parse(json!({"stream_id": 1, "name": "One", "is_adult": 1, "category_ids": [1, 2]})),
+        )
+        .unwrap();
+        let movie = vod_row(
+            sid,
+            0,
+            parse(json!({"stream_id": 2, "name": "Two", "plot": "P", "tmdb": 9})),
+        )
+        .unwrap();
+        assert!(live.source_id.is_empty() && movie.source_id.is_empty());
+        replace_catalogs(
+            &mut conn,
+            sid,
+            vec![
+                part(ContentType::Live, vec![live]),
+                part(ContentType::Movie, vec![movie]),
+            ],
+            None,
+            &mut |_| {},
+        )
+        .unwrap();
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT source_id, extra_json FROM items ORDER BY content_type")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            [
+                (
+                    sid.into(),
+                    r#"{"categoryIds":["1","2"],"isAdult":true}"#.into()
+                ),
+                (sid.into(), r#"{"plot":"P","tmdbId":9}"#.into()),
+            ]
+        );
     }
 
     #[test]
@@ -1035,7 +1267,7 @@ mod tests {
         assert_eq!(row.number, Some(7));
         assert_eq!(row.archive_hours, Some(72));
         assert_eq!(row.added.as_deref(), Some("2023-11-14T22:13:20Z"));
-        assert_eq!(row.extra["isAdult"], false);
+        assert_eq!(extra_value(&row)["isAdult"], false);
         assert!(
             row.url.is_none(),
             "credentials must not be stored in items.url"
@@ -1079,7 +1311,7 @@ mod tests {
         let row = vod_row("s", 0, v).unwrap();
         assert_eq!(row.rating, Some(7.0));
         assert_eq!(row.container_extension.as_deref(), Some("mkv"));
-        assert_eq!(row.extra["tmdbId"], 550);
+        assert_eq!(extra_value(&row)["tmdbId"], 550);
         assert_eq!(row.category_id, "10");
 
         let s: RawSeries = parse(json!({
@@ -1091,7 +1323,7 @@ mod tests {
         assert_eq!(row.year, Some(2018));
         assert_eq!(row.backdrop_url.as_deref(), Some("http://x/b.jpg"));
         assert_eq!(row.rating, Some(8.3));
-        assert_eq!(row.extra["genres"], json!(["Drama", "Crime"]));
+        assert_eq!(extra_value(&row)["genres"], json!(["Drama", "Crime"]));
         assert_eq!(row.category_id, "5");
     }
 

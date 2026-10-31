@@ -628,6 +628,7 @@ impl RowBuilder {
             is_radio: ct == ContentType::Radio,
             archive_hours,
             extra: serde_json::Value::Object(extra),
+            extra_json: None,
             position,
         }
     }

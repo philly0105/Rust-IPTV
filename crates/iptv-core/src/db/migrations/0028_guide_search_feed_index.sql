@@ -1,0 +1,13 @@
+-- 0028: the guide search rows of one feed, by feed.
+--
+-- A refresh used to rebuild the whole guide search index after its swap, in
+-- a second write transaction: every title of every stored feed folded and
+-- indexed again and every epg_search_rows row rewritten, so each feed's
+-- refresh re-indexed all of them (0.25 s per 200k programmes of all feeds
+-- on a desktop, 2-3x that on an N100, with user writes waiting). The swap
+-- (epg::store::commit_staging) now replaces only the refreshed feed's index
+-- entries and search rows in its own transaction, and deletes that feed's
+-- search rows by feed: this index keeps that delete off a scan of every
+-- feed's rows (R2-1). Built here from the rows already stored, about 0.1 s
+-- per 600k rows.
+CREATE INDEX IF NOT EXISTS idx_epg_search_rows_feed ON epg_search_rows(feed);

@@ -7,6 +7,7 @@
 //! the real url inside one transaction. Readers never see a half-imported
 //! feed, and a failed import leaves the previous data untouched.
 
+use super::search::SwapUpkeep;
 use super::xmltv::{XmltvChannel, XmltvProgramme};
 use crate::db::now_rfc3339;
 use crate::error::CoreResult;
@@ -384,6 +385,13 @@ impl<'c> StagingWriter<'c> {
 /// status `ok` with counts, fetch time and etag. Returns the programmes
 /// stored. [`STAGE_TABLE`] is left to the caller (`ingest_reader` closes
 /// the temp database; dropping the table would first walk its pages).
+///
+/// A guide search index that matched the table still matches it after the
+/// swap, kept in step inside this transaction ([`SwapUpkeep`]): the feed's
+/// old entries and search rows go before its programmes and the new ones
+/// are written after the copy, or the whole index is written again when
+/// that costs less. A stale one stays marked stale and is rebuilt after the
+/// swap (C5).
 pub fn commit_staging(
     conn: &mut Connection,
     url: &str,
@@ -391,7 +399,12 @@ pub fn commit_staging(
     channels: u64,
 ) -> CoreResult<u64> {
     let key = staging_key(url);
+    super::search::register_fold(conn)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let upkeep = swap_upkeep(&tx, url)?;
+    if let Some(upkeep) = upkeep {
+        super::search::unindex_before_swap(&tx, url, upkeep)?;
+    }
     tx.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
     tx.execute("DELETE FROM epg_channels WHERE epg_url = ?1", [url])?;
     // A feed that lists a slot twice (same channel and start) keeps the
@@ -412,8 +425,11 @@ pub fn commit_staging(
         params![url, key],
     )?;
     tx.execute("DELETE FROM epg_sources WHERE url = ?1", [&key])?;
-    // The guide search index no longer matches (rebuilt after the swap, C5).
-    super::search::invalidate_index(&tx)?;
+    match upkeep {
+        Some(upkeep) => super::search::index_after_swap(&tx, url, upkeep)?,
+        // The guide search index was stale already (rebuilt after the swap).
+        None => super::search::invalidate_index(&tx)?,
+    }
     tx.execute(
         "UPDATE epg_sources SET status = 'ok', error = NULL, last_fetch_at = ?2, channel_count = ?3,
          program_count = ?4, etag = ?5 WHERE url = ?1",
@@ -421,6 +437,31 @@ pub fn commit_staging(
     )?;
     tx.commit()?;
     Ok(programs)
+}
+
+/// How the swap of `url` keeps the guide search index in step: `None` while
+/// the index is stale, else [`SwapUpkeep::choose`] on the feed's stored
+/// programme count, the staged rows (the rowids of [`STAGE_TABLE`] count up
+/// from one) and the other feeds' stored counts. The counts
+/// (`program_count`) only steer the cost: either upkeep leaves the index a
+/// rebuild would write.
+fn swap_upkeep(conn: &Connection, url: &str) -> CoreResult<Option<SwapUpkeep>> {
+    if !super::search::index_ready(conn)? {
+        return Ok(None);
+    }
+    let (old, others): (i64, i64) = conn.query_row(
+        "SELECT coalesce(sum(program_count) FILTER (WHERE url = ?1), 0),
+                coalesce(sum(program_count) FILTER (WHERE url <> ?1), 0)
+         FROM epg_sources WHERE origin <> ?2",
+        params![url, STAGING_ORIGIN],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let new: i64 = conn.query_row(
+        &format!("SELECT coalesce(max(rowid), 0) FROM {STAGE_TABLE}"),
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(Some(SwapUpkeep::choose(old, new, others)))
 }
 
 /// Boot cleanup: drops leftover staging rows and resets `fetching` (a crash
@@ -562,6 +603,203 @@ mod tests {
         };
         assert_eq!(title(1000), "First");
         assert_eq!(title(2800), "Next");
+    }
+
+    /// Stages `progs` for `url` and swaps them in; returns the search index
+    /// upkeep the swap chose (`None`: the index was stale).
+    fn refresh(
+        conn: &mut Connection,
+        url: &str,
+        progs: &[(&str, i64, &str)],
+    ) -> Option<SwapUpkeep> {
+        let key = begin_staging(conn, url).unwrap();
+        {
+            let mut w = StagingWriter::new(conn, key);
+            for (channel, start, title) in progs {
+                w.push_programme(prog(channel, *start, title)).unwrap();
+            }
+            w.flush().unwrap();
+        }
+        let upkeep = swap_upkeep(conn, url).unwrap();
+        commit_staging(conn, url, None, 0).unwrap();
+        upkeep
+    }
+
+    type Terms = Vec<(String, i64, String, i64)>;
+    type SearchRows = Vec<(i64, i64, i64, i64, String)>;
+    type IndexState = (Terms, Vec<(i64, Vec<u8>)>, Vec<u8>, SearchRows);
+
+    /// Everything guide search reads of its index: each term instance
+    /// (term, rowid, column, offset), each row's token count, the totals
+    /// record, and the search rows.
+    fn index_state(conn: &Connection) -> IndexState {
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS temp.fts_terms USING fts5vocab(main, epg_programs_fts, instance)",
+        )
+        .unwrap();
+        let terms = conn
+            .prepare("SELECT term, doc, col, offset FROM temp.fts_terms ORDER BY 1, 2, 3, 4")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let sizes = conn
+            .prepare("SELECT id, sz FROM epg_programs_fts_docsize ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let totals = conn
+            .query_row(
+                "SELECT block FROM epg_programs_fts_data WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let rows = conn
+            .prepare("SELECT id, start, stop, feed, channel_id FROM epg_search_rows ORDER BY id")
+            .unwrap()
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        (terms, sizes, totals, rows)
+    }
+
+    /// The index kept by the swaps is the index a full rebuild writes.
+    fn assert_matches_a_rebuild(conn: &mut Connection, step: &str) {
+        assert!(super::super::search::index_ready(conn).unwrap(), "{step}");
+        let kept = index_state(conn);
+        assert!(!kept.0.is_empty() || kept.3.is_empty(), "{step}");
+        super::super::search::rebuild_index(conn).unwrap();
+        assert_eq!(index_state(conn), kept, "{step}");
+    }
+
+    /// R2-1: a swap keeps a matching guide search index matching in its own
+    /// transaction, feed by feed (old entries removed with the titles folded
+    /// as they were indexed, new ones added) or, when the other feeds hold
+    /// too few programmes, by writing it all again; either way the result is
+    /// exactly what a rebuild writes (terms, token counts, totals and search
+    /// rows), through several swaps in a row, with case, diacritics, Greek,
+    /// Vietnamese, punctuation and repeated slots. A stale index stays stale
+    /// for the rebuild.
+    #[test]
+    fn swaps_keep_the_search_index_feed_by_feed() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        for url in ["a", "b", "c"] {
+            conn.execute("INSERT INTO epg_sources(url) VALUES (?1)", [url])
+                .unwrap();
+        }
+        let titles = |tag: &str| -> Vec<String> {
+            [
+                "Café Society",
+                "CAFE SOCIETY",
+                "Ελληνικά ΕΙΔΗΣΕΙΣ",
+                "Thời sự",
+                "Le Journal-de 20h!",
+                "news",
+            ]
+            .iter()
+            .map(|t| format!("{t} {tag}"))
+            .collect()
+        };
+        let feed =
+            |tag: &str, channels: &[&'static str], n: i64| -> Vec<(&'static str, i64, String)> {
+                let t = titles(tag);
+                let mut out = Vec::new();
+                for ch in channels {
+                    for i in 0..n {
+                        out.push((
+                            *ch,
+                            1_800_000_000 + i * 1800,
+                            t[i as usize % t.len()].clone(),
+                        ));
+                    }
+                }
+                out
+            };
+        let swap = |conn: &mut Connection, url: &str, progs: &[(&'static str, i64, String)]| {
+            let progs: Vec<(&str, i64, &str)> =
+                progs.iter().map(|(c, s, t)| (*c, *s, t.as_str())).collect();
+            refresh(conn, url, &progs)
+        };
+        use SwapUpkeep::{Feed, Whole};
+        assert_eq!(swap(&mut conn, "a", &feed("alpha", &["x", "y"], 8)), None);
+        assert_eq!(swap(&mut conn, "b", &feed("beta", &["x", "z"], 6)), None);
+        assert!(!super::super::search::index_ready(&conn).unwrap());
+        super::super::search::rebuild_index(&mut conn).unwrap();
+
+        // A new feed (5 against 28 elsewhere), a feed replaced by other
+        // titles with a repeated slot (12 -> 5 against 21), then a feed
+        // emptied while the others hold too few (16 -> 0 against 9).
+        assert_eq!(swap(&mut conn, "c", &feed("gamma", &["y"], 5)), Some(Feed));
+        let mut beta = feed("Δέλτα", &["x"], 4);
+        beta.push(("x", 1_800_000_000, "Repeat ignored".into()));
+        assert_eq!(swap(&mut conn, "b", &beta), Some(Feed));
+        assert_matches_a_rebuild(&mut conn, "feed by feed");
+        assert_eq!(swap(&mut conn, "a", &[]), Some(Whole));
+        assert_matches_a_rebuild(&mut conn, "feed emptied");
+
+        // The only feed with programmes, then a second one back.
+        assert_eq!(swap(&mut conn, "c", &[]), Some(Whole));
+        assert_eq!(
+            swap(&mut conn, "b", &feed("Ωμέγα", &["x", "y"], 7)),
+            Some(Whole)
+        );
+        assert_matches_a_rebuild(&mut conn, "only feed");
+        assert_eq!(swap(&mut conn, "a", &feed("again", &["x"], 3)), Some(Feed));
+        assert_eq!(swap(&mut conn, "c", &feed("more", &["z"], 4)), Some(Feed));
+        assert_matches_a_rebuild(&mut conn, "feeds back");
+
+        // A stale index stays stale.
+        super::super::search::invalidate_index(&conn).unwrap();
+        assert_eq!(swap(&mut conn, "c", &feed("late", &["z"], 2)), None);
+        assert!(!super::super::search::index_ready(&conn).unwrap());
+    }
+
+    /// R2-1: a feed's search rows are deleted through
+    /// `idx_epg_search_rows_feed` (migration 0028), not a scan of every
+    /// feed's rows. The `epg_programs` reads are in the `db` index test.
+    #[test]
+    fn feed_search_rows_are_deleted_through_their_index() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        let mut stmt = conn
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {}",
+                super::super::search::UNINDEX_ROWS_SQL
+            ))
+            .unwrap();
+        let plan: Vec<String> = stmt
+            .query_map(["u"], |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            plan.iter().any(|d| d.contains("idx_epg_search_rows_feed")),
+            "{plan:?}"
+        );
+        assert!(plan.iter().all(|d| !d.starts_with("SCAN")), "{plan:?}");
+    }
+
+    /// R2-1: a feed's own entries are replaced only when the other feeds
+    /// hold more than `old + new / 2` programmes.
+    #[test]
+    fn swap_upkeep_replaces_a_feed_only_when_the_others_outweigh_it() {
+        use SwapUpkeep::{Feed, Whole};
+        let n = 200_000;
+        assert_eq!(SwapUpkeep::choose(n, n, 0), Whole, "one feed");
+        assert_eq!(SwapUpkeep::choose(n, n, n), Whole, "two equal feeds");
+        assert_eq!(SwapUpkeep::choose(n, n, 2 * n), Feed, "three equal feeds");
+        assert_eq!(SwapUpkeep::choose(0, n, n / 2), Whole, "a big new feed");
+        assert_eq!(SwapUpkeep::choose(0, n, n), Feed, "a new feed");
+        assert_eq!(SwapUpkeep::choose(n, 0, n), Whole, "emptied, others as big");
+        assert_eq!(SwapUpkeep::choose(n, 0, n + 1), Feed);
     }
 
     /// Migration 0007 drops the cached guide (which may hold duplicates from

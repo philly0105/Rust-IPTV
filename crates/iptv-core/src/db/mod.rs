@@ -265,6 +265,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0027_expiry_and_resume_indexes",
         sql: include_str!("migrations/0027_expiry_and_resume_indexes.sql"),
     },
+    Migration {
+        version: 28,
+        name: "0028_guide_search_feed_index",
+        sql: include_str!("migrations/0028_guide_search_feed_index.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -898,10 +903,17 @@ mod tests {
             // epg/store.rs: replace, clear and remove a feed.
             "DELETE FROM epg_programs WHERE epg_url = ?1",
             "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
+            // epg/search.rs: the swap's upkeep of one feed's index entries and
+            // search rows.
+            crate::epg::search::UNINDEX_FTS_SQL,
+            crate::epg::search::INDEX_FTS_SQL,
+            crate::epg::search::INDEX_ROWS_SQL,
             // epg/search.rs: guide search through the title index, and its fallback scan.
             crate::epg::search::FTS_SQL,
             crate::epg::search::SCAN_SQL,
         ];
+        // The index upkeep statements fold titles in SQL.
+        crate::epg::search::register_fold(&conn).unwrap();
         for sql in statements {
             let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
             let args = vec![rusqlite::types::Null; stmt.parameter_count()];

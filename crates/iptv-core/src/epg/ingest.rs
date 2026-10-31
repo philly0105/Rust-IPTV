@@ -179,8 +179,9 @@ pub fn ingest_reader(
         "PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0; PRAGMA temp_store=FILE;",
     )?;
     let result = ingest_inner(conn, url, reader, window, etag, on_progress);
-    // Guide search (C5): the swap (or a discarded staging) marked the title
-    // index stale; rebuild it while the bulk-load cache is still large.
+    // Guide search (C5): when the swap found the title index stale already
+    // (or a discarded staging marked it), rebuild it while the bulk-load
+    // cache is still large. A matching index was kept in step by the swap.
     super::search::refresh_index(conn);
     let restore = conn.execute_batch(&format!(
         "PRAGMA cache_size={cache}; PRAGMA wal_autocheckpoint={autockpt}; PRAGMA temp_store={temp_store};"

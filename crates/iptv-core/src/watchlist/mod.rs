@@ -40,7 +40,7 @@ use crate::state::AppState;
 use crate::userstate::{normalize_ts_str, now_ts};
 use rusqlite::{params, Connection, Row, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -265,12 +265,12 @@ pub fn list_filtered(
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// The refs in My List, in list order.
-fn ordered_refs(conn: &Connection) -> CoreResult<Vec<ItemRef>> {
+/// The refs in My List, in list order, each with its stored position.
+fn ordered_positions(conn: &Connection) -> CoreResult<Vec<(ItemRef, i64)>> {
     let mut stmt = conn.prepare_cached(&format!(
-        "SELECT w.source_id, w.content_type, w.item_id FROM watchlist w {ORDER_BY}"
+        "SELECT w.source_id, w.content_type, w.item_id, w.position FROM watchlist w {ORDER_BY}"
     ))?;
-    let rows = stmt.query_map([], |row| parse_ref(row, 0))?;
+    let rows = stmt.query_map([], |row| Ok((parse_ref(row, 0)?, row.get(3)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
@@ -404,19 +404,19 @@ pub fn reorder(conn: &mut Connection, refs: &[ItemRef]) -> CoreResult<()> {
     validate_refs(refs)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     {
-        let current = ordered_refs(&tx)?;
-        let present: HashSet<&ItemRef> = current.iter().collect();
+        let current = ordered_positions(&tx)?;
+        let present: HashMap<&ItemRef, i64> = current.iter().map(|(r, p)| (r, *p)).collect();
         let mut seen: HashSet<&ItemRef> = HashSet::new();
         let listed: Vec<&ItemRef> = refs
             .iter()
-            .filter(|r| present.contains(r) && seen.insert(*r))
+            .filter(|r| present.contains_key(r) && seen.insert(*r))
             .collect();
         let mut listed = listed.into_iter();
         // Walk the current order: a listed entry's place takes the next
         // listed ref, an unlisted entry stays put.
         let order: Vec<&ItemRef> = current
             .iter()
-            .map(|r| {
+            .map(|(r, _)| {
                 if seen.contains(r) {
                     listed.next().unwrap_or(r)
                 } else {
@@ -429,6 +429,11 @@ pub fn reorder(conn: &mut Connection, refs: &[ItemRef]) -> CoreResult<()> {
              WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
         )?;
         for (i, r) in order.into_iter().enumerate() {
+            // Entries already at their index are not rewritten: one move in
+            // a long list wrote every row and its index entry (R4-5).
+            if present.get(r) == Some(&(i as i64)) {
+                continue;
+            }
             set.execute(params![
                 r.source_id,
                 r.content_type.as_str(),
@@ -695,6 +700,42 @@ mod tests {
         // An add after a reorder still lands on top.
         toggle(&mut c, &movie("5"), &snap("5")).unwrap();
         assert_eq!(ids(&c), ["5", "1", "2", "3", "4"]);
+    }
+
+    /// R4-5: a reorder writes only the entries whose position changes, and
+    /// every entry still ends at its index.
+    #[test]
+    fn reorder_writes_only_the_entries_that_move() {
+        let mut c = conn();
+        for id in ["1", "2", "3", "4", "5"] {
+            toggle(&mut c, &movie(id), &snap(id)).unwrap();
+        }
+        let positions = |c: &Connection| -> Vec<(String, i64)> {
+            ordered_positions(c)
+                .unwrap()
+                .into_iter()
+                .map(|(r, p)| (r.item_id, p))
+                .collect()
+        };
+        let writes = |c: &mut Connection, ids: &[&str]| {
+            let refs: Vec<ItemRef> = ids.iter().map(|id| movie(id)).collect();
+            let before = c.total_changes();
+            reorder(c, &refs).unwrap();
+            c.total_changes() - before
+        };
+        // New entries go on top with descending positions: the first
+        // reorder normalizes all but the entry already at its index.
+        let first = writes(&mut c, &["5", "4", "3", "2", "1"]);
+        assert!(first >= 4, "normalized {first} rows");
+        assert_eq!(writes(&mut c, &["5", "3", "4", "2", "1"]), 2);
+        assert_eq!(writes(&mut c, &["1", "5"]), 2);
+        assert_eq!(
+            positions(&c),
+            [("1", 0), ("3", 1), ("4", 2), ("2", 3), ("5", 4)]
+                .map(|(id, p)| (id.to_string(), p))
+                .to_vec()
+        );
+        assert_eq!(writes(&mut c, &["1", "3", "4", "2", "5"]), 0);
     }
 
     #[test]

@@ -219,13 +219,17 @@ pub fn favorites_list_filtered(
     favorites_read(conn, source_id, hide, quality, true)
 }
 
-fn favorites_read(
+/// Order of every favorites reader.
+const FAVORITES_ORDER: &str = "ORDER BY f.position ASC, f.added_at ASC, f.rowid ASC";
+
+/// The ` AND` clauses over alias `f` that drop the favorites hide mode
+/// (`hide`), a channel edit (`edits`) or the quality filter hides.
+fn favorites_shown(
     conn: &Connection,
-    source_id: Option<&str>,
     hide: Option<Hide>,
     quality: Option<QualityFilter>,
     edits: bool,
-) -> CoreResult<Vec<FavoriteEntry>> {
+) -> CoreResult<String> {
     let locked = match hide {
         Some(h) => crate::parental::filter::by_ref(conn, "f", h)?,
         None => String::new(),
@@ -236,10 +240,42 @@ fn favorites_read(
         String::new()
     };
     let shown = quality_by_ref(quality, "f");
+    Ok(format!("{locked}{edited}{shown}"))
+}
+
+/// Refs and stored positions of [`favorites_read`]'s rows, in its order,
+/// without reading the snapshots (reorder).
+fn favorites_refs(
+    conn: &Connection,
+    source_id: Option<&str>,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+    edits: bool,
+) -> CoreResult<Vec<(ItemRef, i64)>> {
+    let shown = favorites_shown(conn, hide, quality, edits)?;
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT f.source_id, f.content_type, f.item_id, f.position
+         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){shown}
+         {FAVORITES_ORDER}"
+    ))?;
+    let rows = stmt.query_map(params![source_id], |row| {
+        Ok((parse_ref(row, 0)?, row.get(3)?))
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+fn favorites_read(
+    conn: &Connection,
+    source_id: Option<&str>,
+    hide: Option<Hide>,
+    quality: Option<QualityFilter>,
+    edits: bool,
+) -> CoreResult<Vec<FavoriteEntry>> {
+    let shown = favorites_shown(conn, hide, quality, edits)?;
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT f.source_id, f.content_type, f.item_id, f.added_at, f.position, f.snapshot_json
-         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){locked}{edited}{shown}
-         ORDER BY f.position ASC, f.added_at ASC, f.rowid ASC"
+         FROM favorites f WHERE (?1 IS NULL OR f.source_id = ?1){shown}
+         {FAVORITES_ORDER}"
     ))?;
     let rows = stmt.query_map(params![source_id], |row| {
         let r = parse_ref(row, 0)?;
@@ -400,15 +436,17 @@ pub fn favorites_reorder(
     // fails with SQLITE_BUSY when another write commits in between.
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     {
-        let stored: Vec<ItemRef> = favorites_list(&tx, source_id)?
+        // Refs and positions only: the snapshots of both reads were parsed
+        // and dropped (R4-5).
+        let stored_rows = favorites_refs(&tx, source_id, None, None, false)?;
+        let position: std::collections::HashMap<&ItemRef, i64> =
+            stored_rows.iter().map(|(r, p)| (r, *p)).collect();
+        let stored: Vec<&ItemRef> = stored_rows.iter().map(|(r, _)| r).collect();
+        let shown: HashSet<ItemRef> = favorites_refs(&tx, source_id, hide, quality, true)?
             .into_iter()
-            .map(|f| f.item_ref)
+            .map(|(r, _)| r)
             .collect();
-        let shown: HashSet<ItemRef> = favorites_list_filtered(&tx, source_id, hide, quality)?
-            .into_iter()
-            .map(|f| f.item_ref)
-            .collect();
-        let present: HashSet<&ItemRef> = stored.iter().collect();
+        let present: HashSet<&ItemRef> = stored.iter().copied().collect();
         // A ref listed twice keeps its first place; refs that are not
         // favorites (or of another source) are ignored.
         let mut seen = HashSet::new();
@@ -423,17 +461,22 @@ pub fn favorites_reorder(
         let mut order = listed.iter().copied().chain(
             stored
                 .iter()
+                .copied()
                 .filter(|r| !seen.contains(*r) && shown.contains(*r)),
         );
         let mut set = tx.prepare_cached(
             "UPDATE favorites SET position = ?4 WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
         )?;
-        for (i, slot) in stored.iter().enumerate() {
+        for (i, slot) in stored.iter().copied().enumerate() {
             let r = if moves(slot) {
                 order.next().unwrap_or(slot)
             } else {
                 slot
             };
+            // Rows already at their index are not rewritten (R4-5).
+            if position.get(r) == Some(&(i as i64)) {
+                continue;
+            }
             set.execute(params![
                 r.source_id,
                 r.content_type.as_str(),
@@ -1060,6 +1103,39 @@ mod tests {
         assert_eq!(got, vec![r("s1", "a")]);
         let err = favorite_toggle(&mut c, &r("nope", "x"), &snap("X")).unwrap_err();
         assert!(matches!(err, CoreError::NotFound(_)));
+    }
+
+    /// R4-5: a favorites reorder writes only the rows whose position
+    /// changes; the stored order is what rewriting every row gave.
+    #[test]
+    fn favorites_reorder_writes_only_the_rows_that_move() {
+        let mut c = conn();
+        for id in ["a", "b", "c", "d"] {
+            favorite_toggle(&mut c, &r("s1", id), &snap(id)).unwrap();
+        }
+        let writes = |c: &mut Connection, ids: &[&str]| {
+            let refs: Vec<ItemRef> = ids.iter().map(|id| r("s1", id)).collect();
+            let before = c.total_changes();
+            favorites_reorder(c, None, &refs, None, None).unwrap();
+            c.total_changes() - before
+        };
+        let stored = |c: &Connection| -> Vec<(String, i64)> {
+            favorites_list(c, None)
+                .unwrap()
+                .into_iter()
+                .map(|f| (f.item_ref.item_id, f.position))
+                .collect()
+        };
+        writes(&mut c, &["a", "b", "c", "d"]);
+        assert_eq!(writes(&mut c, &["a", "c", "b", "d"]), 2);
+        assert_eq!(writes(&mut c, &["d"]), 4, "d first, the rest move down");
+        assert_eq!(
+            stored(&c),
+            [("d", 0), ("a", 1), ("c", 2), ("b", 3)]
+                .map(|(id, p)| (id.to_string(), p))
+                .to_vec()
+        );
+        assert_eq!(writes(&mut c, &["d", "a", "c", "b"]), 0);
     }
 
     #[test]

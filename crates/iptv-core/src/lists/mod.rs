@@ -435,6 +435,15 @@ fn ordered_refs(conn: &Connection, id: &str) -> CoreResult<Vec<ItemRef>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Every ref of a list in list order, each with its stored position.
+fn ordered_positions(conn: &Connection, id: &str) -> CoreResult<Vec<(ItemRef, i64)>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT i.source_id, i.content_type, i.item_id, i.position FROM custom_list_items i WHERE i.list_id = ?1 {ITEM_ORDER}"
+    ))?;
+    let rows = stmt.query_map([id], |row| Ok((parse_ref(row, 0)?, row.get(3)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Every ref of a list in list order, each with whether `lists.items` shows
 /// it (see [`visible_clause`]).
 fn refs_with_visibility(
@@ -846,11 +855,11 @@ pub fn reorder_items(conn: &mut Connection, id: &str, refs: &[ItemRef]) -> CoreR
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     require_list(&tx, id)?;
     {
-        let stored = ordered_refs(&tx, id)?;
-        let present: HashSet<&ItemRef> = stored.iter().collect();
+        let stored = ordered_positions(&tx, id)?;
+        let present: HashMap<&ItemRef, i64> = stored.iter().map(|(r, p)| (r, *p)).collect();
         let mut seen: HashSet<&ItemRef> = HashSet::new();
         for (n, r) in refs.iter().enumerate() {
-            if !present.contains(r) {
+            if !present.contains_key(r) {
                 return Err(CoreError::invalid(format!("refs[{n}] is not in this list")));
             }
             if !seen.insert(r) {
@@ -862,12 +871,20 @@ pub fn reorder_items(conn: &mut Connection, id: &str, refs: &[ItemRef]) -> CoreR
             "UPDATE custom_list_items SET position = ?5
              WHERE list_id = ?1 AND source_id = ?2 AND content_type = ?3 AND item_id = ?4",
         )?;
-        for (i, r) in stored.iter().enumerate() {
-            let r = if seen.contains(r) {
-                listed.next().unwrap_or(r)
+        for (i, (slot, _)) in stored.iter().enumerate() {
+            let r = if seen.contains(slot) {
+                listed.next().unwrap_or(slot)
             } else {
-                r
+                slot
             };
+            // Only rows whose position changes are written: SQLite rewrites
+            // a row and its index entry even for the same value, so a move
+            // in a 2,000-channel list wrote every row (4.8 ms and 3.4 MB of
+            // WAL per 30 moves, against 1.2 ms and 0.25 MB; R4-5). A gappy
+            // or tied list still ends at 0..n, since those rows differ.
+            if present.get(r) == Some(&(i as i64)) {
+                continue;
+            }
             set.execute(params![
                 id,
                 r.source_id,
@@ -1319,5 +1336,57 @@ mod tests {
         renamed[0].id = "other".into();
         import_lists(&fresh, &renamed, &map, false).unwrap();
         assert_eq!(list(&fresh, None, None).unwrap().len(), 2);
+    }
+
+    /// Stored `(itemId, position)` pairs of a list in list order.
+    fn positions(c: &Connection, id: &str) -> Vec<(String, i64)> {
+        ordered_positions(c, id)
+            .unwrap()
+            .into_iter()
+            .map(|(r, p)| (r.item_id, p))
+            .collect()
+    }
+
+    /// R4-5: a reorder writes only the rows whose position changes and
+    /// still leaves every row at its index, as rewriting all of them did.
+    #[test]
+    fn reorder_writes_only_the_rows_that_move() {
+        let mut c = conn();
+        let items: Vec<NewItem> = (0..6).map(|i| item("s1", &i.to_string())).collect();
+        let l = create(&mut c, "Mine", &items, None, None).unwrap();
+        // Gaps and a tie, as an old build or an import may leave them.
+        c.execute(
+            "UPDATE custom_list_items SET position = CASE item_id WHEN '0' THEN 0 WHEN '1' THEN 5 WHEN '2' THEN 5 ELSE position * 10 END WHERE list_id = ?1",
+            [&l.id],
+        )
+        .unwrap();
+        let refs = |ids: &[&str]| -> Vec<ItemRef> {
+            ids.iter()
+                .map(|id| ItemRef::new("s1", ContentType::Live, *id))
+                .collect()
+        };
+        let writes = |c: &mut Connection, ids: &[&str]| {
+            let before = c.total_changes();
+            reorder_items(c, &l.id, &refs(ids)).unwrap();
+            // Less the list's own `updated_at`.
+            c.total_changes() - before - 1
+        };
+        let want = |ids: &[&str]| -> Vec<(String, i64)> {
+            ids.iter()
+                .enumerate()
+                .map(|(i, id)| (id.to_string(), i as i64))
+                .collect()
+        };
+        // The first reorder normalizes the gaps: every row but the first.
+        assert_eq!(writes(&mut c, &["0", "1", "2", "3", "4", "5"]), 5);
+        assert_eq!(positions(&c, &l.id), want(&["0", "1", "2", "3", "4", "5"]));
+        // An adjacent swap writes two rows; a part of the list keeps the
+        // others in their slots.
+        assert_eq!(writes(&mut c, &["0", "2", "1", "3", "4", "5"]), 2);
+        assert_eq!(positions(&c, &l.id), want(&["0", "2", "1", "3", "4", "5"]));
+        assert_eq!(writes(&mut c, &["5", "3"]), 2);
+        assert_eq!(positions(&c, &l.id), want(&["0", "2", "1", "5", "4", "3"]));
+        // The same order again writes nothing but still counts as a save.
+        assert_eq!(writes(&mut c, &["0", "2", "1", "5", "4", "3"]), 0);
     }
 }

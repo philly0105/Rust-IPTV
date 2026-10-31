@@ -522,8 +522,10 @@ pub async fn cancel(state: &Arc<AppState>, id: i64) -> CoreResult<()> {
         }
     }
     cleanup_part(state, &d).await?;
+    // User writes pass the write gate, so during an import save they park
+    // one pooled connection between them (R1-1).
     state
-        .db_call(move |c| {
+        .db_write(move |c| {
             store::clear_destination(c, id)?;
             store::finish(c, id, DownloadStatus::Canceled, 0, None)
         })
@@ -543,7 +545,7 @@ async fn cleanup_part(state: &Arc<AppState>, d: &Download) -> CoreResult<()> {
     .await??;
     if removed {
         state
-            .db_call(move |c| store::clear_destination(c, id))
+            .db_write(move |c| store::clear_destination(c, id))
             .await?;
     }
     Ok(())
@@ -577,15 +579,15 @@ pub async fn remove(state: &Arc<AppState>, id: i64, delete_file: bool) -> CoreRe
         Ok(())
     })
     .await??;
-    state.db_call(move |c| store::delete(c, id)).await?;
+    state.db_write(move |c| store::delete(c, id)).await?;
     notify(state);
     Ok(())
 }
 
-/// Saves the offline playback position.
+/// Saves the offline playback position (a user write, through the gate).
 pub async fn set_position(state: &Arc<AppState>, id: i64, seconds: i64) -> CoreResult<()> {
     state
-        .db_call(move |c| store::set_position(c, id, seconds))
+        .db_write(move |c| store::set_position(c, id, seconds))
         .await
 }
 

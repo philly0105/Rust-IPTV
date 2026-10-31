@@ -1328,7 +1328,7 @@ pub async fn add(state: Arc<AppState>, args: AddSourceArgs) -> Result<Source, Ad
         let id = id.clone();
         let data_dir = state.data_dir.clone();
         let duplicate = state
-            .db_call(move |c| {
+            .db_write(move |c| {
                 if let Some((other_id, other_name)) = store::find_same(c, &config, None)? {
                     return Ok(Some((other_id, duplicate_error(&config, &other_name))));
                 }
@@ -1452,8 +1452,11 @@ async fn run_import_inner(
             let kind = source.kind;
             let (movies, series) = (summary.movies, summary.series);
             let warning = run.run.warning.lock().take();
+            // Outcome rows pass the background gate: imports that finish
+            // while another source saves park one connection between them,
+            // and user writes never queue behind them (R1-1).
             state
-                .db_call(move |c| {
+                .db_background(move |c| {
                     store::record_import(c, &sid, None)?;
                     if let Some((msg, code)) = &warning {
                         // A content type kept its previous rows: say so.
@@ -1649,11 +1652,12 @@ async fn apply_parked_backup(state: &Arc<AppState>, id: &str) -> bool {
 
 /// Records a failed import (message and code, C10), or a success when `error`
 /// is `None`. The message is redacted: it is shown on screen and exported.
+/// Through the background gate, as the outcome of a finished import.
 async fn record(state: &AppState, id: &str, error: Option<(&str, RpcErrorCode)>) {
     let sid = id.to_string();
     let error = error.map(|(m, c)| (crate::logging::redact_text(m).into_owned(), c));
     if let Err(err) = state
-        .db_call(move |c| match &error {
+        .db_background(move |c| match &error {
             Some((msg, code)) => store::record_import_error(c, &sid, msg, *code),
             None => store::record_import(c, &sid, None),
         })
@@ -1816,8 +1820,9 @@ pub async fn update(state: &AppState, id: &str, patch: SourcePatch) -> CoreResul
     let staged_in = staged.clone();
     let pending = Arc::new(AtomicBool::new(false));
     let pending_in = pending.clone();
+    // A user write: through the write gate (R1-1).
     let result = state
-        .db_call(move |c| {
+        .db_write(move |c| {
             let mut config_changed = false;
             // Checked and placed before the write lock, as `store::insert` does.
             let raw = match &text {
@@ -1991,7 +1996,7 @@ pub async fn remove_all(state: &AppState) -> CoreResult<()> {
 
 /// `sources.reorder`.
 pub async fn reorder(state: &AppState, ids: Vec<String>) -> CoreResult<()> {
-    state.db_call(move |c| store::reorder(c, &ids)).await?;
+    state.db_write(move |c| store::reorder(c, &ids)).await?;
     emit_changed(state, None, ChangeReason::Config);
     Ok(())
 }

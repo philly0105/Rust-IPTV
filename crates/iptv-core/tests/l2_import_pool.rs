@@ -12,7 +12,11 @@
 //! (`AppState::db_background`).
 //!
 //! R1-1: a Stalker login caches its session in the background, so a save
-//! never holds the source's session mutex.
+//! never holds the source's session mutex. Download cancel, remove and
+//! position, and `sources.add` / `update` / `reorder` pass the user-write
+//! gate; import outcomes, account statuses and window geometry pass the
+//! background gate (R4-1), and a forced account check answers before its
+//! row is stored.
 
 use iptv_core::catalog::{replace_catalog, CategoryRow, ItemRow};
 use iptv_core::events::BroadcastSink;
@@ -340,5 +344,221 @@ async fn a_stalker_login_during_a_save_keeps_the_session_free() {
     let cached: serde_json::Value = serde_json::from_str(&cached).unwrap();
     assert_eq!(cached["endpoint"], endpoint.as_str());
     assert_eq!(cached["token"].as_str(), token.as_deref());
+    drop(long);
+}
+
+/// R1-1, R4-1: the writes that still took a pooled connection of their own
+/// while an import saved. Six window geometry saves, two renames, a source
+/// reorder and two download positions wait for the save's write lock next
+/// to the save and two guide ingests. Ungated, those eleven writers alone
+/// filled the eight connections and reads failed at the 15 s checkout
+/// timeout. Now they park two between them (one per gate), a burst of
+/// catalog pages keeps three, and forced account checks of two panels
+/// answer before the save commits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn newly_gated_writes_leave_reads_free() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (sink, _rx) = BroadcastSink::channel(256);
+    let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    iptv_core::xtream::init(state.clone()).await.unwrap();
+    let panel = mock.url("/xtream");
+    state
+        .db_call(move |c| {
+            c.execute(
+                r#"INSERT INTO sources (id, kind, name, config_json) VALUES ('s1', 'xtream', 'S', '{"serverUrl":"http://panel.invalid","username":"u","password":"p"}')"#,
+                [],
+            )?;
+            for user in [iptv_mock::xtream::USER_FULL, iptv_mock::xtream::USER_EXPIRING] {
+                let cfg = json!({
+                    "serverUrl": panel,
+                    "username": user,
+                    "password": iptv_mock::xtream::PASSWORD,
+                })
+                .to_string();
+                c.execute(
+                    "INSERT INTO sources (id, kind, name, config_json) VALUES (?1, 'xtream', ?1, ?2)",
+                    [user, cfg.as_str()],
+                )?;
+            }
+            for i in 1..=2 {
+                c.execute(
+                    "INSERT INTO downloads (source_id, content_type, item_id, title, url, status) VALUES ('s1', 'movie', ?1, 'Film', 'http://x/film.mp4', 'completed')",
+                    [format!("m{i}")],
+                )?;
+            }
+            let cats: Vec<CategoryRow> = (0..20)
+                .map(|k| CategoryRow {
+                    category_id: format!("c{k}"),
+                    name: format!("Genre {k}"),
+                    position: k,
+                })
+                .collect();
+            let mut rows = (0..2_000).map(|i| ItemRow {
+                source_id: "s1".into(),
+                content_type: ContentType::Movie,
+                item_id: format!("m{i}"),
+                category_id: format!("c{}", i % 20),
+                title: format!("Movie {i}"),
+                position: i,
+                ..Default::default()
+            });
+            replace_catalog(c, "s1", ContentType::Movie, &cats, &mut rows)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let router = Arc::new(iptv_core::rpc::build_router());
+
+    // The save holds the write lock; it and two guide ingests hold a pooled
+    // connection each.
+    let holder = rusqlite::Connection::open(state.db_path()).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let long = iptv_core::db::long_write();
+    let mut releases = Vec::new();
+    let busy: Vec<_> = (0..3)
+        .map(|_| {
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            releases.push(tx);
+            let st = state.clone();
+            tokio::spawn(async move {
+                st.db_call(move |_| {
+                    let _ = rx.recv();
+                    Ok(())
+                })
+                .await
+            })
+        })
+        .collect();
+
+    let mut calls: Vec<(&str, serde_json::Value)> = (0..6)
+        .map(|i| {
+            (
+                "window.setState",
+                json!({"state": {"width": 1200 + i, "height": 800, "maximized": false}}),
+            )
+        })
+        .collect();
+    calls.extend([
+        (
+            "sources.update",
+            json!({"id": "s1", "patch": {"name": "One"}}),
+        ),
+        (
+            "sources.update",
+            json!({"id": "s1", "patch": {"name": "Two"}}),
+        ),
+        ("sources.reorder", json!({"ids": ["s1"]})),
+        (
+            "downloads.setPosition",
+            json!({"id": 1, "positionSeconds": 30}),
+        ),
+        (
+            "downloads.setPosition",
+            json!({"id": 2, "positionSeconds": 60}),
+        ),
+    ]);
+    let writers: Vec<_> = calls
+        .into_iter()
+        .map(|(cmd, args)| {
+            let (st, r) = (state.clone(), router.clone());
+            tokio::spawn(async move { (cmd, r.dispatch(st, cmd, args).await) })
+        })
+        .collect();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // The player's forced checks answer while the save still runs.
+    for user in [
+        iptv_mock::xtream::USER_FULL,
+        iptv_mock::xtream::USER_EXPIRING,
+    ] {
+        let t = Instant::now();
+        let v = tokio::time::timeout(
+            Duration::from_secs(5),
+            router.dispatch(
+                state.clone(),
+                "account.status",
+                json!({"sourceId": user, "refresh": true}),
+            ),
+        )
+        .await
+        .expect("a forced check waited for the save")
+        .unwrap();
+        assert_eq!(v["sourceId"], user, "{v}");
+        assert!(v.get("error").is_none(), "{v}");
+        eprintln!(
+            "l2_import_pool: forced check of {user} in {:?}",
+            t.elapsed()
+        );
+    }
+
+    // Fourteen category pages at once.
+    let started = Instant::now();
+    let reads: Vec<_> = (0..14)
+        .map(|k| {
+            let (st, r) = (state.clone(), router.clone());
+            tokio::spawn(async move {
+                let t = Instant::now();
+                let v = r
+                    .dispatch(
+                        st,
+                        "catalog.movies",
+                        json!({"sourceId": "s1", "categoryId": format!("c{k}")}),
+                    )
+                    .await
+                    .unwrap();
+                (t.elapsed(), v["total"].as_i64())
+            })
+        })
+        .collect();
+    let mut slowest = Duration::ZERO;
+    for r in reads {
+        let (took, total) = r.await.unwrap();
+        assert_eq!(total, Some(100));
+        slowest = slowest.max(took);
+    }
+    eprintln!(
+        "l2_import_pool: 14 pages with 11 newly gated writers parked in {:?}, slowest {slowest:?}",
+        started.elapsed()
+    );
+    assert!(
+        slowest < Duration::from_secs(1),
+        "a read waited {slowest:?} for a connection"
+    );
+
+    holder.execute_batch("COMMIT").unwrap();
+    drop(releases);
+    for b in busy {
+        b.await.unwrap().unwrap();
+    }
+    for w in writers {
+        let (cmd, out) = w.await.unwrap();
+        if let Err(e) = out {
+            panic!("{cmd} failed: {}", e.message);
+        }
+    }
+    // The checks' rows land after the commit.
+    for user in [
+        iptv_mock::xtream::USER_FULL,
+        iptv_mock::xtream::USER_EXPIRING,
+    ] {
+        let v = router
+            .dispatch(
+                state.clone(),
+                "account.status",
+                json!({"sourceId": user, "refresh": true}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(v["sourceId"], user);
+        let stored = state
+            .db_call(move |c| iptv_core::account::load(c, user))
+            .await
+            .unwrap();
+        assert!(stored.is_some(), "{user} status stored");
+    }
+    state.flush_background_writes().await;
     drop(long);
 }

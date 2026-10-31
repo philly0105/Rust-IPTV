@@ -441,6 +441,53 @@ pub const BULK_MIN_ROWS: u64 = 20_000;
 /// `(untagged titles, foreign-script titles)`.
 type Undecided = HashMap<String, (Vec<i64>, Vec<i64>)>;
 
+/// Drops every secondary index of `items` and returns `(name, CREATE
+/// statement)` of each, in the order they were created, for
+/// [`create_item_indexes`]. The primary key stays: duplicate detection, the
+/// per-source deletes and the `sources` cascade find rows through it.
+/// Sorting the rows once afterwards is several times cheaper than updating
+/// all of them (twelve as of migration 0024) per row. Used by a large
+/// [`CatalogWriter`] rewrite and a large source removal
+/// (`sources::store::delete`), inside their transaction.
+pub(crate) fn drop_item_indexes(conn: &Connection) -> CoreResult<Vec<(String, String)>> {
+    let indexes = {
+        let mut stmt = conn.prepare(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>()?
+    };
+    for (name, _) in &indexes {
+        conn.execute_batch(&format!("DROP INDEX \"{}\"", name.replace('"', "\"\"")))?;
+    }
+    Ok(indexes)
+}
+
+/// Builds the indexes [`drop_item_indexes`] dropped again, in the order they
+/// were created: among covering indexes of the same cost SQLite takes the
+/// newest, and migrations 0022 and 0024 create the narrow `idx_items_cat`
+/// last so counts read it.
+pub(crate) fn create_item_indexes(
+    conn: &Connection,
+    indexes: &[(String, String)],
+) -> CoreResult<()> {
+    for (_, sql) in indexes {
+        conn.execute_batch(sql)?;
+    }
+    Ok(())
+}
+
+/// Builds the search index (`items_fts`) afresh from the rows `items` holds.
+/// For a delete that removes more rows than it keeps: the per-row `'delete'`
+/// tokenizes every old title and writes a delete marker for each word, where
+/// this drops the whole index and tokenizes only the rows left. Run it only
+/// once `items` holds exactly the rows the index should have: after the
+/// deletes, before any insert whose entry is added in bulk.
+pub(crate) fn rebuild_search_index(conn: &Connection) -> CoreResult<()> {
+    conn.execute("INSERT INTO items_fts (items_fts) VALUES ('rebuild')", [])?;
+    Ok(())
+}
+
 /// The name a category is stored under (see [`CatalogWriter::finish`]).
 fn stored_category_name(name: &str) -> &str {
     let name = name.trim();
@@ -581,11 +628,21 @@ impl<'c> CatalogWriter<'c> {
         };
         // A large refresh drops the indexes before its deletes too.
         w.maybe_go_bulk()?;
+        // A refresh that replaces more rows than it keeps (a single-source
+        // user's every changed refresh) indexes the kept rows afresh after
+        // the deletes instead of deleting the old entries one by one:
+        // `begin` of a 250k-row refresh next to 40k kept rows took 1.1 s,
+        // now 0.45 s (dev profile). `kept` is only counted once the rewrite
+        // touches BULK_MIN_ROWS, so a small rewrite next to a big library
+        // never pays for a rebuild.
+        let rebuild_fts = w.kept.is_some_and(|kept| kept < w.replaced);
         for ct in types {
-            conn.execute(
-                "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
-                params![source_id, ct.as_str()],
-            )?;
+            if !rebuild_fts {
+                conn.execute(
+                    "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1 AND content_type = ?2",
+                    params![source_id, ct.as_str()],
+                )?;
+            }
             conn.execute(
                 "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1 AND content_type = ?2)",
                 params![source_id, ct.as_str()],
@@ -599,18 +656,20 @@ impl<'c> CatalogWriter<'c> {
                 params![source_id, ct.as_str()],
             )?;
         }
+        // Here, and only here, `items` holds just the kept rows: before the
+        // deletes it still has the replaced ones, and `finish` adds the new
+        // rows' entries itself.
+        if rebuild_fts {
+            rebuild_search_index(conn)?;
+        }
         w.replaced_gone = true;
         Ok(w)
     }
 
-    /// Drops every secondary index of `items` once the rewrite touches enough
-    /// rows ([`BULK_MIN_ROWS`]); [`CatalogWriter::finish`] runs their stored
-    /// CREATE statements again. Sorting the rows once is several times
-    /// cheaper than updating all eleven of them (as of migration 0019) per
-    /// row. The primary key stays (duplicate detection and the per-source
-    /// deletes use it). They are built again in the order they were created:
-    /// among covering indexes of the same cost SQLite takes the newest, and
-    /// migration 0022 orders them so counts read a narrow one.
+    /// Drops every secondary index of `items` ([`drop_item_indexes`]) once
+    /// the rewrite touches enough rows ([`BULK_MIN_ROWS`]);
+    /// [`CatalogWriter::finish`] builds them again in their creation order
+    /// ([`create_item_indexes`]).
     fn maybe_go_bulk(&mut self) -> CoreResult<()> {
         let touched = self.replaced + self.total + self.duplicates;
         if self.dropped_indexes.is_some() || touched < BULK_MIN_ROWS {
@@ -639,19 +698,7 @@ impl<'c> CatalogWriter<'c> {
         if touched < kept {
             return Ok(());
         }
-        let indexes = {
-            let mut stmt = self.conn.prepare(
-                "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'items' AND sql IS NOT NULL ORDER BY rowid",
-            )?;
-            let rows =
-                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-        for (name, _) in &indexes {
-            self.conn
-                .execute_batch(&format!("DROP INDEX \"{}\"", name.replace('"', "\"\"")))?;
-        }
-        self.dropped_indexes = Some(indexes);
+        self.dropped_indexes = Some(drop_item_indexes(self.conn)?);
         Ok(())
     }
 
@@ -794,8 +841,8 @@ impl<'c> CatalogWriter<'c> {
         check_cancel(self.cancel.as_ref())?;
         // A bulk rewrite builds the indexes again first: the counts below
         // read them.
-        for (_, sql) in self.dropped_indexes.iter().flatten() {
-            self.conn.execute_batch(sql)?;
+        if let Some(indexes) = &self.dropped_indexes {
+            create_item_indexes(self.conn, indexes)?;
         }
         let mut insert_cat = self.conn.prepare_cached(
             "INSERT OR IGNORE INTO categories (source_id, content_type, category_id, name, hidden, position, item_count) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",

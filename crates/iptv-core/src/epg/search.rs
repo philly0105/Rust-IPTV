@@ -864,7 +864,7 @@ pub async fn search(state: &AppState, req: SearchRequest) -> CoreResult<Vec<Guid
     let rt = runtime(state);
     let started = std::time::Instant::now();
     let (hits, used_index) = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             ensure_source(c, &q.source_id)?;
             let dir = resolve::directory(c, &rt)?;
             // One read snapshot: a guide refresh that commits between the

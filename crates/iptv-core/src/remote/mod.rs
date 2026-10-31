@@ -511,7 +511,7 @@ pub async fn refresh_channels(state: &Arc<AppState>) -> CoreResult<usize> {
     let hide = crate::parental::hide_filter(state).await?;
     let sid = source_id.clone();
     let channels = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let found = crate::catalog::all_live_channels(c, &sid, english, quality, hide)?;
             let mut v: Vec<Channel> = found
                 .into_iter()

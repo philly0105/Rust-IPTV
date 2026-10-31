@@ -45,6 +45,9 @@
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
 //! import hold one pooled connection waiting on the write lock, not fifty.
+//! Lookups read the index on the read-only pool (`AppState::db_read`), so
+//! a poster or logo request never waits for a connection that writers
+//! waiting out an import's save have taken (R1-1).
 //! The writer owns the running byte total and evicts down to 90 % of the cap
 //! after an insert takes it over. It re-reads the table's total on every
 //! `images.stats` and at least once a minute while inserting, so several
@@ -371,13 +374,15 @@ struct SourceAccess {
 
 /// A source's headers and authority (empty when `id` is unknown, so a stale
 /// `sourceId` still loads the image, just without the source's trust).
+/// Read on the read-only pool like [`ImageCache::lookup`]: server mode reads
+/// it for every image request, hit or not.
 async fn load_source(state: &AppState, id: Option<&str>) -> Result<SourceAccess, ImageError> {
     let Some(id) = id.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(SourceAccess::default());
     };
     let id = id.to_owned();
     let row = state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             Ok(c.query_row(
                 "SELECT kind, config_json FROM sources WHERE id = ?1",
                 [&id],
@@ -485,6 +490,8 @@ struct Job {
 /// drops the writer's sender, and the writer exits once its queue drains.
 struct ImageCache {
     pool: DbPool,
+    /// `AppState::db_read`, for [`Self::lookup`].
+    read_pool: DbPool,
     /// `AppState::db_background`'s gate, for the writer's batches.
     background_gate: Arc<Semaphore>,
     db_path: PathBuf,
@@ -525,6 +532,7 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
         let (tx, rx) = mpsc::unbounded_channel();
         Arc::new(ImageCache {
             pool: state.db.clone(),
+            read_pool: state.db_read.clone(),
             background_gate: state.background_gate(),
             db_path: state.db_path(),
             dir: state.data_dir.join(DIR_NAME),
@@ -609,7 +617,7 @@ impl ImageCache {
         }
         let dir = self.dir.clone();
         let k = key.to_owned();
-        let found = blocking(&self.pool, &self.db_path, move |c| {
+        let found = blocking(&self.read_pool, &self.db_path, move |c| {
             store::lookup(c, &dir, &k)
         })
         .await

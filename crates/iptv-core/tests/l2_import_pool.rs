@@ -17,6 +17,11 @@
 //! gate; import outcomes, account statuses and window geometry pass the
 //! background gate (R4-1), and a forced account check answers before its
 //! row is stored.
+//!
+//! R1-1 phase 2: the hot reads (catalog, guide, user-state lists, parental
+//! reads, image lookups) run on a read-only pool of their own
+//! (`AppState::db_read_call`), so they answer even while waiting writers
+//! hold every connection of the write pool.
 
 use iptv_core::catalog::{replace_catalog, CategoryRow, ItemRow};
 use iptv_core::events::BroadcastSink;
@@ -560,5 +565,198 @@ async fn newly_gated_writes_leave_reads_free() {
         assert!(stored.is_some(), "{user} status stored");
     }
     state.flush_background_writes().await;
+    drop(long);
+}
+
+/// R1-1 phase 2: the hot reads have a read-only pool of their own. A save
+/// holds the write lock with `long_write` raised, and eight ungated writers
+/// wait for it, one on every connection of the write pool, next to a gated
+/// user write and a background write waiting at their gates. Before the read
+/// pool, every catalog page, guide read, user-state list and image lookup
+/// then waited out the 15 s checkout timeout and failed. Now they answer at
+/// once, and every writer lands after the commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reads_answer_while_ungated_writers_hold_every_write_connection() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (sink, _rx) = BroadcastSink::channel(256);
+    let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    // 400 channels in 4 groups.
+    state
+        .db_call(|c| {
+            c.execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES ('s1', 'm3u', 'S', '{}')",
+                [],
+            )?;
+            let cats: Vec<CategoryRow> = (0..4)
+                .map(|k| CategoryRow {
+                    category_id: format!("g{k}"),
+                    name: format!("Group {k}"),
+                    position: k,
+                })
+                .collect();
+            let mut rows = (0..400).map(|i| ItemRow {
+                source_id: "s1".into(),
+                content_type: ContentType::Live,
+                item_id: format!("c{i}"),
+                category_id: format!("g{}", i % 4),
+                title: format!("Channel {i}"),
+                epg_channel_id: Some(format!("ch{i}.tv")),
+                position: i,
+                ..Default::default()
+            });
+            replace_catalog(c, "s1", ContentType::Live, &cats, &mut rows)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // A poster in the image cache, its index row committed (`stats` waits
+    // for the index writer).
+    let poster = iptv_mock::images::poster_url(&mock.base, "read-pool");
+    let first = iptv_core::imagecache::get(&state, &poster, None)
+        .await
+        .unwrap();
+    assert!(!first.hit);
+    iptv_core::imagecache::stats(&state).await.unwrap();
+    let router = Arc::new(iptv_core::rpc::build_router());
+
+    let holder = rusqlite::Connection::open(state.db_path()).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let long = iptv_core::db::long_write();
+    let ungated: Vec<_> = (0..iptv_core::db::POOL_MAX)
+        .map(|i| {
+            let st = state.clone();
+            tokio::spawn(async move {
+                st.db_call(move |c| {
+                    c.execute(
+                        "INSERT INTO app_state(key, value) VALUES (?1, 'x')",
+                        [format!("ungated{i}")],
+                    )?;
+                    Ok(())
+                })
+                .await
+            })
+        })
+        .collect();
+    let user = {
+        let (st, r) = (state.clone(), router.clone());
+        tokio::spawn(async move {
+            r.dispatch(
+                st,
+                "favorites.toggle",
+                json!({
+                    "ref": {"sourceId": "s1", "contentType": "live", "itemId": "c1"},
+                    "snapshot": {"title": "Channel 1", "contentType": "live"},
+                }),
+            )
+            .await
+        })
+    };
+    let background = {
+        let st = state.clone();
+        tokio::spawn(async move {
+            st.db_background(|c| {
+                c.execute(
+                    "INSERT INTO app_state(key, value) VALUES ('background', 'x')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // The write pool is full: a read there waits for a connection.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_millis(300),
+            state.db_call(|c| Ok(c.query_row("SELECT 1", [], |r| r.get::<_, i64>(0))?)),
+        )
+        .await
+        .is_err(),
+        "a write pool connection was still free"
+    );
+
+    let r = |id: &str| json!({"sourceId": "s1", "contentType": "live", "itemId": id});
+    let from = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let to = (chrono::Utc::now() + chrono::TimeDelta::hours(3))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let reads = [
+        (
+            "catalog.channels",
+            json!({"sourceId": "s1", "categoryId": "g1"}),
+        ),
+        (
+            "catalog.categories",
+            json!({"sourceId": "s1", "contentType": "live"}),
+        ),
+        ("catalog.item", json!({"ref": r("c7")})),
+        ("catalog.items", json!({"refs": [r("c1"), r("c2")]})),
+        ("catalog.search", json!({"query": "channel 12"})),
+        ("epg.nowNext", json!({"refs": [r("c1"), r("c2")]})),
+        (
+            "epg.grid",
+            json!({"refs": [r("c1"), r("c2")], "from": from, "to": to}),
+        ),
+        ("favorites.list", json!({})),
+        ("recent.list", json!({})),
+        ("positions.continueWatching", json!({})),
+        ("watchlist.list", json!({})),
+        ("lists.list", serde_json::Value::Null),
+        ("parental.locks", json!({})),
+    ];
+    for (cmd, args) in reads {
+        let t = Instant::now();
+        let v = tokio::time::timeout(
+            Duration::from_secs(5),
+            router.dispatch(state.clone(), cmd, args),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{cmd} waited for a write pool connection"))
+        .unwrap_or_else(|e| panic!("{cmd} failed: {}", e.message));
+        let took = t.elapsed();
+        assert!(took < Duration::from_secs(1), "{cmd} took {took:?}");
+        match cmd {
+            "catalog.channels" => assert_eq!(v["total"], 100, "{v}"),
+            "catalog.categories" => assert_eq!(v.as_array().map(Vec::len), Some(4), "{v}"),
+            "catalog.item" => assert_eq!(v["name"], "Channel 7", "{v}"),
+            _ => {}
+        }
+        eprintln!("l2_import_pool: {cmd} with the write pool full in {took:?}");
+    }
+    let t = Instant::now();
+    let hit = tokio::time::timeout(
+        Duration::from_secs(5),
+        iptv_core::imagecache::get(&state, &poster, None),
+    )
+    .await
+    .expect("the image lookup waited for a write pool connection")
+    .unwrap();
+    assert!(hit.hit, "served from the cache");
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    eprintln!(
+        "l2_import_pool: image cache hit with the write pool full in {:?}",
+        t.elapsed()
+    );
+
+    holder.execute_batch("COMMIT").unwrap();
+    for w in ungated {
+        w.await.unwrap().unwrap();
+    }
+    user.await.unwrap().unwrap();
+    background.await.unwrap().unwrap();
+    let landed: i64 = state
+        .db_read_call(|c| {
+            Ok(c.query_row(
+                "SELECT (SELECT count(*) FROM app_state WHERE key LIKE 'ungated%' OR key = 'background') + (SELECT count(*) FROM favorites)",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(landed, i64::from(iptv_core::db::POOL_MAX) + 2);
     drop(long);
 }

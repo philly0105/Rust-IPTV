@@ -130,7 +130,7 @@ pub fn register(r: &mut RpcRouter) {
         let hide = crate::parental::hide_filter(&state).await?;
         let quality = crate::catalog::rpc::quality_filter(&state);
         let v = state
-            .db_call(move |c| {
+            .db_read_call(move |c| {
                 super::favorites_list_filtered(c, a.source_id.as_deref(), hide, quality)
             })
             .await?;
@@ -144,7 +144,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("favorites.contains", |state, a: Refs| async move {
         let v = state
-            .db_call(move |c| super::favorites_contains(c, &a.refs))
+            .db_read_call(move |c| super::favorites_contains(c, &a.refs))
             .await?;
         Ok::<Vec<ItemRef>, RpcError>(v)
     });
@@ -170,7 +170,7 @@ pub fn register(r: &mut RpcRouter) {
         let hide = crate::parental::hide_filter(&state).await?;
         let quality = crate::catalog::rpc::quality_filter(&state);
         let v = state
-            .db_call(move |c| {
+            .db_read_call(move |c| {
                 super::recent_list_filtered(c, a.source_id.as_deref(), a.limit, hide, quality)
             })
             .await?;
@@ -200,7 +200,7 @@ pub fn register(r: &mut RpcRouter) {
     // positions
     r.add("positions.get", |state, a: RefEpisode| async move {
         let v = state
-            .db_call(move |c| super::position_get(c, &a.item_ref, a.episode_id.as_deref()))
+            .db_read_call(move |c| super::position_get(c, &a.item_ref, a.episode_id.as_deref()))
             .await?;
         Ok::<Option<PlaybackPosition>, RpcError>(v)
     });
@@ -256,7 +256,7 @@ pub fn register(r: &mut RpcRouter) {
     });
     r.add("positions.forSeries", |state, a: RefOnly| async move {
         let v = state
-            .db_call(move |c| super::positions_for_series(c, &a.item_ref))
+            .db_read_call(move |c| super::positions_for_series(c, &a.item_ref))
             .await?;
         Ok::<Vec<PlaybackPosition>, RpcError>(v)
     });
@@ -265,7 +265,7 @@ pub fn register(r: &mut RpcRouter) {
         |state, a: LimitArgs| async move {
             let hide = crate::parental::hide_filter(&state).await?;
             let v = state
-                .db_call(move |c| super::continue_watching_filtered(c, a.limit, hide))
+                .db_read_call(move |c| super::continue_watching_filtered(c, a.limit, hide))
                 .await?;
             Ok::<Vec<PlaybackPosition>, RpcError>(v)
         },

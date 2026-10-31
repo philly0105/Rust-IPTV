@@ -53,7 +53,7 @@ pub async fn init(state: Arc<AppState>) -> CoreResult<()> {
 pub async fn sources(state: &AppState) -> CoreResult<Vec<EpgSourceStatus>> {
     let settings = state.settings_snapshot().epg_urls;
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let configured = store::configured_urls(c, &settings)?;
             store::list_status(c, &configured)
         })
@@ -114,7 +114,7 @@ fn resolve_many(
 /// portal guide move by it ([`shifted`]) like the XMLTV reads do.
 pub async fn channel_shift(state: &AppState, r: &ItemRef) -> CoreResult<i64> {
     let r = r.clone();
-    state.db_call(move |c| query::item_shift(c, &r)).await
+    state.db_read_call(move |c| query::item_shift(c, &r)).await
 }
 
 /// `p` moved by `shift` seconds ([`channel_shift`]). A provider guide is
@@ -176,7 +176,7 @@ pub async fn now_next_opts(
     let rt = runtime(state);
     let now = chrono::Utc::now().timestamp() - i64::from(offset_minutes) * 60;
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let ids = resolve_many(c, &rt, &refs)?;
             let mut cache: HashMap<(String, i64), EpgNowNext> = HashMap::new();
             let mut out = HashMap::with_capacity(refs.len());
@@ -209,7 +209,7 @@ pub async fn programs(
     let (f, t) = query::parse_range(from, to)?;
     let rt = runtime(state);
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let id = resolve_many(c, &rt, std::slice::from_ref(&r))?
                 .pop()
                 .flatten();
@@ -245,7 +245,7 @@ pub async fn grid_opts(
     let (f, t) = query::parse_range(from, to)?;
     let rt = runtime(state);
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let ids = resolve_many(c, &rt, &refs)?;
             let mut cache: HashMap<(String, i64), Vec<EpgProgram>> = HashMap::new();
             let mut out = HashMap::with_capacity(refs.len());
@@ -278,7 +278,7 @@ pub async fn channels_search(
         .unwrap_or(SEARCH_DEFAULT_LIMIT)
         .clamp(1, SEARCH_MAX_LIMIT);
     state
-        .db_call(move |c| query::channels_search(c, &query, limit))
+        .db_read_call(move |c| query::channels_search(c, &query, limit))
         .await
 }
 
@@ -370,7 +370,7 @@ pub async fn set_channel_shift(
 pub async fn resolve_ref(state: &AppState, r: ItemRef) -> CoreResult<Resolution> {
     let rt = runtime(state);
     state
-        .db_call(move |c| {
+        .db_read_call(move |c| {
             let dir = resolve::directory(c, &rt)?;
             let mut res = resolve::resolve(c, &dir, &r)?;
             res.shift_minutes = query::channel_shift_minutes(c, &r)?;

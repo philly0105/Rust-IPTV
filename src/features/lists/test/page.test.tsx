@@ -8,6 +8,8 @@ import { DEFAULT_SETTINGS, itemKey, type Channel, type ParentalLock, type Settin
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | { call: (cmd: string, args?: unknown) => Promise<unknown> } }));
 const played = vi.hoisted(() => [] as { channel: Channel; kind: SourceKind | undefined; name: string }[]);
+/** Renders of the dropped channels' Remove buttons. */
+const droppedButtons = vi.hoisted(() => ({ renders: 0 }));
 vi.mock('@/api/transport', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/transport')>()),
   rpc: (cmd: string, args?: unknown) => rpcMock.current!.call(cmd, args),
@@ -16,14 +18,21 @@ vi.mock('@/api/transport', async (importOriginal) => ({
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
 // The player itself is out of scope: a stage placeholder and a recorder for playChannel.
-vi.mock('../deps', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../deps')>()),
-  PlayerStage: ({ children }: { children?: React.ReactNode }) => <div data-testid="player-stage">{children}</div>,
-  playChannel: async (channel: Channel, kind: SourceKind | undefined, _now: string | undefined, name: string) => {
-    played.push({ channel, kind, name });
-  },
-  sourceKindOf: async (sourceId: string) => (sourceId === 'src2' ? 'm3u' : 'xtream'),
-}));
+vi.mock('../deps', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../deps')>();
+  return {
+    ...actual,
+    IconButton: (props: Parameters<typeof actual.IconButton>[0]) => {
+      if (/Old (Sports|Movies)/.test(String(props.label))) droppedButtons.renders += 1;
+      return <actual.IconButton {...props} />;
+    },
+    PlayerStage: ({ children }: { children?: React.ReactNode }) => <div data-testid="player-stage">{children}</div>,
+    playChannel: async (channel: Channel, kind: SourceKind | undefined, _now: string | undefined, name: string) => {
+      played.push({ channel, kind, name });
+    },
+    sourceKindOf: async (sourceId: string) => (sourceId === 'src2' ? 'm3u' : 'xtream'),
+  };
+});
 
 const h = await import('./harness');
 const rpc = h.createRpcMock();
@@ -160,6 +169,25 @@ describe('list page', () => {
     await waitFor(() => expect(h.lastToast()?.title).toBe('Removed 2 unavailable channels from Sports'));
     expect(core.lists[0]!.items.map((i) => i.title)).toEqual(['BBC One']);
     expect(rows()).toHaveLength(1);
+  });
+
+  it('the dropped channels draw nothing again when the page renders for something else', async () => {
+    h.installCore(rpc, [h.coreList('L1', 'Sports', [BBC], { dropped: [GONE, GONE2] })]);
+    stubLiveExtras();
+    h.renderAt('/lists/L1', routes);
+    const tray = await screen.findByTestId('list-unavailable');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    await act(async () => undefined);
+    expect(droppedButtons.renders).toBeGreaterThanOrEqual(2);
+    droppedButtons.renders = 0;
+    // A channel of another source starts playing: the page renders, the tray's rows do not.
+    act(() =>
+      usePlayerStore.setState({ source: { url: 'http://x/7.ts', kind: 'direct', title: 'Elsewhere', ref: { sourceId: 'src9', contentType: 'live', itemId: '7' }, isLive: true, isRadio: false } }),
+    );
+    await act(async () => undefined);
+    expect(droppedButtons.renders).toBe(0);
+    fireEvent.click(within(tray).getByRole('button', { name: /Old Sports/ }));
+    await waitFor(() => expect(rpc.callsOf('lists.removeItems')).toEqual([{ id: 'L1', refs: [GONE.ref] }]));
   });
 
   it('an empty list says how to fill it', async () => {

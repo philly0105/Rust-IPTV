@@ -58,15 +58,6 @@ const DRAG_MIME = 'application/x-tsrust-mylist';
 /** The continue-watching answer the VOD grids read too (the same arguments, so one request serves both). */
 const RESUME_LOOKUP = { limit: 500 } as const;
 
-/**
- * Watched ticks and order change only through writes that invalidate the list
- * (this page's actions, the toggles, `watchlist.changed`, a finishing save and
- * mark-watched through invalidateWatched) and playback rows (linked in
- * lib/cache.ts). A visit within this time shows the cached list as it is
- * instead of reading it again (L3-vod-7).
- */
-const MY_LIST_STALE_MS = 5 * 60_000;
-
 /** A move by one place, given the row's index among the rows on screen. */
 const step = (delta: -1 | 1) => (from: number) => from + delta;
 
@@ -121,7 +112,8 @@ export function MyListPage() {
   const { t, i18n } = useTranslation('mylist');
   const navigate = useNavigate();
   const { setHeader } = useShell();
-  const query = useMyList({ staleTime: MY_LIST_STALE_MS });
+  // A visit within the list's staleTime shows the cached list as it is.
+  const query = useMyList();
   const sources = useVisibleSources();
   const hiddenSources = usePendingRemovals((s) => s.ids);
   const [params, setParams] = useListParams();

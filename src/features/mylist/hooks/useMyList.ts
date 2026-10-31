@@ -9,12 +9,22 @@ import { LIST_ARGS } from '../lib/cache';
 import { keysOf } from '../lib/list';
 
 /**
+ * How long the list counts as fresh for its readers. Everything that changes
+ * it invalidates the key: My List writes and `watchlist.changed`, a finishing
+ * save and mark-watched (invalidateWatched), parental and source changes, and
+ * the playback rows (linked in lib/cache.ts). So a poster grid, rail, detail
+ * page or My List visit within this time shows the cached list instead of
+ * reading the same answer again.
+ */
+const LIST_STALE_MS = 5 * 60_000;
+
+/**
  * The whole of My List in the user's order (the shared `watchlist.list {}`
  * query). Every write that changes it invalidates the key (see lib/cache.ts),
  * so readers follow invalidations rather than refetching on each mount.
  */
 export function useMyList(opts?: RpcQueryOptions) {
-  return useRpcQuery('watchlist.list', LIST_ARGS, opts);
+  return useRpcQuery('watchlist.list', LIST_ARGS, { ...opts, staleTime: opts?.staleTime ?? LIST_STALE_MS });
 }
 
 /** Keys (`${sourceId}|${contentType}|${itemId}`) of every My List entry; empty until loaded. */

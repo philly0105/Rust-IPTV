@@ -32,9 +32,9 @@ export interface MyListRailProps {
 export function MyListRail({ hideError = false }: MyListRailProps = {}) {
   const { t, i18n } = useTranslation('mylist');
   const settings = useSettings();
-  // The command's default staleTime: every write that changes a Watched tag invalidates the key
-  // (watchlist.changed, the player's finishing save and the mark-watched actions through
-  // invalidateWatched), so a dashboard visit need not re-read it.
+  // Every write that changes a Watched tag invalidates the key (watchlist.changed, the player's
+  // finishing save and the mark-watched actions through invalidateWatched), so a dashboard visit
+  // within the list's staleTime need not re-read it.
   const query = useMyList();
   const hidden = usePendingRemovals((s) => s.ids);
   const items = useMemo<WatchlistEntry[] | undefined>(() => {

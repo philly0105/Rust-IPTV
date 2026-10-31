@@ -45,6 +45,7 @@ import {
   nextSearchLimit,
   normalizeQuery,
   previewGroups,
+  previewMatches,
   searchRequestLimit,
   searchTerms,
   sourceFacets,
@@ -129,6 +130,41 @@ const EMPTY_STALKER = splitStalkerResults([]);
 
 /** Guide programmes the Programmes tab lists for one query (`epg.search`, per source and in all). */
 const PROGRAMME_LIMIT = 50;
+
+/**
+ * Programme searches wait for a longer rest than the library's, as the command palette's do: each
+ * key asks `epg.search` of every source, 35-60 ms each on a large guide, and the two-letter prefixes
+ * typing passes through match the most. Programmes come last in Top results and have a tab of
+ * their own, so the wait is off the results read first.
+ */
+const PROGRAMME_DEBOUNCE_MS = 300;
+const NO_PROGRAMMES: GuideSearchHit[] = [];
+
+/**
+ * Programmes for `query` once it has rested for PROGRAMME_DEBOUNCE_MS. A query the page opens
+ * with goes out at once, and a cleared one clears at once. While a newer search waits or loads,
+ * the last answer stays on screen narrowed to the typed text, as the catalog's preview does, so
+ * the rows neither flash away on each key nor show another query's programmes.
+ * `pending` holds until the typed text has its answer.
+ */
+function useRestedProgrammeSearch(sourceIds: readonly string[], query: string, offsetMinutes: number): { hits: GuideSearchHit[]; pending: boolean } {
+  const rested = useDebounced(query, PROGRAMME_DEBOUNCE_MS);
+  const asked = query ? rested : '';
+  const search = useProgrammeSearch(sourceIds, asked, { enabled: !!asked, limit: PROGRAMME_LIMIT, offsetMinutes });
+  const pending = asked !== query || search.pending;
+  const [settled, setSettled] = useState({ query: asked, hits: search.hits });
+  if (!pending && (settled.query !== asked || settled.hits !== search.hits)) setSettled({ query: asked, hits: search.hits });
+  const hits = useMemo(() => {
+    if (!pending) return search.hits;
+    if (narrowsQuery(query, settled.query)) {
+      const terms = searchTerms(query);
+      return settled.hits.filter((h) => previewMatches(h.program.title, terms));
+    }
+    // The typed text is being asked already (a source still answering): what has come in so far.
+    return asked === query ? search.hits : NO_PROGRAMMES;
+  }, [pending, search.hits, query, asked, settled]);
+  return { hits, pending };
+}
 
 /**
  * Stalker portals keep VOD out of SQLite, so their movies and series are searched on the portal,
@@ -230,7 +266,7 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // Guide programmes: every searched source's, or the picked chip's.
   const prefs = useDisplayPrefs();
   const programmeSources = useMemo(() => (facet ? [facet] : searchSources.map((s) => s.id)), [facet, searchSources]);
-  const programmes = useProgrammeSearch(programmeSources, query, { enabled: !!query, limit: PROGRAMME_LIMIT, offsetMinutes: prefs.epgOffsetMinutes });
+  const programmes = useRestedProgrammeSearch(programmeSources, query, prefs.epgOffsetMinutes);
 
   // While a larger page loads, the previous page stays on screen: cap it by the limit it was fetched with.
   const [settledLimit, setSettledLimit] = useState(limit);
@@ -380,7 +416,8 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   };
   const anyResults = groups.length > 0 || programmeHits.length > 0;
   const showBadges = !scoped && allSources.length > 1;
-  const loading = !!query && (catalog.isPending || (groups.length === 0 && stalker.pending));
+  // Nothing else matched yet: "No results" waits for the programme search too.
+  const loading = !!query && (catalog.isPending || (groups.length === 0 && (stalker.pending || programmes.pending)));
   // Back from a title: the results open where you left them (same query, type and source in the
   // URL), with focus on the title you opened. A link here (PUSH) is a fresh visit from the top.
   const navigationType = useNavigationType();
@@ -1282,8 +1319,12 @@ const ChannelGrid = memo(function ChannelGrid({
 /** The channel logo's box, `w-12`: twelve spacing steps of 3.75 px at 100 % scale. */
 const CHANNEL_LOGO_PX = 45;
 
-/** One channel hit; choosing it plays the channel. The source is quiet text, not an outlined chip. */
-function ChannelHitButton({
+/**
+ * One channel hit; choosing it plays the channel. The source is quiet text, not an outlined chip.
+ * Memoized like the poster cells: the grid renders every mounted cell on each scroll step, and
+ * these props hold still while it scrolls.
+ */
+const ChannelHitButton = memo(function ChannelHitButton({
   hit: h,
   index,
   showBadges,
@@ -1328,7 +1369,7 @@ function ChannelHitButton({
       {c.isRadio && <Radio aria-hidden size={16} className="shrink-0 text-fg-subtle" />}
     </button>
   );
-}
+});
 
 /** How many of each type Top results shows before "See all". */
 const TOP_POSTERS = 12;

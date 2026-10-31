@@ -3,6 +3,7 @@
 // every row when the same list came back. It now keeps a long staleTime, goes stale whenever
 // a playback row may have changed a Watched tick, and its memoized rows skip identical refetches.
 // L2-checks-1: toasts named the provider's raw title while the rows showed the base title.
+import { hashKey } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,6 +35,7 @@ rpcMock.current = rpc;
 const { queryClient, invalidate, rpcKey } = await import('@/api/query');
 const { MyListPage } = await import('../pages/MyListPage');
 const { MyListButton } = await import('..');
+const { LIST_KEY } = await import('../lib/cache');
 
 const m = (id: string): ItemRef => ({ sourceId: 'src1', contentType: 'movie', itemId: id });
 const LIST = [
@@ -125,6 +127,44 @@ describe('My List reads (L3-vod-7)', () => {
     expect(posterRenders.byTitle.get('Blade Runner')).toBeGreaterThan(before.get('Blade Runner')!);
     expect(posterRenders.byTitle.get('Arrival')).toBe(before.get('Arrival'));
     expect(posterRenders.byTitle.get('Heat')).toBe(before.get('Heat'));
+  });
+});
+
+describe('poster corners and buttons read the cached list', () => {
+  const mountButton = () =>
+    render(
+      <h.Providers path="/movie/m1">
+        <MyListButton itemRef={m('m1')} snapshot={{ title: 'Arrival', contentType: 'movie' }} />
+      </h.Providers>,
+    );
+
+  it('a mount a minute later reads nothing again, while an invalidation in between still does', async () => {
+    h.installCore(rpc, LIST);
+    const first = mountButton();
+    await waitFor(() => expect(screen.getByTestId('mylist-button').dataset['state']).toBe('ready'));
+    // The playback rows' link finds the list by TanStack's own hash of its key.
+    expect(queryClient.getQueryCache().get(hashKey(LIST_KEY))).toBeDefined();
+    first.unmount();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
+    try {
+      mountButton().unmount();
+      await act(async () => undefined);
+      expect(rpc.callsOf('watchlist.list')).toHaveLength(1);
+
+      // A playback row going stale marks the list stale too.
+      queryClient.setQueryData(rpcKey('positions.get', { ref: m('m2') }), null);
+      await act(() => invalidate('positions.'));
+      const second = mountButton();
+      await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(2));
+      second.unmount();
+
+      // A change made elsewhere (another window, the remote) while nothing showed the list.
+      await act(() => invalidate('watchlist.'));
+      mountButton();
+      await waitFor(() => expect(rpc.callsOf('watchlist.list')).toHaveLength(3));
+    } finally {
+      clock.mockRestore();
+    }
   });
 });
 

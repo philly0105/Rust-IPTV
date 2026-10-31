@@ -8,6 +8,8 @@
  * then refreshes other windows and the remote.
  */
 
+import { hashKey } from '@tanstack/react-query';
+
 import { invalidate, queryClient, rpcKey } from '@/api/query';
 import { RpcError, rpc } from '@/api/transport';
 import { sameRef, type WatchlistEntry } from '@/api/types';
@@ -18,6 +20,8 @@ import { reinsertRef } from './list';
 /** Arguments of the shared query: the whole list, every source and type. */
 export const LIST_ARGS: { sourceId?: string; contentType?: 'movie' | 'series' } = {};
 export const LIST_KEY = rpcKey('watchlist.list', LIST_ARGS);
+/** TanStack's hash of {@link LIST_KEY}: every reader of the list uses the default key hash. */
+const LIST_HASH = hashKey(LIST_KEY);
 
 export function readList(): WatchlistEntry[] | undefined {
   return queryClient.getQueryData<WatchlistEntry[]>(LIST_KEY);
@@ -49,14 +53,20 @@ export function rollbackList(previous: WatchlistEntry[] | undefined): void {
  * Recent's Remove, the player's saves). Whenever a `positions.` query is
  * marked stale, so is the list: nothing refetches now, the next page or rail
  * mount reads it again. This lets the page keep a long staleTime (L3-vod-7).
+ *
+ * The list is found by its hash, not with `invalidateQueries`: that matches
+ * an exact key by hashing it with every cached query's own hash function, a
+ * scan of the whole cache for each positions query marked stale (one player
+ * save marks dozens), and it would hand this key to hash functions written
+ * for other commands' keys. `invalidate()` on the entry is what
+ * `invalidateQueries` with `refetchType: 'none'` does to each match.
  */
 function stalesWithPositions(): () => void {
-  return queryClient.getQueryCache().subscribe((event) => {
+  const cache = queryClient.getQueryCache();
+  return cache.subscribe((event) => {
     if (event.type !== 'updated' || event.action.type !== 'invalidate') return;
     const head = event.query.queryKey[0];
-    if (typeof head === 'string' && head.startsWith('positions.')) {
-      void queryClient.invalidateQueries({ queryKey: LIST_KEY, exact: true, refetchType: 'none' });
-    }
+    if (typeof head === 'string' && head.startsWith('positions.')) cache.get(LIST_HASH)?.invalidate();
   });
 }
 stalesWithPositions();

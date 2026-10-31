@@ -42,9 +42,11 @@ const hashes = new WeakMap<readonly ItemRef[], Map<string, string>>();
 /**
  * TanStack's own hash (so other `epg.grid` readers share the entry), made once per refs chunk and window:
  * a key holds up to 500 refs, and every render would otherwise serialize all of them (as useWatched.ts).
+ * An exact-key lookup over the cache can hand it any other command's key, which is hashed plainly.
  */
 function gridKeyHash(key: QueryKey): string {
-  const args = key[1] as { refs: readonly ItemRef[]; from: string; to: string };
+  const args = key[1] as Partial<{ refs: readonly ItemRef[]; from: string; to: string }> | null | undefined;
+  if (!Array.isArray(args?.refs) || args.from === undefined || args.to === undefined) return hashKey(key);
   let byWindow = hashes.get(args.refs);
   if (!byWindow) {
     byWindow = new Map();

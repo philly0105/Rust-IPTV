@@ -41,6 +41,18 @@ vi.mock('@/api/events', () => ({
   onAnyAppEvent: () => () => undefined,
 }));
 vi.mock('@/features/player', async () => (await import('./harness')).playerModule);
+/** Channel names drawn: one per channel result render. */
+const channelNames = vi.hoisted(() => ({ renders: 0 }));
+vi.mock('@/features/live/components/ChannelLogo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/live/components/ChannelLogo')>();
+  return {
+    ...actual,
+    ChannelName: (props: Parameters<typeof actual.ChannelName>[0]) => {
+      channelNames.renders += 1;
+      return actual.ChannelName(props);
+    },
+  };
+});
 
 const movie = (i: number, sourceId = 'src1'): VodItem => ({
   ref: { sourceId, contentType: 'movie', itemId: `m${i}` },
@@ -326,6 +338,21 @@ describe('VD-1: poster results scroll without re-rendering every card', () => {
   });
 });
 
+describe('channel results scroll without re-rendering every channel', () => {
+  it('a scroll step that mounts no new row draws none of the mounted channels again', async () => {
+    rpcMock.handlers['catalog.search'] = () => ({ live: Array.from({ length: 60 }, (_, i) => channel(i, 'src1')), movies: [], series: [] });
+    renderApp('/search?q=news');
+    const grid = await screen.findByTestId('vod-search-channels');
+    await waitFor(() => expect(within(grid).getAllByRole('button').length).toBeGreaterThan(8));
+    await new Promise((r) => setTimeout(r, 50));
+    channelNames.renders = 0;
+    // The page scrolls and stops: the grid renders as scrolling starts and again as it ends.
+    fireEvent.scroll(screen.getByTestId('vod-search'));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(channelNames.renders).toBe(0);
+  });
+});
+
 describe('L3-vod-5: the results narrow to the typed query within a frame of the key', () => {
   const titled = (i: number, title: string): VodItem => ({ ...movie(i), title });
 
@@ -397,5 +424,43 @@ describe('guide programmes in search (F-SEARCH-PROGRAMMES)', () => {
     renderApp('/search?q=alpha');
     expect(await screen.findByTestId('search-programmes')).toBeTruthy();
     expect(screen.queryByText(/No results/)).toBeNull();
+  });
+
+  const programmeQueries = () => callsOf('epg.search').map((c) => (c.args as { query: string }).query);
+
+  it('asks every source for a query the page opens with, without waiting for a pause', async () => {
+    renderApp('/search?q=alpha');
+    // Well inside the programme search's pause: the opening query is not held back.
+    await waitFor(() => expect(programmeQueries()).toEqual(['alpha', 'alpha']), { timeout: 200 });
+  });
+
+  it('searches the guide for the word typed once it rests, not for every prefix on the way', async () => {
+    renderApp('/search?q=b');
+    await screen.findByLabelText('Header search');
+    // Typed letter by letter, faster than the programme pause but slower than the library's.
+    for (const q of ['br', 'bre', 'brea', 'break', 'breaki', 'breakin', 'breaking']) {
+      fireEvent.change(field(), { target: { value: q } });
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    await waitFor(() => expect(programmeQueries()).toEqual(['breaking', 'breaking']), { timeout: 2000 });
+    // The library search follows the field at its own pace.
+    expect(callsOf('catalog.search').length).toBeGreaterThan(2);
+  });
+
+  it('keeps the answered programmes, narrowed to the typed text, while the longer query waits', async () => {
+    rpcMock.handlers['epg.search'] = (a) => {
+      const { sourceId, query } = a as { sourceId: string; query: string };
+      if (query !== 'alpha') return never();
+      return sourceId === 'src1' ? [programmeHit('src1', 'Alpha Report', start + 600_000)] : [programmeHit('src2', 'Alpha Hour', start)];
+    };
+    renderApp('/search?q=alpha&type=programmes');
+    const list = await screen.findByTestId('search-programmes');
+    await waitFor(() => expect(within(list).getAllByRole('button')).toHaveLength(2));
+    fireEvent.change(field(), { target: { value: 'alpha r' } });
+    // "Alpha Hour" cannot match the longer text; "Alpha Report" stays rather than flashing away.
+    await waitFor(() => expect(screen.queryByText('Alpha Hour')).toBeNull());
+    expect(screen.getByText('Alpha Report')).toBeTruthy();
+    await waitFor(() => expect(programmeQueries()).toContain('alpha r'), { timeout: 2000 });
+    expect(screen.getByText('Alpha Report')).toBeTruthy();
   });
 });

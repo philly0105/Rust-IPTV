@@ -151,6 +151,32 @@ describe('B4-vod-D1/D2: startEpisodeQueue follows the player', () => {
     expect(queueIds()).toEqual(['e11', 'e12', 'e13', 'e21', 'e22']);
   });
 
+  it('resolves only the next episode; the later ones wait as placeholders the player resolves on play', async () => {
+    playing('e12');
+    await startEpisodeQueue(ctxFor('xtream'), 'e12');
+    const asked = () => callsOf('xtream.streamUrl').map((c) => (c.args as { episodeId: string }).episodeId);
+    expect(asked()).toEqual(['e13']);
+    const q = queueOf();
+    expect(q.map((e) => e.episodeId)).toEqual(['e11', 'e12', 'e13', 'e21', 'e22']);
+    expect(q[2]!.url).not.toBe('');
+    expect(q.slice(3).map((e) => e.url)).toEqual(['', '']);
+
+    // Each start asks one more: the new next episode.
+    act(() => playing('e13'));
+    await waitFor(() => expect(asked()).toEqual(['e13', 'e21']));
+    await waitFor(() => expect(queueOf()[3]).toMatchObject({ episodeId: 'e21', url: 'http://x/series/e21.mkv' }));
+    expect(queueOf()[4]).toMatchObject({ episodeId: 'e22', url: '' });
+  });
+
+  it('queues nothing after a next episode that failed to resolve', async () => {
+    rpcMock.handlers['xtream.streamUrl'] = () => {
+      throw new Error('gone');
+    };
+    playing('e12');
+    await startEpisodeQueue(ctxFor('xtream'), 'e12');
+    expect(queueIds()).toEqual(['e11', 'e12']);
+  });
+
   it('is a no-op when the player is on something else (playback failed)', async () => {
     usePlayerStore.setState({ source: { ref: { ...sref, itemId: 'other' } }, status: 'error' });
     await startEpisodeQueue(ctxFor('xtream'), 'e12');

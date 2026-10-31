@@ -2,7 +2,9 @@
  * Series auto-advance: when an episode starts, the player queue (C8) is set to
  * that episode followed by the rest of its season and the whole next season,
  * so the player's own "Up next" (`usePlayerStore.next()`) keeps going after
- * the detail page is gone (mini player, another screen).
+ * the detail page is gone (mini player, another screen). Only the next episode
+ * gets its stream URL up front; the ones after it are placeholders the player
+ * resolves if they are played.
  *
  * The manager lives at module level. It follows the player store: when the
  * player moves to another episode of the same series it extends the queue
@@ -36,9 +38,20 @@ export const REFRESH_LEAD_SECONDS = 90;
 /** Parallel `streamUrl` calls while building a queue. */
 const RESOLVE_CONCURRENCY = 4;
 
-/** How many upcoming episodes are resolved ahead. Stalker links expire, so only the next one. */
-export function lookaheadFor(kind: SourceKind): number {
-  return kind === 'stalker' ? 1 : Number.POSITIVE_INFINITY;
+/**
+ * Upcoming episodes resolved ahead: only the next one. The player advances to
+ * that entry alone, and every episode start builds the queue again, so a URL
+ * resolved further ahead was never played (one `streamUrl` per remaining
+ * episode on each start, each reading the whole series in the core).
+ */
+const RESOLVE_AHEAD = 1;
+
+/**
+ * Whether the episodes after the resolved one go in as placeholders. Stalker's
+ * queue stops at the next episode, as it always has: its links expire.
+ */
+function placeholdersAhead(kind: SourceKind): boolean {
+  return kind !== 'stalker';
 }
 
 /**
@@ -185,14 +198,18 @@ function currentEpisodeOf(ctx: EpisodeQueueContext): { source: PlayerSource; epi
 async function build(a: ActiveQueue, episodeId: string): Promise<void> {
   a.builtFor = episodeId;
   const seq = ++a.seq;
-  const upcoming = queueEpisodes(a.ctx.order, episodeId, lookaheadFor(a.ctx.sourceKind));
-  const resolved = upcoming.length > 0 ? await resolveQueue(a.ctx, upcoming) : [];
+  const upcoming = queueEpisodes(a.ctx.order, episodeId);
+  const ahead = upcoming.slice(0, RESOLVE_AHEAD);
+  const resolved = ahead.length > 0 ? await resolveQueue(a.ctx, ahead) : [];
   if (active !== a || a.seq !== seq) return;
   const cur = currentEpisodeOf(a.ctx);
   if (!cur || cur.episodeId !== episodeId) return;
   // Earlier episodes go in front as placeholders, so the player's Prev works from S01E02 on.
   const earlier = previousEpisodes(a.ctx.order, episodeId).map((ep) => placeholderFor(a.ctx, ep));
-  usePlayerStore.setState({ queue: [...earlier, cur.source, ...resolved] });
+  // Later ones follow as placeholders, but never after an episode that failed to resolve: the queue would skip it.
+  const later =
+    placeholdersAhead(a.ctx.sourceKind) && resolved.length === ahead.length ? upcoming.slice(ahead.length).map((ep) => placeholderFor(a.ctx, ep)) : [];
+  usePlayerStore.setState({ queue: [...earlier, cur.source, ...resolved, ...later] });
 }
 
 async function refreshNext(a: ActiveQueue, episodeId: string): Promise<void> {

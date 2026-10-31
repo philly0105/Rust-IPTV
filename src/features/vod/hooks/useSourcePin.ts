@@ -9,7 +9,10 @@ import { useToast, errorDescription } from '@/ui';
 
 import { matchKey, migrateLocalPins } from '../lib/pins';
 
-/** Preferred-source pin for a title (`sourcePins.*`), plus the copy it points at when that copy is among `others`. */
+/**
+ * Preferred-source pin for a title (`sourcePins.*`), plus the copy it points at when that copy is among `others`.
+ * Read only once the title has other copies: a pin can only point at one of them, and nothing shows it before.
+ */
 export function useSourcePin(item: Pick<VodItem, 'title' | 'titleBase' | 'year'> | undefined, others: VodItem[]) {
   const { t } = useTranslation('vod');
   const { toast } = useToast();
@@ -21,7 +24,7 @@ export function useSourcePin(item: Pick<VodItem, 'title' | 'titleBase' | 'year'>
       await migrateLocalPins();
       return rpc('sourcePins.get', { matchKey: key ?? '' });
     },
-    enabled: !!key,
+    enabled: !!key && others.length > 0,
   });
   const pin = query.data ?? undefined;
 

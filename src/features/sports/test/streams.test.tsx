@@ -468,6 +468,19 @@ describe('useGuideWindow', () => {
     await tick(20);
     expect(callsOf('epg.grid')).toEqual([]);
   });
+
+  it('leaves exact-key lookups of other commands working while its grids are cached', async () => {
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    handlers['epg.grid'] = () => ({});
+    const { result } = renderHook(() => useGuideWindow(index.slice(0, 3), Date.parse('2026-10-23T22:30Z'), Date.parse('2026-10-24T03:30Z'), true), {
+      wrapper,
+    });
+    await waitFor(() => expect(callsOf('epg.grid')).toHaveLength(1));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // An exact match hashes the wanted key with each cached query's own key hash.
+    expect(() => queryClient.getQueryCache().find({ queryKey: ['watchlist.list', {}], exact: true })).not.toThrow();
+    expect(queryClient.getQueryCache().findAll({ queryKey: ['epg.grid'] })).toHaveLength(1);
+  });
 });
 
 describe('useGameStreams', () => {

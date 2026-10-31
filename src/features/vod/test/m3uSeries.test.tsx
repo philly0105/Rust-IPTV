@@ -98,7 +98,9 @@ describe('F-M3U-SERIES: SeriesDetailPage for an M3U series', () => {
     await waitFor(() => expect(played).toHaveLength(1));
     expect(played[0]).toMatchObject({ ref: sref, episodeId: 'e11', sourceKind: 'm3u' });
     await waitFor(() => expect(queueIds()).toEqual(['e11', 'e12', 'e21']));
-    expect(callsOf('m3u.streamUrl').map((c) => (c.args as { episodeId: string }).episodeId).sort()).toEqual(['e12', 'e21']);
+    // The next episode is resolved now; the one after it when it is played.
+    expect(callsOf('m3u.streamUrl').map((c) => (c.args as { episodeId: string }).episodeId)).toEqual(['e12']);
+    expect(usePlayerStore.getState().queue[2]).toMatchObject({ episodeId: 'e21', url: '' });
     expect(callsOf('m3u.seriesDetail')[0]!.args).toEqual({ ref: sref });
     expect(callsOf('catalog.item')).toHaveLength(0);
   });

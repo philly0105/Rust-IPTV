@@ -16,7 +16,7 @@ import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DEFAULT_SETTINGS, type ItemRef, type Page, type SeriesDetail, type SeriesItem, type VodDetail, type VodItem } from '@/api/types';
+import { DEFAULT_SETTINGS, type Category, type ItemRef, type Page, type SeriesDetail, type SeriesItem, type VodDetail, type VodItem } from '@/api/types';
 
 import { forgetSpots } from '../hooks/useScrollMemory';
 import { buildPageRequest } from '../lib/paging';
@@ -237,5 +237,48 @@ describe('VOD-DETAIL-PLACEHOLDER: Stalker', () => {
     await act(async () => new Promise((r) => setTimeout(r, 50)));
     expect(screen.queryByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeNull();
     expect(callsOf('parental.check')).toEqual([]);
+  });
+});
+
+describe('detail pages read only what they show', () => {
+  const fact = (label: string) =>
+    [...screen.getByTestId('vod-about').querySelectorAll('dt')].find((dt) => dt.textContent === label)?.nextElementSibling?.textContent;
+  const action: Category = { id: 'c1', sourceId: 'src1', contentType: 'movie', name: 'Action', hidden: false, itemCount: 3, position: 0 } as Category;
+
+  it('a movie whose row names its category reads no category list, and no pin while no other source has it', async () => {
+    rpcMock.handlers['xtream.vodDetail'] = (): VodDetail => ({ item: { ...movieRow, categoryName: 'Sci-Fi' }, cast: [], backdrops: [], providerDetailsUnavailable: false });
+    open('/s/src1/movie/m7');
+    await waitFor(() => expect(fact('Category')).toBe('Sci-Fi'));
+    await waitFor(() => expect(callsOf('catalog.sameTitle')).toHaveLength(1));
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(callsOf('catalog.categories')).toEqual([]);
+    expect(callsOf('sourcePins.get')).toEqual([]);
+  });
+
+  it('a series whose row names its category reads no category list', async () => {
+    rpcMock.handlers['xtream.seriesDetail'] = (): SeriesDetail => ({ item: { ...seriesRow, categoryName: 'Drama' }, seasons: [], cast: [], backdrops: [], providerDetailsUnavailable: false });
+    open('/s/src1/series/s1');
+    await waitFor(() => expect(fact('Category')).toBe('Drama'));
+    await act(async () => new Promise((r) => setTimeout(r, 20)));
+    expect(callsOf('catalog.categories')).toEqual([]);
+  });
+
+  it('a title without its category name still finds it in the category list', async () => {
+    rpcMock.handlers['catalog.categories'] = () => [action];
+    rpcMock.handlers['xtream.vodDetail'] = (): VodDetail => ({ item: movieRow, cast: [], backdrops: [], providerDetailsUnavailable: false });
+    open('/s/src1/movie/m7');
+    await waitFor(() => expect(fact('Category')).toBe('Action'));
+    expect(callsOf('catalog.categories')).toHaveLength(1);
+  });
+
+  it('reads the pin once another source has the title, and plays the pinned copy', async () => {
+    const other: VodItem = { ...movieRow, ref: { sourceId: 'src2', contentType: 'movie', itemId: 'm9' } };
+    rpcMock.handlers['sources.list'] = () => [makeSource('src1', 'xtream', 'Alpha IPTV'), makeSource('src2', 'xtream', 'Beta IPTV')];
+    rpcMock.handlers['catalog.sameTitle'] = () => [other];
+    rpcMock.handlers['sourcePins.get'] = () => ({ sourceId: 'src2', itemId: 'm9', updatedAt: '2026-10-01T00:00:00Z' });
+    rpcMock.handlers['xtream.vodDetail'] = (): VodDetail => ({ item: { ...movieRow, categoryName: 'Sci-Fi' }, cast: [], backdrops: [], providerDetailsUnavailable: false });
+    open('/s/src1/movie/m7');
+    await waitFor(() => expect(callsOf('sourcePins.get')).toHaveLength(1));
+    await screen.findByText(i18n.t('vod:playsFrom', { source: 'Beta IPTV' }));
   });
 });

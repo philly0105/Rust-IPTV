@@ -215,7 +215,8 @@ export function SeriesDetailPage() {
     ? { title: t('series'), documentTitle: pageTitle }
     : { title: pageTitle, subtitle: headerSource, section: t('series'), back: { onClick: goBack } };
   usePageHeader(header, [watch.active, pageTitle, headerSource, t]);
-  const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item, staleTime: 5 * 60_000 });
+  // Only for an item without its category's name (a portal search hit): catalog rows carry it.
+  const categories = useRpcQuery('catalog.categories', categoriesArgs(sourceId, 'series'), { enabled: !!sourceId && !!item && !item.categoryName, staleTime: 5 * 60_000 });
   // L1-visual-6: favorites, My List and the player keep the base title; the year is the subtitle only
   // (My List saves what a poster card saves, myListTarget).
   const snapshot = {

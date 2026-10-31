@@ -6,7 +6,7 @@
  */
 
 import { ListOrdered, ListTree, ListVideo, Plus, Settings2, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 
@@ -100,6 +100,14 @@ export function ListPage() {
   // C2: Ask mode marks locked channels and keeps their programme titles back, as on Live.
   const locks = useListLocks(paged.channels);
   const actions = useListActions();
+  const { removeEntries } = actions;
+  // Stable through clock ticks and cursor moves, so the dropped channels' section skips those renders.
+  const removeUnavailable = useCallback(
+    (entries: CustomListEntry[], label: string) => {
+      if (list) removeEntries(list, entries, label);
+    },
+    [list, removeEntries],
+  );
   const settings = useRpcQuery('settings.get', undefined);
   // The Live TV quality filter leaves out the channels it hides: an empty list may be its doing.
   const quality = useLiveQuality();
@@ -562,11 +570,7 @@ export function ListPage() {
         </div>
         {listBody}
         {list && paged.unavailable.length > 0 ? (
-          <UnavailableEntries
-            entries={paged.unavailable}
-            strip={prefs.stripCountryPrefix}
-            onRemove={(entries, label) => actions.removeEntries(list, entries, label)}
-          />
+          <UnavailableEntries entries={paged.unavailable} strip={prefs.stripCountryPrefix} fmt={fmt} onRemove={removeUnavailable} />
         ) : null}
       </section>
 
@@ -628,18 +632,23 @@ export function ListPage() {
   );
 }
 
-/** Channels the provider dropped: greyed, with Remove each and Remove all. */
-function UnavailableEntries({
+/**
+ * Channels the provider dropped: greyed, with Remove each and Remove all. Memoized: the page
+ * renders on every clock tick and cursor move, and a list can hold hundreds of dropped channels,
+ * each with its own button, whose props stay the same through those renders.
+ */
+const UnavailableEntries = memo(function UnavailableEntries({
   entries,
   strip,
+  fmt,
   onRemove,
 }: {
   entries: CustomListEntry[];
   strip: boolean;
+  fmt: Intl.NumberFormat;
   onRemove(entries: CustomListEntry[], label: string): void;
 }) {
-  const { t, i18n } = useTranslation('lists');
-  const fmt = new Intl.NumberFormat(intlLocale(i18n.language));
+  const { t } = useTranslation('lists');
   return (
     <details className="group shrink-0 border-t border-divider bg-surface" data-testid="list-unavailable">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-fg-muted outline-none hover:text-fg focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
@@ -677,4 +686,4 @@ function UnavailableEntries({
       </div>
     </details>
   );
-}
+});

@@ -1,3 +1,4 @@
+import { hashKey, type QueryKey } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ItemRef, WatchlistEntry } from '@/api/types';
@@ -256,6 +257,46 @@ describe('patchList', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(titles(readList() ?? [])).toEqual(['B', 'A']);
     expect(queryClient.getQueryState(LIST_KEY)?.status).toBe('success');
+    queryClient.clear();
+  });
+});
+
+describe('the list goes stale with playback rows', () => {
+  const isPositions = (q: { queryKey: QueryKey }) => String(q.queryKey[0]).startsWith('positions.');
+
+  // One player save marks every cached positions query stale. Matching the list's key against
+  // the whole cache once per such query (each with that query's own key hash) was a long task
+  // on a large cache, and a hash written for one command's keys could throw on the list's key.
+  it('marks the list stale without hashing its key against the other cached queries', async () => {
+    const { queryClient } = await import('@/api/query');
+    const { LIST_KEY } = await import('../lib/cache');
+    queryClient.clear();
+    queryClient.setQueryData(LIST_KEY, []);
+    const ownHash = vi.fn((key: QueryKey) => hashKey(key));
+    queryClient.getQueryCache().build(queryClient, { queryKey: ['epg.grid', { refs: [], from: 'a', to: 'b' }], queryKeyHashFn: ownHash });
+    for (let i = 0; i < 50; i += 1) queryClient.setQueryData(['positions.watchedContains', { refs: [String(i)] }], []);
+    ownHash.mockClear();
+
+    await queryClient.invalidateQueries({ predicate: isPositions, refetchType: 'none' });
+    expect(queryClient.getQueryState(LIST_KEY)?.isInvalidated).toBe(true);
+    expect(ownHash).not.toHaveBeenCalled();
+    queryClient.clear();
+  });
+
+  it('still marks it stale while a query whose key hash takes only its own keys is cached', async () => {
+    const { queryClient } = await import('@/api/query');
+    const { LIST_KEY } = await import('../lib/cache');
+    queryClient.clear();
+    queryClient.setQueryData(LIST_KEY, []);
+    const pickyHash = (key: QueryKey) => {
+      if (key[0] !== 'epg.grid') throw new Error('not a grid key');
+      return hashKey(key);
+    };
+    queryClient.getQueryCache().build(queryClient, { queryKey: ['epg.grid', { refs: [] }], queryKeyHashFn: pickyHash });
+    queryClient.setQueryData(['positions.get', { ref: r('movie', 'a') }], null);
+
+    await expect(queryClient.invalidateQueries({ predicate: isPositions, refetchType: 'none' })).resolves.toBeUndefined();
+    expect(queryClient.getQueryState(LIST_KEY)?.isInvalidated).toBe(true);
     queryClient.clear();
   });
 });

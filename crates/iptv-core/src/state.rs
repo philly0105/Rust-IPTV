@@ -44,7 +44,9 @@ pub struct AppState {
 }
 
 /// Runs best-effort writes after their caller has returned: the cache rows a
-/// read fills (TMDB lookups, listed Stalker rows). They pass the gate of
+/// read fills (TMDB lookups, listed Stalker rows), a Stalker session, an
+/// Xtream panel's clock and the boot purge of expired TMDB rows (R1-1,
+/// R4-2). They pass the gate of
 /// [`AppState::db_write`] like user writes, so while an import holds the
 /// write lock they never park more than that one pooled connection, and the
 /// read that started them does not wait for the lock (DB-1). Cloned out of
@@ -297,7 +299,9 @@ impl AppState {
     }
 
     /// [`Self::db_call`] for the periodic writes nobody waits on: download
-    /// progress, a recording's byte count and the image cache index. They
+    /// progress, a recording's byte count and the image cache index; also
+    /// the background bookkeeping no user waits for (an import's outcome
+    /// row, an account status, the window geometry; R1-1, R4-1). They
     /// pass a gate of their own one at a time before they take a pooled
     /// connection, so while an import holds SQLite's write lock they park one
     /// connection between them instead of one each, and user writes never

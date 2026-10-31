@@ -572,7 +572,7 @@ pub fn cleanup_on_boot(conn: &Connection) -> CoreResult<()> {
 }
 
 /// Deletes rows (and their data) for urls no longer configured. Returns how many were removed.
-pub fn prune(conn: &Connection, keep: &[ConfiguredUrl]) -> CoreResult<usize> {
+pub fn prune(conn: &mut Connection, keep: &[ConfiguredUrl]) -> CoreResult<usize> {
     let keep: HashSet<&str> = keep.iter().map(|c| c.url.as_str()).collect();
     let stale: Vec<String> = {
         let mut stmt = conn.prepare("SELECT url FROM epg_sources WHERE origin <> ?1")?;
@@ -581,14 +581,21 @@ pub fn prune(conn: &Connection, keep: &[ConfiguredUrl]) -> CoreResult<usize> {
             .filter(|u| !keep.contains(u.as_str()))
             .collect()
     };
-    if !stale.is_empty() {
-        // Before the deletes: a failure part-way leaves the index marked stale.
-        super::search::invalidate_index(conn)?;
+    if stale.is_empty() {
+        return Ok(0);
     }
+    // The index marker goes in the same transaction as the programmes. As
+    // separate writes, a rebuild on another connection (after a refresh)
+    // could run between them and mark an index that still holds the pruned
+    // programmes as matching; refreshes that update the index in place
+    // would then keep their entries, and give their rowids to new rows.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    super::search::invalidate_index(&tx)?;
     for url in &stale {
-        conn.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
-        conn.execute("DELETE FROM epg_sources WHERE url = ?1", [url])?;
+        tx.execute("DELETE FROM epg_programs WHERE epg_url = ?1", [url])?;
+        tx.execute("DELETE FROM epg_sources WHERE url = ?1", [url])?;
     }
+    tx.commit()?;
     Ok(stale.len())
 }
 
@@ -979,6 +986,115 @@ mod tests {
         assert_index_matches_a_rebuild(&mut conn);
     }
 
+    /// Programmes deleted while the index still counted them leave their
+    /// search rows above the stored rowids, where the next refresh's new
+    /// rows go. That refresh has the index rebuilt instead of failing on
+    /// the search rows' key (and every refresh after it the same way).
+    #[test]
+    fn search_rows_left_above_the_programmes_send_the_refresh_to_a_rebuild() {
+        let mut conn = guide(&["u", "gone"]);
+        refresh(&mut conn, "u", &day(0, 48));
+        refresh(&mut conn, "gone", &day(0, 48));
+        conn.execute("DELETE FROM epg_programs WHERE epg_url = 'gone'", [])
+            .unwrap();
+        assert!(search::index_ready(&conn).unwrap());
+        assert_eq!(refresh(&mut conn, "u", &day(4, 52)), (96, false));
+        assert_eq!(matches(&conn, "film 50").len(), 1);
+        assert_index_matches_a_rebuild(&mut conn);
+    }
+
+    /// A swap that fails part-way (the process stopped, the disk full)
+    /// leaves the stored programmes, their rowids, the index and its marker
+    /// as they were; the next refresh updates them in place as usual.
+    #[test]
+    fn a_failed_swap_leaves_the_guide_and_its_index_as_they_were() {
+        let mut conn = guide(&["u"]);
+        refresh(&mut conn, "u", &day(0, 48));
+        let before = (rows(&conn, "u"), index_snapshot(&conn));
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER fail_swap BEFORE INSERT ON epg_search_rows
+             BEGIN SELECT RAISE(ABORT, 'stopped'); END",
+        )
+        .unwrap();
+        let key = begin_staging(&conn, "u").unwrap();
+        {
+            let mut w = StagingWriter::new(&mut conn, key);
+            for p in day(4, 52) {
+                w.push_programme(p).unwrap();
+            }
+            w.flush().unwrap();
+        }
+        assert!(commit_staging(&mut conn, "u", None, 0).is_err());
+        assert!(search::index_ready(&conn).unwrap());
+        assert_eq!((rows(&conn, "u"), index_snapshot(&conn)), before);
+        conn.execute_batch("DROP TRIGGER fail_swap").unwrap();
+        assert_index_matches_a_rebuild(&mut conn);
+        assert_eq!(refresh(&mut conn, "u", &day(4, 52)), (96, true));
+        assert_index_matches_a_rebuild(&mut conn);
+    }
+
+    /// Two feeds listing the same channels and slots: refreshing one
+    /// replaces only its own programmes and search rows.
+    #[test]
+    fn feeds_sharing_channels_are_refreshed_apart() {
+        let mut conn = guide(&["u", "v"]);
+        refresh(&mut conn, "u", &day(0, 48));
+        refresh(&mut conn, "v", &day(0, 48));
+        let v_rows = rows(&conn, "v");
+        let v_feed: i64 = conn
+            .query_row("SELECT rowid FROM epg_sources WHERE url = 'v'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let of_v = |conn: &Connection| -> SearchRows {
+            let rows = index_snapshot(conn).1;
+            rows.into_iter().filter(|r| r.3 == v_feed).collect()
+        };
+        let v_index = of_v(&conn);
+        assert_eq!(v_index.len(), 96);
+        let mut next = day(4, 52);
+        next[10].title = "Show 14 moved".into();
+        assert_eq!(refresh(&mut conn, "u", &next), (96, true));
+        assert_eq!(rows(&conn, "v"), v_rows);
+        assert_eq!(of_v(&conn), v_index);
+        assert_eq!(matches(&conn, "show 14").len(), 2);
+        assert_eq!(matches(&conn, "moved").len(), 1);
+        assert_eq!(matches(&conn, "show 0").len(), 1, "v keeps its slot");
+        assert_index_matches_a_rebuild(&mut conn);
+    }
+
+    /// A prune removes the index marker and the programmes of the urls no
+    /// longer configured in one transaction: a rebuild on another
+    /// connection cannot run between the two and mark an index that still
+    /// holds the pruned programmes as matching. A failure part-way keeps
+    /// both.
+    #[test]
+    fn a_prune_is_one_transaction() {
+        let mut conn = guide(&["a", "b", "keep"]);
+        for url in ["a", "b", "keep"] {
+            refresh(&mut conn, url, &day(0, 4));
+        }
+        let keep = [ConfiguredUrl {
+            url: "keep".into(),
+            origin: EpgOrigin::Settings,
+            source_id: None,
+            headers: RequestHeaders::default(),
+        }];
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER fail_prune BEFORE DELETE ON epg_sources WHEN old.url = 'b'
+             BEGIN SELECT RAISE(ABORT, 'stopped'); END",
+        )
+        .unwrap();
+        assert!(prune(&mut conn, &keep).is_err());
+        assert!(search::index_ready(&conn).unwrap());
+        assert_eq!((count(&conn, "a"), count(&conn, "b")), (8, 8));
+        conn.execute_batch("DROP TRIGGER fail_prune").unwrap();
+        assert_eq!(prune(&mut conn, &keep).unwrap(), 2);
+        assert!(!search::index_ready(&conn).unwrap());
+        assert_eq!((count(&conn, "a"), count(&conn, "b")), (0, 0));
+        assert_eq!(count(&conn, "keep"), 8);
+    }
+
     /// The diff's statements read the stored programmes through the slot
     /// index and each staged and replaced row by its key.
     #[test]
@@ -1023,6 +1139,10 @@ mod tests {
             (
                 "SELECT p.rowid FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url WHERE p.rowid > ?1",
                 "SEARCH p USING INTEGER PRIMARY KEY (rowid>?)",
+            ),
+            (
+                "SELECT EXISTS (SELECT 1 FROM epg_search_rows WHERE id > ?1)",
+                "SEARCH epg_search_rows USING INTEGER PRIMARY KEY (rowid>?)",
             ),
         ] {
             let plan = plan(sql);

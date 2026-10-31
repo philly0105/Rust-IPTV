@@ -218,7 +218,20 @@ pub(crate) fn unindex(conn: &Connection, ids: &str, count: u64) -> CoreResult<bo
 /// plus one). `added` is how many that is; any other count removes the
 /// marker, so the index is rebuilt after the swap. Counts the update
 /// towards [`MAX_IN_PLACE_UPDATES`].
+///
+/// A search row above `last` belongs to a programme deleted without the
+/// index being told, and the new rows have taken its rowid: indexing them
+/// would fail on the search row's key, on this refresh and every later
+/// one. The marker is removed instead, and the rebuild after the swap
+/// drops what the index kept of the deleted programmes.
 pub(crate) fn index_after(conn: &Connection, last: i64, added: u64) -> CoreResult<()> {
+    let left_behind: bool = conn
+        .prepare_cached("SELECT EXISTS (SELECT 1 FROM epg_search_rows WHERE id > ?1)")?
+        .query_row([last], |r| r.get(0))?;
+    if left_behind {
+        tracing::warn!("guide search index held deleted programmes; rebuilding it");
+        return invalidate_index(conn);
+    }
     ensure_fold(conn)?;
     conn.execute(
         &format!(

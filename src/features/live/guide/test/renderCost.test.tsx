@@ -8,10 +8,13 @@ import { act, cleanup, configure, fireEvent, screen } from '@testing-library/rea
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, Page, PageQuery } from '@/api/types';
+import { usePlayerStore } from '@/features/player';
 import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, GRID_CHUNK, GRID_ROW } from '../../components/EpgGridPage';
+import { ScopePicker } from '../../components/ScopePicker';
 import { HOUR } from '../../lib/epgTime';
+import { GuidePreview } from '../GuidePreview';
 import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
@@ -25,6 +28,15 @@ vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEven
 vi.mock('@/shell', async () => await import('../../test/fakes'));
 vi.mock('@/features/player', async () => await import('../../test/fakes'));
 vi.mock('@/features/player/remote', async () => await import('../../test/fakes'));
+// Their calls count renders of the preview band and of the toolbar (its two pickers).
+vi.mock('../GuidePreview', async (orig) => {
+  const mod = await orig<typeof import('../GuidePreview')>();
+  return { ...mod, GuidePreview: vi.fn(mod.GuidePreview) };
+});
+vi.mock('../../components/ScopePicker', async (orig) => {
+  const mod = await orig<typeof import('../../components/ScopePicker')>();
+  return { ...mod, ScopePicker: vi.fn(mod.ScopePicker) };
+});
 
 rpcMock.current = createRpcMock();
 const rpc = rpcMock.current;
@@ -132,6 +144,51 @@ describe('grid keys (P2-GUIDE-6)', () => {
     stringify.mockRestore();
     expect(screen.getByRole('button', { name: /^c4 P0,/ })).toBeTruthy();
     expect(gridKeys).toEqual([]);
+  });
+});
+
+describe('a vertical scroll and the parts above the grid (F3-4)', () => {
+  it('a row crossing re-renders neither the preview band nor the toolbar while a channel plays off screen', async () => {
+    channels = Array.from({ length: 3 * GRID_CHUNK }, (_, i) => makeChannel(i));
+    // A window wide and tall enough for the band, which then starts open.
+    vi.spyOn(window, 'matchMedia').mockImplementation(((media: string) => ({
+      matches: media.includes('min-width') || media.includes('min-height'),
+      media,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    })) as never);
+    rpc.handlers['catalog.item'] = (a) => makeChannel(Number((a as { ref: Channel['ref'] }).ref.itemId.slice(1)));
+    rpc.handlers['epg.programs'] = () => [];
+    usePlayerStore.setState({ source: { url: 'x', kind: 'hls', title: 'Channel 100', ref: makeChannel(100).ref, isLive: true, isRadio: false } } as never);
+    try {
+      renderGuide({ path: '/epg?source=src1', routes: GRID });
+      await screen.findByTestId('guide-preview');
+      await screen.findByTestId('guide-go-to-playing');
+      await screen.findByRole('button', { name: /^c1 P0,/ });
+      // Past the prefetch of the chunk below.
+      await new Promise((r) => setTimeout(r, 300));
+      vi.mocked(GuidePreview).mockClear();
+      vi.mocked(ScopePicker).mockClear();
+      const grid = screen.getByTestId('epg-grid');
+      for (const y of [GRID_ROW, 2 * GRID_ROW, 3 * GRID_ROW]) {
+        act(() => {
+          grid.scrollTop = y;
+          fireEvent.scroll(grid);
+        });
+      }
+      expect(screen.getByRole('button', { name: /^c4 P0,/ })).toBeTruthy();
+      expect(vi.mocked(GuidePreview)).not.toHaveBeenCalled();
+      expect(vi.mocked(ScopePicker)).not.toHaveBeenCalled();
+      // Still offered, and still the band of the cursor's programme.
+      expect(screen.getByTestId('guide-go-to-playing')).toBeTruthy();
+      expect(screen.getByTestId('guide-preview-title').textContent).toBe('c0 P0');
+    } finally {
+      usePlayerStore.setState({ source: undefined } as never);
+    }
   });
 });
 

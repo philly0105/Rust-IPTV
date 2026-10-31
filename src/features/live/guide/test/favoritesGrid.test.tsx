@@ -4,15 +4,17 @@
  * (GD-FAV-GRID). The channel lookups answer after a staggered delay, so they land in separate
  * ticks as real calls do.
  */
-import { cleanup, configure, screen, waitFor } from '@testing-library/react';
-import { Profiler } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { act, cleanup, configure, renderHook, screen, waitFor } from '@testing-library/react';
+import { Profiler, type ReactNode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Channel, ItemRef } from '@/api/types';
 
 import { defaultStart, EpgGridPage, GRID_CHUNK } from '../../components/EpgGridPage';
 import { HOUR } from '../../lib/epgTime';
-import { createRpcMock, installDomStubs, makeChannel, program, renderGuide, settings } from './harness';
+import { useGuideViewChannels } from '../viewChannels';
+import { createRpcMock, installDomStubs, makeChannel, newClient, program, renderGuide, settings } from './harness';
 
 const rpcMock = vi.hoisted(() => ({ current: null as null | ReturnType<typeof import('./harness')['createRpcMock']> }));
 vi.mock('@/api/transport', async (orig) => ({
@@ -103,5 +105,29 @@ describe("the guide's Favorites view (GD-FAV-GRID)", () => {
     // The chunk below is read ahead at rest, once: its refs are known too.
     expect(asked(GRID_CHUNK)).toEqual([rows(GRID_CHUNK, FAVORITES)]);
     expect(grids).toHaveLength(4);
+  });
+});
+
+describe('the Favorites view on a guide render (F3-4)', () => {
+  it('a render that changes nothing keeps the view and walks no favorite; only rows near the screen count as loaded', async () => {
+    const MANY = 1000;
+    rpc.handlers['favorites.list'] = () =>
+      Array.from({ length: MANY }, (_, i) => ({ ref: makeChannel(i).ref, position: i, addedAt: '', snapshot: { title: `Fav ${i}`, contentType: 'live' } }));
+    rpc.handlers['catalog.items'] = (a) => (a as { refs: ItemRef[] }).refs.map((r) => ({ item: makeChannel(indexOf(r)) as Channel }));
+    const client = newClient();
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result, rerender } = renderHook(() => useGuideViewChannels({ kind: 'favorites' }, 'src1'), { wrapper });
+    await waitFor(() => expect(result.current?.total).toBe(MANY));
+    act(() => result.current!.setVisibleRange(0, 12));
+    await waitFor(() => expect(result.current!.loaded).toHaveLength(12 + 20 + 1));
+    // Every page render (a scroll frame, a toolbar publish) re-renders the hook with the same state.
+    const states = vi.spyOn(client, 'getQueryState');
+    const view = result.current;
+    rerender();
+    rerender();
+    expect(result.current).toBe(view);
+    expect(states).not.toHaveBeenCalled();
+    // A far favorite is still found through its entry, as a reveal and Go to playing do.
+    expect(result.current!.indexOf!(makeChannel(900).ref)).toBe(900);
   });
 });

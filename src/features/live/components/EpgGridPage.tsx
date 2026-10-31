@@ -1875,13 +1875,14 @@ export function EpgGridPage() {
       isRadio: hit.ref.contentType === 'radio',
     }),
   );
-  const catchup = (channel: Channel, program: EpgProgram) => {
+  // Stable, so the memoised preview band keeps its render through scroll frames (F3-4).
+  const catchup = useStable((channel: Channel, program: EpgProgram) => {
     const kind = ownKind(channel);
     if (!kind) return;
     playCatchup(channel, kind, program, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
       toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
     );
-  };
+  });
 
   // What the memoised rows do: one stable object, each entry reading the latest render.
   const openCell = useStable((row: number, channel: Channel, program: EpgProgram, el: HTMLElement) => {
@@ -1944,7 +1945,7 @@ export function EpgGridPage() {
   const bar = guideBarLayout(pageWidth);
   // LG-01: "Go to playing" while the playing channel's row is in this list but off screen. Only
   // then: offered for a channel of another group, a press read every page of this one for nothing.
-  const playingRow = playingKey ? (paged.loaded.find((l) => itemKey(l.channel.ref) === playingKey)?.index ?? (playingRef ? paged.indexOf?.(playingRef) : undefined)) : undefined;
+  const playingRow = playingKey && playingRef ? (paged.loaded.find((l) => sameRef(l.channel.ref, playingRef))?.index ?? paged.indexOf?.(playingRef)) : undefined;
   const playingOnScreen = playingRow !== undefined && playingRow >= first && playingRow <= last;
   const playingInList = playingHere && (view ? playingRow !== undefined : !!playingChannel && (!categoryId || playingChannel.categoryId === categoryId));
   const goToPlaying =
@@ -1954,7 +1955,9 @@ export function EpgGridPage() {
           if (playingRow !== undefined) virtualizer.scrollToIndex(playingRow, { align: 'center' });
         }
       : undefined;
-  // A phone's genre filter and Go to playing are header actions, so the toolbar is one row.
+  // A phone's genre filter and Go to playing are header actions, so the toolbar is one row. The
+  // toolbar gets the stable one too: `goToPlaying` is a new function on every render while the
+  // playing row is off screen, which re-rendered the memoised toolbar on each row crossed (F3-4).
   const goToPlayingStable = useStable(() => goToPlaying?.());
   const canGoToPlaying = !!goToPlaying;
   const phoneActions = useMemo(
@@ -2038,10 +2041,10 @@ export function EpgGridPage() {
         onGenre={setGenreFilter}
         previewOpen={bandFits ? previewOpen : undefined}
         onTogglePreview={togglePreview}
-        onGoToPlaying={goToPlaying}
+        onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined}
       />
       {showPreview && sourceId ? (
-        <GuidePreview
+        <MemoGuidePreview
           channel={previewSubject?.channel}
           program={previewSubject?.program}
           next={previewSubject ? nextProgram(programsFor(previewSubject.channel), previewSubject.program) : undefined}
@@ -2339,6 +2342,12 @@ export function EpgGridPage() {
 }
 
 const MemoJumpToDialog = memo(JumpToDialog);
+/**
+ * The band's props hold still through a vertical scroll (the subject's channel and programmes come
+ * from the row caches, its handlers are stable), so a row crossing no longer re-renders the band's
+ * player stage, details and actions with their six query observers (F3-4).
+ */
+const MemoGuidePreview = memo(GuidePreview);
 const MemoMappingDialog = memo(EpgMappingDialog);
 
 /**

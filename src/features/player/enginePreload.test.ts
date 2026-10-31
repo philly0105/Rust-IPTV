@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryClient, rpcKey } from '@/api/query';
 import type { Settings } from '@/api/types';
 
-import { __setEngineLoadersForTests, afterPaint, preloadEngineFor, preloadEngines } from './enginePreload';
+import { __setEngineLoadersForTests, afterPaint, preloadEngineFor, preloadEngines, prewarmTsWorkers } from './enginePreload';
 
 const env = vi.hoisted(() => ({ desktop: false }));
 vi.mock('@/api/transport', async (importOriginal) => ({
@@ -154,5 +154,60 @@ describe('no idle warm-up for mpv and VLC players (F1-5)', () => {
     l = await idleWarmUp();
     expect(l.hls).toHaveBeenCalledTimes(1);
     expect(l.mpegts).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('spare mpegts.js workers (F2-2)', () => {
+  function tsLoaders(supported = true) {
+    const prewarmWorkers = vi.fn();
+    const mpegts = vi.fn(async (): Promise<unknown> => ({ default: { isSupported: () => supported, prewarmWorkers } }));
+    return { loaders: { hls: vi.fn(async (): Promise<unknown> => ({})), mpegts }, prewarmWorkers };
+  }
+
+  it('loading mpegts.js for a play boots one spare worker, once', async () => {
+    vi.useFakeTimers();
+    const { loaders: l, prewarmWorkers } = tsLoaders();
+    __setEngineLoadersForTests(l);
+    preloadEngineFor('http://h/live/1.ts');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(prewarmWorkers.mock.calls).toEqual([[1]]);
+    preloadEngineFor('http://h/live/2.ts');
+    preloadEngineFor('http://h/live/3.m3u8');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(prewarmWorkers).toHaveBeenCalledTimes(1);
+  });
+
+  it('the wall asks for one per tile, at most 4, after the frame paints', async () => {
+    vi.useFakeTimers();
+    const { loaders: l, prewarmWorkers } = tsLoaders();
+    __setEngineLoadersForTests(l);
+    prewarmTsWorkers(6);
+    expect(l.mpegts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(l.mpegts).toHaveBeenCalledTimes(1);
+    expect(prewarmWorkers.mock.calls).toEqual([[1], [4]]);
+    // Already loaded: no second fetch.
+    prewarmTsWorkers(2);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(l.mpegts).toHaveBeenCalledTimes(1);
+    expect(prewarmWorkers.mock.calls.at(-1)).toEqual([2]);
+    prewarmTsWorkers(0);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(prewarmWorkers).toHaveBeenCalledTimes(3);
+  });
+
+  it('boots none without MSE, and an older bundle without the call is no error', async () => {
+    vi.useFakeTimers();
+    const { loaders: l, prewarmWorkers } = tsLoaders(false);
+    __setEngineLoadersForTests(l);
+    prewarmTsWorkers(4);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(prewarmWorkers).not.toHaveBeenCalled();
+    // An unhandled TypeError here would fail the run.
+    const older = vi.fn(async (): Promise<unknown> => ({ default: { isSupported: () => true } }));
+    __setEngineLoadersForTests({ hls: async () => ({}), mpegts: older });
+    prewarmTsWorkers(4);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(older).toHaveBeenCalledTimes(1);
   });
 });

@@ -24,13 +24,41 @@ let enabled = import.meta.env.MODE !== 'test';
 const loaded = new Map<keyof typeof DEFAULT_LOADERS, Promise<unknown>>();
 let idleQueued = false;
 
-function load(name: keyof typeof DEFAULT_LOADERS): void {
-  if (!enabled || loaded.has(name)) return;
-  const job = loaders[name]().catch(() => {
-    // A failed fetch (offline in server mode) is tried again by the next request.
-    loaded.delete(name);
-  });
+/** The patched mpegts.js as far as warming goes; optional, so an older cached bundle is no error. */
+type TsModule = { default?: { isSupported?(): boolean; prewarmWorkers?(count: number): void } };
+
+/** Most transmuxing workers booted ahead at once (the patch caps them at 4 as well). */
+const MAX_TS_WORKERS = 4;
+
+/**
+ * Boot `count` spare mpegts.js transmuxing workers (F2-2). A TS start used to build its worker
+ * before the stream request could go out from inside it: 17-34 ms per zap, reconnect and seek
+ * restart in Chromium. The patch keeps one booted spare from here on; a player takes it and
+ * another boots. Without MSE the engine plays through the element and needs none.
+ */
+function bootTsWorkers(mod: unknown, count: number): void {
+  const mpegts = (mod as TsModule | undefined)?.default;
+  if (mpegts?.isSupported?.()) mpegts.prewarmWorkers?.(Math.min(count, MAX_TS_WORKERS));
+}
+
+function load(name: keyof typeof DEFAULT_LOADERS): Promise<unknown> | undefined {
+  if (!enabled) return undefined;
+  const known = loaded.get(name);
+  if (known) return known;
+  const job = loaders[name]().then(
+    (mod) => {
+      // Loaded for a play (or a page that plays): its first TS start finds a worker booted.
+      if (name === 'mpegts') bootTsWorkers(mod, 1);
+      return mod;
+    },
+    () => {
+      // A failed fetch (offline in server mode) is tried again by the next request.
+      loaded.delete(name);
+      return undefined;
+    },
+  );
   loaded.set(name, job);
+  return job;
 }
 
 /**
@@ -123,6 +151,17 @@ export function preloadEngineFor(url: string | undefined): void {
     if (hls) load('hls');
     if (ts) load('mpegts');
   });
+}
+
+/**
+ * Boot up to `count` (at most 4) mpegts.js workers for streams about to start together: the
+ * multi-view wall opening with its tiles, whose URLs are still being looked up. Loads mpegts.js
+ * after the frame paints if nothing has yet, as `preloadEngineFor` does for a URL that does not
+ * say. Spares beyond one that no tile takes are shut after 15 s (the patch).
+ */
+export function prewarmTsWorkers(count: number): void {
+  if (!enabled || count <= 0) return;
+  afterPaint(() => void load('mpegts')?.then((mod) => bootTsWorkers(mod, count)));
 }
 
 /** Testing only: swap the loaders (and turn preloading on) or put the defaults back. */

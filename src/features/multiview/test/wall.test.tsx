@@ -42,6 +42,7 @@ const h = vi.hoisted(() => {
     rejectIds: new Set<string>(),
     ensureUnlocked: undefined as unknown,
     requestPin: undefined as unknown,
+    prewarm: [] as number[],
   };
 });
 
@@ -71,6 +72,10 @@ vi.mock('@/features/player', async () => {
   }));
   return { usePlayerStore };
 });
+
+vi.mock('@/features/player/enginePreload', () => ({
+  prewarmTsWorkers: (n: number) => void h.prewarm.push(n),
+}));
 
 vi.mock('../parentalGate', () => ({
   ensureUnlocked: (...a: unknown[]) => (h.ensureUnlocked as (...x: unknown[]) => Promise<boolean>)(...a),
@@ -156,6 +161,7 @@ beforeEach(() => {
   h.engines.length = 0;
   h.failUrls.clear();
   h.rejectIds.clear();
+  h.prewarm.length = 0;
   calls.length = 0;
   handlers = defaultHandlers();
   h.rpc = (cmd, args) => {
@@ -568,6 +574,22 @@ describe('opening the wall', () => {
     expect(h.engines.map((e) => e.url)).toEqual([1, 2, 3, 4].map((i) => `http://mock/c${i}.m3u8`));
     // Timers never fire early (a millisecond of rounding aside).
     expect(h.engines[3]!.at - h.engines[0]!.at).toBeGreaterThanOrEqual(3 * TILE_START_STAGGER_MS - 2);
+  });
+
+  it('boots one mpegts.js worker per tile it opens with, once, while the tiles look their streams up (F2-2)', async () => {
+    seed([1, 2, 3]);
+    renderPage();
+    expect(h.prewarm).toEqual([3]);
+    await waitFor(() => expect(h.engines).toHaveLength(3));
+    // A tile added later finds the spare mpegts.js keeps: no second call.
+    act(() => void useMultiviewStore.getState().add(input(4, 'm3u1')));
+    await waitFor(() => expect(h.engines).toHaveLength(4));
+    expect(h.prewarm).toEqual([3]);
+  });
+
+  it('boots none for an empty wall', () => {
+    renderPage();
+    expect(h.prewarm).toEqual([]);
   });
 
   it("asks an Xtream account's limit when a channel goes on the wall, so the wall opens with its banner in place", async () => {

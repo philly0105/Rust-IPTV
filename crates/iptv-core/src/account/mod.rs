@@ -174,10 +174,19 @@ pub fn save(conn: &Connection, status: &AccountStatus) -> CoreResult<bool> {
 /// Stores `status` and emits [`CHANGED_EVENT`]. Failures are logged only:
 /// the status is a convenience and never fails the caller.
 pub async fn record(state: &AppState, status: AccountStatus) {
-    let id = status.source_id.clone();
     // Downloads follow the source's connection limit.
     crate::downloads::manager::account_changed(state, &status);
-    match state.db_call(move |c| save(c, &status)).await {
+    store(state, status).await;
+}
+
+/// Saves `status` and emits [`CHANGED_EVENT`] once the row is stored. The
+/// save passes the gate of the periodic writes ([`AppState::db_background`]):
+/// on a plain pooled connection, a sync start or a forced check during
+/// another source's import save parked one connection each for the rest of
+/// that save (R4-1).
+async fn store(state: &AppState, status: AccountStatus) {
+    let id = status.source_id.clone();
+    match state.db_background(move |c| save(c, &status)).await {
         Ok(true) => state.emit(CHANGED_EVENT, serde_json::json!({ "sourceId": id })),
         Ok(false) => {}
         Err(err) => tracing::warn!(source_id = %id, %err, "could not store account status"),
@@ -232,8 +241,7 @@ async fn refresh(
     source: &Source,
     min_age: Duration,
 ) -> CoreResult<AccountStatus> {
-    let lock = lock_for(state, &source.id);
-    let _guard = lock.lock().await;
+    let guard = lock_for(state, &source.id).lock_owned().await;
     let sid = source.id.clone();
     let cached = state.db_call(move |c| load(c, &sid)).await?;
     if let Some(c) = &cached {
@@ -269,7 +277,18 @@ async fn refresh(
             s
         }
     };
-    record(state, status.clone()).await;
+    // Downloads follow the new limit at once. The row is stored after the
+    // answer: the player's check after a failed tune does not wait for an
+    // import save's commit (R4-1). The source's lock is held until the row
+    // is stored, so a check queued behind this one reads it and reuses it
+    // within FORCE_MIN_AGE, and `account.changed` still follows the row.
+    crate::downloads::manager::account_changed(state, &status);
+    let state = Arc::clone(state);
+    let row = status.clone();
+    tokio::spawn(async move {
+        store(&state, row).await;
+        drop(guard);
+    });
     Ok(status)
 }
 

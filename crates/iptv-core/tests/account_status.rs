@@ -200,7 +200,26 @@ async fn a_failed_check_keeps_the_last_good_fields() {
     assert!(s.error.is_some(), "{s:?}");
     assert_eq!(s.active_cons, Some(2), "last good values kept");
     assert_ne!(s.checked_at, "2020-01-01T00:00:00Z");
-    assert!(!s.error.unwrap().contains(iptv_mock::xtream::PASSWORD));
+    assert!(!s
+        .error
+        .as_deref()
+        .unwrap()
+        .contains(iptv_mock::xtream::PASSWORD));
+
+    // The forced check answers before its row is stored (R4-1); the next
+    // one waits for the source's lock until it is, then reuses it.
+    let again = account::status(&env.state, &src.id, true)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(again, s);
+    let id = src.id.clone();
+    let stored = env
+        .state
+        .db_call(move |c| account::load(c, &id))
+        .await
+        .unwrap();
+    assert_eq!(stored, Some(s));
 }
 
 /// Portal requests the mock Stalker portal has served so far.

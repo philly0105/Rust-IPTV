@@ -204,9 +204,11 @@ export function SportsPage() {
   // every live game while another day is picked) get a pass of their own, over their own window.
   const liveOnly = useMemo(() => leagueLive.filter((g) => !dayKeys.has(g.key)), [leagueLive, dayKeys]);
   // Each pass reads the guide over a window that only grows until the day changes: a league tab, or a
-  // game going live or final, no longer asks the whole guide again (useGrowingWindow).
+  // game going live or final, no longer asks the whole guide again (useGrowingWindow). The live pass's
+  // games follow the clock, not the picked day: it starts over at Eastern midnight too, or a far day left
+  // open would stretch it over every day's live games since.
   const dayWindow = useGrowingWindow(leagueDay, day);
-  const liveWindow = useGrowingWindow(liveOnly, day);
+  const liveWindow = useGrowingWindow(liveOnly, `${day}|${today}`);
   const dayStreams = useGameStreams(leagueDay, hasSources, { window: dayWindow, now });
   const liveStreams = useGameStreams(liveOnly, hasSources, { window: liveWindow, now });
   const liveGames = useMemo(

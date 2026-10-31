@@ -325,6 +325,43 @@ describe('sports page', () => {
     expect(dayWindow()).toEqual(span(next));
   });
 
+  it("starts the live pass's window over at Eastern midnight while a far day stays picked", async () => {
+    // A minute before the next Eastern midnight: the page's minute clock next ticks just after it.
+    const step = 30 * h.MINUTE;
+    let midnight = Math.ceil(Date.now() / h.MINUTE) * h.MINUTE;
+    const before = etDate(midnight);
+    while (etDate(midnight) === before) midnight += step;
+    while (etDate(midnight - h.MINUTE) !== before) midnight -= h.MINUTE;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(midnight - h.MINUTE + 1000);
+    try {
+      // Five days back: still on the strip once it moves on a day.
+      const far = etDays(Date.now(), 7, 7)[2]!;
+      setDay([h.finalGame('5', { startMs: Date.now() - 5 * 24 * h.HOUR, etDate: far })], far);
+      pickDay(far);
+      const late = h.liveGame('8', { startMs: Date.now() - 2 * h.HOUR });
+      data.live = [late];
+      /** The live pass's window: the day pass asks first, the live pass second. */
+      const liveWindow = () => data.windows.at(-1);
+      await openReady(`/sports?day=${far}`);
+      expect(liveWindow()).toEqual(gameWindow(late));
+      // Past midnight the late game is over and a new one is live.
+      const early = h.liveGame('9', { startMs: midnight - 10 * h.MINUTE });
+      data.live = [early];
+      data.cache.delete(`live|${ALL.join()}`);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(h.MINUTE);
+      });
+      expect(etDate(Date.now())).not.toBe(before);
+      expect(data.streamCalls.at(-1)?.keys).toEqual(['nba:9']);
+      expect(data.dayCalls.at(-1)?.day).toBe(far);
+      // The new day's live games only: it no longer spans yesterday's late game too.
+      expect(liveWindow()).toEqual(gameWindow(early));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('leads with Live now whatever day is picked', async () => {
     const days = etDays(Date.now(), 7, 7);
     const lastWeek = days[0]!;

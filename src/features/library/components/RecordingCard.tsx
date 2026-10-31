@@ -8,12 +8,13 @@
  * reads programme, then channel and date.
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { Disc3, FileWarning } from 'lucide-react';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useRpcQuery } from '@/api/query';
-import type { ItemRef, RecordingFile } from '@/api/types';
+import { batchedItemQuery } from '@/api/query';
+import type { ItemRef } from '@/api/types';
 import { dateTimeFormat, intlLocale } from '@/lib/intl';
 import { CARD_ART } from '@/ui/card';
 import { cn } from '@/ui/cn';
@@ -25,28 +26,38 @@ import type { RecordingEntry } from '../lib/myvideos';
 const NO_REF: ItemRef = { sourceId: '', contentType: 'live', itemId: '' };
 
 /**
- * The logo of the channel a recording file came from: the file names its recording, the recording
- * its channel, and the catalog that channel's logo (cached, so a grid of cards asks once each).
+ * Recording id -> the channel it recorded, built once per `recordings.list` answer. A file names
+ * its recording and the recording its channel; the rail looks each card's channel up here and
+ * hands it down (F4-5), where every card used to observe the list and search it on each render.
  */
-function useChannelLogo(f: RecordingFile): string | undefined {
+export function useRecordingChannels(): ReadonlyMap<string, ItemRef> {
   const recordings = useRecordings().data;
-  const ref = f.recordingId ? recordings?.find((r) => r.id === f.recordingId)?.ref : undefined;
-  const item = useRpcQuery('catalog.item', { ref: ref ?? NO_REF }, { enabled: !!ref, staleTime: 10 * 60_000 });
-  const data = ref ? item.data : undefined;
+  return useMemo(() => new Map((recordings ?? []).map((r) => [r.id, r.ref])), [recordings]);
+}
+
+/**
+ * The logo of the channel a recording file came from, from the catalog. Through the `catalog.items`
+ * batch under the `['catalog.item', { ref }]` key the other readers share (F4-5): a rail of cards
+ * asks one call for every channel instead of one `catalog.item` each.
+ */
+function useChannelLogo(channel: ItemRef | undefined): string | undefined {
+  const item = useQuery({ ...batchedItemQuery(channel ?? NO_REF, 10 * 60_000), enabled: !!channel });
+  const data = channel ? item.data : undefined;
   return data && 'logoUrl' in data ? data.logoUrl || undefined : undefined;
 }
 
 /** Caption under the wide artwork: title and one line of facts. */
 export const RECORDING_CAPTION_HEIGHT = 48;
 
-function RecordingCardImpl({ entry }: { entry: RecordingEntry }) {
+/** `channelRef`: the channel the file's recording recorded ({@link useRecordingChannels}), for its logo. */
+function RecordingCardImpl({ entry, channelRef }: { entry: RecordingEntry; channelRef?: ItemRef | undefined }) {
   const { t, i18n } = useTranslation('library');
   const f = entry.file;
   const writing = f.status === 'recording';
   const at = Date.parse(f.date);
   const date = Number.isFinite(at) ? dateTimeFormat(intlLocale(i18n.language), { dateStyle: 'medium', timeStyle: 'short' }).format(at) : '';
   const channel = f.title && f.channelName ? f.channelName : undefined;
-  const logo = useChannelLogo(f);
+  const logo = useChannelLogo(channelRef);
 
   return (
     <div className="flex h-full flex-col gap-2" data-testid="library-card" data-kind="recording" data-missing={entry.missing || undefined}>

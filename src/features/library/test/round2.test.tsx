@@ -14,7 +14,7 @@ import { queryClient } from '@/api/query';
 import type { Channel, Download, Recording, RecordingFile } from '@/api/types';
 
 import { DownloadRow } from '../components/DownloadRow';
-import { RecordingCard } from '../components/RecordingCard';
+import { RecordingCard, useRecordingChannels } from '../components/RecordingCard';
 import { fileTitle, recordingEntry } from '../lib/myvideos';
 import { FavoritesPage } from '../pages/FavoritesPage';
 import { MyVideoDetailPage } from '../pages/MyVideoDetailPage';
@@ -62,11 +62,17 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/** The card as My Videos' rail renders it: its channel looked up through the recording that wrote the file. */
+function RailCard({ file }: { file: RecordingFile }) {
+  const channels = useRecordingChannels();
+  return <RecordingCard entry={recordingEntry(file)} channelRef={file.recordingId ? channels.get(file.recordingId) : undefined} />;
+}
+
 function renderCard(file: RecordingFile) {
   return render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <RecordingCard entry={recordingEntry(file)} />
+        <RailCard file={file} />
       </I18nextProvider>
     </QueryClientProvider>,
   );
@@ -90,9 +96,11 @@ describe('recording cards', () => {
   it("draw the channel's logo, found through the recording that wrote the file, and say Recorded", async () => {
     const ref = { sourceId: 'src1', contentType: 'live' as const, itemId: 'ch9' };
     rpc.handlers['recordings.list'] = () => [{ id: 'rec1', ref, channelName: 'Juniper One' } as Recording];
-    rpc.handlers['catalog.item'] = () => ({ ref, name: 'Juniper One', categoryId: 'g', isRadio: false, logoUrl: 'http://logos/juniper.png' }) as Channel;
+    // Through the catalog.items batch (F4-5), under the catalog.item key the other readers share.
+    rpc.handlers['catalog.items'] = () => [{ item: { ref, name: 'Juniper One', categoryId: 'g', isRadio: false, logoUrl: 'http://logos/juniper.png' } as Channel }];
     const { container } = renderCard(file());
-    await waitFor(() => expect(rpc.callsOf('catalog.item')).toEqual([{ ref }]));
+    await waitFor(() => expect(rpc.callsOf('catalog.items')).toEqual([{ refs: [ref] }]));
+    expect(rpc.callsOf('catalog.item')).toEqual([]);
     await waitFor(() => expect(container.querySelector('[data-poster-fallback]')).toBeNull());
     // The logo is fitted small on black, like a frame of the stream, not stretched over the card.
     expect(container.querySelector('img')).not.toBeNull();
@@ -111,6 +119,7 @@ describe('recording cards', () => {
     expect(container.querySelector('[data-poster-fallback]')).not.toBeNull();
     // No recording to follow: nothing is asked of the catalog.
     expect(rpc.callsOf('catalog.item')).toHaveLength(0);
+    expect(rpc.callsOf('catalog.items')).toHaveLength(0);
   });
 
   it('name a file with no programme or channel without its extension and date stamp', () => {

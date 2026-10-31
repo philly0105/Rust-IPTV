@@ -5,7 +5,7 @@
  */
 
 import { Disc3, FolderOpen, Play, Trash2 } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
@@ -59,6 +59,10 @@ export function RecordingsPanel({ search }: { search: string }) {
   const { t } = useTranslation('library');
   const { query, files } = useVisibleRecordingFiles();
   const visible = useMemo(() => filterRecordings(files, search), [files, search]);
+  // Once for the panel and handed to every row, which is memoized: a keystroke in My Videos'
+  // search re-renders the panel and the rows it adds, not every file's row again (F4-5).
+  const play = usePlayRecording();
+  const { toast } = useToast();
 
   if (query.isLoading) return <SkeletonList rows={6} className="pt-2" />;
   if (query.isError) return <ErrorState error={query.error} retrying={query.isFetching} onRetry={() => void query.refetch()} />;
@@ -80,15 +84,22 @@ export function RecordingsPanel({ search }: { search: string }) {
   return (
     <ul aria-label={t('filterRecordings')} className="flex min-h-0 flex-col divide-y divide-divider overflow-y-auto rounded-lg border border-edge bg-surface" data-testid="recordings-list">
       {visible.map((f) => (
-        <RecordingFileRow key={f.id} file={f} />
+        <RecordingFileRow key={f.id} file={f} play={play} toast={toast} />
       ))}
     </ul>
   );
 }
 
-function RecordingFileRow({ file: f }: { file: RecordingFile }) {
+const RecordingFileRow = memo(function RecordingFileRow({
+  file: f,
+  play: playRecording,
+  toast,
+}: {
+  file: RecordingFile;
+  play: (f: RecordingFile) => Promise<void>;
+  toast: ReturnType<typeof useToast>['toast'];
+}) {
   const { t, i18n } = useTranslation('library');
-  const { toast } = useToast();
   const lang = i18n.language;
   // The programme title leads and the channel sits in the line under it, as on the Scheduled page.
   const name = f.title ?? f.channelName ?? f.fileName;
@@ -96,7 +107,6 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
   const date = dateTimeFormat(intlLocale(lang), { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(f.date));
   const duration = f.durationSeconds ? formatDuration(f.durationSeconds, { locale: lang, t: (key, vars) => i18n.t(`vod:${key}`, vars) }) : '';
 
-  const playRecording = usePlayRecording();
   const play = () => playRecording(f);
 
   const reveal = async () => {
@@ -173,4 +183,4 @@ function RecordingFileRow({ file: f }: { file: RecordingFile }) {
       />
     </li>
   );
-}
+});

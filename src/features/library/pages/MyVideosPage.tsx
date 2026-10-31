@@ -16,7 +16,7 @@ import { PosterCellWidthContext, usePosterWidthBox } from '@/ui/Poster';
 import { Button, EmptyState, ErrorState, Page, SkeletonGrid, Tabs, useEdgeFades, useMediaQuery, useScaledPx, type TabsProps } from '../deps';
 import { moveInRail } from '../components/ContinueRail';
 import { CARD_CAPTION_HEIGHT, LibraryCard } from '../components/LibraryCard';
-import { RecordingCard } from '../components/RecordingCard';
+import { RecordingCard, useRecordingChannels } from '../components/RecordingCard';
 import { BrowseMoviesAction, PageTitle } from '../components/bits';
 import { VirtualCardGrid } from '../components/VirtualCardGrid';
 import { useActiveDownloads } from '../hooks/useActiveDownloads';
@@ -344,6 +344,8 @@ function RecordingsRail({
   // P2-POSTERS-4: the cards' width is known (17rem, 14rem below sm), so their logos load at it
   // instead of each reading its frame as it mounts.
   const cardWidth = usePosterWidthBox(useScaledPx(useMediaQuery(SM_QUERY) ? RECORDING_CARD_PX : RECORDING_CARD_NARROW_PX));
+  // One lookup of each card's channel for the rail, not a list observer and a search per card (F4-5).
+  const channels = useRecordingChannels();
   return (
     <section aria-labelledby="my-videos-recordings" className="flex flex-col gap-3" data-testid="my-videos-recordings">
       <div className="flex items-baseline gap-3">
@@ -367,7 +369,7 @@ function RecordingsRail({
               className={cn(CARD_ROOT, 'block w-full cursor-pointer text-start')}
             >
               <PosterCellWidthContext.Provider value={cardWidth}>
-                <RecordingCard entry={e} />
+                <RecordingCard entry={e} channelRef={e.file.recordingId ? channels.get(e.file.recordingId) : undefined} />
               </PosterCellWidthContext.Provider>
             </button>
           </li>

@@ -13,6 +13,7 @@ pub mod error;
 pub mod events;
 pub mod http;
 pub mod logging;
+pub mod memory;
 pub mod model;
 pub mod rpc;
 pub mod state;

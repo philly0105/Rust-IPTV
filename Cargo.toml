@@ -89,14 +89,23 @@ windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging", "Win32
 [profile.release]
 codegen-units = 1
 lto = true
+# "s", measured against 2 and 3 with this profile on the iptv-core release
+# perf tests and tests/resize_perf.rs (4-core Linux, 2026-10-31): 2 made a
+# poster resize, a 120 MB guide ingest and the 50k-entry M3U parse 8-24%
+# faster, imports about 5% and searches and page queries no faster (they run
+# in SQLite, already at 3 below); 3 was no better overall. Either level grew
+# iptv-server by 32% (18.5 to 24.4 MB). Under fat LTO the merged module is
+# optimized at the binary crate's level, so a package override for a Rust
+# crate (iptv-core, image, serde_json) changes next to nothing: only this
+# level does.
 opt-level = "s"
 panic = "unwind"
 strip = true
 
 # The bundled SQLite is C code built by the cc crate, which follows the
 # profile's opt-level: "s" compiles it for size (/O1 with MSVC). Every catalog
-# query runs in it, so it gets full optimization. The rest of the binary stays
-# at "s" until opt-level 3 is measured against the installer size.
+# query runs in it, so it gets full optimization. Unlike a Rust crate's, this
+# override survives LTO: cc builds native objects outside it.
 [profile.release.package.libsqlite3-sys]
 opt-level = 3
 

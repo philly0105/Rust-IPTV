@@ -34,6 +34,8 @@ RUN pnpm build
 FROM rust:1.96-bookworm AS server
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
+# .cargo/config.toml sets the bundled SQLite's build flags.
+COPY .cargo ./.cargo
 COPY crates ./crates
 RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=tsrust-target,target=/src/target \

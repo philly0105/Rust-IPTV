@@ -1567,6 +1567,7 @@ async fn run_importer(
     crate::catchup::forget_source(state, id);
     match imp.import(state.clone(), &source).await {
         Ok(summary) => {
+            crate::memory::release_freed_heap_soon();
             tracing::info!(source_id = %id, %kind, channels = summary.channels, movies = summary.movies, series = summary.series, "backup source imported");
             let _ = set_error_coded(state, id, None).await;
             if kind == SourceKind::Stalker {

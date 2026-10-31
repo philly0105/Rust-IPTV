@@ -1,0 +1,17 @@
+# Build settings every checkout shares; cargo reads this file for builds run
+# anywhere in the repository (CI, `pnpm tauri build`, the Docker image, which
+# copies it). Machine-local settings such as a target-dir elsewhere belong in
+# CARGO_HOME's config.toml or in environment variables (CARGO_TARGET_DIR).
+
+[env]
+# The bundled SQLite is compiled with SQLITE_ENABLE_MEMORY_MANAGEMENT by
+# libsqlite3-sys. It puts the page caches of all connections in one
+# process-wide LRU behind a global mutex taken on every page fetch, so pooled
+# queries running at the same time wait on each other. Without it each
+# connection keeps its own cache and takes no shared lock: in iptv-core's
+# tests/db_concurrency_perf.rs, four tasks reading at once went from 76 to 133
+# calls/s, and one task alone is unchanged. libsqlite3-sys appends these flags
+# after its own. An environment variable of the same name wins over this
+# value; iptv-core's tests/sqlite_compile_options.rs fails on a build that
+# lost it.
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_MEMORY_MANAGEMENT"

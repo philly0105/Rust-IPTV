@@ -1399,6 +1399,7 @@ async fn run_import_locked(
     // A refresh of this source while it runs joins it (ST-2).
     let inflight = reserved.unwrap_or_else(|| Inflight::new(&state, id, token.clone()));
     let result = run_import_inner(state, id, guard, token).await;
+    crate::memory::release_freed_heap_soon();
     inflight.finish(&result);
     result
 }

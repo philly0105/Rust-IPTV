@@ -5,11 +5,10 @@
  */
 
 import { hashKey, queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey, type UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 
 import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
-import { onAppEvent } from '@/api/events';
-import { invalidate, queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
+import { queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { RpcError, rpcRaw } from '@/api/transport';
 import type {
@@ -417,28 +416,13 @@ export function useIsFavorite(ref: ItemRef): boolean {
 }
 
 /**
- * Downloads list kept fresh by `downloads.update` events (a new row, a status change). Progress
- * does not refetch it (DL-7): the controls that show a transfer's bytes read its live
- * `downloads.progress` samples (`useLiveProgress`), so a running download no longer refetches the
- * whole list twice a second.
+ * Downloads list, kept fresh by the shell's event binding: `downloads.update` (a new row, a status
+ * change) refetches `downloads.list` in its event burst, as the library's `useDownloads` relies on.
+ * This hook also refetched it 500 ms after each update, a second round trip with the same answer
+ * (F4-7). Progress does not refetch it (DL-7): the controls that show a transfer's bytes read its
+ * live `downloads.progress` samples (`useLiveProgress`).
  */
 export function useDownloads(enabled = true) {
-  useEffect(() => {
-    if (!enabled) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const bump = () => {
-      if (timer) return;
-      timer = setTimeout(() => {
-        timer = null;
-        void invalidate('downloads.list');
-      }, 500);
-    };
-    const off = onAppEvent('downloads.update', bump);
-    return () => {
-      off();
-      if (timer) clearTimeout(timer);
-    };
-  }, [enabled]);
   return useRpcQuery('downloads.list', undefined, { enabled, staleTime: 10_000 });
 }
 

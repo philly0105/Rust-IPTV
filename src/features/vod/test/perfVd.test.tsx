@@ -1,29 +1,36 @@
 // Performance audit, VOD detail: a detail page refetches the download list for downloads.update
-// only, not for transfer progress (VD-3, then DL-7: the controls read the live samples), and the
-// hover prefetch also starts the TMDB lookup the page sends next (VD-8).
+// only, not for transfer progress (VD-3, then DL-7: the controls read the live samples), and only
+// once, through the shell's event binding (F4-7); the hover prefetch also starts the TMDB lookup
+// the page sends next (VD-8).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { queryClient, rpcKey } from '@/api/query';
+import { bindEventInvalidation, EVENT_BURST_MS, queryClient, rpcKey } from '@/api/query';
 import type { Download, ItemRef } from '@/api/types';
 import { DEFAULT_SETTINGS } from '@/api/types';
 
 import { prefetchVodDetail, resetPrefetchMemory } from '../hooks/prefetch';
 import { useItemDownloads } from '../hooks/usePlayback';
 
-const events = vi.hoisted(() => new Map<string, Set<(p: unknown) => void>>());
+const events = vi.hoisted(() => ({ byType: new Map<string, Set<(p: unknown) => void>>(), any: new Set<(e: { type: string; payload: unknown }) => void>() }));
 vi.mock('@/api/events', () => ({
   onAppEvent: (type: string, handler: (p: unknown) => void) => {
-    const set = events.get(type) ?? new Set();
-    events.set(type, set);
+    const set = events.byType.get(type) ?? new Set();
+    events.byType.set(type, set);
     set.add(handler);
     return () => set.delete(handler);
   },
-  onAnyAppEvent: () => () => undefined,
+  onAnyAppEvent: (handler: (e: { type: string; payload: unknown }) => void) => {
+    events.any.add(handler);
+    return () => events.any.delete(handler);
+  },
 }));
-const emit = (type: string, payload: unknown) => events.get(type)?.forEach((h) => h(payload));
+const emit = (type: string, payload: unknown) => {
+  events.byType.get(type)?.forEach((h) => h(payload));
+  events.any.forEach((h) => h({ type, payload }));
+};
 
 const rpcState = vi.hoisted(() => ({ calls: [] as { cmd: string; args: unknown }[], downloads: [] as unknown[] }));
 vi.mock('@/api/transport', async (orig) => ({
@@ -57,8 +64,15 @@ beforeEach(() => {
 });
 afterEach(() => queryClient.clear());
 
-describe('useItemDownloads (VD-3, DL-7)', () => {
-  it('refetches the list for downloads.update, not for progress of any row', async () => {
+describe('useItemDownloads (VD-3, DL-7, F4-7)', () => {
+  // The shell binds this once (shell/effects.ts); the hook adds no listener of its own.
+  let unbind: () => void = () => undefined;
+  beforeEach(() => {
+    unbind = bindEventInvalidation();
+  });
+  afterEach(() => unbind());
+
+  it('refetches the list once for downloads.update, not for progress of any row', async () => {
     const own = movie('7');
     rpcState.downloads = [download(1, own), download(2, movie('8'))];
     const { result } = renderHook(() => useItemDownloads(own, true), { wrapper });
@@ -72,6 +86,9 @@ describe('useItemDownloads (VD-3, DL-7)', () => {
 
     emit('downloads.update', {});
     await waitFor(() => expect(listCalls()).toBe(before + 1), { timeout: 2000 });
+    // The hook's own 500 ms refetch asked a second time with the same answer (F4-7).
+    await new Promise((r) => setTimeout(r, 700 + EVENT_BURST_MS));
+    expect(listCalls()).toBe(before + 1);
   });
 });
 

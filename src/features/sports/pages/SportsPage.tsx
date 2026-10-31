@@ -234,7 +234,8 @@ export function SportsPage() {
   const pickLeague = (next: League | null) => {
     rememberLeague(next);
     setRemembered(next);
-    setWideWindow(true);
+    // The tabs report a press on the open tab too, which changes nothing and must not ask the whole day's guide.
+    if (next !== league) setWideWindow(true);
     setParam('league', next);
   };
   // A day, league or filter changed from the pinned toolbar part way down a long day would open the

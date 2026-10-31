@@ -645,32 +645,86 @@ interface Candidates {
 const NO_POSITIONS: readonly number[] = [];
 const candidateMaps = new WeakMap<readonly IndexedChannel[], WeakMap<ReadonlyMap<ItemKey, EpgProgram[]>, Candidates>>();
 
-function addPosition(map: Map<string, number[]>, key: string, i: number): void {
+/** Adds position `i` under `key`; false when the key had it already. */
+function addPosition(map: Map<string, number[]>, key: string, i: number): boolean {
   const list = map.get(key);
   if (!list) map.set(key, [i]);
   else if (list[list.length - 1] !== i) list.push(i);
+  else return false;
+  return true;
+}
+
+/** The distinct words of a channel's programmes, and whether their `hits` were taken too. */
+interface GuideWords {
+  words: readonly string[];
+  hits: boolean;
 }
 
 /**
- * Adds the channel at position `i` of the index, with its programmes. Their words go into the map and are
- * dropped: with `words` (the teams' first words of the games to match), each programme keeps the few of them
- * it holds (`ProgrammeText.hits`), and matching tokenizes again only the programmes those let through.
+ * Per programme list, its distinct words. The lists are the guide queries' own while no EPG offset is set
+ * (`shiftPrograms`), so preparing a guide that is still cached once more (Sports left and opened again, a
+ * day seen a few minutes ago picked again) adds these instead of tokenizing every programme again. On the
+ * test slate they are about a sixth of the guide's words, their strings shared through one vocabulary per
+ * preparing.
  */
-function addChannel(c: Candidates, ch: IndexedChannel, i: number, list: readonly EpgProgram[] | undefined, words?: ReadonlySet<string>): void {
-  for (const w of ch.tokens) addPosition(c.byWord, w, i);
-  if (ch.network !== null) addPosition(c.byNetwork, ch.network, i);
-  if (ch.teamName !== null) addPosition(c.byTeamName, ch.teamName, i);
-  for (const p of list ?? []) {
+const guideWords = new WeakMap<readonly EpgProgram[], GuideWords>();
+
+/**
+ * Adds the words of a channel's programmes at position `i` and returns the distinct ones, each as the
+ * vocabulary's copy. With `words` (the teams' first words of the games to match), each programme keeps the
+ * few of them it holds (`ProgrammeText.hits`), and matching tokenizes again only the programmes those let through.
+ */
+function addProgrammes(
+  c: Candidates,
+  i: number,
+  list: readonly EpgProgram[],
+  vocabulary: Map<string, string>,
+  words?: ReadonlySet<string>,
+): string[] {
+  const distinct: string[] = [];
+  const keep = (w: string) => {
+    let word = vocabulary.get(w);
+    if (word === undefined) vocabulary.set(w, (word = w));
+    distinct.push(word);
+  };
+  for (const p of list) {
     const t = programmeText(p);
     const title = t.words?.title ?? textTokens(p.title);
     const description = t.words?.description ?? (p.description ? textTokens(p.description) : NO_WORDS);
-    for (const w of title) addPosition(c.byWord, w, i);
-    for (const w of description) addPosition(c.byWord, w, i);
+    for (const w of title) if (addPosition(c.byWord, w, i)) keep(w);
+    for (const w of description) if (addPosition(c.byWord, w, i)) keep(w);
     if (words && !t.words) {
       t.hits = hitsAmong(title, description, words);
       t.hitsOf = words;
     }
   }
+  // An exact copy: an array grown by pushes keeps spare room, a few MB over a big guide.
+  return distinct.slice();
+}
+
+/**
+ * Adds the channel at position `i` of the index, with its programmes. Their words go into the map; only the
+ * distinct ones of the list are kept (`guideWords`), and a list seen before adds those instead of being read
+ * again. Its programmes then keep the hits they were given the first time, against that time's words:
+ * `mayNameBoth` reads a programme whole for a game whose teams those lack.
+ */
+function addChannel(
+  c: Candidates,
+  ch: IndexedChannel,
+  i: number,
+  list: readonly EpgProgram[] | undefined,
+  vocabulary: Map<string, string>,
+  words?: ReadonlySet<string>,
+): void {
+  // The programmes first, so a word reaches the list kept whether or not the channel's name has it too.
+  if (list) {
+    const known = guideWords.get(list);
+    if (known && (known.hits || !words)) for (const w of known.words) addPosition(c.byWord, w, i);
+    else guideWords.set(list, { words: addProgrammes(c, i, list, vocabulary, words), hits: words !== undefined });
+  }
+  for (const w of ch.tokens) addPosition(c.byWord, w, i);
+  if (ch.network !== null) addPosition(c.byNetwork, ch.network, i);
+  if (ch.teamName !== null) addPosition(c.byTeamName, ch.teamName, i);
 }
 
 function storeCandidates(index: readonly IndexedChannel[], programs: ReadonlyMap<ItemKey, EpgProgram[]>, c: Candidates): void {
@@ -688,7 +742,8 @@ function candidatesOf(index: readonly IndexedChannel[], programs: ReadonlyMap<It
   if (!c) {
     c = { byWord: new Map(), byNetwork: new Map(), byTeamName: new Map() };
     const { keys } = indexMeta(index);
-    for (let i = 0; i < index.length; i++) addChannel(c, index[i]!, i, programs.get(keys[i]!));
+    const vocabulary = new Map<string, string>();
+    for (let i = 0; i < index.length; i++) addChannel(c, index[i]!, i, programs.get(keys[i]!), vocabulary);
     storeCandidates(index, programs, c);
   }
   return c;
@@ -737,9 +792,9 @@ function yieldToPage(): Promise<void> {
  * Builds what `matchGame` needs for `index` and `programs` ahead, in slices of at most
  * {@link PREPARE_BUDGET_MS} (and {@link PREPARE_SLICE} channels) with a yield to the page between them:
  * tokenizing the guide text of a big index (8,000 channels with 12 programmes each) takes about a second,
- * which in one go would freeze the window. `words`, the first words of the teams to match
- * (`teamFirstWords`), lets the programmes keep only those of their words (`addChannel`). Resolves false
- * when `signal` aborted first.
+ * which in one go would freeze the window. Programme lists prepared before are not tokenized again
+ * (`guideWords`). `words`, the first words of the teams to match (`teamFirstWords`), lets the programmes
+ * keep only those of their words (`addChannel`). Resolves false when `signal` aborted first.
  */
 export async function prepareMatch(
   index: readonly IndexedChannel[],
@@ -750,12 +805,13 @@ export async function prepareMatch(
   if (candidateMaps.get(index)?.get(programs)) return !signal?.aborted;
   const c: Candidates = { byWord: new Map(), byNetwork: new Map(), byTeamName: new Map() };
   const { keys } = indexMeta(index);
+  const vocabulary = new Map<string, string>();
   for (let i = 0; i < index.length; ) {
     if (i > 0) await yieldToPage();
     if (signal?.aborted) return false;
     const start = performance.now();
     const end = Math.min(i + PREPARE_SLICE, index.length);
-    do addChannel(c, index[i]!, i, programs.get(keys[i]!), words);
+    do addChannel(c, index[i]!, i, programs.get(keys[i]!), vocabulary, words);
     while (++i < end && performance.now() - start < PREPARE_BUDGET_MS);
   }
   storeCandidates(index, programs, c);

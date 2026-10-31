@@ -23,6 +23,19 @@ import {
 } from '../lib/match';
 import type { Game, GameBroadcast, GameTeam, League } from '../lib/types';
 
+/** How many texts were split into words, to see which preparing reads a guide's programmes again. */
+const tokenized = vi.hoisted(() => ({ texts: 0 }));
+vi.mock('../lib/names', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../lib/names')>();
+  return {
+    ...mod,
+    textTokens: (text: string) => {
+      tokenized.texts += 1;
+      return mod.textTokens(text);
+    },
+  };
+});
+
 function team(abbreviation: string, location: string, name: string, shortDisplayName = name, displayName = `${location} ${name}`): GameTeam {
   return {
     id: abbreviation,
@@ -1116,6 +1129,45 @@ describe('candidates', () => {
     expect(matchGame(NBA_GAME, [nbaTv], tv)[0]?.program).toBe(game);
     // Neither names both teams: none of their words outlive the preparing.
     expect([highlights, show, game].map(programmeWordsKeptForTests)).toEqual([false, false, true]);
+  });
+
+  it('prepares a guide again over programme lists it has read without reading their programmes again, with the same matches', async () => {
+    const now = Date.parse('2026-10-23T18:00Z');
+    const fresh = (map: Map<ItemKey, EpgProgram[]>) => new Map([...map].map(([key, list]) => [key, list.map((p) => ({ ...p }))]));
+    const reference = games.map((g) => matchGame(g, index, fresh(programs), now));
+    const words = firstWordsOf(games);
+    const lists = fresh(programs);
+    tokenized.texts = 0;
+    await prepareMatch(index, lists, undefined, new Set(words));
+    expect(tokenized.texts).toBeGreaterThan(0);
+    // Sports opened again, or a day seen a few minutes ago picked again: a new index and a new map of the
+    // same lists, as the guide's query cache hands them over.
+    tokenized.texts = 0;
+    const reindexed = [...index];
+    const again = new Map(lists);
+    await prepareMatch(reindexed, again, undefined, new Set(words));
+    expect(tokenized.texts).toBe(0);
+    expect(games.map((g) => matchGame(g, reindexed, again, now))).toEqual(reference);
+    expect(games.map((g) => matchGame(g, reindexed, again, now))).toEqual(games.map((g) => matchGameScanForTests(g, reindexed, again, now)));
+
+    // Lists first read without the teams' words (one game matched over a guide not prepared) are read once
+    // more when prepared, for the hits their programmes keep.
+    const plain = fresh(programs);
+    matchGame(espnGame, index, plain, now);
+    tokenized.texts = 0;
+    await prepareMatch([...index], new Map(plain), undefined, new Set(words));
+    expect(tokenized.texts).toBeGreaterThan(0);
+  });
+
+  it('keeps the words a programme list holds apart from its channel’s name, which may change before the list is read again', async () => {
+    const before = indexed('Knicks Celtics Live');
+    const tv = guide([[before, [programme('NBA Basketball', '2026-10-23T23:00Z', '2026-10-24T01:30Z', 'Knicks at Celtics.')]]]);
+    const words = firstWordsOf([espnGame]);
+    await prepareMatch([before], tv, undefined, new Set(words));
+    const after = toIndexed({ ...before.channel, name: 'Sports Live' }, { id: 's1', kind: 'xtream', name: 'S1' }, true);
+    const again = new Map(tv);
+    await prepareMatch([after], again, undefined, new Set(words));
+    expect(brief(matchGame(espnGame, [after], again))).toEqual([['Sports Live', 'guide', false]]);
   });
 
   it('stops preparing when its signal aborts', async () => {

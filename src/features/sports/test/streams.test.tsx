@@ -1,8 +1,8 @@
 // The Sports matching hooks against a mocked core: the channel index (sports groups paged whole, hidden and
 // other groups skipped, network searches classified and deduplicated, 'catalog.' keys), the guide window
 // (chunked refs, the EPG offset both ways), and useGameStreams end to end with the bounded fallback search,
-// a guide asked over every league's games that a league switch leaves as it was, and preparing it again
-// only for new teams.
+// a guide asked over every league's games that a league switch leaves as it was, a poll that prepares
+// nothing again, and a game added later matched as over a guide read whole.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -37,6 +37,7 @@ const { queryClient, invalidate } = await import('@/api/query');
 const { itemKey } = await import('@/api/types');
 const { NETWORKS } = await import('../lib/names');
 const { etDate } = await import('../lib/espn');
+const { matchGame } = await import('../lib/match');
 const { toIndexed, useChannelIndex, INDEX_PAGE_LIMIT, NETWORK_SEARCH_LIMIT } = await import('../hooks/useChannelIndex');
 const { useGuideWindow, GRID_CHUNK } = await import('../hooks/useGuideWindow');
 const { useGameStreams, fallbackQuery, FALLBACK_CONCURRENCY, FALLBACK_LIMIT } = await import('../hooks/useGameStreams');
@@ -721,22 +722,37 @@ describe('useGameStreams', () => {
     expect(loading).not.toContain(true);
   });
 
-  it('prepares the guide again for new teams, not for a poll’s new objects of the same games', async () => {
+  it('prepares nothing again for a poll’s new objects of the same games, and matches a game added later as over a guide read whole', async () => {
     const now = Date.now();
     const nba = game('nba', KNICKS, CELTICS, now + 4 * HOUR);
-    serve([ch('s1', 'p1', 'US| SPORTS 1')]);
+    const later = game('nba', team('MIA', 'Miami', 'Heat'), team('ORL', 'Orlando', 'Magic'), now + 4 * HOUR);
+    const slot = ch('s1', 'p1', 'US| SPORTS 1');
+    const at = (t: number) => new Date(t).toISOString();
+    const programme = (): EpgProgram => ({
+      channelId: 'p1',
+      title: 'NBA Basketball',
+      description: 'Heat at Magic.',
+      start: at(later.startMs),
+      end: at(later.startMs + 3 * HOUR),
+    });
+    serve([slot], { guide: () => ({ [itemKey(slot.ref)]: [programme()] }) });
     let games = [nba];
     const { result, rerender } = renderHook(() => useGameStreams(games), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.streams.get(nba.key)).toEqual([]);
     const prepared = prepares.count;
     games = [{ ...nba, broadcasts: [...nba.broadcasts] }];
     rerender();
     await tick(20);
     expect(prepares.count).toBe(prepared);
-    // Another game at the same time: the guide window holds, the teams to prepare for do not.
-    games = [nba, game('nba', team('MIA', 'Miami', 'Heat'), team('ORL', 'Orlando', 'Magic'), now + 4 * HOUR)];
+    // Another game at the same time: the guide window holds, and its programmes keep what they were prepared
+    // with, the Knicks' and Celtics' words, which say nothing of the Heat and Magic.
+    games = [nba, later];
     rerender();
-    await waitFor(() => expect(prepares.count).toBe(prepared + 1));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const unprepared = matchGame(later, [toIndexed(slot, SOURCES[0]!, true)], new Map([[itemKey(slot.ref), [programme()]]]), now);
+    expect(unprepared.map((m) => [m.reason, m.program!.title])).toEqual([['guide', 'NBA Basketball']]);
+    expect(result.current.streams.get(later.key)).toEqual(unprepared);
   });
 
   it(`runs at most ${FALLBACK_CONCURRENCY} fallback searches at once`, async () => {

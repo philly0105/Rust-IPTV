@@ -296,7 +296,7 @@ describe('sports page', () => {
     expect(data.dayCalls.at(-1)?.leagues).toEqual(ALL);
   });
 
-  it('asks the day’s guide over every league once the league changes, and over a remembered league’s games until then', async () => {
+  it('asks the day’s guide over every league once the league changes, and over a remembered league’s games until then, a press on its own tab included', async () => {
     const nba = h.game('1');
     const nfl = h.game('2', { league: 'nfl', home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
     const playing = h.liveGame('9', { startMs: Date.now() - 26 * h.HOUR, etDate: etDate(Date.now() - 26 * h.HOUR) });
@@ -308,6 +308,11 @@ describe('sports page', () => {
     expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1']);
     expect(data.windowCalls.at(-2)).toEqual(['nba:1']);
     expect(data.windowCalls.at(-1)).toEqual(['nba:9']);
+    // A press on the open tab changes no league.
+    fireEvent.click(screen.getByRole('tab', { name: /^NBA / }));
+    await act(async () => undefined);
+    expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1']);
+    expect(data.windowCalls.at(-2)).toEqual(['nba:1']);
     fireEvent.click(screen.getByRole('tab', { name: /^NFL / }));
     await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nfl:2']));
     expect(data.windowCalls.at(-2)).toEqual(['nba:1', 'nfl:2']);

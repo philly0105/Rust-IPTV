@@ -1761,7 +1761,23 @@ export function EpgGridPage() {
       missing();
     }
   });
-  const digits = useDigitEntry((n) => void jumpToNumber(n));
+  // The source's highest channel number, asked once digits are typed, as Live does (L2-live-7): a
+  // number no further digit can extend jumps at once instead of waiting out the 1 s pause (73 on a
+  // 500-channel source). The guide has no radio rows, and a typed number is looked up source-wide.
+  const [digitsUsed, setDigitsUsed] = useState(false);
+  const topNumber = useRpcQuery(
+    'catalog.channels',
+    { sourceId, query: { offset: 0, limit: 1, sort: 'number', dir: 'desc' } },
+    { enabled: !!sourceId && digitsUsed, staleTime: 5 * 60_000 },
+  );
+  const maxNumber = topNumber.data ? (topNumber.data.items[0]?.number ?? 0) : undefined;
+  // Digits typed right after a number that committed early belong to it; together they pass the
+  // highest number, so the readout says no channel has it (L3-live-9).
+  const digits = useDigitEntry((n) => void jumpToNumber(n), undefined, maxNumber, (n) => {
+    if (osdTimer.current) clearTimeout(osdTimer.current);
+    setOsd({ kind: 'missing', number: n });
+    osdTimer.current = setTimeout(() => setOsd(null), 2000);
+  });
   useEffect(() => {
     if (!digits.buffer) return;
     if (osdTimer.current) clearTimeout(osdTimer.current);
@@ -1771,6 +1787,7 @@ export function EpgGridPage() {
     'digit',
     (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey || !sourceId) return;
+      setDigitsUsed(true);
       digits.push(e.key);
     },
     { description: tg('shortcutDigits'), area: guideArea },

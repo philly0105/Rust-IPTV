@@ -17,6 +17,7 @@ import { useToastStore } from '@/ui';
 
 import { defaultStart, EpgGridPage, PREVIEW_HOVER_MS, slotLabels } from '../../components/EpgGridPage';
 import { preloadScopePickerList } from '../../components/ScopePicker';
+import { DIGIT_COMMIT_MS } from '../../hooks/useDigitEntry';
 import { formatClock, HOUR, MINUTE } from '../../lib/epgTime';
 import { genreOf } from '../genre';
 import { __resetGuideSourceForTests } from '../lastSource';
@@ -85,7 +86,9 @@ beforeEach(() => {
   h['catalog.categories'] = () => [];
   h['catalog.channels'] = (a) => {
     const { query: q } = a as { query: PageQuery };
-    return { items: CHANNELS.slice(q.offset, q.offset + q.limit), total: CHANNELS.length, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
+    // The highest-number lookup behind typed numbers (L2-live-7) asks for one row by number, descending.
+    const list = q.sort === 'number' && q.dir === 'desc' ? [...CHANNELS].reverse() : CHANNELS;
+    return { items: list.slice(q.offset, q.offset + q.limit), total: CHANNELS.length, offset: q.offset, limit: q.limit } satisfies Page<Channel>;
   };
   h['catalog.item'] = (a) => makeChannel(Number((a as { ref: { itemId: string } }).ref.itemId.slice(1)));
   h['catalog.items'] = (a) => (a as { refs: Channel['ref'][] }).refs.map((r) => ({ item: makeChannel(Number(r.itemId.slice(1))) }));
@@ -450,6 +453,30 @@ describe('channel numbers in the guide (LG-01)', () => {
     fireEvent.keyDown(window, { key: '9' });
     fireEvent.keyDown(window, { key: '9' });
     await waitFor(() => expect(screen.getByTestId('digit-osd').textContent).toContain('No channel 99'), { timeout: 6000 });
+  });
+
+  it('a number no further digit can extend jumps without the pause, as on Live (F3-6)', async () => {
+    rpc.handlers['catalog.channelByNumber'] = (a) => {
+      const n = (a as { number: number }).number;
+      return n >= 1 && n <= CHANNELS.length ? CHANNELS[n - 1]! : null;
+    };
+    renderGuide({ path: '/epg?source=src1', routes: GRID });
+    await screen.findByRole('button', { name: /^c0 P0,/ });
+    const top = () => (rpc.of('catalog.channels') as { query: PageQuery }[]).filter(({ query: q }) => q.sort === 'number' && q.dir === 'desc' && q.limit === 1);
+    // Asked only once digits are typed.
+    expect(top()).toHaveLength(0);
+    const typedAt = Date.now();
+    fireEvent.keyDown(window, { key: '7' });
+    await waitFor(() => expect(top()).toHaveLength(1));
+    // 30 channels: no number above 7 starts with 7, so 7 is looked up without the 1 s pause.
+    await waitFor(() => expect(rpc.of('catalog.channelByNumber')).toContainEqual({ sourceId: 'src1', number: 7, contentType: 'live' }), { timeout: DIGIT_COMMIT_MS - 200 });
+    expect(Date.now() - typedAt).toBeLessThan(DIGIT_COMMIT_MS);
+    // A digit right behind the early commit belongs to it: 70 is past the highest number.
+    fireEvent.keyDown(window, { key: '0' });
+    await waitFor(() => expect(screen.getByTestId('digit-osd').textContent).toContain('No channel 70'));
+    expect(rpc.of('catalog.channelByNumber')).toHaveLength(1);
+    expect(top()).toHaveLength(1);
+    await waitFor(() => expect((document.activeElement as HTMLElement | null)?.getAttribute('aria-label')).toMatch(/^c6 P0,/));
   });
 });
 

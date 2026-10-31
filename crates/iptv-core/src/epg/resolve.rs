@@ -5,6 +5,7 @@
 //! East / West, refused when two channels score about the same) > none.
 
 use super::ingest::EpgRuntime;
+use super::query::{self, tvg_shift_sql};
 use super::store::STAGING_ORIGIN;
 use crate::error::CoreResult;
 use crate::model::ItemRef;
@@ -25,8 +26,9 @@ pub const FUZZY_MARGIN: f64 = 0.02;
 /// so a score of 0.9 needs the longer one to have 10 characters and the
 /// shorter 9 or more; shorter keys only match exactly.
 const MIN_FUZZY_KEY: usize = 9;
-/// Most fuzzy results a directory remembers; the memo is cleared when full.
-const FUZZY_MEMO_CAP: usize = 50_000;
+/// Most title results, and most programme checks, a directory remembers;
+/// each memo is cleared when full.
+const MEMO_CAP: usize = 50_000;
 
 /// How a ref was resolved (`epg.resolve`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,13 +202,24 @@ pub struct ChannelDirectory {
     generation: u64,
     /// lowercase id -> canonical id.
     ids: HashMap<String, String>,
-    /// normalized name -> channel id (first enabled url wins).
-    names: HashMap<String, String>,
+    /// normalized name -> index in `entries` of its channel (first enabled
+    /// url wins).
+    names: HashMap<String, usize>,
     /// (normalized name, channel id, [`qualifiers`]) for fuzzy matching.
     entries: Vec<(String, String, Vec<String>)>,
-    /// Title -> index in `entries` of its fuzzy match ([`Self::find_name`]).
-    /// The directory is replaced when the generation moves, and this with it.
-    fuzzy: Mutex<HashMap<String, Option<usize>>>,
+    /// Title -> index in `entries` of its match, exact or fuzzy, or `None`
+    /// ([`Self::find_name`]). The directory is replaced when the generation
+    /// moves, and this with it.
+    titles: Mutex<HashMap<String, Option<usize>>>,
+    /// Channel id -> whether any feed has programmes for it
+    /// ([`Self::has_programmes`]). Programmes change only through a refresh,
+    /// a prune and `epg.clearAll`, each followed by a bump that replaces
+    /// this directory and its memos (the boot cleanup runs before any
+    /// directory is built).
+    programmes: Mutex<HashMap<String, bool>>,
+    /// Fuzzy scans run, for tests.
+    #[cfg(test)]
+    fuzzy_scans: std::sync::atomic::AtomicUsize,
 }
 
 impl ChannelDirectory {
@@ -224,7 +237,10 @@ impl ChannelDirectory {
             ids: HashMap::new(),
             names: HashMap::new(),
             entries: Vec::new(),
-            fuzzy: Mutex::new(HashMap::new()),
+            titles: Mutex::new(HashMap::new()),
+            programmes: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            fuzzy_scans: Default::default(),
         };
         for row in rows {
             let (id, name) = row?;
@@ -244,7 +260,7 @@ impl ChannelDirectory {
                 if key.is_empty() || dir.names.contains_key(&key) {
                     continue;
                 }
-                dir.names.insert(key.clone(), id.clone());
+                dir.names.insert(key.clone(), dir.entries.len());
                 dir.entries
                     .push((key, id.clone(), stripped_qualifiers(&stripped)));
             }
@@ -262,33 +278,46 @@ impl ChannelDirectory {
     /// with the same [`qualifiers`], so "Sky Sports 1" never takes "Sky
     /// Sports 2" and "BBC One +1" never takes "BBC One +2". A fuzzy match
     /// whose runner-up (another channel) scores within [`FUZZY_MARGIN`] of
-    /// it is ambiguous and refused. Fuzzy results are remembered per title.
+    /// it is ambiguous and refused.
+    ///
+    /// Every result, exact, fuzzy or none, is remembered per title and
+    /// looked up before the title is normalized: only fuzzy results were,
+    /// so every `epg.nowNext` and grid call ran the affix regexes again for
+    /// each channel matched by name or not at all (R2-5).
     pub fn find_name(&self, title: &str) -> Option<&str> {
-        let key = normalize_name(title);
-        if key.is_empty() {
-            return None;
-        }
-        if let Some(id) = self.names.get(&key) {
-            return Some(id);
-        }
-        if key.chars().count() < MIN_FUZZY_KEY {
-            return None;
-        }
-        if let Some(&found) = self.fuzzy.lock().get(title) {
+        if let Some(&found) = self.titles.lock().get(title) {
             return found.map(|i| self.entries[i].1.as_str());
         }
-        let found = self.fuzzy_match(&key, title);
-        let mut memo = self.fuzzy.lock();
-        if memo.len() >= FUZZY_MEMO_CAP {
+        let found = self.match_name(title);
+        let mut memo = self.titles.lock();
+        if memo.len() >= MEMO_CAP {
             memo.clear();
         }
         memo.insert(title.to_string(), found);
         found.map(|i| self.entries[i].1.as_str())
     }
 
+    /// Index in `entries` of the match of `title`, see [`Self::find_name`].
+    fn match_name(&self, title: &str) -> Option<usize> {
+        let key = normalize_name(title);
+        if key.is_empty() {
+            return None;
+        }
+        if let Some(&i) = self.names.get(&key) {
+            return Some(i);
+        }
+        if key.chars().count() < MIN_FUZZY_KEY {
+            return None;
+        }
+        self.fuzzy_match(&key, title)
+    }
+
     /// Index in `entries` of the fuzzy match of `title` (normalized `key`),
     /// see [`Self::find_name`].
     fn fuzzy_match(&self, key: &str, title: &str) -> Option<usize> {
+        #[cfg(test)]
+        self.fuzzy_scans
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let quals = qualifiers(title);
         let floor = FUZZY_THRESHOLD - FUZZY_MARGIN;
         let klen = key.chars().count() as f64;
@@ -338,7 +367,24 @@ impl ChannelDirectory {
         if key.is_empty() {
             return None;
         }
-        self.names.get(&key).map(String::as_str)
+        self.names.get(&key).map(|&i| self.entries[i].1.as_str())
+    }
+
+    /// Whether any feed has programmes for `channel_id` ([`has_programmes`]),
+    /// remembered for this snapshot: a catalog whose tvg-ids the guide does
+    /// not declare probed `epg_programs` once per such channel on every
+    /// `epg.nowNext` and grid call (R2-5). Guide search shares it.
+    pub(crate) fn has_programmes(&self, conn: &Connection, channel_id: &str) -> CoreResult<bool> {
+        if let Some(&known) = self.programmes.lock().get(channel_id) {
+            return Ok(known);
+        }
+        let known = has_programmes(conn, channel_id)?;
+        let mut memo = self.programmes.lock();
+        if memo.len() >= MEMO_CAP {
+            memo.clear();
+        }
+        memo.insert(channel_id.to_string(), known);
+        Ok(known)
     }
 
     /// The runtime generation this snapshot was loaded at.
@@ -369,12 +415,13 @@ pub fn directory(conn: &Connection, rt: &EpgRuntime) -> CoreResult<Arc<ChannelDi
     Ok(d)
 }
 
+/// The manual mapping statement of [`manual_mapping`].
+const MANUAL_SQL: &str = "SELECT epg_channel_id FROM epg_channel_map WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3";
+
 /// Manual mapping of `r`: `None` = no row, `Some(None)` = explicitly unmapped.
 pub fn manual_mapping(conn: &Connection, r: &ItemRef) -> CoreResult<Option<Option<String>>> {
     Ok(conn
-        .prepare_cached(
-            "SELECT epg_channel_id FROM epg_channel_map WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
-        )?
+        .prepare_cached(MANUAL_SQL)?
         .query_row(
             params![r.source_id, r.content_type.as_str(), r.item_id],
             |row| row.get::<_, Option<String>>(0),
@@ -390,28 +437,114 @@ pub(crate) fn has_programmes(conn: &Connection, channel_id: &str) -> CoreResult<
         .is_some())
 }
 
-/// Resolves `r` to an XMLTV channel id.
-pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreResult<Resolution> {
-    if let Some(manual) = manual_mapping(conn, r)? {
-        return Ok(Resolution {
-            epg_channel_id: manual.filter(|s| !s.trim().is_empty()),
-            via: Via::Manual,
-            shift_minutes: None,
-        });
+/// One ref's catalog row with its manual mapping and its channel shift:
+/// title, `epg_channel_id`, `tvg-shift` ([`tvg_shift_sql`]), whether a
+/// manual mapping exists and its channel (NULL = explicitly none), and the
+/// channel's own shift in minutes. One statement per ref instead of four
+/// or five (the mapping, the row, the channel shift, the row again for
+/// `extra_json`): about 540 for a 120-ref page and 2,250 for a 500-ref
+/// Sports chunk before any programme was read (R2-5).
+pub const ITEM_SQL: &str = concat!(
+    "SELECT i.title, i.epg_channel_id, ",
+    tvg_shift_sql!(),
+    ", m.item_id IS NOT NULL, m.epg_channel_id, sh.shift_minutes
+     FROM items i
+     LEFT JOIN epg_channel_map m
+       ON m.source_id = i.source_id AND m.content_type = i.content_type AND m.item_id = i.item_id
+     LEFT JOIN epg_channel_shift sh
+       ON sh.source_id = i.source_id AND sh.content_type = i.content_type AND sh.item_id = i.item_id
+     WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.item_id = ?3"
+);
+
+/// What [`resolve_item`] reads of one ref.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ItemGuide {
+    pub resolution: Resolution,
+    /// The channel's own guide shift in minutes (`epg.setChannelShift`).
+    pub channel_shift_minutes: Option<i32>,
+    /// Its `tvg-shift` in seconds; 0 without one.
+    pub tvg_shift: i64,
+}
+
+impl ItemGuide {
+    /// The channel's guide shift in seconds before its source's
+    /// ([`query::item_shift`]): its own shift, else its `tvg-shift`.
+    pub fn shift(&self) -> i64 {
+        query::channel_shift_secs(self.channel_shift_minutes, self.tvg_shift)
     }
-    let item: Option<(String, Option<String>)> = conn
-        .prepare_cached(
-            "SELECT title, epg_channel_id FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
-        )?
+}
+
+fn manual(epg_channel_id: Option<String>) -> Resolution {
+    Resolution {
+        epg_channel_id: epg_channel_id.filter(|s| !s.trim().is_empty()),
+        via: Via::Manual,
+        shift_minutes: None,
+    }
+}
+
+/// Resolves `r` to an XMLTV channel id ([`ItemGuide::resolution`]) and
+/// reads its own guide shift, with one statement ([`ITEM_SQL`]) while its
+/// catalog row exists. The order stays: manual mapping, then an
+/// `epg_channel_id` known to the guide, then one with programmes, then the
+/// name. Without the row, a manual mapping and a channel shift still apply
+/// (both are kept by the stable catalog id, so they outlive an item a
+/// refresh dropped).
+pub fn resolve_item(
+    conn: &Connection,
+    dir: &ChannelDirectory,
+    r: &ItemRef,
+) -> CoreResult<ItemGuide> {
+    type Row = (
+        String,
+        Option<String>,
+        i64,
+        bool,
+        Option<String>,
+        Option<i32>,
+    );
+    let row: Option<Row> = conn
+        .prepare_cached(ITEM_SQL)?
         .query_row(
             params![r.source_id, r.content_type.as_str(), r.item_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    query::tvg_shift_secs(row.get_ref(2)?),
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((title, item_epg)) = item else {
-        return Ok(Resolution::none());
+    let Some((title, item_epg, tvg_shift, mapped, mapped_to, channel_shift_minutes)) = row else {
+        return Ok(ItemGuide {
+            resolution: manual_mapping(conn, r)?.map_or_else(Resolution::none, manual),
+            channel_shift_minutes: query::channel_shift_minutes(conn, r)?,
+            tvg_shift: 0,
+        });
     };
-    if let Some(id) = item_epg.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let resolution = if mapped {
+        manual(mapped_to)
+    } else {
+        resolve_unmapped(conn, dir, &title, item_epg.as_deref())?
+    };
+    Ok(ItemGuide {
+        resolution,
+        channel_shift_minutes,
+        tvg_shift,
+    })
+}
+
+/// Resolution of a catalog row without a manual mapping.
+fn resolve_unmapped(
+    conn: &Connection,
+    dir: &ChannelDirectory,
+    title: &str,
+    item_epg: Option<&str>,
+) -> CoreResult<Resolution> {
+    if let Some(id) = item_epg.map(str::trim).filter(|s| !s.is_empty()) {
         if let Some(canonical) = dir.find_id(id) {
             return Ok(Resolution {
                 epg_channel_id: Some(canonical.to_string()),
@@ -420,7 +553,7 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
             });
         }
         // Programmes for channels the feed never declared with <channel>.
-        if has_programmes(conn, id)? {
+        if dir.has_programmes(conn, id)? {
             return Ok(Resolution {
                 epg_channel_id: Some(id.to_string()),
                 via: Via::Item,
@@ -428,7 +561,7 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
             });
         }
     }
-    if let Some(id) = dir.find_name(&title) {
+    if let Some(id) = dir.find_name(title) {
         return Ok(Resolution {
             epg_channel_id: Some(id.to_string()),
             via: Via::Name,
@@ -436,6 +569,11 @@ pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreRe
         });
     }
     Ok(Resolution::none())
+}
+
+/// Resolves `r` to an XMLTV channel id ([`resolve_item`] without the shift).
+pub fn resolve(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> CoreResult<Resolution> {
+    Ok(resolve_item(conn, dir, r)?.resolution)
 }
 
 #[cfg(test)]
@@ -551,7 +689,12 @@ mod tests {
                 entries.push((key, id.to_string(), qualifiers(&source)));
             }
         }
-        assert_eq!(d.names, names);
+        let by_name: HashMap<String, String> = d
+            .names
+            .iter()
+            .map(|(k, &i)| (k.clone(), d.entries[i].1.clone()))
+            .collect();
+        assert_eq!(by_name, names);
         assert_eq!(d.entries, entries);
     }
 
@@ -612,7 +755,11 @@ mod tests {
         assert!(best(MIN_FUZZY_KEY, MIN_FUZZY_KEY + 1) >= FUZZY_THRESHOLD);
         let d = dir(&[("e.uk", "Eurosport")]);
         assert_eq!(d.find_name("Eurosprt"), None);
-        assert!(d.fuzzy.lock().is_empty(), "no scan for a short key");
+        assert_eq!(
+            d.fuzzy_scans.load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "no scan for a short key"
+        );
     }
 
     /// EP-2: a fuzzy result is computed once per title and directory.
@@ -623,6 +770,209 @@ mod tests {
         assert_eq!(d.find_name("Sky Sprts 2"), Some("ss2.uk"));
         assert_eq!(d.find_name("Sky Sprots 3"), None);
         assert_eq!(d.find_name("Sky Sprots 3"), None);
-        assert_eq!(d.fuzzy.lock().len(), 2);
+        assert_eq!(d.titles.lock().len(), 2);
+        assert_eq!(d.fuzzy_scans.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
+
+    /// A guide feed `u` (One, Sky Sports 1 and 2, and programmes for an id
+    /// it never declares) and catalog rows covering every resolution path,
+    /// manual mappings and shifts; `k` and `l` have no catalog row.
+    fn catalog() -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO sources(id, kind, name, config_json, epg_json) VALUES ('s', 'm3u', 's', '{}', '{}');
+               INSERT INTO epg_sources(url) VALUES ('u');
+               INSERT INTO epg_channels(epg_url, channel_id, display_name) VALUES
+                 ('u', 'one.uk', 'Channel One'), ('u', 'ss1.uk', 'Sky Sports 1'), ('u', 'ss2.uk', 'Sky Sports 2');
+               INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('u', 'undeclared.tv', 0, 60, 'x');
+               INSERT INTO items(source_id, content_type, item_id, category_id, title, epg_channel_id, extra_json) VALUES
+                 ('s', 'live', 'a', 'c', 'Whatever', 'ONE.UK', '{}'),
+                 ('s', 'live', 'b', 'c', 'Channel One HD', NULL, '{}'),
+                 ('s', 'live', 'c', 'c', 'Sky Sprts 2', 'nope.tv', '{}'),
+                 ('s', 'live', 'd', 'c', 'Unknown Thing', ' undeclared.tv ', '{}'),
+                 ('s', 'live', 'e', 'c', 'Nothing Here At All', '', '{}'),
+                 ('s', 'live', 'f', 'c', 'Channel One', NULL, '{}'),
+                 ('s', 'live', 'g', 'c', 'Channel One', 'one.uk', '{}'),
+                 ('s', 'live', 'h', 'c', 'Channel One', NULL, '{"tvgShift":"3"}'),
+                 ('s', 'live', 'i', 'c', 'Channel One', NULL, '{"tvgShift":"+1.5"}'),
+                 ('s', 'live', 'j', 'c', 'Channel One', NULL, '{"tvgShift":2}'),
+                 ('s', 'live', 'm', 'c', 'ss', NULL, 'not json');
+               INSERT INTO epg_channel_map(source_id, content_type, item_id, epg_channel_id) VALUES
+                 ('s', 'live', 'f', 'ss1.uk'), ('s', 'live', 'g', NULL), ('s', 'live', 'h', '  '),
+                 ('s', 'live', 'k', 'one.uk');
+               INSERT INTO epg_channel_shift(source_id, content_type, item_id, shift_minutes) VALUES
+                 ('s', 'live', 'j', -30), ('s', 'live', 'k', 15);"#,
+        )
+        .unwrap();
+        conn
+    }
+
+    /// `tvg-shift` as read before R2-5: the row again, through serde.
+    fn tvg_shift_before(conn: &Connection, r: &ItemRef) -> i64 {
+        let extra: Option<String> = conn
+            .query_row(
+                "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+                params![r.source_id, r.content_type.as_str(), r.item_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+        extra
+            .and_then(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
+            .and_then(|v| match v.get("tvgShift")? {
+                serde_json::Value::String(s) => Some(query::parse_shift(s)),
+                serde_json::Value::Number(n) => Some(query::parse_shift(&n.to_string())),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    /// Resolution and channel shift as read before R2-5: the mapping, the
+    /// row, the programme probe, the channel shift and the row again.
+    fn resolve_before(conn: &Connection, dir: &ChannelDirectory, r: &ItemRef) -> ItemGuide {
+        let channel_shift_minutes = query::channel_shift_minutes(conn, r).unwrap();
+        let tvg_shift = tvg_shift_before(conn, r);
+        let done = |resolution| ItemGuide {
+            resolution,
+            channel_shift_minutes,
+            tvg_shift,
+        };
+        if let Some(m) = manual_mapping(conn, r).unwrap() {
+            return done(manual(m));
+        }
+        let item: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT title, epg_channel_id FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+                params![r.source_id, r.content_type.as_str(), r.item_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .unwrap();
+        let Some((title, item_epg)) = item else {
+            return done(Resolution::none());
+        };
+        let via = |id: &str, via| Resolution {
+            epg_channel_id: Some(id.to_string()),
+            via,
+            shift_minutes: None,
+        };
+        if let Some(id) = item_epg.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(canonical) = dir.find_id(id) {
+                return done(via(canonical, Via::Item));
+            }
+            if has_programmes(conn, id).unwrap() {
+                return done(via(id, Via::Item));
+            }
+        }
+        match dir.find_name(&title) {
+            Some(id) => done(via(id, Via::Name)),
+            None => done(Resolution::none()),
+        }
+    }
+
+    fn runs(conn: &Connection, sql: &str) -> i32 {
+        conn.prepare_cached(sql)
+            .unwrap()
+            .get_status(rusqlite::StatementStatus::Run)
+    }
+
+    /// R2-5: one statement per ref resolves every path (manual, explicit
+    /// none, blank, item id in any case, an undeclared id with programmes,
+    /// exact and fuzzy names, no match, a key too short to match) and reads
+    /// the shift (channel shift over tvg-shift, string and number forms,
+    /// malformed JSON) as the separate reads did; a ref whose row is gone
+    /// keeps its manual mapping and channel shift.
+    #[test]
+    fn resolve_item_matches_the_separate_reads() {
+        let conn = catalog();
+        let dir = ChannelDirectory::load(&conn, 0).unwrap();
+        let ids = [
+            "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "m", "k", "l",
+        ];
+        let expect: [(Option<&str>, Via, i64); 13] = [
+            (Some("one.uk"), Via::Item, 0),
+            (Some("one.uk"), Via::Name, 0),
+            (Some("ss2.uk"), Via::Name, 0),
+            (Some("undeclared.tv"), Via::Item, 0),
+            (None, Via::None, 0),
+            (Some("ss1.uk"), Via::Manual, 0),
+            (None, Via::Manual, 0),
+            (None, Via::Manual, 3 * 3600),
+            (Some("one.uk"), Via::Name, 5400),
+            (Some("one.uk"), Via::Name, -1800),
+            (None, Via::None, 0),
+            (Some("one.uk"), Via::Manual, 900),
+            (None, Via::None, 0),
+        ];
+        for (id, (channel, via, shift)) in ids.iter().zip(expect) {
+            let r = ItemRef::new("s", crate::model::ContentType::Live, *id);
+            let got = resolve_item(&conn, &dir, &r).unwrap();
+            assert_eq!(got, resolve_before(&conn, &dir, &r), "{id}");
+            assert_eq!(got.resolution.epg_channel_id.as_deref(), channel, "{id}");
+            assert_eq!(got.resolution.via, via, "{id}");
+            assert_eq!(got.shift(), shift, "{id}");
+        }
+        // Rows that exist take one statement each; only the two gone rows
+        // fall back to the mapping probe.
+        let conn = catalog();
+        let dir = ChannelDirectory::load(&conn, 0).unwrap();
+        for id in ids {
+            resolve_item(
+                &conn,
+                &dir,
+                &ItemRef::new("s", crate::model::ContentType::Live, id),
+            )
+            .unwrap();
+        }
+        assert_eq!(runs(&conn, ITEM_SQL), ids.len() as i32);
+        assert_eq!(runs(&conn, MANUAL_SQL), 2);
+    }
+
+    /// R2-5: the one statement reads each of its three rows by key.
+    #[test]
+    fn item_statement_reads_its_rows_by_key() {
+        let conn = catalog();
+        let mut stmt = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {ITEM_SQL}"))
+            .unwrap();
+        let plan: Vec<String> = stmt
+            .query_map(["s", "live", "a"], |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(plan.len(), 3, "{plan:?}");
+        for d in &plan {
+            assert!(d.starts_with("SEARCH") && d.contains("INDEX"), "{plan:?}");
+        }
+    }
+
+    /// R2-5: the programme probe and the title match are remembered per
+    /// directory, every title result included; a new directory asks again.
+    #[test]
+    fn programme_checks_and_title_results_are_remembered() {
+        let conn = catalog();
+        let dir = ChannelDirectory::load(&conn, 0).unwrap();
+        assert!(dir.has_programmes(&conn, "undeclared.tv").unwrap());
+        assert!(!dir.has_programmes(&conn, "later.tv").unwrap());
+        conn.execute(
+            "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES ('u', 'later.tv', 0, 60, 'x')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            !dir.has_programmes(&conn, "later.tv").unwrap(),
+            "remembered"
+        );
+        let fresh = ChannelDirectory::load(&conn, 1).unwrap();
+        assert!(fresh.has_programmes(&conn, "later.tv").unwrap());
+
+        assert_eq!(dir.find_name("Channel One HD"), Some("one.uk"));
+        assert_eq!(dir.find_name("Nothing Here At All"), None);
+        assert_eq!(dir.find_name("ss"), None);
+        assert_eq!(dir.find_name("Channel One HD"), Some("one.uk"));
+        let memo = dir.titles.lock();
+        assert_eq!(memo.len(), 3, "exact, none and short results");
+        assert_eq!(memo.get("ss"), Some(&None));
     }
 }

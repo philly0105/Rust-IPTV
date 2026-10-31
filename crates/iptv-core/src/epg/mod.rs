@@ -90,7 +90,8 @@ fn check_refs(refs: &[ItemRef]) -> CoreResult<()> {
 }
 
 /// Resolves each ref once, sharing the directory snapshot: its XMLTV
-/// channel id and guide shift in seconds ([`query::item_shift`]).
+/// channel id and guide shift in seconds ([`query::item_shift`]), read
+/// with one statement per ref ([`resolve::resolve_item`]).
 fn resolve_many(
     conn: &rusqlite::Connection,
     rt: &EpgRuntime,
@@ -99,12 +100,17 @@ fn resolve_many(
     let dir = resolve::directory(conn, rt)?;
     let mut source_shifts = HashMap::new();
     refs.iter()
-        .map(|r| match resolve::resolve(conn, &dir, r)?.epg_channel_id {
-            Some(id) => {
-                let source = query::cached_source_shift(conn, &mut source_shifts, &r.source_id)?;
-                Ok(Some((id, query::item_shift_with(conn, r, source)?)))
+        .map(|r| {
+            let item = resolve::resolve_item(conn, &dir, r)?;
+            let shift = item.shift();
+            match item.resolution.epg_channel_id {
+                Some(id) => {
+                    let source =
+                        query::cached_source_shift(conn, &mut source_shifts, &r.source_id)?;
+                    Ok(Some((id, shift + source)))
+                }
+                None => Ok(None),
             }
-            None => Ok(None),
         })
         .collect()
 }
@@ -372,9 +378,11 @@ pub async fn resolve_ref(state: &AppState, r: ItemRef) -> CoreResult<Resolution>
     state
         .db_read_call(move |c| {
             let dir = resolve::directory(c, &rt)?;
-            let mut res = resolve::resolve(c, &dir, &r)?;
-            res.shift_minutes = query::channel_shift_minutes(c, &r)?;
-            Ok(res)
+            let item = resolve::resolve_item(c, &dir, &r)?;
+            Ok(Resolution {
+                shift_minutes: item.channel_shift_minutes,
+                ..item.resolution
+            })
         })
         .await
 }

@@ -6,6 +6,7 @@
 use super::store::STAGING_ORIGIN;
 use crate::error::{CoreError, CoreResult};
 use crate::model::{EpgNowNext, EpgProgram, ItemRef};
+use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -101,11 +102,54 @@ pub fn item_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
 /// [`item_shift`] with the source's shift (seconds) already read, for callers
 /// that resolve many channels ([`cached_source_shift`]).
 pub fn item_shift_with(conn: &Connection, r: &ItemRef, source_secs: i64) -> CoreResult<i64> {
-    let channel = match channel_shift_minutes(conn, r)? {
-        Some(m) => i64::from(m) * 60,
-        None => tvg_shift(conn, r)?,
+    let (channel, tvg): (Option<i32>, i64) = conn.prepare_cached(ITEM_SHIFT_SQL)?.query_row(
+        params![r.source_id, r.content_type.as_str(), r.item_id],
+        |row| Ok((row.get(0)?, tvg_shift_secs(row.get_ref(1)?))),
+    )?;
+    Ok(channel_shift_secs(channel, tvg) + source_secs)
+}
+
+/// A channel's own guide shift in seconds: its shift in minutes when it has
+/// one ([`channel_shift_minutes`]), else its `tvg-shift` in seconds.
+pub(crate) fn channel_shift_secs(minutes: Option<i32>, tvg_shift: i64) -> i64 {
+    minutes.map_or(tvg_shift, |m| i64::from(m) * 60)
+}
+
+/// The `extraJson.tvgShift` of the `items` row aliased `i`, as SQL: the
+/// value when it is a string or a number, else NULL ([`tvg_shift_secs`]
+/// reads it). `json_valid` comes first because `json_type` and
+/// `json_extract` raise an error on malformed JSON, which means no shift;
+/// `json_type` keeps `true` out, which `json_extract` returns as 1. Reading
+/// the one key in SQL replaced a second read of the row and a
+/// `serde_json::Value` of all of `extra_json` per channel (R2-5).
+macro_rules! tvg_shift_sql {
+    () => {
+        "CASE WHEN json_valid(i.extra_json) THEN
+           CASE WHEN json_type(i.extra_json, '$.tvgShift') IN ('text', 'integer', 'real')
+                THEN json_extract(i.extra_json, '$.tvgShift') END END"
     };
-    Ok(channel + source_secs)
+}
+pub(crate) use tvg_shift_sql;
+
+/// The channel's own shift in minutes and its `tvg-shift` ([`tvg_shift_sql`]),
+/// either NULL when its row is missing.
+const ITEM_SHIFT_SQL: &str = concat!(
+    "SELECT (SELECT shift_minutes FROM epg_channel_shift
+              WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3),
+            (SELECT ",
+    tvg_shift_sql!(),
+    " FROM items i WHERE i.source_id = ?1 AND i.content_type = ?2 AND i.item_id = ?3)"
+);
+
+/// The `tvg-shift` ([`tvg_shift_sql`]) in seconds, read as the M3U import
+/// stores it: a string, or a number in its decimal form; 0 for NULL.
+pub(crate) fn tvg_shift_secs(value: ValueRef<'_>) -> i64 {
+    match value {
+        ValueRef::Text(t) => std::str::from_utf8(t).map_or(0, parse_shift),
+        ValueRef::Integer(n) => parse_shift(&n.to_string()),
+        ValueRef::Real(f) => parse_shift(&f.to_string()),
+        ValueRef::Null | ValueRef::Blob(_) => 0,
+    }
 }
 
 /// [`source_shift`] read once per source id and kept in `cache`.
@@ -150,28 +194,6 @@ pub fn source_shift(conn: &Connection, source_id: &str) -> CoreResult<i64> {
         .unwrap_or(0);
     let max = i64::from(MAX_SHIFT_MINUTES);
     Ok(minutes.clamp(-max, max) * 60)
-}
-
-/// The `tvg-shift` of a catalog item in seconds (`extraJson.tvgShift`, set
-/// by the M3U import); 0 for items without one.
-fn tvg_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
-    let extra: Option<String> = conn
-        .prepare_cached(
-            "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
-        )?
-        .query_row(
-            params![r.source_id, r.content_type.as_str(), r.item_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let shift = extra
-        .and_then(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
-        .and_then(|v| match v.get("tvgShift")? {
-            serde_json::Value::String(s) => Some(parse_shift(s)),
-            serde_json::Value::Number(n) => Some(parse_shift(&n.to_string())),
-            _ => None,
-        });
-    Ok(shift.unwrap_or(0))
 }
 
 /// Candidate feeds in priority order (by rowid), with a programme of
@@ -908,6 +930,98 @@ mod tests {
         assert_eq!(feeds_read(&conn), 3, "the coverage walk reads all three");
         now_next_with(&conn, "c", now, 0, false).unwrap();
         assert_eq!(feeds_read(&conn), 4, "now/next reads the first only");
+    }
+
+    /// The `tvg-shift` read before R2-5: the whole `extra_json` through
+    /// serde.
+    fn tvg_shift_before(extra: Option<&str>) -> i64 {
+        extra
+            .and_then(|e| serde_json::from_str::<serde_json::Value>(e).ok())
+            .and_then(|v| match v.get("tvgShift")? {
+                serde_json::Value::String(s) => Some(parse_shift(s)),
+                serde_json::Value::Number(n) => Some(parse_shift(&n.to_string())),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    /// R2-5: reading `tvgShift` in SQL gives the shift the serde read gave,
+    /// for strings, integers, fractions, signs, commas, out-of-range values,
+    /// other JSON types, other top-level values and malformed JSON; a
+    /// channel's own shift still wins over it, a channel shift without an
+    /// items row still applies, and a missing row reads as no shift.
+    #[test]
+    fn tvg_shift_in_sql_matches_the_serde_read() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO sources(id, kind, name, config_json, epg_json) VALUES ('s', 'm3u', 's', '{}', '{}')",
+            [],
+        )
+        .unwrap();
+        let extras: &[&str] = &[
+            r#"{"tvgShift":"1"}"#,
+            r#"{"tvgShift":"+1.5"}"#,
+            r#"{"tvgShift":" -2 "}"#,
+            r#"{"tvgShift":"0,5"}"#,
+            r#"{"tvgShift":"\u0033"}"#,
+            r#"{"tvgShift":"25"}"#,
+            r#"{"tvgShift":"abc"}"#,
+            r#"{"tvgShift":""}"#,
+            r#"{"tvgShift":2}"#,
+            r#"{"tvgShift":-1.5}"#,
+            r#"{"tvgShift":0.25}"#,
+            r#"{"tvgShift":2.50}"#,
+            r#"{"tvgShift":1e1}"#,
+            r#"{"tvgShift":-24}"#,
+            r#"{"tvgShift":24.0001}"#,
+            r#"{"tvgShift":99999999999999999999}"#,
+            r#"{"tvgShift":true}"#,
+            r#"{"tvgShift":false}"#,
+            r#"{"tvgShift":null}"#,
+            r#"{"tvgShift":[1]}"#,
+            r#"{"tvgShift":{"h":1}}"#,
+            r#"{"tvgName":"x"}"#,
+            r#"{"tvg":{"tvgShift":"1"}}"#,
+            r#"["tvgShift", 1]"#,
+            r#""1""#,
+            "{}",
+            r#"{"tvgShift":"1""#,
+            "not json",
+            "",
+        ];
+        for (n, extra) in extras.iter().enumerate() {
+            let id = n.to_string();
+            conn.execute(
+                "INSERT INTO items(source_id, content_type, item_id, category_id, title, position, extra_json)
+                 VALUES ('s', 'live', ?1, 'c', ?1, ?2, ?3)",
+                params![id, n as i64, extra],
+            )
+            .unwrap();
+            let r = ItemRef::new("s", crate::model::ContentType::Live, id.clone());
+            assert_eq!(
+                item_shift_with(&conn, &r, 0).unwrap(),
+                tvg_shift_before(Some(extra)),
+                "{extra:?}"
+            );
+            assert_eq!(
+                item_shift_with(&conn, &r, 600).unwrap(),
+                tvg_shift_before(Some(extra)) + 600
+            );
+        }
+        // The channel's own shift replaces its tvg-shift, with or without
+        // an items row.
+        for id in ["0", "gone"] {
+            conn.execute(
+                "INSERT INTO epg_channel_shift(source_id, content_type, item_id, shift_minutes) VALUES ('s', 'live', ?1, -90)",
+                [id],
+            )
+            .unwrap();
+            let r = ItemRef::new("s", crate::model::ContentType::Live, id);
+            assert_eq!(item_shift_with(&conn, &r, 60).unwrap(), -90 * 60 + 60);
+        }
+        let r = ItemRef::new("s", crate::model::ContentType::Live, "missing");
+        assert_eq!(item_shift_with(&conn, &r, 60).unwrap(), 60);
     }
 
     /// The brief statements differ from the full ones only in the

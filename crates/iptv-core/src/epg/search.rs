@@ -402,7 +402,7 @@ impl SearchMemo {
         }
         let found: Option<Arc<str>> = match dir.find_id(id) {
             Some(canonical) => Some(canonical.into()),
-            None if resolve::has_programmes(conn, id)? => Some(id.into()),
+            None if dir.has_programmes(conn, id)? => Some(id.into()),
             None => None,
         };
         self.ids.insert(id.to_string(), found.clone());

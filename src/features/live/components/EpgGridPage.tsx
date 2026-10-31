@@ -126,8 +126,15 @@ export const GRID_CHUNK = 40;
 const HEADER_H = 36;
 /** How long a window's guide answer counts as fresh (also for the windows prefetched beside it). */
 const GRID_STALE_MS = 5 * 60_000;
-/** Keep adjacent programme slices ready for a return scroll. */
+/** Keep the slices the page has shown ready for a return scroll. */
 const GRID_CACHE_MS = 15 * 60_000;
+/**
+ * Slices only asked ahead (the chunks beside the screen, the outer slices) are kept as long as
+ * they count as fresh, as the query table keeps `epg.grid`: one parsed 40-channel, 24 h answer
+ * is a few hundred KB of heap, and most are never shown. One the page goes on to show takes its
+ * query's longer time.
+ */
+const GRID_PREFETCH_CACHE_MS = GRID_STALE_MS;
 /** Keep toolbar updates off the browser's scroll frames. Data-window crossings still publish at once. */
 const GRID_VIEWPORT_PUBLISH_MS = 100;
 /** Delay optional buffer replacement until a horizontal gesture settles. */
@@ -408,8 +415,13 @@ export function gridArgs(refs: ItemRef[], from: string, to: string) {
   return { refs, from, to, withDescription: false };
 }
 
-/** Each refs array's grid key hash, with the window it was for. */
-const gridHashes = new WeakMap<readonly ItemRef[], { from: string; to: string; hash: string }>();
+/** Each refs array's grid key hashes, by window (`from|to`). */
+const gridHashes = new WeakMap<readonly ItemRef[], Map<string, string>>();
+/**
+ * Windows remembered per refs array: the shown one, the outer slices a fast move reads from the
+ * cache, and the ones the keys and buttons step through.
+ */
+const GRID_HASH_WINDOWS = 16;
 
 /**
  * TanStack's own hash of a {@link gridArgs} key, so prefetches and readers share the entry, worked
@@ -420,10 +432,18 @@ function gridKeyHash(key: QueryKey): string {
   const args = key[1] as Partial<ReturnType<typeof gridArgs>> | null | undefined;
   if (args?.refs?.length === 0) return 'epg.grid:empty';
   if (!args?.refs || args.from === undefined || args.to === undefined) return hashKey(key);
-  const hit = gridHashes.get(args.refs);
-  if (hit && hit.from === args.from && hit.to === args.to) return hit.hash;
-  const hash = hashKey(key);
-  gridHashes.set(args.refs, { from: args.from, to: args.to, hash });
+  let byWindow = gridHashes.get(args.refs);
+  if (!byWindow) {
+    byWindow = new Map();
+    gridHashes.set(args.refs, byWindow);
+  }
+  const window = `${args.from}|${args.to}`;
+  let hash = byWindow.get(window);
+  if (hash === undefined) {
+    if (byWindow.size >= GRID_HASH_WINDOWS) byWindow.clear();
+    hash = hashKey(key);
+    byWindow.set(window, hash);
+  }
   return hash;
 }
 
@@ -438,18 +458,53 @@ function refKeys(refs: readonly ItemRef[]): ReadonlySet<ItemKey> {
   return keys;
 }
 
-/** The length of the window the guide last laid out this session (0 until one was): it follows the page width. */
-let lastWindowMs = 0;
+/** Where the length of the guide's last data window is kept between launches. */
+const DATA_WINDOW_KEY = 'tsrust.guideDataWindow';
+/** The longest stored length believed: a zoomed-out guide on an 8K screen asks for about three days. */
+const DATA_WINDOW_MAX = 4 * 24 * HOUR;
+
+/**
+ * The data window the guide laid out last, in an earlier launch too, else the 24 h that every page
+ * up to about 1,800 px of track lays out at the default zoom.
+ */
+export function storedGuideDataWindow(): number {
+  try {
+    const length = Number(localStorage.getItem(DATA_WINDOW_KEY));
+    if (length >= GRID_DATA_LENGTH && length <= DATA_WINDOW_MAX && length % GRID_DATA_STEP === 0) return length;
+  } catch {
+    // storage blocked: the default
+  }
+  return GRID_DATA_LENGTH;
+}
+
+function storeGuideDataWindow(length: number): void {
+  try {
+    localStorage.setItem(DATA_WINDOW_KEY, String(length));
+  } catch {
+    // storage blocked: the length lasts for this launch
+  }
+}
+
+/**
+ * The length of the window the guide last laid out (it follows the page width and the zoom): the
+ * stored one until a guide is laid out in this launch.
+ */
+let lastWindowMs = storedGuideDataWindow();
+
+/** Testing only: a new launch, which starts from the stored length again. */
+export function __resetGuideWindowForTests(): void {
+  lastWindowMs = storedGuideDataWindow();
+}
 
 /**
  * The first chunk's `epg.grid` for a guide about to open at `params` on these rows (its first
  * channel page), with the arguments the page will ask with once laid out, if it lays out as wide
- * as last time. The boot and navigation prefetch call it (`setGuideGridPrefetch`), so on a return
- * to the guide the grid loads with the channels instead of after the page has rendered and
- * measured itself.
+ * as the guide did last time (24 h when no guide was ever laid out). The boot and navigation
+ * prefetch call it (`setGuideGridPrefetch`) once this module has loaded, so the grid loads with the
+ * channels instead of after the page has rendered and measured itself, on the first visit of a
+ * launch too.
  */
 function prefetchFirstChunk(refs: ItemRef[], params: URLSearchParams, settings: Settings | undefined): void {
-  if (lastWindowMs <= 0) return;
   const start = guideDataStart(parseWindowAt(params.get('at')) ?? defaultStart(Date.now()));
   const offsetMs = displayPrefsOf(settings).epgOffsetMinutes * MINUTE;
   const args = gridArgs(refs.slice(0, GRID_CHUNK), new Date(start - offsetMs).toISOString(), new Date(start + lastWindowMs - offsetMs).toISOString());
@@ -558,7 +613,10 @@ export function EpgGridPage() {
   const viewportMs = ((Math.max(0, pageWidth - channelCol) / pxPerMin) * MINUTE);
   const dataWindowMs = guideDataLength(viewportMs);
   useEffect(() => {
-    if (pageMeasured) lastWindowMs = dataWindowMs;
+    if (!pageMeasured || dataWindowMs === lastWindowMs) return;
+    lastWindowMs = dataWindowMs;
+    // It moves in six-hour steps, so a window resize writes it rarely.
+    storeGuideDataWindow(dataWindowMs);
   }, [pageMeasured, dataWindowMs]);
   const wantedDataStart = guideDataStart(shownTime[0]);
   const wantedDataEnd = wantedDataStart + dataWindowMs;
@@ -743,9 +801,11 @@ export function EpgGridPage() {
     // A chunk whose channels are not all loaded yet would be asked again once they are.
     if (refs.length < Math.min(GRID_CHUNK, count - c * GRID_CHUNK)) return;
     const args = gridArgs(refs, fromIso, toIso);
-    void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS });
+    void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_PREFETCH_CACHE_MS });
   });
   const gridsLoaded = !!gridA.data && !gridA.isPlaceholderData && (refsB.length === 0 || (!!gridB.data && !gridB.isPlaceholderData));
+  const gridsLoadedRef = useRef(gridsLoaded);
+  gridsLoadedRef.current = gridsLoaded;
   useEffect(() => {
     if (!atRest || !gridsLoaded) return;
     const id = window.setTimeout(() => {
@@ -806,20 +866,25 @@ export function EpgGridPage() {
   ] as const;
   // A fast fling may outrun the exact six-hour slice while its RPC is still pending. Any
   // cached slice for these exact channel chunks that covers the visible viewport can supply
-  // the cells meanwhile. The cache search runs once per render, not once per row.
+  // the cells meanwhile: one as long as the window, on this view's six-hour grid (answers of
+  // another EPG offset are not on it). The few such slices are looked up by key, once per render
+  // and not once per row: walking the query cache and keying every grid answer in it cost more.
   const outerShift = dataWindowMs - GRID_DATA_STEP;
-  const refSignatures = new Set([refsA, refsB].filter((refs) => refs.length > 0).map((refs) => refs.map(itemKey).join('|')));
-  const cachedAnswers = (gridsLoaded ? [] : queryClient.getQueriesData<Record<ItemKey, EpgProgram[]>>({ queryKey: ['epg.grid'] }))
-    .flatMap(([key, data]) => {
-      const args = key[1] as ReturnType<typeof gridArgs> | undefined;
-      if (!data || !args || !refSignatures.has(args.refs.map(itemKey).join('|')) || args.withDescription !== false) return [];
-      const span = [Date.parse(args.from) + offsetMs, Date.parse(args.to) + offsetMs] as Span;
-      // Different EPG offsets can leave answers for the same refs in the cache. Only a slice
-      // aligned with this view's six-hour grid belongs to its current offset.
-      return span[1] - span[0] === dataWindowMs && (span[0] - dataStart) % GRID_DATA_STEP === 0 &&
-        span[0] <= shownTime[0] && span[1] >= shownTime[1] ? [{ data, span }] : [];
-    })
-    .sort((a, b) => Math.abs(a.span[0] - dataStart) - Math.abs(b.span[0] - dataStart));
+  const cachedAnswers: { data: Record<ItemKey, EpgProgram[]>; span: Span }[] = [];
+  if (!gridsLoaded) {
+    const cache = queryClient.getQueryCache();
+    const earliest = dataStart + Math.ceil((shownTime[1] - dataWindowMs - dataStart) / GRID_DATA_STEP) * GRID_DATA_STEP;
+    for (let s = earliest; s <= shownTime[0]; s += GRID_DATA_STEP) {
+      const from = new Date(s - offsetMs).toISOString();
+      const to = new Date(s + dataWindowMs - offsetMs).toISOString();
+      for (const refs of [refsA, refsB]) {
+        if (refs.length === 0) continue;
+        const data = cache.get(gridKeyHash(rpcKey('epg.grid', gridArgs(refs, from, to))))?.state.data as Record<ItemKey, EpgProgram[]> | undefined;
+        if (data) cachedAnswers.push({ data, span: [s, s + dataWindowMs] });
+      }
+    }
+    cachedAnswers.sort((a, b) => Math.abs(a.span[0] - dataStart) - Math.abs(b.span[0] - dataStart));
+  }
   // A fast scroll can land before its full 40-channel / 24-hour answer is ready. Ask only for
   // the rows actually on screen and the nearby hours, so those tiles do not wait behind the
   // full slice. The short idle delay avoids issuing a request for every position in a fling.
@@ -1153,6 +1218,12 @@ export function EpgGridPage() {
   const viewportPublishAt = useRef(0);
   const viewportTimer = useRef(0);
   const horizontalIdleTimer = useRef(0);
+  /**
+   * The chunk pair (`listKey|a|b`) whose outer programme slices are wanted; null: the next pair
+   * to come to rest. Opening the guide, a jump and a move in time set it to null; rows reached by
+   * scrolling up or down alone get none until the user moves in time on them (see `outerIntent`).
+   */
+  const outerFor = useRef<string | null>(null);
   const programmaticX = useRef<number | null>(null);
   const laidRoot = useRef<HTMLElement | null>(null);
   const laidTrack = useRef(trackBase);
@@ -1279,6 +1350,8 @@ export function EpgGridPage() {
     const max = Math.max(0, channelCol + trackWidth - width);
     const x = Math.max(0, Math.min(max, (time - start) / MINUTE * pxPerMin));
     wheelScroller.current.cancel(root);
+    // Opening, a jump or a move in time: the rows that rest next warm their outer slices.
+    outerFor.current = null;
     // A button jump moves the native viewport immediately. The buffer effect and shared
     // hydration queue prepare its surrounding hours without replacing overlapping tiles.
     // Update sticky title eligibility immediately for jumps, or once per frame for gestures.
@@ -1583,27 +1656,65 @@ export function EpgGridPage() {
     if (!pageMeasured || (s === dataStart && e === dataEnd)) return;
     const from = new Date(s - offsetMs).toISOString();
     const to = new Date(e - offsetMs).toISOString();
+    const cache = queryClient.getQueryCache();
+    const asked: Promise<void>[] = [];
     for (const refs of [refsA, refsB]) {
       if (refs.length === 0) continue;
       const args = gridArgs(refs, from, to);
-      void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS })
-        .then(() => setPrefetchVersion((v) => v + 1));
+      const key = rpcKey('epg.grid', args);
+      // A slice still fresh or on its way is skipped: each rest used to ask the cache for it again
+      // and render the page once it answered.
+      const state = cache.get(gridKeyHash(key))?.state;
+      if (state?.fetchStatus === 'fetching' || (state?.data !== undefined && !state.isInvalidated && Date.now() - state.dataUpdatedAt < GRID_STALE_MS)) continue;
+      asked.push(queryClient.prefetchQuery({ queryKey: key, queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_PREFETCH_CACHE_MS }));
     }
+    if (asked.length === 0) return;
+    // One render for both chunks' answers, and none while the page shows its own answers: only a
+    // move that outran those reads the slices from the cache (`cachedAnswers`), and its render does.
+    void Promise.all(asked).then(() => {
+      if (!gridsLoadedRef.current) setPrefetchVersion((v) => v + 1);
+    });
+  });
+  /**
+   * A move in time on rows that skipped their outer slices (reached by scrolling up or down
+   * alone): at rest, the slice ahead of the move is asked at once, so a fling warms its far slice
+   * within its first frames; otherwise the rows that rest next warm both.
+   */
+  const outerPair = `${listKey}|${chunkA}|${chunkB}`;
+  const outerIntent = useStable((direction: -1 | 1) => {
+    if (outerFor.current === outerPair) return;
+    if (!atRest || !gridsLoaded || dataStart !== wantedDataStart || dataEnd !== wantedDataEnd) {
+      outerFor.current = null;
+      return;
+    }
+    outerFor.current = outerPair;
+    prefetchSlice(direction > 0 ? dataStart + outerShift : dataStart - outerShift);
   });
   /** Keyboard moves can request a slice before their destination becomes visible. */
-  const prefetchWindow = useStable((delta: number) => prefetchSlice(guideDataStart(shownTime[0] + delta)));
-  const prefetchRefsKey = [...refsA, ...refsB].map(itemKey).join('|');
+  const prefetchWindow = useStable((delta: number) => {
+    outerIntent(delta > 0 ? 1 : -1);
+    prefetchSlice(guideDataStart(shownTime[0] + delta));
+  });
   const horizontalPrefetchTimer = useRef(0);
+  // Another source, group or view opens at its top: its first rest warms its outer slices.
+  useEffect(() => {
+    outerFor.current = null;
+  }, [listKey]);
   // The displayed answer takes priority. One outer slice per direction covers a long fling,
   // with only six hours of overlap instead of repeatedly fetching nearly identical 24h slices.
+  // They are warmed at the first rest after the guide opens, after a jump, and around moves in
+  // time; rows reached by scrolling up or down alone skip them (`outerFor`), as each pair of
+  // chunks passed cost up to four 40-channel, 24 h answers that only a move in time reads.
   useEffect(() => {
     if (!atRest || !gridsLoaded || dataStart !== wantedDataStart || dataEnd !== wantedDataEnd) return;
+    if (outerFor.current !== null && outerFor.current !== outerPair) return;
     // Vertical flings change the channel chunks repeatedly. Wait until those rows have held
     // still before warming distant times for them; otherwise each passed chunk costs two RPCs.
     const verticalIdleMs = performance.now() - vScroll.current.t;
     const delay = Math.max(500, 1000 - verticalIdleMs);
     const id = window.setTimeout(() => {
       horizontalPrefetchTimer.current = 0;
+      outerFor.current = outerPair;
       prefetchSlice(dataStart - outerShift);
       prefetchSlice(dataStart + outerShift);
     }, delay);
@@ -1612,7 +1723,7 @@ export function EpgGridPage() {
       window.clearTimeout(id);
       if (horizontalPrefetchTimer.current === id) horizontalPrefetchTimer.current = 0;
     };
-  }, [atRest, gridsLoaded, dataStart, dataEnd, wantedDataStart, wantedDataEnd, outerShift, prefetchRefsKey, prefetchSlice, verticalIdleVersion]);
+  }, [atRest, gridsLoaded, dataStart, dataEnd, wantedDataStart, wantedDataEnd, outerShift, outerPair, refsA, refsB, prefetchSlice, verticalIdleVersion]);
   // Both axes scroll natively. Only the vertical axis changes which channel rows are mounted.
   const onGridScroll = (el: HTMLDivElement) => {
     const nativeX = scrollStart(el, rtl);
@@ -1623,10 +1734,14 @@ export function EpgGridPage() {
     // Idle and resize observations can precede delivery of a scroll event. Track delivered
     // events separately so that those observations cannot make a gesture look idle.
     if (x !== observedScrollX.current) {
+      const later = x > observedScrollX.current;
       observedScrollX.current = x;
       const programmatic = programmaticX.current !== null && Math.abs(x - programmaticX.current) < 1;
       programmaticX.current = null;
-      if (!programmatic) observeHorizontalInput();
+      if (!programmatic) {
+        observeHorizontalInput();
+        outerIntent(later ? 1 : -1);
+      }
       publishViewport(el, false, false, { x, y });
       if (!programmatic) {
         manualView.current = true;
@@ -1788,6 +1903,8 @@ export function EpgGridPage() {
       setReveal(null);
       const index = known ?? paged.indexOf?.(reveal.ref);
       if (index === undefined) return;
+      // A jump: the rows it lands on warm their outer slices.
+      outerFor.current = null;
       virtualizer.scrollToIndex(index, { align: 'center' });
       cursorRef.current = { row: index, time: reveal.time };
       setCursor({ row: index, time: reveal.time });
@@ -1811,6 +1928,7 @@ export function EpgGridPage() {
           if (!reveal.quiet) toast({ title: tg('hitNotFound', { channel: reveal.channelName }) });
           return;
         }
+        outerFor.current = null;
         virtualizer.scrollToIndex(index, { align: 'center' });
         cursorRef.current = { row: index, time: reveal.time };
         setCursor({ row: index, time: reveal.time });
@@ -1857,13 +1975,13 @@ export function EpgGridPage() {
       isRadio: hit.ref.contentType === 'radio',
     }),
   );
-  const catchup = (channel: Channel, program: EpgProgram) => {
+  const catchup = useStable((channel: Channel, program: EpgProgram) => {
     const kind = ownKind(channel);
     if (!kind) return;
     playCatchup(channel, kind, program, undefined, displayChannelName(channel.name, prefs.stripCountryPrefix)).catch((err: unknown) =>
       toast({ title: t('catchupFailed'), description: errorDescription(err), variant: 'error' }),
     );
-  };
+  });
 
   // What the memoised rows do: one stable object, each entry reading the latest render.
   const openCell = useStable((row: number, channel: Channel, program: EpgProgram, el: HTMLElement) => {
@@ -1936,7 +2054,9 @@ export function EpgGridPage() {
           if (playingRow !== undefined) virtualizer.scrollToIndex(playingRow, { align: 'center' });
         }
       : undefined;
-  // A phone's genre filter and Go to playing are header actions, so the toolbar is one row.
+  // A phone's genre filter and Go to playing are header actions, so the toolbar is one row. Both
+  // places get one function for good: a new one each render re-rendered the memoised toolbar on
+  // every scroll frame while the playing row was off screen.
   const goToPlayingStable = useStable(() => goToPlaying?.());
   const canGoToPlaying = !!goToPlaying;
   const phoneActions = useMemo(
@@ -2020,10 +2140,12 @@ export function EpgGridPage() {
         onGenre={setGenreFilter}
         previewOpen={bandFits ? previewOpen : undefined}
         onTogglePreview={togglePreview}
-        onGoToPlaying={goToPlaying}
+        onGoToPlaying={canGoToPlaying ? goToPlayingStable : undefined}
       />
       {showPreview && sourceId ? (
-        <GuidePreview
+        // Memoised with stable handlers: a scroll frame leaves the band, its player and its
+        // recording buttons alone; the subject, a tick or the scale re-render it.
+        <MemoGuidePreview
           channel={previewSubject?.channel}
           program={previewSubject?.program}
           next={previewSubject ? nextProgram(programsFor(previewSubject.channel), previewSubject.program) : undefined}
@@ -2321,6 +2443,7 @@ export function EpgGridPage() {
 }
 
 const MemoJumpToDialog = memo(JumpToDialog);
+const MemoGuidePreview = memo(GuidePreview);
 const MemoMappingDialog = memo(EpgMappingDialog);
 
 /**

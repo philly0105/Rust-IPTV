@@ -304,15 +304,32 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
     [listKey, size, previewOn, prefetchPage, dropFarPrefetches, pageKnown],
   );
 
+  // The query hash of a page of this list, worked out once for the last few pages read: a drag or
+  // a fling reads every row outside pages a and b (twice in the Live list), and getQueryData hashed
+  // the whole key on each read. Only the hash is kept; the data is read from the cache every time,
+  // so a page that lands later shows on the next render.
+  const pageHash = useMemo(() => {
+    const recent: [page: number, hash: string][] = [];
+    return (page: number): string => {
+      const hit = recent.find(([p]) => p === page);
+      if (hit) return hit[1];
+      // The client's own hash, so a hash function set for these queries later still applies.
+      const hash = queryClient.defaultQueryOptions({ queryKey: rpcKey('catalog.channels', query(page)) }).queryHash;
+      recent.unshift([page, hash]);
+      if (recent.length > 4) recent.pop();
+      return hash;
+    };
+  }, [queryClient, query]);
+
   // Rows outside pages a and b come from any page of this list already in the cache (read
   // ahead, or seen before), so a page switch never blanks rows that are known.
   const getChannel = useCallback(
     (i: number) => {
       const hit = inPage(pageA, i) ?? inPage(pageB, i);
       if (hit || placeholderFromOtherList || i < 0) return hit;
-      return inPage(queryClient.getQueryData<Page<Channel>>(rpcKey('catalog.channels', query(Math.floor(i / size)))), i);
+      return inPage(queryClient.getQueryCache().get(pageHash(Math.floor(i / size)))?.state.data as Page<Channel> | undefined, i);
     },
-    [queryClient, pageA, pageB, placeholderFromOtherList, query, size],
+    [queryClient, pageA, pageB, placeholderFromOtherList, pageHash, size],
   );
 
   const locate = useCallback(

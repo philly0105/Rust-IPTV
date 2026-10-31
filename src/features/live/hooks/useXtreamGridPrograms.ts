@@ -5,6 +5,14 @@ import { itemKey, type EpgProgram, type ItemRef } from '@/api/types';
 
 import { StalkerPreviewQueue } from '../lib/stalkerPreviewQueue';
 
+/**
+ * Whole tables the guide keeps, as many as the core keeps of the provider's answers (a row beyond
+ * them costs a provider request either way). A table holds the channel's whole archive with
+ * descriptions, often 100 KB or more, and a guide scrolled down a long list asks for one per row
+ * whose XMLTV leaves a gap near the view: the default of 2,000 per source held them all session.
+ */
+export const XTREAM_GRID_TABLES = 200;
+
 /** Xtream's complete per-channel table, shared across every horizontal guide window. */
 export function useXtreamGridPrograms(sourceId: string, enabled: boolean, refs: readonly ItemRef[], now: number) {
   const [version, bump] = useReducer((x: number) => x + 1, 0);
@@ -22,7 +30,15 @@ export function useXtreamGridPrograms(sourceId: string, enabled: boolean, refs: 
         });
       },
       // The result covers every time window; the core also caches the provider response.
-      { sourceId: `xtream-grid:${sourceId}`, ttlMs: 20 * 60_000, emptyTtlMs: 20 * 60_000, expireAtProgramBoundary: false, staleWhileRevalidate: true, maxPerSync: 24 },
+      {
+        sourceId: `xtream-grid:${sourceId}`,
+        ttlMs: 20 * 60_000,
+        emptyTtlMs: 20 * 60_000,
+        expireAtProgramBoundary: false,
+        staleWhileRevalidate: true,
+        maxPerSync: 24,
+        maxCached: XTREAM_GRID_TABLES,
+      },
     ),
     [sourceId],
   );

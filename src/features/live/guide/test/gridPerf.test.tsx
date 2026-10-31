@@ -8,7 +8,7 @@
  */
 import { QueryClient } from '@tanstack/react-query';
 import { act, cleanup, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { useState } from 'react';
+import { Profiler, useState } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { buildScheduleIndex } from '@/features/recording/lib/schedule';
@@ -74,10 +74,12 @@ const originals = {
   scrollTop: Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop'),
 };
 
+// Set here, not in beforeAll, where it comes too late for the tests' own timeout: the first guide
+// a file renders pays for the module graph, slower than the default 5 s on a busy machine.
+vi.setConfig({ testTimeout: 20_000 });
 beforeAll(() => {
   installDomStubs();
   configure({ asyncUtilTimeout: 4000 });
-  vi.setConfig({ testTimeout: 20_000 });
   for (const [prop, map] of [
     ['scrollLeft', scrolls.left],
     ['scrollTop', scrolls.top],
@@ -814,6 +816,85 @@ describe('guide requests', () => {
     }
     client.clear();
   });
+
+  it('rows reached by scrolling down alone skip the outer slices until a move in time on them asks for the one ahead', async () => {
+    channels = Array.from({ length: 6 * GRID_CHUNK }, (_, i) => makeChannel(i));
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourlyWindow(at);
+    const { client } = renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    const dataStart = guideDataStart(at);
+    const outerShift = GRID_DATA_LENGTH - GRID_DATA_STEP;
+    const exact = new Date(dataStart).toISOString();
+    const earlier = new Date(dataStart - outerShift).toISOString();
+    const later = new Date(dataStart + outerShift).toISOString();
+    const asked = () => rpc.of('epg.grid') as { refs: Channel['ref'][]; from: string }[];
+    const outer = (firstRow: string) =>
+      asked().filter((a) => a.refs[0]!.itemId === firstRow && (a.from === earlier || a.from === later)).map((a) => a.from);
+    // The first rest after the guide opens warms both.
+    await waitFor(() => expect(outer('c0').sort()).toEqual([earlier, later].sort()));
+
+    // Four chunks down, by scrolling alone: past the vertical idle (600 ms) and the warm-up's wait
+    // (at most a second), the rows have their own slice and their neighbours', no outer ones.
+    const grid = screen.getByTestId('epg-grid');
+    act(() => { grid.scrollTop = 170 * GRID_ROW; fireEvent.scroll(grid); });
+    await screen.findByRole('button', { name: /^c170 P0,/ });
+    const exactFor = (firstRow: string) => asked().some((a) => a.refs[0]!.itemId === firstRow && a.from === exact);
+    await waitFor(() => expect(exactFor('c120') && exactFor('c200')).toBe(true));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 2000)));
+    expect(exactFor('c160')).toBe(true);
+    expect(outer('c160')).toEqual([]);
+
+    // A move in time there asks for the slice ahead of it at once.
+    act(() => { grid.scrollLeft += 60; fireEvent.scroll(grid); });
+    await waitFor(() => expect(outer('c160')).toEqual([later]), { timeout: 200 });
+    // Slices only asked ahead go when they stop being fresh; ones the page shows stay longer.
+    const entry = (from: string) => client.getQueryCache().findAll({ queryKey: ['epg.grid'] })
+      .find((q) => { const a = q.queryKey[1] as { refs: Channel['ref'][]; from: string; to: string }; return a.from === from && a.refs[0]?.itemId === 'c160' && Date.parse(a.to) - Date.parse(a.from) === GRID_DATA_LENGTH; });
+    await waitFor(() => expect(entry(later)?.state.data).toBeDefined());
+    expect(entry(later)?.gcTime).toBe(5 * 60_000);
+    expect(entry(exact)?.gcTime).toBe(15 * 60_000);
+  }, 20_000);
+
+  it('outer slices that land while the page shows its own answers render nothing, and a rest on warm rows asks again for none', async () => {
+    const at = defaultStart(Date.now());
+    const answer = hourlyWindow(at);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    rpc.handlers['epg.grid'] = async (a) => {
+      const { from, to } = a as { from: string; to: string };
+      if (Date.parse(from) !== guideDataStart(at) && Date.parse(to) - Date.parse(from) === GRID_DATA_LENGTH) await gate;
+      return answer(a);
+    };
+    let commits = 0;
+    const page = (
+      <Profiler id="guide" onRender={() => { commits++; }}>
+        <EpgGridPage />
+      </Profiler>
+    );
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: [{ path: '/epg', element: page }] });
+    await screen.findByRole('button', { name: /^c1 P0,/ });
+    const outerCalls = () => (rpc.of('epg.grid') as { from: string; to: string }[])
+      .filter((a) => Date.parse(a.from) !== guideDataStart(at) && Date.parse(a.to) - Date.parse(a.from) === GRID_DATA_LENGTH).length;
+    await waitFor(() => expect(outerCalls()).toBe(2));
+    // Until the page holds still: no commit for 300 ms.
+    for (let seen = -1; seen !== commits; ) {
+      seen = commits;
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 300)));
+    }
+    const before = commits;
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(commits).toBe(before);
+
+    // A vertical rest on the same rows: their outer slices are fresh, so none is asked again.
+    const grid = screen.getByTestId('epg-grid');
+    act(() => { grid.scrollTop = 2 * GRID_ROW; fireEvent.scroll(grid); });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1800)));
+    expect(outerCalls()).toBe(2);
+  }, 20_000);
 
   it('reminders, recordings, rules and recording support load with the page (L2-guide-library-15, L2-perf-ui-6)', async () => {
     renderGuide({ path: '/epg?source=src1', routes: GRID });

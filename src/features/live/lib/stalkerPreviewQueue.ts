@@ -31,6 +31,8 @@ export interface PreviewQueueOptions {
   sourceId?: string;
   /** What this queue asks for beyond the channel (e.g. `limit|from`); part of its cache keys. */
   scope?: string;
+  /** Answers kept for the source before the oldest go (default {@link MAX_CACHED}). */
+  maxCached?: number;
 }
 
 interface Entry {
@@ -38,7 +40,7 @@ interface Entry {
   at: number;
 }
 
-/** Answers kept per source; the oldest go first beyond this. */
+/** Answers kept per source unless the queue says otherwise; the oldest go first beyond this. */
 const MAX_CACHED = 2000;
 
 /** One source's portal guide: whether it is answering, and what it said. */
@@ -126,6 +128,7 @@ export class StalkerPreviewQueue {
       backoffMs: 30_000,
       maxBackoffMs: 5 * 60_000,
       clock: Date.now,
+      maxCached: MAX_CACHED,
       ...options,
     };
   }
@@ -246,7 +249,7 @@ export class StalkerPreviewQueue {
     cache.set(k, { programs, at: this.opts.clock() });
     // A Map iterates in insertion order: the first keys are the oldest answers.
     for (const old of cache.keys()) {
-      if (cache.size <= MAX_CACHED) break;
+      if (cache.size <= this.opts.maxCached) break;
       cache.delete(old);
     }
   }

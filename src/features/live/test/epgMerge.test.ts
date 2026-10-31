@@ -4,7 +4,7 @@ import type { EpgProgram, ItemRef } from '@/api/types';
 
 import { mergePrograms, nowNextFrom, preferNowNext } from '../lib/epgMerge';
 import { HOUR, MINUTE } from '../lib/epgTime';
-import { StalkerPreviewQueue } from '../lib/stalkerPreviewQueue';
+import { resetStalkerPreviewSources, StalkerPreviewQueue } from '../lib/stalkerPreviewQueue';
 
 const T = Date.UTC(2026, 9, 11, 12, 0, 0);
 const p = (title: string, s: number, e: number): EpgProgram => ({ channelId: 'x', title, start: new Date(s).toISOString(), end: new Date(e).toISOString() });
@@ -140,5 +140,26 @@ describe('StalkerPreviewQueue', () => {
     await flush();
     expect(onUpdate).not.toHaveBeenCalled();
     expect(q.get(ref('a'))).toBeUndefined();
+  });
+
+  it('keeps at most `maxCached` answers of its source, the oldest going first, and asks again for one wanted again', async () => {
+    const fetch = vi.fn(async (r: ItemRef) => [p(`table ${r.itemId}`, T - HOUR, T + HOUR)]);
+    const opts = { delayMs: 0, clock: () => T, ttlMs: HOUR, expireAtProgramBoundary: false };
+    const refs = Array.from({ length: 5 }, (_, i) => ref(`c${i}`));
+    const capped = new StalkerPreviewQueue(fetch, () => undefined, { ...opts, sourceId: 'capped', maxCached: 3 });
+    capped.sync(refs);
+    await vi.waitFor(() => expect(capped.get(ref('c4'))).toBeDefined());
+    expect(capped.get(ref('c0'))).toBeUndefined();
+    expect(capped.get(ref('c1'))).toBeUndefined();
+    expect(refs.slice(2).map((r) => capped.get(r)?.[0]?.title)).toEqual(['table c2', 'table c3', 'table c4']);
+    capped.sync([ref('c0')]);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(6));
+
+    // Another source's queue without the option keeps every answer, as before.
+    const other = new StalkerPreviewQueue(fetch, () => undefined, { ...opts, sourceId: 'uncapped' });
+    other.sync(refs);
+    await vi.waitFor(() => expect(other.get(ref('c4'))).toBeDefined());
+    expect(refs.every((r) => other.get(r) !== undefined)).toBe(true);
+    resetStalkerPreviewSources();
   });
 });

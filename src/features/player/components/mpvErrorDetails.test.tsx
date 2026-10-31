@@ -14,7 +14,8 @@ vi.mock('@/api/transport', () => ({
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
 vi.mock('@/api/window', () => ({
-  cursorInViewport: async () => ({ x: 10, y: 10 }),
+  cursorPosition: async () => ({ x: 10, y: 10 }),
+  screenToViewport: async (p: { x: number; y: number }) => p,
   enterPipWindow: async () => true,
   exitPipWindow: async () => undefined,
   recoverPipWindow: async () => false,

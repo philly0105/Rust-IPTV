@@ -69,10 +69,22 @@ vi.mock('@/api/events', () => ({
   },
 }));
 
-/** Where the desktop cursor is, in viewport CSS px (the root measures as BOX). */
+/**
+ * Where the desktop cursor is. The window sits at the screen's origin at 100 %, so these are
+ * viewport CSS px too (the root measures as BOX).
+ */
 let cursor = { x: 10, y: 10 };
+/** Window reads the cursor poll made (cursor position, then place and scale once it moved). */
+const cursorReads = { cursor: 0, window: 0 };
 vi.mock('@/api/window', () => ({
-  cursorInViewport: async () => cursor,
+  cursorPosition: async () => {
+    cursorReads.cursor++;
+    return cursor;
+  },
+  screenToViewport: async (p: { x: number; y: number }) => {
+    cursorReads.window++;
+    return p;
+  },
   enterPipWindow: async () => true,
   exitPipWindow: async () => undefined,
   recoverPipWindow: async () => false,
@@ -718,6 +730,70 @@ describe('fullscreen overlay chrome', () => {
     cursor = { x: 300, y: 200 };
     await advance(400);
     expect(chrome()).toBeTruthy();
+  });
+
+  it('a resting cursor costs one read a tick; the window is read only once it moves', async () => {
+    vi.useFakeTimers();
+    cursor = { x: 300, y: 200 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isFullscreen: true, status: 'playing' }));
+    render(surfaceTree);
+    const advance = async (ms: number): Promise<void> => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    await advance(100);
+    cursorReads.cursor = 0;
+    cursorReads.window = 0;
+    await advance(2000);
+    expect(cursorReads.cursor).toBe(10);
+    expect(cursorReads.window).toBe(0);
+
+    cursor = { x: 320, y: 200 };
+    await advance(200);
+    expect(cursorReads.window).toBe(1);
+  });
+
+  it('on macOS a focused window reads no cursor; a window behind another app polls it', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    const focused = vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    cursor = { x: 300, y: 200 };
+    mpvState = { ...mpvState, loaded: true, duration: 600 };
+    act(() => usePlayerStore.setState({ isFullscreen: true, status: 'playing' }));
+    render(surfaceTree);
+    const advance = async (ms: number): Promise<void> => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    await advance(100);
+    act(() => usePlayerStore.setState({ status: 'playing' }));
+    const chrome = (): HTMLElement | null => screen.queryByTestId('mpv-overlay-chrome');
+    cursorReads.cursor = 0;
+    await advance(3000);
+    // The webview gets the moves itself: nothing to poll.
+    expect(cursorReads.cursor).toBe(0);
+    expect(chrome()).toBeNull();
+
+    // Another app in front (PiP over it): the moves reach no DOM handler, so the poll takes over.
+    focused.mockReturnValue(false);
+    act(() => {
+      window.dispatchEvent(new Event('blur'));
+    });
+    await advance(400);
+    cursor = { x: 320, y: 220 };
+    await advance(400);
+    expect(chrome()).toBeTruthy();
+
+    // In front again: the poll stops.
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    const reads = cursorReads.cursor;
+    await advance(2000);
+    expect(cursorReads.cursor).toBe(reads);
   });
 
   it('shows window-fill controls when the pointer moves over the macOS video view', async () => {

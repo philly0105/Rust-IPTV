@@ -2,7 +2,7 @@ import { AlertTriangle, ChevronRight, Lock, PictureInPicture2, Play, RotateCcw, 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cursorInViewport } from '@/api/window';
+import { cursorPosition, screenToViewport } from '@/api/window';
 import { intlLocale } from '@/lib/intl';
 
 import { cn } from '../cn';
@@ -37,6 +37,14 @@ import { useZapBannerShown, useZapHover } from './zapHooks';
 const HIDE_AFTER_MS = 2600;
 /** How often fullscreen mpv checks whether the mouse moved over the native video window. */
 const CURSOR_POLL_MS = 200;
+
+/**
+ * macOS: the native video view lets mouse moves through to the webview, which WebKit passes on
+ * only while the window is key. Windows' native video window swallows them at any time.
+ */
+function movesReachWebview(): boolean {
+  return typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
+}
 
 /**
  * Keeps the chrome pinned while *keyboard* focus is inside it. Focus left on a button by a
@@ -516,29 +524,52 @@ function MpvPlayer({ compact, thumb }: { compact: boolean; thumb: boolean }) {
   }, []);
 
   // Windows' native video window swallows DOM mouse moves, so poll the desktop cursor there.
-  // macOS passes moves through to the webview; the root's pointer handler reacts at once.
-  // The poll only counts movement inside the player, not on another monitor or app.
+  // macOS passes moves through to the webview while the window is key, and the root's pointer
+  // handler reacts at once; there the poll runs only while it is not (PiP over another app).
+  // The poll only counts movement inside the player, not on another monitor or app. A tick reads
+  // the cursor alone; the window's place and scale are read only once it moved.
   useEffect(() => {
     if (!overlay) return;
     poke();
-    let last: string | undefined;
+    let last: { x: number; y: number } | undefined;
+    let poll: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
-    const id = setInterval(() => {
-      void cursorInViewport().then((p) => {
-        const root = rootRef.current;
-        if (stopped || !p || !root) return;
-        const key = `${p.x},${p.y}`;
-        const moved = last !== undefined && key !== last;
-        last = key;
+    const tick = (): void => {
+      void cursorPosition().then(async (p) => {
+        if (stopped || !p) return;
+        const moved = last !== undefined && (p.x !== last.x || p.y !== last.y);
+        last = p;
         if (!moved) return;
+        const v = await screenToViewport(p);
+        const root = rootRef.current;
+        if (stopped || !v || !root) return;
         const r = root.getBoundingClientRect();
-        if (p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom) poke();
+        if (v.x >= r.left && v.x < r.right && v.y >= r.top && v.y < r.bottom) poke();
       });
-    }, CURSOR_POLL_MS);
+    };
+    const polling = (on: boolean): void => {
+      if (on && poll === null) {
+        last = undefined;
+        poll = setInterval(tick, CURSOR_POLL_MS);
+      } else if (!on && poll !== null) {
+        clearInterval(poll);
+        poll = null;
+      }
+    };
+    const mac = movesReachWebview();
+    const onFocus = (): void => polling(false);
+    const onBlur = (): void => polling(true);
+    polling(!mac || !document.hasFocus());
+    if (mac) {
+      window.addEventListener('focus', onFocus);
+      window.addEventListener('blur', onBlur);
+    }
     window.addEventListener('keydown', poke);
     return () => {
       stopped = true;
-      clearInterval(id);
+      polling(false);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
       window.removeEventListener('keydown', poke);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };

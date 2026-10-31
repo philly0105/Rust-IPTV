@@ -935,7 +935,8 @@ describe('zap bursts, catch-up zapping and channel renames', () => {
     expect(usePlayerStore.getState().source?.url).toBe('http://x/live/104.m3u8');
     // Channels 2 and 3 were passed on the way: no stream and no Recent row for them.
     expect(calls('xtream.streamUrl')).toEqual([{ ref: channel(4).ref }]);
-    expect(calls('recent.add')).toEqual([expect.objectContaining({ ref: channel(4).ref })]);
+    // The Recent row goes out with the guide's answer, which the play did not wait for.
+    await vi.waitFor(() => expect(calls('recent.add')).toEqual([expect.objectContaining({ ref: channel(4).ref })]));
     expect(media.useMediaStore.getState().osd).toMatchObject({ primary: '4', secondary: 'Channel 4' });
   });
 
@@ -1228,6 +1229,88 @@ describe('the guide answer the player shares with the live page (L3-player-9)', 
       nowNext.fetchNowNext(liveRef),
     ]);
     expect(n).toBe(1);
+  });
+});
+
+describe('a tune does not wait for the guide', () => {
+  const m3u = (n: number): Channel => channel(n, { url: `http://m/${100 + n}.m3u8` });
+  const guideFor = (ref: ItemRef, title: string) => ({ [itemKey(ref)]: { now: { title, end: new Date(Date.now() + 3_600_000).toISOString() } } });
+  const rows = (): [string, string | undefined][] =>
+    calls('recent.add').map((c) => {
+      const { ref, snapshot } = c as { ref: ItemRef; snapshot: { subtitle?: string } };
+      return [ref.itemId, snapshot.subtitle];
+    });
+
+  beforeEach(() => {
+    handlers['sources.get'] = () => ({ id: 's1', kind: 'm3u' });
+  });
+
+  it('an m3u channel starts before the guide answers and takes the programme title when it comes', async () => {
+    let answer!: (v: unknown) => void;
+    handlers['epg.nowNext'] = () => new Promise((r) => (answer = r));
+    const generation = usePlayerStore.getState().playGeneration;
+    const tuned = playChannel(m3u(2), 'm3u');
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://m/102.m3u8'));
+    await tuned;
+    expect(calls('epg.nowNext')).toHaveLength(1);
+    expect(usePlayerStore.getState().playGeneration).toBe(generation + 1);
+    expect(usePlayerStore.getState().source?.subtitle).toBeUndefined();
+    // The Recent row waits for the title.
+    expect(rows()).toEqual([]);
+
+    answer(guideFor(m3u(2).ref, 'Evening News'));
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.subtitle).toBe('Evening News'));
+    // The same play: nothing reloads.
+    expect(usePlayerStore.getState().playGeneration).toBe(generation + 1);
+    expect(JSON.parse(sessionStorage.getItem(RESUME_KEY) ?? '{}').source?.subtitle).toBe('Evening News');
+    await vi.waitFor(() => expect(rows()).toEqual([['102', 'Evening News']]));
+  });
+
+  it('a guide answer in before the stream starts plays with it, in one go', async () => {
+    handlers['epg.nowNext'] = (a) => guideFor((a as { refs: ItemRef[] }).refs[0] as ItemRef, 'Evening News');
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    handlers['sources.get'] = async () => {
+      await held;
+      return { id: 's1', kind: 'm3u' };
+    };
+    const played: (string | undefined)[] = [];
+    const unsub = usePlayerStore.subscribe((s, prev) => {
+      if (s.playGeneration !== prev.playGeneration) played.push(s.source?.subtitle);
+    });
+    try {
+      const tuned = playChannel(m3u(2), 'm3u');
+      await vi.waitFor(() => expect(nowNext.peekNowNext(m3u(2).ref)?.now?.title).toBe('Evening News'));
+      release();
+      await tuned;
+    } finally {
+      unsub();
+    }
+    expect(played).toEqual(['Evening News']);
+    expect(rows()).toEqual([['102', 'Evening News']]);
+  });
+
+  it('a title that comes after a newer tune stays off the newer channel, and Recent keeps the order', async () => {
+    const answers = new Map<string, (v: unknown) => void>();
+    handlers['epg.nowNext'] = (a) => {
+      const ref = (a as { refs: ItemRef[] }).refs[0] as ItemRef;
+      return new Promise((r) => answers.set(itemKey(ref), r));
+    };
+    await playChannel(m3u(2), 'm3u');
+    await playChannel(m3u(3), 'm3u');
+    expect(usePlayerStore.getState().source?.url).toBe('http://m/103.m3u8');
+    // Channel 2's row went out as channel 3 began, ahead of channel 3's own (waiting for its title).
+    expect(rows()).toEqual([['102', undefined]]);
+
+    answers.get(itemKey(m3u(2).ref))?.(guideFor(m3u(2).ref, 'Old Show'));
+    await vi.waitFor(() => expect(nowNext.peekNowNext(m3u(2).ref)?.now?.title).toBe('Old Show'));
+    await flush();
+    expect(usePlayerStore.getState().source?.subtitle).toBeUndefined();
+    expect(rows()).toEqual([['102', undefined]]);
+
+    answers.get(itemKey(m3u(3).ref))?.(guideFor(m3u(3).ref, 'Evening News'));
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.subtitle).toBe('Evening News'));
+    await vi.waitFor(() => expect(rows()).toEqual([['102', undefined], ['103', 'Evening News']]));
   });
 });
 

@@ -193,8 +193,9 @@ export function bindTrayLabels(): () => void {
 }
 
 /**
- * Cursor position on the desktop, or null on the web. The embedded mpv window swallows
- * mouse moves over the video, so fullscreen controls poll this to notice the mouse.
+ * Cursor position on the desktop in physical screen px, or null on the web. The embedded mpv
+ * window swallows mouse moves over the video, so fullscreen controls poll this to notice the
+ * mouse: one call a tick, compared with the last.
  */
 export async function cursorPosition(): Promise<{ x: number; y: number } | null> {
   if (!isDesktop) return null;
@@ -208,16 +209,17 @@ export async function cursorPosition(): Promise<{ x: number; y: number } | null>
 }
 
 /**
- * Cursor position in CSS px relative to the webview viewport (same space as
- * `getBoundingClientRect`), or null on the web. Lets the fullscreen chrome react only to
- * movement over the video, not anywhere on the screen.
+ * A screen point as {@link cursorPosition} reads it, in CSS px relative to the webview viewport
+ * (same space as `getBoundingClientRect`), or null on the web. Lets the fullscreen chrome react
+ * only to movement over the video, not anywhere on the screen. Two calls (the window's place
+ * and scale), so a poll asks only once the cursor moved.
  */
-export async function cursorInViewport(): Promise<{ x: number; y: number } | null> {
+export async function screenToViewport(p: { x: number; y: number }): Promise<{ x: number; y: number } | null> {
   if (!isDesktop) return null;
   try {
-    const { cursorPosition: read, getCurrentWindow } = await import('@tauri-apps/api/window');
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const win = getCurrentWindow();
-    const [p, origin, scale] = await Promise.all([read(), win.innerPosition(), win.scaleFactor()]);
+    const [origin, scale] = await Promise.all([win.innerPosition(), win.scaleFactor()]);
     return { x: (p.x - origin.x) / scale, y: (p.y - origin.y) / scale };
   } catch {
     return null;

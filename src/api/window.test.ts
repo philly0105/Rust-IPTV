@@ -18,6 +18,8 @@ const fake = vi.hoisted(() => {
     failOn: '' as string,
     saved: null as unknown,
     pipAspect: true,
+    scale: 1,
+    cursor: { x: 0, y: 0 },
   };
   const calls: [string, unknown?][] = [];
   const rec = (name: string) =>
@@ -31,7 +33,11 @@ const fake = vi.hoisted(() => {
     outerPosition: async () => ({ ...state.pos }),
     innerSize: async () => ({ ...state.inner }),
     outerSize: async () => ({ ...state.outer }),
-    scaleFactor: async () => 1,
+    innerPosition: async () => {
+      calls.push(['innerPosition']);
+      return { x: state.pos.x + 8, y: state.pos.y + 31 };
+    },
+    scaleFactor: async () => state.scale,
     setFullscreen: async (on: boolean) => {
       await rec('setFullscreen')(on);
       state.fullscreen = on;
@@ -69,6 +75,10 @@ vi.mock('./events', () => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: fake.invoke }));
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => fake.win,
+  cursorPosition: async () => {
+    fake.calls.push(['cursorPosition']);
+    return { ...fake.state.cursor };
+  },
   currentMonitor: async () => fake.state.current,
   availableMonitors: async () => fake.state.monitors,
   LogicalSize: class {
@@ -98,6 +108,8 @@ const {
   flushBeforeQuit,
   QUIT_FLUSH_EVENT,
   QUIT_FLUSH_BUDGET_MS,
+  cursorPosition,
+  screenToViewport,
 } = await import('./window');
 
 const named = (name: string) => fake.calls.filter(([n]) => n === name).map(([, a]) => a);
@@ -120,10 +132,23 @@ afterEach(async () => {
     current: fake.monitor(0, 0, 1920, 1080),
     saved: null,
     pipAspect: true,
+    scale: 1,
+    cursor: { x: 0, y: 0 },
   });
   fake.calls.length = 0;
   localStorage.clear();
   vi.restoreAllMocks();
+});
+
+describe('the cursor over the window', () => {
+  it('reads the cursor in one call, and maps a point into the viewport with the window place and scale', async () => {
+    fake.state.cursor = { x: 1508, y: 431 };
+    expect(await cursorPosition()).toEqual({ x: 1508, y: 431 });
+    expect(fake.calls).toEqual([['cursorPosition']]);
+    // Content at (108, 81) on a 150 % screen.
+    fake.state.scale = 1.5;
+    expect(await screenToViewport({ x: 558, y: 381 })).toEqual({ x: 300, y: 200 });
+  });
 });
 
 describe('placeOnScreen', () => {

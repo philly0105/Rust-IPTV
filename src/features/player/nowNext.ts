@@ -71,7 +71,7 @@ export function peekNowNext(ref: ItemRef, now = Date.now()): EpgNowNext | null |
  * stops on it. Each resolves true when the channel is to be asked, false when the burst moved on.
  */
 const holds = new Map<string, Promise<boolean>>();
-/** Lets a step's hold go once the gate let its tune through (the tune waits on the guide answer). */
+/** Lets a step's hold go once the gate let its tune through, so the title comes with the stream. */
 const passes = new Map<string, () => void>();
 
 /** The channel on screen is `key`, and a step whose guide may be asked (a locked one shows none). */
@@ -108,8 +108,8 @@ export function holdNowNext(ref: ItemRef, dwellMs: number): void {
     }, dwellMs);
     // The pass counts from the start, not only once the dwell looked: the quiet's tune starts on a
     // timer as long as this one and fires first, so its gate can let the step through (an unlock
-    // already running, a prompt answered at once) before this timer runs. The tune then waits on
-    // the answer with the placeholder still up, which nothing else would change.
+    // already running, a prompt answered at once) before this timer runs, and the guide is asked
+    // then, alongside the stream, rather than a dwell later.
     passes.set(key, () => {
       clearTimeout(timer);
       unsub?.();
@@ -127,8 +127,8 @@ export function holdNowNext(ref: ItemRef, dwellMs: number): void {
 
 /**
  * The gate let `ref`'s tune through, after a PIN prompt or without one (an unlock already
- * running, an unlocked channel): a hold on it is asked now. The tune waits for the guide answer
- * before it plays, so waiting for the play itself would never end.
+ * running, an unlocked channel): a hold on it is asked now, alongside the stream lookup. The tune
+ * does not wait for the answer; a title that comes after the play starts joins it then.
  */
 export function passNowNext(ref: ItemRef): void {
   passes.get(itemKey(ref))?.();

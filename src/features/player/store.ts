@@ -99,8 +99,13 @@ export interface PlayerActions {
    * `externalPlayer`: with `mode: 'external'`, the player to open it in (a menu's Play in MPV or
    * VLC) instead of the one in the settings. A later play of the same item in external mode
    * without one (the stage's Reopen) opens it in the same player again.
+   * `subtitle`: a live item's programme title, still on its way from the guide. The item plays
+   * without waiting and takes the title when it comes; its Recent row waits for it.
    */
-  play(source: PlayerSource, opts?: { queue?: PlayerSource[]; mode?: PlayerMode; externalPlayer?: 'mpv' | 'vlc' }): Promise<void>;
+  play(
+    source: PlayerSource,
+    opts?: { queue?: PlayerSource[]; mode?: PlayerMode; externalPlayer?: 'mpv' | 'vlc'; subtitle?: Promise<string | undefined> },
+  ): Promise<void>;
   stop(): void;
   togglePlay(): void;
   seekBy(seconds: number): void;
@@ -473,6 +478,43 @@ function writeResume(): void {
   }
 }
 
+function addRecent(source: PlayerSource): void {
+  const snapshot = snapshotOf(source);
+  // No event follows recent.add and C4 caches `recent.` for 30 s: refresh the Recently watched rails.
+  if (snapshot && source.ref) rpc('recent.add', { ref: source.ref, snapshot }).then(() => invalidate('recent.'), () => undefined);
+}
+
+/** A play's Recent row, held back until its programme title comes (`followTitle`). */
+let heldRecent: (() => void) | null = null;
+
+/** Sends the held Recent row now: a later play's row must not go out before it. */
+function sendHeldRecent(): void {
+  const send = heldRecent;
+  heldRecent = null;
+  send?.();
+}
+
+/**
+ * A live play that started before the guide answered: the programme title joins the source when
+ * it comes (the title bar, the media controls and the resume record catch up; `watchKey` ignores
+ * it, so nothing restarts), and the Recent row goes out with it. Only this play takes it: a
+ * newer one, a Stop or a zap's placeholder on screen by then leaves it be.
+ */
+function followTitle(source: PlayerSource & { ref: ItemRef }, title: Promise<string | undefined>, token: number): void {
+  let subtitle: string | undefined;
+  const send = (): void => addRecent(subtitle ? { ...source, subtitle } : source);
+  heldRecent = send;
+  void title.then((t) => {
+    subtitle = t;
+    const cur = usePlayerStore.getState().source;
+    if (t && token === playToken && cur?.ref && itemKey(cur.ref) === itemKey(source.ref) && !cur.subtitle && !isPendingZap(cur)) {
+      usePlayerStore.setState({ source: { ...cur, subtitle: t } });
+      writeResume();
+    }
+    if (heldRecent === send) sendHeldRecent();
+  });
+}
+
 function clearResume(): void {
   try {
     sessionStorage.removeItem(RESUME_KEY);
@@ -644,9 +686,9 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
     });
 
     if (source.ref) {
-      const snapshot = snapshotOf(source);
-      // No event follows recent.add and C4 caches `recent.` for 30 s: refresh the Recently watched rails.
-      if (snapshot) rpc('recent.add', { ref: source.ref, snapshot }).then(() => invalidate('recent.'), () => undefined);
+      sendHeldRecent();
+      if (opts?.subtitle) followTitle({ ...source, ref: source.ref }, opts.subtitle, token);
+      else addRecent(source);
     }
 
     if (mode === 'external') {
@@ -1342,9 +1384,15 @@ export async function resolveSource(args: PlayItemArgs): Promise<PlayerSource> {
     const known = args.channel && itemKey(args.channel.ref) === itemKey(ref) && args.channel.url ? args.channel : undefined;
     const [item, src] = await Promise.all([
       known ?? rpc('catalog.item', { ref }),
-      // The source's own headers change only with an edit (`sources.changed` invalidates them).
+      // The source's own headers change only with an edit (`sources.changed` invalidates them), so
+      // the record held is used however old: a zap does not wait on asking for it again.
       queryClient
-        .fetchQuery({ queryKey: rpcKey('sources.get', { id: ref.sourceId }), queryFn: () => rpc('sources.get', { id: ref.sourceId }), retry: false })
+        .fetchQuery({
+          queryKey: rpcKey('sources.get', { id: ref.sourceId }),
+          queryFn: () => rpc('sources.get', { id: ref.sourceId }),
+          staleTime: Infinity,
+          retry: false,
+        })
         .catch(() => null),
     ]);
     const url = 'url' in item ? item.url : undefined;
@@ -1465,6 +1513,14 @@ function leaveListZap(ref: ItemRef): void {
   if (ctx?.listId || ctx?.favorites) usePlayerStore.setState({ zapContext: { sourceId: ref.sourceId } });
 }
 
+const PENDING = Symbol('pending');
+
+/** `p`'s value when it has settled already, else `PENDING`; never waits for it. */
+function settledValue<T>(p: Promise<T>): Promise<T | typeof PENDING> {
+  // A settled promise's reaction is queued first, so it wins the race.
+  return Promise.race([p, Promise.resolve(PENDING)]);
+}
+
 /**
  * `playItem` with its outcome. `onAllowed` runs once the gate let the item through and before
  * anything else, so a zap's tuner readout never shows a channel the PIN prompt then refuses.
@@ -1476,7 +1532,10 @@ export async function startItem(
     queue?: PlayerSource[];
     onAllowed?: () => void;
     keepList?: boolean;
-    /** The subtitle, still on its way (asked in parallel with the gate and the stream lookup). */
+    /**
+     * The subtitle, still on its way (asked in parallel with the gate and the stream lookup). The
+     * play does not wait for it: one not in by then joins the source when it comes.
+     */
     subtitle?: Promise<string | undefined>;
     /**
      * Told the request numbers this start takes: its own (`onRequest`, first thing), then its
@@ -1525,14 +1584,17 @@ export async function startItem(
     failResolve(err, placeholder, () => playItem(args, queueOpts));
     throw err;
   }
+  // The guide's answer when it is in already; the stream does not wait for one still on its way.
+  let title: Promise<string | undefined> | undefined;
   if (opts?.subtitle && !source.subtitle) {
-    const subtitle = await opts.subtitle;
-    if (subtitle) source = { ...source, subtitle };
+    const subtitle = await settledValue(opts.subtitle);
+    if (subtitle === PENDING) title = opts.subtitle;
+    else if (subtitle) source = { ...source, subtitle };
   }
   if (seq !== requestSeq) return 'superseded';
   await previousUnloaded;
   if (seq !== requestSeq) return 'superseded';
-  const playing = usePlayerStore.getState().play(source, queueOpts);
+  const playing = usePlayerStore.getState().play(source, title ? { ...queueOpts, subtitle: title } : queueOpts);
   // play() took its own request number before its first await.
   opts?.onPlay?.(requestSeq);
   await playing;
@@ -2404,6 +2466,7 @@ export function __resetPlayerForTests(): void {
   lastSave = Promise.resolve();
   finishedSavedFor = undefined;
   failedResolve = null;
+  heldRecent = null;
   allowedRefKey = null;
   startOverKey = null;
   sourceKindCache.clear();

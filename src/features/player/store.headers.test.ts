@@ -15,7 +15,7 @@ vi.mock('@/api/transport', () => ({
 }));
 
 const { resolveSource } = await import('./store');
-const { queryClient } = await import('@/api/query');
+const { invalidate, queryClient } = await import('@/api/query');
 
 /** The source record sits in the query cache (`sources.changed` drops it): a new answer needs a drop. */
 const sourceChanged = (): void => queryClient.removeQueries({ queryKey: ['sources.get'] });
@@ -91,6 +91,29 @@ describe('resolveSource per-channel headers (m3u)', () => {
     await resolveSource(args);
     await resolveSource(args);
     expect(asked).toBe(1);
+  });
+
+  it('keeps the playlist record however old, until a source change marks it out of date', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      let asked = 0;
+      handlers['catalog.item'] = () => item();
+      handlers['sources.get'] = () => {
+        asked++;
+        return source({ userAgent: `Playlist/${asked}` });
+      };
+      expect((await resolveSource(args)).headers).toEqual({ userAgent: 'Playlist/1' });
+      // An hour on one channel: a zap still takes the record held.
+      vi.setSystemTime(Date.now() + 60 * 60_000);
+      expect((await resolveSource(args)).headers).toEqual({ userAgent: 'Playlist/1' });
+      expect(asked).toBe(1);
+      // `sources.changed` invalidates it: the next play asks again.
+      await invalidate('sources.');
+      expect((await resolveSource(args)).headers).toEqual({ userAgent: 'Playlist/2' });
+      expect(asked).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('skips the channel lookup when the caller already holds the channel', async () => {

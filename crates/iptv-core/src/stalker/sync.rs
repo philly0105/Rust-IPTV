@@ -80,6 +80,30 @@ async fn list(client: &StalkerClient, req: Req) -> CoreResult<Vec<Value>> {
     Ok(into_list(client.call(req).await?))
 }
 
+/// Every live channel: `get_all_channels`, or the paged list on panels that
+/// disable it. The answer tree is taken apart, not cloned (IN-1): a
+/// 20k-channel portal's tree is 150-200 MB.
+async fn live_channels(client: &StalkerClient) -> CoreResult<Vec<Value>> {
+    let all = match client
+        .call(Req::new("itv", "get_all_channels").timeout(LONG_TIMEOUT))
+        .await
+    {
+        Ok(js) => into_list(js),
+        Err(CoreError::Invalid(_)) | Err(CoreError::NotFound(_)) => Vec::new(),
+        Err(err) => return Err(err),
+    };
+    if !all.is_empty() {
+        return Ok(all);
+    }
+    fetch_all_pages(
+        client,
+        Req::new("itv", "get_ordered_list")
+            .p("genre", "*")
+            .p("sortby", "number"),
+    )
+    .await
+}
+
 /// First-page `total_items` of a VOD/series listing; `None` when the portal
 /// did not answer (or answered without a total). The page's
 /// `max_page_items` seeds the source's page size (R5-6), so the first grid
@@ -276,72 +300,65 @@ async fn run(
     emit: &Emit<'_>,
 ) -> CoreResult<ImportSummary> {
     emit("fetching", 0, None, Some("Connecting to the portal"));
+    // The session first: every request below needs its token.
     let endpoint = client.endpoint().await?;
 
-    emit("fetching", 0, None, Some("Loading channel categories"));
-    let genres = mapping::categories(&list(client, Req::new("itv", "get_genres")).await?);
-
+    // Every section at once (R5-3): no request needs another's answer (the
+    // genres only feed the mapping), and one after another they cost 5-6
+    // round trips on every import, sources.add included. The genres and the
+    // channels fail the import, so either error ends the join at once
+    // instead of waiting up to LONG_TIMEOUT for get_all_channels. The
+    // optional sections and the totals never end it; they are handled below
+    // in their old order.
     emit("fetching", 0, None, Some("Loading channels"));
-    // The answer tree is taken apart, not cloned (IN-1): a 20k-channel
-    // portal's tree is 150-200 MB.
-    let all = match client
-        .call(Req::new("itv", "get_all_channels").timeout(LONG_TIMEOUT))
-        .await
-    {
-        Ok(js) => into_list(js),
-        Err(CoreError::Invalid(_)) | Err(CoreError::NotFound(_)) => Vec::new(),
-        Err(err) => return Err(err),
+    let genres = async {
+        let list = list(client, Req::new("itv", "get_genres")).await?;
+        Ok::<_, CoreError>(mapping::categories(&list))
     };
-    let channels = if all.is_empty() {
-        // Some panels disable get_all_channels: page through the list instead.
-        fetch_all_pages(
-            client,
-            Req::new("itv", "get_ordered_list")
-                .p("genre", "*")
-                .p("sortby", "number"),
-        )
-        .await?
-    } else {
-        all
-    };
-
-    emit(
-        "fetching",
-        channels.len() as u64,
-        None,
-        Some("Loading radio"),
-    );
     // Radio, VOD and series: a portal that does not serve one (an error
     // answer) gets an empty section, as before. A temporary failure (the
     // portal or the network did not answer) keeps that section's previous
     // rows instead of wiping them (L1-core-14), and says so in lastError.
-    let radio = match fetch_all_pages(
-        client,
-        Req::new("radio", "get_ordered_list").p("sortby", "number"),
-    )
-    .await
-    {
+    let radio = async {
+        let req = Req::new("radio", "get_ordered_list").p("sortby", "number");
+        Ok::<_, CoreError>(fetch_all_pages(client, req).await)
+    };
+    let vod_categories =
+        async { Ok::<_, CoreError>(list(client, Req::new("vod", "get_categories")).await) };
+    let series_categories =
+        async { Ok::<_, CoreError>(list(client, Req::new("series", "get_categories")).await) };
+    // Asked here, not under the save slot after the mapping, where a slow
+    // VOD count (3 x 30 s) held every other import's save.
+    let totals = async { Ok::<_, CoreError>(totals(state, client, source_id).await) };
+    let (genres, channels, radio, vod_categories, series_categories, (movies, series)) = tokio::try_join!(
+        genres,
+        live_channels(client),
+        radio,
+        vod_categories,
+        series_categories,
+        totals
+    )?;
+    let radio = match radio {
         Ok(r) => Some(r),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         Err(err) => optional_section(err, "radio", "radio stations")?,
     };
-
-    emit(
-        "fetching",
-        (channels.len() + radio.as_ref().map_or(0, Vec::len)) as u64,
-        None,
-        Some("Loading movie and series categories"),
-    );
-    let vod_categories = match list(client, Req::new("vod", "get_categories")).await {
+    let vod_categories = match vod_categories {
         Ok(c) => Some(mapping::categories(&c)),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         Err(err) => optional_section(err, "VOD categories", "movie categories")?,
     };
-    let series_categories = match list(client, Req::new("series", "get_categories")).await {
+    let series_categories = match series_categories {
         Ok(c) => Some(mapping::categories(&c)),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         Err(err) => optional_section(err, "series categories", "series categories")?,
     };
+    emit(
+        "fetching",
+        (channels.len() + radio.as_ref().map_or(0, Vec::len)) as u64,
+        None,
+        Some("Loading channels"),
+    );
     // Unchanged refresh (ST-3): when every section answered, the answers
     // are hashed (on the blocking pool: tens of MB of JSON). A hash and row
     // counts that match the last write keep the catalog as it is.
@@ -374,7 +391,6 @@ async fn run(
         if let Some(rows) = kept {
             tracing::info!(source_id, "stalker portal unchanged; catalog kept");
             emit("saving", 0, None, Some(crate::sources::UNCHANGED_MESSAGE));
-            let (movies, series) = totals(state, client, source_id).await;
             Runtime::get(state).forget_listings(source_id);
             return Ok(ImportSummary {
                 channels: rows,
@@ -456,8 +472,6 @@ async fn run(
         }]
     };
     emit("parsing", total, Some(total), None);
-
-    let (movies, series) = totals(state, client, source_id).await;
 
     // A cancelled run keeps the old catalog (C8): stop before saving, and
     // save all four types in one transaction so a cancel seen by the writer

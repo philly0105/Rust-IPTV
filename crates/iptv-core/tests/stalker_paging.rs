@@ -42,6 +42,11 @@ struct Portal {
     calls: Mutex<HashMap<String, u64>>,
     inflight: AtomicUsize,
     max_inflight: AtomicUsize,
+    /// Extra delay of every request, in ms, and the most requests of any
+    /// kind in flight at once.
+    each_ms: AtomicUsize,
+    all_inflight: AtomicUsize,
+    max_all_inflight: AtomicUsize,
 }
 
 impl Portal {
@@ -77,6 +82,13 @@ async fn portal_php(
     let get = |k: &str| q.get(k).cloned().unwrap_or_default();
     let key = format!("{}.{}", get("type"), get("action"));
     *p.calls.lock().unwrap().entry(key.clone()).or_default() += 1;
+    let all = p.all_inflight.fetch_add(1, Ordering::SeqCst) + 1;
+    p.max_all_inflight.fetch_max(all, Ordering::SeqCst);
+    let each = p.each_ms.load(Ordering::SeqCst) as u64;
+    if each > 0 {
+        tokio::time::sleep(Duration::from_millis(each)).await;
+    }
+    p.all_inflight.fetch_sub(1, Ordering::SeqCst);
     let page = get("p").parse::<usize>().unwrap_or(1).max(1);
     let listed = key.ends_with(".get_ordered_list");
     let failing = p.fail_from.lock().unwrap().get(&get("type")).copied();
@@ -245,6 +257,28 @@ async fn a_known_page_size_sends_a_grid_page_in_one_wave() {
         )
         .await;
     assert_eq!(last["items"].as_array().unwrap().len(), MOVIES - 84);
+}
+
+/// R5-3: the sync asked genres, channels, radio, both category lists and
+/// both totals one after another, 5-6 round trips that need nothing from
+/// each other. They now go out together after the session.
+#[tokio::test]
+async fn sync_asks_its_sections_together() {
+    let e = env(30).await;
+    e.portal.each_ms.store(300, Ordering::SeqCst);
+    let t0 = std::time::Instant::now();
+    let summary = e.ok("stalker.sync", json!({"sourceId": SID})).await;
+    let took = t0.elapsed();
+    assert_eq!(summary["channels"], 30 + STATIONS);
+    assert_eq!(summary["movies"], MOVIES);
+    // get_genres, get_all_channels, radio page 1, vod and series
+    // get_categories, vod and series page 1 for the totals.
+    let together = e.portal.max_all_inflight.load(Ordering::SeqCst);
+    assert!(together >= 7, "{together} requests in flight at most");
+    // One after another: genres, all channels, 1 + 1 channel waves, 1 + 6
+    // radio waves, two category lists and one totals wave are 14 waves of
+    // 300 ms (4.2 s). Together, the radio walk's 7 waves set the pace.
+    assert!(took < Duration::from_millis(3_500), "sync took {took:?}");
 }
 
 /// R5-6: the sync's movie total reads page 1 of the VOD list, whose

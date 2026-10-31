@@ -118,6 +118,28 @@ async fn run_flow(srv: stub::Server) {
     assert_eq!(err, None);
     assert_eq!(leaked, 0, "password stored in catalog rows");
 
+    // The panel's clock and formats reach app_state in the background
+    // (R1-1); a late write for a removed source stores nothing.
+    let meta_rows = |id: String| {
+        let state = state.clone();
+        async move {
+            state.flush_background_writes().await;
+            state
+                .db_call(move |c| {
+                    Ok(c.query_row(
+                        "SELECT count(*) FROM app_state WHERE key = 'xtream_meta:' || ?1",
+                        [id],
+                        |r| r.get::<_, i64>(0),
+                    )?)
+                })
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(meta_rows(sid.clone()).await, 1);
+    iptv_core::xtream::meta::remember_meta(&state, "gone", &Default::default());
+    assert_eq!(meta_rows("gone".into()).await, 0);
+
     // xmltv.php detected.
     let expected_xmltv = format!("{}/xmltv.php?username=demo&password=secret", srv.server_url);
     assert_eq!(

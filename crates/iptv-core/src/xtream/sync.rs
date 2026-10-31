@@ -139,14 +139,8 @@ pub async fn sync_source(
     // account: the reply doubles as a fresh subscription status.
     crate::account::remember_xtream(&state, source_id, super::service::info_from_raw(account))
         .await;
+    meta::remember_meta(&state, source_id, &server_meta);
     let rt = meta::runtime(&state);
-    {
-        let rt = rt.clone();
-        let sid = source_id.to_string();
-        state
-            .db_call(move |c| meta::store_meta(c, &rt, &sid, &server_meta))
-            .await?;
-    }
 
     // What the last write stored, and the rows there now (unchanged check).
     let previous = {

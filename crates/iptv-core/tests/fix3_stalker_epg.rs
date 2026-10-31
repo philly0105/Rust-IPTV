@@ -3,9 +3,11 @@
 //! and never turns into a timeout; a slow archive read keeps the short EPG
 //! and the day tables read before the deadline. R5-1: day tables are
 //! cached and shared with catch-up, their pages go out together, and `to`
-//! bounds the days read.
+//! bounds the days read. A table a failed page cut short is not cached.
 
 use axum::extract::{Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use iptv_core::events::BroadcastSink;
@@ -37,6 +39,8 @@ struct Portal {
     /// Day-table requests in flight, and the most at once.
     tables_inflight: AtomicUsize,
     tables_max_inflight: AtomicUsize,
+    /// Page 3 of this date's `epg` table answers HTTP 503 this many times.
+    fail_page3: Mutex<Option<(String, u32)>>,
 }
 
 impl Portal {
@@ -56,10 +60,18 @@ fn rfc(t: chrono::DateTime<chrono::Utc>) -> String {
 async fn portal_php(
     State(p): State<Arc<Portal>>,
     Query(q): Query<HashMap<String, String>>,
-) -> Json<Value> {
+) -> Response {
     let get = |k: &str| q.get(k).cloned().unwrap_or_default();
     let key = format!("{}.{}", get("type"), get("action"));
     *p.calls.lock().unwrap().entry(key.clone()).or_default() += 1;
+    if key == "epg.get_simple_data_table" && get("p") == "3" {
+        if let Some((date, left)) = p.fail_page3.lock().unwrap().as_mut() {
+            if *date == get("date") && *left > 0 {
+                *left -= 1;
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+        }
+    }
     let table = key.ends_with(".get_simple_data_table");
     if table {
         let now = p.tables_inflight.fetch_add(1, Ordering::SeqCst) + 1;
@@ -110,7 +122,7 @@ async fn portal_php(
         }
         _ => json!([]),
     };
-    Json(json!({ "js": js }))
+    Json(json!({ "js": js })).into_response()
 }
 
 async fn spawn_portal(port: u16, portal: Arc<Portal>) {
@@ -429,4 +441,62 @@ async fn the_table_type_that_answered_goes_first() {
     // other six ask `itv` straight away.
     assert_eq!(portal.count("epg.get_simple_data_table"), 3);
     assert_eq!(portal.count("itv.get_simple_data_table"), 45);
+}
+
+/// RB-G review: a day table whose page 3 fails (HTTP 503 through every
+/// retry) answers that call with the pages it has, as before the cache,
+/// but is not kept: catch-up on a programme of the missing page reads the
+/// table again and finds it, and the next guide read shows the whole day.
+#[tokio::test]
+async fn a_table_a_failed_page_cut_short_is_read_again() {
+    let portal = Arc::new(Portal::default());
+    spawn_portal(7210, portal.clone()).await;
+    let e = env_on(7210).await;
+    e.call("stalker.sync", json!({"sourceId": SID}))
+        .await
+        .unwrap();
+    let tables = || portal.count("epg.get_simple_data_table");
+    let archived = |v: &Value| -> Vec<String> {
+        titles(v)
+            .into_iter()
+            .filter(|t| t.starts_with("Archive "))
+            .collect()
+    };
+
+    let day = (chrono::Utc::now() - chrono::Duration::days(3)).date_naive();
+    // Three answers: one read's attempts (the client retries a 5xx twice).
+    *portal.fail_page3.lock().unwrap() = Some((day.to_string(), 3));
+    let from = day.and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let args = json!({
+        "ref": live("1001"),
+        "limit": 50,
+        "from": rfc(from),
+        "to": rfc(from + chrono::Duration::days(1)),
+    });
+    let short = archived(&e.call("stalker.epg", args.clone()).await.unwrap());
+    assert_eq!(
+        short,
+        [format!("Archive {day} #1"), format!("Archive {day} #2")],
+        "the failed page ended the table for this call"
+    );
+    assert_eq!(portal.fail_page3.lock().unwrap().as_ref().unwrap().1, 0);
+
+    // Catch-up on page 3's programme (10:00-11:00 UTC) reads the day again.
+    let before = tables();
+    let start = day.and_hms_opt(10, 30, 0).unwrap().and_utc();
+    let src = e
+        .call(
+            "stalker.catchupUrl",
+            json!({"ref": live("1001"), "start": rfc(start), "durationMinutes": 30}),
+        )
+        .await
+        .unwrap_or_else(|err| panic!("the cut-short table was reused: {err:?}"));
+    assert_eq!(src["url"], format!("http://archive.example/{day}-3.ts"));
+    assert_eq!(tables() - before, 5, "the day's five pages, read again");
+
+    // That whole read is cached: the guide shows every programme of the
+    // day and reads no table.
+    let whole = archived(&e.call("stalker.epg", args).await.unwrap());
+    assert_eq!(whole.len(), 5, "{whole:?}");
+    assert_eq!(tables() - before, 5, "served from the cache");
 }

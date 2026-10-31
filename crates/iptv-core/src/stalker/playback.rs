@@ -330,7 +330,8 @@ const DAY_TABLE_CAP: usize = 512;
 /// How long a cached day table is reused. A past day's table no longer
 /// changes; today's and tomorrow's can (and a stale programme id would give
 /// a dead catch-up link), and an empty answer may be a table the portal has
-/// not built yet.
+/// not built yet. A read cut short by a failure is not reused at all
+/// ([`DayTable::ttl`]).
 const DAY_TABLE_TTL_PAST: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 const DAY_TABLE_TTL_NEAR: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 const DAY_TABLE_TTL_EMPTY: std::time::Duration = std::time::Duration::from_secs(2 * 60);
@@ -370,6 +371,10 @@ pub struct DayTable {
     /// Table type that answered (`epg` or `itv`).
     kind: Option<&'static str>,
     at: tokio::time::Instant,
+    /// Zero when a page failed (HTTP 429 or 5xx after the retries, a reset
+    /// connection): the read's own waiters get the rows it has, as before
+    /// the cache, but a later guide row or catch-up click reads the table
+    /// again instead of missing those programmes for 30 minutes.
     ttl: std::time::Duration,
 }
 
@@ -520,7 +525,8 @@ fn shared_error(err: &CoreError) -> CoreError {
 /// Ministra serves it under `epg`, some builds only under `itv`: `first` is
 /// the type that last answered for the source, and the other one is still
 /// asked when it gives nothing. Auth failures and a portal that does not
-/// answer ([`no_answer`]) propagate.
+/// answer ([`no_answer`]) propagate; any other failure gives the rows read
+/// so far, with a zero TTL so that the cache does not keep them.
 async fn day_table(
     client: &StalkerClient,
     gate: &tokio::sync::Semaphore,
@@ -531,8 +537,10 @@ async fn day_table(
     let day = date.format("%Y-%m-%d").to_string();
     let other = if first == "itv" { "epg" } else { "itv" };
     let mut found = None;
+    let mut whole = true;
     for table_type in [first, other] {
-        let rows = table_pages(client, gate, table_type, channel_id, &day).await?;
+        let (rows, complete) = table_pages(client, gate, table_type, channel_id, &day).await?;
+        whole &= complete;
         if !rows.is_empty() {
             found = Some((table_type, rows));
             break;
@@ -542,7 +550,9 @@ async fn day_table(
         Some((kind, rows)) => (Some(kind), rows.into_iter().map(trim_day_row).collect()),
         None => (None, Vec::new()),
     };
-    let ttl = if rows.is_empty() {
+    let ttl = if !whole {
+        std::time::Duration::ZERO
+    } else if rows.is_empty() {
         DAY_TABLE_TTL_EMPTY
     } else if date < Utc::now().date_naive() {
         DAY_TABLE_TTL_PAST
@@ -561,14 +571,16 @@ async fn day_table(
 /// leaves (at most [`MAX_DAY_PAGES`] in all), [`DAY_PAGE_CONCURRENCY`] at a
 /// time and in order (R5-1: they went one after another, though page 1
 /// gives the total). The page size is page 1's row count, which is what the
-/// old one-by-one walk stopped on. A failed or empty page ends the table.
+/// old one-by-one walk stopped on. A failed or empty page ends the table;
+/// the flag is false when a failure ended it rather than the portal's
+/// answer (an empty page, the last page, no such table on page 1).
 async fn table_pages(
     client: &StalkerClient,
     gate: &tokio::sync::Semaphore,
     table_type: &str,
     channel_id: &str,
     day: &str,
-) -> CoreResult<Vec<Value>> {
+) -> CoreResult<(Vec<Value>, bool)> {
     let page = |p: u64| {
         let req = Req::new(table_type, "get_simple_data_table")
             .p("ch_id", channel_id)
@@ -579,8 +591,10 @@ async fn table_pages(
             page_answer(client.call(req).await)
         }
     };
-    let Some(js) = page(1).await? else {
-        return Ok(Vec::new());
+    let js = match page(1).await? {
+        Page::Rows(js) => js,
+        Page::NoTable => return Ok((Vec::new(), true)),
+        Page::Failed => return Ok((Vec::new(), false)),
     };
     let total = n(&js, "total_items");
     let mut rows = into_list(js);
@@ -595,25 +609,43 @@ async fn table_pages(
     tokio::pin!(rest);
     // Dropping `rest` at an empty page drops the requests still out.
     while let Some(js) = rest.next().await {
-        let Some(js) = js? else { break };
+        // Past page 1 the total says more rows exist, so any failure,
+        // even a refusal, leaves the table short.
+        let Page::Rows(js) = js? else {
+            return Ok((rows, false));
+        };
         let got = into_list(js);
         if got.is_empty() {
             break;
         }
         rows.extend(got);
     }
-    Ok(rows)
+    Ok((rows, true))
 }
 
-/// A day-table page: `None` for a failure that only ends the table (an
-/// unsupported action, an HTML page). Auth failures and a portal that does
-/// not answer propagate.
-fn page_answer(res: CoreResult<Value>) -> CoreResult<Option<Value>> {
+/// What one day-table page gave.
+#[derive(Debug)]
+enum Page {
+    Rows(Value),
+    /// The portal refused the request (an unsupported action, an HTML page,
+    /// HTTP 404): on page 1, it serves no such table.
+    NoTable,
+    /// A failure that may pass: HTTP 429 or 5xx after the retries, a reset
+    /// connection, an empty answer.
+    Failed,
+}
+
+/// A day-table page. Auth failures and a portal that does not answer
+/// propagate; any other failure only ends the table.
+fn page_answer(res: CoreResult<Value>) -> CoreResult<Page> {
     match res {
-        Ok(js) => Ok(Some(js)),
+        Ok(js) => Ok(Page::Rows(js)),
         Err(err @ CoreError::Auth(_)) => Err(err),
         Err(err) if no_answer(&err) => Err(err),
-        Err(_) => Ok(None),
+        Err(CoreError::Invalid(_) | CoreError::NotFound(_) | CoreError::Unsupported(_)) => {
+            Ok(Page::NoTable)
+        }
+        Err(_) => Ok(Page::Failed),
     }
 }
 
@@ -1647,6 +1679,11 @@ mod tests {
             started: tokio::time::Instant::now(),
         };
         assert!(!pending.stale(), "a read in flight is shared");
+        let cut_short = day_entry(2, std::time::Duration::ZERO);
+        assert!(
+            cut_short.stale(),
+            "a read a failure cut short is not reused"
+        );
 
         let tables = DayTables::default();
         tables.entries.insert("s1|7|old".into(), near);
@@ -1676,6 +1713,34 @@ mod tests {
         assert!(!tables.entries.contains_key("s1|7|new"));
         assert!(!tables.kinds.contains_key("s1"));
         assert_eq!(tables.len(), DAY_TABLE_CAP * 9 / 10 - 1);
+    }
+
+    /// RB-G review: only a refusal on page 1 means the portal has no such
+    /// table. A throttled or failed page cuts the table short, which the
+    /// cache must not keep; auth failures and a silent portal propagate.
+    #[test]
+    fn day_table_pages_tell_refusals_from_failures() {
+        let page = |err: CoreError| page_answer(Err(err));
+        assert!(matches!(page_answer(Ok(json!([]))), Ok(Page::Rows(_))));
+        for refused in [
+            CoreError::invalid("HTML page"),
+            CoreError::not_found("HTTP 404"),
+            CoreError::Unsupported("no such action".into()),
+        ] {
+            assert!(matches!(page(refused), Ok(Page::NoTable)));
+        }
+        for failed in [
+            CoreError::Server("HTTP 503".into()),
+            CoreError::Server("HTTP 429".into()),
+            CoreError::network("connection reset"),
+            CoreError::network("Stalker epg: the portal sent an empty response"),
+        ] {
+            assert!(matches!(page(failed), Ok(Page::Failed)));
+        }
+        assert!(page(CoreError::Auth("x".into())).is_err());
+        assert!(page(CoreError::Timeout("x".into())).is_err());
+        let unreachable = CoreError::network("Could not reach the portal at x. Check it.");
+        assert!(page(unreachable).is_err());
     }
 
     #[test]

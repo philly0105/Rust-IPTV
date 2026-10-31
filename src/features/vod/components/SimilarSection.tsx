@@ -52,9 +52,9 @@ export function SimilarSection({
   rootRef?: RefObject<Element | null>;
 }) {
   const { t } = useTranslation('vod');
-  // The section sits below the fold: its lookups (one per TMDB title) wait until it nears the
-  // screen and the page is idle, as Home's trending rail does, and a Stalker portal, whose VOD is
-  // not in the local catalog, asks for none (nothing could match).
+  // The section sits below the fold: its lookup (one `catalog.matchTitles` for every TMDB title)
+  // waits until it nears the screen and the page is idle, as Home's trending rail does, and a
+  // Stalker portal, whose VOD is not in the local catalog, asks nothing (nothing could match).
   const [nearRef, near] = useNearViewport<HTMLDivElement>(rootRef ?? VIEWPORT);
   const [idle, setIdle] = useState(false);
   useEffect(() => (near && !idle ? whenIdle(() => setIdle(true)) : undefined), [near, idle]);

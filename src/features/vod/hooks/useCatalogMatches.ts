@@ -1,15 +1,15 @@
-import { useQueries } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
-import type { CatalogSearchResult } from '@/api/rpc';
+import type { CatalogTitleQuery } from '@/api/rpc';
 import { rpcKey } from '@/api/query';
 import { rpcRaw } from '@/api/transport';
 import { itemKey, type SeriesItem, type TmdbBrief, type VodItem } from '@/api/types';
 
 /** TMDB titles looked up per rail; TMDB sends about 20 similar titles. */
 const MAX_LOOKUPS = 20;
-/** Catalog hits read per title: enough for a remake or two sharing the name. */
-const HITS_PER_TITLE = 8;
+
+const NONE: (VodItem | SeriesItem)[] = [];
 
 /** Lower case, no accents, letters and digits only: "Amélie (2001)" and "amelie 2001" compare equal. */
 function fold(s: string): string {
@@ -37,13 +37,26 @@ export function matchBrief<T extends VodItem | SeriesItem>(brief: Pick<TmdbBrief
   });
 }
 
+/** `catalog.matchTitles` args for a rail's briefs: title, and the year and TMDB id when known. */
+function matchTitlesArgs(briefs: readonly TmdbBrief[], sourceId: string, kind: 'movie' | 'series') {
+  const titles = briefs.map((b): CatalogTitleQuery => {
+    const t: CatalogTitleQuery = { title: b.title, tmdbId: b.tmdbId };
+    if (b.year !== undefined) t.year = b.year;
+    return t;
+  });
+  return { sourceId, contentType: kind, titles };
+}
+
 /**
  * TMDB titles ("More like this", "Known for") that this source has (VL-tmdb-deadend), as catalog
  * items, so each card opens the title's own detail page instead of a search that finds nothing.
- * One `catalog.search` per brief (local SQLite, a few ms each), cached like the search page's.
- * Stalker portals keep VOD out of SQLite, so nothing could match there: callers turn the lookups
- * off for them (`enabled`), and "More like this", below the fold, also until it nears the screen
- * and the page is idle, so its twenty searches do not queue with the page's own reads.
+ * One `catalog.matchTitles` call per rail: the core probes each title's base title through an
+ * index and runs `catalog.search`'s word-prefix pass only for titles that need it, in one database
+ * call, where one `catalog.search` per title queued 20 to 40 ranked searches (10-60 ms each) on the
+ * core's pool. Each card is still picked here (`matchBrief`). Stalker portals keep VOD out of
+ * SQLite, so nothing could match there: callers turn the lookup off for them (`enabled`), and
+ * "More like this", below the fold, also until it nears the screen and the page is idle, so it does
+ * not queue with the page's own reads.
  */
 export function useCatalogMatches(
   briefs: readonly TmdbBrief[],
@@ -51,26 +64,21 @@ export function useCatalogMatches(
   kind: 'movie' | 'series',
   enabled = true,
 ): { items: (VodItem | SeriesItem)[]; pending: boolean } {
-  const wanted = enabled && sourceId ? briefs.slice(0, MAX_LOOKUPS) : [];
-  const results = useQueries({
-    queries: wanted.map((b) => {
-      const args = { query: b.title, sourceId: sourceId ?? '', contentTypes: [kind], limit: HITS_PER_TITLE };
-      return {
-        queryKey: rpcKey('catalog.search', args),
-        queryFn: async ({ signal }: { signal: AbortSignal }) => (await rpcRaw('catalog.search', args, { signal })) as CatalogSearchResult,
-        staleTime: 5 * 60_000,
-        retry: false,
-      };
-    }),
+  const wanted = useMemo(() => briefs.slice(0, MAX_LOOKUPS), [briefs]);
+  const args = useMemo(() => matchTitlesArgs(wanted, sourceId ?? '', kind), [wanted, sourceId, kind]);
+  const on = enabled && !!sourceId && wanted.length > 0;
+  const lists = useQuery({
+    queryKey: rpcKey('catalog.matchTitles', args),
+    queryFn: async ({ signal }) => (await rpcRaw('catalog.matchTitles', args, { signal })) as (VodItem | SeriesItem)[][],
+    enabled: on,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
-  const stamp = results.map((r) => r.dataUpdatedAt).join(',');
   const items = useMemo(() => {
     const out: (VodItem | SeriesItem)[] = [];
     const seen = new Set<string>();
     wanted.forEach((b, i) => {
-      const data = results[i]?.data;
-      const hits: (VodItem | SeriesItem)[] = (kind === 'movie' ? data?.movies : data?.series) ?? [];
-      const hit = matchBrief(b, hits);
+      const hit = matchBrief(b, lists.data?.[i] ?? NONE);
       if (!hit) return;
       const key = itemKey(hit.ref);
       if (seen.has(key)) return;
@@ -78,7 +86,7 @@ export function useCatalogMatches(
       out.push(hit);
     });
     return out;
-    // `stamp` changes when any lookup answers; `wanted` is a slice of `briefs`.
-  }, [stamp, briefs, sourceId, kind, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { items, pending: results.some((r) => r.isPending) };
+  }, [wanted, lists.data]);
+  // A query that is off stays pending in TanStack terms: neither cards nor a spinner then.
+  return { items: on ? items : NONE, pending: on && lists.isPending };
 }

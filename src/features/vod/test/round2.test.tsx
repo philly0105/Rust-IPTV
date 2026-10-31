@@ -307,24 +307,38 @@ describe('"More like this" lookups', () => {
     <SimilarSection items={briefs} loading={false} sourceId="src1" sourceKind={sourceKind} error={undefined} onRetry={() => undefined} keyMissing={false} enriched />
   );
 
-  it('wait until the section nears the screen, then ask once per title', async () => {
-    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+  it('wait until the section nears the screen, then ask once for every title', async () => {
+    const dune: VodItem = { ref: { sourceId: 'src1', contentType: 'movie', itemId: 'd1' }, title: 'Dune (2021)', titleBase: 'Dune', categoryId: 'c1' };
+    rpcMock.handlers['catalog.matchTitles'] = (a) => (a as { titles: { title: string }[] }).titles.map((t) => (t.title === 'Dune' ? [dune] : []));
     renderAt('/', [{ path: '/', element: similar('xtream') }]);
     // No IntersectionObserver in jsdom: the section never came near, so nothing is asked.
     await new Promise((r) => setTimeout(r, 300));
-    expect(callsOf('catalog.search')).toHaveLength(0);
+    expect(callsOf('catalog.matchTitles')).toHaveLength(0);
     cleanup();
     vi.stubGlobal('IntersectionObserver', EagerObserver);
     renderAt('/', [{ path: '/', element: similar('xtream') }]);
-    await waitFor(() => expect(callsOf('catalog.search')).toHaveLength(2));
+    // One call for the rail, not one search per title (F4-3); the card opens the title's page.
+    expect((await screen.findByRole('link', { name: /Dune/ })).getAttribute('href')).toBe('/s/src1/movie/d1');
+    expect(callsOf('catalog.matchTitles')).toEqual([
+      {
+        sourceId: 'src1',
+        contentType: 'movie',
+        titles: [
+          { title: 'Dune', tmdbId: 1 },
+          { title: 'Arrival', tmdbId: 2 },
+        ],
+      },
+    ]);
+    expect(callsOf('catalog.search')).toHaveLength(0);
   });
 
   it('ask nothing for a Stalker portal, whose VOD is not in the local catalog', async () => {
     vi.stubGlobal('IntersectionObserver', EagerObserver);
-    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    rpcMock.handlers['catalog.matchTitles'] = (a) => (a as { titles: unknown[] }).titles.map(() => []);
     renderAt('/', [{ path: '/', element: similar('stalker') }]);
     expect(await screen.findByText('None of the similar titles TMDB lists are in this source.')).toBeTruthy();
     await new Promise((r) => setTimeout(r, 300));
+    expect(callsOf('catalog.matchTitles')).toHaveLength(0);
     expect(callsOf('catalog.search')).toHaveLength(0);
   });
 });

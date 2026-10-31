@@ -6,7 +6,8 @@
 #[path = "m3u_support.rs"]
 mod support;
 
-use iptv_core::recording::engine::{force_engine, Engine};
+use iptv_core::model::{PlayerKind, PlayerSource};
+use iptv_core::recording::engine::{self, force_engine, Engine};
 use iptv_core::recording::scheduler::ManualClock;
 use iptv_core::recording::{
     self, RecordingStatus, ReminderRequest, ReminderStatus, ScheduleRequest,
@@ -14,6 +15,7 @@ use iptv_core::recording::{
 use iptv_core::rpc::RpcRouter;
 use iptv_core::AppEvent;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use support::*;
@@ -192,6 +194,133 @@ async fn wrong_headers_never_produce_a_file() {
     let row = wait_status(&env, &res.recording.id, RecordingStatus::Cancelled, 20).await;
     assert!(row.file_names.is_empty() && row.bytes == 0, "{row:?}");
     drop(mock);
+}
+
+/// A local live stream: `total` bytes (byte `i` is `i % 251`, so order
+/// shows) in `chunk`-byte pieces `every` apart, then silence with the
+/// connection open, like a live channel between packets. Returns its URL
+/// and the bytes handed to the connection so far.
+async fn spawn_stream(total: usize, chunk: usize, every: Duration) -> (String, Arc<AtomicUsize>) {
+    let sent = Arc::new(AtomicUsize::new(0));
+    let counter = sent.clone();
+    let app = axum::Router::new().route(
+        "/live.ts",
+        axum::routing::get(move || {
+            let sent = counter.clone();
+            async move {
+                let body = futures::stream::unfold(0usize, move |at| {
+                    let sent = sent.clone();
+                    async move {
+                        if at >= total {
+                            futures::future::pending::<()>().await;
+                        }
+                        if at > 0 && !every.is_zero() {
+                            tokio::time::sleep(every).await;
+                        }
+                        let n = chunk.min(total - at);
+                        let piece: Vec<u8> = (at..at + n).map(|i| (i % 251) as u8).collect();
+                        sent.fetch_add(n, Ordering::SeqCst);
+                        Some((Ok::<_, std::io::Error>(bytes::Bytes::from(piece)), at + n))
+                    }
+                });
+                (
+                    [(axum::http::header::CONTENT_TYPE, "video/mp2t")],
+                    axum::body::Body::from_stream(body),
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://127.0.0.1:{port}/live.ts"), sent)
+}
+
+/// Starts the HTTP copy of `url` into `path` (created first, as the
+/// scheduler does) for up to a minute; returns its stop switch and task.
+fn start_copy(
+    env: &Env,
+    url: &str,
+    path: &std::path::Path,
+) -> (
+    tokio::sync::watch::Sender<bool>,
+    tokio::task::JoinHandle<engine::PartEnd>,
+) {
+    std::fs::File::create(path).unwrap();
+    let source = PlayerSource {
+        url: url.into(),
+        kind: PlayerKind::Direct,
+        headers: None,
+        title: "Live".into(),
+        subtitle: None,
+        poster_url: None,
+        item_ref: None,
+        episode_id: None,
+        resume_seconds: None,
+        is_live: true,
+        is_radio: false,
+    };
+    let (stop_tx, mut stop) = tokio::sync::watch::channel(false);
+    let (state, path) = (env.state.clone(), path.to_path_buf());
+    let until = tokio::time::Instant::now() + Duration::from_secs(60);
+    let task = tokio::spawn(async move {
+        engine::record_part(&state, &Engine::Http, &source, "s", &path, until, &mut stop).await
+    });
+    (stop_tx, task)
+}
+
+fn len_of(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+#[tokio::test]
+async fn the_http_copy_writes_through_a_buffer_and_keeps_every_byte_on_stop() {
+    let env = env().await;
+    const TOTAL: usize = 300_000;
+    let (url, sent) = spawn_stream(TOTAL, 4096, Duration::ZERO).await;
+    let path = env.dir.path().join("buffered.ts");
+    let (stop_tx, task) = start_copy(&env, &url, &path);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while sent.load(Ordering::SeqCst) < TOTAL {
+        assert!(tokio::time::Instant::now() < deadline, "the stream stalled");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Everything arrived, but the copy writes whole buffers, not each
+    // chunk: the tail is still in memory.
+    let before = len_of(&path);
+    assert!(before < TOTAL as u64, "{before}");
+    stop_tx.send(true).unwrap();
+    let end = task.await.unwrap();
+    assert!(end.stopped && end.error.is_none(), "{end:?}");
+    let body = std::fs::read(&path).unwrap();
+    assert_eq!(body.len(), TOTAL, "stopping writes the buffered tail");
+    assert!(body.iter().enumerate().all(|(i, b)| *b == (i % 251) as u8));
+}
+
+#[tokio::test]
+async fn a_slow_stream_reaches_the_disk_within_seconds() {
+    let env = env().await;
+    // 10 KB/s (a radio stream) fills no buffer for many seconds; the copy
+    // still writes what it has every 2 s, for the progress and a crash.
+    let (url, _) = spawn_stream(usize::MAX, 1_000, Duration::from_millis(100)).await;
+    let path = env.dir.path().join("slow.ts");
+    let started = tokio::time::Instant::now();
+    let (stop_tx, task) = start_copy(&env, &url, &path);
+    while len_of(&path) == 0 {
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "nothing on disk after {:?}",
+            started.elapsed()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    stop_tx.send(true).unwrap();
+    let end = task.await.unwrap();
+    assert!(end.stopped && end.error.is_none(), "{end:?}");
+    let body = std::fs::read(&path).unwrap();
+    assert!(!body.is_empty());
+    assert!(body.iter().enumerate().all(|(i, b)| *b == (i % 251) as u8));
 }
 
 #[tokio::test]

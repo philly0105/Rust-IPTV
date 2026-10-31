@@ -232,6 +232,10 @@ pub struct PartEnd {
 /// caller; `--` keeps it from being read as an option. `--stream-record`
 /// only needs the demuxed packets, so the video decoder skips every frame
 /// (`--vd-lavc-skipframe=all`) instead of decoding what `--vo=null` drops.
+/// It writes each packet as the demuxer reads it and the recorder never
+/// seeks back, so the demuxer keeps no back buffer: mpv's default for a
+/// network stream holds 50 MiB of played packets, plus the unused part of
+/// the 150 MiB forward cache, for the whole recording.
 pub fn mpv_args(source: &PlayerSource, path: &Path, pipe: Option<&str>) -> Vec<String> {
     let mut args = vec![
         "--no-config".to_string(),
@@ -244,6 +248,8 @@ pub fn mpv_args(source: &PlayerSource, path: &Path, pipe: Option<&str>) -> Vec<S
         "--ao=null".to_string(),
         "--hwdec=no".to_string(),
         "--vd-lavc-skipframe=all".to_string(),
+        "--demuxer-seekable-cache=no".to_string(),
+        "--demuxer-max-back-bytes=0".to_string(),
         "--network-timeout=20".to_string(),
         format!("--stream-record={}", path.display()),
     ];
@@ -515,6 +521,14 @@ async fn quit_mpv(child: &mut tokio::process::Child, pipe: Option<&str>) {
 
 /// Longest wait for the first or next chunk of a direct stream.
 const HTTP_IDLE: Duration = Duration::from_secs(20);
+/// Write buffer of the HTTP copy. A live stream arrives in chunks of a few
+/// KiB, and each write to a tokio file is a hand-off to the blocking pool
+/// and a write(2): about 160 a second at 6 Mbit/s, for hours.
+const WRITE_BUFFER: usize = 128 * 1024;
+/// Longest time copied bytes wait in [`WRITE_BUFFER`]. A 128 kbit/s radio
+/// stream takes 8 s to fill it, and `recordings.progress` (which reads the
+/// part file's size every 2 s) and a crash would lag by that much.
+const FLUSH_EVERY: Duration = Duration::from_secs(2);
 
 async fn run_http(
     state: &Arc<AppState>,
@@ -575,7 +589,7 @@ async fn run_http(
     if ct.contains("mpegurl") || ct.starts_with("text/") || ct.contains("dash+xml") {
         return fail(ENGINE_MISSING_MESSAGE.to_string());
     }
-    let mut file = match tokio::fs::OpenOptions::new()
+    let file = match tokio::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
         .open(path)
@@ -585,30 +599,48 @@ async fn run_http(
         Err(e) if disk_full(&e) => return fail(super::DISK_FULL_MESSAGE.to_string()),
         Err(e) => return fail(format!("could not write {}: {e}", path.display())),
     };
+    let mut file = tokio::io::BufWriter::with_capacity(WRITE_BUFFER, file);
+    let write_failed = |e: std::io::Error| {
+        fail(if disk_full(&e) {
+            super::DISK_FULL_MESSAGE.to_string()
+        } else {
+            format!("could not write {}: {e}", path.display())
+        })
+    };
     let mut body = resp.bytes_stream();
     use tokio::io::AsyncWriteExt;
+    let mut flushed_at = Instant::now();
+    let deadline = tokio::time::sleep_until(until);
+    tokio::pin!(deadline);
+    // Every way out breaks to the flush below, so the buffered tail reaches
+    // the disk on a stop, at the end time and when the stream fails.
     let end = loop {
         let chunk = tokio::select! {
             c = crate::http::next_body_chunk(&mut body, &host, HTTP_IDLE) => c,
-            _ = tokio::time::sleep_until(until) => break stopped(),
+            _ = &mut deadline => break stopped(),
             _ = stop_signal(stop) => break stopped(),
         };
         match chunk {
             Ok(Some(bytes)) => {
-                if let Err(e) = file.write_all(&bytes).await {
-                    break fail(if disk_full(&e) {
-                        super::DISK_FULL_MESSAGE.to_string()
-                    } else {
-                        format!("could not write {}: {e}", path.display())
-                    });
+                let mut written = file.write_all(&bytes).await;
+                if written.is_ok() && flushed_at.elapsed() >= FLUSH_EVERY {
+                    written = file.flush().await;
+                    flushed_at = Instant::now();
+                }
+                if let Err(e) = written {
+                    break write_failed(e);
                 }
             }
             Ok(None) => break fail("the stream ended".to_string()),
             Err(e) => break fail(crate::error::RpcError::from(e).message),
         }
     };
-    let _ = file.flush().await;
-    end
+    // The tail can hold up to a buffer, so a failure to write it counts,
+    // unless the part already ended on an error of its own.
+    match file.flush().await {
+        Err(e) if end.error.is_none() => write_failed(e),
+        _ => end,
+    }
 }
 
 #[cfg(test)]
@@ -736,6 +768,8 @@ mod tests {
             "--vo=null",
             "--ao=null",
             "--vd-lavc-skipframe=all",
+            "--demuxer-seekable-cache=no",
+            "--demuxer-max-back-bytes=0",
             "--idle=no",
             "--no-config",
             "--user-agent=UA/1",

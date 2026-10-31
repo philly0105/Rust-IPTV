@@ -905,40 +905,54 @@ pub fn continue_watching_filtered(
         Some(h) => crate::parental::filter::by_ref(conn, "k", h)?,
         None => String::new(),
     };
-    let mut stmt = conn.prepare_cached(&format!(
-        "WITH ranked AS (
-           SELECT p.*, p.rowid AS rid, ROW_NUMBER() OVER (
-             PARTITION BY p.source_id, p.content_type, p.item_id
-             ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
-           FROM playback_positions p
-         )
-         SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
+    let mut stmt = conn.prepare_cached(&continue_watching_sql(&locked))?;
+    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The statement of [`continue_watching_filtered`]; `locked` is the hide
+/// mode's clauses on alias `k`. It walks `idx_positions_updated` newest
+/// first and stops at the limit (`?1`). A row counts only when no row of
+/// the same item is newer (updated_at, then rowid, as everywhere else),
+/// checked through the primary key. Ranking every row of the table with a
+/// window function took 30-90 ms on a history of 14k-42k rows; the walk
+/// takes under 1 ms for Home's 24, and 6-17 ms for the grids' 200, which
+/// read the whole index when fewer items than that are in progress.
+fn continue_watching_sql(locked: &str) -> String {
+    format!(
+        "SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
                 k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
                 i.title, COALESCE(i.poster_url, i.logo_url)
-         FROM ranked k
+         FROM playback_positions k
          LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
-         WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2{locked}
-         ORDER BY k.updated_at DESC, k.rid DESC
+         WHERE k.watched = 0 AND k.position_seconds > ?2{locked}
+           AND NOT EXISTS (
+             SELECT 1 FROM playback_positions n
+             WHERE n.source_id = k.source_id AND n.content_type = k.content_type AND n.item_id = k.item_id
+               AND (n.updated_at > k.updated_at OR (n.updated_at = k.updated_at AND n.rowid > k.rowid)))
+         ORDER BY k.updated_at DESC, k.rowid DESC
          LIMIT ?1"
-    ))?;
-    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], |row| {
-        let mut p = position_from_row(row)?;
-        if p.snapshot.is_none() {
-            let title: Option<String> = row.get(9)?;
-            let poster: Option<String> = row.get(10)?;
-            p.snapshot = Some(match title {
-                Some(title) => ItemSnapshot {
-                    title,
-                    subtitle: None,
-                    poster_url: poster,
-                    content_type: p.item_ref.content_type,
-                },
-                None => fallback_snapshot(&p.item_ref),
-            });
-        }
-        Ok(p)
-    })?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    )
+}
+
+/// A [`continue_watching_sql`] row: the position, with a snapshot from the
+/// catalog row (columns 9 and 10) when it has none stored.
+fn continue_from_row(row: &Row<'_>) -> rusqlite::Result<PlaybackPosition> {
+    let mut p = position_from_row(row)?;
+    if p.snapshot.is_none() {
+        let title: Option<String> = row.get(9)?;
+        let poster: Option<String> = row.get(10)?;
+        p.snapshot = Some(match title {
+            Some(title) => ItemSnapshot {
+                title,
+                subtitle: None,
+                poster_url: poster,
+                content_type: p.item_ref.content_type,
+            },
+            None => fallback_snapshot(&p.item_ref),
+        });
+    }
+    Ok(p)
 }
 
 /// Removes one position (`episode_id = None` targets the item-level row).
@@ -1138,5 +1152,280 @@ mod tests {
         assert_eq!(done.duration_seconds, Some(1000));
         assert!(continue_watching(&c, Some(10)).unwrap().is_empty());
         assert!(position_set(&c, &p("show", Some("e1"), -1, None)).is_err());
+    }
+
+    /// The statement [`continue_watching_filtered`] ran before the index
+    /// walk: a window function ranks every row of each item. Kept as the
+    /// reference the walk must match row for row.
+    const RANKED_REFERENCE: &str = "WITH ranked AS (
+           SELECT p.*, p.rowid AS rid, ROW_NUMBER() OVER (
+             PARTITION BY p.source_id, p.content_type, p.item_id
+             ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
+           FROM playback_positions p
+         )
+         SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
+                k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
+                i.title, COALESCE(i.poster_url, i.logo_url)
+         FROM ranked k
+         LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
+         WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2{locked}
+         ORDER BY k.updated_at DESC, k.rid DESC
+         LIMIT ?1";
+
+    fn ranked_reference(c: &Connection, limit: i64, hide: Option<Hide>) -> Vec<PlaybackPosition> {
+        let locked = match hide {
+            Some(h) => crate::parental::filter::by_ref(c, "k", h).unwrap(),
+            None => String::new(),
+        };
+        let mut stmt = c
+            .prepare(&RANKED_REFERENCE.replace("{locked}", &locked))
+            .unwrap();
+        let rows = stmt
+            .query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)
+            .unwrap();
+        rows.collect::<Result<_, _>>().unwrap()
+    }
+
+    /// A cheap xorshift, so a seeded history is the same on every run.
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0 % n
+        }
+    }
+
+    /// One `playback_positions` row: source, type, item, episode, position,
+    /// duration, updated_at, snapshot, watched.
+    type HistoryRow = (
+        &'static str,
+        &'static str,
+        String,
+        String,
+        i64,
+        i64,
+        String,
+        Option<String>,
+        bool,
+    );
+
+    /// Inserts `rows` in a shuffled order, so rowids do not follow time.
+    fn insert_history(c: &mut Connection, rng: &mut Rng, mut rows: Vec<HistoryRow>) {
+        for i in (1..rows.len()).rev() {
+            rows.swap(i, rng.below(i as u64 + 1) as usize);
+        }
+        let tx = c.transaction().unwrap();
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO playback_positions (source_id, content_type, item_id, episode_id,
+                       position_seconds, duration_seconds, updated_at, snapshot_json, watched)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                )
+                .unwrap();
+            for r in &rows {
+                stmt.execute(params![r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7, r.8])
+                    .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+
+    /// A history of `items` movies and series (1-15 episodes) over two
+    /// sources. Timestamps come from a small set, so rows of one item tie
+    /// and break on rowid, and a quarter use SQLite's `YYYY-MM-DD HH:MM:SS`
+    /// form (an import). Newest rows are often watched or at or below 5 s;
+    /// a third of the items are not in `items` (fallback snapshot), some
+    /// rows carry their own snapshot, and some items sit in an adult
+    /// category.
+    fn seed_history(c: &mut Connection, seed: u64, items: usize) {
+        let mut rng = Rng(seed);
+        for src in ["s1", "s2"] {
+            for ty in ["movie", "series"] {
+                for (id, name) in [("c1", "Drama"), ("c2", "Kids"), ("c3", "XXX Adult")] {
+                    c.execute(
+                        "INSERT INTO categories (source_id, content_type, category_id, name) VALUES (?1, ?2, ?3, ?4)",
+                        params![src, ty, id, name],
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        let mut rows = Vec::new();
+        for n in 0..items {
+            let src = ["s1", "s2"][rng.below(2) as usize];
+            let series = rng.below(2) == 0;
+            let ty = if series { "series" } else { "movie" };
+            let id = format!("i{n}");
+            if rng.below(3) != 0 {
+                let poster = (rng.below(2) == 0).then(|| format!("http://p/{n}.jpg"));
+                c.execute(
+                    "INSERT INTO items (source_id, content_type, item_id, category_id, title, poster_url, logo_url)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'http://l/x.png')",
+                    params![src, ty, id, ["c1", "c2", "c3"][rng.below(3) as usize], format!("Title {n}"), poster],
+                )
+                .unwrap();
+            }
+            let episodes = if series { 1 + rng.below(15) } else { 1 };
+            for e in 0..episodes {
+                let day = 1 + rng.below(4);
+                let hour = 10 + rng.below(3);
+                let at = if rng.below(4) == 0 {
+                    format!("2026-10-{day:02} {hour}:00:00")
+                } else {
+                    format!("2026-10-{day:02}T{hour}:00:00.000Z")
+                };
+                let position = [0, 5, 6, 300, 1200][rng.below(5) as usize];
+                let snapshot = (rng.below(8) == 0)
+                    .then(|| format!(r#"{{"title":"Saved {n}","contentType":"{ty}"}}"#));
+                rows.push((
+                    src,
+                    ty,
+                    id.clone(),
+                    if series {
+                        format!("e{e}")
+                    } else {
+                        String::new()
+                    },
+                    position,
+                    3000,
+                    at,
+                    snapshot,
+                    rng.below(3) == 0,
+                ));
+            }
+        }
+        insert_history(c, &mut rng, rows);
+    }
+
+    #[test]
+    fn continue_watching_matches_the_ranked_reference() {
+        for seed in [1, 7, 42, 2026] {
+            let mut c = conn();
+            crate::parental::register_sql(&c).unwrap();
+            seed_history(&mut c, seed, 400);
+            let several: i64 = c
+                .query_row(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM playback_positions
+                     GROUP BY source_id, content_type, item_id HAVING COUNT(*) > 1)",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(
+                several > 100,
+                "seed {seed}: {several} items with several rows"
+            );
+            assert!(ranked_reference(&c, 200, None).len() > 24, "seed {seed}");
+            let compare = |c: &Connection, label: &str| {
+                for hide in [
+                    None,
+                    Some(Hide { auto_adult: false }),
+                    Some(Hide { auto_adult: true }),
+                ] {
+                    for limit in [1, 24, 200] {
+                        assert_eq!(
+                            continue_watching_filtered(c, Some(limit), hide).unwrap(),
+                            ranked_reference(c, limit, hide),
+                            "seed {seed}, {label}, limit {limit}, {hide:?}"
+                        );
+                    }
+                }
+            };
+            compare(&c, "no locks");
+            c.execute_batch(
+                "INSERT INTO parental_locks (source_id, content_type, kind, target_id, created_at) VALUES
+                   ('s1', 'series', 'category', 'c1', 'now'),
+                   ('s2', 'movie', 'category', 'c2', 'now'),
+                   ('s1', 'movie', 'item', 'i3', 'now'),
+                   ('s2', 'series', 'item', 'i4', 'now'),
+                   ('s2', 'movie', 'item', 'i5', 'now')",
+            )
+            .unwrap();
+            compare(&c, "locks");
+        }
+    }
+
+    #[test]
+    fn continue_watching_walks_the_updated_index() {
+        let c = conn();
+        let sql = format!("EXPLAIN QUERY PLAN {}", continue_watching_sql(""));
+        let plan: Vec<String> = c
+            .prepare(&sql)
+            .unwrap()
+            .query_map(params![24, MIN_RESUME_SECONDS], |r| r.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|d| d.starts_with("SCAN k USING INDEX idx_positions_updated")),
+            "{plan:?}"
+        );
+    }
+
+    /// `positions.continueWatching` on long histories, the window reference
+    /// against the walk: about 2% of the rows in progress, the rest watched
+    /// episodes (whole seasons marked watched), inserted out of order.
+    /// Prints the medians; asserts only that both answer the same.
+    ///
+    /// `cargo test -p iptv-core --release --lib continue_watching_timing -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn continue_watching_timing() {
+        for rows in [14_000usize, 42_000] {
+            let mut c = conn();
+            let mut rng = Rng(rows as u64);
+            let mut history = Vec::with_capacity(rows);
+            for n in 0..rows {
+                let in_progress = rng.below(50) == 0;
+                let at = format!(
+                    "2026-{:02}-{:02}T{:02}:{:02}:00.000Z",
+                    1 + rng.below(10),
+                    1 + rng.below(28),
+                    rng.below(24),
+                    rng.below(60)
+                );
+                history.push((
+                    ["s1", "s2"][n % 2],
+                    "series",
+                    format!("show{}", n / 10),
+                    format!("e{}", n % 10),
+                    if in_progress { 600 } else { 3000 },
+                    3000,
+                    at,
+                    None,
+                    !in_progress,
+                ));
+            }
+            insert_history(&mut c, &mut rng, history);
+            for limit in [24, 200] {
+                assert_eq!(
+                    continue_watching_filtered(&c, Some(limit), None).unwrap(),
+                    ranked_reference(&c, limit, None)
+                );
+                let median = |f: &dyn Fn()| {
+                    let mut t: Vec<_> = (0..21)
+                        .map(|_| {
+                            let started = std::time::Instant::now();
+                            f();
+                            started.elapsed()
+                        })
+                        .collect();
+                    t.sort();
+                    t[t.len() / 2]
+                };
+                let window = median(&|| {
+                    ranked_reference(&c, limit, None);
+                });
+                let walk = median(&|| {
+                    continue_watching_filtered(&c, Some(limit), None).unwrap();
+                });
+                eprintln!("{rows} rows, limit {limit}: window {window:?}, walk {walk:?}");
+            }
+        }
     }
 }

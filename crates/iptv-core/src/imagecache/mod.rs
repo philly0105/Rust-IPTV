@@ -40,7 +40,10 @@
 //! them), else from one upstream fetch whose original is not kept. An image
 //! the resizer leaves alone (SVG, GIF, WebP, animated PNG, already narrow
 //! enough, see [`resize`]) is stored and served as the original, and the
-//! decision is remembered in memory so later hints skip the decode.
+//! decision is remembered in memory so later hints skip the decode. The
+//! upstream fetch for a variant asks for JPEG and PNG by name and leaves
+//! WebP and AVIF out of its `Accept`, so a host that picks the format from
+//! the request sends one the resizer can shrink.
 //!
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
@@ -860,7 +863,13 @@ impl ImageCache {
         }
         let fetched = tokio::time::timeout(
             FETCH_DEADLINE,
-            fetch::download(&job.client, &job.url, &job.headers, &host),
+            fetch::download(
+                &job.client,
+                &job.url,
+                &job.headers,
+                &host,
+                job.width.is_some(),
+            ),
         )
         .await
         .unwrap_or_else(|_| {

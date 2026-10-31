@@ -10,18 +10,28 @@ use url::Url;
 
 /// `Accept` of image requests (what a browser sends for `<img>`).
 const ACCEPT_IMAGES: &str = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
+/// `Accept` of a fetch for a width variant. It names only the formats
+/// [`super::resize`] decodes: a CDN that picks the format from the request
+/// (TMDB's sends WebP to anyone naming `image/webp`) would otherwise answer
+/// with one the resizer keeps as it is, and every bucket would serve that
+/// full-size picture.
+const ACCEPT_RESIZABLE: &str = "image/jpeg,image/png,image/*;q=0.8,*/*;q=0.5";
 
-/// Fetches `url` and returns its stored content type and body.
+/// Fetches `url` and returns its stored content type and body. `resizing`
+/// is true for a width variant's fetch ([`ACCEPT_RESIZABLE`]).
 pub(super) async fn download(
     client: &reqwest::Client,
     url: &Url,
     headers: &RequestHeaders,
     host: &str,
+    resizing: bool,
 ) -> Result<(String, Vec<u8>), ImageError> {
-    let req = http::apply_source_headers(
-        client.get(url.clone()).header(ACCEPT, ACCEPT_IMAGES),
-        headers,
-    );
+    let accept = if resizing {
+        ACCEPT_RESIZABLE
+    } else {
+        ACCEPT_IMAGES
+    };
+    let req = http::apply_source_headers(client.get(url.clone()).header(ACCEPT, accept), headers);
     let head_timeout = head_timeout();
     let resp = match tokio::time::timeout(head_timeout, req.send()).await {
         Err(_) => {

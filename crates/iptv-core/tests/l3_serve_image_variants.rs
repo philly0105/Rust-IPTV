@@ -3,7 +3,8 @@
 //! wider than the hint's bucket, cached under its own key, so a poster wall
 //! moves and stores a fraction of the bytes. SVG, GIF, small and broken
 //! images are served as stored; PNG keeps its transparency; a full-size
-//! original already in the cache is reused instead of refetched.
+//! original already in the cache is reused instead of refetched; a host that
+//! picks the format from `Accept` sends a variant fetch a JPEG, not WebP.
 
 use axum::extract::{Request, State};
 use axum::http::header;
@@ -58,6 +59,9 @@ fn logo_png(side: u32) -> Vec<u8> {
 
 const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
 const SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><rect width='10' height='10'/></svg>";
+/// A WebP header and filler: the resizer leaves WebP alone, so the bytes
+/// only have to look like one.
+const WEBP: &[u8] = b"RIFF\x24\0\0\0WEBPVP8 \x18\0\0\0filler bytes of a picture";
 
 struct Stub {
     base: String,
@@ -89,12 +93,32 @@ fn typed(ct: &'static str, body: Vec<u8>) -> Response {
 async fn spawn_stub() -> Stub {
     let hits: Arc<Mutex<HashMap<String, usize>>> = Arc::default();
     let poster = poster_jpeg();
+    let negotiated = poster.clone();
     let app = Router::new()
         .route(
             "/poster.jpg",
             get(move || {
                 let body = poster.clone();
                 async move { typed("image/jpeg", body) }
+            }),
+        )
+        // Picks the format from `Accept`, like TMDB's image CDN: WebP to
+        // whoever names it, else the JPEG.
+        .route(
+            "/negotiated.jpg",
+            get(move |headers: header::HeaderMap| {
+                let jpeg = negotiated.clone();
+                async move {
+                    let accept = headers
+                        .get(header::ACCEPT)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default();
+                    if accept.contains("image/webp") {
+                        typed("image/webp", WEBP.to_vec())
+                    } else {
+                        typed("image/jpeg", jpeg)
+                    }
+                }
             }),
         )
         .route(
@@ -217,6 +241,37 @@ async fn a_full_size_original_already_cached_is_resized_without_a_refetch() {
     let norm = normalize_url(&url).unwrap();
     assert!(keys.contains(&cache_key(&norm)));
     assert!(keys.contains(&variant_key(&norm, 192)));
+}
+
+#[tokio::test]
+async fn a_host_that_negotiates_the_format_sends_a_variant_fetch_one_the_resizer_reads() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    let url = stub.url("/negotiated.jpg");
+
+    // The variant fetch does not name WebP, so the host sends the JPEG and
+    // the grid gets a 192 px copy instead of the full-size WebP.
+    let small = imagecache::fetch_sized(&state, &url, None, Some(180))
+        .await
+        .unwrap();
+    assert_eq!(small.content_type, "image/jpeg");
+    assert_eq!(
+        image::load_from_memory(&std::fs::read(&small.path).unwrap())
+            .unwrap()
+            .dimensions(),
+        (192, 288)
+    );
+    let norm = normalize_url(&url).unwrap();
+    let stored = rows(&state).await;
+    assert_eq!(stored.len(), 1, "{stored:?}");
+    assert_eq!(stored[0].0, variant_key(&norm, 192));
+
+    // A full-size fetch still asks like a browser and gets the WebP.
+    let full = imagecache::fetch(&state, &url, None).await.unwrap();
+    assert_eq!(full.content_type, "image/webp");
+    assert_eq!(full.bytes, WEBP.len() as u64);
+    assert_eq!(stub.hits("/negotiated.jpg"), 2);
 }
 
 #[tokio::test]

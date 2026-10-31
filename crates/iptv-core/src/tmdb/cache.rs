@@ -393,19 +393,37 @@ impl TmdbCache {
         Ok(n)
     }
 
-    /// Deletes expired rows; returns how many.
-    pub async fn purge_expired(db: &DbPool) -> CoreResult<u64> {
-        let db = db.clone();
-        tokio::task::spawn_blocking(move || -> CoreResult<u64> {
-            let conn = db.get()?;
-            Ok(conn.execute(
-                "DELETE FROM tmdb_cache WHERE expires_at <= ?1",
-                [ts(Utc::now())],
-            )? as u64)
-        })
-        .await?
+    /// Deletes the rows expired at `now`; returns how many. `expires_at` has
+    /// no index and comes after the payload, so finding them reads every
+    /// row's overflow pages. That runs as a plain read, and only the deletes,
+    /// by rowid and [`PURGE_BATCH`] at a time, take the write lock.
+    pub fn purge_expired(conn: &mut rusqlite::Connection, now: DateTime<Utc>) -> CoreResult<u64> {
+        let now = ts(now);
+        let expired: Vec<i64> = conn
+            .prepare("SELECT rowid FROM tmdb_cache WHERE expires_at <= ?1")?
+            .query_map([&now], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let mut purged = 0;
+        for batch in expired.chunks(PURGE_BATCH) {
+            let tx = conn.transaction()?;
+            {
+                // A row refreshed since the read keeps its rowid: the
+                // expiry is checked again.
+                let mut delete = tx.prepare_cached(
+                    "DELETE FROM tmdb_cache WHERE rowid = ?1 AND expires_at <= ?2",
+                )?;
+                for rowid in batch {
+                    purged += delete.execute(rusqlite::params![rowid, now])? as u64;
+                }
+            }
+            tx.commit()?;
+        }
+        Ok(purged)
     }
 }
+
+/// Rows one write transaction of [`TmdbCache::purge_expired`] deletes.
+const PURGE_BATCH: usize = 500;
 
 #[cfg(test)]
 mod tests {
@@ -444,6 +462,41 @@ mod tests {
             clone_error(&CoreError::Db(rusqlite::Error::QueryReturnedNoRows)),
             CoreError::Db(rusqlite::Error::QueryReturnedNoRows)
         ));
+    }
+
+    #[test]
+    fn purge_deletes_only_expired_rows() {
+        let mut c = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut c).unwrap();
+        let now = Utc::now();
+        let row = |key: &str, id: Option<i64>, payload: Option<&str>, expires: DateTime<Utc>| {
+            c.execute(
+                "INSERT INTO tmdb_cache (media_type, lookup_key, tmdb_id, payload_json, fetched_at, expires_at)
+                 VALUES ('movie', ?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![key, id, payload, ts(now), ts(expires)],
+            )
+            .unwrap();
+        };
+        let day = chrono::Duration::days(1);
+        row("fresh", Some(1), Some("{}"), now + day);
+        row("fresh-negative", None, None, now + day);
+        row("expired", Some(2), Some("{}"), now - day);
+        row("expired-negative", None, None, now - day);
+        row("expires-now", Some(3), None, now);
+        for n in 0..1_200 {
+            row(&format!("old-{n}"), Some(n), None, now - day);
+        }
+        assert_eq!(TmdbCache::purge_expired(&mut c, now).unwrap(), 1_203);
+        let mut left: Vec<String> = c
+            .prepare("SELECT lookup_key FROM tmdb_cache")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        left.sort();
+        assert_eq!(left, ["fresh", "fresh-negative"]);
+        assert_eq!(TmdbCache::purge_expired(&mut c, now).unwrap(), 0);
     }
 
     #[test]

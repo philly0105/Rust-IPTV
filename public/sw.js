@@ -4,6 +4,7 @@
 // - Page navigations and the app shell (/): network-first, falling back to the
 //   cached shell when offline.
 // - /api/* (RPC, events, proxy, files) and anything cross-origin: never cached.
+//   Where the browser supports static routes, these skip the worker entirely.
 
 const CACHE = 'tsrust-iptv-v1';
 const SHELL = '/';
@@ -13,13 +14,44 @@ const SHELL = '/';
 // the file is served unbuilt; activate then deletes nothing.
 const ASSETS = /* build:assets */ null;
 
+// Static routes (Chromium 123+) send the requests the fetch handler leaves alone straight to the
+// network. Otherwise each RPC, image, proxied segment or direct stream fetch is dispatched to the
+// worker first, and waits for it to start again whenever the browser has stopped it for idling.
+// The /api rule also covers navigations to API URLs (file and recording links). The second rule
+// covers everything else the handler ignores, cross-origin streams included, but needs the `not`
+// and `or` conditions; a browser without them keeps the /api rule alone.
+const API_ROUTE = { condition: { urlPattern: { pathname: '/api/*' } }, source: 'network' };
+const UNHANDLED_ROUTE = {
+  condition: {
+    not: {
+      or: [
+        { requestMode: 'navigate' },
+        { urlPattern: { pathname: '/assets/*' } },
+        { urlPattern: { pathname: SHELL } },
+      ],
+    },
+  },
+  source: 'network',
+};
+
+/** Registers the static routes where supported. Never rejects: without them the fetch handler still answers. */
+function addStaticRoutes(event) {
+  if (typeof event.addRoutes !== 'function') return undefined;
+  const add = (rules) => new Promise((resolve) => resolve(event.addRoutes(rules)));
+  return add([API_ROUTE, UNHANDLED_ROUTE])
+    .catch(() => add(API_ROUTE))
+    .catch(() => undefined);
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.add(SHELL))
-      .catch(() => undefined)
-      .then(() => self.skipWaiting()),
+    Promise.all([
+      addStaticRoutes(event),
+      caches
+        .open(CACHE)
+        .then((cache) => cache.add(SHELL))
+        .catch(() => undefined),
+    ]).then(() => self.skipWaiting()),
   );
 });
 
@@ -50,20 +82,30 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-async function cacheFirst(request) {
+/**
+ * Stores a copy of a good response in the background. The page gets the response at once and
+ * reads it while the copy is written, instead of waiting for the whole body to be downloaded and
+ * stored first. A failed write only leaves the entry uncached.
+ */
+function storeCopy(event, cache, key, response) {
+  if (response.ok) event.waitUntil(cache.put(key, response.clone()).catch(() => undefined));
+}
+
+async function cacheFirst(event) {
+  const { request } = event;
   const cache = await caches.open(CACHE);
   const hit = await cache.match(request);
   if (hit) return hit;
   const response = await fetch(request);
-  if (response.ok) await cache.put(request, response.clone());
+  storeCopy(event, cache, request, response);
   return response;
 }
 
-async function networkFirst(request) {
+async function networkFirst(event) {
   const cache = await caches.open(CACHE);
   try {
-    const response = await fetch(request);
-    if (response.ok) await cache.put(SHELL, response.clone());
+    const response = await fetch(event.request);
+    storeCopy(event, cache, SHELL, response);
     return response;
   } catch (err) {
     const hit = await cache.match(SHELL);
@@ -79,8 +121,8 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
   if (url.pathname.startsWith('/assets/')) {
-    event.respondWith(cacheFirst(request));
+    event.respondWith(cacheFirst(event));
   } else if (request.mode === 'navigate' || url.pathname === SHELL) {
-    event.respondWith(networkFirst(request));
+    event.respondWith(networkFirst(event));
   }
 });

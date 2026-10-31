@@ -1,10 +1,11 @@
 // Entry-chunk budget (C4, SC10): `pnpm build && pnpm size:check`.
 //
 // Prints every JavaScript chunk in dist/assets, largest first, and exits 1 when the entry chunk
-// (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when a lazy
-// route chunk statically loads player code it must not wait for (see ROUTES: none for Home,
-// Settings and the VOD browsing pages, performance audit SH-2; no dock or controls for the pages
-// that draw the stage), or when there is no build to check. Plain Node, no dependencies.
+// (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when the
+// boot chunks hold code only lazy pages use (NOT_AT_BOOT), when a lazy route chunk statically loads
+// player code it must not wait for (see ROUTES: none for Home, Settings and the VOD browsing pages,
+// performance audit SH-2; no dock or controls for the pages that draw the stage), or when there is
+// no build to check. Plain Node, no dependencies.
 //
 //   node tools/check-bundle.mjs [distDir]    (default: dist)
 //
@@ -48,6 +49,22 @@ const MODULES = {
   controls: { marker: 'controls-pane', what: "the player's controls (features/player/components/Controls.tsx)" },
   cards: { marker: 'source-card-progress', what: "Home's cards (shell/dashboard/cards.tsx)" },
 };
+/**
+ * Code only lazy pages (or only the desktop app) use, found by a string only it holds, which must
+ * not be in the boot: the entry and the chunks it loads statically, index.html's preloads. A manual
+ * vendor chunk loads whole, so one misplaced package rides along on every launch. `web` markers
+ * apply to the web build only (vite.config.ts keeps the whole Tauri API in vendor-tauri for the
+ * desktop app, which syncs its window at boot). A marker that is in no chunk fails the check.
+ */
+const NOT_AT_BOOT = [
+  { marker: 'plugin:dialog|', what: 'the Tauri dialog plugin' },
+  { marker: 'plugin:opener|', what: 'the Tauri opener plugin' },
+  { marker: 'plugin:updater|', what: 'the Tauri updater plugin' },
+  { marker: 'plugin:window|', what: "the Tauri window API (the web build's boot needs only invoke and listen)", web: true },
+  { marker: 'measureElement', what: 'TanStack Virtual (only the virtualized pages use it)' },
+  { marker: 'role:"switch"', what: "the form fields (ui/Field.tsx; the header's search box is ui/SearchInput.tsx)" },
+  { marker: '"tab-bar"', what: 'the phone tab bar (shell/TabBar.tsx), which only phones draw' },
+];
 /** What a route must not load: chunks by name, and modules by marker. */
 const NO_PLAYER = { what: 'player code', names: PLAYER, modules: ['store', 'engines', 'dock', 'controls'] };
 const NO_PLAYER_UI = { what: "the player's UI", names: PLAYER_UI, modules: ['engines', 'dock', 'controls'] };
@@ -178,6 +195,10 @@ function staticClosure(file) {
 }
 
 const boot = (f) => ENTRY.test(f) || /^(?:vendor|locale)-/.test(f);
+const entryFile = htmlEntry ?? entries[0].file;
+const bootChunks = staticClosure(entryFile);
+// Only a web build writes precompressed copies (vite.config.ts `precompress`); `tauri build` does not.
+const webBuild = existsSync(join(assets, `${entryFile}.br`));
 const source = new Map();
 const text = (file) => {
   if (!source.has(file)) source.set(file, readFileSync(join(assets, file), 'utf8'));
@@ -189,6 +210,22 @@ for (const [key, m] of Object.entries(MODULES)) {
     fail(`no chunk holds ${m.what} (marker "${m.marker}") in ${shown}; update MODULES.${key} in tools/check-bundle.mjs if the module changed.`);
   }
 }
+const atBoot = [];
+for (const { marker, what, web } of NOT_AT_BOOT) {
+  const holders = chunks.filter((c) => text(c.file).includes(marker)).map((c) => c.file);
+  if (holders.length === 0) fail(`no chunk holds ${what} (marker "${marker}") in ${shown}; update NOT_AT_BOOT in tools/check-bundle.mjs if the module changed.`);
+  if (web && !webBuild) continue;
+  const held = holders.filter((f) => bootChunks.has(f));
+  if (held.length > 0) atBoot.push(`${what} is in ${held.join(', ')}`);
+}
+const bootSize = [...bootChunks].reduce((sum, f) => sum + (chunks.find((c) => c.file === f)?.size ?? 0), 0);
+console.log(`Boot (the entry and its static imports): ${bootChunks.size} chunks, ${bytes(bootSize)} bytes, ${webBuild ? 'web' : 'desktop'} build.`);
+if (atBoot.length > 0) {
+  fail(`every launch loads code only lazy pages use: ${atBoot.join('; ')}. Give the package a chunk of its own rather than a vendor-* one (VENDOR_CHUNKS in vite.config.ts), or load the module behind import(); see docs/architecture/performance.md.`);
+}
+console.log(`size:check: the boot chunks hold none of the ${NOT_AT_BOOT.length} lazy-only modules checked.`);
+console.log('');
+
 const leaks = [];
 for (const route of ROUTES) {
   const page = chunks.find((c) => route.chunk.test(c.file));

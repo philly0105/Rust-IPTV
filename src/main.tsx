@@ -8,6 +8,7 @@ import { imageBaseReady } from '@/api/images';
 import { queryClient, rpcKey } from '@/api/query';
 import { rpc, rpcRaw } from '@/api/transport';
 import { bindWindowFullscreen } from '@/api/window';
+import { PHONE_QUERY } from '@/shell/navigation';
 import { startupTarget } from '@/shell/StartupRedirect';
 import { captureMpegtsArchiveTrace } from '@/features/player/timeshiftDiagnostics';
 import { App } from './App';
@@ -41,6 +42,10 @@ if (window.location.pathname === '/') {
 } else {
   prefetchScreenData(window.location.pathname + window.location.search);
 }
+
+// The phone tab bar is a chunk of its own, which wider windows never load: on a phone it starts
+// with the boot, so the shell's first render rarely waits on its stand-in.
+if (window.matchMedia?.(PHONE_QUERY).matches) void import('./shell/TabBar').catch(() => undefined);
 
 bindWindowFullscreen();
 if (!('__TAURI_INTERNALS__' in window) && import.meta.env.PROD && 'serviceWorker' in navigator) void navigator.serviceWorker.register('/sw.js').catch(() => undefined);

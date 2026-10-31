@@ -1,4 +1,4 @@
-import { QueryClientProvider, hashKey } from '@tanstack/react-query';
+import { QueryClientProvider, hashKey, onlineManager } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +17,7 @@ import {
   useRpcQuery,
   type RpcCommand,
 } from './query';
-import { rpcRaw } from './transport';
+import { RpcError, rpcRaw } from './transport';
 
 const bus = vi.hoisted(() => ({ handlers: new Set<(e: AppEvent) => void>() }));
 
@@ -166,6 +166,78 @@ describe('useRpcQuery (C4)', () => {
     // One cache entry, one request.
     expect(queryClient.getQueryCache().findAll({ queryKey: ['stats.summary'] })).toHaveLength(1);
     expect(vi.mocked(rpcRaw).mock.calls.filter(([c]) => c === 'stats.summary')).toHaveLength(1);
+  });
+});
+
+describe('retries', () => {
+  afterEach(() => {
+    queryClient.clear();
+    vi.useRealTimers();
+  });
+
+  const retry = (cmd: string) => queryClient.defaultQueryOptions({ queryKey: [cmd, null] }).retry as (n: number, e: unknown) => boolean;
+  const timeout = new RpcError('timeout', 'slow panel', true);
+  const unreachable = new RpcError('network', 'Cannot reach the server', true, { transport: 'unreachable' });
+  const proxy502 = new RpcError('network', 'HTTP 502 Bad Gateway', undefined, { transport: 'http' });
+
+  it('retries retryable errors of local commands twice', () => {
+    for (const cmd of ['catalog.channels', 'sources.list', 'mpv.load']) {
+      expect(retry(cmd)(0, timeout)).toBe(true);
+      expect(retry(cmd)(1, new RpcError('db', 'database is locked', true))).toBe(true);
+      expect(retry(cmd)(2, timeout)).toBe(false);
+      expect(retry(cmd)(0, new RpcError('invalid', 'bad args'))).toBe(false);
+    }
+  });
+
+  it("does not retry a provider's error, which the core already retried", () => {
+    for (const cmd of ['stalker.movies', 'xtream.vodDetail', 'tmdb.movie']) {
+      expect(retry(cmd)(0, timeout)).toBe(false);
+      expect(retry(cmd)(0, new RpcError('server', 'HTTP 503 from the panel', true))).toBe(false);
+      expect(retry(cmd)(0, new RpcError('network', 'empty portal answer', true, { sourceId: 's1' }))).toBe(false);
+    }
+  });
+
+  it("retries a provider command when the app's own server did not answer", () => {
+    for (const cmd of ['stalker.movies', 'xtream.seriesDetail', 'tmdb.trending']) {
+      expect(retry(cmd)(0, unreachable)).toBe(true);
+      expect(retry(cmd)(1, proxy502)).toBe(true);
+      expect(retry(cmd)(2, unreachable)).toBe(false);
+    }
+  });
+
+  it('lets a per-query retry win over the provider rule', () => {
+    expect(queryClient.defaultQueryOptions({ queryKey: ['tmdb.movie', null], retry: false }).retry).toBe(false);
+  });
+
+  it('asks a failing panel once, where a local command is asked three times', async () => {
+    vi.useFakeTimers();
+    const panel = vi.fn(async () => Promise.reject(timeout));
+    const local = vi.fn(async () => Promise.reject(timeout));
+    const a = queryClient.fetchQuery({ queryKey: ['stalker.movies', { page: 1 }], queryFn: panel }).catch((e: unknown) => e);
+    const b = queryClient.fetchQuery({ queryKey: ['catalog.channels', { page: 1 }], queryFn: local }).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await a).toBe(timeout);
+    expect(await b).toBe(timeout);
+    expect(panel).toHaveBeenCalledTimes(1);
+    expect(local).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('offline (web)', () => {
+  const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: queryClient }, children);
+  afterEach(() => {
+    onlineManager.setOnline(true);
+    queryClient.clear();
+  });
+
+  it('waits for the network, since every call goes to the server', async () => {
+    vi.mocked(rpcRaw).mockClear();
+    onlineManager.setOnline(false);
+    const { result } = renderHook(() => useRpcQuery('stats.summary', null as never), { wrapper });
+    await waitFor(() => expect(result.current.fetchStatus).toBe('paused'));
+    expect(vi.mocked(rpcRaw)).not.toHaveBeenCalled();
+    onlineManager.setOnline(true);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 });
 

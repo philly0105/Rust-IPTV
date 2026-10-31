@@ -177,7 +177,9 @@ async function callWeb(cmd: string, args: unknown, opts?: CallOptions): Promise<
     const code: RpcErrorCode =
       res.status === 404 ? 'not_found' : res.status === 504 ? 'timeout' : res.status >= 502 ? 'network' : 'internal';
     const message = typeof body === 'string' && body ? body : `HTTP ${res.status} ${res.statusText}`.trim();
-    throw new RpcError(code, message);
+    // Not our server's own answer (a proxy's 502, say): marked like 'unreachable', so query.ts
+    // still retries it for provider commands, whose core-side failures it does not retry.
+    throw new RpcError(code, message, undefined, { transport: 'http' });
   }
   return body;
 }

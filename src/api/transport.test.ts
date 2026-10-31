@@ -131,7 +131,8 @@ describe('rpc (web)', () => {
 
   it('falls back to the HTTP status only when the body is not an error payload', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 502, statusText: 'Bad Gateway' })));
-    await expect(rpc('app.info')).rejects.toMatchObject({ code: 'network', message: 'HTTP 502 Bad Gateway' });
+    // Marked as the app's own server failing, so a provider command still retries it (query.ts).
+    await expect(rpc('app.info')).rejects.toMatchObject({ code: 'network', message: 'HTTP 502 Bad Gateway', retryable: true, details: { transport: 'http' } });
   });
 
   it('maps fetch failures to a retryable network error', async () => {

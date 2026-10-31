@@ -2,7 +2,8 @@
 // before the app's module script; CSP is script-src 'self', so it cannot be
 // inline). Mirrors src/shell/theme.tsx, which stays the source of truth once
 // it loads: same localStorage keys, 'system' resolves dark unless the OS asks
-// for light, OLED only while dark, UI scale clamped to 0.9-1.25.
+// for light, OLED only while dark, UI scale clamped to 0.9-1.25. It also starts loading the
+// remembered language's strings (see the end).
 (function () {
   var html = document.documentElement;
   // index.html has one theme-color per OS colour scheme; both get the app's colour, so the one
@@ -39,6 +40,25 @@
   }
   // Also when storage is blocked: the page is dark then, whatever the OS scheme.
   sync();
+  // A remembered language other than English: its strings chunk starts loading now, next to the
+  // entry, instead of once the whole boot graph has loaded and src/i18n asks for it. The build
+  // writes the language chunks in place of the placeholder (vite.config.ts `withLocaleMap`);
+  // English is not among them, since index.html preloads it already.
+  var LOCALES = /* build:locales */ null;
+  try {
+    var lang = localStorage.getItem('tsrust.language');
+    var href = LOCALES && lang && Object.prototype.hasOwnProperty.call(LOCALES, lang) ? LOCALES[lang] : null;
+    if (href) {
+      var link = document.createElement('link');
+      link.rel = 'modulepreload';
+      // As index.html's own preloads: the module import that follows then reuses this fetch.
+      link.crossOrigin = '';
+      link.href = href;
+      document.head.appendChild(link);
+    }
+  } catch (e) {
+    // Storage blocked: src/i18n loads the language when it starts.
+  }
   // Keeps the browser chrome colour in step when the theme changes later.
   if (metas.length && typeof MutationObserver === 'function') {
     new MutationObserver(sync).observe(html, { attributes: true, attributeFilter: ['data-theme', 'data-oled'] });

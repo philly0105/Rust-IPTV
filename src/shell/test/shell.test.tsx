@@ -1447,9 +1447,11 @@ describe('Run 3 onboarding wiring', () => {
       window.matchMedia = ((query: string) => ({ ...stubbed(query), matches: query === '(max-width: 639px)' || query === '(max-width: 1023px)' })) as typeof window.matchMedia;
       renderRoutes(routes(<SearchFieldPage />), '/favorites');
       await screen.findByText('favorites page');
+      // The bar is a lazy chunk of its own.
+      const bar = await screen.findByTestId('tab-bar');
       const search = document.querySelectorAll('[data-tour="search"]');
       expect(search).toHaveLength(1);
-      expect(screen.getByTestId('tab-bar').contains(search[0]!)).toBe(true);
+      expect(bar.contains(search[0]!)).toBe(true);
       // The Live TV tab holds the first step's anchor.
       const live = document.querySelectorAll('[data-tour="live"]');
       expect([...live]).toEqual([within(screen.getByTestId('tab-bar')).getByRole('link', { name: 'Live TV' })]);

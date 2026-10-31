@@ -88,3 +88,43 @@ describe('theme boot script', () => {
     expect(meta()).toBe(bg(":root[data-theme='light']"));
   });
 });
+
+describe('language preload', () => {
+  const BUILT = BOOT.replace('/* build:locales */ null', JSON.stringify({ de: '/assets/locale-de-abc.js', zhtw: '/assets/locale-zhtw-def.js' }));
+  const preloads = () => [...document.head.querySelectorAll('link[rel="modulepreload"]')].map((l) => l.getAttribute('href'));
+
+  it("starts the remembered language's chunk before the app loads", () => {
+    localStorage.setItem('tsrust.language', 'zhtw');
+    new Function(BUILT)();
+    expect(preloads()).toEqual(['/assets/locale-zhtw-def.js']);
+    const link = document.head.querySelector('link[rel="modulepreload"]')!;
+    // The same credentials mode as the module import that follows, so it reuses the fetch.
+    expect(link.hasAttribute('crossorigin')).toBe(true);
+  });
+
+  it('preloads nothing for English, an unknown or missing language, or an unbuilt file', () => {
+    for (const lang of ['en', 'xx', 'constructor', null]) {
+      document.head.innerHTML = '';
+      if (lang === null) localStorage.removeItem('tsrust.language');
+      else localStorage.setItem('tsrust.language', lang);
+      new Function(BUILT)();
+      expect(preloads(), String(lang)).toEqual([]);
+    }
+    localStorage.setItem('tsrust.language', 'de');
+    new Function(BOOT)();
+    expect(preloads()).toEqual([]);
+  });
+
+  it('still applies the theme when storage is blocked', () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    try {
+      new Function(BUILT)();
+      expect(preloads()).toEqual([]);
+      expect(html.dataset['theme']).toBe('dark');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

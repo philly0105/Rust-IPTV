@@ -119,6 +119,15 @@ export const RAIL_WATCH_LINKS = WATCH_LINKS.filter((l) => !l.notInRail);
 /** The phone tab bar's width limit (Tailwind `sm`): below it the rail goes and the bar shows. */
 export const PHONE_QUERY = '(max-width: 639px)';
 
+/**
+ * The phone tab bar's own height, in rem against the 15 px root: it follows the UI scale, not
+ * density. Here rather than in TabBar.tsx, which is a lazy chunk: the shell's skeleton and its
+ * stand-in for the bar draw the same height before that chunk arrives.
+ */
+export const TAB_BAR_HEIGHT = 'calc(56rem / 15)';
+/** What overlays lift by while the bar shows: its height plus the home indicator's safe area. */
+export const SHELL_BOTTOM_INSET = `calc(${TAB_BAR_HEIGHT} + env(safe-area-inset-bottom, 0px))`;
+
 // ---------------------------------------------------------------------------
 // The last source the user opened, for the phone tab bar's Live TV tab and the Watch group's
 // Live TV, Movies and Series.

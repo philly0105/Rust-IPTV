@@ -18,7 +18,7 @@ import { ContextPanel } from './ContextPanel';
 import { useLanguageSync, useLastRoutePersistence, useShellEvents, useWindowStatePersistence } from './effects';
 import { focusSearchWhenReady } from './focusSearch';
 import { Header, HEADER_SEARCH_WIDTH } from './Header';
-import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
+import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource, SHELL_BOTTOM_INSET, TAB_BAR_HEIGHT } from './navigation';
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
 import { useOutletScrollMemory } from './scrollMemory';
@@ -27,7 +27,6 @@ import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
 import { useSettings, useSettingsValue } from './useSettings';
-import { SHELL_BOTTOM_INSET, TabBar, TAB_BAR_HEIGHT } from './TabBar';
 
 // player: the dock and the external-playback footer carry the whole playback UI (surfaces,
 // controls, engines, the store), about a third of the app's code, in their own chunk (C4 entry
@@ -173,6 +172,9 @@ function useWatchStats(enabled: boolean): void {
   }, [enabled]);
 }
 
+// The phone tab bar (about 7 kB): only phones draw it, so the desktop app and wider windows never
+// load it. Its stand-in until the chunk arrives is the skeleton's bar, the same height.
+const TabBar = lazy(() => import('./TabBar').then((m) => ({ default: m.TabBar })));
 // recording: renders nothing; split out so the recording hooks and schedule logic stay out of the main chunk.
 const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
 // parental: the PIN dialogs (C2) load with the shell, outside the main chunk.
@@ -484,17 +486,31 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
         </div>
-        {phone && (
-          <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>
-            {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
-                <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
-                <Skeleton className="h-2 w-10" />
-              </div>
-            ))}
-          </div>
-        )}
+        {phone && <TabBarSkeleton />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The phone tab bar's placeholder: the boot skeleton's bar, and the shell's while the bar's chunk
+ * loads. Toasts lift above it as above the bar (ui/Toast.tsx, TOAST_AVOID_SELECTOR).
+ */
+function TabBarSkeleton() {
+  return (
+    <div
+      aria-hidden
+      data-testid="tab-bar-skeleton"
+      data-toast-avoid=""
+      className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]"
+      style={{ height: SHELL_BOTTOM_INSET }}
+    >
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
+          <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
+          <Skeleton className="h-2 w-10" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -610,7 +626,11 @@ export function ShellLayout() {
             <ContextPanel inline={wide} />
           </div>
           {player && <player.ExternalPlaybackFooter />}
-          {phone && <TabBar />}
+          {phone && (
+            <Suspense fallback={<TabBarSkeleton />}>
+              <TabBar />
+            </Suspense>
+          )}
         </div>
         {player && <player.PlayerDock />}
         <PaletteHost />

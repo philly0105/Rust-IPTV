@@ -147,11 +147,18 @@ describe('what a page reaches before its first render', () => {
     expect(reached(['src/main.tsx', 'src/shell/ShellLayout.tsx', 'src/shell/effects.ts'], [PIP, STORE, DOCK])).toEqual([]);
   });
 
+  it('the boot does not load the phone tab bar, which wider windows and the desktop app never draw', () => {
+    expect(reached(['src/main.tsx', 'src/shell/ShellLayout.tsx'], ['src/shell/TabBar.tsx'])).toEqual([]);
+    const shell = readFileSync(join(SRC, 'shell/ShellLayout.tsx'), 'utf8');
+    expect(shell).toContain("import('./TabBar')");
+  });
+
   it('the walk follows the imports that do exist', () => {
     // A guard that never finds anything proves nothing: these chains are expected.
     expect(importChain(LIVE, STORE)).not.toBeNull();
     expect(importChain('src/features/player/dock.ts', CONTROLS)).not.toBeNull();
     expect(importChain('src/shell/dashboard/DashboardPage.tsx', CARDS)).not.toBeNull();
+    expect(importChain('src/shell/TabBar.tsx', 'src/shell/navigation.ts')).not.toBeNull();
   });
 
   it('the shell loads the dock from its own module, and the barrel does not export it', () => {

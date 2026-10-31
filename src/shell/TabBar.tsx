@@ -32,17 +32,13 @@ import {
   readLastSource,
   sectionCurrent,
   sourcesFor,
+  TAB_BAR_HEIGHT,
   watchLinks,
   type NavLinkDef,
 } from './navigation';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { useVisibleSources } from './useVisibleSources';
-
-/** The bar's own height, in rem against the 15 px root: it follows the UI scale, not density. */
-export const TAB_BAR_HEIGHT = 'calc(56rem / 15)';
-/** What overlays lift by while the bar shows: its height plus the home indicator's safe area. */
-export const SHELL_BOTTOM_INSET = `calc(${TAB_BAR_HEIGHT} + env(safe-area-inset-bottom, 0px))`;
 
 interface Tab {
   id: 'home' | 'live' | 'guide' | 'search';
@@ -63,7 +59,10 @@ const tabClass = (active: boolean) =>
       : 'text-fg-muted active:bg-active',
   );
 
-/** The bar. Rendered by the shell below sm only. */
+/**
+ * The bar. Rendered by the shell below sm only, so it is a lazy chunk of its own: the desktop app
+ * and every wider window never draw it (main.tsx starts it at boot on a phone).
+ */
 export const TabBar = memo(function TabBar() {
   const { t } = useTranslation('shell');
   const sources = useVisibleSources();

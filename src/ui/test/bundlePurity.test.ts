@@ -19,9 +19,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import viteConfigFn, { withAssetList } from '../../../vite.config';
+import viteConfigFn, { withAssetList, withLocaleMap } from '../../../vite.config';
 
 const ROOT = join(__dirname, '..', '..', '..');
 type ConfigEnv = Parameters<Extract<typeof viteConfigFn, (...args: never[]) => unknown>>[0];
@@ -116,6 +116,56 @@ describe('bundle shape', () => {
     expect(chunk('/app/node_modules/.pnpm/cmdk@1/node_modules/cmdk/dist/index.mjs')).toBeUndefined();
     expect(chunk('/app/node_modules/.pnpm/x/node_modules/@radix-ui/react-dialog/dist/index.mjs')).toBeUndefined();
     expect(chunk('/app/node_modules/.pnpm/lucide-react@1/node_modules/lucide-react/dist/esm/icons/play.mjs')).toBeUndefined();
+  });
+
+  // Every vendor chunk is preloaded by index.html on every boot and loads whole.
+  it('keeps code only lazy pages use out of the boot-time vendor chunks', () => {
+    const chunk = rollup.output!.manualChunks!;
+    expect(chunk('/app/node_modules/.pnpm/@tanstack+query-core@5/node_modules/@tanstack/query-core/build/modern/index.js')).toBe('vendor-query');
+    expect(chunk('/app/node_modules/.pnpm/@tanstack+react-query@5/node_modules/@tanstack/react-query/build/modern/index.js')).toBe('vendor-query');
+    // TanStack Virtual: only the virtualized pages, all of them lazy. Its own chunk, not a
+    // preloaded vendor one, and out of the small-chunk merge.
+    expect(chunk('/app/node_modules/.pnpm/x/node_modules/@tanstack/react-virtual/dist/esm/index.js')).toBe('virtual');
+    expect(chunk('/app/node_modules/.pnpm/x/node_modules/@tanstack/virtual-core/dist/esm/index.js')).toBe('virtual');
+    // The Tauri plugins are reached only through import().
+    for (const plugin of ['dialog', 'opener', 'updater']) {
+      expect(chunk(`/app/node_modules/.pnpm/x/node_modules/@tauri-apps/plugin-${plugin}/dist-js/index.js`)).toBe('tauri-plugins');
+    }
+  });
+
+  describe('the Tauri API', () => {
+    const api = (file: string) => `C:\\app\\node_modules\\.pnpm\\@tauri-apps+api@2\\node_modules\\@tauri-apps\\api\\${file}`;
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("web build: only the boot's files are in the preloaded chunk; the window API is lazy", () => {
+      vi.stubEnv('TAURI_ENV_PLATFORM', '');
+      const chunk = rollup.output!.manualChunks!;
+      expect(chunk(api('core.js'))).toBe('vendor-tauri');
+      expect(chunk(api('event.js'))).toBe('vendor-tauri');
+      expect(chunk(api('external\\tslib\\tslib.es6.js'))).toBe('vendor-tauri');
+      expect(chunk('/app/node_modules/@tauri-apps/api/core.js')).toBe('vendor-tauri');
+      for (const file of ['window.js', 'dpi.js', 'image.js', 'webview.js']) expect(chunk(api(file)), file).toBeUndefined();
+    });
+
+    it('desktop build: the whole API, since the window API runs at every desktop boot', () => {
+      vi.stubEnv('TAURI_ENV_PLATFORM', 'windows');
+      const chunk = rollup.output!.manualChunks!;
+      for (const file of ['core.js', 'event.js', 'window.js', 'dpi.js']) expect(chunk(api(file)), file).toBe('vendor-tauri');
+      expect(chunk('/app/node_modules/.pnpm/x/node_modules/@tauri-apps/plugin-dialog/dist-js/index.js')).toBe('tauri-plugins');
+    });
+  });
+
+  it("writes the build's language chunks, English left out, into theme-boot.js's placeholder", () => {
+    const source = readFileSync(join(ROOT, 'public', 'theme-boot.js'), 'utf8');
+    expect(source).toContain('var LOCALES = /* build:locales */ null;');
+    const built = withLocaleMap(source, [
+      { name: 'locale-en', fileName: 'assets/locale-en-a.js' },
+      { name: 'locale-zhtw', fileName: 'assets/locale-zhtw-b.js' },
+      { name: 'index', fileName: 'assets/index-c.js' },
+      { name: 'locale-de', fileName: 'assets/locale-de-d.js' },
+    ]);
+    expect(built).toContain('var LOCALES = {"de":"/assets/locale-de-d.js","zhtw":"/assets/locale-zhtw-b.js"};');
+    expect(built).not.toContain('build:locales');
   });
 
   it("writes the build's /assets/ URLs into the service worker's placeholder", () => {

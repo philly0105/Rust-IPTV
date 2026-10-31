@@ -1,6 +1,7 @@
 /**
  * TanStack Query bindings (SPEC C1). Query keys are `[cmd, args]`.
- * Only errors with `retryable` are retried, at most twice.
+ * Only errors with `retryable` are retried, at most twice; provider commands
+ * only when the app's own server failed the call (`retryProviderError`).
  */
 
 import {
@@ -21,6 +22,28 @@ import { RpcError, rpcRaw, type RpcArgs, type RpcName, type RpcResult } from './
 import type { ItemRef, Settings } from './types';
 
 const MAX_RETRIES = 2;
+
+function retryRetryable(failureCount: number, error: unknown): boolean {
+  return error instanceof RpcError && error.retryable && failureCount < MAX_RETRIES;
+}
+
+/**
+ * Commands an IPTV panel or TMDB answers. The core already retries those calls itself (Xtream
+ * and Stalker three attempts, TMDB four), so two more rounds here tripled the requests a slow or
+ * failing panel got, and the wait before its error showed.
+ */
+const PROVIDER_PREFIXES: readonly string[] = ['stalker.', 'xtream.', 'tmdb.'];
+
+/**
+ * Retry for provider commands: only when the app's own server, or a proxy in front of it, failed
+ * the call (`details.transport`, web only), which the core never saw. A provider error the core
+ * already retried shows at once; it stays `retryable`, so the page's Retry button still works.
+ */
+function retryProviderError(failureCount: number, error: unknown): boolean {
+  if (!retryRetryable(failureCount, error)) return false;
+  const d = (error as RpcError).details;
+  return typeof d === 'object' && d !== null && 'transport' in d;
+}
 
 /** Any RPC command name, as used in key[0]. */
 export type RpcCommand = RpcName;
@@ -72,27 +95,48 @@ export function queryDefaultsFor(cmd: RpcCommand): QueryTiming {
 }
 
 /**
- * Applies {@link queryDefaultsFor} to every query whose key[0] is a command, including raw
- * `useQuery`/`prefetchQuery` callers. Precedence, lowest first: client defaults, the C4
- * table, `setQueryDefaults` entries, then the options passed with the query.
+ * Applies {@link queryDefaultsFor} (and, for provider commands, {@link retryProviderError}) to
+ * every query whose key[0] is a command, including raw `useQuery`/`prefetchQuery` callers.
+ * Precedence, lowest first: client defaults, the C4 table, `setQueryDefaults` entries, then the
+ * options passed with the query.
  */
 class RpcQueryClient extends QueryClient {
   override getQueryDefaults(queryKey: QueryKey): ReturnType<QueryClient['getQueryDefaults']> {
     const registered = super.getQueryDefaults(queryKey);
     const head = queryKey[0];
-    return typeof head === 'string' ? { ...queryDefaultsFor(head as RpcCommand), ...registered } : registered;
+    if (typeof head !== 'string') return registered;
+    const retry = PROVIDER_PREFIXES.some((p) => head.startsWith(p)) ? { retry: retryProviderError } : {};
+    return { ...queryDefaultsFor(head as RpcCommand), ...retry, ...registered };
   }
 }
+
+/**
+ * Desktop: every call is IPC to the local core and needs no network, so queries and mutations run
+ * whatever the OS says about connectivity. TanStack's default (`online`) paused all of them while
+ * the webview reported offline: My videos showed an empty library, and uncached catalog pages their
+ * skeletons, until the network came back. A provider command now fails with its own network error
+ * instead, and still refetches when the network returns (`always` alone turns that off). The web
+ * keeps the default, since its calls need the server.
+ */
+const DESKTOP_NETWORK = { networkMode: 'always' } as const;
+
+/**
+ * True inside the Tauri webview (transport.ts `isDesktop`). Read here, as bootInfo.ts does, because
+ * the client is built when this module loads and tests mock `./transport` with partial factories.
+ */
+const isDesktopWindow: boolean = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export const queryClient: QueryClient = new RpcQueryClient({
   defaultOptions: {
     queries: {
       ...DEFAULT_QUERY_TIMING,
       refetchOnWindowFocus: false,
-      retry: (failureCount, error) => error instanceof RpcError && error.retryable && failureCount < MAX_RETRIES,
+      retry: retryRetryable,
+      ...(isDesktopWindow ? { ...DESKTOP_NETWORK, refetchOnReconnect: true } : {}),
     },
     mutations: {
       retry: false,
+      ...(isDesktopWindow ? DESKTOP_NETWORK : {}),
     },
   },
 });

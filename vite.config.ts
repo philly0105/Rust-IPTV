@@ -20,17 +20,38 @@ const mpegtsPatchHash = createHash('sha256')
   .update(readFileSync(fileURLToPath(new URL('./patches/mpegts.js@1.8.2.patch', import.meta.url))))
   .digest('hex');
 
-/** node_modules package -> vendor chunk name (first match wins). */
+/**
+ * node_modules package -> vendor chunk name (first match wins). index.html preloads every
+ * `vendor-*` chunk on every boot, and a manual chunk loads whole, so only what the boot runs
+ * belongs in one. cmdk, its Radix dialog stack and lucide-react are left out (performance audit
+ * SH-10): cmdk is used only by the lazy command palette and most icons only by lazy pages, so
+ * Rollup places them with their users.
+ *
+ * `virtual` and `tauri-plugins` are packages only lazy code uses: TanStack Virtual (27 kB) only the
+ * virtualized pages, the Tauri dialog, opener and updater plugins only through import(). Each set
+ * gets a chunk of its own rather than none, since a manual chunk stays out of the
+ * experimentalMinChunkSize merge: left to Rollup, the merge put TanStack Virtual in a chunk of
+ * parental helpers that Settings, Search and the VOD pages load, and the opener plugin with app
+ * code Home loads.
+ */
 const VENDOR_CHUNKS: ReadonlyArray<readonly [chunk: string, packages: readonly string[]]> = [
   ['vendor-react', ['react', 'react-dom', 'scheduler', 'react-router']],
-  ['vendor-query', ['@tanstack/query-core', '@tanstack/react-query', '@tanstack/virtual-core', '@tanstack/react-virtual']],
+  ['vendor-query', ['@tanstack/query-core', '@tanstack/react-query']],
   ['vendor-i18n', ['i18next', 'react-i18next']],
-  // cmdk, its Radix dialog stack and lucide-react are left out (performance audit SH-10): cmdk is
-  // used only by the lazy command palette and most icons only by lazy pages, so Rollup places them
-  // with their users instead of in a chunk that index.html preloads on every boot.
   ['vendor-ui', ['tailwind-merge', 'clsx', 'zustand']],
-  ['vendor-tauri', ['@tauri-apps/api', '@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-updater']],
+  ['vendor-tauri', ['@tauri-apps/api']],
+  ['virtual', ['@tanstack/virtual-core', '@tanstack/react-virtual']],
+  ['tauri-plugins', ['@tauri-apps/plugin-dialog', '@tauri-apps/plugin-opener', '@tauri-apps/plugin-updater']],
 ];
+
+/**
+ * The files of `@tauri-apps/api` the boot imports statically: `invoke` and `listen` (transport,
+ * bootInfo, events, main.tsx) and the tslib helpers `core.js` uses.
+ */
+const TAURI_BOOT_FILES = /^(?:core\.js|event\.js|external\/)/;
+
+/** `tauri build` and `tauri dev` set TAURI_ENV_PLATFORM; a plain `pnpm build` is the web build. */
+const desktopBuild = (): boolean => !!process.env['TAURI_ENV_PLATFORM'];
 
 /**
  * `src/i18n/<folder>/*.json` and the folder's `index.ts`, which gathers them for `loadLanguage`;
@@ -70,9 +91,16 @@ function vendorChunk(id: string): string | undefined {
   const at = id.lastIndexOf('node_modules');
   if (at < 0) return undefined;
   const parts = id.slice(at + 'node_modules'.length + 1).split(/[\\/]/);
-  const pkg = parts[0]?.startsWith('@') ? `${parts[0]}/${parts[1]}` : parts[0];
+  const scoped = parts[0]?.startsWith('@') ?? false;
+  const pkg = scoped ? `${parts[0]}/${parts[1]}` : parts[0];
   if (!pkg) return undefined;
-  return VENDOR_CHUNKS.find(([, pkgs]) => pkgs.includes(pkg))?.[0];
+  const chunk = VENDOR_CHUNKS.find(([, pkgs]) => pkgs.includes(pkg))?.[0];
+  // The web build keeps only the boot's files of the Tauri API in its preloaded chunk: the window
+  // API (about 17 kB) runs only in the desktop app, so Rollup gives it a lazy chunk the web never
+  // fetches. The desktop build keeps the whole API together, because main.tsx syncs the window's
+  // fullscreen state at boot: a split would only turn that preload into a second fetch.
+  if (chunk === 'vendor-tauri' && !desktopBuild() && !TAURI_BOOT_FILES.test(parts.slice(scoped ? 2 : 1).join('/'))) return undefined;
+  return chunk;
 }
 
 /**
@@ -210,8 +238,55 @@ function serviceWorkerAssets(): Plugin {
   };
 }
 
+/** The placeholder in `public/theme-boot.js` that a build replaces with its language chunks. */
+const LOCALE_MAP = '/* build:locales */ null';
+
+/**
+ * `public/theme-boot.js` with this build's language chunks in place of its placeholder, as
+ * `{ de: '/assets/locale-de-<hash>.js', ... }`. English is left out: index.html preloads it.
+ */
+export function withLocaleMap(source: string, chunks: Iterable<{ name: string; fileName: string }>): string {
+  const map: [string, string][] = [];
+  for (const c of chunks) {
+    const lang = /^locale-(.+)$/.exec(c.name)?.[1];
+    if (lang && lang !== 'en') map.push([lang, `/${c.fileName}`]);
+  }
+  map.sort(([a], [b]) => a.localeCompare(b));
+  return source.replace(LOCALE_MAP, JSON.stringify(Object.fromEntries(map)));
+}
+
+/**
+ * Writes the language chunk map into `dist/theme-boot.js`, so a remembered language other than
+ * English starts loading next to the entry. Before, `src/i18n`
+ * asked for it only once the whole boot graph had loaded: on a cold remote web start one more
+ * round trip before the first render. Runs in writeBundle, after Vite copied `public/` and before
+ * `precompress` compresses the result; theme-boot.js is served no-cache, so its hashes stay current.
+ */
+function themeBootLocales(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'tsrust-theme-boot-locales',
+    apply: 'build',
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+    },
+    async writeBundle(_options, bundle) {
+      const file = join(outDir, 'theme-boot.js');
+      let source: string;
+      try {
+        source = await readFile(file, 'utf8');
+      } catch {
+        return;
+      }
+      if (!source.includes(LOCALE_MAP)) this.error(`${file} has no ${LOCALE_MAP} placeholder for the language chunks.`);
+      const chunks = Object.values(bundle).flatMap((o) => (o.type === 'chunk' ? [{ name: o.name, fileName: o.fileName }] : []));
+      await writeFile(file, withLocaleMap(source, chunks));
+    },
+  };
+}
+
 export default defineConfig(({ command }) => ({
-  plugins: [react(), tailwindcss(), serviceWorkerAssets(), precompress(), timeshiftTrace()],
+  plugins: [react(), tailwindcss(), serviceWorkerAssets(), themeBootLocales(), precompress(), timeshiftTrace()],
   optimizeDeps: {
     esbuildOptions: { banner: { js: `/* mpegts patch ${mpegtsPatchHash} */` } },
   },

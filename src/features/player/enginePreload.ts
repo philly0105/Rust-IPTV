@@ -4,8 +4,18 @@
  * about three times slower than the next. A page that plays streams asks for both while the
  * browser is idle (`preloadEngines`), and every play request asks for the one its URL needs
  * right away (`preloadEngineFor`). Each module is fetched once; the engines' own `import()`
- * then resolves from the module cache.
+ * then resolves from the module cache. The idle warm-up is skipped on desktop when every
+ * configured player (live, VOD and catch-up) is mpv, VLC or embedded mpv: none of those plays
+ * through either engine. The few plays that still use the built-in player there (radio, ClearKey,
+ * mpv not found, the multi-view wall) fetch theirs after the click.
+ *
+ * Settings come from the query cache and the platform from the transport, both already in the entry
+ * chunk: importing the player store here would pull player code into every page that warms engines.
  */
+
+import { queryClient, rpcKey } from '@/api/query';
+import { isDesktop } from '@/api/transport';
+import type { Settings, VideoPlayer } from '@/api/types';
 
 type Loader = () => Promise<unknown>;
 
@@ -66,12 +76,29 @@ function whenIdle(fn: () => void): void {
   else setTimeout(fn, 300);
 }
 
-/** Both engines, once the browser is idle. For pages that play streams (live TV, VOD, the dashboard). */
+/** Players that never build a built-in engine: they run only in the desktop app (`modeForSettings`). */
+const OUTSIDE_PLAYERS: ReadonlySet<VideoPlayer> = new Set(['mpv', 'vlc', 'embedded-mpv']);
+
+/** True when the settings send live, VOD and catch-up all to a player that needs no engine. */
+function noEngineNeeded(): boolean {
+  if (!isDesktop) return false;
+  const s = queryClient.getQueryData<Settings>(rpcKey('settings.get'));
+  if (!s) return false;
+  return [s.livePlayer ?? s.player, s.vodPlayer ?? s.player, s.catchupPlayer ?? s.player].every((p) => OUTSIDE_PLAYERS.has(p));
+}
+
+/**
+ * Both engines, once the browser is idle. For pages that play streams (live TV, VOD, the
+ * dashboard). Settings are read then, not now, so a page that calls this before they arrive still
+ * gets the check; a skip loads nothing and marks nothing, so a later call after a player change
+ * warms them.
+ */
 export function preloadEngines(): void {
   if (!enabled || idleQueued || (loaded.has('hls') && loaded.has('mpegts'))) return;
   idleQueued = true;
   whenIdle(() => {
     idleQueued = false;
+    if (noEngineNeeded()) return;
     load('hls');
     load('mpegts');
   });

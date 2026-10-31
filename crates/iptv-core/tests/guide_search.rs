@@ -729,9 +729,89 @@ async fn index_follows_refresh_clear_and_staging() {
         .is_empty());
 }
 
+/// A refresh that changes a few programmes (one retitled, one dropped, one
+/// added) keeps the index in step through the swap; searches then answer
+/// exactly what they answer after a full rebuild.
+#[tokio::test]
+async fn a_partial_refresh_answers_as_a_rebuild_does() {
+    let e = env().await;
+    let b = base();
+    let url = e.ingest(b).await;
+    let mut xml = String::from("<?xml version=\"1.0\"?><tv>");
+    for (id, name) in [
+        ("one.uk", "Channel One"),
+        ("two.uk", "Channel Two"),
+        ("three.uk", "Channel Three"),
+        ("four.uk", "Channel Four"),
+    ] {
+        xml.push_str(&format!(
+            "<channel id=\"{id}\"><display-name>{name}</display-name></channel>"
+        ));
+    }
+    for (ch, h, title) in programmes() {
+        let title = match (ch, h) {
+            ("one.uk", 1) => "Le Journal du soir",
+            ("one.uk", 26) => continue,
+            _ => title,
+        };
+        xml.push_str(&format!(
+            "<programme start=\"{}\" stop=\"{}\" channel=\"{ch}\"><title>{title}</title><desc>About {title}</desc><category>Talk</category></programme>",
+            xmltv_ts(b + h * HOUR),
+            xmltv_ts(b + (h + 1) * HOUR)
+        ));
+    }
+    xml.push_str(&format!(
+        "<programme start=\"{}\" stop=\"{}\" channel=\"two.uk\"><title>Café crème</title></programme></tv>",
+        xmltv_ts(b + 2 * HOUR),
+        xmltv_ts(b + 3 * HOUR)
+    ));
+    std::fs::write(&url, xml).unwrap();
+    epg::refresh_now(e.state.clone(), &url).await.unwrap();
+    assert!(e.index_ready().await);
+    let in_place: i64 = e
+        .state
+        .db_call(|c| {
+            Ok(c.query_row(
+                "SELECT CAST(value AS INTEGER) FROM app_state WHERE key = ?1",
+                [search::IN_PLACE_KEY],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(in_place, 1, "updated in place, not rebuilt");
+    let queries = [
+        "cafe", "journal", "soir", "20h", "creme", "society", "sports",
+    ];
+    let mut kept = Vec::new();
+    for q in queries {
+        kept.push(e.search(window(q, b - HOUR, b + 2 * 86_400)).await);
+    }
+    assert_eq!(kept[0].len(), 6, "{:?}", kept[0]);
+    assert!(kept[3].is_empty(), "the old title is gone");
+    assert_eq!(keys(&kept[2]), vec![k("c1", b + HOUR), k("c5", b + HOUR)]);
+    assert_eq!(keys(&kept[4]), vec![k("c2", b + 2 * HOUR)]);
+    e.state
+        .db_call(|c| {
+            search::invalidate_index(c)?;
+            search::ensure_index(c, false)
+        })
+        .await
+        .unwrap();
+    for (q, want) in queries.iter().zip(&kept) {
+        assert_eq!(
+            &e.search(window(q, b - HOUR, b + 2 * 86_400)).await,
+            want,
+            "{q}"
+        );
+    }
+}
+
 /// The index test of `db/mod.rs` covers the grid statements; these are the
 /// two search statements: the FTS match drives the index path (each hit
-/// reads its programme by rowid), and the scan walks the `stop` index.
+/// reads its programme by rowid), and the fallback reads the programme
+/// table once (its window holds most of a stored guide), each programme's
+/// feed by its key.
 #[tokio::test]
 async fn search_statements_use_indexes() {
     let e = bare_env().await;
@@ -766,14 +846,12 @@ async fn search_statements_use_indexes() {
         );
     }
     let scan = &plans[1];
-    let p: Vec<&String> = scan.iter().filter(|d| d.contains(" p ")).collect();
-    assert!(!p.is_empty(), "{scan:?}");
-    for d in p {
-        assert!(
-            d.starts_with("SEARCH p USING INDEX idx_epg_programs_stop"),
-            "{scan:?}"
-        );
-    }
+    assert!(scan.iter().any(|d| d == "SCAN p"), "{scan:?}");
+    assert!(
+        scan.iter()
+            .any(|d| d.starts_with("SEARCH s USING INDEX sqlite_autoindex_epg_sources_1")),
+        "{scan:?}"
+    );
 }
 
 /// 1,000 guide channels x 200 half-hour programmes, searched from a source

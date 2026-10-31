@@ -353,7 +353,7 @@ fn model(
     }
     let has_programmes = |id: &str| -> rusqlite::Result<bool> {
         Ok(c.query_row(
-            "SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1",
+            iptv_core::epg::resolve::HAS_PROGRAMMES_SQL,
             [id],
             |_| Ok(()),
         )

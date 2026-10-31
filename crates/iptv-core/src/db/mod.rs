@@ -246,6 +246,12 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0026_download_rate_limit",
         sql: include_str!("migrations/0026_download_rate_limit.sql"),
     },
+    // guide: only the slot index on epg_programs (cheaper refreshes).
+    Migration {
+        version: 27,
+        name: "0027_drop_epg_secondary_indexes",
+        sql: include_str!("migrations/0027_drop_epg_secondary_indexes.sql"),
+    },
 ];
 
 /// Message shown when the database was written by a newer build.
@@ -412,6 +418,7 @@ pub fn configure(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.busy_handler(Some(busy_wait))?;
     conn.set_prepared_statement_cache_capacity(STATEMENT_CACHE);
     crate::catalog::language::register(conn)?;
+    crate::epg::search::register_fold(conn)?;
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA journal_size_limit=67108864; PRAGMA cache_size=-32768;",
     )?;
@@ -814,8 +821,19 @@ pub fn to_rfc3339(ts: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// `EXPLAIN QUERY PLAN` details of `sql`, every parameter NULL.
+    fn plan(conn: &rusqlite::Connection, sql: &str) -> Vec<String> {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let args = vec![rusqlite::types::Null; stmt.parameter_count()];
+        stmt.query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
     /// Every guide statement over `epg_programs` searches an index instead of
-    /// scanning the table (0008 dropped the epg_url index).
+    /// scanning the table (0008 dropped the epg_url index; 0027 left the slot
+    /// index as the only one).
     #[test]
     fn guide_queries_use_an_index_after_all_migrations() {
         let dir = tempfile::tempdir().unwrap();
@@ -827,23 +845,20 @@ mod tests {
             crate::epg::query::FEED_SQL,
             crate::epg::query::BEFORE_SQL,
             crate::epg::query::INSIDE_SQL,
+            crate::epg::query::BEFORE_BRIEF_SQL,
+            crate::epg::query::INSIDE_BRIEF_SQL,
             // epg/resolve.rs: does a channel have programmes.
-            "SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1",
+            crate::epg::resolve::HAS_PROGRAMMES_SQL,
             // epg/store.rs: replace, clear and remove a feed.
             "DELETE FROM epg_programs WHERE epg_url = ?1",
+            "DELETE FROM epg_programs WHERE epg_url IN (SELECT url FROM epg_sources WHERE origin <> ?1)",
             "SELECT count(*) FROM epg_programs WHERE epg_url = ?1",
-            // epg/search.rs: guide search through the title index, and its fallback scan.
+            "SELECT 1 FROM epg_programs WHERE epg_url = ?1 LIMIT 1",
+            // epg/search.rs: guide search through the title index.
             crate::epg::search::FTS_SQL,
-            crate::epg::search::SCAN_SQL,
         ];
         for sql in statements {
-            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
-            let args = vec![rusqlite::types::Null; stmt.parameter_count()];
-            let plan: Vec<String> = stmt
-                .query_map(rusqlite::params_from_iter(args), |r| r.get::<_, String>(3))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect();
+            let plan = plan(&conn, sql);
             let programmes: Vec<&String> = plan
                 .iter()
                 .filter(|d| matches!(d.split_whitespace().nth(1), Some("p" | "epg_programs")))
@@ -857,6 +872,22 @@ mod tests {
                 );
             }
         }
+        let has = plan(&conn, crate::epg::resolve::HAS_PROGRAMMES_SQL);
+        assert!(
+            has.iter().any(|d| d
+                == "SEARCH p USING COVERING INDEX idx_epg_programs_slot (epg_url=? AND channel_id=?)"),
+            "{has:?}"
+        );
+        // The search's fallback reads every programme overlapping a window
+        // of up to 16 days, most of a guide that keeps 16: one pass over the
+        // table, each programme's feed by its key.
+        let scan = plan(&conn, crate::epg::search::SCAN_SQL);
+        assert!(scan.iter().any(|d| d == "SCAN p"), "{scan:?}");
+        assert!(
+            scan.iter()
+                .any(|d| d.starts_with("SEARCH s USING INDEX sqlite_autoindex_epg_sources_1")),
+            "{scan:?}"
+        );
     }
 
     use super::*;
@@ -1054,6 +1085,25 @@ mod tests {
             !has_index("idx_epg_programs_url"),
             "0008 drops the redundant epg_url index"
         );
+        // 0027 leaves the slot index as the only one on epg_programs.
+        let indexes: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'epg_programs'",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(indexes, ["idx_epg_programs_slot"]);
+        let unique: i64 = conn
+            .query_row(
+                "SELECT \"unique\" FROM pragma_index_list('epg_programs') WHERE name = 'idx_epg_programs_slot'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(unique, 1);
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM sources", [], |r| r.get(0))
             .unwrap();

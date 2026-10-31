@@ -182,7 +182,8 @@ fn tvg_shift(conn: &Connection, r: &ItemRef) -> CoreResult<i64> {
 /// the latest start nearly always runs after the range start, so the probe
 /// stops at its first row. Joining from the programmes instead read every
 /// programme of the lookback and the range in every feed before sorting by
-/// url. `+p.stop` keeps the plan off the `stop` index.
+/// url. `+p.stop` keeps the plan off any index on `stop` (one existed until
+/// migration 0027).
 pub const FEED_SQL: &str = "SELECT s.url FROM epg_sources s
      WHERE s.enabled = 1 AND s.origin <> ?5
        AND (SELECT p.start FROM epg_programs p

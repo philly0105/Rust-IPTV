@@ -143,8 +143,9 @@ pub fn ingest_reader(
     // with "database is locked" after the normal busy timeout.
     let _long = crate::db::long_write();
     // Bulk-load tuning for this pooled connection only: a 64 MB page cache
-    // keeps the (channel_id, start) index hot, and deferring WAL checkpoints
-    // avoids copying pages back mid-load. Both are restored afterwards.
+    // keeps the (epg_url, channel_id, start) index hot, and deferring WAL
+    // checkpoints avoids copying pages back mid-load. Both are restored
+    // afterwards.
     let cache: i64 = conn.query_row("PRAGMA cache_size", [], |r| r.get(0))?;
     let autockpt: i64 = conn.query_row("PRAGMA wal_autocheckpoint", [], |r| r.get(0))?;
     let temp_store: i64 = conn.query_row("PRAGMA temp_store", [], |r| r.get(0))?;
@@ -156,13 +157,16 @@ pub fn ingest_reader(
     // setting: the swap's copy journals each page it reuses from the rows it
     // replaces, so a refresh over a stored guide also needs about that
     // guide's size in the temp directory until the swap commits (held in
-    // memory before; `epg_reingest_rss`).
+    // memory before; `epg_reingest_rss`). The swap's index of the staged
+    // slots and its list of replaced rows live there too.
     conn.execute_batch(
         "PRAGMA cache_size=-65536; PRAGMA wal_autocheckpoint=0; PRAGMA temp_store=FILE;",
     )?;
     let result = ingest_inner(conn, url, reader, window, etag, on_progress);
-    // Guide search (C5): the swap (or a discarded staging) marked the title
-    // index stale; rebuild it while the bulk-load cache is still large.
+    // Guide search (C5): a swap that replaced only what changed kept the
+    // title index in step; one that copied the whole feed (or a discarded
+    // staging) marked it stale: rebuild it while the bulk-load cache is
+    // still large.
     super::search::refresh_index(conn);
     let restore = conn.execute_batch(&format!(
         "PRAGMA cache_size={cache}; PRAGMA wal_autocheckpoint={autockpt}; PRAGMA temp_store={temp_store};"

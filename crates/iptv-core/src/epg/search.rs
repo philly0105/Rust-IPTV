@@ -2,24 +2,30 @@
 //! channels of one source.
 //!
 //! Titles are indexed by `epg_programs_fts`, an external-content FTS5 table
-//! over `epg_programs` (migration 0015). The index is not kept in step row
-//! by row: ingestion writes millions of rows through staging and swaps them
-//! in with a few bulk statements, so triggers would double the cost of every
-//! refresh. Instead the whole index is rebuilt after each change, and an
-//! `app_state` marker ([`INDEX_MARKER`]) says whether it matches the table:
+//! over `epg_programs` (migration 0015), with `epg_search_rows` next to it
+//! (each programme's start, stop, feed and guide channel by rowid,
+//! migration 0019: the hits are read there instead of in the wide
+//! programme rows). Neither is kept in step by triggers: ingestion swaps a
+//! feed in with a few bulk statements, and row triggers would double their
+//! cost. An `app_state` marker ([`INDEX_MARKER`]) says whether the index
+//! matches the table:
 //!
-//! - every statement that deletes or swaps programmes removes the marker in
-//!   the same transaction (`store::commit_staging`, `clear_all`, `prune`,
-//!   and the staging cleanups when they deleted rows);
+//! - a refresh over a matching index replaces only the programmes that
+//!   changed, and in the same transaction takes them out of the index
+//!   ([`unindex`]) and indexes the new ones ([`index_after`]); see
+//!   `store::commit_staging`. A refresh that changes most of the guide
+//!   copies the whole feed instead, like the paths below;
+//! - every other statement that deletes or swaps programmes removes the
+//!   marker in the same transaction (`clear_all`, `prune`, and the staging
+//!   cleanups when they deleted rows);
 //! - [`rebuild_index`] empties the index, indexes every title as [`fold`]
-//!   folds it, refills `epg_search_rows` (each programme's start, stop,
-//!   feed and guide channel by rowid, migration 0019: the hits are read
-//!   there instead of in the wide programme rows), and sets the marker to
-//!   [`INDEX_VERSION`] in one transaction: after each refresh, after
-//!   `epg.clearAll`, after a prune, and once in the background at startup
-//!   when the marker is missing or from an older version and programmes
-//!   exist (an upgraded database, or a crash between a swap and its
-//!   rebuild);
+//!   folds it, refills `epg_search_rows`, and sets the marker to
+//!   [`INDEX_VERSION`] in one transaction: after a refresh, `epg.clearAll`
+//!   or a prune that removed the marker, after
+//!   [`MAX_IN_PLACE_UPDATES`] refreshes that updated it in place, and once
+//!   in the background at startup when the marker is missing or from
+//!   another build and programmes exist (an upgraded database, or a crash
+//!   between a swap and its rebuild);
 //! - [`search`] reads the index only while the marker holds the current
 //!   version and falls back to a scan of the time window otherwise, so
 //!   results are never stale and rowids reused by later inserts never
@@ -50,10 +56,28 @@ use std::sync::Arc;
 /// `app_state` key present while `epg_programs_fts` matches `epg_programs`.
 pub const INDEX_MARKER: &str = "epg_search_index";
 /// Marker value of an index of [`fold`]ed titles with its
-/// `epg_search_rows`. A marker with any other value (`ready`: raw titles,
-/// before the fold; `folded-1`: before the search rows) counts as missing.
-pub const INDEX_VERSION: &str = "folded-2";
-/// SQL function [`rebuild_index`] registers to fold titles while indexing.
+/// `epg_search_rows`, built by this build. A marker with any other value
+/// (`ready`: raw titles, before the fold; `folded-1`: before the search
+/// rows; another build's) counts as missing.
+///
+/// The build's version is part of it because refreshes update the index in
+/// place: FTS5 takes a title out of an external-content index only when it
+/// is handed exactly the tokens it indexed, and a [`fold`] that changed
+/// between builds (Rust's Unicode tables behind `to_lowercase`, the
+/// `strip_diacritics` tables) would leave entries behind for good, where a
+/// rebuild after every refresh used to wipe them. Each new build rebuilds
+/// the index once at startup instead. A change to [`fold`] or to the
+/// tables it uses still needs a new prefix when the version stays.
+pub const INDEX_VERSION: &str = concat!("folded-2:", env!("CARGO_PKG_VERSION"));
+/// `app_state` key counting the refreshes that updated the index in place
+/// since [`rebuild_index`] last ran.
+pub const IN_PLACE_KEY: &str = "epg_search_index_updates";
+/// Refreshes that may update the index in place before the next one
+/// rebuilds it. A rebuild costs about a second per 600k programmes; it
+/// clears whatever the in-place updates might have left behind (a row a
+/// future writer forgot to index) and compacts the FTS segments.
+pub const MAX_IN_PLACE_UPDATES: i64 = 30;
+/// SQL function folding titles while indexing ([`register_fold`]).
 const FOLD_SQL_FUNCTION: &str = "epg_search_fold";
 /// Query length bounds, in characters after trimming.
 pub const MIN_QUERY_CHARS: usize = 2;
@@ -121,13 +145,22 @@ pub fn index_ready(conn: &Connection) -> CoreResult<bool> {
         .is_some())
 }
 
-/// Rebuilds the whole index from `epg_programs` and marks it ready, in one
-/// write transaction. Titles are indexed as [`fold`] folds them (not with
-/// `'rebuild'`, which would index the raw titles of the content table), so
-/// the index and the scan agree on every script; queries are folded the
-/// same way before they reach the tokenizer.
-pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
-    let started = std::time::Instant::now();
+/// True when a refresh may update the index in place: it matches the
+/// programme table and has been updated in place fewer than
+/// [`MAX_IN_PLACE_UPDATES`] times since its last rebuild.
+pub fn can_update_in_place(conn: &Connection) -> CoreResult<bool> {
+    let (ready, updates): (bool, i64) = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM app_state WHERE key = ?1 AND value = ?2),
+                coalesce((SELECT CAST(value AS INTEGER) FROM app_state WHERE key = ?3), 0)",
+        [INDEX_MARKER, INDEX_VERSION, IN_PLACE_KEY],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok(ready && updates < MAX_IN_PLACE_UPDATES)
+}
+
+/// Registers the SQL function that folds titles for the index ([`fold`]).
+/// `db::configure` registers it on every pooled connection.
+pub fn register_fold(conn: &Connection) -> rusqlite::Result<()> {
     conn.create_scalar_function(
         FOLD_SQL_FUNCTION,
         1,
@@ -139,7 +172,87 @@ pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
                 .map_err(|e| rusqlite::Error::UserFunctionError(Box::new(e)))?;
             Ok(title.map(fold))
         },
+    )
+}
+
+/// [`register_fold`] for a connection that lacks it (one opened outside the
+/// pool). Registering it again would throw away the connection's prepared
+/// statements, and fails while one of them runs.
+fn ensure_fold(conn: &Connection) -> rusqlite::Result<()> {
+    if conn
+        .prepare(&format!("SELECT {FOLD_SQL_FUNCTION}(NULL)"))
+        .is_err()
+    {
+        register_fold(conn)?;
+    }
+    Ok(())
+}
+
+/// Takes the programmes whose rowids table `ids` lists (column `id`) out of
+/// the index; call before deleting them, in the same transaction. Their
+/// titles are handed to FTS5 folded as they were indexed. Returns false,
+/// with no title touched, when not all `count` of them had a search row:
+/// the index does not track them, and only a rebuild can set it right.
+pub(crate) fn unindex(conn: &Connection, ids: &str, count: u64) -> CoreResult<bool> {
+    let removed = conn.execute(
+        &format!("DELETE FROM epg_search_rows WHERE id IN (SELECT id FROM {ids})"),
+        [],
+    )? as u64;
+    if removed != count {
+        return Ok(false);
+    }
+    ensure_fold(conn)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO epg_programs_fts(epg_programs_fts, rowid, title)
+             SELECT 'delete', p.rowid, {FOLD_SQL_FUNCTION}(p.title)
+             FROM {ids} g CROSS JOIN epg_programs p ON p.rowid = g.id"
+        ),
+        [],
     )?;
+    Ok(true)
+}
+
+/// Indexes the programmes with a rowid above `last`: the ones inserted
+/// since `last` was the largest (SQLite gives a new row the largest rowid
+/// plus one). `added` is how many that is; any other count removes the
+/// marker, so the index is rebuilt after the swap. Counts the update
+/// towards [`MAX_IN_PLACE_UPDATES`].
+pub(crate) fn index_after(conn: &Connection, last: i64, added: u64) -> CoreResult<()> {
+    ensure_fold(conn)?;
+    conn.execute(
+        &format!(
+            "INSERT INTO epg_programs_fts(rowid, title)
+             SELECT rowid, {FOLD_SQL_FUNCTION}(title) FROM epg_programs WHERE rowid > ?1"
+        ),
+        [last],
+    )?;
+    let rows = conn.execute(
+        "INSERT INTO epg_search_rows(id, start, stop, feed, channel_id)
+         SELECT p.rowid, p.start, p.stop, s.rowid, p.channel_id
+         FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
+         WHERE p.rowid > ?1",
+        [last],
+    )? as u64;
+    if rows != added {
+        return invalidate_index(conn);
+    }
+    conn.execute(
+        "INSERT INTO app_state(key, value, updated_at) VALUES (?1, '1', CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1, updated_at = excluded.updated_at",
+        [IN_PLACE_KEY],
+    )?;
+    Ok(())
+}
+
+/// Rebuilds the whole index from `epg_programs` and marks it ready, in one
+/// write transaction. Titles are indexed as [`fold`] folds them (not with
+/// `'rebuild'`, which would index the raw titles of the content table), so
+/// the index and the scan agree on every script; queries are folded the
+/// same way before they reach the tokenizer.
+pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
+    let started = std::time::Instant::now();
+    ensure_fold(conn)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "INSERT INTO epg_programs_fts(epg_programs_fts) VALUES('delete-all')",
@@ -163,6 +276,7 @@ pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         [INDEX_MARKER, INDEX_VERSION],
     )?;
+    tx.execute("DELETE FROM app_state WHERE key = ?1", [IN_PLACE_KEY])?;
     tx.commit()?;
     tracing::debug!(
         ms = started.elapsed().as_millis() as u64,
@@ -577,8 +691,11 @@ pub const FTS_SQL: &str = "SELECT p.id, p.channel_id, p.start, p.stop, p.feed
      CROSS JOIN epg_search_rows p ON p.id = f.rowid
      WHERE epg_programs_fts MATCH ?1 AND p.stop > ?2 AND p.start < ?3";
 
-/// The fallback statement: every programme overlapping the window (on the
-/// `stop` index); titles are matched in Rust with the same folding.
+/// The fallback statement: every programme overlapping the window, read in
+/// one pass over the table (a window of up to 16 days holds most of a
+/// guide that keeps 16; migration 0027 dropped the `stop` index, which
+/// bounded only one side of it and read in random order). Titles are
+/// matched in Rust with the same folding.
 pub const SCAN_SQL: &str = "SELECT p.rowid, p.channel_id, p.start, p.stop, p.title, s.rowid
      FROM epg_programs p JOIN epg_sources s ON s.url = p.epg_url
      WHERE p.stop > ?1 AND p.start < ?2 AND s.enabled = 1 AND s.origin <> ?3";

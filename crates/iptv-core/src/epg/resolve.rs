@@ -358,9 +358,18 @@ pub fn manual_mapping(conn: &Connection, r: &ItemRef) -> CoreResult<Option<Optio
         .optional()?)
 }
 
+/// Does any feed hold a programme of channel `?1`: one probe of the
+/// `(epg_url, channel_id, start)` index per feed, the only index on
+/// `epg_programs` (migration 0027). Every programme's feed has its
+/// `epg_sources` row (foreign key), so this is "any programme of the
+/// channel" as before.
+pub const HAS_PROGRAMMES_SQL: &str = "SELECT 1 FROM epg_sources s
+     WHERE EXISTS (SELECT 1 FROM epg_programs p WHERE p.epg_url = s.url AND p.channel_id = ?1)
+     LIMIT 1";
+
 pub(crate) fn has_programmes(conn: &Connection, channel_id: &str) -> CoreResult<bool> {
     Ok(conn
-        .prepare_cached("SELECT 1 FROM epg_programs WHERE channel_id = ?1 LIMIT 1")?
+        .prepare_cached(HAS_PROGRAMMES_SQL)?
         .query_row([channel_id], |_| Ok(()))
         .optional()?
         .is_some())
@@ -508,6 +517,45 @@ mod tests {
         let d = dir(&[("e.uk", "Eurosport")]);
         assert_eq!(d.find_name("Eurosprt"), None);
         assert!(d.fuzzy.lock().is_empty(), "no scan for a short key");
+    }
+
+    /// Any feed's programmes count, a disabled feed's too, whether or not
+    /// the feed declares the channel; the probe reads the slot index.
+    #[test]
+    fn has_programmes_finds_a_channel_in_any_feed() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        for (url, enabled) in [("a", 1), ("b", 1), ("c", 0)] {
+            conn.execute(
+                "INSERT INTO epg_sources(url, enabled) VALUES (?1, ?2)",
+                params![url, enabled],
+            )
+            .unwrap();
+        }
+        for (url, channel) in [("a", "one"), ("b", "two"), ("c", "off")] {
+            conn.execute(
+                "INSERT INTO epg_programs(epg_url, channel_id, start, stop, title) VALUES (?1, ?2, 0, 60, 'T')",
+                params![url, channel],
+            )
+            .unwrap();
+        }
+        assert!(has_programmes(&conn, "one").unwrap());
+        assert!(has_programmes(&conn, "two").unwrap(), "second feed only");
+        assert!(has_programmes(&conn, "off").unwrap(), "disabled feed");
+        assert!(!has_programmes(&conn, "none").unwrap());
+        assert!(!has_programmes(&conn, "ONE").unwrap(), "ids are exact");
+        let plan: Vec<String> = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {HAS_PROGRAMMES_SQL}"))
+            .unwrap()
+            .query_map(["one"], |r| r.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|d| d
+                == "SEARCH p USING COVERING INDEX idx_epg_programs_slot (epg_url=? AND channel_id=?)"),
+            "{plan:?}"
+        );
     }
 
     /// EP-2: a fuzzy result is computed once per title and directory.

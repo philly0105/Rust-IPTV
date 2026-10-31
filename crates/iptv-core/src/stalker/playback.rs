@@ -14,6 +14,8 @@ use futures::future::{BoxFuture, FutureExt, Shared};
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// `stalker.accountInfo` result (TS `StalkerAccountInfo`).
@@ -410,21 +412,32 @@ pub const EPG_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20)
 /// Overall budget of `stalker.epg` with `from`. The day tables read after
 /// the short EPG stop here; the call then returns what it has.
 pub const EPG_PAST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(40);
-/// How long a bulk `get_epg_info` answer is reused for a source.
-const BULK_EPG_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// How long a bulk `get_epg_info` answer is fresh for a source. Past it the
+/// next row starts a refresh and still answers from the old guide (R5-2:
+/// was 5 min, which refetched and reparsed the whole portal's guide every
+/// 5 minutes of browsing). The answer spans 6 h and the read drops what has
+/// ended, so a portal-side change shows up at most this late.
+const BULK_EPG_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 /// How long a failed bulk `get_epg_info` is remembered before it is asked
 /// again.
 const BULK_EPG_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
 /// Longest a row whose short EPG answered empty waits for the bulk guide.
 /// The fetch itself carries on in the background and fills the cache.
 const BULK_EPG_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+/// A bulk guide no row asked for in this long is dropped (R5-2): it used to
+/// stay resident for the rest of the session once fetched.
+const BULK_EPG_IDLE: std::time::Duration =
+    std::time::Duration::from_secs(BULK_EPG_TTL.as_secs() + 5 * 60);
 
-/// One bulk `get_epg_info` answer: programmes keyed by channel id.
+/// One bulk `get_epg_info` answer, indexed by channel id. Each channel's
+/// programmes are mapped once, on the blocking pool, with an empty channel
+/// id that the read fills in (R5-2). The portal's JSON tree is not kept:
+/// for a 10k-channel guide it was on the order of 100 MB.
 #[derive(Debug)]
 pub struct BulkEpg {
-    by_channel: Map<String, Value>,
+    by_channel: HashMap<String, Arc<[EpgProgram]>>,
     ok: bool,
-    at: std::time::Instant,
+    at: tokio::time::Instant,
 }
 
 type BulkEpgFuture = Shared<BoxFuture<'static, Arc<BulkEpg>>>;
@@ -435,44 +448,74 @@ type BulkEpgFuture = Shared<BoxFuture<'static, Arc<BulkEpg>>>;
 #[derive(Clone)]
 pub struct BulkEpgEntry {
     fut: BulkEpgFuture,
+    /// The last good answer, served while `fut` replaces it.
+    stale: Option<Arc<BulkEpg>>,
+    /// When a row last asked, in ms after `born`; also the entry's
+    /// identity for [`sweep_when_idle`].
+    used: Arc<AtomicU64>,
+    born: tokio::time::Instant,
+}
+
+/// What a row gets from its source's bulk guide.
+enum BulkAnswer {
+    /// An answer to use now.
+    Ready(Arc<BulkEpg>),
+    /// Nothing usable yet: the fetch in flight, waited for at most
+    /// [`BULK_EPG_WAIT`].
+    Pending(BulkEpgFuture),
 }
 
 impl BulkEpgEntry {
-    fn start(client: &StalkerClient) -> Self {
+    fn start(client: &StalkerClient, stale: Option<Arc<BulkEpg>>) -> Self {
         let client = client.clone();
         let task = tokio::spawn(async move {
             let req = Req::new("itv", "get_epg_info")
                 .p("period", 6)
                 .timeout(LONG_TIMEOUT);
             let (by_channel, ok) = match client.call(req).await {
-                // `data` is taken out of the answer, not cloned (IN-1).
-                Ok(js) => match take_data(js) {
-                    Value::Object(m) => (m, true),
-                    _ => (Map::new(), true),
-                },
+                // `data` is taken out of the answer, not cloned (IN-1), and
+                // mapped off the runtime worker.
+                Ok(js) => {
+                    match tokio::task::spawn_blocking(move || index_bulk(take_data(js))).await {
+                        Ok(index) => (index, true),
+                        Err(err) => {
+                            tracing::debug!(error = %err, "stalker bulk EPG could not be read");
+                            (HashMap::new(), false)
+                        }
+                    }
+                }
                 Err(err) => {
                     tracing::debug!(error = %err, "stalker bulk EPG failed");
-                    (Map::new(), false)
+                    (HashMap::new(), false)
                 }
             };
             Arc::new(BulkEpg {
                 by_channel,
                 ok,
-                at: std::time::Instant::now(),
+                at: tokio::time::Instant::now(),
             })
         });
         let fut = async move {
             task.await.unwrap_or_else(|_| {
                 Arc::new(BulkEpg {
-                    by_channel: Map::new(),
+                    by_channel: HashMap::new(),
                     ok: false,
-                    at: std::time::Instant::now(),
+                    at: tokio::time::Instant::now(),
                 })
             })
         }
         .boxed()
         .shared();
-        Self { fut }
+        Self::new(fut, stale)
+    }
+
+    fn new(fut: BulkEpgFuture, stale: Option<Arc<BulkEpg>>) -> Self {
+        Self {
+            fut,
+            stale,
+            used: Arc::new(AtomicU64::new(0)),
+            born: tokio::time::Instant::now(),
+        }
     }
 
     fn expired(&self) -> bool {
@@ -481,6 +524,88 @@ impl BulkEpgEntry {
             None => false,
         }
     }
+
+    /// The good answer to keep serving while a refresh runs: this entry's
+    /// own when it has one, else the one it was serving.
+    fn usable(&self) -> Option<Arc<BulkEpg>> {
+        match self.fut.peek() {
+            Some(b) if b.ok => Some(b.clone()),
+            _ => self.stale.clone(),
+        }
+    }
+
+    /// Stale-while-revalidate (R5-2): a good answer, expired or not, at
+    /// once; a row waits only when nothing usable is cached. A failed fetch
+    /// with no older answer gives its empty one until [`BULK_EPG_RETRY`].
+    fn answer(&self) -> BulkAnswer {
+        match (self.usable(), self.fut.peek()) {
+            (Some(good), _) => BulkAnswer::Ready(good),
+            (None, Some(failed)) => BulkAnswer::Ready(failed.clone()),
+            (None, None) => BulkAnswer::Pending(self.fut.clone()),
+        }
+    }
+
+    fn touch(&self) {
+        self.used
+            .store(self.born.elapsed().as_millis() as u64, Ordering::Relaxed);
+    }
+
+    fn idle(&self) -> std::time::Duration {
+        let used = std::time::Duration::from_millis(self.used.load(Ordering::Relaxed));
+        self.born.elapsed().saturating_sub(used)
+    }
+}
+
+/// Maps the bulk answer's `data` (programmes keyed by channel id) with the
+/// same [`mapping::epg_program`] the rows used to run at read time, so the
+/// output is identical; channels without programmes are left out.
+fn index_bulk(data: Value) -> HashMap<String, Arc<[EpgProgram]>> {
+    let Value::Object(by_channel) = data else {
+        return HashMap::new();
+    };
+    by_channel
+        .into_iter()
+        .filter_map(|(id, list)| {
+            let Value::Array(list) = list else {
+                return None;
+            };
+            let programs: Vec<EpgProgram> = list
+                .iter()
+                .filter_map(|v| mapping::epg_program("", v))
+                .collect();
+            (!programs.is_empty()).then(|| (id, programs.into()))
+        })
+        .collect()
+}
+
+/// Drops the source's bulk guide once no row has asked for it in
+/// [`BULK_EPG_IDLE`], unless a newer entry replaced it (that one has its own
+/// sweeper).
+fn sweep_when_idle(rt: std::sync::Weak<super::Runtime>, source_id: String, used: Arc<AtomicU64>) {
+    tokio::spawn(async move {
+        let mut wait = BULK_EPG_IDLE;
+        loop {
+            tokio::time::sleep(wait).await;
+            let Some(rt) = rt.upgrade() else { return };
+            let mine = |e: &BulkEpgEntry| Arc::ptr_eq(&e.used, &used);
+            let removed = rt
+                .bulk_epg
+                .remove_if(&source_id, |_, e| mine(e) && e.idle() >= BULK_EPG_IDLE);
+            if removed.is_some() {
+                return;
+            }
+            // Still this entry, used since: look again once it may be idle.
+            let next = rt
+                .bulk_epg
+                .get(&source_id)
+                .filter(|e| mine(e))
+                .map(|e| BULK_EPG_IDLE.saturating_sub(e.idle()));
+            match next {
+                Some(left) => wait = left.max(std::time::Duration::from_secs(1)),
+                None => return,
+            }
+        }
+    });
 }
 
 /// The answer's `data` member, or the answer itself when it has none.
@@ -494,18 +619,28 @@ fn take_data(js: Value) -> Value {
     }
 }
 
-/// The source's bulk guide: the cached answer, the fetch in flight, or a
-/// new fetch.
-fn bulk_epg(state: &AppState, client: &StalkerClient, source_id: &str) -> BulkEpgFuture {
+/// The source's bulk guide: the cached answer (an expired one starts its
+/// refresh and is still served), the fetch in flight, or a new fetch.
+fn bulk_epg(state: &AppState, client: &StalkerClient, source_id: &str) -> BulkAnswer {
     let rt = super::Runtime::get(state);
-    let mut entry = rt
-        .bulk_epg
-        .entry(source_id.to_string())
-        .or_insert_with(|| BulkEpgEntry::start(client));
-    if entry.expired() {
-        *entry = BulkEpgEntry::start(client);
+    let mut fresh = false;
+    let (answer, used) = {
+        let mut entry = rt.bulk_epg.entry(source_id.to_string()).or_insert_with(|| {
+            fresh = true;
+            BulkEpgEntry::start(client, None)
+        });
+        if entry.expired() {
+            let stale = entry.usable();
+            *entry = BulkEpgEntry::start(client, stale);
+            fresh = true;
+        }
+        entry.touch();
+        (entry.answer(), entry.used.clone())
+    };
+    if fresh {
+        sweep_when_idle(Arc::downgrade(&rt), source_id.to_string(), used);
     }
-    entry.fut.clone()
+    answer
 }
 
 /// The day tables [`past_programmes`] reads: the UTC dates from `from`
@@ -600,26 +735,38 @@ async fn portal_epg(
             return Err(session::slow_error(&client.config.portal_url));
         }
     };
-    let mut entries = match short {
+    let entries = match short {
         Ok(js) => into_list(js),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         // Silent or unreachable portal: the bulk call would only wait longer.
         Err(err) if no_answer(&err) => return Err(err),
         Err(_) => Vec::new(),
     };
+    let mut upcoming: Vec<EpgProgram> = entries
+        .iter()
+        .filter_map(|v| mapping::epg_program(&channel_id, v))
+        .collect();
     if entries.is_empty() {
         // The portal answered: whatever the bulk guide does, this row gets
         // its (possibly empty) programmes, never an error.
-        let bulk = bulk_epg(state, client, &r.source_id);
-        match tokio::time::timeout(BULK_EPG_WAIT, bulk).await {
-            Ok(bulk) => {
-                if let Some(Value::Array(a)) = bulk.by_channel.get(&r.item_id) {
-                    entries = a.clone();
+        let bulk = match bulk_epg(state, client, &r.source_id) {
+            BulkAnswer::Ready(bulk) => Some(bulk),
+            BulkAnswer::Pending(fetch) => match tokio::time::timeout(BULK_EPG_WAIT, fetch).await {
+                Ok(bulk) => Some(bulk),
+                Err(_) => {
+                    tracing::debug!(source_id = %r.source_id, "stalker bulk EPG still loading");
+                    None
                 }
-            }
-            Err(_) => {
-                tracing::debug!(source_id = %r.source_id, "stalker bulk EPG still loading");
-            }
+            },
+        };
+        if let Some(list) = bulk.as_ref().and_then(|b| b.by_channel.get(&r.item_id)) {
+            upcoming = list
+                .iter()
+                .map(|p| EpgProgram {
+                    channel_id: channel_id.clone(),
+                    ..p.clone()
+                })
+                .collect();
         }
     }
     // The channel's guide shift moves the portal's programmes (the bulk
@@ -627,9 +774,8 @@ async fn portal_epg(
     let shift = crate::epg::channel_shift(state, r).await?;
     let now_at = Utc::now();
     let now = now_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let mut programs: Vec<EpgProgram> = entries
-        .iter()
-        .filter_map(|v| mapping::epg_program(&channel_id, v))
+    let mut programs: Vec<EpgProgram> = upcoming
+        .into_iter()
         .map(|p| crate::epg::shifted(p, shift))
         .filter(|p| p.end > now || p.end == p.start)
         .collect();
@@ -866,6 +1012,140 @@ mod tests {
         assert_eq!(take_data(json!({"x": 1})), json!({"x": 1}));
         assert_eq!(take_data(json!({ "data": null })), Value::Null);
         assert_eq!(take_data(json!([1])), json!([1]));
+    }
+
+    /// R5-2: the bulk guide is mapped once into an index instead of being
+    /// kept as the portal's JSON tree. A row reads exactly what the old
+    /// read-time mapping of that channel's array gave: the 'Untitled'
+    /// fallback, a duration-based end, a swapped stop, markup stripped.
+    #[test]
+    fn bulk_index_reads_like_the_raw_guide() {
+        let data = json!({
+            "7": [
+                {"name": "News", "descr": "<b>Daily</b>  news", "category": "News",
+                 "start_timestamp": 1_700_000_000, "stop_timestamp": "1700003600"},
+                {"start_timestamp": 1_700_003_600, "duration": 1800},
+                {"name": "Swapped", "start_timestamp": 1_700_010_000, "stop_timestamp": 1000},
+                {"name": "No time"},
+                {"title": "By time", "time": "2023-11-15 01:00:00", "time_to": "2023-11-15 02:00:00"}
+            ],
+            "8": [],
+            "9": {"not": "a list"},
+            "10": [{"name": "No time either"}]
+        });
+        let raw_read = |ch: &str| -> Vec<EpgProgram> {
+            match data.get(ch) {
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .filter_map(|v| mapping::epg_program("one.uk", v))
+                    .collect(),
+                _ => Vec::new(),
+            }
+        };
+        let index = index_bulk(take_data(json!({ "data": data.clone() })));
+        for ch in ["7", "8", "9", "10", "11"] {
+            let read: Vec<EpgProgram> = index
+                .get(ch)
+                .map(|list| {
+                    list.iter()
+                        .map(|p| EpgProgram {
+                            channel_id: "one.uk".into(),
+                            ..p.clone()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            assert_eq!(read, raw_read(ch), "channel {ch}");
+        }
+        assert_eq!(index.len(), 1, "only channels with programmes");
+        assert_eq!(index["7"].len(), 4);
+        assert_eq!(index["7"][1].title, "Untitled");
+        assert!(index_bulk(json!([1])).is_empty());
+    }
+
+    fn bulk_answer(ok: bool) -> Arc<BulkEpg> {
+        Arc::new(BulkEpg {
+            by_channel: HashMap::new(),
+            ok,
+            at: tokio::time::Instant::now(),
+        })
+    }
+
+    /// An entry whose fetch has finished with `answer`, or is still out.
+    fn bulk_entry(answer: Option<Arc<BulkEpg>>, stale: Option<Arc<BulkEpg>>) -> BulkEpgEntry {
+        let fut = match answer {
+            Some(b) => futures::future::ready(b).boxed().shared(),
+            None => futures::future::pending().boxed().shared(),
+        };
+        let _ = fut.clone().now_or_never();
+        BulkEpgEntry::new(fut, stale)
+    }
+
+    fn ready(a: BulkAnswer) -> Option<Arc<BulkEpg>> {
+        match a {
+            BulkAnswer::Ready(b) => Some(b),
+            BulkAnswer::Pending(_) => None,
+        }
+    }
+
+    /// R5-2: an expired good guide is still served while its refresh runs
+    /// (rows used to wait up to 10 s for the refetch every 5 minutes, and
+    /// got nothing past that); a row waits only when nothing usable is
+    /// cached.
+    #[tokio::test(start_paused = true)]
+    async fn bulk_guide_is_served_while_it_refreshes() {
+        let good = bulk_answer(true);
+        let fresh = bulk_entry(Some(good.clone()), None);
+        assert!(!fresh.expired());
+        tokio::time::advance(BULK_EPG_TTL).await;
+        assert!(fresh.expired());
+        // The refresh: in flight, then failed, the old answer still serves.
+        let refreshing = bulk_entry(None, fresh.usable());
+        assert!(!refreshing.expired());
+        assert!(Arc::ptr_eq(&ready(refreshing.answer()).unwrap(), &good));
+        let failed = bulk_entry(Some(bulk_answer(false)), refreshing.usable());
+        assert!(Arc::ptr_eq(&ready(failed.answer()).unwrap(), &good));
+        // A failed fetch is asked again after BULK_EPG_RETRY, keeping the
+        // good answer for the next refresh.
+        tokio::time::advance(BULK_EPG_RETRY).await;
+        assert!(failed.expired());
+        assert!(Arc::ptr_eq(&failed.usable().unwrap(), &good));
+
+        // Nothing cached: the first fetch is waited for; a failed one gives
+        // its empty answer until it is retried.
+        assert!(ready(bulk_entry(None, None).answer()).is_none());
+        let empty = ready(bulk_entry(Some(bulk_answer(false)), None).answer()).unwrap();
+        assert!(!empty.ok);
+    }
+
+    /// R5-2: the guide stayed resident for the session once fetched. An
+    /// entry no row asked for in BULK_EPG_IDLE is dropped; a used one, or
+    /// one a newer entry replaced, is not dropped by this sweeper.
+    #[tokio::test(start_paused = true)]
+    async fn an_idle_bulk_guide_is_dropped() {
+        let rt = Arc::new(super::super::Runtime::default());
+        let entry = bulk_entry(Some(bulk_answer(true)), None);
+        let used = entry.used.clone();
+        rt.bulk_epg.insert("s1".into(), entry);
+        sweep_when_idle(Arc::downgrade(&rt), "s1".into(), used);
+        let minutes = |m: u64| std::time::Duration::from_secs(m * 60);
+
+        tokio::time::sleep(minutes(20)).await;
+        rt.bulk_epg.get("s1").unwrap().touch();
+        tokio::time::sleep(minutes(20)).await;
+        assert!(rt.bulk_epg.contains_key("s1"), "used 20 minutes ago");
+        tokio::time::sleep(minutes(16)).await;
+        assert!(!rt.bulk_epg.contains_key("s1"), "idle for 36 minutes");
+
+        // A replaced entry's sweeper leaves the new one alone.
+        let old = bulk_entry(Some(bulk_answer(true)), None);
+        let old_used = old.used.clone();
+        rt.bulk_epg.insert("s2".into(), old);
+        sweep_when_idle(Arc::downgrade(&rt), "s2".into(), old_used);
+        rt.bulk_epg
+            .insert("s2".into(), bulk_entry(Some(bulk_answer(true)), None));
+        tokio::time::sleep(minutes(40)).await;
+        assert!(rt.bulk_epg.contains_key("s2"));
     }
 
     /// D10: `(a - ts).abs()` overflowed on a hostile start timestamp, and

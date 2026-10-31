@@ -130,8 +130,8 @@ pub struct Runtime {
     pub plans: Lru<Arc<Vec<vod::SeasonPlan>>>,
     /// Portal page size keyed by `<sourceId>|<type>`.
     pub page_sizes: DashMap<String, i64>,
-    /// Bulk `get_epg_info` answer per source id (shared, short-lived; see
-    /// [`playback::BulkEpgEntry`]).
+    /// Bulk `get_epg_info` answer per source id (shared, indexed by channel,
+    /// dropped once no row asks for it; see [`playback::BulkEpgEntry`]).
     pub bulk_epg: DashMap<String, playback::BulkEpgEntry>,
     /// `stalker_items` exists in this database.
     table_ready: AtomicBool,

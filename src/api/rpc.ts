@@ -769,6 +769,8 @@ export interface RpcMap {
   'images.stats': Cmd<void, ImageCacheStats>;
   /** Deletes every cached image; resolves the (empty) stats. */
   'images.clear': Cmd<void, ImageCacheStats>;
+  /** Fetches the pictures the image gate queued ahead of their requests (at most 48); resolves once they are queued. */
+  'images.warm': Cmd<{ items: { url: string; sourceId?: string; w?: number }[] }, void>;
 
   // screenshot: player frames to Pictures\Tsrust IPTV (Run 3 C6). Desktop only; server mode -> unsupported.
   /** Decoded 1 B..=25 MB, magic bytes must match format, else invalid. */
@@ -992,6 +994,7 @@ export const RPC_COMMANDS = [
   'stats.clear',
   'images.stats',
   'images.clear',
+  'images.warm',
   'screenshot.save',
   'screenshot.mpv',
   'screenshot.open',

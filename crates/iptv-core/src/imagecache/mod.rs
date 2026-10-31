@@ -21,6 +21,10 @@
 //! 4. Otherwise one fetch per URL and scope ([`flight_scope`]: the trusted
 //!    authority under the guard, and the source's request headers) runs as a
 //!    detached task (single flight); concurrent callers share its outcome.
+//!    Before it asks the host it takes an upstream slot: at most
+//!    [`UPSTREAM_PER_HOST`] fetches go to one `host:port` at once and
+//!    [`UPSTREAM_MAX`] in all, so a parallel wall neither floods a provider's
+//!    host nor holds more than a few bodies in memory.
 //!    The body is checked (image type, at most [`MAX_IMAGE_BYTES`]), written
 //!    to a temp name and renamed into place, and the callers are answered.
 //!    The index row is written in the background: a catalog import holds
@@ -37,13 +41,26 @@
 //! counts what the grids actually show. A variant is made from the cached
 //! original when there is one (full-size files cached before hints existed
 //! are reused this way, then age out by LRU since the UI stops asking for
-//! them), else from one upstream fetch whose original is not kept. An image
+//! them), else from the smallest cached variant wider than it (a logo shown
+//! in the list and in the guide, a poster in a rail and in a grid), else from
+//! one upstream fetch whose original is not kept. An image
 //! the resizer leaves alone (SVG, GIF, WebP, animated PNG, already narrow
 //! enough, see [`resize`]) is stored and served as the original, and the
 //! decision is remembered in memory so later hints skip the decode. The
 //! upstream fetch for a variant asks for JPEG and PNG by name and leaves
 //! WebP and AVIF out of its `Accept`, so a host that picks the format from
 //! the request sends one the resizer can shrink.
+//!
+//! Warming ([`warm`], `images.warm`): the browser opens about six connections
+//! to the image route, and a request that misses holds one for its whole
+//! upstream fetch, so a cold wall used to be fetched six (server mode: four)
+//! at a time. The UI names the pictures it has queued, and each one that is
+//! not cached is checked like a request (the guard included) and queued
+//! here; queued warms start whenever an upstream slot is free, the newest
+//! batch first. A picture's own request then joins the running fetch or
+//! finds the file. A request that waits for a slot always gets the next free
+//! one before any warm, so the pictures a user scrolled to never wait behind
+//! the warms of a screen they left.
 //!
 //! Every index write goes through one writer task ([`store`]) that batches
 //! them into a single transaction, so fifty posters loading during a catalog
@@ -68,18 +85,19 @@ use crate::model::{RequestHeaders, Settings};
 use crate::state::AppState;
 use breaker::{Admit, Breakers};
 use futures::future::{BoxFuture, FutureExt, Shared};
+use futures::StreamExt;
 use parking_lot::{Mutex, RwLock};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use store::{Lookup, Op};
-use tokio::sync::{mpsc, oneshot, OnceCell, Semaphore};
+use tokio::sync::{mpsc, oneshot, OnceCell, OwnedSemaphorePermit, Semaphore};
 use url::Url;
 
 /// Folder under the data dir that holds the cached files.
@@ -110,6 +128,23 @@ static HEAD_TIMEOUT_MS: AtomicU64 = AtomicU64::new(0);
 const MAX_FAILURES: usize = 4096;
 /// Variant keys remembered as "serve the original" at most.
 const MAX_KEPT: usize = 65_536;
+/// Upstream fetches at once to one `host:port`, for every caller together.
+/// A little above the browser's six connections, so a warmed wall fills
+/// faster than the browser alone would fetch it, and low enough for a
+/// provider's panel that also serves the streams and may count connections.
+pub const UPSTREAM_PER_HOST: usize = 8;
+/// Upstream fetches at once in all. Each holds its whole body in memory (up
+/// to [`MAX_IMAGE_BYTES`]) until its copy is stored.
+pub const UPSTREAM_MAX: usize = 16;
+/// Pictures one [`warm`] takes at most, and warms queued at most: about
+/// one settled screen of posters or logos with the rows just past its edge.
+pub const WARM_MAX_ITEMS: usize = 48;
+/// Pictures of one [`warm`] checked at once (each check reads the index on
+/// the blocking pool, which shares the database pool with the UI's RPCs).
+const WARM_CHECKS: usize = 4;
+/// Hosts with an upstream slot count kept at most; a full map keeps only
+/// the hosts with a fetch running or waiting.
+const MAX_SLOT_HOSTS: usize = 1024;
 /// Extension key of the runtime singleton.
 const EXT_KEY: &str = "imagecache";
 
@@ -483,6 +518,20 @@ struct Job {
     client: reqwest::Client,
 }
 
+impl Job {
+    /// Its key in [`Flights`] and the failure memory.
+    fn flight_key(&self) -> String {
+        format!("{}|{}", self.key, self.scope)
+    }
+}
+
+/// The upstream slots one fetch holds: one of its host's
+/// ([`UPSTREAM_PER_HOST`]) and one of all ([`UPSTREAM_MAX`]).
+struct Slots {
+    _host: Option<OwnedSemaphorePermit>,
+    _all: Option<OwnedSemaphorePermit>,
+}
+
 /// The runtime singleton (stored in `AppState::extensions`). It holds no
 /// `Arc<AppState>`, so it never keeps the state alive; dropping the state
 /// drops the writer's sender, and the writer exits once its queue drains.
@@ -511,6 +560,13 @@ struct ImageCache {
     resizes: Semaphore,
     /// Image hosts that stopped answering.
     breakers: Mutex<Breakers>,
+    /// Upstream slots per `host:port` ([`UPSTREAM_PER_HOST`] each).
+    host_slots: Mutex<HashMap<Authority, Arc<Semaphore>>>,
+    /// Upstream slots in all ([`UPSTREAM_MAX`]).
+    upstream: Arc<Semaphore>,
+    /// Warmed pictures waiting for a free upstream slot, newest batch first
+    /// (at most [`WARM_MAX_ITEMS`]).
+    warms: Mutex<VecDeque<Job>>,
 }
 
 /// Resizes at once: every core but one, so a poster wall's first view leaves
@@ -543,6 +599,9 @@ fn cache(state: &AppState) -> Arc<ImageCache> {
             next_flight: AtomicU64::new(1),
             resizes: Semaphore::new(resize_slots()),
             breakers: Mutex::default(),
+            host_slots: Mutex::default(),
+            upstream: Arc::new(Semaphore::new(UPSTREAM_MAX)),
+            warms: Mutex::default(),
         })
     })
 }
@@ -659,6 +718,65 @@ impl ImageCache {
         })
     }
 
+    /// The first of `keys` that is stored, in the order given, with its
+    /// index: [`Self::lookup`] of them all with one query.
+    async fn lookup_first(
+        &self,
+        mut keys: Vec<String>,
+    ) -> Result<Option<(usize, CachedImage)>, ImageError> {
+        // Files whose rows are still queued come first, as in `lookup`: the
+        // writer drops an entry only after its row commits, so an entry gone
+        // by now is found by the query below. Only the keys before the first
+        // such file are worth a query.
+        let mut queued = None;
+        for (at, key) in keys.iter().enumerate() {
+            if let Some(image) = self.pending_file(key).await {
+                queued = Some((at, image));
+                break;
+            }
+        }
+        keys.truncate(queued.as_ref().map_or(keys.len(), |(at, _)| *at));
+        if keys.is_empty() {
+            return Ok(queued);
+        }
+        let dir = self.dir.clone();
+        let asked = keys.clone();
+        let found = blocking(&self.pool, &self.db_path, move |c| {
+            store::lookup_first(c, &dir, &asked)
+        })
+        .await
+        .map_err(ImageError::local)?;
+        let mut stale = Vec::new();
+        let mut first = queued;
+        for (at, (key, found)) in keys.iter().zip(found).enumerate() {
+            match found {
+                Lookup::Hit {
+                    content_type,
+                    bytes,
+                    last_access,
+                } => {
+                    self.touch(key, last_access);
+                    first = Some((
+                        at,
+                        CachedImage {
+                            path: file_path(&self.dir, key),
+                            content_type,
+                            bytes,
+                            hit: true,
+                        },
+                    ));
+                    break;
+                }
+                Lookup::Stale => stale.push(key.clone()),
+                Lookup::Miss => {}
+            }
+        }
+        if !stale.is_empty() {
+            self.send(Op::Forget { keys: stale });
+        }
+        Ok(first)
+    }
+
     /// Queues a `last_access` write when the stored one is a minute old and
     /// no write for `key` was queued in the last minute.
     fn touch(&self, key: &str, last_access: i64) {
@@ -731,40 +849,7 @@ impl ImageCache {
 
     /// Joins the flight for `job` (same URL and scope) or starts one.
     async fn join_or_start(self: &Arc<Self>, job: Job) -> Result<CachedImage, ImageError> {
-        let flight_key = format!("{}|{}", job.key, job.scope);
-        let (fut, resolved) = {
-            let mut flights = self.flights.lock();
-            match flights.get(&flight_key) {
-                Some(flight) => (flight.fut.clone(), flight.fut.peek().is_some()),
-                None => {
-                    if let Some(err) = self.remembered(&flight_key) {
-                        return Err(err);
-                    }
-                    let id = self.next_flight.fetch_add(1, Ordering::Relaxed);
-                    let (tx, rx) = oneshot::channel::<FlightResult>();
-                    let fut = rx
-                        .map(|r| {
-                            r.unwrap_or_else(|_| {
-                                Err(ImageError::new(
-                                    ImageErrorKind::Local,
-                                    "The image fetch stopped unexpectedly.",
-                                ))
-                            })
-                        })
-                        .boxed()
-                        .shared();
-                    flights.insert(
-                        flight_key.clone(),
-                        Flight {
-                            id,
-                            fut: fut.clone(),
-                        },
-                    );
-                    tokio::spawn(Arc::clone(self).run_flight(flight_key, id, job, tx));
-                    (fut, false)
-                }
-            }
-        };
+        let (fut, resolved) = self.flight(job, None)?;
         let done = fut.await?;
         Ok(CachedImage {
             // Joining a finished flight served bytes already on disk.
@@ -773,16 +858,59 @@ impl ImageCache {
         })
     }
 
+    /// The flight for `job`: the running one (true with it when it already
+    /// finished), or a new detached one that fetches with `slots` when they
+    /// were taken for it, else waits for its own. A failure remembered for
+    /// the key and scope is returned instead.
+    fn flight(
+        self: &Arc<Self>,
+        job: Job,
+        slots: Option<Slots>,
+    ) -> Result<(Shared<BoxFuture<'static, FlightResult>>, bool), ImageError> {
+        let flight_key = job.flight_key();
+        let mut flights = self.flights.lock();
+        if let Some(flight) = flights.get(&flight_key) {
+            return Ok((flight.fut.clone(), flight.fut.peek().is_some()));
+        }
+        if let Some(err) = self.remembered(&flight_key) {
+            return Err(err);
+        }
+        let id = self.next_flight.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel::<FlightResult>();
+        let fut = rx
+            .map(|r| {
+                r.unwrap_or_else(|_| {
+                    Err(ImageError::new(
+                        ImageErrorKind::Local,
+                        "The image fetch stopped unexpectedly.",
+                    ))
+                })
+            })
+            .boxed()
+            .shared();
+        flights.insert(
+            flight_key.clone(),
+            Flight {
+                id,
+                fut: fut.clone(),
+            },
+        );
+        tokio::spawn(Arc::clone(self).run_flight(flight_key, id, job, slots, tx));
+        Ok((fut, false))
+    }
+
     /// The detached body of one flight: it runs to the end even when every
-    /// caller went away, so the next request finds the image stored.
+    /// caller went away, so the next request finds the image stored. Its
+    /// upstream slots are free again when it ends, so a waiting warm may go.
     async fn run_flight(
         self: Arc<Self>,
         flight_key: String,
         id: u64,
         job: Job,
+        slots: Option<Slots>,
         tx: oneshot::Sender<FlightResult>,
     ) {
-        match self.download(&job, id).await {
+        match self.download(&job, id, slots).await {
             Ok(done) => {
                 // The file is in place; its row may still wait for the write
                 // lock. A request arriving before it commits finds the
@@ -801,6 +929,7 @@ impl ImageCache {
                 let _ = tx.send(Err(err));
             }
         }
+        self.pump_warms();
     }
 
     /// Removes the flight (and remembers its failure, unless it was local or
@@ -820,10 +949,12 @@ impl ImageCache {
 
     /// Fetches, validates and stores one image for flight `id`, and queues
     /// its index row (pending until the writer's batch is done). A variant
-    /// job resizes the cached original when there is one, else the fetched
-    /// body, and stores only the result (or only the original, when the
-    /// resizer leaves it alone).
-    async fn download(&self, job: &Job, id: u64) -> Result<Done, ImageError> {
+    /// job resizes the cached original when there is one, else the smallest
+    /// cached variant wider than it, else the fetched body, and stores only
+    /// the result (or only the original, when the resizer leaves it alone).
+    /// The upstream fetch uses `slots` when a warm took them, else waits for
+    /// its own.
+    async fn download(&self, job: &Job, id: u64, slots: Option<Slots>) -> Result<Done, ImageError> {
         // An earlier flight may have stored it after the caller looked.
         if let Some(image) = self.lookup(&job.key).await? {
             return Ok(Done {
@@ -833,27 +964,52 @@ impl ImageCache {
         }
         let base_key = cache_key(&job.url);
         if let Some(width) = job.width {
-            if let Some(original) = self.lookup(&base_key).await? {
+            // The original first (the best source), then the wider copies
+            // from the smallest up (the cheapest to decode). A picture shown
+            // at two sizes is fetched once.
+            let sources = std::iter::once(base_key.clone())
+                .chain(
+                    resize::WIDTH_BUCKETS
+                        .iter()
+                        .filter(|b| **b > width)
+                        .map(|b| variant_key(&job.url, *b)),
+                )
+                .collect();
+            if let Some((at, source)) = self.lookup_first(sources).await? {
                 // Evicted between the lookup and the read: fetch it below.
-                if let Ok(body) = tokio::fs::read(&original.path).await {
+                if let Ok(body) = tokio::fs::read(&source.path).await {
                     if let Some(done) = self.store_variant(job, id, width, body).await? {
                         return Ok(Done {
                             fetched: false,
                             ..done
                         });
                     }
-                    self.keep(&job.key);
-                    return Ok(Done {
-                        image: original,
-                        fetched: false,
-                    });
+                    // The resizer leaves the original alone: it serves this
+                    // width. A wider copy it leaves alone (a re-encode that
+                    // would not be smaller) is not marked, since `kept`
+                    // sends later requests to the original, which is not
+                    // stored: the original is fetched below as on any miss.
+                    if at == 0 {
+                        self.keep(&job.key);
+                        return Ok(Done {
+                            image: source,
+                            fetched: false,
+                        });
+                    }
                 }
             }
         }
         let host = job.url.host_str().unwrap_or("the image server").to_owned();
+        let authority = Authority::of(&job.url);
+        // Taken before the breaker is asked and the clock starts: time spent
+        // queued behind the host's other fetches is not the host's silence.
+        let _slots = match slots {
+            Some(slots) => slots,
+            None => self.upstream_slots(authority.as_ref()).await,
+        };
         // Asked only now, so disk hits and variants made from a cached
-        // original never wait on a host's breaker.
-        let host_key = Authority::of(&job.url).map(|a| (a, job.scope.clone()));
+        // copy never wait on a host's breaker.
+        let host_key = authority.map(|a| (a, job.scope.clone()));
         let started = Instant::now();
         let admitted = host_key
             .as_ref()
@@ -937,6 +1093,101 @@ impl ImageCache {
                 skip_secs = breaker::open_for().as_secs(),
                 "an image host stopped answering; its images fail at once for a while"
             );
+        }
+    }
+
+    /// The upstream slot count of `host`.
+    fn host_slots(&self, host: &Authority) -> Arc<Semaphore> {
+        let mut hosts = self.host_slots.lock();
+        if let Some(slots) = hosts.get(host) {
+            return slots.clone();
+        }
+        if hosts.len() >= MAX_SLOT_HOSTS {
+            // A fetch running or waiting holds a clone of its host's count.
+            hosts.retain(|_, slots| Arc::strong_count(slots) > 1);
+        }
+        let slots = Arc::new(Semaphore::new(UPSTREAM_PER_HOST));
+        hosts.insert(host.clone(), slots.clone());
+        slots
+    }
+
+    /// Waits for an upstream slot of `host`, then for one of all. In that
+    /// order, so fetches queued behind one slow host hold no slot that
+    /// another host could use. A waiting request gets each freed slot before
+    /// a warm does: [`Self::free_slots`] takes only slots nobody waits for.
+    async fn upstream_slots(&self, host: Option<&Authority>) -> Slots {
+        // Never closed, so a permit always comes.
+        let host = match host {
+            Some(host) => self.host_slots(host).acquire_owned().await.ok(),
+            None => None,
+        };
+        let all = self.upstream.clone().acquire_owned().await.ok();
+        Slots {
+            _host: host,
+            _all: all,
+        }
+    }
+
+    /// [`Self::upstream_slots`] without waiting: `None` while either is
+    /// taken or wanted by a waiting request.
+    fn free_slots(&self, host: Option<&Authority>) -> Option<Slots> {
+        let host = match host {
+            Some(host) => Some(self.host_slots(host).try_acquire_owned().ok()?),
+            None => None,
+        };
+        let all = self.upstream.clone().try_acquire_owned().ok()?;
+        Some(Slots {
+            _host: host,
+            _all: Some(all),
+        })
+    }
+
+    /// Queues the jobs of one [`warm`] ahead of older warms, in their order,
+    /// and starts what the free slots allow. The oldest are dropped past
+    /// [`WARM_MAX_ITEMS`]: they belong to a screen the user already left.
+    fn queue_warms(self: &Arc<Self>, jobs: Vec<Job>) {
+        if jobs.is_empty() {
+            return;
+        }
+        {
+            let mut warms = self.warms.lock();
+            for job in jobs.into_iter().rev() {
+                warms.push_front(job);
+            }
+            warms.truncate(WARM_MAX_ITEMS);
+        }
+        self.pump_warms();
+    }
+
+    /// Starts queued warms while upstream slots are free, first in queue
+    /// first, passing over a host whose slots are all taken. A warm whose
+    /// image is being fetched already is dropped.
+    fn pump_warms(self: &Arc<Self>) {
+        loop {
+            let (job, slots) = {
+                let mut warms = self.warms.lock();
+                let mut next = None;
+                let mut i = 0;
+                while i < warms.len() && self.upstream.available_permits() > 0 {
+                    if self.flights.lock().contains_key(&warms[i].flight_key()) {
+                        warms.remove(i);
+                        continue;
+                    }
+                    match self.free_slots(Authority::of(&warms[i].url).as_ref()) {
+                        Some(slots) => {
+                            next = warms.remove(i).map(|job| (job, slots));
+                            break;
+                        }
+                        None => i += 1,
+                    }
+                }
+                match next {
+                    Some(next) => next,
+                    None => return,
+                }
+            };
+            // A remembered failure starts nothing; the slots go back.
+            let _ = self.flight(job, Some(slots));
         }
     }
 
@@ -1142,13 +1393,44 @@ pub async fn fetch_sized_within(
     width: Option<u32>,
     wait: Option<Duration>,
 ) -> Result<CachedImage, ImageError> {
+    let cache = cache(state);
+    let job = match resolve(state, &cache, url, source_id, width).await? {
+        Resolved::Stored(image) => return Ok(image),
+        Resolved::Missing(job) => job,
+    };
+    let host = job.url.host_str().unwrap_or("the image server").to_owned();
+    let flight = cache.join_or_start(job);
+    let Some(wait) = wait else {
+        return flight.await;
+    };
+    tokio::time::timeout(wait, flight)
+        .await
+        .unwrap_or_else(|_| Err(ImageError::pending(&host)))
+}
+
+/// What a request comes to before anything is fetched.
+enum Resolved {
+    /// On disk (or served by the original), past the guard.
+    Stored(CachedImage),
+    /// Not stored: the fetch that gets it.
+    Missing(Job),
+}
+
+/// The guard check and the lookups of [`fetch_sized_within`]: the stored
+/// image, or the job that fetches it.
+async fn resolve(
+    state: &Arc<AppState>,
+    cache: &ImageCache,
+    url: &str,
+    source_id: Option<&str>,
+    width: Option<u32>,
+) -> Result<Resolved, ImageError> {
     let url = normalize_url(url)?;
     let width = width.and_then(resize::bucket);
     let key = match width {
         Some(w) => variant_key(&url, w),
         None => cache_key(&url),
     };
-    let cache = cache(state);
     cache.ready().await?;
     let mode = http::server_mode(state);
     // Server mode checks the URL against the source's authority first, hit
@@ -1163,11 +1445,11 @@ pub async fn fetch_sized_within(
         None => None,
     };
     if let Some(image) = cache.lookup(&key).await? {
-        return Ok(image);
+        return Ok(Resolved::Stored(image));
     }
     if width.is_some() && cache.is_kept(&key) {
         if let Some(image) = cache.lookup(&cache_key(&url)).await? {
-            return Ok(image);
+            return Ok(Resolved::Stored(image));
         }
     }
     let source = match checked {
@@ -1183,22 +1465,53 @@ pub async fn fetch_sized_within(
         &source.headers,
     );
     let client = http::guarded_client(state, trusted);
-    let host = url.host_str().unwrap_or("the image server").to_owned();
-    let job = Job {
+    Ok(Resolved::Missing(Job {
         url,
         key,
         width,
         scope,
         headers: source.headers,
         client,
-    };
-    let flight = cache.join_or_start(job);
-    let Some(wait) = wait else {
-        return flight.await;
-    };
-    tokio::time::timeout(wait, flight)
-        .await
-        .unwrap_or_else(|_| Err(ImageError::pending(&host)))
+    }))
+}
+
+/// One picture for [`warm`]: what a cache-route URL asks for (its `url`,
+/// `sourceId` and `w`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarmItem {
+    pub url: String,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    /// Width hint in device pixels, as the route's `w`.
+    #[serde(default)]
+    pub w: Option<u32>,
+}
+
+/// Gets the upstream fetches of pictures a screen is about to ask for going
+/// before their own requests reach the cache. Each item is checked exactly
+/// as its request would be (the server-mode guard included, then the
+/// lookups), at most [`WARM_MAX_ITEMS`] of them; the ones not stored are
+/// queued and start whenever an upstream slot is free. Returns once they are
+/// queued, without waiting for any fetch. Failures are dropped: each
+/// picture's own request reports them.
+pub async fn warm(state: &Arc<AppState>, items: Vec<WarmItem>) {
+    let cache = cache(state);
+    let jobs: Vec<Job> = futures::stream::iter(items.into_iter().take(WARM_MAX_ITEMS))
+        .map(|item| {
+            let cache = &cache;
+            async move { resolve(state, cache, &item.url, item.source_id.as_deref(), item.w).await }
+        })
+        .buffered(WARM_CHECKS)
+        .filter_map(|resolved| async move {
+            match resolved {
+                Ok(Resolved::Missing(job)) => Some(job),
+                Ok(Resolved::Stored(_)) | Err(_) => None,
+            }
+        })
+        .collect()
+        .await;
+    cache.queue_warms(jobs);
 }
 
 /// Disk hit, or fetch, validate and store. Concurrent calls for one URL share

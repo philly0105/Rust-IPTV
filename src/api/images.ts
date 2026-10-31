@@ -257,6 +257,33 @@ export function isImageCacheUrl(url: string | null | undefined): boolean {
   return !!desktopImageBase && url.startsWith(`${desktopImageBase}?`);
 }
 
+/** One picture for the core's `images.warm`: what a cache URL asks the route for. */
+export interface ImageWarmItem {
+  url: string;
+  sourceId?: string;
+  w?: number;
+}
+
+/**
+ * The `url`, `sourceId` and `w` a cache URL made by `imageUrl` carries, read as the route reads them
+ * (first value wins, a blank `sourceId` is none, `w` only when a positive whole number), so a warm
+ * names the same cached copy the picture's own request asks for. Null for any other URL.
+ */
+export function imageCacheRequest(url: string): ImageWarmItem | null {
+  if (!isImageCacheUrl(url)) return null;
+  const params = new URLSearchParams(url.slice(url.indexOf('?') + 1));
+  const src = params.get('url')?.trim();
+  if (!src) return null;
+  const item: ImageWarmItem = { url: src };
+  const sourceId = params.get('sourceId')?.trim();
+  if (sourceId) item.sourceId = sourceId;
+  const w = params.get('w')?.trim();
+  // Digits only, as the route parses it. Past the largest bucket both serve the original; a
+  // number too big for the core's field would fail the whole batch, so it is capped.
+  if (w && /^\+?\d+$/.test(w) && Number(w) > 0) item.w = Math.min(Number(w), 0xffff_ffff);
+  return item;
+}
+
 /**
  * The URLs to try for one picture, best first: for each source in order, its
  * cache URL, the original (once) and the cache URL again (`retry=1`),

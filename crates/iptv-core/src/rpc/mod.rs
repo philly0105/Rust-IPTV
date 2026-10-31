@@ -457,7 +457,7 @@ mod tests {
         };
         assert_eq!(
             sorted(crate::imagecache::rpc::COMMANDS),
-            ["images.clear", "images.stats"]
+            ["images.clear", "images.stats", "images.warm"]
         );
         assert_eq!(
             sorted(crate::screenshot::rpc::COMMANDS),

@@ -139,15 +139,68 @@ pub(super) fn lookup(conn: &mut Connection, dir: &Path, key: &str) -> CoreResult
     let Some((content_type, bytes, last_access)) = row else {
         return Ok(Lookup::Miss);
     };
-    let bytes = to_u64(bytes);
-    Ok(match fs::metadata(file_path(dir, key)) {
+    Ok(checked(dir, key, content_type, to_u64(bytes), last_access))
+}
+
+/// What the row of `key` says once its file is checked: a hit when the file
+/// is there with the recorded size, else stale.
+fn checked(dir: &Path, key: &str, content_type: String, bytes: u64, last_access: i64) -> Lookup {
+    match fs::metadata(file_path(dir, key)) {
         Ok(m) if m.is_file() && m.len() == bytes => Lookup::Hit {
             content_type,
             bytes,
             last_access,
         },
         _ => Lookup::Stale,
-    })
+    }
+}
+
+/// [`lookup`] of several keys with one query: what each of `keys` holds, in
+/// order, up to and including the first hit. A variant asks this for the
+/// copies it can be made from, best first.
+pub(super) fn lookup_first(
+    conn: &mut Connection,
+    dir: &Path,
+    keys: &[String],
+) -> CoreResult<Vec<Lookup>> {
+    let mut rows = HashMap::new();
+    if !keys.is_empty() {
+        // Not a cached statement: the list's length varies with the bucket,
+        // and each length would take a slot of the connection's cache.
+        let marks = vec!["?"; keys.len()].join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT key, content_type, bytes, last_access FROM image_cache WHERE key IN ({marks})"
+        ))?;
+        let found = stmt.query_map(rusqlite::params_from_iter(keys), |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ),
+            ))
+        })?;
+        for row in found {
+            let (key, row) = row?;
+            rows.insert(key, row);
+        }
+    }
+    let mut out = Vec::with_capacity(keys.len());
+    for key in keys {
+        let found = match rows.remove(key) {
+            Some((content_type, bytes, last_access)) => {
+                checked(dir, key, content_type, to_u64(bytes), last_access)
+            }
+            None => Lookup::Miss,
+        };
+        let hit = matches!(found, Lookup::Hit { .. });
+        out.push(found);
+        if hit {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 /// Every `(key, bytes)` of the index.
@@ -677,6 +730,44 @@ mod tests {
         assert_eq!(report.removed, 0);
         assert!(file_path(dir.path(), &d).exists());
         assert!(dir.path().join("aa").join("notes.txt").exists());
+    }
+
+    #[test]
+    fn lookup_first_reads_keys_in_order_up_to_the_first_intact_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = db::open_and_migrate(&tmp.path().join("db.sqlite")).unwrap();
+        let dir = tmp.path().join(super::super::DIR_NAME);
+        let key = |c: char| c.to_string().repeat(64);
+        let (none, stale, hit, later) = (key('a'), key('b'), key('c'), key('d'));
+        let conn = &mut pool.get().unwrap();
+        for k in [&stale, &hit, &later] {
+            conn.execute(
+                "INSERT INTO image_cache (key, url, content_type, bytes, created_at, last_access)
+                 VALUES (?1, ?1, 'image/png', 4, 1, 7)",
+                params![k],
+            )
+            .unwrap();
+        }
+        // `stale` has no file; `hit` and `later` have theirs.
+        for k in [&hit, &later] {
+            let p = file_path(&dir, k);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, b"\x89PNG").unwrap();
+        }
+        let keys = [none.clone(), stale, hit, later];
+        let found = lookup_first(conn, &dir, &keys).unwrap();
+        assert_eq!(found.len(), 3, "nothing after the first hit is read");
+        assert!(matches!(found[0], Lookup::Miss));
+        assert!(matches!(found[1], Lookup::Stale));
+        assert!(matches!(
+            &found[2],
+            Lookup::Hit { content_type, bytes: 4, last_access: 7 } if content_type == "image/png"
+        ));
+        assert!(matches!(
+            lookup_first(conn, &dir, &[none]).unwrap()[..],
+            [Lookup::Miss]
+        ));
+        assert!(lookup_first(conn, &dir, &[]).unwrap().is_empty());
     }
 
     #[test]

@@ -3,8 +3,9 @@
 //! wider than the hint's bucket, cached under its own key, so a poster wall
 //! moves and stores a fraction of the bytes. SVG, GIF, small and broken
 //! images are served as stored; PNG keeps its transparency; a full-size
-//! original already in the cache is reused instead of refetched; a host that
-//! picks the format from `Accept` sends a variant fetch a JPEG, not WebP.
+//! original or a wider copy already in the cache is reused instead of
+//! refetched; a host that picks the format from `Accept` sends a variant
+//! fetch a JPEG, not WebP.
 
 use axum::extract::{Request, State};
 use axum::http::header;
@@ -241,6 +242,143 @@ async fn a_full_size_original_already_cached_is_resized_without_a_refetch() {
     let norm = normalize_url(&url).unwrap();
     assert!(keys.contains(&cache_key(&norm)));
     assert!(keys.contains(&variant_key(&norm, 192)));
+}
+
+/// Width and height of the image stored at `path`.
+fn dimensions(path: &Path) -> (u32, u32) {
+    image::load_from_memory(&std::fs::read(path).unwrap())
+        .unwrap()
+        .dimensions()
+}
+
+#[tokio::test]
+async fn a_smaller_copy_is_made_from_a_wider_one_without_a_refetch() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    let url = stub.url("/poster.jpg");
+    let norm = normalize_url(&url).unwrap();
+
+    // A rail at DPR 2 (384), then a grid at DPR 1 (192).
+    let wide = imagecache::fetch_sized(&state, &url, None, Some(360))
+        .await
+        .unwrap();
+    assert_eq!(dimensions(&wide.path), (384, 576));
+    let small = imagecache::fetch_sized(&state, &url, None, Some(150))
+        .await
+        .unwrap();
+    assert!(
+        small.hit,
+        "made on disk, reported as a hit like the original's"
+    );
+    assert_eq!(small.content_type, "image/jpeg");
+    assert_eq!(dimensions(&small.path), (192, 288));
+    assert_eq!(stub.hits("/poster.jpg"), 1, "the poster was fetched once");
+    let keys: Vec<String> = rows(&state).await.into_iter().map(|r| r.0).collect();
+    assert_eq!(
+        keys,
+        [variant_key(&norm, 192), variant_key(&norm, 384)],
+        "two copies, no original"
+    );
+    // The new copy is a disk hit from now on.
+    let again = imagecache::fetch_sized(&state, &url, None, Some(180))
+        .await
+        .unwrap();
+    assert!(again.hit);
+    assert_eq!(again.path, small.path);
+
+    // Nothing marked the copy as served by the original: the original,
+    // which was never stored, is fetched when it is asked for.
+    let full = imagecache::fetch(&state, &url, None).await.unwrap();
+    assert!(!full.hit);
+    assert_eq!(full.bytes, poster_jpeg().len() as u64);
+    assert_eq!(stub.hits("/poster.jpg"), 2);
+}
+
+#[tokio::test]
+async fn a_logo_in_the_list_and_the_guide_is_fetched_once_and_keeps_its_transparency() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    let url = stub.url("/logo.png");
+    // The Live list at DPR 2 (40 px: 96), then the guide (32 px: 64).
+    let list = imagecache::fetch_sized(&state, &url, None, Some(80))
+        .await
+        .unwrap();
+    let guide = imagecache::fetch_sized(&state, &url, None, Some(64))
+        .await
+        .unwrap();
+    assert_eq!(stub.hits("/logo.png"), 1);
+    assert_ne!(guide.path, list.path);
+    assert_eq!(guide.content_type, "image/png");
+    let decoded = image::load_from_memory(&std::fs::read(&guide.path).unwrap())
+        .unwrap()
+        .into_rgba8();
+    assert_eq!(decoded.dimensions(), (64, 64));
+    assert_eq!(decoded.get_pixel(3, 30)[3], 0);
+    assert_eq!(decoded.get_pixel(60, 30)[3], 255);
+}
+
+#[tokio::test]
+async fn a_wider_copy_gone_from_disk_or_left_alone_by_the_resizer_falls_back_to_one_fetch() {
+    let stub = spawn_stub().await;
+    let dir = tempfile::tempdir().unwrap();
+    let state = new_state(dir.path()).await;
+    let url = stub.url("/poster.jpg");
+    let norm = normalize_url(&url).unwrap();
+
+    // The wider copy's file vanished (evicted by another process, say).
+    let wide = imagecache::fetch_sized(&state, &url, None, Some(360))
+        .await
+        .unwrap();
+    rows(&state).await;
+    std::fs::remove_file(&wide.path).unwrap();
+    let small = imagecache::fetch_sized(&state, &url, None, Some(150))
+        .await
+        .unwrap();
+    assert!(!small.hit);
+    assert_eq!(dimensions(&small.path), (192, 288));
+    assert_eq!(stub.hits("/poster.jpg"), 2);
+    let keys: Vec<String> = rows(&state).await.into_iter().map(|r| r.0).collect();
+    assert_eq!(keys, [variant_key(&norm, 192)], "the stale row is dropped");
+
+    // A wider copy the resizer will not shrink (it only resizes JPEG and
+    // PNG): the copy is fetched as on any miss, and later requests at
+    // that width are not sent to an original that is not stored.
+    let other = stub.url("/negotiated.jpg");
+    let other_norm = normalize_url(&other).unwrap();
+    let key = variant_key(&other_norm, 1024);
+    let path = dir
+        .path()
+        .join(imagecache::DIR_NAME)
+        .join(&key[..2])
+        .join(&key);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, WEBP).unwrap();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO image_cache (key, url, content_type, bytes, created_at, last_access)
+                 VALUES (?1, 'x', 'image/webp', ?2, 1, 1)",
+                rusqlite::params![key, WEBP.len() as i64],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let copy = imagecache::fetch_sized(&state, &other, None, Some(512))
+        .await
+        .unwrap();
+    assert!(!copy.hit);
+    assert_eq!(copy.content_type, "image/jpeg");
+    assert_eq!(dimensions(&copy.path), (512, 768));
+    assert_eq!(stub.hits("/negotiated.jpg"), 1);
+    let again = imagecache::fetch_sized(&state, &other, None, Some(512))
+        .await
+        .unwrap();
+    assert!(again.hit);
+    assert_eq!(again.path, copy.path);
+    assert_eq!(stub.hits("/negotiated.jpg"), 1);
 }
 
 #[tokio::test]

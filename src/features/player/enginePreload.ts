@@ -47,8 +47,11 @@ function load(name: keyof typeof DEFAULT_LOADERS): Promise<unknown> | undefined 
   if (known) return known;
   const job = loaders[name]().then(
     (mod) => {
-      // Loaded for a play (or a page that plays): its first TS start finds a worker booted.
-      if (name === 'mpegts') bootTsWorkers(mod, 1);
+      // Loaded for a play (or a page that plays): its first TS start finds a worker booted. Not
+      // when mpv or VLC play everything: `preloadEngineFor` loads mpegts.js before the mode is
+      // known, and a spare is its own isolate (about 1-3 MB) that they never take. A built-in TS
+      // play there still gets one after its start (the patch's wantSpares), the wall its own.
+      if (name === 'mpegts' && !playersAllOutside()) bootTsWorkers(mod, 1);
       return mod;
     },
     () => {

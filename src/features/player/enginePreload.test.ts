@@ -196,6 +196,23 @@ describe('spare mpegts.js workers (F2-2)', () => {
     expect(prewarmWorkers).toHaveBeenCalledTimes(3);
   });
 
+  it('boots no spare when a play loads mpegts.js for mpv or VLC, though the wall still does', async () => {
+    env.desktop = true;
+    queryClient.setQueryData(rpcKey('settings.get'), { player: 'mpv', vodPlayer: 'vlc', catchupPlayer: 'embedded-mpv' } as Settings);
+    vi.useFakeTimers();
+    const { loaders: l, prewarmWorkers } = tsLoaders();
+    __setEngineLoadersForTests(l);
+    // Every play asks for its engine before the mode is decided.
+    preloadEngineFor('http://h/live/1.ts');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(l.mpegts).toHaveBeenCalledTimes(1);
+    expect(prewarmWorkers).not.toHaveBeenCalled();
+    // The wall always plays in the built-in engines.
+    prewarmTsWorkers(2);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(prewarmWorkers.mock.calls).toEqual([[2]]);
+  });
+
   it('boots none without MSE, and an older bundle without the call is no error', async () => {
     vi.useFakeTimers();
     const { loaders: l, prewarmWorkers } = tsLoaders(false);

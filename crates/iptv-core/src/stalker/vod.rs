@@ -7,7 +7,7 @@
 use super::mapping;
 use super::protocol::{self as p, absolutize, into_list, n, s};
 use super::session::{Req, StalkerClient};
-use super::{CachedItem, Runtime};
+use super::{CachedItem, Runtime, StoredItem};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
     ContentType, Episode, ItemRef, Page, PageQuery, Season, SeriesDetail, SortKey, VodDetail,
@@ -222,7 +222,7 @@ pub async fn remember_rows(
     names: &std::collections::HashMap<String, String>,
 ) {
     let runtime = Runtime::get(state);
-    let mut persisted: Vec<(ItemRef, CachedItem)> = Vec::with_capacity(rows.len());
+    let mut persisted: Vec<(ItemRef, StoredItem)> = Vec::with_capacity(rows.len());
     for row in rows {
         let Some(id) = mapping::vod_id(&row.raw) else {
             continue;
@@ -232,21 +232,22 @@ pub async fn remember_rows(
         } else {
             ContentType::Movie
         };
-        let mut raw = row.raw.clone();
-        if kind == Kind::Series {
-            // Mark the origin so detail lookups use the series API.
-            raw["__kind"] = Value::from("series");
-        }
         let r = ItemRef::new(source_id, ct, id);
         // `*` is the all-categories listing of a row that names none.
         let category_id = (!row.category_id.is_empty() && row.category_id != "*")
             .then(|| row.category_id.clone());
-        let item = CachedItem {
-            raw,
-            category_name: names.get(&row.category_id).cloned(),
-            category_id,
+        let category_name = names.get(&row.category_id).cloned();
+        // The row's text is made once: memory and the background write
+        // share it.
+        let item = if kind == Kind::Series {
+            // Mark the origin so detail lookups use the series API.
+            let mut raw = row.raw.clone();
+            raw["__kind"] = Value::from("series");
+            StoredItem::new(&raw, category_name, category_id)
+        } else {
+            StoredItem::new(&row.raw, category_name, category_id)
         };
-        runtime.remember(&r, item.clone());
+        runtime.remember_stored(&r, item.clone());
         persisted.push((r, item));
     }
     // Written in the background: the page does not wait for it (DB-1).

@@ -86,7 +86,75 @@ pub fn channel_row(
     })
 }
 
-/// Rebuilds the portal-ish raw value of a stored channel (for playback).
+/// The members of a `get_all_channels` item a sync reads: what
+/// [`channel_row`] and [`archive_hours`] read, plus `tv_genre_id` for the
+/// category. A portal sends 40-50 members per channel; only these are
+/// decoded. A member sent as `null` reads as missing, as it does from a
+/// parsed item.
+#[derive(serde::Deserialize)]
+struct ChannelFields {
+    #[serde(default)]
+    id: Option<Value>,
+    #[serde(default)]
+    name: Option<Value>,
+    #[serde(default)]
+    cmd: Option<Value>,
+    #[serde(default)]
+    number: Option<Value>,
+    #[serde(default)]
+    logo: Option<Value>,
+    #[serde(default)]
+    xmltv_id: Option<Value>,
+    #[serde(default)]
+    tv_genre_id: Option<Value>,
+    #[serde(default)]
+    tv_archive: Option<Value>,
+    #[serde(default)]
+    enable_tv_archive: Option<Value>,
+    #[serde(default)]
+    tv_archive_duration: Option<Value>,
+    #[serde(default)]
+    use_http_tmp_link: Option<Value>,
+    #[serde(default)]
+    use_load_balancing: Option<Value>,
+    #[serde(default)]
+    censored: Option<Value>,
+}
+
+/// One `get_all_channels` item reduced to the members a sync reads, for
+/// [`channel_row`]. An item that is not an object, or repeats one of those
+/// members, is parsed whole instead, so it reads exactly as before.
+pub fn channel_fields(raw: &serde_json::value::RawValue) -> Value {
+    let text = raw.get();
+    if text.starts_with('{') {
+        if let Ok(f) = serde_json::from_str::<ChannelFields>(text) {
+            let mut m = serde_json::Map::new();
+            for (k, v) in [
+                ("id", f.id),
+                ("name", f.name),
+                ("cmd", f.cmd),
+                ("number", f.number),
+                ("logo", f.logo),
+                ("xmltv_id", f.xmltv_id),
+                ("tv_genre_id", f.tv_genre_id),
+                ("tv_archive", f.tv_archive),
+                ("enable_tv_archive", f.enable_tv_archive),
+                ("tv_archive_duration", f.tv_archive_duration),
+                ("use_http_tmp_link", f.use_http_tmp_link),
+                ("use_load_balancing", f.use_load_balancing),
+                ("censored", f.censored),
+            ] {
+                if let Some(v) = v {
+                    m.insert(k.into(), v);
+                }
+            }
+            return Value::Object(m);
+        }
+    }
+    serde_json::from_str(text).unwrap_or(Value::Null)
+}
+
+/// Rebuilds the portal-ish raw value of a stored channel (for playback)./// Rebuilds the portal-ish raw value of a stored channel (for playback).
 pub fn channel_raw(extra: &Value) -> Value {
     let mut raw = json!({});
     if let Some(cmd) = extra.get("cmd") {
@@ -277,6 +345,40 @@ mod tests {
     use super::*;
 
     const EP: &str = "http://h/stalker_portal/server/load.php";
+
+    /// The reduced item maps to the same row as the whole parsed item,
+    /// whatever value types the portal sends.
+    #[test]
+    fn reduced_channel_items_map_like_parsed_ones() {
+        let items = [
+            r#"{"id": 101, "name": " News One ", "number": "7", "cmd": "ffrt http://h/101", "tv_genre_id": 1, "xmltv_id": "news.one", "logo": "/l/101.png", "tv_archive": "1", "tv_archive_duration": "48", "use_http_tmp_link": "0", "use_load_balancing": null, "censored": 0, "cmds": [{"id": 1}], "status": 1, "epg": []}"#,
+            r#"{"id": "102", "number": 0, "cmd": "http://h/102.m3u8", "enable_tv_archive": true, "tv_archive_duration": "0", "use_http_tmp_link": true, "censored": "1", "logo": 5}"#,
+            r#"{"id": "103", "name": "First", "name": "Second", "number": 3.0}"#,
+            r#"{"id": "105", "tv_archive": [], "censored": {}, "use_load_balancing": "false", "number": "12abc", "xmltv_id": 77, "logo": "http://cdn.example/x.png"}"#,
+            r#"{"id": null, "name": "No id"}"#,
+            r#"{"id": " ", "name": "Blank id"}"#,
+            r#"{"id": true, "tv_archive": 0, "enable_tv_archive": "0", "number": "-4"}"#,
+            r#"{"id": "7", "use_http_tmp_link": "1", "use_load_balancing": 1, "tv_archive": "true", "tv_archive_duration": 99999999999}"#,
+            r#""not a channel""#,
+            r#"null"#,
+            r#"["1", "array"]"#,
+            r#"{}"#,
+        ];
+        for item in items {
+            let raw: Box<serde_json::value::RawValue> = serde_json::from_str(item).unwrap();
+            let whole: Value = serde_json::from_str(item).unwrap();
+            let reduced = channel_fields(&raw);
+            let row = |v: &Value| {
+                channel_row("s", EP, v, ContentType::Live, "c".into(), 3).map(|r| format!("{r:?}"))
+            };
+            assert_eq!(row(&reduced), row(&whole), "{item}");
+            assert_eq!(
+                s(&reduced, "tv_genre_id"),
+                s(&whole, "tv_genre_id"),
+                "{item}"
+            );
+        }
+    }
 
     #[test]
     fn maps_categories_skipping_all() {

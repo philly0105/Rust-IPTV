@@ -251,6 +251,16 @@ impl StalkerClient {
         &self.mac
     }
 
+    /// The saved source this client is bound to; `None` for an unsaved
+    /// config (`stalker.test`).
+    pub fn source_id(&self) -> Option<&str> {
+        self.source_id.as_deref()
+    }
+
+    pub(crate) fn state(&self) -> &Arc<AppState> {
+        &self.state
+    }
+
     /// The resolved endpoint, establishing a session first if needed.
     pub async fn endpoint(&self) -> CoreResult<String> {
         Ok(self.ensure_session().await?.0)
@@ -303,13 +313,39 @@ impl StalkerClient {
         token: Option<&str>,
         attempts: u32,
     ) -> CoreResult<Body> {
+        Ok(
+            match self
+                .exchange(endpoint, req, token, attempts, decode_js)
+                .await?
+            {
+                Reply::Answer(v) => Body::Js(v),
+                Reply::Refused(m) => Body::AuthFailure(m),
+            },
+        )
+    }
+
+    /// One HTTP exchange with retries; `decode` reads the capped body. A
+    /// big list's body (tens of MB) is decoded on the blocking pool, not on
+    /// a runtime worker.
+    async fn exchange<T, D>(
+        &self,
+        endpoint: &str,
+        req: &Req,
+        token: Option<&str>,
+        attempts: u32,
+        decode: D,
+    ) -> CoreResult<Reply<T>>
+    where
+        T: Send + 'static,
+        D: Fn(&str, bytes::Bytes) -> CoreResult<Reply<T>> + Copy + Send + 'static,
+    {
         let url = p::build_request_url(endpoint, &req.params);
         let label = req.label();
         let headers = self.headers(token);
         let long = req.timeout >= LONG_TIMEOUT;
-        // A big list that timed out (no head in time, or a body under the
-        // minimum rate) would be as slow again: not retried.
-        let retry = |err: &CoreError| !(long && matches!(err, CoreError::Timeout(_)));
+        let retry = |err: &CoreError| {
+            !timeout_is_final(err, long, crate::sources::import_cancel().is_some())
+        };
         let op = || {
             let url = url.clone();
             let headers = headers.clone();
@@ -340,7 +376,7 @@ impl StalkerClient {
                     .map_err(|e| send_error(e, &url))?;
                 let status = resp.status();
                 if status.as_u16() == 401 || status.as_u16() == 403 {
-                    return Ok(Body::AuthFailure(format!("HTTP {}", status.as_u16())));
+                    return Ok(Reply::Refused(format!("HTTP {}", status.as_u16())));
                 }
                 if !status.is_success() {
                     return Err(status_error(status, &format!("Stalker {label}")));
@@ -355,18 +391,10 @@ impl StalkerClient {
                 } else {
                     crate::http::read_capped(resp, &context, MAX_BODY_BYTES).await?
                 };
-                let text = String::from_utf8_lossy(&body);
-                match p::classify_body(&text) {
-                    b @ (Body::Js(_) | Body::AuthFailure(_)) => Ok(b),
-                    Body::Empty => Err(CoreError::network(format!(
-                        "Stalker {label}: the portal sent an empty response"
-                    ))),
-                    Body::Html => Err(CoreError::invalid(format!(
-                        "Stalker {label}: the portal answered with an HTML page instead of data"
-                    ))),
-                    Body::Unexpected => Err(CoreError::invalid(format!(
-                        "Stalker {label}: the portal answer is not a Stalker response"
-                    ))),
+                if long {
+                    tokio::task::spawn_blocking(move || decode(&label, body)).await?
+                } else {
+                    decode(&label, body)
                 }
             }
         };
@@ -376,20 +404,37 @@ impl StalkerClient {
     /// Authenticated call returning `js`. On an auth failure the session
     /// re-handshakes once and the call is retried once.
     pub async fn call(&self, req: Req) -> CoreResult<Value> {
+        self.authed(&req, decode_js).await
+    }
+
+    /// [`Self::call`] for a big list (`get_all_channels`): the list stays
+    /// the portal's JSON text ([`p::ListText`]), so an unchanged answer is
+    /// never decoded. Answers the text cannot be read from come back as
+    /// items, read as [`Self::call`] reads them.
+    pub async fn call_list(&self, req: Req) -> CoreResult<ListAnswer> {
+        self.authed(&req, decode_list).await
+    }
+
+    async fn authed<T, D>(&self, req: &Req, decode: D) -> CoreResult<T>
+    where
+        T: Send + 'static,
+        D: Fn(&str, bytes::Bytes) -> CoreResult<Reply<T>> + Copy + Send + 'static,
+    {
         let (endpoint, token) = self.ensure_session().await?;
-        match self
-            .raw(&endpoint, &req, token.as_deref(), ATTEMPTS)
+        if let Reply::Answer(v) = self
+            .exchange(&endpoint, req, token.as_deref(), ATTEMPTS, decode)
             .await?
         {
-            Body::Js(v) => return Ok(v),
-            Body::AuthFailure(_) => {}
-            _ => unreachable!("raw only returns Js or AuthFailure"),
+            return Ok(v);
         }
         tracing::debug!(label = %req.label(), "stalker auth failure, re-handshaking once");
         let (endpoint, token) = self.reauth(token).await?;
-        match self.raw(&endpoint, &req, token.as_deref(), ATTEMPTS).await? {
-            Body::Js(v) => Ok(v),
-            _ => Err(CoreError::Auth(
+        match self
+            .exchange(&endpoint, req, token.as_deref(), ATTEMPTS, decode)
+            .await?
+        {
+            Reply::Answer(v) => Ok(v),
+            Reply::Refused(_) => Err(CoreError::Auth(
                 "The portal refused the request after a fresh login. Check the MAC address and subscription.".into(),
             )),
         }
@@ -693,6 +738,74 @@ pub(crate) fn is_unreachable(err: &CoreError) -> bool {
     }
 }
 
+/// What one exchange gave: the answer, or the portal's refusal (HTTP
+/// 401/403 or an auth-failure body), which re-handshakes once.
+enum Reply<T> {
+    Answer(T),
+    Refused(String),
+}
+
+/// A big list answer: the portal's JSON text, or the items of an answer
+/// only the full parse reads (see [`p::list_text`]).
+#[derive(Debug)]
+pub enum ListAnswer {
+    Text(p::ListText),
+    Items(Vec<Value>),
+}
+
+impl ListAnswer {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Text(t) => t.len(),
+            Self::Items(items) => items.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Reads a body into its `js` value: [`p::classify_body`], with the
+/// classes that are not an answer turned into errors.
+fn decode_js(label: &str, body: bytes::Bytes) -> CoreResult<Reply<Value>> {
+    let text = String::from_utf8_lossy(&body);
+    match p::classify_body(&text) {
+        Body::Js(v) => Ok(Reply::Answer(v)),
+        Body::AuthFailure(m) => Ok(Reply::Refused(m)),
+        Body::Empty => Err(CoreError::network(format!(
+            "Stalker {label}: the portal sent an empty response"
+        ))),
+        Body::Html => Err(CoreError::invalid(format!(
+            "Stalker {label}: the portal answered with an HTML page instead of data"
+        ))),
+        Body::Unexpected => Err(CoreError::invalid(format!(
+            "Stalker {label}: the portal answer is not a Stalker response"
+        ))),
+    }
+}
+
+/// [`decode_js`] for a big list: the list is kept as text when the
+/// envelope allows it.
+fn decode_list(label: &str, body: bytes::Bytes) -> CoreResult<Reply<ListAnswer>> {
+    match p::list_text(body) {
+        Ok(text) => Ok(Reply::Answer(ListAnswer::Text(text))),
+        Err(body) => Ok(match decode_js(label, body)? {
+            Reply::Answer(js) => Reply::Answer(ListAnswer::Items(p::into_list(js))),
+            Reply::Refused(m) => Reply::Refused(m),
+        }),
+    }
+}
+
+/// True when a timed-out request is not sent again. A big list would be
+/// as slow again. Outside an import someone waits on the answer (a zap, a
+/// grid page, a detail), and a portal that let a whole deadline pass in
+/// silence rarely answers the next try: two more deadlines only make the
+/// error come later. Inside an import a try may still rescue the run.
+fn timeout_is_final(err: &CoreError, long: bool, in_import: bool) -> bool {
+    matches!(err, CoreError::Timeout(_)) && (long || !in_import)
+}
+
 /// Reads and parses a stalker source's config.
 pub async fn load_config(state: &AppState, source_id: &str) -> CoreResult<StalkerSourceConfig> {
     let id = source_id.to_string();
@@ -873,6 +986,56 @@ mod tests {
             .opt("y", Some("z"));
         assert_eq!(r.label(), "itv/get_genres");
         assert_eq!(r.params.len(), 4);
+    }
+
+    #[test]
+    fn a_spent_deadline_is_final_outside_an_import() {
+        let slow = CoreError::Timeout("slow".into());
+        assert!(
+            timeout_is_final(&slow, false, false),
+            "a zap or a grid page"
+        );
+        assert!(
+            !timeout_is_final(&slow, false, true),
+            "an import tries again"
+        );
+        assert!(timeout_is_final(&slow, true, true), "a big list never");
+        let reset = CoreError::network("Could not reach 127.0.0.1:9. connection reset");
+        assert!(!timeout_is_final(&reset, false, false));
+        assert!(!timeout_is_final(&reset, true, false));
+    }
+
+    #[test]
+    fn list_answers_are_read_as_calls_read_them() {
+        let decode =
+            |body: &str| decode_list("itv/get_all_channels", bytes::Bytes::from(body.to_string()));
+        match decode(r#"{"js":{"total_items":1,"data":[{"id":"1"}]},"text":"0.01s"}"#) {
+            Ok(Reply::Answer(ListAnswer::Text(t))) => assert_eq!(t.bytes(), br#"[{"id":"1"}]"#),
+            other => panic!("{:?}", other.map(|_| ())),
+        }
+        // Answers without a list as text: items, as `call` reads them.
+        match decode(r#"{"js":{"total_items":0}}"#) {
+            Ok(Reply::Answer(ListAnswer::Items(items))) => assert!(items.is_empty()),
+            other => panic!("{:?}", other.map(|_| ())),
+        }
+        for refusal in [
+            "Authorization failed.",
+            r#"{"js":{"error":"Invalid token","data":[]}}"#,
+        ] {
+            assert!(
+                matches!(decode(refusal), Ok(Reply::Refused(_))),
+                "{refusal}"
+            );
+        }
+        assert!(matches!(decode(""), Err(CoreError::Network(_))));
+        assert!(matches!(
+            decode("<html></html>"),
+            Err(CoreError::Invalid(_))
+        ));
+        assert!(matches!(
+            decode(r#"{"js":[{"id":1}"#),
+            Err(CoreError::Invalid(_))
+        ));
     }
 
     #[test]

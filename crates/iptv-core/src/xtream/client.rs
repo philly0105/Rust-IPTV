@@ -240,8 +240,10 @@ impl XtreamClient {
                     read_capped(resp, &context, MAX_BODY_BYTES).await
                 }
                 .await;
+                let in_import = crate::sources::import_cancel().is_some();
                 result.map_err(|err| Failed {
-                    budget_spent: matches!(err, CoreError::Timeout(_)) && tried.elapsed() >= budget,
+                    budget_spent: matches!(err, CoreError::Timeout(_))
+                        && deadline_spent(tried.elapsed(), head, budget, in_import),
                     err,
                 })
             }
@@ -318,6 +320,21 @@ pub const MAX_BODY_BYTES: usize = 512 * 1024 * 1024;
 const METADATA_DEADLINE: std::time::Duration = crate::http::METADATA_DEADLINE;
 #[cfg(test)]
 const METADATA_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// True when a small request that timed out after `elapsed` is not tried
+/// again: it used its whole `budget`, or, outside an import, its `head`
+/// deadline. Someone waits on those (a detail, an episode URL, a short
+/// EPG), and a panel that stayed silent for a whole head deadline rarely
+/// answers the next try: two more only make the error come later. Inside
+/// an import a try may still rescue the run.
+fn deadline_spent(
+    elapsed: std::time::Duration,
+    head: std::time::Duration,
+    budget: std::time::Duration,
+    in_import: bool,
+) -> bool {
+    elapsed >= budget || (!in_import && elapsed >= head.min(budget))
+}
 
 /// A failed try; see [`XtreamClient::fetch`].
 struct Failed {
@@ -737,6 +754,27 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(hits.load(SeqCst), 1, "minimum-rate breach retried");
+    }
+
+    #[test]
+    fn a_silent_head_is_final_outside_an_import() {
+        let s = std::time::Duration::from_secs;
+        let (head, budget) = (s(15), s(60));
+        assert!(
+            deadline_spent(s(15), head, budget, false),
+            "a detail waits once"
+        );
+        assert!(
+            !deadline_spent(s(15), head, budget, true),
+            "an import tries again"
+        );
+        assert!(deadline_spent(s(60), head, budget, true));
+        assert!(
+            !deadline_spent(s(10), head, budget, false),
+            "a connect timeout is retried"
+        );
+        // The account check's head deadline is its budget.
+        assert!(deadline_spent(s(10), s(10), s(10), true));
     }
 
     /// Review R3-2: a list body that stalled mid-way (head and part of the

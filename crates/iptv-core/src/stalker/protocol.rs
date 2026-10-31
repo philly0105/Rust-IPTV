@@ -10,7 +10,11 @@
 use crate::model::{PlayerKind, RequestHeaders};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use serde::de::IgnoredAny;
+use serde::Deserialize;
+use serde_json::value::RawValue;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use url::Url;
 
 /// Shared overflow-safe converters for provider numbers.
@@ -448,6 +452,137 @@ pub fn classify_body(text: &str) -> Body {
         }
         Err(_) => Body::Unexpected,
     }
+}
+
+/// A big list answer (`get_all_channels`) kept as the portal's JSON text:
+/// the body and where the list sits in it. Hashing the list's own bytes
+/// tells an unchanged answer apart without building its tree (150-200 MB
+/// for a 20k-channel portal), and the envelope around it (some portals add
+/// a debug line that changes on every answer) does not count.
+#[derive(Clone)]
+pub struct ListText {
+    body: bytes::Bytes,
+    span: std::ops::Range<usize>,
+    /// `data` is an object keyed by id instead of an array.
+    keyed: bool,
+    len: usize,
+}
+
+/// Sizes only: the body is tens of MB.
+impl std::fmt::Debug for ListText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ListText")
+            .field("bytes", &self.span.len())
+            .field("keyed", &self.keyed)
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
+impl ListText {
+    /// The list's JSON text, as the portal sent it.
+    pub fn bytes(&self) -> &[u8] {
+        &self.body[self.span.clone()]
+    }
+
+    /// `data` was an object keyed by id.
+    pub fn keyed(&self) -> bool {
+        self.keyed
+    }
+
+    /// Items in the list.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Each item's JSON text, in the order [`into_list`] gives them: an
+    /// array in its order; an object keyed by id in key order, a repeated
+    /// key giving its last item.
+    pub fn items(&self) -> serde_json::Result<Vec<&RawValue>> {
+        let text = std::str::from_utf8(self.bytes())
+            .map_err(|_| <serde_json::Error as serde::de::Error>::custom("not UTF-8"))?;
+        if self.keyed {
+            let map: BTreeMap<String, &RawValue> = serde_json::from_str(text)?;
+            Ok(map.into_values().collect())
+        } else {
+            serde_json::from_str(text)
+        }
+    }
+}
+
+/// Reads a big list answer without building its tree. `Err` hands the body
+/// back when the answer needs [`classify_body`] (auth failures, error
+/// answers, no list, an odd envelope or text that is not UTF-8), which
+/// reads it exactly as before.
+pub fn list_text(body: bytes::Bytes) -> Result<ListText, bytes::Bytes> {
+    match std::str::from_utf8(&body).ok().and_then(list_span) {
+        Some((span, keyed, len)) => Ok(ListText {
+            body,
+            span,
+            keyed,
+            len,
+        }),
+        None => Err(body),
+    }
+}
+
+/// Where `js` (an array) or `js.data` (an array or an object keyed by id)
+/// sits in `text`, whether it is keyed, and how many items it holds.
+/// `None` for anything [`classify_body`] must read: the envelope is only
+/// trusted when it parses with each member once.
+fn list_span(text: &str) -> Option<(std::ops::Range<usize>, bool, usize)> {
+    #[derive(Deserialize)]
+    struct Envelope<'a> {
+        #[serde(borrow)]
+        js: &'a RawValue,
+    }
+    #[derive(Deserialize)]
+    struct Js<'a> {
+        #[serde(borrow, default)]
+        data: Option<&'a RawValue>,
+        #[serde(default)]
+        error: Option<Value>,
+        #[serde(default)]
+        msg: Option<Value>,
+    }
+    let trimmed = text.trim_start_matches('\u{feff}').trim();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    let env: Envelope = serde_json::from_str(trimmed).ok()?;
+    let (list, keyed) = match env.js.get().as_bytes().first()? {
+        b'[' => (env.js, false),
+        b'{' => {
+            let js: Js = serde_json::from_str(env.js.get()).ok()?;
+            let refused = [&js.error, &js.msg].iter().any(|v| {
+                v.as_ref()
+                    .and_then(Value::as_str)
+                    .is_some_and(is_auth_failure_phrase)
+            });
+            let data = js.data.filter(|_| !refused)?;
+            match data.get().as_bytes().first()? {
+                b'[' => (data, false),
+                b'{' => (data, true),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    let len = if keyed {
+        serde_json::from_str::<BTreeMap<String, IgnoredAny>>(list.get())
+            .ok()?
+            .len()
+    } else {
+        serde_json::from_str::<Vec<IgnoredAny>>(list.get())
+            .ok()?
+            .len()
+    };
+    let start = list.get().as_ptr() as usize - text.as_ptr() as usize;
+    Some((start..start + list.get().len(), keyed, len))
 }
 
 /// Result of probing a candidate endpoint with a token-less `itv/get_genres`.
@@ -998,6 +1133,65 @@ mod tests {
         assert_eq!(classify_body(r#"{"data":[]}"#), Body::Unexpected);
         assert_eq!(classify_body("garbage"), Body::Unexpected);
         assert_eq!(classify_body("\u{feff}{\"js\":[]}"), Body::Js(json!([])));
+    }
+
+    #[test]
+    fn list_text_keeps_only_the_list() {
+        let text = |body: &str| list_text(bytes::Bytes::from(body.to_string()));
+        let t = text(
+            "\u{feff} {\"js\": [ {\"id\":1}, {\"id\":2} ] , \"text\": \"generated in: 0.01s\"}\n",
+        )
+        .unwrap();
+        assert_eq!(t.bytes(), b"[ {\"id\":1}, {\"id\":2} ]");
+        assert_eq!((t.len(), t.keyed()), (2, false));
+
+        let body = r#"{"js":{"total_items":2,"error":"","data":[{"id":"1"},"x"]}}"#;
+        let t = text(body).unwrap();
+        assert_eq!(t.bytes(), br#"[{"id":"1"},"x"]"#);
+        let items: Vec<&str> = t.items().unwrap().iter().map(|r| r.get()).collect();
+        assert_eq!(items, [r#"{"id":"1"}"#, r#""x""#]);
+
+        // Keyed by id: key order, a repeated key gives its last item, as
+        // the parsed answer does.
+        let body = r#"{"js":{"data":{"b":{"id":"2"},"a":{"id":"1"},"b":{"id":"3"}}}}"#;
+        let t = text(body).unwrap();
+        assert_eq!((t.len(), t.keyed()), (2, true));
+        let items: Vec<Value> = t
+            .items()
+            .unwrap()
+            .iter()
+            .map(|r| serde_json::from_str(r.get()).unwrap())
+            .collect();
+        let parsed = match classify_body(body) {
+            Body::Js(js) => into_list(js),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(items, parsed);
+        assert_eq!(items, [json!({"id": "1"}), json!({"id": "3"})]);
+
+        // Everything else is read by `classify_body`.
+        for body in [
+            "",
+            "Authorization failed.",
+            "<html></html>",
+            "[1, 2]",
+            r#""Access denied.""#,
+            r#"{"data":[]}"#,
+            r#"{"js":"Authorization failed."}"#,
+            r#"{"js":{"error":"Invalid token","data":[]}}"#,
+            r#"{"js":{"msg":"Unauthorized request","data":[]}}"#,
+            r#"{"js":{"total_items":0}}"#,
+            r#"{"js":{"data":null}}"#,
+            r#"{"js":null}"#,
+            r#"{"js":[1],"js":[2]}"#,
+            r#"{"js":{"data":[1],"data":[2]}}"#,
+            r#"{"js":[1"#,
+            r#"{"js":[1]} trailing"#,
+        ] {
+            assert!(text(body).is_err(), "{body}");
+        }
+        let not_utf8 = bytes::Bytes::from_static(b"{\"js\":[\"\xff\"]}");
+        assert!(list_text(not_utf8).is_err());
     }
 
     #[test]

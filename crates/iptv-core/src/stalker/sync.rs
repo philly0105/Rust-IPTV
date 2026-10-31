@@ -3,7 +3,7 @@
 
 use super::mapping;
 use super::protocol::{self as p, into_list, n};
-use super::session::{Req, StalkerClient, LONG_TIMEOUT};
+use super::session::{ListAnswer, Req, StalkerClient, LONG_TIMEOUT};
 use super::Runtime;
 use crate::catalog::{self, CategoryRow, ItemRow};
 use crate::error::{CoreError, CoreResult};
@@ -116,8 +116,9 @@ async fn totals(state: &Arc<AppState>, client: &StalkerClient, source_id: &str) 
 /// Version of the Stalker mapping rules, hashed into the stored fingerprint
 /// ([`answers_hash`]): bumping it makes the next refresh rewrite an
 /// unchanged catalog once. Bump it whenever a change alters the rows a sync
-/// writes (like `xtream::sync::SYNC_VERSION`).
-pub const SYNC_VERSION: u32 = 1;
+/// writes (like `xtream::sync::SYNC_VERSION`). 2: the channel list is
+/// hashed as the portal's text.
+pub const SYNC_VERSION: u32 = 2;
 
 /// `app_state` key of a source's fingerprint (dropped with the source, see
 /// `sources::store::delete`).
@@ -150,11 +151,13 @@ impl std::io::Write for HashWriter<'_> {
 /// sha256 (hex) of everything a sync builds the catalog from:
 /// [`SYNC_VERSION`], the endpoint (logo URLs are made absolute against it),
 /// the live, movie and series categories, and the channel and radio
-/// answers. serde_json writes an answer tree the same way every time.
+/// answers. A channel list kept as text is hashed as the portal sent it
+/// (the same portal writes the same list the same way); parsed answers as
+/// serde_json writes them, which is the same every time.
 fn answers_hash(
     endpoint: &str,
     categories: [&[CategoryRow]; 3],
-    channels: &[Value],
+    channels: &ListAnswer,
     radio: &[Value],
 ) -> CoreResult<String> {
     let mut h = Sha256::new();
@@ -170,10 +173,23 @@ fn answers_hash(
         }
         h.update([0xff]);
     }
-    for list in [channels, radio] {
-        serde_json::to_writer(HashWriter(&mut h), list)?;
-        h.update([0xff]);
+    match channels {
+        ListAnswer::Text(text) => {
+            h.update(if text.keyed() {
+                &b"keyed\n"[..]
+            } else {
+                &b"text\n"[..]
+            });
+            h.update(text.bytes());
+        }
+        ListAnswer::Items(items) => {
+            h.update(b"items\n");
+            serde_json::to_writer(HashWriter(&mut h), items)?;
+        }
     }
+    h.update([0xff]);
+    serde_json::to_writer(HashWriter(&mut h), radio)?;
+    h.update([0xff]);
     Ok(hex::encode(h.finalize()))
 }
 
@@ -262,25 +278,29 @@ async fn run(
     let genres = mapping::categories(&list(client, Req::new("itv", "get_genres")).await?);
 
     emit("fetching", 0, None, Some("Loading channels"));
-    // The answer tree is taken apart, not cloned (IN-1): a 20k-channel
-    // portal's tree is 150-200 MB.
+    // The list stays the portal's JSON text, read on the blocking pool: a
+    // 20k-channel answer is ~25 MB, its tree 150-200 MB. An unchanged
+    // answer is never decoded; a changed one is decoded item by item once
+    // this import holds the save slot.
     let all = match client
-        .call(Req::new("itv", "get_all_channels").timeout(LONG_TIMEOUT))
+        .call_list(Req::new("itv", "get_all_channels").timeout(LONG_TIMEOUT))
         .await
     {
-        Ok(js) => into_list(js),
-        Err(CoreError::Invalid(_)) | Err(CoreError::NotFound(_)) => Vec::new(),
+        Ok(list) => list,
+        Err(CoreError::Invalid(_)) | Err(CoreError::NotFound(_)) => ListAnswer::Items(Vec::new()),
         Err(err) => return Err(err),
     };
     let channels = if all.is_empty() {
         // Some panels disable get_all_channels: page through the list instead.
-        fetch_all_pages(
-            client,
-            Req::new("itv", "get_ordered_list")
-                .p("genre", "*")
-                .p("sortby", "number"),
+        ListAnswer::Items(
+            fetch_all_pages(
+                client,
+                Req::new("itv", "get_ordered_list")
+                    .p("genre", "*")
+                    .p("sortby", "number"),
+            )
+            .await?,
         )
-        .await?
     } else {
         all
     };
@@ -295,29 +315,40 @@ async fn run(
     // answer) gets an empty section, as before. A temporary failure (the
     // portal or the network did not answer) keeps that section's previous
     // rows instead of wiping them (L1-core-14), and says so in lastError.
-    let radio = match fetch_all_pages(
-        client,
-        Req::new("radio", "get_ordered_list").p("sortby", "number"),
-    )
-    .await
-    {
+    // They go out together with the movie and series totals, so neither
+    // the totals nor the categories wait on the radio walk, and nothing is
+    // asked of the portal once the save slot is held.
+    let radio_walk = async {
+        let radio = fetch_all_pages(
+            client,
+            Req::new("radio", "get_ordered_list").p("sortby", "number"),
+        )
+        .await;
+        emit(
+            "fetching",
+            (channels.len() + radio.as_ref().map_or(0, Vec::len)) as u64,
+            None,
+            Some("Loading movie and series categories"),
+        );
+        radio
+    };
+    let (radio, vod_categories, series_categories, (movies, series)) = tokio::join!(
+        radio_walk,
+        list(client, Req::new("vod", "get_categories")),
+        list(client, Req::new("series", "get_categories")),
+        totals(state, client, source_id),
+    );
+    let radio = match radio {
         Ok(r) => Some(r),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         Err(err) => optional_section(err, "radio", "radio stations")?,
     };
-
-    emit(
-        "fetching",
-        (channels.len() + radio.as_ref().map_or(0, Vec::len)) as u64,
-        None,
-        Some("Loading movie and series categories"),
-    );
-    let vod_categories = match list(client, Req::new("vod", "get_categories")).await {
+    let vod_categories = match vod_categories {
         Ok(c) => Some(mapping::categories(&c)),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         Err(err) => optional_section(err, "VOD categories", "movie categories")?,
     };
-    let series_categories = match list(client, Req::new("series", "get_categories")).await {
+    let series_categories = match series_categories {
         Ok(c) => Some(mapping::categories(&c)),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         Err(err) => optional_section(err, "series categories", "series categories")?,
@@ -352,9 +383,9 @@ async fn run(
             .db_call(move |conn| unchanged_rows(conn, &sid, &hash))
             .await?;
         if let Some(rows) = kept {
+            drop(channels);
             tracing::info!(source_id, "stalker portal unchanged; catalog kept");
             emit("saving", 0, None, Some(crate::sources::UNCHANGED_MESSAGE));
-            let (movies, series) = totals(state, client, source_id).await;
             Runtime::get(state).forget_listings(source_id);
             return Ok(ImportSummary {
                 channels: rows,
@@ -370,8 +401,9 @@ async fn run(
     // One import maps and saves at a time (ST-2); held until the write ends.
     let slot = crate::sources::save_slot(state).await?;
 
-    // Map rows on the blocking pool, not the runtime worker (IN-1): a
-    // 20k-channel answer takes seconds of CPU on a slow machine.
+    // Decode and map rows on the blocking pool, not the runtime worker
+    // (IN-1): a 20k-channel answer takes seconds of CPU on a slow machine.
+    // Each item is decoded to the members a row reads, mapped, and dropped.
     let total = (channels.len() + radio.len()) as u64;
     let (st, sid) = (Arc::clone(state), source_id.to_string());
     let (live_rows, live_categories, radio_rows) = tokio::task::spawn_blocking(move || {
@@ -380,7 +412,7 @@ async fn run(
         let known: HashSet<&str> = genres.iter().map(|g| g.category_id.as_str()).collect();
         let mut live_rows: Vec<ItemRow> = Vec::with_capacity(channels.len());
         let mut seen: HashSet<String> = HashSet::new();
-        for (i, v) in channels.iter().enumerate() {
+        let mut add = |i: usize, v: &Value| {
             let genre = p::s(v, "tv_genre_id")
                 .filter(|g| known.contains(g.as_str()))
                 .unwrap_or_else(|| UNCATEGORIZED.to_string());
@@ -391,8 +423,25 @@ async fn run(
                     live_rows.push(row);
                 }
             }
-            if (i + 1) % 2000 == 0 && gate.due(std::time::Instant::now()) {
+            if (i + 1).is_multiple_of(2000) && gate.due(std::time::Instant::now()) {
                 progress(&st, &sid, "parsing", (i + 1) as u64, Some(total), None);
+            }
+        };
+        match &channels {
+            ListAnswer::Text(text) => {
+                let items = text.items().map_err(|e| {
+                    CoreError::invalid(format!(
+                        "Stalker itv/get_all_channels: the channel list could not be read: {e}"
+                    ))
+                })?;
+                for (i, item) in items.into_iter().enumerate() {
+                    add(i, &mapping::channel_fields(item));
+                }
+            }
+            ListAnswer::Items(items) => {
+                for (i, v) in items.iter().enumerate() {
+                    add(i, v);
+                }
             }
         }
         drop(known);
@@ -420,12 +469,12 @@ async fn run(
             })
             .filter(|r| seen.insert(r.item_id.clone()))
             .collect();
-        // The answer trees are mapped: free them before the totals and the write.
+        // The answers are mapped: free them before the write.
         drop(channels);
         drop(radio);
-        (live_rows, live_categories, radio_rows)
+        Ok::<_, CoreError>((live_rows, live_categories, radio_rows))
     })
-    .await?;
+    .await??;
     let radio_categories = if radio_rows.is_empty() {
         Vec::new()
     } else {
@@ -436,8 +485,6 @@ async fn run(
         }]
     };
     emit("parsing", total, Some(total), None);
-
-    let (movies, series) = totals(state, client, source_id).await;
 
     // A cancelled run keeps the old catalog (C8): stop before saving, and
     // save all four types in one transaction so a cancel seen by the writer

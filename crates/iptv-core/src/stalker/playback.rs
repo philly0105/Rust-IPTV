@@ -10,10 +10,12 @@ use crate::error::{CoreError, CoreResult};
 use crate::model::{ContentType, EpgProgram, ItemRef, PlayerSource, StalkerSourceConfig};
 use crate::state::AppState;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
+use dashmap::DashMap;
 use futures::future::{BoxFuture, FutureExt, Shared};
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// `stalker.accountInfo` result (TS `StalkerAccountInfo`).
@@ -321,28 +323,122 @@ fn no_answer(err: &CoreError) -> bool {
     matches!(err, CoreError::Timeout(_)) || session::is_unreachable(err)
 }
 
+/// How long a day table read from today's date on is reused: the portal
+/// still adds programmes to those.
+const DAY_TABLE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// How long an earlier day's table is reused: its programmes have aired.
+const PAST_DAY_TABLE_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+/// Day tables kept across all sources (a table is a day's ~50 rows).
+const DAY_TABLES_CAP: usize = 64;
+
+/// Day tables read recently, keyed `source|channel|date`, so a catch-up
+/// start right after the ribbon or the archive page, or the next ribbon
+/// call, does not read the same tables again. Only a table read to its end
+/// is kept, and callers for one table wait for one read.
+#[derive(Default)]
+pub struct DayTables {
+    tables: DashMap<String, DayTable>,
+    /// One read at a time per key; an entry goes once nobody waits on it.
+    reads: DashMap<String, Arc<tokio::sync::Mutex<()>>>,
+    /// The table type (`epg` or `itv`) each source last answered on.
+    kinds: DashMap<String, &'static str>,
+}
+
+struct DayTable {
+    rows: Arc<Vec<Value>>,
+    at: std::time::Instant,
+    ttl: std::time::Duration,
+}
+
+impl DayTables {
+    fn fresh(&self, key: &str) -> Option<Arc<Vec<Value>>> {
+        let t = self.tables.get(key)?;
+        (t.at.elapsed() < t.ttl).then(|| t.rows.clone())
+    }
+
+    fn store(&self, key: String, rows: Arc<Vec<Value>>, ttl: std::time::Duration) {
+        if self.tables.len() >= DAY_TABLES_CAP && !self.tables.contains_key(&key) {
+            let oldest = self
+                .tables
+                .iter()
+                .min_by_key(|e| e.value().at)
+                .map(|e| e.key().clone());
+            if let Some(k) = oldest {
+                self.tables.remove(&k);
+            }
+        }
+        let at = std::time::Instant::now();
+        self.tables.insert(key, DayTable { rows, at, ttl });
+    }
+
+    /// The table types in the order to ask a source for them.
+    fn order(&self, source_id: &str) -> [&'static str; 2] {
+        match self.kinds.get(source_id).map(|k| *k) {
+            Some("itv") => ["itv", "epg"],
+            _ => ["epg", "itv"],
+        }
+    }
+
+    /// Drops every table of a source (removed, or pointing elsewhere now).
+    pub fn forget_source(&self, source_id: &str) {
+        let prefix = format!("{source_id}|");
+        self.tables.retain(|k, _| !k.starts_with(&prefix));
+        self.kinds.remove(source_id);
+    }
+}
+
+/// A caller's turn to read one table; its lock entry goes with the last
+/// caller, also when that caller stops waiting.
+struct ReadTurn<'a> {
+    reads: &'a DashMap<String, Arc<tokio::sync::Mutex<()>>>,
+    key: &'a str,
+}
+
+impl Drop for ReadTurn<'_> {
+    fn drop(&mut self) {
+        // The map's handle and this caller's: nobody else waits.
+        self.reads
+            .remove_if(self.key, |_, lock| Arc::strong_count(lock) <= 2);
+    }
+}
+
+/// What [`read_day_table`] read: the rows, the table type that served them,
+/// and whether the table was read to its end.
+struct DayRead {
+    rows: Vec<Value>,
+    table_type: &'static str,
+    complete: bool,
+}
+
 /// Every row of one day's programme table (`get_simple_data_table`), or
 /// `None` when the portal serves no table. Ministra serves it under `epg`;
-/// some builds only under `itv`. Auth failures and a portal that does not
+/// some builds only under `itv`: the types are asked in `order`. With
+/// `stop_at`, the read stops at the page holding the programme airing then
+/// (the rows come in time order). Auth failures and a portal that does not
 /// answer ([`no_answer`]) propagate.
-async fn day_table(
+async fn read_day_table(
     client: &StalkerClient,
     channel_id: &str,
-    date: NaiveDate,
-) -> CoreResult<Option<Vec<Value>>> {
-    let date = date.format("%Y-%m-%d").to_string();
-    for table_type in ["epg", "itv"] {
+    date: &str,
+    order: [&'static str; 2],
+    stop_at: Option<i64>,
+) -> CoreResult<Option<DayRead>> {
+    for table_type in order {
         let mut rows: Vec<Value> = Vec::new();
+        let mut complete = true;
         for page in 1..=10 {
             let req = Req::new(table_type, "get_simple_data_table")
                 .p("ch_id", channel_id)
-                .p("date", &date)
+                .p("date", date)
                 .p("p", page);
             let js = match client.call(req).await {
                 Ok(js) => js,
                 Err(err @ CoreError::Auth(_)) => return Err(err),
                 Err(err) if no_answer(&err) => return Err(err),
-                Err(_) => break,
+                Err(_) => {
+                    complete = false;
+                    break;
+                }
             };
             let total = n(&js, "total_items");
             let got = into_list(js);
@@ -350,32 +446,100 @@ async fn day_table(
                 break;
             }
             let per = got.len() as i64;
+            let found = stop_at.is_some_and(|ts| got.iter().any(|v| archive_row_matches(v, ts)));
             rows.extend(got);
             if total.is_none_or(|t| page * per >= t) {
                 break;
             }
+            if found {
+                complete = false;
+                break;
+            }
         }
         if !rows.is_empty() {
-            return Ok(Some(rows));
+            return Ok(Some(DayRead {
+                rows,
+                table_type,
+                complete,
+            }));
         }
     }
     Ok(None)
 }
 
+/// One day's table: the one read recently unless `refresh`, else read from
+/// the portal (see [`read_day_table`] for `stop_at`). The flag says whether
+/// the rows came from [`DayTables`].
+async fn day_table(
+    client: &StalkerClient,
+    channel_id: &str,
+    date: NaiveDate,
+    stop_at: Option<i64>,
+    refresh: bool,
+) -> CoreResult<Option<(Arc<Vec<Value>>, bool)>> {
+    let day = date.format("%Y-%m-%d").to_string();
+    let Some(source_id) = client.source_id() else {
+        let read = read_day_table(client, channel_id, &day, ["epg", "itv"], stop_at).await?;
+        return Ok(read.map(|r| (Arc::new(r.rows), false)));
+    };
+    let rt = super::Runtime::get(client.state());
+    let tables = &rt.day_tables;
+    let key = format!("{source_id}|{channel_id}|{day}");
+    let lock = tables.reads.entry(key.clone()).or_default().clone();
+    let _turn = ReadTurn {
+        reads: &tables.reads,
+        key: &key,
+    };
+    let _read = lock.lock().await;
+    if !refresh {
+        if let Some(rows) = tables.fresh(&key) {
+            return Ok(Some((rows, true)));
+        }
+    }
+    let order = tables.order(source_id);
+    let Some(read) = read_day_table(client, channel_id, &day, order, stop_at).await? else {
+        return Ok(None);
+    };
+    tables.kinds.insert(source_id.to_string(), read.table_type);
+    let rows = Arc::new(read.rows);
+    if read.complete {
+        let ttl = if date < Utc::now().date_naive() {
+            PAST_DAY_TABLE_TTL
+        } else {
+            DAY_TABLE_TTL
+        };
+        tables.store(key.clone(), rows.clone(), ttl);
+    }
+    Ok(Some((rows, false)))
+}
+
 /// The archived program airing at `start`. Ministra builds day tables in
 /// the session's cookie timezone (Europe/Paris), not UTC, so a programme
 /// late in the UTC day can sit in the next day's table: the adjacent days
-/// are asked when the UTC day has no match.
+/// are asked when the UTC day has no match. A table read a few minutes ago
+/// may lack a programme the portal added since, so the reused tables are
+/// read once more before giving up.
 async fn find_archive_program(
     client: &StalkerClient,
     channel_id: &str,
     start: DateTime<Utc>,
 ) -> CoreResult<Option<Value>> {
     let ts = start.timestamp();
+    let mut reused = Vec::new();
     for date in archive_days(start.date_naive()) {
-        if let Some(rows) = day_table(client, channel_id, date).await? {
-            if let Some(hit) = rows.into_iter().find(|v| archive_row_matches(v, ts)) {
-                return Ok(Some(hit));
+        if let Some((rows, cached)) = day_table(client, channel_id, date, Some(ts), false).await? {
+            if let Some(hit) = rows.iter().find(|v| archive_row_matches(v, ts)) {
+                return Ok(Some(hit.clone()));
+            }
+            if cached {
+                reused.push(date);
+            }
+        }
+    }
+    for date in reused {
+        if let Some((rows, _)) = day_table(client, channel_id, date, Some(ts), true).await? {
+            if let Some(hit) = rows.iter().find(|v| archive_row_matches(v, ts)) {
+                return Ok(Some(hit.clone()));
             }
         }
     }
@@ -419,10 +583,15 @@ const BULK_EPG_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
 /// The fetch itself carries on in the background and fills the cache.
 const BULK_EPG_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// One bulk `get_epg_info` answer: programmes keyed by channel id.
+/// One bulk `get_epg_info` answer: each channel's programmes keyed by
+/// channel id, mapped once when the answer comes in. Only what a row shows
+/// is kept, not the answer's tree (every programme's ~20 members, several
+/// times the answer's size), and the channel id is left empty: each row
+/// sets its own. The times are the portal's: the guide shift is applied
+/// per call.
 #[derive(Debug)]
 pub struct BulkEpg {
-    by_channel: Map<String, Value>,
+    by_channel: HashMap<Box<str>, Arc<[EpgProgram]>>,
     ok: bool,
     at: std::time::Instant,
 }
@@ -445,14 +614,14 @@ impl BulkEpgEntry {
                 .p("period", 6)
                 .timeout(LONG_TIMEOUT);
             let (by_channel, ok) = match client.call(req).await {
-                // `data` is taken out of the answer, not cloned (IN-1).
-                Ok(js) => match take_data(js) {
-                    Value::Object(m) => (m, true),
-                    _ => (Map::new(), true),
+                // Mapped on the blocking pool; the tree is dropped there.
+                Ok(js) => match tokio::task::spawn_blocking(move || bulk_programmes(js)).await {
+                    Ok(by_channel) => (by_channel, true),
+                    Err(_) => (HashMap::new(), false),
                 },
                 Err(err) => {
                     tracing::debug!(error = %err, "stalker bulk EPG failed");
-                    (Map::new(), false)
+                    (HashMap::new(), false)
                 }
             };
             Arc::new(BulkEpg {
@@ -464,7 +633,7 @@ impl BulkEpgEntry {
         let fut = async move {
             task.await.unwrap_or_else(|_| {
                 Arc::new(BulkEpg {
-                    by_channel: Map::new(),
+                    by_channel: HashMap::new(),
                     ok: false,
                     at: std::time::Instant::now(),
                 })
@@ -492,6 +661,27 @@ fn take_data(js: Value) -> Value {
         },
         other => other,
     }
+}
+
+/// Each channel's programmes in a bulk answer, mapped without a channel
+/// id. A channel whose value is not a list, or holds no programme, has no
+/// entry.
+fn bulk_programmes(js: Value) -> HashMap<Box<str>, Arc<[EpgProgram]>> {
+    let Value::Object(data) = take_data(js) else {
+        return HashMap::new();
+    };
+    data.into_iter()
+        .filter_map(|(id, list)| {
+            let Value::Array(list) = list else {
+                return None;
+            };
+            let programs: Vec<EpgProgram> = list
+                .iter()
+                .filter_map(|v| mapping::epg_program("", v))
+                .collect();
+            (!programs.is_empty()).then(|| (id.into_boxed_str(), programs.into()))
+        })
+        .collect()
 }
 
 /// The source's bulk guide: the cached answer, the fetch in flight, or a
@@ -527,14 +717,14 @@ async fn past_programmes(
     channel_id: &str,
     from: DateTime<Utc>,
     now: DateTime<Utc>,
-    out: &mut Vec<Value>,
+    out: &mut Vec<Arc<Vec<Value>>>,
 ) -> CoreResult<()> {
     let mut tables = stream::iter(past_days(from, now))
-        .map(|d| day_table(client, channel_id, d))
+        .map(|d| day_table(client, channel_id, d, None, false))
         .buffer_unordered(3);
     while let Some(t) = tables.next().await {
-        if let Some(rows) = t? {
-            out.extend(rows);
+        if let Some((rows, _)) = t? {
+            out.push(rows);
         }
     }
     Ok(())
@@ -600,21 +790,31 @@ async fn portal_epg(
             return Err(session::slow_error(&client.config.portal_url));
         }
     };
-    let mut entries = match short {
+    let entries = match short {
         Ok(js) => into_list(js),
         Err(err @ CoreError::Auth(_)) => return Err(err),
         // Silent or unreachable portal: the bulk call would only wait longer.
         Err(err) if no_answer(&err) => return Err(err),
         Err(_) => Vec::new(),
     };
+    let mut portal_programs: Vec<EpgProgram> = entries
+        .iter()
+        .filter_map(|v| mapping::epg_program(&channel_id, v))
+        .collect();
     if entries.is_empty() {
         // The portal answered: whatever the bulk guide does, this row gets
         // its (possibly empty) programmes, never an error.
         let bulk = bulk_epg(state, client, &r.source_id);
         match tokio::time::timeout(BULK_EPG_WAIT, bulk).await {
             Ok(bulk) => {
-                if let Some(Value::Array(a)) = bulk.by_channel.get(&r.item_id) {
-                    entries = a.clone();
+                if let Some(list) = bulk.by_channel.get(r.item_id.as_str()) {
+                    portal_programs = list
+                        .iter()
+                        .map(|p| EpgProgram {
+                            channel_id: channel_id.clone(),
+                            ..p.clone()
+                        })
+                        .collect();
                 }
             }
             Err(_) => {
@@ -622,14 +822,14 @@ async fn portal_epg(
             }
         }
     }
+    drop(entries);
     // The channel's guide shift moves the portal's programmes (the bulk
     // cache keeps them as the portal sent them) before the times pick.
     let shift = crate::epg::channel_shift(state, r).await?;
     let now_at = Utc::now();
     let now = now_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let mut programs: Vec<EpgProgram> = entries
-        .iter()
-        .filter_map(|v| mapping::epg_program(&channel_id, v))
+    let mut programs: Vec<EpgProgram> = portal_programs
+        .into_iter()
         .map(|p| crate::epg::shifted(p, shift))
         .filter(|p| p.end > now || p.end == p.start)
         .collect();
@@ -654,7 +854,7 @@ async fn portal_epg(
             Err(_) => {
                 tracing::debug!(
                     source_id = %r.source_id,
-                    rows = past.len(),
+                    days = past.len(),
                     "stalker archive EPG ran out of time; returning the days read so far"
                 );
             }
@@ -662,6 +862,7 @@ async fn portal_epg(
         let earliest_upcoming = programs.first().map(|p| p.start.clone());
         programs.extend(
             past.iter()
+                .flat_map(|rows| rows.iter())
                 .filter_map(|v| mapping::epg_program(&channel_id, v))
                 .map(|p| crate::epg::shifted(p, shift))
                 .filter(|p| p.end > from_s && p.end > p.start)

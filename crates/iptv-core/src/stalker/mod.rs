@@ -52,6 +52,85 @@ pub struct CachedItem {
     pub category_id: Option<String>,
 }
 
+/// A remembered row as memory and `stalker_items` keep it: the row's
+/// compact JSON text, the same text `stalker_items.raw_json` stores. A
+/// parsed Ministra row (60-70 members) takes several times its text, and
+/// the cache keeps up to [`ITEM_CACHE_CAP`] rows for the session; a read
+/// (detail, playback, a title lookup) parses its row again.
+#[derive(Debug, Clone)]
+pub(crate) struct StoredItem {
+    json: Arc<str>,
+    category_name: Option<String>,
+    category_id: Option<String>,
+}
+
+impl StoredItem {
+    pub(crate) fn new(
+        raw: &Value,
+        category_name: Option<String>,
+        category_id: Option<String>,
+    ) -> Self {
+        Self {
+            json: raw.to_string().into(),
+            category_name,
+            category_id,
+        }
+    }
+
+    fn parse(&self) -> Option<CachedItem> {
+        Some(CachedItem {
+            raw: serde_json::from_str(&self.json).ok()?,
+            category_name: self.category_name.clone(),
+            category_id: self.category_id.clone(),
+        })
+    }
+}
+
+/// The in-memory row cache: an [`Lru`] of [`StoredItem`]s that hands out
+/// parsed [`CachedItem`]s.
+pub struct ItemCache {
+    rows: Lru<StoredItem>,
+}
+
+impl ItemCache {
+    fn new(cap: usize) -> Self {
+        Self {
+            rows: Lru::new(cap),
+        }
+    }
+
+    /// The row under `key`, parsed, marking it as recently used.
+    pub fn get(&self, key: &str) -> Option<CachedItem> {
+        self.rows.get(key)?.parse()
+    }
+
+    pub fn insert(&self, key: String, item: CachedItem) {
+        let stored = StoredItem::new(&item.raw, item.category_name, item.category_id);
+        self.rows.insert(key, stored);
+    }
+
+    pub(crate) fn insert_stored(&self, key: String, item: StoredItem) {
+        self.rows.insert(key, item);
+    }
+
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.rows.contains_key(key)
+    }
+
+    /// Drops every entry whose key starts with `prefix`.
+    pub fn remove_prefix(&self, prefix: &str) {
+        self.rows.remove_prefix(prefix);
+    }
+}
+
 /// A small concurrent map with least-recently-used eviction.
 pub struct Lru<V> {
     map: DashMap<String, (V, u64)>,
@@ -125,7 +204,7 @@ pub struct Runtime {
     /// Session per source id.
     pub sessions: DashMap<String, Arc<tokio::sync::Mutex<session::SessionState>>>,
     /// Raw VOD/series rows keyed by `ItemRef::key()` (backed by `stalker_items`).
-    pub items: Lru<CachedItem>,
+    pub items: ItemCache,
     /// Season plans keyed by `ItemRef::key()`.
     pub plans: Lru<Arc<Vec<vod::SeasonPlan>>>,
     /// Portal page size keyed by `<sourceId>|<type>`.
@@ -133,6 +212,8 @@ pub struct Runtime {
     /// Bulk `get_epg_info` answer per source id (shared, short-lived; see
     /// [`playback::BulkEpgEntry`]).
     pub bulk_epg: DashMap<String, playback::BulkEpgEntry>,
+    /// Day tables read recently (see [`playback::DayTables`]).
+    pub day_tables: playback::DayTables,
     /// `stalker_items` exists in this database.
     table_ready: AtomicBool,
 }
@@ -141,10 +222,11 @@ impl Default for Runtime {
     fn default() -> Self {
         Self {
             sessions: DashMap::new(),
-            items: Lru::new(ITEM_CACHE_CAP),
+            items: ItemCache::new(ITEM_CACHE_CAP),
             plans: Lru::new(PLAN_CACHE_CAP),
             page_sizes: DashMap::new(),
             bulk_epg: DashMap::new(),
+            day_tables: playback::DayTables::default(),
             table_ready: AtomicBool::new(false),
         }
     }
@@ -158,6 +240,10 @@ impl Runtime {
 
     pub fn remember(&self, r: &ItemRef, item: CachedItem) {
         self.items.insert(r.key(), item);
+    }
+
+    pub(crate) fn remember_stored(&self, r: &ItemRef, item: StoredItem) {
+        self.items.insert_stored(r.key(), item);
     }
 
     pub fn remember_plan(&self, r: &ItemRef, plan: Arc<Vec<vod::SeasonPlan>>) {
@@ -180,6 +266,7 @@ impl Runtime {
         self.items.remove_prefix(&format!("{source_id}|"));
         self.forget_listings(source_id);
         self.bulk_epg.remove(source_id);
+        self.day_tables.forget_source(source_id);
     }
 }
 
@@ -275,6 +362,13 @@ pub async fn persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
     if rows.is_empty() {
         return;
     }
+    let rows: Vec<(ItemRef, StoredItem)> = rows
+        .into_iter()
+        .map(|(r, item)| {
+            let stored = StoredItem::new(&item.raw, item.category_name, item.category_id);
+            (r, stored)
+        })
+        .collect();
     let rt = Runtime::get(state);
     let res = state
         .db_write(move |conn| write_items(&rt, conn, &rows))
@@ -286,8 +380,8 @@ pub async fn persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
 
 /// [`persist_items`] in the background: a movie or series page does not
 /// wait for the write while an import holds the write lock (DB-1). The rows
-/// are in the runtime's memory already.
-pub fn spawn_persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
+/// are in the runtime's memory already, sharing their text with this write.
+pub(crate) fn spawn_persist_items(state: &AppState, rows: Vec<(ItemRef, StoredItem)>) {
     if rows.is_empty() {
         return;
     }
@@ -300,7 +394,7 @@ pub fn spawn_persist_items(state: &AppState, rows: Vec<(ItemRef, CachedItem)>) {
 fn write_items(
     rt: &Runtime,
     conn: &mut rusqlite::Connection,
-    rows: &[(ItemRef, CachedItem)],
+    rows: &[(ItemRef, StoredItem)],
 ) -> CoreResult<()> {
     ensure_items_table(rt, conn)?;
     let now = chrono::Utc::now().timestamp_millis();
@@ -321,7 +415,7 @@ fn write_items(
                 r.source_id,
                 r.content_type.as_str(),
                 r.item_id,
-                item.raw.to_string(),
+                &*item.json,
                 item.category_name,
                 now,
                 item.category_id
@@ -374,12 +468,13 @@ pub async fn cached_item(state: &AppState, r: &ItemRef) -> Option<CachedItem> {
         .ok()
         .flatten();
     let (raw, category_name, category_id) = row?;
-    let item = CachedItem {
-        raw: serde_json::from_str(&raw).ok()?,
+    let stored = StoredItem {
+        json: raw.into(),
         category_name,
         category_id,
     };
-    rt.remember(r, item.clone());
+    let item = stored.parse()?;
+    rt.remember_stored(r, stored);
     Some(item)
 }
 
@@ -414,5 +509,28 @@ mod tests {
         lru.remove_prefix("k1");
         assert!(!lru.contains_key("k10"));
         assert!(!lru.is_empty());
+    }
+
+    #[test]
+    fn remembered_rows_are_kept_as_their_text() {
+        let cache = ItemCache::new(10);
+        let raw = serde_json::json!({"id": "5", "name": "Film", "__kind": "series", "n": [1, {"a": null}]});
+        cache.insert(
+            "s|series|5".into(),
+            CachedItem {
+                raw: raw.clone(),
+                category_name: Some("Drama".into()),
+                category_id: Some("7".into()),
+            },
+        );
+        let stored = cache.rows.get("s|series|5").unwrap();
+        assert_eq!(&*stored.json, raw.to_string());
+        let hit = cache.get("s|series|5").unwrap();
+        assert_eq!(hit.raw, raw);
+        assert_eq!(hit.category_name.as_deref(), Some("Drama"));
+        assert_eq!(hit.category_id.as_deref(), Some("7"));
+        assert!(cache.get("s|series|6").is_none());
+        cache.remove_prefix("s|");
+        assert!(cache.is_empty());
     }
 }

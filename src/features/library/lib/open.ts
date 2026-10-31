@@ -39,8 +39,11 @@ export async function openEntry(
   if (path) {
     // The provider's detail goes out with the click, beside the route chunk, not after the page's
     // first render; the page shows the title's catalog row meanwhile (F4-1). Not speculative, so
-    // neither Data Saver nor a coarse pointer skips it.
-    if (source) prefetchVodDetail(queryClient, snapshot.posterUrl ? { ref, sourceKind: source.kind, posterUrl: snapshot.posterUrl } : { ref, sourceKind: source.kind });
+    // neither Data Saver nor a coarse pointer skips it, and the page that joins it keeps retries.
+    if (source) {
+      const target = snapshot.posterUrl ? { ref, sourceKind: source.kind, posterUrl: snapshot.posterUrl } : { ref, sourceKind: source.kind };
+      prefetchVodDetail(queryClient, target, { speculative: false });
+    }
     navigate(path);
     return;
   }

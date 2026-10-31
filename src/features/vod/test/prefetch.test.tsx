@@ -7,6 +7,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { RpcError } from '@/api/transport';
 import type { ItemRef, Source, VodDetail } from '@/api/types';
 
 import {
@@ -454,6 +455,32 @@ describe('prefetchOnOpen (F4-1)', () => {
       delete (navigator as { connection?: unknown }).connection;
     }
     expect(rpcMock.calls.map((c) => c.cmd)).toEqual(['catalog.item']);
+  });
+
+  it('keeps the client\'s retries for the page that mounts while the click\'s detail is out', async () => {
+    // The app's policy: a retryable RpcError is asked again (query.ts).
+    client = new QueryClient({ defaultOptions: { queries: { retry: (n, e) => e instanceof RpcError && e.retryable && n < 2, retryDelay: 10 } } });
+    client.setQueryData(['sources.list', null], sources);
+    rpcMock.handlers['catalog.items'] = (args) => (args as { refs: ItemRef[] }).refs.map((ref) => ({ item: { ref, title: 'Row', categoryId: 'c' } }));
+    let failures = 1;
+    rpcMock.handlers['xtream.vodDetail'] = (args) => new Promise((resolve, reject) => setTimeout(() => {
+      if (failures-- > 0) reject(new RpcError('timeout', 'provider timed out'));
+      else resolve(movieDetail((args as { ref: ItemRef }).ref));
+    }, 50));
+    prefetchOnOpen(client, movieRef);
+    // The route chunk loads well before the provider answers: the page joins the fetch in flight.
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    const source = makeSource('x1', 'xtream', 'X') as Source;
+    let state: { title?: string; error: boolean } | undefined;
+    function Detail() {
+      const q = useMovieDetail(source, { ...movieRef });
+      state = { title: q.data?.item.title, error: q.isError };
+      return null;
+    }
+    render(wrap(<Detail />));
+    await act(() => vi.advanceTimersByTimeAsync(200));
+    expect(state).toEqual({ title: 'Movie 42', error: false });
+    expect(detailCalls().filter((c) => c.cmd === 'xtream.vodDetail')).toHaveLength(2);
   });
 
   it('does nothing for a source the cached list does not hold, or a channel', async () => {

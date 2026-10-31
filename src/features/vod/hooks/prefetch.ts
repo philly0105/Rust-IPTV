@@ -139,8 +139,13 @@ export function preloadDetailChunk(kind: 'movie' | 'series'): void {
  * title no cached list holds (a continue-watching card, My List) also gets
  * its local catalog row, which the page shows as its hero while the provider
  * answers (F4-1). Live and other non-VOD refs are ignored.
+ *
+ * `speculative` (a hover or focus rest, the default) asks the provider's detail once, without
+ * retries. A click that opens the page passes false: the page mounts while that fetch is still out
+ * and joins it, retry policy and all (TanStack fixes `retry` when a fetch starts), so the click's
+ * fetch keeps the client's retries the page's own fetch would have had.
  */
-export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget): void {
+export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget, { speculative = true }: { speculative?: boolean } = {}): void {
   const { ref } = t;
   if (ref.contentType !== 'movie' && ref.contentType !== 'series') return;
   preloadImage(t.posterUrl, ref.sourceId);
@@ -152,17 +157,18 @@ export function prefetchVodDetail(qc: QueryClient, t: PrefetchTarget): void {
     preloadImage(data.item ? (data.item.backdropUrl ?? data.backdrops?.[0]) : data.backdropUrl, ref.sourceId);
   };
   preloadDetailChunk(ref.contentType);
-  // retry: false: a failed prefetch costs nothing; the page asks again (with retries) on open.
+  // retry: false for a hover: a failed prefetch costs nothing, and the page asks again (with
+  // retries) once it has settled. A click's page joins the fetch in flight, so that one retries.
   if (ref.contentType === 'movie') {
     const q = movieDetailQuery(t.sourceKind, ref);
-    void qc.prefetchQuery({ ...q, retry: false }).then(() => {
+    void qc.prefetchQuery(speculative ? { ...q, retry: false } : q).then(() => {
       const data = qc.getQueryData(q.queryKey);
       afterData(data);
       prefetchTmdb(qc, 'movie', data && ('item' in data ? data.item : data));
     });
   } else {
     const q = seriesDetailQuery(t.sourceKind, ref);
-    void qc.prefetchQuery({ ...q, retry: false }).then(() => {
+    void qc.prefetchQuery(speculative ? { ...q, retry: false } : q).then(() => {
       const data = qc.getQueryData(q.queryKey);
       afterData(data);
       prefetchTmdb(qc, 'series', data && ('item' in data ? data.item : data));
@@ -181,7 +187,7 @@ export function prefetchOnOpen(qc: QueryClient, ref: ItemRef, posterUrl?: string
   if (ref.contentType !== 'movie' && ref.contentType !== 'series') return;
   const sourceKind = qc.getQueryData<Source[]>(rpcKey('sources.list', undefined))?.find((s) => s.id === ref.sourceId)?.kind;
   if (!sourceKind) return;
-  prefetchVodDetail(qc, posterUrl ? { ref, sourceKind, posterUrl } : { ref, sourceKind });
+  prefetchVodDetail(qc, posterUrl ? { ref, sourceKind, posterUrl } : { ref, sourceKind }, { speculative: false });
 }
 
 /** {@link prefetchOnOpen} with the page's query client, for click handlers. Stable. */

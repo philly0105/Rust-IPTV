@@ -254,9 +254,16 @@ describe('opening a title from Favorites (F4-1)', () => {
     renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
     const list = await screen.findByTestId('favorites-list');
     const open = await waitFor(() => within(list).getAllByTestId('entry-artwork')[0]!);
+    // Stands in for the app's retry policy (the harness turns retries off).
+    const policy = () => false;
+    queryClient.setDefaultOptions({ queries: { retry: policy, gcTime: 0 } });
     fireEvent.click(open);
     // No route renders the detail page here: the request comes from the open itself.
     await waitFor(() => expect(rpc.callsOf('xtream.vodDetail')).toEqual([{ ref: { sourceId: 'src1', contentType: 'movie', itemId: 'm1' } }]));
+    // Not a hover's one try: the page joins this fetch, so it keeps the client's retry policy.
+    const detail = queryClient.getQueryCache().find({ queryKey: ['xtream.vodDetail', { ref: { sourceId: 'src1', contentType: 'movie', itemId: 'm1' } }] });
+    expect(detail?.options.retry).toBe(policy);
+    queryClient.setDefaultOptions({ queries: { retry: false, gcTime: 0 } });
   });
 });
 

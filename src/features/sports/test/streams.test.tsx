@@ -18,8 +18,14 @@ vi.mock('@/api/transport', async (importOriginal) => ({
   isDesktop: false,
 }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEvent: () => () => undefined }));
+// Counted, not changed: how often the hooks prepare and match is what some tests below pin.
+vi.mock('../lib/match', async (orig) => {
+  const actual = await orig<typeof import('../lib/match')>();
+  return { ...actual, matchGame: vi.fn(actual.matchGame), prepareMatch: vi.fn(actual.prepareMatch) };
+});
 
-const { queryClient, invalidate } = await import('@/api/query');
+const { queryClient, invalidate, rpcKey } = await import('@/api/query');
+const match = await import('../lib/match');
 const { itemKey } = await import('@/api/types');
 const { NETWORKS } = await import('../lib/names');
 const { etDate } = await import('../lib/espn');
@@ -723,5 +729,32 @@ describe('useGameStreams', () => {
     renderHook(() => useGameStreams([game('nba', KNICKS, CELTICS, Date.now())], false), { wrapper });
     await tick(20);
     expect(calls.filter((c) => c.cmd !== 'sources.list' && c.cmd !== 'settings.get')).toEqual([]);
+  });
+
+  it('keeps the index, its prepared map and every match when only a source’s status moves (F5-3)', async () => {
+    const now = Date.now();
+    const games = [game('nba', KNICKS, CELTICS, now + HOUR), game('nfl', STEELERS, BUCS, now + 26 * HOUR)];
+    serve([ch('s1', 'ev', 'NBA 05: Knicks @ Celtics'), ch('s1', 'st3', 'NFL Sunday Ticket 3')]);
+    const { result } = renderHook(() => ({ index: useChannelIndex(), streams: useGameStreams(games) }), { wrapper });
+    await waitFor(() => expect(result.current.streams.loading).toBe(false));
+    const channels = result.current.index.channels;
+    const streams = result.current.streams.streams;
+    const prepared = vi.mocked(match.prepareMatch).mock.calls.length;
+    const matched = vi.mocked(match.matchGame).mock.calls.length;
+
+    // An import that left the playlist as it was, or a failed refresh: sources.list comes back with only
+    // its times, error or counts changed.
+    queryClient.setQueryData(rpcKey('sources.list'), [{ ...SOURCES[0], lastRefreshAt: '2026-10-31T09:00:00Z', lastError: 'HTTP 503' }]);
+    await tick(20);
+    expect(result.current.index.channels).toBe(channels);
+    expect(result.current.streams.streams.get(games[0]!.key)).toBe(streams.get(games[0]!.key));
+    // Before F5-3 the index was rebuilt: its candidate map prepared again and every game matched again.
+    expect(vi.mocked(match.prepareMatch).mock.calls.length).toBe(prepared);
+    expect(vi.mocked(match.matchGame).mock.calls.length).toBe(matched);
+
+    // A rename reaches the rows (the stream list names a source when there are several): rebuilt.
+    queryClient.setQueryData(rpcKey('sources.list'), [{ ...SOURCES[0], name: 'Living room' }]);
+    await waitFor(() => expect(result.current.index.channels).not.toBe(channels));
+    expect(result.current.index.channels.map((r) => r.sourceName)).toEqual(['Living room', 'Living room']);
   });
 });

@@ -293,7 +293,14 @@ const NO_SOURCES: Source[] = [];
 export function useChannelIndex(enabled = true): { channels: IndexedChannel[]; loading: boolean; error: unknown } {
   const client = useQueryClient();
   const sources = useVisibleSources();
-  const list = sources.data ?? NO_SOURCES;
+  const raw = sources.data ?? NO_SOURCES;
+  // Only a source's id, kind and name reach the index. Every import refetches sources.list (an unchanged
+  // one too), and a failed refresh or a backoff changes its status: a new list there rebuilt the index,
+  // and with it the candidate map (about 0.4 s for 96k programmes) and every game's matches (F5-3). The
+  // signature keeps the sources' order, so `lists[i]` stays the groups of `list[i]`.
+  const sig = raw.map((s) => `${s.id}\u0000${s.kind}\u0000${s.name}`).join('\u0001');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const list = useMemo(() => raw, [sig]);
   const groups = useQueries({
     queries: list.map((s) => ({
       queryKey: sportsGroupsKey(s.id),

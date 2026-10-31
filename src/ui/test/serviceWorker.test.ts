@@ -142,7 +142,7 @@ describe('service worker fetch', () => {
     expect(await (await responded).text()).toBe('body of /assets/hls-abc.js');
     expect(sw.cache.writes.map((w) => w.key)).toEqual([`${ORIGIN}/assets/hls-abc.js`]);
     expect(extended).toHaveLength(1);
-    sw.cache.writes[0].finish();
+    sw.cache.writes[0]!.finish();
     await extended[0];
 
     const again = dispatchFetch(sw, '/assets/hls-abc.js');
@@ -157,7 +157,7 @@ describe('service worker fetch', () => {
     expect(await (await responded).text()).toBe('preloaded shell');
     expect(sw.fetched).toEqual([]);
     expect(sw.cache.writes.map((w) => w.key)).toEqual([`${ORIGIN}/`]);
-    sw.cache.writes[0].finish();
+    sw.cache.writes[0]!.finish();
     await extended[0];
   });
 

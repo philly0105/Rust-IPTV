@@ -31,6 +31,8 @@ vi.mock('@/features/player', () => ({
   PlayerDock: () => null,
   ExternalPlaybackFooter: () => null,
 }));
+// The shell loads the dock from its own module (F1-1), with the same stand-ins.
+vi.mock('@/features/player/dock', () => import('@/features/player'));
 
 const { ShellLayout } = await import('../ShellLayout');
 const { useShellStore } = await import('../store');

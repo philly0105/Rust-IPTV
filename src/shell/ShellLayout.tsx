@@ -7,6 +7,7 @@ import { isDesktop } from '@/api/transport';
 import { leaveBareWindowFullscreen } from '@/api/window';
 import { ChannelEditDialogHost } from '@/features/channeledit/DialogHost';
 import { ListsDialogHost } from '@/features/lists/host';
+import { PLAYER_DOCK_EVENT } from '@/features/player/dockRequest';
 import { registerGateHost } from '@/features/parental/gate';
 import { useParentalEvents } from '@/features/parental/status';
 import '@/i18n';
@@ -38,12 +39,14 @@ import { SHELL_BOTTOM_INSET, TabBar, TAB_BAR_HEIGHT } from './TabBar';
 // first idle moment, so it never competes with the page being opened. It starts at once when
 // there is playback to restore, and on the first pointer or key press (the start of any play
 // intent; a page that plays imports the player itself, so by then the chunk is usually in).
-type PlayerModule = typeof import('@/features/player');
+// `@/features/player/dock`, not the barrel: pages import the barrel for the stage and the store,
+// and with the dock in it they loaded the controls before their first render (F1-1).
+type PlayerModule = typeof import('@/features/player/dock');
 let loadedPlayer: PlayerModule | null = null;
 let playerModule: Promise<PlayerModule> | null = null;
 
 function loadPlayerModule(): Promise<PlayerModule> {
-  playerModule ??= import('@/features/player').then((m) => (loadedPlayer = m));
+  playerModule ??= import('@/features/player/dock').then((m) => (loadedPlayer = m));
   return playerModule;
 }
 
@@ -72,11 +75,12 @@ function playbackToRestore(): boolean {
 /**
  * Calls `load` once: at once when `now`, else on the first idle moment (at most
  * PLAYER_IDLE_TIMEOUT_MS; a macrotask where requestIdleCallback is missing) once `delayMs` has
- * passed and scrolling is quiet, or on the first pointer or non-modifier key press. Presses
- * count from the start. Returns the cancel function.
+ * passed and scrolling is quiet, or on the first pointer or non-modifier key press or
+ * PLAYER_DOCK_EVENT. Presses count from the start. Returns the cancel function.
  */
 export function schedulePlayerLoad(load: () => void, now: boolean, win: Window = window, delayMs = 0): () => void {
-  const intents = ['pointerdown', 'keydown'] as const;
+  // PLAYER_DOCK_EVENT: a play began without a press (the player barrel raises it, F1-1).
+  const intents = ['pointerdown', 'keydown', PLAYER_DOCK_EVENT] as const;
   const movement = ['wheel', 'scroll', 'touchmove'] as const;
   let idle: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;

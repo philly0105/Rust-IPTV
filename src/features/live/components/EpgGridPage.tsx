@@ -42,8 +42,7 @@ import { itemKey, sameRef, type Channel, type EpgProgram, type GuideSearchHit, t
 
 import { Button, buttonClass, cn, Dialog, EmptyState, ErrorState, FilterChip, IconButton, TEXT_LINK, Skeleton, Tooltip, TOUCH_TARGET, useListVirtualizer, useRowHeight, useScaledPx, useToast, errorDescription } from '@/ui';
 import { portalContainer } from '@/ui/portal';
-import { dateTimeFormat, intlLocale, relativeTimeFormat } from '@/lib/intl';
-import { joinList } from '@/shell/dashboard/cards';
+import { dateTimeFormat, intlLocale, joinList, relativeTimeFormat } from '@/lib/intl';
 import { useShortcut } from '@/shell';
 import { usePlayerStore } from '@/features/player';
 // Run 2 C2/C3 and Run 1 C2/C4: the channel row menu, as on the Live page.
@@ -1579,6 +1578,9 @@ export function EpgGridPage() {
   // "Match guide channel" from the row menu and the no-match notice, as on the Live page.
   const [mapping, setMapping] = useState<Channel | null>(null);
   const closeMapping = useCallback(() => setMapping(null), []);
+  // The dialog mounts when it first opens and stays for its exit and later openings, as on Live.
+  const [mappingUsed, setMappingUsed] = useState(false);
+  if (mapping && !mappingUsed) setMappingUsed(true);
   const toggleFavorite = useStable(async (channel: Channel, wasFavorite: boolean) => {
     const name = displayChannelName(channel.name, prefs.stripCountryPrefix);
     try {
@@ -2416,7 +2418,7 @@ export function EpgGridPage() {
           onClose={closeRowMenu}
         />
       ) : null}
-      <MemoMappingDialog channel={mapping} onClose={closeMapping} />
+      {mappingUsed ? <MemoMappingDialog channel={mapping} onClose={closeMapping} /> : null}
       <Dialog open={programmeLink !== null} onClose={() => setProgrammeLink(null)} title={t('copyUrl')} size="lg">
         <p className="mb-2 text-sm text-fg-muted">Select the stream address and copy it manually.</p>
         <input

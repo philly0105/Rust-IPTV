@@ -5,8 +5,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/features/player', () => ({}));
+// The shell loads the dock from its own module (F1-1), with the same stand-ins.
+vi.mock('@/features/player/dock', () => import('@/features/player'));
 
 const { PLAYER_IDLE_TIMEOUT_MS, PLAYER_PREFETCH_DELAY_MS, PLAYER_SCROLL_QUIET_MS, schedulePlayerLoad } = await import('../ShellLayout');
+const { PLAYER_DOCK_EVENT, requestPlayerDock } = await import('@/features/player/dockRequest');
 
 function fakeWindow() {
   const target = new EventTarget();
@@ -65,6 +68,19 @@ describe('player prefetch delay', () => {
     expect(extra.requestIdleCallback).toHaveBeenCalledWith(expect.any(Function), { timeout: PLAYER_IDLE_TIMEOUT_MS });
     expect(load).not.toHaveBeenCalled();
     idleCallbacks[0]!();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('a play that starts without a press asks for the dock at once (F1-1)', () => {
+    vi.useFakeTimers();
+    const load = vi.fn();
+    const { win, extra } = fakeWindow();
+    schedulePlayerLoad(load, false, win, PLAYER_PREFETCH_DELAY_MS);
+    requestPlayerDock(win);
+    expect(load).toHaveBeenCalledTimes(1);
+    win.dispatchEvent(new Event(PLAYER_DOCK_EVENT));
+    vi.advanceTimersByTime(PLAYER_PREFETCH_DELAY_MS);
+    expect(extra.requestIdleCallback).not.toHaveBeenCalled();
     expect(load).toHaveBeenCalledTimes(1);
   });
 

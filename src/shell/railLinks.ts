@@ -8,7 +8,7 @@
 
 import { Clapperboard, Clock, Heart, Radio, Tv, Layers, type LucideIcon } from 'lucide-react';
 
-import type { Source } from '@/api/types';
+import type { ItemRef, Source } from '@/api/types';
 
 export type RailLinkId = 'live' | 'radio' | 'movies' | 'series' | 'favorites' | 'recent';
 
@@ -37,6 +37,26 @@ const DEFS: Record<RailLinkId, { labelKey: string; icon: LucideIcon }> = {
 
 export function sourceBasePath(sourceId: string): string {
   return `/s/${encodeURIComponent(sourceId)}`;
+}
+
+/**
+ * In-app path for an item's detail (movie/series) or browse (live/radio) page. Here, in the
+ * entry's path helpers, since F1-1: My List and the stats pages used it from Home's cards module,
+ * which re-exports it, and as a module of its own the 4 kB chunk merge put it in an unrelated chunk.
+ */
+export function itemPath(ref: ItemRef): string {
+  const sid = encodeURIComponent(ref.sourceId);
+  const iid = encodeURIComponent(ref.itemId);
+  switch (ref.contentType) {
+    case 'movie':
+      return `/s/${sid}/movie/${iid}`;
+    case 'series':
+      return `/s/${sid}/series/${iid}`;
+    case 'radio':
+      return `/s/${sid}/radio`;
+    default:
+      return `/s/${sid}/live`;
+  }
 }
 
 /**

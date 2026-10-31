@@ -6,7 +6,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 
-import { joinList } from '@/shell/dashboard/cards';
+import { joinList } from '@/lib/intl';
 import { buttonClass } from '@/ui/Button';
 
 import { CARD_ROOT } from '@/ui/card';

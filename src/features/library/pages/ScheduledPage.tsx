@@ -14,8 +14,7 @@ import { Link } from 'react-router';
 import { invalidate } from '@/api/query';
 import { rpc } from '@/api/transport';
 import type { Recording, RecordingStatus, Reminder } from '@/api/types';
-import { dateTimeFormat, intlLocale } from '@/lib/intl';
-import { joinList } from '@/shell/dashboard/cards';
+import { dateTimeFormat, intlLocale, joinList } from '@/lib/intl';
 import { buttonClass } from '@/ui/Button';
 import { cn } from '@/ui/cn';
 

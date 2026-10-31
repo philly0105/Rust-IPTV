@@ -21,7 +21,7 @@ import { useNavigate } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import { itemKey, sameRef, type ItemKey, type PlaybackPosition, type WatchlistEntry } from '@/api/types';
-import { itemPath } from '@/shell/dashboard/cards';
+import { itemPath } from '@/shell/railLinks';
 import { intlLocale } from '@/lib/intl';
 import { snapshotTitle } from '@/lib/title';
 

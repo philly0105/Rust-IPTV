@@ -3,9 +3,10 @@
 // Prints every JavaScript chunk in dist/assets, largest first, and exits 1 when the entry chunk
 // (`dist/assets/index-*.js`, the module script index.html loads) is over BUDGET bytes, when
 // Home's route chunk statically loads player code (performance audit SH-2), when the Search,
-// Settings, category-grid or Sports route chunks statically load the player's UI, or when there is
-// no build to check. The Live and Guide route chunks are measured too and noted while they still
-// load the player's controls (see ROUTES). Plain Node, no dependencies.
+// Settings, category-grid or Sports route chunks statically load the player's UI, when the Live
+// and Guide route chunks load the player's controls (F1-1), when Live, the guide, Search or
+// Scheduled load Home's cards module, or when there is no build to check. Plain Node, no
+// dependencies.
 //
 //   node tools/check-bundle.mjs [distDir]    (default: dist)
 //
@@ -20,11 +21,12 @@ const BUDGET = 268_000;
 const ENTRY = /^index-[\w-]+\.js$/;
 /**
  * Player chunks (named after their first module: the player store, `playback`, `mpvExtras`, the
- * `@/features/player` barrel, the stage and the engines). A lazy route renders only after its
- * static imports have run, so one of these in Home's static closure made a cold Home wait for
- * about 97 kB of player code it needs only after a click. Home loads the player behind import().
+ * `@/features/player` barrel, the shell's `@/features/player/dock`, the stage and the engines). A
+ * lazy route renders only after its static imports have run, so one of these in Home's static
+ * closure made a cold Home wait for about 97 kB of player code it needs only after a click. Home
+ * loads the player behind import().
  */
-const PLAYER = /^(?:store|playback|mpvExtras|player-index|PlayerStage|PlayerDock|Controls|hls|mpegts|shaka-player\.compiled)-[\w-]+\.js$/;
+const PLAYER = /^(?:store|playback|mpvExtras|player-index|dock|PlayerStage|PlayerDock|Controls|hls|mpegts|shaka-player\.compiled)-[\w-]+\.js$/;
 /**
  * The player's UI: the barrel, the dock, the stage, the controls (whose chunk also holds the
  * player's stores and subscriptions: reconnect, failover, sleep timer, zap banner) and the engines.
@@ -33,7 +35,7 @@ const PLAYER = /^(?:store|playback|mpvExtras|player-index|PlayerStage|PlayerDock
  * controls chunk, 69 kB, in front of Search's and the category grids' first render; the duration
  * helper merged into the player's subtitle chunk did the same to Settings.
  */
-const PLAYER_UI = /^(?:player-index|PlayerStage|PlayerDock|Controls|hls|mpegts|shaka-player\.compiled)-[\w-]+\.js$/;
+const PLAYER_UI = /^(?:player-index|dock|PlayerStage|PlayerDock|Controls|hls|mpegts|shaka-player\.compiled)-[\w-]+\.js$/;
 /** The chunk Controls.tsx starts; the route checks fail when it is gone, so a rename cannot switch them off. */
 const CONTROLS = /^Controls-[\w-]+\.js$/;
 /**
@@ -42,20 +44,32 @@ const CONTROLS = /^Controls-[\w-]+\.js$/;
  * category grid's poster menu plays a movie and Sports plays a game's channel the same way.
  *
  * Live and the guide draw the stage (`PlayerStage`), but the controls come with the dock, which the
- * shell loads; they reach the controls chunk only because the `@/features/player` barrel exports
- * `PlayerDock`, so importing `PlayerStage` from it puts the dock's whole graph in their chunks'
- * reach (measured: about 37 kB gzipped each before their first render). `pending` routes print a
- * note instead of failing until that is fixed in the player feature; the check says when a pending
- * route is clean, so the note can become a guard.
+ * shell loads from `@/features/player/dock` (F1-1). While the `@/features/player` barrel exported
+ * `PlayerDock`, importing `PlayerStage` from it put the dock's whole graph in their chunks' reach
+ * (about 37 kB gzipped each before their first render). A route marked `pending` prints a note
+ * instead of failing, and the check says when it is clean, so the note can become a guard.
+ *
+ * `cards`: Home's cards module (`shell/dashboard/cards.tsx`, about 39 kB with My List, the VOD
+ * prefetch and the rails it brings). Live, the guide, Search and Scheduled used it only for
+ * `joinList`, which is a leaf now (`src/lib/joinList.ts`). My List, the VOD landing and the detail
+ * pages draw its cards and may load it.
  */
+const CARDS = /^cards-[\w-]+\.js$/;
 const ROUTES = [
   { name: 'Home', chunk: /^DashboardPage-[\w-]+\.js$/, page: 'src/shell/dashboard/DashboardPage.tsx', forbid: PLAYER, what: 'player code' },
   { name: 'Search', chunk: /^SearchPage-[\w-]+\.js$/, page: 'src/features/vod/pages/SearchPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
   { name: 'Settings', chunk: /^SettingsPage-[\w-]+\.js$/, page: 'src/features/settings/SettingsPage.tsx', forbid: PLAYER, what: 'player code' },
   { name: 'Category grid', chunk: /^CategoryGridPage-[\w-]+\.js$/, page: 'src/features/vod/pages/CategoryGridPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
   { name: 'Sports', chunk: /^SportsPage-[\w-]+\.js$/, page: 'src/features/sports/pages/SportsPage.tsx', forbid: PLAYER_UI, what: "the player's UI" },
-  { name: 'Live', chunk: /^LivePage-[\w-]+\.js$/, page: 'src/features/live/components/LivePage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
-  { name: 'Guide', chunk: /^EpgGridPage-[\w-]+\.js$/, page: 'src/features/live/components/EpgGridPage.tsx', forbid: CONTROLS, what: "the player's controls", pending: true },
+  { name: 'Live', chunk: /^LivePage-[\w-]+\.js$/, page: 'src/features/live/components/LivePage.tsx', forbid: CONTROLS, what: "the player's controls" },
+  { name: 'Guide', chunk: /^EpgGridPage-[\w-]+\.js$/, page: 'src/features/live/components/EpgGridPage.tsx', forbid: CONTROLS, what: "the player's controls" },
+];
+/** Routes that must not load Home's cards module before their first render (see CARDS). */
+const NO_CARDS = [
+  { name: 'Live', chunk: /^LivePage-[\w-]+\.js$/ },
+  { name: 'Guide', chunk: /^EpgGridPage-[\w-]+\.js$/ },
+  { name: 'Search', chunk: /^SearchPage-[\w-]+\.js$/ },
+  { name: 'Scheduled', chunk: /^ScheduledPage-[\w-]+\.js$/ },
 ];
 /** A static `import`/`export ... from "./chunk.js"` in Rollup's output; `import("./x.js")` is not one. */
 const STATIC_IMPORT = /\b(?:import|export)\s*(?:\{[^}]*\}\s*from\s*|\*\s*as\s*[\w$]+\s*from\s*|[\w$]+\s*from\s*)?["']\.\/([\w.-]+\.js)["']/g;
@@ -155,13 +169,26 @@ for (const route of ROUTES) {
   if (player.length === 0) {
     if (route.pending) notes.push(`${route.name} no longer loads ${route.what}: drop \`pending\` from its ROUTES entry so the check guards it.`);
   } else if (route.pending) {
-    notes.push(`${route.name} still loads ${route.what} (${player.join(', ')}) before its first render; take PlayerDock out of the @/features/player barrel and have the shell load it from its own module.`);
+    notes.push(`${route.name} still loads ${route.what} (${player.join(', ')}) before its first render.`);
   } else {
     leaks.push(`The ${route.name} route chunk statically loads ${route.what} (${player.join(', ')}).`);
   }
 }
 for (const note of notes) console.log(`size:check: note: ${note}`);
 if (leaks.length > 0) {
-  fail(`${leaks.join(' ')} Load the player inside the click handler with import('@/features/player'), and import the store from '@/features/player/store' where a page reads it; see docs/architecture/performance.md.`);
+  fail(`${leaks.join(' ')} Load the player inside the click handler with import('@/features/player'), import the store from '@/features/player/store' where a page reads it, and keep the dock out of the barrel (the shell loads @/features/player/dock); see docs/architecture/performance.md.`);
 }
-console.log("size:check: no player code in the Home or Settings route chunks' static imports, and none of the player's UI in Search's, the category grid's or Sports'.");
+if (!chunks.some((c) => CARDS.test(c.file))) {
+  fail(`no Home cards chunk (cards-*.js) in ${shown}; update CARDS in tools/check-bundle.mjs if src/shell/dashboard/cards.tsx moved.`);
+}
+const cardLeaks = [];
+for (const route of NO_CARDS) {
+  const page = chunks.find((c) => route.chunk.test(c.file));
+  if (!page) fail(`no ${route.name} route chunk in ${shown}; update NO_CARDS in tools/check-bundle.mjs if the page moved.`);
+  const cards = [...staticClosure(page.file)].filter((f) => CARDS.test(f));
+  if (cards.length > 0) cardLeaks.push(`The ${route.name} route chunk statically loads Home's cards module (${cards.join(', ')}).`);
+}
+if (cardLeaks.length > 0) {
+  fail(`${cardLeaks.join(' ')} Import joinList from '@/lib/joinList' and itemPath from '@/shell/itemPath', not from '@/shell/dashboard/cards'; see docs/architecture/performance.md.`);
+}
+console.log("size:check: no player code in the Home or Settings route chunks' static imports, none of the player's UI in Search's, the category grid's or Sports', no player controls in Live's or the guide's, and no Home cards in Live's, the guide's, Search's or Scheduled's.");

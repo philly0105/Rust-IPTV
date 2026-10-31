@@ -33,6 +33,8 @@ vi.mock('@/features/player', () => ({
   PlayerDock: () => null,
   ExternalPlaybackFooter: () => null,
 }));
+// The shell loads the dock from its own module (F1-1), with the same stand-ins.
+vi.mock('@/features/player/dock', () => import('@/features/player'));
 const queue = vi.hoisted(() => ({ calls: [] as unknown[] }));
 vi.mock('@/features/vod/lib/episodeQueue', () => ({
   queueSeriesFrom: async (args: unknown) => {

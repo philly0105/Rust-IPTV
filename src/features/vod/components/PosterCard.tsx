@@ -12,9 +12,8 @@ import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
 import { usePrefetchIntent, type PrefetchIntent, type PrefetchTarget } from '../hooks/prefetch';
 import { formatRating } from '../lib/format';
 import { languageName, type ItemLanguage } from '../lib/language';
-import { joinList } from '@/shell/dashboard/cards';
 import { CARD_ART, CARD_ART_CURSOR, CARD_ROOT, Poster, ProgressBar, Skeleton, WatchedChip, cn } from '@/ui';
-import { listSeparator } from '@/lib/intl';
+import { joinList, listSeparator } from '@/lib/intl';
 
 export interface PosterCardProps {
   /** Caption; pass `titleBase` so a year already in `year`/`meta` is not shown twice. */

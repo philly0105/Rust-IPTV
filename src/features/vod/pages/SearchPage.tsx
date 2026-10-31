@@ -19,8 +19,7 @@ import { ms } from '@/features/live/lib/epgTime';
 import { clockTime, dayHeading } from '@/features/recording/lib/schedule';
 import { useParentalStatus } from '@/features/parental/status';
 import type { PlayItemArgs } from '@/features/player';
-import { joinList } from '@/shell/dashboard/cards';
-import { intlLocale, numberFormat } from '@/lib/intl';
+import { intlLocale, joinList, numberFormat } from '@/lib/intl';
 import { snapshotTitle } from '@/lib/title';
 
 import { GridMyListProvider, myListTarget, PosterCard } from '../components/PosterCard';

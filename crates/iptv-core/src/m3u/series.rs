@@ -423,6 +423,32 @@ pub fn stored_episodes(extra: &serde_json::Value) -> Vec<StoredEpisode> {
         .unwrap_or_default()
 }
 
+/// [`stored_episodes`] of the catalog row `r`, deserialized straight from
+/// its `extra_json` text: no Value tree, and every other key skipped. The
+/// catalog readers leave the list out of the rows they return
+/// (`catalog::read_named`), so whatever needs the episodes reads them here.
+/// Empty when the row is missing, has no list, or the list does not parse.
+pub fn stored_episodes_of(conn: &Connection, r: &ItemRef) -> CoreResult<Vec<StoredEpisode>> {
+    #[derive(Deserialize)]
+    struct EpisodesOnly {
+        #[serde(default)]
+        episodes: Vec<StoredEpisode>,
+    }
+    let extra: Option<String> = conn
+        .prepare_cached(
+            "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = ?2 AND item_id = ?3",
+        )?
+        .query_row(
+            params![r.source_id, r.content_type.as_str(), r.item_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(extra
+        .and_then(|x| serde_json::from_str::<EpisodesOnly>(&x).ok())
+        .map(|e| e.episodes)
+        .unwrap_or_default())
+}
+
 /// Seasons in number order, episodes in episode order (playlist order on a
 /// tie), as `xtream::service::build_seasons` shapes them.
 pub fn seasons(r: &ItemRef, episodes: &[StoredEpisode]) -> Vec<Season> {
@@ -466,10 +492,20 @@ fn expect_series(r: &ItemRef, what: &str) -> CoreResult<()> {
     }
 }
 
-async fn series_row(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<catalog::NamedRow> {
+/// The catalog row of series `r` and its stored episodes, in one `db_call`
+/// (the row as `catalog::get_named` reads it carries no episode list).
+async fn series_row(
+    state: &Arc<AppState>,
+    r: &ItemRef,
+) -> CoreResult<(catalog::NamedRow, Vec<StoredEpisode>)> {
     let key = r.clone();
     state
-        .db_call(move |c| catalog::get_named(c, &key))
+        .db_call(move |c| {
+            let Some(named) = catalog::get_named(c, &key)? else {
+                return Ok(None);
+            };
+            Ok(Some((named, stored_episodes_of(c, &key)?)))
+        })
         .await?
         .ok_or_else(|| {
             CoreError::not_found(
@@ -482,8 +518,7 @@ async fn series_row(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<catalog::N
 /// importer. Playlists carry no cast, plot or trailer.
 pub async fn series_detail(state: &Arc<AppState>, r: &ItemRef) -> CoreResult<SeriesDetail> {
     expect_series(r, "m3u.seriesDetail")?;
-    let named = series_row(state, r).await?;
-    let episodes = stored_episodes(&named.row.extra);
+    let (named, episodes) = series_row(state, r).await?;
     Ok(SeriesDetail {
         seasons: seasons(r, &episodes),
         item: named.into_series(),
@@ -523,11 +558,8 @@ pub async fn stream_url(
     let Some(ep_id) = episode_id.map(str::trim).filter(|e| !e.is_empty()) else {
         return Err(CoreError::invalid("Choose an episode to play."));
     };
-    let named = series_row(state, r).await?;
-    let Some(ep) = stored_episodes(&named.row.extra)
-        .into_iter()
-        .find(|e| e.id == ep_id)
-    else {
+    let (named, episodes) = series_row(state, r).await?;
+    let Some(ep) = episodes.into_iter().find(|e| e.id == ep_id) else {
         return Err(CoreError::not_found(
             "This episode is no longer in the playlist. Refresh the source and try again.",
         ));
@@ -722,17 +754,7 @@ fn mark_if_complete(conn: &Connection, source_id: &str, series_id: &str) -> Core
     if !marked.is_empty() {
         return Ok(());
     }
-    let extra: Option<String> = conn
-        .query_row(
-            "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = 'series' AND item_id = ?2",
-            params![source_id, series_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let episodes = extra
-        .and_then(|x| serde_json::from_str::<serde_json::Value>(&x).ok())
-        .map(|x| stored_episodes(&x))
-        .unwrap_or_default();
+    let episodes = stored_episodes_of(conn, &r)?;
     if episodes.is_empty() {
         return Ok(());
     }
@@ -1071,5 +1093,57 @@ mod tests {
         assert!(stored_episodes(&serde_json::json!({ "episodes": "x" })).is_empty());
         assert_eq!(kind_of("http://h/a.m3u8?t=1"), PlayerKind::Hls);
         assert_eq!(kind_of("http://h/a.mkv"), PlayerKind::Direct);
+    }
+
+    /// The episode reader on stored text answers what `stored_episodes`
+    /// answers on the parsed row, junk included: never an error.
+    #[test]
+    fn stored_episodes_of_reads_the_text_and_tolerates_junk() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE items (source_id TEXT, content_type TEXT, item_id TEXT, extra_json TEXT)",
+        )
+        .unwrap();
+        let ep = |id: &str| StoredEpisode {
+            id: id.into(),
+            season: 1,
+            episode: 1,
+            title: "T".into(),
+            url: format!("http://h/{id}.mkv"),
+            poster_url: Some("http://i/p.jpg".into()),
+            container_extension: None,
+            duration_seconds: Some(60),
+            headers: None,
+        };
+        let good =
+            serde_json::json!({ "plot": "p", "episodes": [ep("a"), ep("b")], "x": {"y": [1]} });
+        let rows = [
+            ("good", good.to_string()),
+            ("none", "{}".to_string()),
+            ("text", r#"{"episodes": "x"}"#.to_string()),
+            ("null", r#"{"episodes": null}"#.to_string()),
+            ("bad_ep", r#"{"episodes": [{"id": "a"}]}"#.to_string()),
+            ("broken", r#"{"episodes": [{"#.to_string()),
+        ];
+        for (id, extra) in &rows {
+            c.execute(
+                "INSERT INTO items VALUES ('s', 'series', ?1, ?2)",
+                params![id, extra],
+            )
+            .unwrap();
+        }
+        for (id, extra) in &rows {
+            let parsed = serde_json::from_str(extra).unwrap_or(serde_json::json!({}));
+            let r = ItemRef::new("s", ContentType::Series, *id);
+            assert_eq!(
+                stored_episodes_of(&c, &r).unwrap(),
+                stored_episodes(&parsed),
+                "{id}"
+            );
+        }
+        let r = ItemRef::new("s", ContentType::Series, "good");
+        assert_eq!(stored_episodes_of(&c, &r).unwrap(), vec![ep("a"), ep("b")]);
+        let missing = ItemRef::new("s", ContentType::Series, "gone");
+        assert!(stored_episodes_of(&c, &missing).unwrap().is_empty());
     }
 }

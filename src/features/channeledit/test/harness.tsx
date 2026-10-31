@@ -213,11 +213,30 @@ function createFakeCore() {
       }
       return { ...ch };
     },
+    // As crates/iptv-core/src/catalog/rpc.rs `items`: up to 500 refs, each answered as `catalog.item`
+    // (an override included) would, its own error kept with its details.
+    'catalog.items': async (raw) => {
+      const a = raw as { refs: ItemRef[] };
+      if (a.refs.length < 1 || a.refs.length > 500) fail('invalid', 'refs must hold 1 to 500 items.');
+      const one = overrides['catalog.item'] ?? handlers['catalog.item']!;
+      const out: unknown[] = [];
+      for (const r of a.refs) {
+        try {
+          out.push({ item: await one({ ref: r }) });
+        } catch (e) {
+          const { code, message, details } = e as { code: RpcErrorCode; message: string; details?: unknown };
+          out.push({ error: { code, message, retryable: false, ...(details !== undefined ? { details } : {}) } });
+        }
+      }
+      return out;
+    },
   };
 
   return {
     calls,
     callsOf: (cmd: string) => calls.filter((c) => c.cmd === cmd).map((c) => c.args),
+    /** Every ref asked of `catalog.items`, call after call. */
+    itemRefsAsked: () => calls.filter((c) => c.cmd === 'catalog.items').flatMap((c) => (c.args as { refs: ItemRef[] }).refs),
     edits,
     reset() {
       catalog.clear();

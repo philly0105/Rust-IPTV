@@ -13,7 +13,8 @@
 import type { TFunction } from 'i18next';
 import type { ReactNode } from 'react';
 
-import { queryClient, rpcKey } from '@/api/query';
+import { ITEMS_BATCH_MAX } from '@/api/itemBatch';
+import { batchedItemQuery, queryClient, rpcKey } from '@/api/query';
 import { isParentalLocked, rpc, RpcError } from '@/api/transport';
 import { itemKey, sameRef, type ChannelEdit, type ItemRef } from '@/api/types';
 import { toast, errorDescription } from '@/ui';
@@ -38,7 +39,7 @@ export interface Refused {
 /** Refs the core takes per `channels.setHidden` call (C2). */
 export const HIDE_BATCH = 500;
 
-/** Calls in flight at once when refs go one at a time (lookups, a batch retried ref by ref). */
+/** Calls in flight at once when refs go one at a time (a batch retried ref by ref). */
 const PARALLEL = 6;
 
 /** Why a write failed, as text. A channel the provider dropped gets its own words. */
@@ -126,15 +127,19 @@ export function isGoneAnswer(err: unknown): boolean {
  * Answers share the cache of the hidden-channels rows, which ask the same, so
  * a row the dialog has shown costs no call, whichever way it answered. A
  * lookup that fails for another reason counts as listed.
+ *
+ * The rest go through the `catalog.items` batch, {@link ITEMS_BATCH_MAX} refs
+ * a call, one call after another: Unhide all over 1,000 channels asked 1,000
+ * `catalog.item` calls six at a time, and now asks 2 (F5-4).
  */
 async function splitByPresence(refs: readonly ItemRef[]): Promise<{ listed: ItemRef[]; gone: ItemRef[] }> {
   const gone = new Set<string>();
-  await eachLimit(refs, PARALLEL, async (ref) => {
-    const queryKey = rpcKey('catalog.item', { ref });
+  const ask: ItemRef[] = [];
+  for (const ref of refs) {
     // fetchQuery reuses fresh data but always asks again after an error (the
     // query marks every error invalidated); reuse a recent not_found too, unless
     // a lookup is already under way, which fetchQuery joins.
-    const cached = queryClient.getQueryState<unknown, RpcError>(queryKey);
+    const cached = queryClient.getQueryState<unknown, RpcError>(rpcKey('catalog.item', { ref }));
     if (
       cached?.status === 'error' &&
       cached.fetchStatus === 'idle' &&
@@ -142,14 +147,19 @@ async function splitByPresence(refs: readonly ItemRef[]): Promise<{ listed: Item
       Date.now() - cached.errorUpdatedAt < ITEM_STALE_MS
     ) {
       gone.add(itemKey(ref));
-      return;
+    } else {
+      ask.push(ref);
     }
-    try {
-      await queryClient.fetchQuery({ queryKey, queryFn: () => rpc('catalog.item', { ref }), staleTime: ITEM_STALE_MS });
-    } catch (err) {
-      if (isGoneAnswer(err)) gone.add(itemKey(ref));
-    }
-  });
+  }
+  for (let i = 0; i < ask.length; i += ITEMS_BATCH_MAX) {
+    const slice = ask.slice(i, i + ITEMS_BATCH_MAX);
+    // Started in one synchronous loop, so the slice goes out as one call; one slice at a time holds
+    // one of the core's connections, not one per 500 refs at once.
+    const answers = await Promise.allSettled(slice.map((ref) => queryClient.fetchQuery(batchedItemQuery(ref, ITEM_STALE_MS))));
+    answers.forEach((a, j) => {
+      if (a.status === 'rejected' && isGoneAnswer(a.reason)) gone.add(itemKey(slice[j]!));
+    });
+  }
   return {
     listed: refs.filter((r) => !gone.has(itemKey(r))),
     gone: refs.filter((r) => gone.has(itemKey(r))),

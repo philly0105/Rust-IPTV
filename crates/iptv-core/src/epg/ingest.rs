@@ -89,6 +89,24 @@ pub fn runtime(state: &AppState) -> Arc<EpgRuntime> {
     state.ext_or_insert_with(RUNTIME_KEY, || Arc::new(EpgRuntime::default()))
 }
 
+/// [`EpgRuntime::bump`], then builds the new channel directory before the
+/// caller emits `epg.changed`. The event makes the UI refetch every mounted
+/// `epg.*` query at once; the first of them built the directory (every
+/// channel of every enabled feed, 0.1-0.25 s at 30-60k guide channels, about
+/// three times that on an N100) under `rt.names` while the others waited
+/// on that lock, each holding a pooled connection (R2-4). A failure is
+/// logged: the next read builds it as before.
+pub(crate) async fn bump_and_prewarm(state: &AppState, rt: &Arc<EpgRuntime>) {
+    rt.bump();
+    let r = rt.clone();
+    if let Err(e) = state
+        .db_read_call(move |c| super::resolve::directory(c, &r).map(|_| ()))
+        .await
+    {
+        tracing::warn!(error = %e, "could not build the guide channel directory");
+    }
+}
+
 /// `epg.progress` payload.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -383,7 +401,7 @@ async fn run_refresh(
             if stats.not_modified {
                 state.emit("epg.changed", STATUS_ONLY);
             } else {
-                rt.bump();
+                bump_and_prewarm(&state, &rt).await;
                 state.emit("epg.changed", serde_json::json!({}));
             }
         }
@@ -565,7 +583,7 @@ pub async fn schedule_pass(state: Arc<AppState>) -> CoreResult<Vec<String>> {
         })
         .await?;
     if pruned > 0 {
-        rt.bump();
+        bump_and_prewarm(&state, &rt).await;
         state.emit("epg.changed", serde_json::json!({}));
     }
     let now = chrono::Utc::now();
@@ -938,6 +956,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(staging, 0);
+    }
+
+    /// R2-4: a refresh that stored data builds the new channel directory
+    /// before `epg.changed` goes out, so the reads the event sets off find
+    /// it built instead of the first one building it while the rest wait.
+    #[tokio::test]
+    async fn a_refresh_builds_the_directory_before_it_announces_the_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().join("data"),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let path = tmp.path().join("guide.xml");
+        std::fs::write(
+            &path,
+            "<tv><channel id=\"one.uk\"><display-name>Channel One</display-name></channel></tv>",
+        )
+        .unwrap();
+        let rt = runtime(&state);
+        let before = rt.generation();
+        refresh_now(state.clone(), &path.to_string_lossy())
+            .await
+            .unwrap();
+        assert!(rt.generation() > before);
+        let built = rt.names.lock().clone().expect("the directory is built");
+        assert_eq!(built.generation(), rt.generation());
+        assert_eq!(built.find_id("ONE.UK"), Some("one.uk"));
+        assert_eq!(built.find_name("UK: Channel One HD"), Some("one.uk"));
     }
 
     #[test]

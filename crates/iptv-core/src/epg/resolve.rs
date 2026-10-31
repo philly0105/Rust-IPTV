@@ -81,8 +81,23 @@ static TLD: Lazy<Regex> = Lazy::new(|| Regex::new(r"\.[a-z]{2,3}$").expect("tld 
 /// " 4K" stripped (repeatedly), `&` read as "and", then only letters and
 /// digits kept. Empty input yields an empty key.
 pub fn normalize_name(name: &str) -> String {
-    let s = strip_affixes(name).replace('&', "and").replace('+', "plus");
-    s.chars().filter(|c| c.is_alphanumeric()).collect()
+    name_key(&strip_affixes(name))
+}
+
+/// The last steps of [`normalize_name`], on a name [`strip_affixes`] has
+/// already been through: `&` read as "and", `+` as "plus", then only
+/// letters and digits kept, in one pass.
+fn name_key(stripped: &str) -> String {
+    let mut key = String::with_capacity(stripped.len());
+    for c in stripped.chars() {
+        match c {
+            '&' => key.push_str("and"),
+            '+' => key.push_str("plus"),
+            c if c.is_alphanumeric() => key.push(c),
+            _ => {}
+        }
+    }
+    key
 }
 
 /// The first steps of [`normalize_name`]: lowercase, decorative symbols,
@@ -115,7 +130,12 @@ fn strip_affixes(name: &str) -> String {
 /// "BBC One" on purpose (same schedule), and their digits are no channel
 /// number.
 fn qualifiers(name: &str) -> Vec<String> {
-    let chars: Vec<char> = strip_affixes(name).chars().collect();
+    stripped_qualifiers(&strip_affixes(name))
+}
+
+/// [`qualifiers`] of a name [`strip_affixes`] has already been through.
+fn stripped_qualifiers(stripped: &str) -> Vec<String> {
+    let chars: Vec<char> = stripped.chars().collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
@@ -175,11 +195,6 @@ fn id_base(id: &str) -> String {
     TLD.replace(&lower, "").into_owned()
 }
 
-/// Normalized key of an XMLTV channel id: "BBCOne.uk" -> "bbcone".
-fn normalize_id(id: &str) -> String {
-    normalize_name(&id_base(id))
-}
-
 /// Snapshot of the channels of every enabled EPG url, for id and name lookup.
 pub struct ChannelDirectory {
     generation: u64,
@@ -216,15 +231,22 @@ impl ChannelDirectory {
             dir.ids
                 .entry(id.to_lowercase())
                 .or_insert_with(|| id.clone());
+            // The display name and the id without its country suffix
+            // ("BBCOne.uk" -> "bbcone"), each stripped once for both its key
+            // and its qualifiers. Building the key ([`normalize_name`]) and
+            // then the qualifiers ([`qualifiers`]) stripped each twice and read
+            // the id's suffix twice: about 8-10 regex searches per channel,
+            // while every EPG read waited on this build after a refresh (R2-4).
             let base = id_base(&id);
-            for (key, source) in [(normalize_name(&name), &name), (normalize_id(&id), &base)] {
-                if key.is_empty() {
+            for source in [name.as_str(), base.as_str()] {
+                let stripped = strip_affixes(source);
+                let key = name_key(&stripped);
+                if key.is_empty() || dir.names.contains_key(&key) {
                     continue;
                 }
-                if !dir.names.contains_key(&key) {
-                    dir.names.insert(key.clone(), id.clone());
-                    dir.entries.push((key, id.clone(), qualifiers(source)));
-                }
+                dir.names.insert(key.clone(), id.clone());
+                dir.entries
+                    .push((key, id.clone(), stripped_qualifiers(&stripped)));
             }
         }
         Ok(dir)
@@ -331,7 +353,9 @@ impl ChannelDirectory {
 
 /// The cached directory, rebuilt when the runtime generation changed. The
 /// lock is held while it is rebuilt, so concurrent callers wait for one
-/// build instead of each loading every guide channel.
+/// build instead of each loading every guide channel. The write paths that
+/// bump the generation build it before they announce the change
+/// ([`super::ingest::bump_and_prewarm`]), so the reads that follow find it.
 pub fn directory(conn: &Connection, rt: &EpgRuntime) -> CoreResult<Arc<ChannelDirectory>> {
     let generation = rt.generation();
     let mut cached = rt.names.lock();
@@ -431,7 +455,7 @@ mod tests {
         assert_eq!(normalize_name("Canal+ HD"), "canalplus");
         assert_eq!(normalize_name("HD"), "hd");
         assert_eq!(normalize_name(""), "");
-        assert_eq!(normalize_id("BBCOne.uk"), "bbcone");
+        assert_eq!(normalize_name(&id_base("BBCOne.uk")), "bbcone");
     }
 
     #[test]
@@ -448,6 +472,87 @@ mod tests {
         assert_eq!(q("BBC One 1080p H.264 50fps"), Vec::<String>::new());
         assert_eq!(q("Sky Sports F1"), ["1"]);
         assert_eq!(q("HBOEast"), Vec::<String>::new());
+    }
+
+    /// [`normalize_name`] as it was before R2-4 split it.
+    fn normalize_name_before(name: &str) -> String {
+        let s = strip_affixes(name).replace('&', "and").replace('+', "plus");
+        s.chars().filter(|c| c.is_alphanumeric()).collect()
+    }
+
+    const NAMES: &[&str] = &[
+        "UK: BBC One HD",
+        "BBC One +1",
+        "BBC One + 2",
+        "Sky Sports 1 HD",
+        "|UK| Sky Sports F1 ◉",
+        "AT&T SportsNet",
+        "Canal+ HD",
+        "E4 +1",
+        "Discovery Channel West",
+        "Ελληνικά & Νέα",
+        "Thời sự 24/7",
+        "  [DE] Das Erste (1080p) ",
+        "HD",
+        "&+",
+        "",
+    ];
+
+    /// R2-4: the one-pass key gives the key of the replace-and-filter steps.
+    #[test]
+    fn name_key_matches_the_steps_it_replaced() {
+        for name in NAMES {
+            assert_eq!(
+                normalize_name(name),
+                normalize_name_before(name),
+                "{name:?}"
+            );
+        }
+    }
+
+    /// R2-4: stripping each name and id once gives the directory that
+    /// normalizing and qualifying each of them separately gave.
+    #[test]
+    fn directory_entries_match_separate_normalization() {
+        let ids = [
+            "bbcone.uk",
+            "BBCOnePlus1.uk",
+            "bbc1plus2.uk",
+            "SkySports1.uk",
+            "skyf1.uk",
+            "att.us",
+            "CanalPlus.fr",
+            "E4.uk",
+            "dw.us",
+            "ert.gr",
+            "vtv.vn",
+            "daserste.de",
+            "hd",
+            "x.tv",
+            "empty",
+        ];
+        let channels: Vec<(&str, &str)> = ids.iter().copied().zip(NAMES.iter().copied()).collect();
+        let d = dir(&channels);
+        // The directory reads one feed's channels in key (id) order.
+        let mut channels = channels;
+        channels.sort_unstable();
+        let mut names: HashMap<String, String> = HashMap::new();
+        let mut entries: Vec<(String, String, Vec<String>)> = Vec::new();
+        for (id, name) in &channels {
+            let base = id_base(id);
+            for (key, source) in [
+                (normalize_name_before(name), name.to_string()),
+                (normalize_name_before(&id_base(id)), base),
+            ] {
+                if key.is_empty() || names.contains_key(&key) {
+                    continue;
+                }
+                names.insert(key.clone(), id.to_string());
+                entries.push((key, id.to_string(), qualifiers(&source)));
+            }
+        }
+        assert_eq!(d.names, names);
+        assert_eq!(d.entries, entries);
     }
 
     fn dir(channels: &[(&str, &str)]) -> ChannelDirectory {

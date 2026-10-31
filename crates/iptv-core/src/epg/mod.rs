@@ -394,7 +394,7 @@ pub async fn set_enabled(state: Arc<AppState>, url: String, enabled: bool) -> Co
                 .is_none_or(|r| r.program_count == 0 && r.status != "fetching"))
         })
         .await?;
-    runtime(&state).bump();
+    ingest::bump_and_prewarm(&state, &runtime(&state)).await;
     state.emit("epg.changed", serde_json::json!({}));
     if enabled && needs_data {
         ingest::spawn_refresh(state, &url);

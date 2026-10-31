@@ -316,13 +316,14 @@ impl<R: BufRead> M3uReader<R> {
         {
             return;
         }
-        let (attrs, _) = parse_attrs_in(rest, true);
+        let mut attrs = Vec::new();
+        parse_attrs_in(rest, true, |k, v| attrs.push((k.to_ascii_lowercase(), v)));
         for (k, v) in attrs {
             if k == "tvg-shift" && self.header_shift.is_none() {
-                self.header_shift = non_empty(&v);
+                self.header_shift = non_empty(v);
             }
             if matches!(k.as_str(), "url-tvg" | "x-tvg-url" | "tvg-url") {
-                for url in extract_urls(&v) {
+                for url in extract_urls(v) {
                     if self.header.epg_urls.len() >= MAX_EPG_URLS {
                         break;
                     }
@@ -332,7 +333,7 @@ impl<R: BufRead> M3uReader<R> {
                 }
             }
             if self.header.attrs.len() < MAX_HEADER_ATTRS && self.seen_attrs.insert(k.clone()) {
-                self.header.attrs.push((k, v));
+                self.header.attrs.push((k, v.to_string()));
             }
         }
     }
@@ -775,18 +776,26 @@ fn apply_header_opt(entry: &mut M3uEntry, key: &str, value: &str) {
 }
 
 /// Parses `key=value` attributes until the first comma outside quotes.
-/// Returns the attributes (keys lowercased) and the byte index just past that
-/// comma (or `s.len()` when there is none).
-pub(crate) fn parse_attrs(s: &str) -> (Vec<(String, String)>, Option<usize>) {
-    parse_attrs_in(s, false)
+/// Returns the attributes (keys trimmed, in the case written) and the byte
+/// index just past that comma (`None` when there is none).
+#[cfg(test)]
+pub(crate) fn parse_attrs(s: &str) -> (Vec<(&str, &str)>, Option<usize>) {
+    let mut attrs = Vec::new();
+    let comma = parse_attrs_in(s, false, |k, v| attrs.push((k, v)));
+    (attrs, comma)
 }
 
-/// [`parse_attrs`]; with `header` (an `#EXTM3U` line, which has no display
-/// name) a comma ends neither the attributes nor an unquoted value, so
+/// [`parse_attrs`], handing each attribute to `attr` as it is read, so an
+/// entry line allocates nothing for the attributes it does not keep. With
+/// `header` (an `#EXTM3U` line, which has no display name) a comma ends
+/// neither the attributes nor an unquoted value, so
 /// `url-tvg=http://a/e.xml,http://b/e.xml` keeps both guides.
-fn parse_attrs_in(s: &str, header: bool) -> (Vec<(String, String)>, Option<usize>) {
+fn parse_attrs_in<'s>(
+    s: &'s str,
+    header: bool,
+    mut attr: impl FnMut(&'s str, &'s str),
+) -> Option<usize> {
     let bytes = s.as_bytes();
-    let mut attrs = Vec::new();
     let mut i = 0;
     let n = bytes.len();
     while i < n {
@@ -796,7 +805,7 @@ fn parse_attrs_in(s: &str, header: bool) -> (Vec<(String, String)>, Option<usize
                 i += 1;
                 continue;
             }
-            return (attrs, Some(i + 1));
+            return Some(i + 1);
         }
         if c.is_ascii_whitespace() {
             i += 1;
@@ -843,9 +852,9 @@ fn parse_attrs_in(s: &str, header: bool) -> (Vec<(String, String)>, Option<usize
                 }
                 (&s[start..k], k)
             };
-            let key = key.trim().to_ascii_lowercase();
+            let key = key.trim();
             if !key.is_empty() {
-                attrs.push((key, value.to_string()));
+                attr(key, value);
             }
             i = next;
         } else {
@@ -853,7 +862,16 @@ fn parse_attrs_in(s: &str, header: bool) -> (Vec<(String, String)>, Option<usize
             i = i_key_end;
         }
     }
-    (attrs, None)
+    None
+}
+
+/// `key` lowercased into `buf`. `None` for a key longer than `buf`: every
+/// key [`parse_extinf`] reads is shorter, so it would be ignored anyway.
+fn lowercase_key<'b>(key: &str, buf: &'b mut [u8; 16]) -> Option<&'b str> {
+    let out = buf.get_mut(..key.len())?;
+    out.copy_from_slice(key.as_bytes());
+    out.make_ascii_lowercase();
+    std::str::from_utf8(out).ok()
 }
 
 /// Parses everything after `#EXTINF:`.
@@ -869,23 +887,22 @@ fn parse_extinf(rest: &str) -> M3uEntry {
         .ok()
         .filter(|d| d.is_finite());
     let after = &rest[dur_end..];
-    let (attrs, comma) = parse_attrs(after);
-    let name = match comma {
-        Some(i) => after[i..].trim().to_string(),
-        None => String::new(),
-    };
     let mut e = M3uEntry {
         duration,
-        name,
         ..Default::default()
     };
-    for (k, v) in attrs {
-        match k.as_str() {
-            "tvg-id" => e.tvg_id = non_empty(&v),
-            "tvg-name" => e.tvg_name = non_empty(&v),
+    // Keys are matched in a stack buffer and only kept values are copied.
+    let mut key = [0u8; 16];
+    let comma = parse_attrs_in(after, false, |k, v| {
+        let Some(k) = lowercase_key(k, &mut key) else {
+            return;
+        };
+        match k {
+            "tvg-id" => e.tvg_id = non_empty(v),
+            "tvg-name" => e.tvg_name = non_empty(v),
             "tvg-logo" | "logo" => {
                 if e.tvg_logo.is_none() {
-                    e.tvg_logo = non_empty(&v)
+                    e.tvg_logo = non_empty(v)
                 }
             }
             "tvg-chno" | "channel-number" | "tvg-num" => {
@@ -904,23 +921,26 @@ fn parse_extinf(rest: &str) -> M3uEntry {
                         })
                 }
             }
-            "tvg-shift" => e.tvg_shift = non_empty(&v),
-            "group-title" => e.group = non_empty(&v),
+            "tvg-shift" => e.tvg_shift = non_empty(v),
+            "group-title" => e.group = non_empty(v),
             "radio" => e.radio = v.trim().eq_ignore_ascii_case("true") || v.trim() == "1",
-            "catchup" | "catchup-type" => e.catchup = non_empty(&v),
+            "catchup" | "catchup-type" => e.catchup = non_empty(v),
             "catchup-days" | "timeshift" => {
                 if e.catchup_days.is_none() {
                     e.catchup_days = v.trim().parse::<i64>().ok().filter(|d| *d > 0)
                 }
             }
-            "catchup-source" => e.catchup_source = non_empty(&v),
-            "user-agent" | "http-user-agent" => apply_header_opt(&mut e, "user-agent", &v),
+            "catchup-source" => e.catchup_source = non_empty(v),
+            "user-agent" | "http-user-agent" => apply_header_opt(&mut e, "user-agent", v),
             "referrer" | "referer" | "http-referrer" | "http-referer" => {
-                apply_header_opt(&mut e, "referrer", &v)
+                apply_header_opt(&mut e, "referrer", v)
             }
-            "origin" | "http-origin" => apply_header_opt(&mut e, "origin", &v),
+            "origin" | "http-origin" => apply_header_opt(&mut e, "origin", v),
             _ => {}
         }
+    });
+    if let Some(i) = comma {
+        e.name = after[i..].trim().to_string();
     }
     e
 }
@@ -945,8 +965,12 @@ fn set_url(entry: &mut M3uEntry, line: &str) {
 
 /// Name fallback chain: EXTINF name, tvg-name, last URL path segment, URL.
 fn finalize_name(entry: &mut M3uEntry) {
-    if !entry.name.trim().is_empty() {
-        entry.name = entry.name.trim().to_string();
+    let name = entry.name.trim();
+    if !name.is_empty() {
+        // `parse_extinf` trims the name already: copy it only when not.
+        if name.len() != entry.name.len() {
+            entry.name = name.to_string();
+        }
         return;
     }
     if let Some(n) = entry.tvg_name.as_deref().filter(|n| !n.trim().is_empty()) {
@@ -987,14 +1011,16 @@ pub fn extract_urls(value: &str) -> Vec<String> {
 
 /// True for URLs whose path ends in a typical movie container extension.
 pub fn has_movie_extension(url: &str) -> bool {
-    let path = url
-        .split(['?', '#'])
-        .next()
-        .unwrap_or(url)
-        .to_ascii_lowercase();
+    let path = url.split(['?', '#']).next().unwrap_or(url);
     [".mp4", ".mkv", ".avi", ".m4v", ".mov"]
         .iter()
-        .any(|ext| path.ends_with(ext))
+        .any(|ext| ends_with_ignore_case(path, ext))
+}
+
+/// Whether `s` ends with the ASCII `suffix`, in any case (no lowercased copy).
+pub(super) fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
+    s.len() >= suffix.len()
+        && s.as_bytes()[s.len() - suffix.len()..].eq_ignore_ascii_case(suffix.as_bytes())
 }
 
 /// The container extension of a URL path (`mp4`), if any.
@@ -1111,10 +1137,33 @@ http://s/2\n";
     #[test]
     fn unquoted_and_single_quoted_attrs() {
         let (attrs, comma) = parse_attrs(" tvg-chno=7 group-title='A, B' tvg-id=\"x\",Name");
-        assert_eq!(attrs[0], ("tvg-chno".into(), "7".into()));
-        assert_eq!(attrs[1], ("group-title".into(), "A, B".into()));
-        assert_eq!(attrs[2], ("tvg-id".into(), "x".into()));
+        assert_eq!(
+            attrs,
+            [("tvg-chno", "7"), ("group-title", "A, B"), ("tvg-id", "x")]
+        );
         assert!(comma.is_some());
+    }
+
+    /// Attribute keys match in any case and with spaces around them, on
+    /// entries and on the header; a key longer than any known one is ignored.
+    #[test]
+    fn attribute_keys_match_in_any_case() {
+        let (e, header, _) = parse_str(
+            "#EXTM3U URL-TVG=\"http://e/1.xml\" TVG-Shift=2\n\
+             #EXTINF:-1 TVG-ID=\"a.b\" Group-Title = \"News\" tvg-LOGO='http://l/1.png' \u{a0}TVG-CHNO=7 HTTP-USER-AGENT=\"UA\" Catchup-Days=3 tvg-id-but-much-longer=\"x\",  BBC  \n\
+             http://s/1.ts\n",
+        );
+        assert_eq!(e[0].tvg_id.as_deref(), Some("a.b"));
+        assert_eq!(e[0].group.as_deref(), Some("News"));
+        assert_eq!(e[0].tvg_logo.as_deref(), Some("http://l/1.png"));
+        assert_eq!(e[0].tvg_chno, Some(7));
+        assert_eq!(e[0].user_agent.as_deref(), Some("UA"));
+        assert_eq!(e[0].catchup_days, Some(3));
+        assert_eq!(e[0].tvg_shift.as_deref(), Some("2"), "the header's default");
+        assert_eq!(e[0].name, "BBC");
+        assert_eq!(header.epg_urls, ["http://e/1.xml"]);
+        assert_eq!(header.attrs[0], ("url-tvg".into(), "http://e/1.xml".into()));
+        assert_eq!(header.attrs[1], ("tvg-shift".into(), "2".into()));
     }
 
     #[test]

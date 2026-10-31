@@ -6,7 +6,7 @@
 //! ([`StoredEpisode`]). `m3u.seriesDetail` and `m3u.streamUrl` read them
 //! back. See docs/architecture/m3u.md ("Series").
 
-use super::importer::{hash16, url_path_lower};
+use super::importer::{has_dir, hash16, url_path};
 use super::parser::{url_extension, M3uEntry};
 use crate::catalog::{self, ItemRow};
 use crate::error::{CoreError, CoreResult};
@@ -100,7 +100,7 @@ fn clean_rest(s: &str) -> &str {
 /// so live channels and radio never become episodes.
 pub fn detect(e: &M3uEntry) -> Option<Detected> {
     let found = marker(&e.name);
-    if found.is_none() && !url_path_lower(&e.url).contains("/series/") {
+    if found.is_none() && !has_dir(url_path(&e.url), "/series/") {
         return None;
     }
     let name = e.name.trim();
@@ -204,7 +204,11 @@ struct Show {
 /// Collects the episodes of one import, one show per group and title.
 #[derive(Default)]
 pub struct SeriesGrouper {
+    /// [`show_key`] -> show.
     index: HashMap<String, usize>,
+    /// Group -> show title as the playlist writes it -> show. Every episode
+    /// of a show repeats both, so each spelling is normalized and keyed once.
+    seen: HashMap<String, HashMap<String, usize>>,
     shows: Vec<Show>,
 }
 
@@ -291,29 +295,14 @@ impl SeriesGrouper {
         e: M3uEntry,
         legacy_id: Option<String>,
     ) -> (bool, EpisodeAt) {
-        let (base, year) = catalog::title_base(&found.show);
-        let key = show_key(&category_id, &found.show, &base, year);
-        let existing = self.index.get(&key).copied();
-        let started = existing.is_none();
-        let at = match existing {
-            Some(i) => i,
-            None => {
-                self.shows.push(Show {
-                    id: hash16(&format!("series\n{key}")),
-                    title: found.show.clone(),
-                    title_base: base,
-                    year,
-                    category_id,
-                    poster_url: None,
-                    position,
-                    episodes: Vec::new(),
-                    id_seeds: Vec::new(),
-                    legacy: Vec::new(),
-                    unnumbered: 0,
-                });
-                self.index.insert(key, self.shows.len() - 1);
-                self.shows.len() - 1
-            }
+        let known = self
+            .seen
+            .get(&category_id)
+            .and_then(|titles| titles.get(&found.show))
+            .copied();
+        let (started, at) = match known {
+            Some(i) => (false, i),
+            None => self.show_of(category_id, &found.show, position),
         };
         let show = &mut self.shows[at];
         let (season, episode) = match found.numbers {
@@ -363,6 +352,40 @@ impl SeriesGrouper {
         (started, added)
     }
 
+    /// The show of a group and title spelling not seen before: the one with
+    /// its [`show_key`] (`EN - Dark (2017)` after `Dark (2017)`), or a new one
+    /// at playlist position `position`. True when the show is new.
+    fn show_of(&mut self, category_id: String, title: &str, position: i64) -> (bool, usize) {
+        let (base, year) = catalog::title_base(title);
+        let key = show_key(&category_id, title, &base, year);
+        let (started, at) = match self.index.get(&key) {
+            Some(&i) => (false, i),
+            None => {
+                let at = self.shows.len();
+                self.shows.push(Show {
+                    id: hash16(&format!("series\n{key}")),
+                    title: title.to_string(),
+                    title_base: base,
+                    year,
+                    category_id: category_id.clone(),
+                    poster_url: None,
+                    position,
+                    episodes: Vec::new(),
+                    id_seeds: Vec::new(),
+                    legacy: Vec::new(),
+                    unnumbered: 0,
+                });
+                self.index.insert(key, at);
+                (true, at)
+            }
+        };
+        self.seen
+            .entry(category_id)
+            .or_default()
+            .insert(title.to_string(), at);
+        (started, at)
+    }
+
     /// Gives the episode at `at` the state saved on old movie row `movie_id`
     /// (an episode matched to that row once the whole playlist is known).
     pub fn adopt(&mut self, at: EpisodeAt, movie_id: String) {
@@ -372,11 +395,31 @@ impl SeriesGrouper {
     }
 
     /// One series row per show, in first-seen order, and the movie ids whose
-    /// state moves to an episode.
+    /// state moves to an episode. Collects [`SeriesGrouper::drain_rows`].
     pub fn into_rows(self, source_id: &str) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
         let mut rows = Vec::with_capacity(self.shows.len());
+        let Ok(legacy) = self.drain_rows(source_id, |row| {
+            rows.push(row);
+            Ok::<_, std::convert::Infallible>(())
+        });
+        (rows, legacy)
+    }
+
+    /// Hands `emit` one series row per show, in first-seen order, and returns
+    /// the movie ids whose state moves to an episode. A row is built only
+    /// once the one before it was handed over, and each show's episodes are
+    /// freed as its row is built, so a large playlist never holds every row
+    /// at once (an episode list as a JSON value takes more memory than the
+    /// episodes it is built from). Stops at the first error of `emit`.
+    pub fn drain_rows<E>(
+        self,
+        source_id: &str,
+        mut emit: impl FnMut(ItemRow) -> Result<(), E>,
+    ) -> Result<Vec<LegacyEpisode>, E> {
+        let Self { index, seen, shows } = self;
+        drop((index, seen));
         let mut legacy = Vec::new();
-        for mut show in self.shows {
+        for mut show in shows {
             let ids = episode_ids(&show.id_seeds);
             for (ep, id) in show.episodes.iter_mut().zip(ids) {
                 ep.id = id;
@@ -396,7 +439,7 @@ impl SeriesGrouper {
                 "episodes".into(),
                 serde_json::to_value(&show.episodes).unwrap_or_default(),
             );
-            rows.push(ItemRow {
+            emit(ItemRow {
                 source_id: source_id.to_string(),
                 content_type: ContentType::Series,
                 item_id: show.id,
@@ -408,9 +451,9 @@ impl SeriesGrouper {
                 extra: serde_json::Value::Object(extra),
                 position: show.position,
                 ..ItemRow::default()
-            });
+            })?;
         }
-        (rows, legacy)
+        Ok(legacy)
     }
 }
 
@@ -1015,6 +1058,109 @@ mod tests {
         assert_eq!(stored_episodes(&rows[0].extra).len(), 3);
         assert_eq!(stored_episodes(&rows[1].extra).len(), 1);
         assert_eq!(rows[0].title_base.as_deref(), Some("The Office"));
+    }
+
+    /// Spellings of shows that come back out of order, across groups, join
+    /// the show their key names, as when every episode was keyed afresh.
+    #[test]
+    fn repeated_spellings_join_the_show_of_their_key() {
+        let line = |g: &str, show: &str, n: u32| {
+            format!(
+                "#EXTINF:-1 group-title=\"{g}\",{show} S01E{n:02}\nhttp://h/series/u/p/{n}.mkv\n"
+            )
+        };
+        let text = [
+            line("Drama", "EN - Dark (2017)", 1),
+            line("Comedy", "The Office [US]", 2),
+            line("Drama", "Dark (2017)", 3),
+            line("Comedy", "The Office (US)", 4),
+            line("Comedy", "The Office [UK]", 5),
+            line("4K", "Dark (2017)", 6),
+            line("Drama", "EN - Dark (2017)", 7),
+            line("Comedy", "The Office (US)", 8),
+        ]
+        .concat();
+        let mut g = SeriesGrouper::default();
+        let mut started = Vec::new();
+        for (i, e) in parse_str(&format!("#EXTM3U\n{text}"))
+            .0
+            .into_iter()
+            .enumerate()
+        {
+            let d = detect(&e).unwrap();
+            let cat = crate::m3u::group_id(e.group.as_deref().unwrap_or(""));
+            started.push(g.add(cat, i as i64, d, e, None).0);
+        }
+        assert_eq!(
+            started,
+            [true, true, false, false, true, true, false, false]
+        );
+        let (rows, _) = g.into_rows("s");
+        let shows: Vec<(&str, i64, Vec<i64>)> = rows
+            .iter()
+            .map(|r| {
+                let eps = stored_episodes(&r.extra)
+                    .iter()
+                    .map(|e| e.episode)
+                    .collect();
+                (r.title.as_str(), r.position, eps)
+            })
+            .collect();
+        assert_eq!(
+            shows,
+            [
+                ("EN - Dark (2017)", 0, vec![1, 3, 7]),
+                ("The Office [US]", 1, vec![2, 4, 8]),
+                ("The Office [UK]", 4, vec![5]),
+                ("Dark (2017)", 5, vec![6]),
+            ]
+        );
+        for r in &rows {
+            let (base, year) = catalog::title_base(&r.title);
+            let key = show_key(&r.category_id, &r.title, &base, year);
+            assert_eq!(r.item_id, hash16(&format!("series\n{key}")), "{}", r.title);
+        }
+    }
+
+    /// Rows handed over one at a time are the rows collected at once, and
+    /// the first error of the receiver stops the drain.
+    #[test]
+    fn drained_rows_match_collected_ones_and_stop_at_an_error() {
+        let text = "#EXTM3U\n\
+             #EXTINF:-1 group-title=\"A\",Dark S01E01\nhttp://h/series/u/p/1.mkv\n\
+             #EXTINF:-1 group-title=\"A\",Dark S01E02\nhttp://h/series/u/p/2.mkv\n\
+             #EXTINF:-1 group-title=\"B\",Lost S01E01\nhttp://h/series/u/p/3.mkv\n\
+             #EXTINF:-1 group-title=\"B\",Heroes S01E01\nhttp://h/series/u/p/4.mkv\n";
+        let grouper = || {
+            let mut g = SeriesGrouper::default();
+            for (i, e) in parse_str(text).0.into_iter().enumerate() {
+                let d = detect(&e).unwrap();
+                let cat = crate::m3u::group_id(e.group.as_deref().unwrap_or(""));
+                g.add(cat, i as i64, d, e, Some(format!("movie{i}")));
+            }
+            g
+        };
+        let (rows, legacy) = grouper().into_rows("s");
+        assert_eq!(rows.len(), 3);
+        let mut drained = Vec::new();
+        let left = grouper()
+            .drain_rows("s", |row| {
+                drained.push(row);
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert_eq!(drained, rows);
+        assert_eq!(left, legacy);
+        let mut calls = 0;
+        let err = grouper().drain_rows("s", |_| {
+            calls += 1;
+            if calls == 2 {
+                Err("stop")
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!((err, calls), (Err("stop"), 2));
     }
 
     /// `(season, episode, title) -> id` of the one series of `text`.

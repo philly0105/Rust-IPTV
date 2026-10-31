@@ -4,7 +4,9 @@
 //! so the previous catalog survives a failed refresh.
 
 use super::body::{sniff, too_large_error, MinRate, MAX_PLAYLIST_BYTES, SNIFF_BYTES};
-use super::parser::{has_movie_extension, url_extension, M3uEntry, M3uReader};
+use super::parser::{
+    ends_with_ignore_case, has_movie_extension, url_extension, M3uEntry, M3uReader,
+};
 use super::series::{EpisodeAt, LegacyEpisode, SeriesGrouper};
 use crate::catalog::{self, CatalogWriter, CategoryRow, ItemRow};
 use crate::db::now_rfc3339;
@@ -263,17 +265,23 @@ pub fn playlist_sha(bytes: &[u8]) -> String {
 
 /// First 16 hex chars of sha256(s).
 pub fn hash16(s: &str) -> String {
-    let d = Sha256::digest(s.as_bytes());
-    hex::encode(&d[..8])
+    hex::encode(digest8(&[s]))
+}
+
+/// First 8 bytes of sha256 over `parts`, joined as they are.
+fn digest8(parts: &[&str]) -> [u8; 8] {
+    let mut h = Sha256::new();
+    for p in parts {
+        h.update(p.as_bytes());
+    }
+    let mut out = [0u8; 8];
+    out.copy_from_slice(&h.finalize()[..8]);
+    out
 }
 
 /// m3u item id: 16 hex chars of sha256(url + '\n' + name) (C2).
 pub fn item_id(url: &str, name: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(url.as_bytes());
-    h.update(b"\n");
-    h.update(name.as_bytes());
-    hex::encode(&h.finalize()[..8])
+    hex::encode(digest8(&[url, "\n", name]))
 }
 
 /// m3u category id: 16 hex chars of sha256(group name) (C4 m3u notes).
@@ -292,13 +300,13 @@ pub fn classify(e: &M3uEntry) -> ContentType {
     if e.radio {
         return ContentType::Radio;
     }
-    let path = url_path_lower(&e.url);
-    if path.contains("/movie/") || path.contains("/series/") {
+    let path = url_path(&e.url);
+    if has_dir(path, "/movie/") || has_dir(path, "/series/") {
         return ContentType::Movie;
     }
     if [".mkv", ".avi", ".mov", ".m4v"]
         .iter()
-        .any(|ext| path.ends_with(ext))
+        .any(|ext| ends_with_ignore_case(path, ext))
     {
         return ContentType::Movie;
     }
@@ -311,14 +319,24 @@ pub fn classify(e: &M3uEntry) -> ContentType {
     ContentType::Live
 }
 
-/// The lowercased path of a stream URL (no scheme, host, query or fragment).
-pub(super) fn url_path_lower(url: &str) -> String {
+/// The path of a stream URL (no scheme, host, query or fragment).
+pub(super) fn url_path(url: &str) -> &str {
     let no_query = url.split(['?', '#']).next().unwrap_or(url);
     let after_scheme = no_query
         .split_once("://")
         .map_or(no_query, |(_, rest)| rest);
-    let path = after_scheme.find('/').map_or("", |i| &after_scheme[i..]);
-    path.to_ascii_lowercase()
+    after_scheme.find('/').map_or("", |i| &after_scheme[i..])
+}
+
+/// Whether URL path `path` contains `dir` (`/series/`: lowercase ASCII,
+/// starting with `/`) in any case. Compared in place, without a lowercased
+/// copy of the path per entry.
+pub(super) fn has_dir(path: &str, dir: &str) -> bool {
+    let (path, dir) = (path.as_bytes(), dir.as_bytes());
+    memchr::memchr_iter(b'/', path).any(|i| {
+        path.get(i..i + dir.len())
+            .is_some_and(|w| w.eq_ignore_ascii_case(dir))
+    })
 }
 
 /// Turns parser entries into catalog rows: stable ids (with a suffix for exact
@@ -328,7 +346,8 @@ pub(super) fn url_path_lower(url: &str) -> String {
 /// episodes back; [`RowBuilder::take_series`] gives one row per show.
 pub struct RowBuilder {
     source_id: String,
-    seen_ids: HashSet<String>,
+    /// The ids given so far, as the 8 digest bytes their hex spells.
+    seen_ids: HashSet<u64>,
     /// Group name -> [`group_id`].
     group_ids: HashMap<String, String>,
     categories: HashMap<ContentType, (Vec<CategoryRow>, HashSet<String>)>,
@@ -357,14 +376,10 @@ struct Legacy {
 }
 
 impl Legacy {
-    /// The identity and old id of movie entry `e` when an old row has its
-    /// identity; counts the entry under it.
-    fn match_key(&mut self, e: &M3uEntry) -> Option<(String, String)> {
-        if self.keys.is_empty() {
-            return None;
-        }
-        let category_id = group_id(e.group.as_deref().unwrap_or_default());
-        let key = super::remap::identity("movie", e.tvg_id.as_deref(), &e.name, &category_id);
+    /// The identity and old id of movie entry `e` of group `category_id`
+    /// when an old row has its identity; counts the entry under it.
+    fn match_key(&mut self, e: &M3uEntry, category_id: &str) -> Option<(String, String)> {
+        let key = super::remap::identity("movie", e.tvg_id.as_deref(), &e.name, category_id);
         let old = self.keys.get(&key)?.clone();
         *self.counts.entry(key.clone()).or_default() += 1;
         Some((key, old))
@@ -410,35 +425,33 @@ impl RowBuilder {
         };
     }
 
-    /// The id of an entry: its hash, with a suffix for an exact duplicate.
+    /// The id of an entry: its hash ([`item_id`]), with a suffix for an
+    /// exact duplicate.
     fn unique_id(&mut self, url: &str, name: &str) -> String {
-        let mut id = item_id(url, name);
-        if self.seen_ids.contains(&id) {
-            let mut n = 2u32;
-            loop {
-                let candidate = hash16(&format!("{url}\n{name}\n#{n}"));
-                if !self.seen_ids.contains(&candidate) {
-                    id = candidate;
-                    break;
-                }
-                n += 1;
-            }
+        let mut id = digest8(&[url, "\n", name]);
+        let mut n = 2u32;
+        while !self.seen_ids.insert(u64::from_be_bytes(id)) {
+            id = digest8(&[url, "\n", name, "\n#", &n.to_string()]);
+            n += 1;
         }
-        self.seen_ids.insert(id.clone());
-        id
+        hex::encode(id)
     }
 
-    /// The category id of `group` for type `ct`, declared on first sight.
-    fn category(&mut self, ct: ContentType, group: &str) -> String {
-        // One sha256 per group, not per entry (IN-10).
-        let cat_id = match self.group_ids.get(group) {
+    /// The [`group_id`] of `group`: one sha256 per group, not per entry (IN-10).
+    fn group_id(&mut self, group: &str) -> String {
+        match self.group_ids.get(group) {
             Some(id) => id.clone(),
             None => {
                 let id = group_id(group);
                 self.group_ids.insert(group.to_string(), id.clone());
                 id
             }
-        };
+        }
+    }
+
+    /// The category id of `group` for type `ct`, declared on first sight.
+    fn category(&mut self, ct: ContentType, group: &str) -> String {
+        let cat_id = self.group_id(group);
         let (cats, cat_ids) = self.categories.entry(ct).or_default();
         if !cat_ids.contains(&cat_id) {
             cat_ids.insert(cat_id.clone());
@@ -464,7 +477,12 @@ impl RowBuilder {
         if ct != ContentType::Movie {
             return Some(self.row_as(e, ct));
         }
-        let matched = self.legacy.match_key(&e);
+        let matched = if self.legacy.keys.is_empty() {
+            None
+        } else {
+            let category_id = self.group_id(e.group.as_deref().unwrap_or_default());
+            self.legacy.match_key(&e, &category_id)
+        };
         let Some(found) = super::series::detect(&e) else {
             let row = self.row_as(e, ct);
             self.legacy.claim(&row.item_id);
@@ -475,8 +493,7 @@ impl RowBuilder {
         let movie_id = self.unique_id(&e.url, &e.name);
         let same_id = self.legacy.claim(&movie_id);
         let legacy = same_id.then_some(movie_id);
-        let group = e.group.clone().unwrap_or_default();
-        let cat_id = self.category(ContentType::Series, &group);
+        let cat_id = self.category(ContentType::Series, e.group.as_deref().unwrap_or_default());
         let (started, at) = self.series.add(cat_id, self.position, found, e, legacy);
         if started {
             self.position += 1;
@@ -490,10 +507,17 @@ impl RowBuilder {
     }
 
     /// The series rows of every episode [`RowBuilder::push`] held back, and
-    /// the episodes earlier imports stored as movies that user state refers to.
-    /// An episode matched by identity only takes the old row when it was the
-    /// only movie entry with that identity and no entry kept the old id.
+    /// the episodes earlier imports stored as movies that user state refers to
+    /// (see [`RowBuilder::take_grouper`]).
     pub fn take_series(&mut self) -> (Vec<ItemRow>, Vec<LegacyEpisode>) {
+        self.take_grouper().into_rows(&self.source_id)
+    }
+
+    /// The episodes [`RowBuilder::push`] held back, grouped into shows, for
+    /// [`SeriesGrouper::drain_rows`]. An episode matched by identity only
+    /// takes the old row when it was the only movie entry with that identity
+    /// and no entry kept the old id.
+    pub fn take_grouper(&mut self) -> SeriesGrouper {
         let mut series = std::mem::take(&mut self.series);
         for (key, old, at) in std::mem::take(&mut self.legacy.candidates) {
             let unique = self.legacy.counts.get(&key) == Some(&1);
@@ -501,7 +525,7 @@ impl RowBuilder {
                 series.adopt(at, old);
             }
         }
-        series.into_rows(&self.source_id)
+        series
     }
 
     /// The row of one entry, as a movie, channel or radio station (never
@@ -511,7 +535,7 @@ impl RowBuilder {
         self.row_as(e, ct)
     }
 
-    fn row_as(&mut self, e: M3uEntry, ct: ContentType) -> ItemRow {
+    fn row_as(&mut self, mut e: M3uEntry, ct: ContentType) -> ItemRow {
         let id = self.unique_id(&e.url, &e.name);
         let cat_id = self.category(ct, e.group.as_deref().unwrap_or_default());
 
@@ -523,58 +547,58 @@ impl RowBuilder {
             _ => None,
         };
 
+        // The entry's strings move into the row: nothing reads them after.
         let mut extra = serde_json::Map::new();
-        if let Some(v) = &e.tvg_name {
-            extra.insert("tvgName".into(), v.clone().into());
+        if let Some(v) = e.tvg_name.take() {
+            extra.insert("tvgName".into(), v.into());
         }
-        if let Some(v) = &e.tvg_shift {
-            extra.insert("tvgShift".into(), v.clone().into());
+        if let Some(v) = e.tvg_shift.take() {
+            extra.insert("tvgShift".into(), v.into());
         }
         let has_catchup = e.catchup.is_some() || e.catchup_source.is_some();
-        let catchup_type = e
-            .catchup
-            .as_deref()
-            .map(|t| t.trim().to_ascii_lowercase())
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| "default".into());
-        let catchup_ok = has_catchup && catalog::catchup_usable(&catchup_type);
+        let mut catchup_ok = false;
         if has_catchup {
+            let catchup_type = e
+                .catchup
+                .as_deref()
+                .map(|t| t.trim().to_ascii_lowercase())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "default".into());
+            catchup_ok = catalog::catchup_usable(&catchup_type);
             let mut c = serde_json::Map::new();
             c.insert("type".into(), catchup_type.into());
             if let Some(d) = e.catchup_days {
                 c.insert("days".into(), d.into());
             }
-            if let Some(s) = &e.catchup_source {
-                c.insert("source".into(), s.clone().into());
+            if let Some(s) = e.catchup_source.take() {
+                c.insert("source".into(), s.into());
             }
             extra.insert("catchup".into(), c.into());
         }
         if e.user_agent.is_some() || e.referrer.is_some() || e.origin.is_some() {
             let mut h = serde_json::Map::new();
-            if let Some(v) = &e.user_agent {
-                h.insert("userAgent".into(), v.clone().into());
+            if let Some(v) = e.user_agent.take() {
+                h.insert("userAgent".into(), v.into());
             }
-            if let Some(v) = &e.referrer {
-                h.insert("referrer".into(), v.clone().into());
+            if let Some(v) = e.referrer.take() {
+                h.insert("referrer".into(), v.into());
             }
-            if let Some(v) = &e.origin {
-                h.insert("origin".into(), v.clone().into());
+            if let Some(v) = e.origin.take() {
+                h.insert("origin".into(), v.into());
             }
             extra.insert("headers".into(), h.into());
         }
         if !e.vlc_opts.is_empty() {
-            let m: serde_json::Map<String, serde_json::Value> = e
-                .vlc_opts
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone().into()))
+            let m: serde_json::Map<String, serde_json::Value> = std::mem::take(&mut e.vlc_opts)
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
                 .collect();
             extra.insert("vlcOpts".into(), m.into());
         }
         if !e.kodi_props.is_empty() {
-            let m: serde_json::Map<String, serde_json::Value> = e
-                .kodi_props
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone().into()))
+            let m: serde_json::Map<String, serde_json::Value> = std::mem::take(&mut e.kodi_props)
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
                 .collect();
             extra.insert("kodiProps".into(), m.into());
         }
@@ -599,6 +623,11 @@ impl RowBuilder {
         } else {
             None
         };
+        let (logo_url, poster_url) = if ct == ContentType::Movie {
+            (None, e.tvg_logo)
+        } else {
+            (e.tvg_logo, None)
+        };
 
         ItemRow {
             source_id: self.source_id.clone(),
@@ -608,19 +637,8 @@ impl RowBuilder {
             title: e.name,
             title_base,
             number,
-            logo_url: if ct == ContentType::Movie {
-                None
-            } else {
-                e.tvg_logo.clone()
-            },
-            poster_url: if ct == ContentType::Movie {
-                e.tvg_logo
-            } else {
-                None
-            },
-            backdrop_url: None,
-            rating: None,
-            added: None,
+            logo_url,
+            poster_url,
             year,
             epg_channel_id: e.tvg_id,
             url: Some(e.url),
@@ -629,7 +647,7 @@ impl RowBuilder {
             archive_hours,
             extra: serde_json::Value::Object(extra),
             position,
-            extra_json: None,
+            ..ItemRow::default()
         }
     }
 
@@ -1116,19 +1134,21 @@ fn write_catalog(
         if let Some(err) = parser.take_io_error() {
             return Err(CoreError::Io(err));
         }
-        // One row per show, with its episodes (m3u/series.rs).
-        let (series_rows, legacy) = builder.take_series();
-        for row in &series_rows {
+        // One row per show, with its episodes (m3u/series.rs), each written
+        // as soon as it is built: rows of every show at once would hold every
+        // episode list as a JSON value through the index rebuild.
+        let legacy = builder.take_grouper().drain_rows(source_id, |row| {
             let seen = declared.entry(row.content_type).or_default();
             let new = builder.categories_from(row.content_type, *seen);
             if !new.is_empty() {
                 writer.declare_categories(row.content_type, new);
                 *seen += new.len();
             }
-            if writer.insert(row)? {
-                remapper.saw(row);
+            if writer.insert(&row)? {
+                remapper.saw(&row);
             }
-        }
+            Ok::<_, CoreError>(())
+        })?;
         let stats = parser.stats();
         let header = parser.header().clone();
         if !stats.saw_header && stats.entries == 0 {
@@ -2009,6 +2029,157 @@ mod tests {
         assert_eq!(s.channels, 1);
     }
 
+    /// A database with source `id` (no catalog yet), on a temp dir.
+    async fn source_db(id: &str) -> (tempfile::TempDir, Arc<AppState>) {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        state
+            .db
+            .get()
+            .unwrap()
+            .execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES (?1, 'm3u', 'S', '{}')",
+                [id],
+            )
+            .unwrap();
+        (tmp, state)
+    }
+
+    /// A playlist of `n` entries mixing channels, movies and episodes of
+    /// 37 shows, in several groups of each, with radio now and then.
+    fn mixed_playlist(n: usize, token: &str) -> String {
+        let mut s = String::from("#EXTM3U\n");
+        for i in 0..n {
+            let line = match i % 5 {
+                0 | 1 => format!(
+                    "#EXTINF:-1 tvg-id=\"c{i}\" group-title=\"Live {}\",Channel {i}\nhttp://h/{token}/{i}.ts",
+                    i % 7
+                ),
+                2 => format!(
+                    "#EXTINF:-1 group-title=\"Films {}\",Movie {i} (2001)\nhttp://h/movie/{token}/{i}.mkv",
+                    i % 3
+                ),
+                3 if i % 4 == 0 => format!(
+                    "#EXTINF:-1 radio=\"true\" group-title=\"Radio\",Radio {i}\nhttp://h/{token}/r{i}.mp3"
+                ),
+                _ => format!(
+                    "#EXTINF:-1 group-title=\"Shows {}\",Show {} S01E{:02}\nhttp://h/series/{token}/{i}.mkv",
+                    i % 37 % 3,
+                    i % 37,
+                    i / 37
+                ),
+            };
+            s.push_str(&line);
+            s.push('\n');
+        }
+        s
+    }
+
+    /// `(content_type, item_id, category_id, title, number, position, extra)`
+    /// of the rows of `id`, in the order they were written.
+    type Written = (String, String, String, String, Option<i64>, i64, String);
+    fn written(state: &AppState, id: &str) -> Vec<Written> {
+        let conn = state.db.get().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT content_type, item_id, category_id, title, number, position, extra_json
+                 FROM items WHERE source_id = ?1 ORDER BY rowid",
+            )
+            .unwrap();
+        stmt.query_map([id], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+    }
+
+    /// Series rows written one at a time, as each is built, are the rows
+    /// `RowBuilder` gives, in its order, after every other row.
+    #[tokio::test]
+    async fn series_rows_are_written_as_built_in_playlist_order() {
+        let (_tmp, state) = source_db("s").await;
+        let text = mixed_playlist(4000, "a");
+        let mut b = RowBuilder::new("s");
+        let mut want: Vec<ItemRow> = parse_str(&text)
+            .0
+            .into_iter()
+            .filter_map(|e| b.push(e))
+            .collect();
+        want.extend(b.take_series().0);
+        let mut conn = state.db.get().unwrap();
+        let summary = write_catalog(
+            &state,
+            &mut conn,
+            "s",
+            Payload::Text(text),
+            "sha",
+            M3uOrigin::Text,
+            None,
+        )
+        .unwrap();
+        assert_eq!(summary.series, 37);
+        let want: Vec<Written> = want
+            .into_iter()
+            .map(|r| {
+                (
+                    r.content_type.as_str().to_string(),
+                    r.item_id,
+                    r.category_id,
+                    r.title,
+                    r.number,
+                    r.position,
+                    r.extra.to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(written(&state, "s"), want);
+    }
+
+    /// An insert that fails on a series row ends the import with its error,
+    /// and the previous catalog stays.
+    #[tokio::test]
+    async fn a_failed_series_insert_keeps_the_catalog() {
+        let (_tmp, state) = source_db("s").await;
+        let mut conn = state.db.get().unwrap();
+        let import = |conn: &mut Connection, token: &str| {
+            let text = mixed_playlist(4000, token);
+            write_catalog(
+                &state,
+                conn,
+                "s",
+                Payload::Text(text),
+                "sha",
+                M3uOrigin::Text,
+                None,
+            )
+        };
+        import(&mut conn, "old").unwrap();
+        let before = written(&state, "s");
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER fail BEFORE INSERT ON main.items WHEN NEW.content_type = 'series'
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+        )
+        .unwrap();
+        let err = import(&mut conn, "new").unwrap_err();
+        assert!(err.to_string().contains("injected failure"), "{err}");
+        assert_eq!(written(&state, "s"), before);
+    }
+
     #[test]
     fn ids_are_stable_and_unique() {
         assert_eq!(item_id("http://a", "A"), item_id("http://a", "A"));
@@ -2039,6 +2210,53 @@ mod tests {
         assert_eq!(movie.year, Some(1995));
         assert_eq!(movie.container_extension.as_deref(), Some("mp4"));
         assert_eq!(movie.number, None);
+    }
+
+    /// Exact duplicates get the hash of the entry with `#2`, `#3` appended.
+    #[test]
+    fn exact_duplicates_take_numbered_ids() {
+        let (entries, _, _) = parse_str(&format!(
+            "#EXTM3U\n{}",
+            "#EXTINF:-1,Dup\nhttp://d\n".repeat(3)
+        ));
+        let mut b = RowBuilder::new("s");
+        let ids: Vec<String> = entries.into_iter().map(|e| b.row(e).item_id).collect();
+        assert_eq!(
+            ids,
+            [
+                item_id("http://d", "Dup"),
+                hash16("http://d\nDup\n#2"),
+                hash16("http://d\nDup\n#3")
+            ]
+        );
+    }
+
+    /// Paths and extensions match in any case, and an `.mp4` is judged by
+    /// the whole URL: a relative one in a movie group is a movie.
+    #[test]
+    fn url_paths_and_extensions_match_in_any_case() {
+        let (e, _, _) = parse_str(
+            "#EXTM3U\n\
+             #EXTINF:-1 group-title=\"G\",A\nhttp://h:8080/SERIES/u/p/1.ts\n\
+             #EXTINF:-1 group-title=\"G\",B\nhttp://h/Vod/B.MKV?t=1\n\
+             #EXTINF:-1 group-title=\"Movies\",C\nC.MP4\n\
+             #EXTINF:-1 group-title=\"News\",D\nhttp://h/live/D.MP4\n\
+             #EXTINF:-1 group-title=\"G\",E\nhttp://h/series-live/1.ts\n",
+        );
+        let types: Vec<ContentType> = e.iter().map(classify).collect();
+        assert_eq!(
+            types,
+            [
+                ContentType::Movie,
+                ContentType::Movie,
+                ContentType::Movie,
+                ContentType::Live,
+                ContentType::Live
+            ]
+        );
+        assert!(has_dir("/a/Movie/1.mkv", "/movie/"));
+        assert!(!has_dir("/a/movies/1.mkv", "/movie/"));
+        assert!(!has_dir("/a/movie", "/movie/"));
     }
 
     /// L1-core-4: Xtream `m3u_plus` movies and episodes landed in Live TV

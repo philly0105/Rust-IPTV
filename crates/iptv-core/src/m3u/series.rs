@@ -205,7 +205,15 @@ struct Show {
 /// Collects the episodes of one import, one show per group and title.
 #[derive(Default)]
 pub struct SeriesGrouper {
+    /// [`show_key`] -> index in `shows`.
     index: HashMap<String, usize>,
+    /// Group id -> show title as the playlist writes it -> index in `shows`.
+    /// The key is a function of those two strings alone (`title_base`'s
+    /// year bound is fixed for an import), so only the first episode of each
+    /// spelling pays for `title_base` (about ten regex passes) and
+    /// `show_key`: 0.8 µs an episode, about 0.2 s of write lock per 120k
+    /// episodes on an N100, most of it repeating work (R3-5).
+    raw_index: HashMap<String, HashMap<String, usize>>,
     shows: Vec<Show>,
 }
 
@@ -292,28 +300,21 @@ impl SeriesGrouper {
         e: M3uEntry,
         legacy_id: Option<String>,
     ) -> (bool, EpisodeAt) {
-        let (base, year) = catalog::title_base(&found.show);
-        let key = show_key(&category_id, &found.show, &base, year);
-        let existing = self.index.get(&key).copied();
-        let started = existing.is_none();
-        let at = match existing {
-            Some(i) => i,
+        let seen = self
+            .raw_index
+            .get(category_id.as_str())
+            .and_then(|by_title| by_title.get(found.show.as_str()))
+            .copied();
+        let (started, at) = match seen {
+            Some(i) => (false, i),
             None => {
-                self.shows.push(Show {
-                    id: hash16(&format!("series\n{key}")),
-                    title: found.show.clone(),
-                    title_base: base,
-                    year,
-                    category_id,
-                    poster_url: None,
-                    position,
-                    episodes: Vec::new(),
-                    id_seeds: Vec::new(),
-                    legacy: Vec::new(),
-                    unnumbered: 0,
-                });
-                self.index.insert(key, self.shows.len() - 1);
-                self.shows.len() - 1
+                // The first episode with this spelling in this group.
+                let (started, i) = self.find_or_start(category_id.clone(), position, &found.show);
+                self.raw_index
+                    .entry(category_id)
+                    .or_default()
+                    .insert(found.show.clone(), i);
+                (started, i)
             }
         };
         let show = &mut self.shows[at];
@@ -362,6 +363,31 @@ impl SeriesGrouper {
             headers: (!headers.is_empty()).then_some(headers),
         });
         (started, added)
+    }
+
+    /// The show `show` of group `category_id` belongs to by [`show_key`], or
+    /// a new one at playlist position `position`; true when it is new.
+    fn find_or_start(&mut self, category_id: String, position: i64, show: &str) -> (bool, usize) {
+        let (base, year) = catalog::title_base(show);
+        let key = show_key(&category_id, show, &base, year);
+        if let Some(i) = self.index.get(&key) {
+            return (false, *i);
+        }
+        self.shows.push(Show {
+            id: hash16(&format!("series\n{key}")),
+            title: show.to_string(),
+            title_base: base,
+            year,
+            category_id,
+            poster_url: None,
+            position,
+            episodes: Vec::new(),
+            id_seeds: Vec::new(),
+            legacy: Vec::new(),
+            unnumbered: 0,
+        });
+        self.index.insert(key, self.shows.len() - 1);
+        (true, self.shows.len() - 1)
     }
 
     /// Gives the episode at `at` the state saved on old movie row `movie_id`
@@ -1026,6 +1052,76 @@ mod tests {
             g.add(cat, i as i64, d, e, legacy);
         }
         g.into_rows()
+    }
+
+    /// R3-5: the lookup by group and raw show title puts every episode in
+    /// the show its key alone picks (the per-episode `title_base` and
+    /// `show_key` it replaces), starts shows on the same episodes, and runs
+    /// the key once per spelling and group.
+    #[test]
+    fn cached_show_lookup_groups_like_the_key() {
+        let spellings = [
+            "Dark (2017)",
+            "EN - Dark (2017)",
+            "Dark (2017) [4K]",
+            "dark  (2017)",
+            "Dark",
+            "The Office [US]",
+            "The Office (US)",
+            "EN - The Office [US] [4K]",
+            "The Office [UK]",
+        ];
+        let groups = ["Drama", "4K Drama", "Comedy"];
+        let mut text = String::from("#EXTM3U\n");
+        for n in 1..5 {
+            for (gi, group) in groups.iter().enumerate() {
+                for (si, show) in spellings.iter().enumerate() {
+                    if (gi + si + n) % 4 != 0 {
+                        text.push_str(&format!(
+                            "#EXTINF:-1 group-title=\"{group}\",{show} S01E{n:02}\nhttp://h/series/{gi}/{si}/{n}.mkv\n"
+                        ));
+                    }
+                }
+            }
+        }
+        let (entries, _, _) = parse_str(&text);
+        let total = entries.len();
+        let mut g = SeriesGrouper::default();
+        let mut keys: Vec<String> = Vec::new();
+        let mut pairs: HashSet<(String, String)> = HashSet::new();
+        for (i, e) in entries.into_iter().enumerate() {
+            let d = detect(&e).unwrap();
+            let cat = crate::m3u::group_id(e.group.as_deref().unwrap_or(""));
+            let (base, year) = catalog::title_base(&d.show);
+            let key = show_key(&cat, &d.show, &base, year);
+            let new = !keys.contains(&key);
+            if new {
+                keys.push(key.clone());
+            }
+            let want = keys.iter().position(|k| *k == key).unwrap();
+            pairs.insert((cat.clone(), d.show.clone()));
+            let (started, at) = g.add(cat, i as i64, d, e, None);
+            assert_eq!((started, at.show), (new, want), "entry {i}");
+        }
+        let cached: usize = g.raw_index.values().map(HashMap::len).sum();
+        assert_eq!(cached, pairs.len());
+        assert!(
+            cached * 2 < total,
+            "{cached} spellings for {total} episodes"
+        );
+        let (rows, _) = g.into_rows();
+        let ids: Vec<String> = keys
+            .iter()
+            .map(|k| hash16(&format!("series\n{k}")))
+            .collect();
+        assert_eq!(
+            rows.iter().map(|r| &r.item_id).collect::<Vec<_>>(),
+            ids.iter().collect::<Vec<_>>()
+        );
+        assert!(
+            rows.len() < spellings.len() * groups.len(),
+            "spellings merged"
+        );
     }
 
     /// R3-3: a series row carries its episodes as text, which parses to the

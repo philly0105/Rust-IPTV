@@ -14,12 +14,12 @@ import type { Channel, ContentType, EpgProgram, ItemKey, Source } from '@/api/ty
 import { useNow } from '@/features/parental/time';
 import { useVisibleSources } from '@/shell/useVisibleSources';
 
-import { gameWindow } from '../lib/espn';
 import { isCurrentGame, isEventChannel, matchGame, prepareMatch, sharedNetworks, type StreamMatch } from '../lib/match';
 import type { Game, GameTeam, League } from '../lib/types';
 import { sportsRead } from './sportsRead';
 import { toIndexed, useChannelIndex, type IndexedChannel } from './useChannelIndex';
 import { useGuideWindow } from './useGuideWindow';
+import { unionWindow, type GuideSpan } from './useGrowingWindow';
 
 const MINUTE = 60_000;
 /** Games starting within this long (or live) get the search fallback. */
@@ -78,18 +78,6 @@ function fallbackQueries(game: Game): string[] {
   return [...new Set(out.filter((q): q is string => q !== null))];
 }
 
-/** The earliest start and latest end of the games' match windows. */
-function unionWindow(games: readonly Game[]): { from: number; to: number } {
-  let from = Infinity;
-  let to = -Infinity;
-  for (const g of games) {
-    const w = gameWindow(g);
-    from = Math.min(from, w.from);
-    to = Math.max(to, w.to);
-  }
-  return games.length > 0 ? { from, to } : { from: 0, to: 0 };
-}
-
 interface SearchAnswers {
   hits: (Channel[] | undefined)[];
   pending: boolean;
@@ -136,15 +124,19 @@ interface Prepared {
  * Matched streams per `game.key` for `games`, which should be the games on screen: the fallback searches run
  * for them. `loading` while the index, the guide window or a fallback search is still on its first answer,
  * or while the latest index and guide are being prepared for matching, unless they only refresh the last ones.
+ * The guide is read over `opts.window` (the page's window, useGrowingWindow.ts), by default the union of the
+ * games' windows.
  */
 export function useGameStreams(
   games: readonly Game[],
   enabled = true,
+  opts: { window?: GuideSpan } = {},
 ): { streams: ReadonlyMap<string, StreamMatch[]>; loading: boolean } {
   const on = enabled && games.length > 0;
   const index = useChannelIndex(on);
   const sources = useVisibleSources().data;
-  const { from, to } = useMemo(() => unionWindow(games), [games]);
+  const own = useMemo(() => unionWindow(games), [games]);
+  const { from, to } = opts.window ?? own;
   // The whole index first: refs arriving source by source would ask the guide again for each.
   const guide = useGuideWindow(index.channels, from, to, on && !index.loading);
   const now = useNow(MINUTE);

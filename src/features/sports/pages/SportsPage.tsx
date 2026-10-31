@@ -14,8 +14,9 @@
  * Below them, three sections: Live now (whatever day is picked: games in progress from today and
  * yesterday, whose late games run past midnight), then the picked day's Upcoming and Final games, so
  * a game never shows twice. Every league's games for the day are fetched (four small answers), so the
- * tabs can count them and switching league shows them at once; streams are matched only for the games
- * the league and search leave on screen.
+ * tabs can count them and switching league shows them at once; streams are matched only for the league's
+ * games, over a guide window that grows with the leagues picked that day (useGrowingWindow), so going
+ * back to a league, or to All, never asks the guide again.
  */
 
 import { CalendarX2, Hd, SearchX, Star, Tv } from 'lucide-react';
@@ -35,6 +36,7 @@ import { Button, EmptyState, ErrorState, FilterChip, Page, SectionHeader, cn, us
 import { followsGame, useFollowedTeams } from '../hooks/useFollowedTeams';
 import { useGameStreams } from '../hooks/useGameStreams';
 import { useLiveGames, useSportsDay } from '../hooks/useGames';
+import { useGrowingWindow } from '../hooks/useGrowingWindow';
 import { etDate, etDays } from '../lib/espn';
 import { filterGames, leagueCounts, sectionGames } from '../lib/filter';
 import type { StreamMatch } from '../lib/match';
@@ -191,8 +193,12 @@ export function SportsPage() {
   // Live games the day list also holds share its matches; the others (yesterday's late games, or
   // every live game while another day is picked) get a pass of their own, over their own window.
   const liveOnly = useMemo(() => leagueLive.filter((g) => !dayKeys.has(g.key)), [leagueLive, dayKeys]);
-  const dayStreams = useGameStreams(leagueDay, hasSources);
-  const liveStreams = useGameStreams(liveOnly, hasSources);
+  // Each pass reads the guide over a window that only grows until the day changes: a league tab, or a
+  // game going live or final, no longer asks the whole guide again (useGrowingWindow).
+  const dayWindow = useGrowingWindow(leagueDay, day);
+  const liveWindow = useGrowingWindow(liveOnly, day);
+  const dayStreams = useGameStreams(leagueDay, hasSources, { window: dayWindow });
+  const liveStreams = useGameStreams(liveOnly, hasSources, { window: liveWindow });
   const liveGames = useMemo(
     () => filterGames(leagueLive, null, query).filter((g) => !filterMyTeams || followsGame(followed, g)),
     [leagueLive, query, filterMyTeams, followed],

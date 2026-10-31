@@ -32,6 +32,8 @@ const data = vi.hoisted(() => ({
   dayCalls: [] as { day: string; leagues: string[] }[],
   liveCalls: [] as string[][],
   streamCalls: [] as { keys: string[]; enabled: boolean }[],
+  /** The guide window each call was given, beside `streamCalls`. */
+  windows: [] as ({ from: number; to: number } | undefined)[],
   /** One stable answer per (day, leagues), as React Query's combine gives. */
   cache: new Map<string, unknown>(),
 }));
@@ -53,8 +55,9 @@ vi.mock('../hooks/useGames', () => ({
   },
 }));
 vi.mock('../hooks/useGameStreams', () => ({
-  useGameStreams: (games: readonly { key: string }[], enabled = true) => {
+  useGameStreams: (games: readonly { key: string }[], enabled = true, opts: { window?: { from: number; to: number } } = {}) => {
     data.streamCalls.push({ keys: games.map((g) => g.key), enabled });
+    data.windows.push(opts.window && { from: opts.window.from, to: opts.window.to });
     return enabled ? { streams: data.streams, loading: data.streamsLoading } : { streams: new Map(), loading: false };
   },
 }));
@@ -88,7 +91,7 @@ const rpc = h.createRpcMock();
 rpcMock.current = rpc;
 const { SportsPage } = await import('../pages/SportsPage');
 const { useShellStore } = await import('@/shell/store');
-const { etDate, etDays, TYPICAL_LENGTH_MS } = await import('../lib/espn');
+const { etDate, etDays, gameWindow, TYPICAL_LENGTH_MS } = await import('../lib/espn');
 const { formatClock } = await import('@/features/live/lib/epgTime');
 const { pickDay } = await import('../paths');
 const { gameProgram, streamAction } = await import('../components/StreamList');
@@ -145,6 +148,7 @@ beforeEach(() => {
   data.dayCalls.length = 0;
   data.liveCalls.length = 0;
   data.streamCalls.length = 0;
+  data.windows.length = 0;
   data.cache.clear();
   player.played.length = 0;
   player.catchups.length = 0;
@@ -277,6 +281,36 @@ describe('sports page', () => {
     open('/sports?league=cricket');
     expect(screen.getByRole('tab', { name: /^All / }).getAttribute('aria-selected')).toBe('true');
     expect(data.dayCalls.at(-1)?.leagues).toEqual(ALL);
+  });
+
+  it('reads the guide over a window that only grows while the day stays, so league tabs keep it (F5-1)', async () => {
+    const days = etDays(Date.now(), 7, 7);
+    const nba = h.game('1', { startMs: Date.now() + h.HOUR });
+    const nfl = h.game('2', { league: 'nfl', startMs: Date.now() + 3 * h.HOUR, home: h.team('CHI', 'Chicago Bears'), away: h.team('NE', 'New England Patriots') });
+    const next = h.game('3', { startMs: Date.now() + 26 * h.HOUR, etDate: days[8] });
+    setDay([nba, nfl]);
+    setDay([next], days[8]);
+    const span = (...games: Game[]) => ({ from: Math.min(...games.map((g) => gameWindow(g).from)), to: Math.max(...games.map((g) => gameWindow(g).to)) });
+    /** The day pass's window: it asks first, the live pass second. */
+    const dayWindow = () => data.windows.at(-2);
+    await openReady('/sports?league=nba');
+    // A first visit reads what its games need, as before.
+    expect(dayWindow()).toEqual(span(nba));
+    fireEvent.click(screen.getByRole('tab', { name: /^All / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1', 'nfl:2']));
+    expect(dayWindow()).toEqual(span(nba, nfl));
+    // Back to one league, or another inside the span: the window and the guide keys stay.
+    fireEvent.click(screen.getByRole('tab', { name: /^NBA / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:1']));
+    expect(dayWindow()).toEqual(span(nba, nfl));
+    fireEvent.click(screen.getByRole('tab', { name: /^NFL / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nfl:2']));
+    expect(dayWindow()).toEqual(span(nba, nfl));
+    // Another day starts over.
+    fireEvent.click(screen.getByRole('tab', { name: /^Tomorrow / }));
+    fireEvent.click(screen.getByRole('tab', { name: /^All / }));
+    await waitFor(() => expect(data.streamCalls.at(-2)?.keys).toEqual(['nba:3']));
+    expect(dayWindow()).toEqual(span(next));
   });
 
   it('leads with Live now whatever day is picked', async () => {

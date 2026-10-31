@@ -383,8 +383,36 @@ export function shownChunks(view: ChunkPair, settled: ChunkPair, all: boolean, c
     b: all || cached(view.b) ? view.b : settled.b,
   };
 }
-/** Rows of programme lists kept per channel before the cache starts over. */
-const PROGRAMS_CACHE_MAX = 2000;
+/**
+ * Rows of programme lists kept per channel before the cache is pruned to the rows within
+ * PROGRAMS_CACHE_AROUND of the screen (F3-5). Each entry pins its row's grid, provider and display
+ * arrays after the query cache let them go; it used to hold 2,000 rows, then start over.
+ */
+const PROGRAMS_CACHE_MAX = 500;
+const PROGRAMS_CACHE_AROUND = 200;
+
+/** Chunk refs arrays the page keeps before it forgets the ones far from the screen (F3-5). */
+export const CHUNK_REFS_KEEP = 64;
+/** Chunks this close to one on screen keep their refs array, and with it their hashed grid keys. */
+export const CHUNK_REFS_MARGIN = 8;
+
+/**
+ * Forgets the chunks of `map` more than CHUNK_REFS_MARGIN from every chunk in `near`, once it holds
+ * more than CHUNK_REFS_KEEP (F3-5). Only the chunks near the view need a stable array: a chunk asked
+ * again later gets a new array whose grid key hashes to the same query. A scrollbar drag through a
+ * 200k-channel list visits thousands of chunks, each kept with its refs, key set and key hash.
+ */
+export function pruneChunkRefs<V>(map: Map<number, V>, near: readonly number[]): void {
+  if (map.size <= CHUNK_REFS_KEEP) return;
+  for (const c of map.keys()) {
+    if (near.every((n) => Math.abs(c - n) > CHUNK_REFS_MARGIN)) map.delete(c);
+  }
+}
+
+/** Keeps only the entries of `cache` whose key is in `keep`, the others' values untouched (F3-5). */
+export function keepEntries<K, V>(cache: Map<K, V>, keep: ReadonlySet<K>): void {
+  for (const k of cache.keys()) if (!keep.has(k)) cache.delete(k);
+}
 const NO_PROGRAMS: EpgProgram[] = [];
 const NO_REFS: ItemRef[] = [];
 /** The args of a disabled `catalog.item` query (nothing playing). */
@@ -724,6 +752,12 @@ export function EpgGridPage() {
   const viewA = Math.floor(first / GRID_CHUNK);
   const viewB = Math.floor(last / GRID_CHUNK);
   const listKey = `${sourceId}|${categoryId ?? ''}|${viewParam ?? ''}`;
+  // The chunks' refs belong to one list: another source, group or view starts over (F3-5).
+  const chunkRefsList = useRef(listKey);
+  if (chunkRefsList.current !== listKey) {
+    chunkRefsList.current = listKey;
+    chunkRefsSeen.current.clear();
+  }
   const [settled, setSettled] = useState({ key: listKey, a: viewA, b: viewB });
   const atRest = settled.key === listKey && settled.a === viewA && settled.b === viewB;
   const { a: chunkA, b: chunkB } = shownChunks({ a: viewA, b: viewB }, settled, atRest || settled.key !== listKey, chunkCached);
@@ -751,6 +785,7 @@ export function EpgGridPage() {
 
   const refsA = chunkRefs(chunkA);
   const refsB = chunkB !== chunkA ? chunkRefs(chunkB) : NO_REFS;
+  pruneChunkRefs(chunkRefsSeen.current, [viewA, viewB, chunkA, chunkB]);
   // The previous answer stays while the next chunk or window loads (keepPrevious): rows it
   // covers keep their programmes and the no-guide notice does not blink. Rows it does not
   // cover show as loading (see `programsFor`). Nothing is asked before the page is measured: the
@@ -1003,9 +1038,24 @@ export function EpgGridPage() {
     }
     else if (short && short.length > 0) out = shiftPrograms([...short], offset);
     else if (list) out = list.length === 0 ? NO_PROGRAMS : shiftPrograms([...list].sort((a, b) => ms(a.start) - ms(b.start)), offset);
-    if (cache.size >= PROGRAMS_CACHE_MAX) cache.clear();
+    if (cache.size >= PROGRAMS_CACHE_MAX && !cache.has(k)) prunePrograms();
     cache.set(k, { list, portal, xtream, short, offset, start: tableStart, end: tableEnd, out });
     return out;
+  };
+  /**
+   * Keeps the programme lists of the rows within PROGRAMS_CACHE_AROUND of the screen, so the rows
+   * on it keep their arrays (and their memoised render) through a prune (F3-5).
+   */
+  const prunePrograms = () => {
+    const cache = programsCache.current;
+    const keep = new Set<ItemKey>();
+    for (let i = Math.max(0, first - PROGRAMS_CACHE_AROUND); i <= Math.min(count - 1, last + PROGRAMS_CACHE_AROUND); i++) {
+      const ref = paged.refAt ? paged.refAt(i) : paged.getChannel(i)?.ref;
+      if (ref) keep.add(itemKey(ref));
+    }
+    keepEntries(cache, keep);
+    // More rows on screen than the cache holds: start over, as before.
+    if (cache.size >= PROGRAMS_CACHE_MAX) cache.clear();
   };
   const gridError = gridA.error ?? gridB.error;
   // Guides hold programmes, yet none of these channels matched one: the way out is matching a

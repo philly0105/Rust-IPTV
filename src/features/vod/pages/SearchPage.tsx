@@ -45,6 +45,7 @@ import {
   nextSearchLimit,
   normalizeQuery,
   previewGroups,
+  previewMatches,
   searchRequestLimit,
   searchTerms,
   sourceFacets,
@@ -365,7 +366,23 @@ export function SearchPage({ scoped }: { scoped?: boolean }) {
   // One result type at a time, chosen by tab; a type missing from these results falls back to the first one present.
   const activeGroup = groups.find((g) => g.kind === typeParam) ?? groups[0];
   // Programmes are a tab of their own, after the catalog's; the only one when nothing else matched.
-  const programmeHits = programmes.hits;
+  // While a new query's guide searches run, the last answered hits stay on screen (useQueries has
+  // no keepPreviousData across keys), as the catalog's and the portals' results do (F4-2). They
+  // dropped to none on every keystroke: Top results unmounted for a frame and a movie grid
+  // mounted in its place, or the Programmes tab went and came back, or "No results" flashed.
+  // A longer query narrows them as the catalog's preview does, keeping them all when none match.
+  const [shownProgrammes, setShownProgrammes] = useState({ query, hits: programmes.hits });
+  if (!programmes.pending && (shownProgrammes.hits !== programmes.hits || shownProgrammes.query !== query)) {
+    setShownProgrammes({ query, hits: programmes.hits });
+  }
+  const keepProgrammes = !!query && programmes.pending;
+  const programmeHits = useMemo(() => {
+    if (!keepProgrammes) return programmes.hits;
+    if (!narrowsQuery(query, shownProgrammes.query)) return shownProgrammes.hits;
+    const terms = searchTerms(query);
+    const narrowed = shownProgrammes.hits.filter((h) => previewMatches(h.program.title, terms));
+    return narrowed.length > 0 ? narrowed : shownProgrammes.hits;
+  }, [keepProgrammes, programmes.hits, query, shownProgrammes]);
   // Top results (critique: search): when the answer spans more than one type, the page opens on a
   // slice of each (a rail of movies, of series, the first channels and programmes), each with
   // "See all" to its tab, instead of the first type alone and a mostly empty screen.

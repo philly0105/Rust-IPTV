@@ -1498,22 +1498,22 @@ pub fn query_named(
         sql.push_str(&vodfilter::vod_filter_sql_on(&q.vod, year, args));
         sql
     };
-    // All movies, All series and Top rated (no category, search or filter):
-    // the stored per-category counts add up to the total, where the count
-    // walked every title of the source on every page (4-5 ms on 182k movies,
-    // about 20 ms with 60 categories hidden, as each title probes the hidden
-    // set). Every item has a category row (`CatalogWriter::finish` adds
-    // "Uncategorized" ones), and for movies and series `item_count` is the
-    // row count (channel edits apply to live and radio). Every other shape
-    // counts its rows.
-    let summed = matches!(q.content_type, ContentType::Movie | ContentType::Series)
-        && q.category_id.is_none()
+    // All movies, All series, Top rated, All channels and the guide's All
+    // list (no category, search or filter): the stored per-category counts
+    // add up to the total, where the count walked every row of the source on
+    // every page (4-5 ms on 182k movies, about 20 ms with 60 categories
+    // hidden, as each title probes the hidden set; 4.4 ms on 200k channels,
+    // 95% of a first page, and up to 12 pages per guide search hit). Every
+    // item has a category row (`CatalogWriter::finish` adds "Uncategorized"
+    // ones), and `item_count` leaves out the channels a channel edit hides
+    // (`recount_categories` runs after every change to the hidden set), the
+    // rows `edited` drops. Every other shape counts its rows.
+    let summed = q.category_id.is_none()
         && search.is_none()
         && min_rating.is_none()
         && q.vod.is_empty()
         && english.is_empty()
         && locked.is_empty()
-        && edited.is_empty()
         && quality_sql.is_empty();
     // A word-prefix search with few matches in the whole library: the
     // matched rowids drive the count and the page. Without statistics SQLite
@@ -1733,8 +1733,8 @@ fn sorted_read_index(
 }
 
 /// Items of one source and type in its visible categories (in every one
-/// with `include_hidden`), from the stored `item_count`s: the total of an
-/// unfiltered list (see [`query_named`]).
+/// with `include_hidden`), without hidden channels, from the stored
+/// `item_count`s: the total of an unfiltered list (see [`query_named`]).
 fn stored_total(
     conn: &Connection,
     source_id: &str,

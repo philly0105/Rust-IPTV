@@ -574,7 +574,10 @@ async fn newly_gated_writes_leave_reads_free() {
 /// user write and a background write waiting at their gates. Before the read
 /// pool, every catalog page, guide read, user-state list and image lookup
 /// then waited out the 15 s checkout timeout and failed. Now they answer at
-/// once, and every writer lands after the commit.
+/// once, and every writer lands after the commit. Every RPC moved to the
+/// read pool is called (RB-E review), so a move back to the write pool
+/// fails here; the server's image path reads the source row for every
+/// request, so server mode is on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn reads_answer_while_ungated_writers_hold_every_write_connection() {
     let mock = iptv_fixtures::spawn_mock().await;
@@ -583,6 +586,8 @@ async fn reads_answer_while_ungated_writers_hold_every_write_connection() {
     let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
         .await
         .unwrap();
+    // Loopback allowed: the image host is the local mock.
+    iptv_core::http::ServerMode::install(&state, true).unwrap();
     // 400 channels in 4 groups.
     state
         .db_call(|c| {
@@ -615,12 +620,39 @@ async fn reads_answer_while_ungated_writers_hold_every_write_connection() {
     // A poster in the image cache, its index row committed (`stats` waits
     // for the index writer).
     let poster = iptv_mock::images::poster_url(&mock.base, "read-pool");
-    let first = iptv_core::imagecache::get(&state, &poster, None)
+    let first = iptv_core::imagecache::get(&state, &poster, Some("s1"))
         .await
         .unwrap();
     assert!(!first.hit);
     iptv_core::imagecache::stats(&state).await.unwrap();
     let router = Arc::new(iptv_core::rpc::build_router());
+    // Hide mode with one locked channel, so the reads run the parental
+    // filters and probes too.
+    for (cmd, args) in [
+        ("parental.setPin", json!({"newPin": "2580"})),
+        (
+            "parental.setLocked",
+            json!({"target": {"sourceId": "s1", "contentType": "live", "kind": "item", "targetId": "c2", "name": "Channel 2"}, "locked": true}),
+        ),
+    ] {
+        router.dispatch(state.clone(), cmd, args).await.unwrap();
+    }
+    let list = router
+        .dispatch(state.clone(), "lists.create", json!({"name": "Read pool"}))
+        .await
+        .unwrap();
+    let list_id = list["id"].as_str().unwrap().to_string();
+    router
+        .dispatch(
+            state.clone(),
+            "lists.addItems",
+            json!({"id": list_id, "items": [{
+                "ref": {"sourceId": "s1", "contentType": "live", "itemId": "c1"},
+                "snapshot": {"title": "Channel 1", "contentType": "live"},
+            }]}),
+        )
+        .await
+        .unwrap();
 
     let holder = rusqlite::Connection::open(state.db_path()).unwrap();
     holder.execute_batch("BEGIN IMMEDIATE").unwrap();
@@ -706,6 +738,53 @@ async fn reads_answer_while_ungated_writers_hold_every_write_connection() {
         ("watchlist.list", json!({})),
         ("lists.list", serde_json::Value::Null),
         ("parental.locks", json!({})),
+        ("catalog.movies", json!({"sourceId": "s1"})),
+        ("catalog.series", json!({"sourceId": "s1"})),
+        (
+            "catalog.channelByNumber",
+            json!({"sourceId": "s1", "number": 3}),
+        ),
+        (
+            "catalog.neighbors",
+            json!({"ref": r("c7"), "categoryId": "g3"}),
+        ),
+        (
+            "catalog.recentlyAdded",
+            json!({"sourceId": "s1", "contentType": "movie"}),
+        ),
+        (
+            "catalog.matchTitles",
+            json!({"sourceId": "s1", "contentType": "movie", "titles": [{"title": "Channel 7"}]}),
+        ),
+        ("catalog.sameTitle", json!({"ref": r("c7")})),
+        ("catalog.allLiveChannels", json!({"sourceId": "s1"})),
+        (
+            "catalog.yearFacets",
+            json!({"sourceId": "s1", "contentType": "movie"}),
+        ),
+        (
+            "epg.programs",
+            json!({"ref": r("c1"), "from": from, "to": to}),
+        ),
+        ("epg.channelsSearch", json!({"query": "ch1"})),
+        ("epg.search", json!({"sourceId": "s1", "query": "news"})),
+        ("epg.sources", serde_json::Value::Null),
+        ("epg.resolve", json!({"ref": r("c1")})),
+        ("favorites.contains", json!({"refs": [r("c1"), r("c2")]})),
+        ("positions.get", json!({"ref": r("c1")})),
+        ("positions.forSeries", json!({"ref": r("c1")})),
+        ("lists.items", json!({"id": list_id})),
+        ("lists.containing", json!({"ref": r("c1")})),
+        ("lists.neighbors", json!({"id": list_id, "ref": r("c1")})),
+        ("watchlist.contains", json!({"refs": [r("c1")]})),
+        (
+            "parental.check",
+            json!({"items": [{"ref": r("c1"), "categoryId": "g1"}]}),
+        ),
+        (
+            "parental.adultCategories",
+            json!({"sourceId": "s1", "contentType": "live"}),
+        ),
     ];
     for (cmd, args) in reads {
         let t = Instant::now();
@@ -729,7 +808,7 @@ async fn reads_answer_while_ungated_writers_hold_every_write_connection() {
     let t = Instant::now();
     let hit = tokio::time::timeout(
         Duration::from_secs(5),
-        iptv_core::imagecache::get(&state, &poster, None),
+        iptv_core::imagecache::get(&state, &poster, Some("s1")),
     )
     .await
     .expect("the image lookup waited for a write pool connection")

@@ -393,17 +393,10 @@ impl TmdbCache {
         Ok(n)
     }
 
-    /// Deletes expired rows; returns how many.
-    pub async fn purge_expired(db: &DbPool) -> CoreResult<u64> {
-        let db = db.clone();
-        tokio::task::spawn_blocking(move || -> CoreResult<u64> {
-            let conn = db.get()?;
-            Ok(conn.execute(
-                "DELETE FROM tmdb_cache WHERE expires_at <= ?1",
-                [ts(Utc::now())],
-            )? as u64)
-        })
-        .await?
+    /// Deletes rows expired at `now`; returns how many. Reads only those
+    /// rows through `idx_tmdb_cache_expires` (0027).
+    pub fn purge_expired(conn: &rusqlite::Connection, now: DateTime<Utc>) -> CoreResult<u64> {
+        Ok(conn.execute("DELETE FROM tmdb_cache WHERE expires_at <= ?1", [ts(now)])? as u64)
     }
 }
 
@@ -451,5 +444,40 @@ mod tests {
         assert!(Fetched::negative().is_negative());
         assert!(!Fetched::id(1).is_negative());
         assert!(!Fetched::payload(None, Value::Null).is_negative());
+    }
+
+    /// The boot purge drops expired rows only, and finds them through the
+    /// expiry index instead of reading every payload (R4-2).
+    #[test]
+    fn purge_drops_expired_rows_through_the_expiry_index() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        let now = Utc::now();
+        for (key, days) in [("old", -2), ("edge", 0), ("fresh", 3)] {
+            let e = CacheEntry {
+                tmdb_id: Some(1),
+                payload: None,
+                expires_at: now + chrono::Duration::days(days),
+            };
+            TmdbCache::write_db(&conn, "movie", key, &e, now).unwrap();
+        }
+        assert_eq!(TmdbCache::purge_expired(&conn, now).unwrap(), 2);
+        let left: Vec<String> = conn
+            .prepare("SELECT lookup_key FROM tmdb_cache")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, ["fresh"]);
+        let plan: String = conn
+            .prepare("EXPLAIN QUERY PLAN DELETE FROM tmdb_cache WHERE expires_at <= ?1")
+            .unwrap()
+            .query_map([ts(now)], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .join("; ");
+        assert!(plan.contains("idx_tmdb_cache_expires"), "{plan}");
     }
 }

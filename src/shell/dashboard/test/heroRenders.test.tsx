@@ -93,7 +93,8 @@ describe('P2-HOME-3: the hero re-renders only the slides that change', () => {
 
 describe('P2-HOME-5: only a continue slide reads its catalog item', () => {
   it('builds a catalog item query for a continue slide only', async () => {
-    rpcMock.handlers['catalog.item'] = () => ({ ref: { sourceId: 's1', contentType: 'movie', itemId: 'r' }, title: 'Resumed', titleBase: 'Resumed' });
+    rpcMock.handlers['catalog.items'] = (a) =>
+      (a as { refs: unknown[] }).refs.map(() => ({ item: { ref: { sourceId: 's1', contentType: 'movie', itemId: 'r' }, title: 'Resumed', titleBase: 'Resumed' } }));
     queryClient.clear();
     const slides = [slide('r', { key: 's1|movie|r|', kind: 'continue' }), ...SIX.slice(1)];
     render(

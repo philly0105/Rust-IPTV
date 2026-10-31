@@ -514,6 +514,21 @@ function routePathname(route: string | undefined): string | undefined {
   return route?.replace(/[?#].*$/, '');
 }
 
+/** The screen this window saved last, and the cached settings object it was saved over. */
+let lastSave: { over: Settings; path: string } | undefined;
+
+/**
+ * `settings.lastRoute` as this window knows it. A screen save's reply stays out of the
+ * `settings.get` cache: a new settings object re-rendered every page and card that reads settings
+ * whole (Home's channel cards, Live, the guide, the VOD rails) 1.2 s after each screen change, for
+ * a field only startup reads. So while the cache still holds the object a save was made over, the
+ * saved screen is the newer value; any later settings object (another write's reply, a reset, a
+ * settings.changed) carries the core's own lastRoute and takes over.
+ */
+export function currentLastRoute(settings: Settings | undefined): string | undefined {
+  return settings !== undefined && settings === lastSave?.over ? lastSave.path : settings?.lastRoute;
+}
+
 /**
  * Persists the current route, query included, as settings.lastRoute.
  *
@@ -521,6 +536,7 @@ function routePathname(route: string | undefined): string | undefined {
  * the same screen (typing a search's ?q=, a filter) is not timed at all: each
  * write costs a settings.update and a core settings rebuild, so it waits for
  * the window to hide or close (a move to another screen saves that one instead).
+ * The reply is not put into the settings cache (see {@link currentLastRoute}).
  */
 export function useLastRoutePersistence(enabled: boolean, initial: string | undefined): void {
   const location = useLocation();
@@ -539,7 +555,10 @@ export function useLastRoutePersistence(enabled: boolean, initial: string | unde
       pending = false;
       saved.current = path;
       rpc('settings.update', { patch: { lastRoute: path } })
-        .then((s) => queryClient.setQueryData(rpcKey('settings.get'), s))
+        .then(() => {
+          const over = queryClient.getQueryData<Settings>(rpcKey('settings.get'));
+          lastSave = over ? { over, path } : undefined;
+        })
         .catch(() => {
           saved.current = undefined; // retry on the next navigation
         });

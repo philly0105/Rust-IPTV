@@ -44,7 +44,7 @@ vi.mock('@/features/vod/lib/episodeQueue', () => ({
 
 const { ShellLayout } = await import('../../ShellLayout');
 const { shellRoutes } = await import('../../routes');
-const { queryClient } = await import('@/api/query');
+const { queryClient, rpcKey } = await import('@/api/query');
 const { useConnectionStore } = await import('../../connection');
 const { firstProgrammeEnd, liveCandidates, onNowItems, trendingMatch } = await import('../DashboardPage');
 const { splitEpisodeLine } = await import('../cards');
@@ -103,7 +103,7 @@ function home(over: { continue?: PlaybackPosition[]; favorites?: FavoriteEntry[]
   h['epg.nowNext'] = () => over.nowNext ?? {};
   h['watchlist.list'] = () => [];
   h['lists.list'] = () => [];
-  h['catalog.item'] = () => null;
+  h['catalog.items'] = (a) => (a as { refs: unknown[] }).refs.map(() => ({ item: null }));
 }
 
 beforeAll(installDomStubs);
@@ -536,6 +536,29 @@ describe('quiet state and trending', () => {
     ]);
   });
 
+  it('the trending list and its lookups stay cached as long as they count as fresh, so a return to Home asks for neither again', async () => {
+    home();
+    rpcMock.handlers['settings.get'] = () => settings({ tmdb: { ...settings().tmdb, enabled: true } });
+    rpcMock.handlers['tmdb.trending'] = () => [{ tmdbId: 1, mediaType: 'movie', title: 'Far Shore', year: 2026 }];
+    rpcMock.handlers['catalog.search'] = () => ({ live: [], movies: [], series: [] });
+    renderRoutes(routes(), '/dashboard');
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.search')).toHaveLength(1));
+    const search = rpcKey('catalog.search', { query: 'Far Shore', contentTypes: ['movie'], limit: 8 });
+    vi.useFakeTimers();
+    try {
+      // Home unmounts: the entries go inactive and their cache time starts.
+      cleanup();
+      act(() => void vi.advanceTimersByTime(59 * 60_000));
+      expect(queryClient.getQueryData(search)).toBeDefined();
+      expect(queryClient.getQueryData(rpcKey('tmdb.trending'))).toBeDefined();
+      act(() => void vi.advanceTimersByTime(2 * 60_000));
+      expect(queryClient.getQueryData(search)).toBeUndefined();
+      expect(queryClient.getQueryData(rpcKey('tmdb.trending'))).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('matches a trending title by name and kind, with the year give or take one', () => {
     const film = (title: string, year?: number, titleBase?: string) => ({ ref: { sourceId: 's1', contentType: 'movie' as const, itemId: title }, title, titleBase, year, categoryId: 'c' });
     const found = { live: [], movies: [film('Far Shore 2', 2026), film('FAR SHORE!', 2025), film('Far Shore', 2019)], series: [] };
@@ -563,9 +586,13 @@ describe('per-card lookups wait for the view (SH-home-rpc-fanout)', () => {
         });
       }),
     );
-    return (el: Element) =>
+    // Every element given comes into view in one observer callback, as a rail's first screen does.
+    return (...els: Element[]) =>
       act(() => {
-        for (const o of observers) if (o.targets.has(el)) o.report([{ target: el, isIntersecting: true } as unknown as IntersectionObserverEntry], {} as IntersectionObserver);
+        for (const o of observers) {
+          const records = els.filter((el) => o.targets.has(el)).map((el) => ({ target: el, isIntersecting: true }) as unknown as IntersectionObserverEntry);
+          if (records.length > 0) o.report(records, {} as IntersectionObserver);
+        }
       });
   }
   afterEach(() => vi.unstubAllGlobals());
@@ -600,9 +627,31 @@ describe('per-card lookups wait for the view (SH-home-rpc-fanout)', () => {
     const rail = await screen.findByTestId('dashboard-rail-continue-watching');
     const card = await within(rail).findByRole('button', { name: 'Resume Harbor Nine' });
     await act(() => new Promise((r) => setTimeout(r, 100)));
-    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.item')).toEqual([]);
+    expect(rpcMock.calls.filter((c) => c.cmd.startsWith('catalog.item'))).toEqual([]);
     inView(card);
-    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.item').map((c) => c.args)).toEqual([{ ref: series }]));
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.items').map((c) => c.args)).toEqual([{ refs: [series] }]));
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.item')).toEqual([]);
+  });
+
+  it('the Continue watching cards that come into view together read their backdrops in one call', async () => {
+    const inView = stubObserver();
+    const refs = ['m1', 'm2', 'm3', 'm4'].map((itemId) => ({ ...movie, itemId }));
+    home({ continue: refs.map((ref, i) => position(ref, `Title ${i + 1}`)) });
+    rpcMock.handlers['settings.get'] = () => settings({ dashboardRails: { ...settings().dashboardRails, hero: false } });
+    rpcMock.handlers['catalog.items'] = (a) =>
+      (a as { refs: (typeof movie)[] }).refs.map((ref) => ({ item: { ref, title: ref.itemId, categoryId: 'c', backdropUrl: `https://img.test/${ref.itemId}-wide.jpg` } }));
+    renderRoutes(routes(), '/dashboard');
+    const rail = await screen.findByTestId('dashboard-rail-continue-watching');
+    const cards = await Promise.all(refs.map((_, i) => within(rail).findByRole('button', { name: `Resume Title ${i + 1}` })));
+    inView(...cards);
+    await waitFor(() => expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.items').map((c) => c.args)).toEqual([{ refs }]));
+    expect(rpcMock.calls.filter((c) => c.cmd === 'catalog.item')).toEqual([]);
+    // Each answer lands under its card's own `catalog.item` entry, which the hero and the player share.
+    await waitFor(() =>
+      expect(refs.map((ref) => (queryClient.getQueryData(rpcKey('catalog.item', { ref })) as { backdropUrl?: string } | undefined)?.backdropUrl)).toEqual(
+        refs.map((ref) => `https://img.test/${ref.itemId}-wide.jpg`),
+      ),
+    );
   });
 });
 

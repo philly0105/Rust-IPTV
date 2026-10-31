@@ -6,7 +6,7 @@ import { rpc } from '@/api/transport';
 import type { CustomList, Settings, Source } from '@/api/types';
 import { Skeleton } from '@/ui';
 
-import { consumeStartupDeepLink, isRestorableRoute, useStartupDeepLink } from './effects';
+import { consumeStartupDeepLink, currentLastRoute, isRestorableRoute, useStartupDeepLink } from './effects';
 import { routeSourceId } from './railLinks';
 import { useSettings } from './useSettings';
 
@@ -31,9 +31,12 @@ export interface StartupChecks {
   isKnownPath?: (pathname: string) => boolean;
 }
 
-/** The screen `/` restores, before any check: lastRoute in restore-last-view mode. */
+/**
+ * The screen `/` restores, before any check: lastRoute in restore-last-view mode (the screen this
+ * window saved last, when `/` comes up again mid-session).
+ */
 function savedRoute(settings: Settings | undefined): string | undefined {
-  const last = settings?.lastRoute;
+  const last = currentLastRoute(settings);
   return settings?.startupBehavior === 'restore-last-view' && last && isRestorableRoute(last) ? last : undefined;
 }
 

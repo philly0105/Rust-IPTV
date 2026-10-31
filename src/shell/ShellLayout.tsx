@@ -177,9 +177,13 @@ function useWatchStats(enabled: boolean): void {
 const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
 // parental: the PIN dialogs (C2) load with the shell, outside the main chunk.
 const ParentalGateHost = lazy(() => import('@/features/parental/GateHost').then((m) => ({ default: m.ParentalGateHost })));
-// The palette and the `?` overlay only show on demand; they load right after the shell, outside the main chunk.
-const CommandPalette = lazy(() => import('./CommandPalette').then((m) => ({ default: m.CommandPalette })));
-const ShortcutOverlay = lazy(() => import('./ShortcutOverlay').then((m) => ({ default: m.ShortcutOverlay })));
+// The palette (with cmdk, about 85 kB of its own) and the `?` overlay only show on demand, so they
+// stay out of the first route's downloads and render: each mounts the first time it opens, and
+// their chunks are warmed on the player's schedule (useWarmOverlays) so a later Ctrl+K rarely waits.
+const loadPalette = () => import('./CommandPalette');
+const loadShortcutOverlay = () => import('./ShortcutOverlay');
+const CommandPalette = lazy(() => loadPalette().then((m) => ({ default: m.CommandPalette })));
+const ShortcutOverlay = lazy(() => loadShortcutOverlay().then((m) => ({ default: m.ShortcutOverlay })));
 // Run 3 C7: the first-run tour and What's new. The host (decision, store) loads right after the
 // shell; the overlays and release notes are its own lazy chunks. Imported from `host`, not the
 // barrel, so RELEASE_NOTES and its icons stay out of this chunk.
@@ -193,6 +197,54 @@ export function openPalette(): void {
 /** Opens the `?` keyboard shortcut overlay from anywhere. */
 export function openShortcutHelp(): void {
   useShellStore.getState().setHelpOpen(true);
+}
+
+/**
+ * Starts the palette's and the overlay's chunk downloads without mounting them, on the player's
+ * schedule: once the first route has had PLAYER_PREFETCH_DELAY_MS and an idle moment to itself, or
+ * at the first pointer or key press (its capture listener runs before the Ctrl+K shortcut).
+ */
+function useWarmOverlays(): void {
+  useEffect(
+    () =>
+      schedulePlayerLoad(
+        () => {
+          void loadPalette().catch(() => undefined);
+          void loadShortcutOverlay().catch(() => undefined);
+        },
+        false,
+        window,
+        PLAYER_PREFETCH_DELAY_MS,
+      ),
+    [],
+  );
+}
+
+/** True from the first time `open` is: the overlay then stays mounted, so its closing still animates. */
+function useOpenedOnce(open: boolean): boolean {
+  const [opened, setOpened] = useState(open);
+  if (open && !opened) setOpened(true);
+  return opened || open;
+}
+
+/** The command palette, mounted from its first open on. Until then the shell reads only `paletteOpen`. */
+function PaletteHost() {
+  const opened = useOpenedOnce(useShellStore((s) => s.paletteOpen));
+  return opened ? (
+    <Suspense fallback={null}>
+      <CommandPalette />
+    </Suspense>
+  ) : null;
+}
+
+/** The `?` overlay, mounted from its first open on. */
+function ShortcutHelpHost() {
+  const opened = useOpenedOnce(useShellStore((s) => s.helpOpen));
+  return opened ? (
+    <Suspense fallback={null}>
+      <ShortcutOverlay />
+    </Suspense>
+  ) : null;
 }
 
 let playbackRestored = false;
@@ -484,6 +536,7 @@ export function ShellLayout() {
   useParentalEvents();
   const player = usePlayerModule();
   useWatchStats(!!player);
+  useWarmOverlays();
   // The layout counts as the parental gate's host from its first render, so a PIN request made
   // before the dialogs can show (restoring a locked channel under the language skeleton, or
   // while their chunk loads) waits in the queue instead of being refused.
@@ -560,10 +613,8 @@ export function ShellLayout() {
           {phone && <TabBar />}
         </div>
         {player && <player.PlayerDock />}
-        <Suspense fallback={null}>
-          <CommandPalette />
-          <ShortcutOverlay />
-        </Suspense>
+        <PaletteHost />
+        <ShortcutHelpHost />
         <ToastViewport />
         <SecureContextNotice />
         <Suspense fallback={null}>

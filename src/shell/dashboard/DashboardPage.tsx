@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 // Icons Home already shares with the shell: a lucide glyph that the player also uses (Trash2) was
 // grouped into a chunk with player code, which put the player store in Home's first render.
 import { CalendarRange, CircleCheck, Clapperboard, CloudOff, Info, Layers, Search, Tv, X, type LucideIcon } from 'lucide-react';
@@ -7,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, type NavigateFunction } from 'react-router';
 
 import { HOME_RAIL_LIMIT, homeContinueArgs, homeFavoritesArgs, homeRecentArgs, homeRecentlyAddedArgs } from '@/api/bootPrefetch';
-import { useRpcQuery } from '@/api/query';
+import { batchedItemQuery, useRpcQuery } from '@/api/query';
 import type { CatalogSearchResult } from '@/api/rpc';
 import {
   itemKey,
@@ -58,6 +59,13 @@ import { readRailEmpty, writeRailEmpty } from './railEmpty';
 const Welcome = lazy(() => import('./Welcome').then((m) => ({ default: m.Welcome })));
 
 const RAIL_LIMIT = HOME_RAIL_LIMIT;
+
+/**
+ * How long the TMDB trending list and its catalog lookups stay fresh, and stay cached once Home is
+ * left: a cache time shorter than that (10 min for a search, 30 for `tmdb.`) dropped them while
+ * still fresh, so a return to Home searched every near card again.
+ */
+const TRENDING_MS = 60 * 60_000;
 
 // The rails that read their own queries, memoized here (SH-4): Home's re-renders for other rails'
 // answers pass them by. My List's posters share one read of the list (P2-HOME-4).
@@ -296,7 +304,8 @@ function DashboardBody() {
   const customListsShown = (customLists.data ?? []).some((l) => l.onDashboard && l.itemCount > 0);
   const trending = useRpcQuery('tmdb.trending', undefined, {
     enabled: hasSources && tmdbEnabled && show('tmdbTrending'),
-    staleTime: 60 * 60_000,
+    staleTime: TRENDING_MS,
+    gcTime: TRENDING_MS,
   });
 
   // Sources in their delete-undo window are already gone from the rail and the palette
@@ -822,11 +831,12 @@ const continueActions = () => import('./continueActions');
 /**
  * The detail page's backdrop of a resumed movie or series (a local catalog read, shared with the
  * hero's query), read once the card is near the view: until then, and while it loads, the card
- * draws its poster (SH-home-rpc-fanout).
+ * draws its poster (SH-home-rpc-fanout). The cards that come near together (the rail's first
+ * screen, a Forward press, a `catalog.` refetch) ask in one `catalog.items` call, not one each.
  */
 function useBackdrop(ref: ItemRef, near: boolean): string | undefined {
   const vod = ref.contentType === 'movie' || ref.contentType === 'series';
-  const item = useRpcQuery('catalog.item', { ref }, { enabled: vod && near, staleTime: 10 * 60_000 });
+  const item = useQuery({ ...batchedItemQuery(ref, 10 * 60_000), enabled: vod && near });
   const d = item.data as { backdropUrl?: string } | undefined;
   return d && 'backdropUrl' in d ? d.backdropUrl : undefined;
 }
@@ -1247,7 +1257,7 @@ function TrendingCard({ b, rail, sourceById, ready }: { b: TmdbBrief; rail: Rail
     'catalog.search',
     { query: b.title, contentTypes: [b.mediaType === 'tv' ? 'series' : 'movie'], limit: 8 },
     // As long as the trending list itself: neither changes within the hour.
-    { enabled: ready && near, staleTime: 60 * 60_000 },
+    { enabled: ready && near, staleTime: TRENDING_MS, gcTime: TRENDING_MS },
   );
   const cardRail: RailCardProps = { ...rail, ref: setCard };
   const match = trendingMatch(b, found.data);

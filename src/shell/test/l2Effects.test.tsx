@@ -2,8 +2,8 @@ import { act, cleanup } from '@testing-library/react';
 import { Outlet } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { queryClient, rpcKey } from '@/api/query';
-import type { AppEvent, ImportProgressEvent } from '@/api/types';
+import { queryClient, rpcKey, useRpcQuery } from '@/api/query';
+import type { AppEvent, ImportProgressEvent, Settings } from '@/api/types';
 import { useToastStore } from '@/ui';
 
 import { makeSource, renderRoutes, rpcMock, settings } from './harness';
@@ -36,7 +36,7 @@ vi.mock('@/api/events', () => ({
   },
 }));
 
-const { IMPORT_TOAST_HOLD_GRACE_MS, holdImportToasts, importProgressText, useLastRoutePersistence, useShellEvents } = await import('../effects');
+const { IMPORT_TOAST_HOLD_GRACE_MS, currentLastRoute, holdImportToasts, importProgressText, useLastRoutePersistence, useShellEvents } = await import('../effects');
 
 function progress(p: ImportProgressEvent): void {
   act(() => {
@@ -194,5 +194,37 @@ describe('lastRoute persistence', () => {
     await act(() => router.navigate('/search?q=dune'));
     act(() => vi.advanceTimersByTime(1200));
     expect(routeWrites()).toEqual(['/live', '/search?q=dune']);
+  });
+
+  it("a save leaves the settings cache alone, so readers of the whole settings do not render again; startup still sees the new screen", async () => {
+    rpcMock.handlers['settings.update'] = (a) => settings({ lastRoute: (a as { patch: { lastRoute: string } }).patch.lastRoute });
+    let renders = 0;
+    function SettingsReader() {
+      useRpcQuery('settings.get', undefined, { staleTime: Infinity }).data;
+      renders += 1;
+      return null;
+    }
+    const { router } = renderRoutes(
+      [{ path: '/', element: <RouteLayout />, children: [{ index: true, element: <div>start</div> }, { path: 'live', element: <SettingsReader /> }] }],
+      '/',
+    );
+    // Loaded before the reader mounts, so it reads the cache and never fetches.
+    const loaded = settings({ lastRoute: '/epg' });
+    queryClient.setQueryData(rpcKey('settings.get'), loaded);
+    await act(() => router.navigate('/live'));
+    const before = renders;
+    await act(async () => void vi.advanceTimersByTime(1200));
+    await act(async () => undefined);
+    // TanStack hands a cache change to its readers on a zero timeout.
+    act(() => void vi.advanceTimersByTime(0));
+    expect(routeWrites()).toEqual(['/live']);
+    expect(renders).toBe(before);
+    expect(queryClient.getQueryData(rpcKey('settings.get'))).toBe(loaded);
+    expect(currentLastRoute(loaded)).toBe('/live');
+    // Any newer settings object carries the core's own value, which takes over again.
+    const reset = settings();
+    act(() => void queryClient.setQueryData(rpcKey('settings.get'), reset));
+    expect(currentLastRoute(reset)).toBeUndefined();
+    expect(currentLastRoute({ ...reset, lastRoute: '/recent' } as Settings)).toBe('/recent');
   });
 });

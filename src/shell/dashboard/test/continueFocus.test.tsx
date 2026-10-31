@@ -86,7 +86,7 @@ function home() {
   h['epg.nowNext'] = () => ({});
   h['watchlist.list'] = () => [];
   h['lists.list'] = () => [];
-  h['catalog.item'] = () => null;
+  h['catalog.items'] = (a) => (a as { refs: unknown[] }).refs.map(() => ({ item: null }));
 }
 
 /** Opens the card's menu from the keyboard (Shift+F10) and picks `action`. */

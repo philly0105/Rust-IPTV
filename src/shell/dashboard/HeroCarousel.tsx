@@ -40,12 +40,13 @@
  * the rotation turns.
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, EllipsisVertical, Info, Pause, Play, Star } from 'lucide-react';
 import { memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
-import { useRpcQuery } from '@/api/query';
+import { batchedItemQuery } from '@/api/query';
 import type { ItemRef } from '@/api/types';
 import { usePrefetchIntent } from '@/features/vod/hooks/prefetch';
 import { MetaLine, Poster, ProgressBar, QUARTER_BLUR, TOUCH_TARGET, Tooltip, cn, tintOf, useImageChain, whenIdle } from '@/ui';
@@ -81,11 +82,13 @@ const readsDetails = (slide: HeroSlide) => slide.kind === 'continue' && isVod(sl
 /**
  * Continue-watching positions carry only a snapshot (title, poster). The
  * catalog item adds the backdrop, plot, year, genres and rating. Shared by the
- * backdrop layer and the slide body through the query cache.
+ * backdrop layer and the slide body through the query cache, and with the
+ * Continue watching cards, whose lookups of the same tick go out with it as one
+ * `catalog.items` call.
  */
 function useSlideDetails(slide: HeroSlide, enabled: boolean): HeroSlide {
   const wanted = enabled && readsDetails(slide);
-  const item = useRpcQuery('catalog.item', { ref: slide.ref }, { enabled: wanted, staleTime: 10 * 60_000 });
+  const item = useQuery({ ...batchedItemQuery(slide.ref, 10 * 60_000), enabled: wanted });
   return useMemo(() => {
     const d = wanted ? item.data : undefined;
     if (!d || !('title' in d)) return slide;

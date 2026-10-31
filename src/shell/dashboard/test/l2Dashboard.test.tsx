@@ -61,7 +61,8 @@ describe('base titles on continue-watching slides', () => {
 
 describe('hero (L2-visual-3, L2-visual-5)', () => {
   it("the headline is the catalog item's base title, as on the detail page", async () => {
-    rpcMock.handlers['catalog.item'] = () => ({ ref: movie('7'), title: '|US| The Paper Astronaut (2026)', titleBase: 'The Paper Astronaut', year: 2026 });
+    rpcMock.handlers['catalog.items'] = (a) =>
+      (a as { refs: unknown[] }).refs.map(() => ({ item: { ref: movie('7'), title: '|US| The Paper Astronaut (2026)', titleBase: 'The Paper Astronaut', year: 2026 } }));
     const slides = buildHeroSlides([position('|US| The Paper Astronaut (2026)')], []);
     wrap(<HeroCarousel slides={slides} sourceName={() => 'Home'} canPlay={() => true} onPlay={vi.fn()} />);
     const heading = await screen.findByRole('heading', { level: 2, name: 'The Paper Astronaut' });

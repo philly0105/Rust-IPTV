@@ -428,6 +428,22 @@ function gridKeyHash(key: QueryKey): string {
   return hash;
 }
 
+const refsSigs = new WeakMap<readonly ItemRef[], string>();
+/**
+ * A refs array's item keys joined into one string, made once per array (F3-2). Chunks keep their
+ * refs array while their rows hold the same refs, and the query keys hold that same array, so
+ * comparing cached grid answers by signature no longer joins every entry's 40 to 500 refs on each
+ * render (2 ms per render at 300 cached answers on a Xeon).
+ */
+function refsSig(refs: readonly ItemRef[]): string {
+  let sig = refsSigs.get(refs);
+  if (sig === undefined) {
+    sig = refs.map(itemKey).join('|');
+    refsSigs.set(refs, sig);
+  }
+  return sig;
+}
+
 const refKeySets = new WeakMap<readonly ItemRef[], ReadonlySet<ItemKey>>();
 /** The item keys of a chunk's refs, made once per refs array. */
 function refKeys(refs: readonly ItemRef[]): ReadonlySet<ItemKey> {
@@ -809,18 +825,29 @@ export function EpgGridPage() {
   // cached slice for these exact channel chunks that covers the visible viewport can supply
   // the cells meanwhile. The cache search runs once per render, not once per row.
   const outerShift = dataWindowMs - GRID_DATA_STEP;
-  const refSignatures = new Set([refsA, refsB].filter((refs) => refs.length > 0).map((refs) => refs.map(itemKey).join('|')));
-  const cachedAnswers = (gridsLoaded ? [] : queryClient.getQueriesData<Record<ItemKey, EpgProgram[]>>({ queryKey: ['epg.grid'] }))
-    .flatMap(([key, data]) => {
-      const args = key[1] as ReturnType<typeof gridArgs> | undefined;
-      if (!data || !args || !refSignatures.has(args.refs.map(itemKey).join('|')) || args.withDescription !== false) return [];
-      const span = [Date.parse(args.from) + offsetMs, Date.parse(args.to) + offsetMs] as Span;
-      // Different EPG offsets can leave answers for the same refs in the cache. Only a slice
-      // aligned with this view's six-hour grid belongs to its current offset.
-      return span[1] - span[0] === dataWindowMs && (span[0] - dataStart) % GRID_DATA_STEP === 0 &&
-        span[0] <= shownTime[0] && span[1] >= shownTime[1] ? [{ data, span }] : [];
-    })
-    .sort((a, b) => Math.abs(a.span[0] - dataStart) - Math.abs(b.span[0] - dataStart));
+  // Worked out on first use, at most once per render, and only while a chunk on screen is still
+  // loading: the rows find their answers in gridA and gridB first (F3-2).
+  let cachedAnswersRead: { data: Record<ItemKey, EpgProgram[]>; span: Span }[] | undefined;
+  const cachedAnswers = () => (cachedAnswersRead ??= gridsLoaded ? [] : scanCachedAnswers());
+  const scanCachedAnswers = () => {
+    const refSignatures = new Set([refsA, refsB].filter((refs) => refs.length > 0).map(refsSig));
+    return queryClient.getQueriesData<Record<ItemKey, EpgProgram[]>>({ queryKey: ['epg.grid'] })
+      .flatMap(([key, data]) => {
+        const args = key[1] as ReturnType<typeof gridArgs> | undefined;
+        // Cheapest tests first: Sports' 500-channel chunks ask with descriptions, and most
+        // answers are for other chunks, whose refs differ in number or are this very array.
+        if (!data || !args?.refs || args.withDescription !== false) return [];
+        const refs = args.refs;
+        if (refs.length !== refsA.length && refs.length !== refsB.length) return [];
+        if (refs !== refsA && refs !== refsB && !refSignatures.has(refsSig(refs))) return [];
+        const span = [Date.parse(args.from) + offsetMs, Date.parse(args.to) + offsetMs] as Span;
+        // Different EPG offsets can leave answers for the same refs in the cache. Only a slice
+        // aligned with this view's six-hour grid belongs to its current offset.
+        return span[1] - span[0] === dataWindowMs && (span[0] - dataStart) % GRID_DATA_STEP === 0 &&
+          span[0] <= shownTime[0] && span[1] >= shownTime[1] ? [{ data, span }] : [];
+      })
+      .sort((a, b) => Math.abs(a.span[0] - dataStart) - Math.abs(b.span[0] - dataStart));
+  };
   // A fast scroll can land before its full 40-channel / 24-hour answer is ready. Ask only for
   // the rows actually on screen and the nearby hours, so those tiles do not wait behind the
   // full slice. The short idle delay avoids issuing a request for every position in a fling.
@@ -836,7 +863,7 @@ export function EpgGridPage() {
     const k = itemKey(ref);
     const current = answers.some(({ q, span }) =>
       !!q.data && !!span && span[0] <= shownTime[0] && span[1] >= shownTime[1] && Object.prototype.hasOwnProperty.call(q.data, k));
-    return !current && !cachedAnswers.some(({ data }) => Object.prototype.hasOwnProperty.call(data, k));
+    return !current && !cachedAnswers().some(({ data }) => Object.prototype.hasOwnProperty.call(data, k));
   });
   const quickStart = Math.floor(shownTime[0] / GRID_EXTEND) * GRID_EXTEND - GRID_EXTEND;
   const quickEnd = Math.ceil(shownTime[1] / GRID_EXTEND) * GRID_EXTEND + GRID_EXTEND;
@@ -885,7 +912,7 @@ export function EpgGridPage() {
         return { list: q.data[k] ?? NO_PROGRAMS, fresh: false };
       }
     }
-    for (const { data } of cachedAnswers) {
+    for (const { data } of cachedAnswers()) {
       if (Object.prototype.hasOwnProperty.call(data, k)) return { list: data[k] ?? NO_PROGRAMS, fresh: true };
     }
     if (quickGrid.data && quickSpan.current && quickSpan.current[0] + offsetMs <= shownTime[0] && quickSpan.current[1] + offsetMs >= shownTime[1] &&
@@ -1593,7 +1620,7 @@ export function EpgGridPage() {
   });
   /** Keyboard moves can request a slice before their destination becomes visible. */
   const prefetchWindow = useStable((delta: number) => prefetchSlice(guideDataStart(shownTime[0] + delta)));
-  const prefetchRefsKey = [...refsA, ...refsB].map(itemKey).join('|');
+  const prefetchRefsKey = `${refsSig(refsA)}#${refsSig(refsB)}`;
   const horizontalPrefetchTimer = useRef(0);
   // The displayed answer takes priority. One outer slice per direction covers a long fling,
   // with only six hours of overlap instead of repeatedly fetching nearly identical 24h slices.

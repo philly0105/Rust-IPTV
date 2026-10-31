@@ -4,14 +4,15 @@
  * layout to themselves.
  */
 import { QueryClient } from '@tanstack/react-query';
-import { act, cleanup, configure, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Channel, Page, PageQuery } from '@/api/types';
+import { rpcKey } from '@/api/query';
+import { itemKey, type Channel, type ItemRef, type Page, type PageQuery } from '@/api/types';
 import { usePlayerStore } from '@/features/player';
 import { useToastStore } from '@/ui';
 
-import { defaultStart, EpgGridPage, GRID_CHUNK, GRID_ROW } from '../../components/EpgGridPage';
+import { defaultStart, EpgGridPage, GRID_CHUNK, GRID_ROW, gridArgs } from '../../components/EpgGridPage';
 import { ScopePicker } from '../../components/ScopePicker';
 import { HOUR } from '../../lib/epgTime';
 import { GuidePreview } from '../GuidePreview';
@@ -28,6 +29,11 @@ vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined, onAnyAppEven
 vi.mock('@/shell', async () => await import('../../test/fakes'));
 vi.mock('@/features/player', async () => await import('../../test/fakes'));
 vi.mock('@/features/player/remote', async () => await import('../../test/fakes'));
+// Its calls count how often a ref's key string is built.
+vi.mock('@/api/types', async (orig) => {
+  const mod = await orig<typeof import('@/api/types')>();
+  return { ...mod, itemKey: vi.fn(mod.itemKey) };
+});
 // Their calls count renders of the preview band and of the toolbar (its two pickers).
 vi.mock('../GuidePreview', async (orig) => {
   const mod = await orig<typeof import('../GuidePreview')>();
@@ -144,6 +150,49 @@ describe('grid keys (P2-GUIDE-6)', () => {
     stringify.mockRestore();
     expect(screen.getByRole('button', { name: /^c4 P0,/ })).toBeTruthy();
     expect(gridKeys).toEqual([]);
+  });
+});
+
+describe('cached grid answers while a chunk loads (F3-2)', () => {
+  it('joins each cached answer\'s refs at most once, and never a described or other-sized chunk\'s', async () => {
+    channels = Array.from({ length: 3 * GRID_CHUNK }, (_, i) => makeChannel(i));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 60_000 } } });
+    // A long session's grid answers: chunk-sized answers for other rows, the quick requests' few
+    // visible rows, and Sports' 500-channel chunks with descriptions.
+    const seed = (tag: string, n: number, size: number, withDescription: boolean) => {
+      for (let k = 0; k < n; k++) {
+        const refs: ItemRef[] = Array.from({ length: size }, (_, i) => ({ sourceId: 'src1', contentType: 'live', itemId: `${tag}${k}-${i}` }));
+        const from = new Date(Date.UTC(2026, 9, 1) + k * HOUR).toISOString();
+        const to = new Date(Date.UTC(2026, 9, 2) + k * HOUR).toISOString();
+        const args = { ...gridArgs(refs, from, to), withDescription };
+        client.setQueryData(rpcKey('epg.grid', args), Object.fromEntries(refs.map((r) => [itemKey(r), []])));
+      }
+    };
+    seed('chunk', 200, GRID_CHUNK, false);
+    seed('quick', 50, 15, false);
+    seed('sports', 3, 500, true);
+    // The chunk on screen never answers, so every render looks through the cache.
+    rpc.handlers['epg.grid'] = () => new Promise(() => undefined);
+    renderGuide({ path: '/epg?source=src1', routes: GRID }, client);
+    const grid = await screen.findByTestId('epg-grid');
+    await waitFor(() => expect(grid.querySelector('[data-channel-row="1"]')).toBeTruthy());
+    await waitFor(() => expect(rpc.of('epg.grid').length).toBeGreaterThan(0));
+    vi.mocked(itemKey).mockClear();
+    for (const y of [GRID_ROW, 2 * GRID_ROW, 3 * GRID_ROW, 4 * GRID_ROW]) {
+      act(() => {
+        grid.scrollTop = y;
+        fireEvent.scroll(grid);
+      });
+    }
+    expect(grid.querySelector('[data-channel-row="10"]')).toBeTruthy();
+    const keyed = new Map<string, number>();
+    for (const [ref] of vi.mocked(itemKey).mock.calls) keyed.set(ref.itemId, (keyed.get(ref.itemId) ?? 0) + 1);
+    const seeded = (tag: string) => [...keyed].filter(([id]) => id.startsWith(tag));
+    // Before, every render joined every answer's refs: 4 scroll renders made 200 x 40 keys each.
+    expect(seeded('chunk').filter(([, n]) => n > 1)).toEqual([]);
+    expect(seeded('quick')).toEqual([]);
+    expect(seeded('sports')).toEqual([]);
+    client.clear();
   });
 });
 

@@ -90,7 +90,10 @@ export function handleGuideEvent(e: EpgProgressEvent): void {
   const phase = toPhase(e.phase);
   useGuideProgressStore.getState().set(e.url, { phase, programs: e.programs ?? 0, message: e.message });
   if (phase === 'done' || phase === 'error') {
-    void invalidate('epg.');
+    // No refetch here: the core sends `epg.changed` right after 'done' and 'error', and the event
+    // binding refetches what it names. A 304 sends a status-only one so guide windows stay
+    // (EP-2); invalidating 'epg.' here ran a round of its own first and marked every cached
+    // guide window stale (F5-5).
     schedule(e.url, LINGER_MS);
   } else {
     const prev = timers.get(e.url);

@@ -10,6 +10,8 @@ import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/
 
 import { useOffline } from './connection';
 import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
+import { overlayWarmers } from './overlayChunks';
+import { usePathname } from './pathname';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
@@ -37,6 +39,33 @@ const itemClass = (active: boolean, collapsed: boolean, dim = false) =>
 const RAIL_GLYPH = 'inline-flex size-5 shrink-0 items-center justify-center';
 
 /**
+ * A rail link's glyph and label. Memoized (F1-3): react-router's NavLink and Link read the
+ * location themselves, so each re-renders on every location change, a typed `?q=` included, and
+ * NavLink runs its children again; this keeps the icons (lucide's builder was the hottest frame
+ * while typing) to the links whose state changes.
+ */
+const RailLinkBody = memo(function RailLinkBody({ icon: Icon, active, collapsed, label }: { icon: NavLinkDef['icon']; active: boolean; collapsed: boolean; label: string }) {
+  return (
+    <>
+      {/* One 20 px box for every leading glyph (icons and source monograms), so the labels share a column. */}
+      <span aria-hidden className={RAIL_GLYPH}>
+        <Icon size={18} className={cn(active && 'text-accent')} />
+      </span>
+      {!collapsed && <span className="truncate">{label}</span>}
+    </>
+  );
+});
+
+/**
+ * The location's search, for the rows whose mark follows `?for=` on the Sources page while there
+ * are no sources. Rendered only then: with sources the rail reads the pathname alone, so a typed
+ * `?q=` re-renders none of it (F1-3).
+ */
+function WithSearch({ children }: { children: (search: string) => ReactNode }) {
+  return children(useLocation().search);
+}
+
+/**
  * One rail link. `current`, when given, says whether it stands for the page on show, in place of
  * the router's match of `to`: Live TV, Movies and Series follow the source on show, and count
  * pages that sit beside their path (sectionCurrent).
@@ -55,15 +84,7 @@ function RailNavLink({
   const label = t(labelKey);
   // A rest on the link starts the page's code and first data.
   const intent = useRouteIntent(to);
-  const content = (active: boolean) => (
-    <>
-      {/* One 20 px box for every leading glyph (icons and source monograms), so the labels share a column. */}
-      <span aria-hidden className={RAIL_GLYPH}>
-        <Icon size={18} className={cn(active && 'text-accent')} />
-      </span>
-      {!collapsed && <span className="truncate">{label}</span>}
-    </>
-  );
+  const content = (active: boolean) => <RailLinkBody icon={Icon} active={active} collapsed={collapsed} label={label} />;
   return (
     <Tooltip content={collapsed ? label : null} side="inline-end" describe={false}>
       {current === undefined ? (
@@ -213,7 +234,7 @@ function RailGroup({
    */
   noSources?: boolean;
 }) {
-  const { pathname, search } = useLocation();
+  const pathname = usePathname();
   const moreId = useId();
   const main = links.filter((l) => !l.more);
   const more = links.filter((l) => l.more);
@@ -229,21 +250,22 @@ function RailGroup({
     setWasCurrent(current);
     if (current !== null && !unfolded) setUnfolded(true);
   }
+  const link = (l: NavLinkDef, search = '') => (
+    <RailNavLink
+      to={l.to}
+      labelKey={l.labelKey}
+      icon={l.icon}
+      end={l.end}
+      tour={l.tour}
+      collapsed={collapsed}
+      // `dim` is the group's: with no sources, the rows whose pages need one.
+      dim={(dim && !l.noSourceNeeded) || l.dim}
+      current={l.section ? sectionCurrent(l.section, pathname, search) : undefined}
+    />
+  );
   const item = (l: NavLinkDef) => (
     // Keyed by section too: with no sources, Live TV, Movies and Series share one path.
-    <li key={l.section ?? l.to}>
-      <RailNavLink
-        to={l.to}
-        labelKey={l.labelKey}
-        icon={l.icon}
-        end={l.end}
-        tour={l.tour}
-        collapsed={collapsed}
-        // `dim` is the group's: with no sources, the rows whose pages need one.
-        dim={(dim && !l.noSourceNeeded) || l.dim}
-        current={l.section ? sectionCurrent(l.section, pathname, noSources ? search : '') : undefined}
-      />
-    </li>
+    <li key={l.section ?? l.to}>{noSources && l.section ? <WithSearch>{(search) => link(l, search)}</WithSearch> : link(l)}</li>
   );
   return (
     <div role="group" aria-labelledby={id} data-rail-group={id} className="flex flex-col">
@@ -406,7 +428,7 @@ function SourceEntry({
     if (was === 'open') trigger.click();
   }, [RailMenu]);
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const pathname = usePathname();
   // The collapsed rail's menu lists Radio only once the m3u radio probe has answered: hovering
   // or focusing the monogram starts it, so a narrow window pays for no probe it never opens.
   const [warm, setWarm] = useState(false);
@@ -723,12 +745,12 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
   const toggleRail = useShellStore((s) => s.toggleRail);
   const toggleRailHidden = useShellStore((s) => s.toggleRailHidden);
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
-  const location = useLocation();
+  const pathname = usePathname();
   // The archive (`/live/archive/:id/...`) belongs to its source too: the rail marks and opens it.
-  const activeSourceId = routeSourceId(location.pathname);
+  const activeSourceId = routeSourceId(pathname);
   const primaryRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const scrollKey = `${location.pathname}|${sources.data ? 'ready' : 'pending'}`;
+  const scrollKey = `${pathname}|${sources.data ? 'ready' : 'pending'}`;
   const primaryFade = useRailScroll(primaryRef, scrollKey, [collapsed]);
   const fade = useRailScroll(scrollRef, scrollKey, [sources.data, collapsed]);
   const sourceCount = sources.data?.length ?? 0;
@@ -826,7 +848,7 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
         ))}
       </ul>
     );
-  } else if (!ONBOARDING_ROUTES.has(location.pathname)) {
+  } else if (!ONBOARDING_ROUTES.has(pathname)) {
     // No sources: one dashed row in the shape of the rows it stands for (SH-welcome-generic).
     sourceList = (
       <Tooltip content={collapsed ? t('addSource') : null} side="inline-end" describe={false}>
@@ -906,17 +928,24 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
             />
             {sourceList}
             {/* One source: its own row leads to the Sources page. */}
-            {!lone && (
-              <RailNavLink
-                to="/sources"
-                labelKey="manageSources"
-                icon={ListVideo}
-                collapsed={collapsed}
-                end
-                // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.
-                current={noSources && sourcesFor(location.pathname, location.search) ? false : undefined}
-              />
-            )}
+            {!lone &&
+              (noSources ? (
+                <WithSearch>
+                  {(search) => (
+                    <RailNavLink
+                      to="/sources"
+                      labelKey="manageSources"
+                      icon={ListVideo}
+                      collapsed={collapsed}
+                      end
+                      // Live TV, Movies or Series led here (no sources yet): that row keeps the mark.
+                      current={sourcesFor(pathname, search) ? false : undefined}
+                    />
+                  )}
+                </WithSearch>
+              ) : (
+                <RailNavLink to="/sources" labelKey="manageSources" icon={ListVideo} collapsed={collapsed} end />
+              ))}
           </div>
         </div>
       </div>
@@ -938,6 +967,8 @@ export const Rail = memo(function Rail({ collapsed, autoCollapsed }: { collapsed
             tooltipSide="top"
             icon={<Keyboard aria-hidden size={18} />}
             onClick={() => setHelpOpen(true)}
+            // The overlay mounts on its first open (F1-3): a hover or focus starts its chunk.
+            {...overlayWarmers}
             className={cn(footerButton, 'size-(--rail-item-height)')}
             data-testid="rail-shortcuts"
           />

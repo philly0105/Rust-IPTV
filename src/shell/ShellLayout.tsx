@@ -21,6 +21,8 @@ import { Header, HEADER_SEARCH_WIDTH } from './Header';
 import { LIBRARY_LINKS, PHONE_QUERY, RAIL_WATCH_LINKS, rememberRouteSource } from './navigation';
 import { Rail } from './Rail';
 import { SecureContextNotice } from './SecureContextNotice';
+import { loadCommandPalette, loadShortcutOverlay, warmOverlays } from './overlayChunks';
+import { PathnameProvider } from './pathname';
 import { useOutletScrollMemory } from './scrollMemory';
 import { modalOpen, useShortcut } from './shortcuts';
 import { useShellStore } from './store';
@@ -176,9 +178,42 @@ function useWatchStats(enabled: boolean): void {
 const RecordingWatcher = lazy(() => import('@/features/recording/components/RecordingWatcher').then((m) => ({ default: m.RecordingWatcher })));
 // parental: the PIN dialogs (C2) load with the shell, outside the main chunk.
 const ParentalGateHost = lazy(() => import('@/features/parental/GateHost').then((m) => ({ default: m.ParentalGateHost })));
-// The palette and the `?` overlay only show on demand; they load right after the shell, outside the main chunk.
-const CommandPalette = lazy(() => import('./CommandPalette').then((m) => ({ default: m.CommandPalette })));
-const ShortcutOverlay = lazy(() => import('./ShortcutOverlay').then((m) => ({ default: m.ShortcutOverlay })));
+// The palette and the `?` overlay mount when they first open (F1-3), outside the main chunk; their
+// chunks are warmed at idle after the player and on hover or focus of their buttons (overlayChunks.ts).
+const CommandPalette = lazy(() => loadCommandPalette().then((m) => ({ default: m.CommandPalette })));
+const ShortcutOverlay = lazy(() => loadShortcutOverlay().then((m) => ({ default: m.ShortcutOverlay })));
+
+/** True from the first time `open` is true, for good: an overlay keeps its state and exit once shown. */
+function useOpenedOnce(open: boolean): boolean {
+  const [opened, setOpened] = useState(open);
+  if (open && !opened) setOpened(true);
+  return opened || open;
+}
+
+/**
+ * The command palette, mounted the first time it opens (F1-3). Closed, it rendered from the
+ * shell's first frame: its chunk, cmdk and programme search (about 85 kB) loaded right after the
+ * shell on every launch, and its five item hooks ran on every navigation. Ctrl+K is bound in
+ * GlobalShortcuts, so it works before the chunk is in; the first open waits for it.
+ */
+function PaletteHost() {
+  const opened = useOpenedOnce(useShellStore((s) => s.paletteOpen));
+  return opened ? (
+    <Suspense fallback={null}>
+      <CommandPalette />
+    </Suspense>
+  ) : null;
+}
+
+/** The `?` overlay, mounted the first time it opens, as the palette is. */
+function ShortcutOverlayHost() {
+  const opened = useOpenedOnce(useShellStore((s) => s.helpOpen));
+  return opened ? (
+    <Suspense fallback={null}>
+      <ShortcutOverlay />
+    </Suspense>
+  ) : null;
+}
 // Run 3 C7: the first-run tour and What's new. The host (decision, store) loads right after the
 // shell; the overlays and release notes are its own lazy chunks. Imported from `host`, not the
 // barrel, so RELEASE_NOTES and its icons stay out of this chunk.
@@ -483,6 +518,9 @@ export function ShellLayout() {
   useParentalEvents();
   const player = usePlayerModule();
   useWatchStats(!!player);
+  // The overlays' chunks come after the player's idle load, at the next idle moment, so the first
+  // Ctrl+K or `?` rarely waits and neither competes with the page being opened.
+  useEffect(() => (player ? warmOverlays() : undefined), [player]);
   // The layout counts as the parental gate's host from its first render, so a PIN request made
   // before the dialogs can show (restoring a locked channel under the language skeleton, or
   // while their chunk loads) waits in the queue instead of being refused.
@@ -523,64 +561,65 @@ export function ShellLayout() {
   return (
     <>
       {leaves}
-      {/* The side safe areas: a phone on its side keeps the rail and the header off the notch. */}
-      <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
-        <a
-          href="#main"
-          className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
-        >
-          {t('skipToContent')}
-        </a>
-        <GlobalShortcuts />
-        {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
-        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          <Header panelInline={wide} railHidden={railHidden} phone={phone} />
-          <ConnectionBanner />
-          <div className="flex min-h-0 flex-1">
-            {/*
-              The outlet is a bounded flex column at every width: the row above
-              has a definite height (h-dvh minus header and footer), and
-              min-h-0 lets it shrink. Pages either grow (main scrolls) or fill
-              it with `flex-1 min-h-0` / `h-full` and scroll inside, which gives
-              VirtualList / VirtualGrid a bounded scroll parent.
-            */}
-            <main
-              id="main"
-              tabIndex={-1}
-              data-shell-outlet=""
-              className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
-            >
-              <Outlet />
-            </main>
-            <ShellNavigationEffects />
-            <ContextPanel inline={wide} />
+      {/* The rail and the palette read the pathname from here: a typed `?q=` re-renders neither. */}
+      <PathnameProvider>
+        {/* The side safe areas: a phone on its side keeps the rail and the header off the notch. */}
+        <div className="flex h-dvh min-h-0 w-full overflow-hidden bg-bg ps-[env(safe-area-inset-left,0px)] pe-[env(safe-area-inset-right,0px)] text-fg" data-testid="shell">
+          <a
+            href="#main"
+            className="sr-only z-[90] rounded-md bg-accent-solid px-4 py-2 text-accent-solid-fg focus:not-sr-only focus:fixed focus:top-3 focus:start-3"
+          >
+            {t('skipToContent')}
+          </a>
+          <GlobalShortcuts />
+          {!railHidden && !phone && <Rail collapsed={collapsed} autoCollapsed={narrow} />}
+          <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+            <Header panelInline={wide} railHidden={railHidden} phone={phone} />
+            <ConnectionBanner />
+            <div className="flex min-h-0 flex-1">
+              {/*
+                The outlet is a bounded flex column at every width: the row above
+                has a definite height (h-dvh minus header and footer), and
+                min-h-0 lets it shrink. Pages either grow (main scrolls) or fill
+                it with `flex-1 min-h-0` / `h-full` and scroll inside, which gives
+                VirtualList / VirtualGrid a bounded scroll parent.
+              */}
+              <main
+                id="main"
+                tabIndex={-1}
+                data-shell-outlet=""
+                className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto focus:outline-none"
+              >
+                <Outlet />
+              </main>
+              <ShellNavigationEffects />
+              <ContextPanel inline={wide} />
+            </div>
+            {player && <player.ExternalPlaybackFooter />}
+            {phone && <TabBar />}
           </div>
-          {player && <player.ExternalPlaybackFooter />}
-          {phone && <TabBar />}
-        </div>
-        {player && <player.PlayerDock />}
-        <Suspense fallback={null}>
-          <CommandPalette />
-          <ShortcutOverlay />
-        </Suspense>
-        <ToastViewport />
-        <SecureContextNotice />
-        <Suspense fallback={null}>
-          <ParentalGateHost />
-        </Suspense>
-        {/* recording: it imports the player, so it mounts with it (it picks up reminders that fired before it listened). */}
-        {player && (
+          {player && <player.PlayerDock />}
+          <PaletteHost />
+          <ShortcutOverlayHost />
+          <ToastViewport />
+          <SecureContextNotice />
           <Suspense fallback={null}>
-            <RecordingWatcher />
+            <ParentalGateHost />
           </Suspense>
-        )}
-        {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
-        <ListsDialogHost />
-        <ChannelEditDialogHost />
-        <Suspense fallback={null}>
-          <OnboardingHost />
-        </Suspense>
-      </div>
+          {/* recording: it imports the player, so it mounts with it (it picks up reminders that fired before it listened). */}
+          {player && (
+            <Suspense fallback={null}>
+              <RecordingWatcher />
+            </Suspense>
+          )}
+          {/* Run 2: the list and rename dialogs. Both hosts are small; each dialog is its own lazy chunk. */}
+          <ListsDialogHost />
+          <ChannelEditDialogHost />
+          <Suspense fallback={null}>
+            <OnboardingHost />
+          </Suspense>
+        </div>
+      </PathnameProvider>
     </>
   );
 }

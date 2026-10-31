@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { BackButton, IconButton, Kbd, SearchInput, TOUCH_TARGET, cn } from '@/ui';
 
+import { paletteWarmers } from './overlayChunks';
 import { useShellStore, type HeaderState } from './store';
 import { useTheme } from './theme';
 
@@ -166,6 +167,8 @@ export const Header = memo(function Header({
               icon={<TextSearch size={18} />}
               aria-haspopup="dialog"
               onClick={() => setPaletteOpen(true)}
+              // The palette mounts on its first open (F1-3): a hover or focus starts its chunk.
+              {...paletteWarmers}
               data-testid="header-palette"
             />
           )}
@@ -184,6 +187,7 @@ export const Header = memo(function Header({
               // One way in: the palette searches favourites, history, the guide and commands, and
               // hands anything else to the search page. Ctrl+F still opens the search page.
               onClick={() => setPaletteOpen(true)}
+              {...paletteWarmers}
               aria-haspopup="dialog"
               data-tour="search"
               data-testid="open-palette"

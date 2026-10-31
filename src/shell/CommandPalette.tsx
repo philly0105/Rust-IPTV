@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 
 import { homeContinueArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
@@ -47,6 +47,7 @@ import { Dialog, Kbd, Poster, cn, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
 import { LIBRARY_LINKS, readLastSource, watchLinks } from './navigation';
+import { usePathname } from './pathname';
 import { playFromShell, type PlayItemArgs } from './playFromShell';
 import { railFadeMask } from './Rail';
 import { railLinks, routeSourceId } from './railLinks';
@@ -448,7 +449,8 @@ function settingsKeywords(key: string, section: string, t: TFunction, en: TFunct
 export function usePaletteItems(): PaletteItem[] {
   const { t, i18n } = useTranslation(['shell', 'parental']);
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  // The pathname alone (F1-3): an open palette has no use for a typed `?q=`.
+  const pathname = usePathname();
   const sources = useVisibleSources();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const registered = useCommandList();

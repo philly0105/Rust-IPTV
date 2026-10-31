@@ -146,11 +146,14 @@ const STALKER_GRID_LIMIT = 12;
 /**
  * `stalker.epg` arguments for the archive channels of a grid window: `from` (the window start)
  * while the window reaches into the archived past, and only the airing programme when the whole
- * window is over (the past comes from the day tables, not the short EPG `limit` caps).
+ * window is over (the past comes from the day tables, not the short EPG `limit` caps). A window
+ * wholly over also passes its end as `to`, so the portal reads only the day tables up to it: from
+ * `from` alone it read every day through tomorrow, k + 2 tables for a window k days back. A window
+ * still reaching now leaves `to` out, where the core would read the same tables, so its key holds.
  */
-export function stalkerArchiveQuery(start: number, end: number, now: number, limit = STALKER_GRID_LIMIT): { from?: number; limit: number } {
+export function stalkerArchiveQuery(start: number, end: number, now: number, limit = STALKER_GRID_LIMIT): { from?: number; to?: number; limit: number } {
   const inArchive = start < now && end > now - MAX_LOOKBACK_HOURS * HOUR;
-  return { from: inArchive ? start : undefined, limit: end <= now ? 1 : limit };
+  return { from: inArchive ? start : undefined, to: inArchive && end <= now ? end : undefined, limit: end <= now ? 1 : limit };
 }
 
 /**
@@ -844,7 +847,7 @@ export function EpgGridPage() {
   const portalLimit = stalkerGridLimit(dataEnd - dataStart);
   const archiveQuery = stalkerArchiveQuery(dataStart - offsetMs, dataEnd - offsetMs, now, portalLimit);
   const plainPortal = useStalkerPreviews(sourceId, isStalker, plainRefs, now, portalLimit);
-  const archivePortal = useStalkerPreviews(sourceId, isStalker, archiveRefs, now, archiveQuery.limit, archiveQuery.from);
+  const archivePortal = useStalkerPreviews(sourceId, isStalker, archiveRefs, now, archiveQuery.limit, archiveQuery.from, archiveQuery.to);
   // guide: Xtream short-EPG fallback for visible rows the XMLTV guide leaves empty, while the
   // window reaches now or the next few hours (the provider's short guide starts at the airing
   // programme and holds a handful after it: a window days ahead asks nothing, L3-guide-library-4).

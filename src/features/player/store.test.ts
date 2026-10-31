@@ -653,6 +653,61 @@ describe('playItem resolution by kind', () => {
   });
 });
 
+describe('a tune does not wait for the guide (F2-4)', () => {
+  beforeEach(() => {
+    handlers['parental.status'] = () => ({ enabled: false });
+  });
+  const airing = (ref: ItemRef, title: string) => ({ [itemKey(ref)]: { now: { title, start: new Date(Date.now() - 60_000).toISOString(), end: new Date(Date.now() + 3_600_000).toISOString() } } });
+  const recents = () => calls('recent.add') as { ref: ItemRef; snapshot: { subtitle?: string } }[];
+
+  it('an M3U channel starts its stream before the guide answers; the programme then lands on it', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    handlers['epg.nowNext'] = () => new Promise((r) => (answer = r));
+    const ch = channel(31, { url: 'http://m3u/31.ts' });
+    const tuned = playChannel(ch, 'm3u');
+    // Before, nothing played until epg.nowNext answered: the row in hand needs no other lookup.
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://m3u/31.ts'));
+    const generation = usePlayerStore.getState().playGeneration;
+    expect(usePlayerStore.getState().source?.subtitle).toBeUndefined();
+    // The Recently watched entry waits for the title.
+    expect(recents()).toEqual([]);
+    answer(airing(ch.ref, 'Late Show'));
+    await expect(tuned).resolves.toBeUndefined();
+    expect(usePlayerStore.getState().source?.subtitle).toBe('Late Show');
+    // The same play: nothing reloads.
+    expect(usePlayerStore.getState().playGeneration).toBe(generation);
+    expect(recents()).toEqual([{ ref: ch.ref, snapshot: expect.objectContaining({ subtitle: 'Late Show' }) }]);
+  });
+
+  it('a newer play keeps its own source, and Recently watched keeps the order the channels played in', async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    const a = channel(32, { url: 'http://m3u/32.ts' });
+    const b = channel(33, { url: 'http://m3u/33.ts' });
+    handlers['epg.nowNext'] = (args) => ((args as { refs: ItemRef[] }).refs[0]?.itemId === a.ref.itemId ? new Promise((r) => (answer = r)) : {});
+    const first = playChannel(a, 'm3u');
+    await vi.waitFor(() => expect(usePlayerStore.getState().source?.url).toBe('http://m3u/32.ts'));
+    await playChannel(b, 'm3u');
+    answer(airing(a.ref, 'Late Show'));
+    await first;
+    expect(usePlayerStore.getState().source?.ref).toEqual(b.ref);
+    expect(usePlayerStore.getState().source?.subtitle).toBeUndefined();
+    // The first entry went out, without its title, as soon as the second play began.
+    expect(recents().map((r) => [r.ref.itemId, r.snapshot.subtitle])).toEqual([
+      [a.ref.itemId, undefined],
+      [b.ref.itemId, undefined],
+    ]);
+  });
+
+  it("a list click's row answers the zap banner, with no catalog.item lookup of its own", async () => {
+    const { fetchChannelInfo } = await import('./zapBanner');
+    const ch = channel(34, { url: 'http://m3u/34.ts', logoUrl: 'http://logo/34.png' });
+    await playItem({ ref: ch.ref, title: ch.name, isLive: true, isRadio: false, sourceKind: 'm3u', channel: ch });
+    expect(await fetchChannelInfo(ch.ref)).toEqual({ number: 34, name: 'Channel 34', logoUrl: 'http://logo/34.png' });
+    expect(calls('catalog.item')).toEqual([]);
+    expect(queryClient.getQueryData(rpcKey('catalog.item', { ref: ch.ref }))).toEqual(ch);
+  });
+});
+
 describe('zap', () => {
   beforeEach(() => {
     handlers['parental.status'] = () => ({ enabled: false });

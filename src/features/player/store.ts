@@ -95,8 +95,14 @@ export interface PlayerActions {
    * `externalPlayer`: with `mode: 'external'`, the player to open it in (a menu's Play in MPV or
    * VLC) instead of the one in the settings. A later play of the same item in external mode
    * without one (the stage's Reopen) opens it in the same player again.
+   *
+   * `subtitle`: a live channel's programme title, still on its way (startItem plays without
+   * waiting for it). Only the Recently watched entry waits for it.
    */
-  play(source: PlayerSource, opts?: { queue?: PlayerSource[]; mode?: PlayerMode; externalPlayer?: 'mpv' | 'vlc' }): Promise<void>;
+  play(
+    source: PlayerSource,
+    opts?: { queue?: PlayerSource[]; mode?: PlayerMode; externalPlayer?: 'mpv' | 'vlc'; subtitle?: Promise<string | undefined> },
+  ): Promise<void>;
   stop(): void;
   togglePlay(): void;
   seekBy(seconds: number): void;
@@ -280,6 +286,32 @@ function snapshotTitle(source: PlayerSource & { ref: ItemRef }): string {
     if (row?.titleBase && (row.title === title || row.titleBase === title)) return row.titleBase;
   }
   return title;
+}
+
+/**
+ * The Recently watched entry still waiting for its channel's programme title (F2-4). The next
+ * play sends it at once, without the title, so the entries keep the order the items played in.
+ */
+let heldRecent: (() => void) | null = null;
+
+function addRecent(ref: ItemRef, snapshot: ItemSnapshot, subtitle?: Promise<string | undefined>): void {
+  heldRecent?.();
+  // No event follows recent.add and C4 caches `recent.` for 30 s: refresh the Recently watched rails.
+  const send = (snap: ItemSnapshot): void => void rpc('recent.add', { ref, snapshot: snap }).then(() => invalidate('recent.'), () => undefined);
+  if (!subtitle) {
+    send(snapshot);
+    return;
+  }
+  let sent = false;
+  const finish = (title?: string): void => {
+    if (sent) return;
+    sent = true;
+    if (heldRecent === flush) heldRecent = null;
+    send(title ? { ...snapshot, subtitle: title } : snapshot);
+  };
+  const flush = (): void => finish();
+  heldRecent = flush;
+  void subtitle.then(finish, flush);
 }
 
 export function snapshotOf(source: PlayerSource): ItemSnapshot | undefined {
@@ -643,8 +675,7 @@ export const usePlayerStore: UseBoundStore<StoreApi<PlayerState & PlayerActions>
 
     if (source.ref) {
       const snapshot = snapshotOf(source);
-      // No event follows recent.add and C4 caches `recent.` for 30 s: refresh the Recently watched rails.
-      if (snapshot) rpc('recent.add', { ref: source.ref, snapshot }).then(() => invalidate('recent.'), () => undefined);
+      if (snapshot) addRecent(source.ref, snapshot, source.subtitle ? undefined : opts?.subtitle);
     }
 
     if (mode === 'external') {
@@ -1512,6 +1543,9 @@ export async function startItem(
   opts?.onRequest?.(seq);
   // The engine downloads while the gate and the stream lookup run.
   preloadEngineFor(args.channel?.url);
+  // The row a list click holds answers the zap banner's details (and `catalog.item`) without a
+  // second lookup, as a zap's neighbour row does (F2-4).
+  if (args.channel && args.isLive) rememberChannel(args.channel);
   // The user picked something: a countdown firing during the lookup must not override it.
   cancelUpNext();
   // Parental gate first, so a locked item's title never shows behind the PIN prompt.
@@ -1547,18 +1581,38 @@ export async function startItem(
     failResolve(err, placeholder, () => playItem(args, queueOpts));
     throw err;
   }
-  if (opts?.subtitle && !source.subtitle) {
-    const subtitle = await opts.subtitle;
-    if (subtitle) source = { ...source, subtitle };
-  }
   if (seq !== requestSeq) return 'superseded';
   await previousUnloaded;
   if (seq !== requestSeq) return 'superseded';
-  const playing = usePlayerStore.getState().play(source, queueOpts);
+  // The stream does not wait for the programme title (F2-4). An M3U channel with its row needs no
+  // other lookup, so every tune that missed the now/next cache (a zap's own request waits for
+  // the gate) waited 3-10 ms for epg.nowNext on desktop, a round trip in server mode, and longer
+  // while the read pool was busy. The title lands on the source once it comes.
+  const subtitle = opts?.subtitle && !source.subtitle ? opts.subtitle.catch(() => undefined) : undefined;
+  const playing = usePlayerStore.getState().play(source, subtitle ? { ...queueOpts, subtitle } : queueOpts);
   // play() took its own request number before its first await.
-  opts?.onPlay?.(requestSeq);
+  const playSeq = requestSeq;
+  opts?.onPlay?.(playSeq);
   await playing;
+  if (subtitle) await landSubtitle(source, playSeq, subtitle);
   return 'started';
+}
+
+/**
+ * Puts a programme title that came after the play on the source it was asked for, while that
+ * play is still the current one: the same item, no newer request, no reload. The media key does
+ * not change, so nothing reloads (players.md "Loads"); a title already there (the live
+ * programme follower) stays.
+ */
+async function landSubtitle(played: PlayerSource, playSeq: number, subtitle: Promise<string | undefined>): Promise<void> {
+  const key = played.ref ? itemKey(played.ref) : undefined;
+  const at = usePlayerStore.getState();
+  if (!key || !at.source?.ref || itemKey(at.source.ref) !== key) return;
+  const generation = at.playGeneration;
+  const title = await subtitle;
+  const cur = usePlayerStore.getState();
+  if (!title || playSeq !== requestSeq || cur.playGeneration !== generation || !cur.source?.ref || itemKey(cur.source.ref) !== key || cur.source.subtitle) return;
+  usePlayerStore.setState({ source: { ...cur.source, subtitle: title } });
 }
 
 export async function playSource(source: PlayerSource): Promise<void> {
@@ -2443,6 +2497,7 @@ export function __resetPlayerForTests(): void {
   queuedPresses = 0;
   if (prefetchTimer) clearTimeout(prefetchTimer);
   prefetchTimer = null;
+  heldRecent = null;
   knownChannels.clear();
   favoriteSlot = null;
   queryClient.removeQueries({ queryKey: ['settings.get'] });

@@ -1,7 +1,9 @@
 //! Fix wave 3 (review round 3, R3 F1/F2): `stalker.epg` on portals that
 //! answer slowly. An empty short EPG uses one cached bulk guide per source
 //! and never turns into a timeout; a slow archive read keeps the short EPG
-//! and the day tables read before the deadline.
+//! and the day tables read before the deadline. R5-1: day tables are
+//! cached and shared with catch-up, their pages go out together, and `to`
+//! bounds the days read.
 
 use axum::extract::{Query, State};
 use axum::routing::get;
@@ -12,7 +14,7 @@ use iptv_core::rpc::RpcRouter;
 use iptv_core::{AppState, RpcError};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,6 +32,11 @@ struct Portal {
     bulk_ms: AtomicU64,
     /// `get_short_epg` answers `[]`.
     short_empty: bool,
+    /// Day tables are served under `itv` only (`epg` answers `[]`).
+    itv_tables: AtomicBool,
+    /// Day-table requests in flight, and the most at once.
+    tables_inflight: AtomicUsize,
+    tables_max_inflight: AtomicUsize,
 }
 
 impl Portal {
@@ -42,6 +49,10 @@ fn programme(name: &str, start: i64, stop: i64) -> Value {
     json!({"name": name, "start_timestamp": start, "stop_timestamp": stop})
 }
 
+fn rfc(t: chrono::DateTime<chrono::Utc>) -> String {
+    t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
 async fn portal_php(
     State(p): State<Arc<Portal>>,
     Query(q): Query<HashMap<String, String>>,
@@ -49,8 +60,17 @@ async fn portal_php(
     let get = |k: &str| q.get(k).cloned().unwrap_or_default();
     let key = format!("{}.{}", get("type"), get("action"));
     *p.calls.lock().unwrap().entry(key.clone()).or_default() += 1;
+    let table = key.ends_with(".get_simple_data_table");
+    if table {
+        let now = p.tables_inflight.fetch_add(1, Ordering::SeqCst) + 1;
+        p.tables_max_inflight.fetch_max(now, Ordering::SeqCst);
+    }
     tokio::time::sleep(Duration::from_millis(p.each_ms.load(Ordering::SeqCst))).await;
+    if table {
+        p.tables_inflight.fetch_sub(1, Ordering::SeqCst);
+    }
     let now = chrono::Utc::now().timestamp();
+    let itv_tables = p.itv_tables.load(Ordering::SeqCst);
     let js = match key.as_str() {
         "itv.get_short_epg" if p.short_empty => json!([]),
         "itv.get_short_epg" => {
@@ -64,15 +84,29 @@ async fn portal_php(
                 "1005": [programme("Bulk 1005", now - 600, now + 3000)],
             }})
         }
+        "epg.get_simple_data_table" if itv_tables => json!([]),
+        "itv.get_simple_data_table" if !itv_tables => json!([]),
         // Five one-programme pages per day, from 08:00 UTC.
-        "epg.get_simple_data_table" => {
+        "epg.get_simple_data_table" | "itv.get_simple_data_table" => {
             let date = chrono::NaiveDate::parse_from_str(&get("date"), "%Y-%m-%d").unwrap();
             let page: i64 = get("p").parse().unwrap_or(1);
             let start =
                 date.and_hms_opt(8, 0, 0).unwrap().and_utc().timestamp() + (page - 1) * 3600;
-            json!({"total_items": 5, "max_page_items": 1, "data": [
-                programme(&format!("Archive {date} #{page}"), start, start + 3600)
-            ]})
+            let mut row = programme(&format!("Archive {date} #{page}"), start, start + 3600);
+            row["id"] = json!(format!("{date}-{page}"));
+            json!({"total_items": 5, "max_page_items": 1, "data": [row]})
+        }
+        // Two channels with a week of archive, for catch-up.
+        "itv.get_all_channels" => json!([
+            {"id": "1001", "name": "One", "cmd": "ffrt http://x/1001", "tv_archive": 1, "tv_archive_duration": 168},
+            {"id": "1002", "name": "Two", "cmd": "ffrt http://x/1002", "tv_archive": 1, "tv_archive_duration": 168},
+        ]),
+        "tv_archive.create_link" => {
+            let id = get("cmd");
+            let id = id
+                .trim_start_matches("auto /media/")
+                .trim_end_matches(".mpg");
+            json!({"cmd": format!("http://archive.example/{id}.ts")})
         }
         _ => json!([]),
     };
@@ -253,18 +287,19 @@ async fn portal_guide_follows_the_guide_shift() {
     assert!((3595..=3605).contains(&delta), "moved by {delta} s");
 }
 
-/// R3 F2: on a portal that takes 3 s per request, a 7-day `from` cannot
+/// R3 F2: on a portal that takes 6 s per request, a 7-day `from` cannot
 /// read every day table within the 40 s budget. The call still succeeds
-/// with the short EPG and the days read before the deadline.
+/// with the short EPG and the days read before the deadline. (R5-1: the
+/// pages after page 1 now go out together, six table requests at most per
+/// source, so 3 s per request no longer outlasted the budget.)
 #[tokio::test]
 async fn slow_archive_keeps_short_epg_and_finished_days() {
     let portal = Arc::new(Portal::default());
-    portal.each_ms.store(3_000, Ordering::SeqCst);
+    portal.each_ms.store(6_000, Ordering::SeqCst);
     spawn_portal(7206, portal.clone()).await;
     let e = env_on(7206).await;
 
-    let from = (chrono::Utc::now() - chrono::Duration::days(7))
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let from = rfc(chrono::Utc::now() - chrono::Duration::days(7));
     let t0 = Instant::now();
     let res = e
         .call(
@@ -280,10 +315,11 @@ async fn slow_archive_keeps_short_epg_and_finished_days() {
         "short EPG kept: {titles:?}"
     );
     let archived = titles.iter().filter(|t| t.starts_with("Archive ")).count();
-    // Nine day tables of five sequential 3 s pages, three days at a time:
-    // about 48 s in all, so the first six days (30 rows) finish in time and
-    // the last three do not.
-    assert!(archived >= 15, "days read before the deadline: {titles:?}");
+    // Nine day tables of five 6 s pages, three days at a time and six
+    // requests at once: about a minute in all. The first three days finish
+    // after 24 s (the oldest may end before `from`), the next two around
+    // 36 s, the rest not in time.
+    assert!(archived >= 10, "days read before the deadline: {titles:?}");
     assert!(
         portal.count("epg.get_simple_data_table") < 45,
         "the deadline cut the archive read short"
@@ -292,4 +328,105 @@ async fn slow_archive_keeps_short_epg_and_finished_days() {
         took >= Duration::from_secs(39) && took < Duration::from_secs(44),
         "returned after {took:?}"
     );
+}
+
+/// R5-1: a 7-day archive read asks each day table's pages together after
+/// page 1, at most six table requests at once per source. The tables are
+/// cached: a second read and a catch-up click on a programme the guide
+/// shows ask none, and `to` reads only the days up to it.
+#[tokio::test]
+async fn archive_days_are_cached_and_their_pages_go_together() {
+    let portal = Arc::new(Portal::default());
+    spawn_portal(7208, portal.clone()).await;
+    let e = env_on(7208).await;
+    e.call("stalker.sync", json!({"sourceId": SID}))
+        .await
+        .unwrap();
+    portal.each_ms.store(100, Ordering::SeqCst);
+    let tables = || portal.count("epg.get_simple_data_table");
+    let archived = |v: &Value| -> Vec<String> {
+        titles(v)
+            .into_iter()
+            .filter(|t| t.starts_with("Archive "))
+            .collect()
+    };
+
+    let now = chrono::Utc::now();
+    let week =
+        json!({"ref": live("1001"), "limit": 50, "from": rfc(now - chrono::Duration::days(7))});
+    let first = e.call("stalker.epg", week.clone()).await.unwrap();
+    assert!(archived(&first).len() >= 30, "{first}");
+    // Nine dates (7 days back through tomorrow), five pages each.
+    assert_eq!(tables(), 45);
+    let most = portal.tables_max_inflight.load(Ordering::SeqCst);
+    assert!((4..=6).contains(&most), "{most} table requests at once");
+
+    let again = e.call("stalker.epg", week).await.unwrap();
+    assert_eq!(archived(&again), archived(&first));
+    assert_eq!(tables(), 45, "served from the cache");
+
+    // Catch-up on a programme three days back (09:00-10:00 UTC, page 2).
+    let day = (now - chrono::Duration::days(3)).date_naive();
+    let start = day.and_hms_opt(9, 30, 0).unwrap().and_utc();
+    let src = e
+        .call(
+            "stalker.catchupUrl",
+            json!({"ref": live("1001"), "start": rfc(start), "durationMinutes": 30}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(src["url"], format!("http://archive.example/{day}-2.ts"));
+    assert_eq!(tables(), 45, "catch-up read no table");
+    assert_eq!(portal.count("tv_archive.create_link"), 1);
+
+    // One UTC day on another channel: its table and the next one only.
+    let from = day.and_hms_opt(0, 0, 0).unwrap().and_utc();
+    let to = from + chrono::Duration::days(1);
+    let one = e
+        .call(
+            "stalker.epg",
+            json!({"ref": live("1002"), "limit": 50, "from": rfc(from), "to": rfc(to)}),
+        )
+        .await
+        .unwrap();
+    let one = archived(&one);
+    assert_eq!(one.len(), 5, "{one:?}");
+    assert!(one.iter().all(|t| t.contains(&day.to_string())), "{one:?}");
+    assert_eq!(tables(), 45 + 10, "two dates of five pages");
+
+    // Forgetting the source drops its tables.
+    iptv_core::stalker::Runtime::get(&e.state).forget_source(SID);
+    assert!(iptv_core::stalker::Runtime::get(&e.state)
+        .day_tables
+        .is_empty());
+}
+
+/// R5-1: a portal that serves its day tables under `itv` only was asked
+/// `epg` first for every table. The type that answered is asked first
+/// next time.
+#[tokio::test]
+async fn the_table_type_that_answered_goes_first() {
+    let portal = Arc::new(Portal::default());
+    portal.itv_tables.store(true, Ordering::SeqCst);
+    spawn_portal(7209, portal.clone()).await;
+    let e = env_on(7209).await;
+    let from = rfc(chrono::Utc::now() - chrono::Duration::days(7));
+    let res = e
+        .call(
+            "stalker.epg",
+            json!({"ref": live("1001"), "limit": 50, "from": from}),
+        )
+        .await
+        .unwrap();
+    assert!(
+        titles(&res)
+            .iter()
+            .filter(|t| t.starts_with("Archive "))
+            .count()
+            >= 30
+    );
+    // The first three days start together and each tries `epg` once; the
+    // other six ask `itv` straight away.
+    assert_eq!(portal.count("epg.get_simple_data_table"), 3);
+    assert_eq!(portal.count("itv.get_simple_data_table"), 45);
 }

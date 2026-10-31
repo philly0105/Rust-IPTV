@@ -133,6 +133,9 @@ pub struct Runtime {
     /// Bulk `get_epg_info` answer per source id (shared, indexed by channel,
     /// dropped once no row asks for it; see [`playback::BulkEpgEntry`]).
     pub bulk_epg: DashMap<String, playback::BulkEpgEntry>,
+    /// Archive day tables per source, channel and date (see
+    /// [`playback::DayTables`]).
+    pub day_tables: playback::DayTables,
     /// `stalker_items` exists in this database.
     table_ready: AtomicBool,
 }
@@ -145,6 +148,7 @@ impl Default for Runtime {
             plans: Lru::new(PLAN_CACHE_CAP),
             page_sizes: DashMap::new(),
             bulk_epg: DashMap::new(),
+            day_tables: playback::DayTables::default(),
             table_ready: AtomicBool::new(false),
         }
     }
@@ -182,6 +186,7 @@ impl Runtime {
         self.forget_listings(source_id);
         self.page_sizes.retain(|k, _| !k.starts_with(&prefix));
         self.bulk_epg.remove(source_id);
+        self.day_tables.forget(source_id);
     }
 }
 

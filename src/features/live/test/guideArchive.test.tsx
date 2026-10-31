@@ -284,11 +284,14 @@ describe('loadArchiveDay', () => {
     expect(await loadArchiveDay({ ...base, kind: 'xtream', isToday: true })).toEqual([{ ...inDay, fromProvider: true }]);
   });
 
-  it('reads the Stalker portal from the start of the day', async () => {
+  it("reads the Stalker portal for the day's window", async () => {
     rpcMock.handlers['epg.programs'] = () => [];
     rpcMock.handlers['stalker.epg'] = () => [inDay];
     expect(await loadArchiveDay({ ...base, kind: 'stalker' })).toEqual([{ ...inDay, fromProvider: true }]);
-    expect(rpcMock.calls[1]).toEqual({ cmd: 'stalker.epg', args: { ref: REF, limit: 50, from: new Date(start).toISOString() } });
+    expect(rpcMock.calls[1]).toEqual({
+      cmd: 'stalker.epg',
+      args: { ref: REF, limit: 50, from: new Date(start).toISOString(), to: new Date(end).toISOString() },
+    });
   });
 
   it('M3U has only XMLTV', async () => {

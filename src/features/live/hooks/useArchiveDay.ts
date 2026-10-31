@@ -26,7 +26,7 @@ export interface ArchiveDayArgs {
 /**
  * One day of a channel's programmes, in display time: the XMLTV guide first; when it has
  * nothing for the day, the provider's own guide (Xtream archive table, then the short EPG for
- * today; Stalker's `stalker.epg` from the day's start). Provider programmes carry `fromProvider`.
+ * today; Stalker's `stalker.epg` for the day's window). Provider programmes carry `fromProvider`.
  */
 export async function loadArchiveDay(a: ArchiveDayArgs & { ref: ItemRef }): Promise<EpgProgram[]> {
   const offsetMs = a.offsetMinutes * MINUTE;
@@ -44,7 +44,8 @@ export async function loadArchiveDay(a: ArchiveDayArgs & { ref: ItemRef }): Prom
     return [];
   }
   if (a.kind === 'stalker') {
-    return markFromProvider(day(await rpc('stalker.epg', { ref: a.ref, limit: STALKER_LIMIT, from })));
+    // `to` keeps the portal to the day's tables: with `from` alone, day -k read k + 2 of them.
+    return markFromProvider(day(await rpc('stalker.epg', { ref: a.ref, limit: STALKER_LIMIT, from, to })));
   }
   return [];
 }

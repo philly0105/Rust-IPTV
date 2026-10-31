@@ -78,6 +78,10 @@ pub struct EpgArgs {
     /// RFC 3339; also return the archived programmes since then.
     #[serde(default)]
     pub from: Option<String>,
+    /// RFC 3339; with `from`, only the archived programmes starting before
+    /// then, and only the day tables up to it are read.
+    #[serde(default)]
+    pub to: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,7 +135,7 @@ pub fn register(r: &mut crate::rpc::RpcRouter) {
     });
     r.add("stalker.epg", |s, a: EpgArgs| async move {
         Ok::<Vec<EpgProgram>, RpcError>(
-            playback::epg(&s, &a.item_ref, a.limit, a.from.as_deref()).await?,
+            playback::epg(&s, &a.item_ref, a.limit, a.from.as_deref(), a.to.as_deref()).await?,
         )
     });
     r.add("stalker.search", |s, a: SearchArgs| async move {

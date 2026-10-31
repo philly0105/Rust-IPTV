@@ -512,7 +512,17 @@ export interface RpcMap {
   'stalker.seriesDetail': Cmd<{ ref: ItemRef }, SeriesDetail>;
   'stalker.streamUrl': Cmd<{ ref: ItemRef; episodeId?: string }, PlayerSource>;
   'stalker.catchupUrl': Cmd<{ ref: ItemRef; start: string; durationMinutes: number }, PlayerSource>;
-  'stalker.epg': Cmd<{ ref: ItemRef; limit?: number; /** RFC 3339; adds archived programmes since then (at most 7 days back). */ from?: string }, EpgProgram[]>;
+  'stalker.epg': Cmd<
+    {
+      ref: ItemRef;
+      limit?: number;
+      /** RFC 3339; adds archived programmes since then (at most 7 days back). */
+      from?: string;
+      /** RFC 3339; with `from`, only archived programmes starting before then, and the portal reads only the days up to it. */
+      to?: string;
+    },
+    EpgProgram[]
+  >;
   'stalker.search': Cmd<
     { sourceId: string; query: string; contentType: ContentType },
     Page<VodItem | SeriesItem>

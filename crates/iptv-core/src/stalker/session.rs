@@ -32,6 +32,10 @@ const ATTEMPTS: u32 = 3;
 /// Largest portal answer accepted. `get_all_channels` of a big panel is tens
 /// of MB; past this the body is not a portal answer.
 pub const MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
+/// Answers larger than this (and every `LONG_TIMEOUT` list) are parsed on
+/// the blocking pool; smaller ones stay inline, where a thread hop would
+/// cost more than the parse.
+const BLOCKING_PARSE_BYTES: usize = 1024 * 1024;
 
 /// `app_state` key of a source's cached session.
 pub fn token_key(source_id: &str) -> String {
@@ -355,8 +359,20 @@ impl StalkerClient {
                 } else {
                     crate::http::read_capped(resp, &context, MAX_BODY_BYTES).await?
                 };
-                let text = String::from_utf8_lossy(&body);
-                match p::classify_body(&text) {
+                // A big answer (get_all_channels, the bulk get_epg_info:
+                // tens of MB) is decoded and parsed on the blocking pool,
+                // not the runtime worker (R5-5): an estimated 0.1-0.3 s of
+                // CPU for 30 MB on a slow machine.
+                let classified = if long || body.len() > BLOCKING_PARSE_BYTES {
+                    tokio::task::spawn_blocking(move || {
+                        p::classify_body(&String::from_utf8_lossy(&body))
+                    })
+                    .await
+                    .map_err(|e| CoreError::Other(anyhow::anyhow!("Stalker {label}: {e}")))?
+                } else {
+                    p::classify_body(&String::from_utf8_lossy(&body))
+                };
+                match classified {
                     b @ (Body::Js(_) | Body::AuthFailure(_)) => Ok(b),
                     Body::Empty => Err(CoreError::network(format!(
                         "Stalker {label}: the portal sent an empty response"
@@ -903,6 +919,88 @@ mod tests {
         assert!(validate_config(&c).is_err());
         c.mac_address = "00:1A; x=1".into();
         assert!(validate_config(&c).is_err());
+    }
+
+    /// R5-5: an answer past BLOCKING_PARSE_BYTES is parsed on the blocking
+    /// pool and classified exactly like a small one, auth failures included.
+    #[tokio::test]
+    async fn a_big_answer_is_classified_like_a_small_one() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let rows: Vec<Value> = (0..30_000)
+            .map(|i| json!({"id": i.to_string(), "name": format!("Channel {i}")}))
+            .collect();
+        let big = json!({"js": {"data": rows}}).to_string();
+        assert!(big.len() > BLOCKING_PARSE_BYTES);
+        let refused = format!(
+            "{{\"js\":{{\"error\":\"Authorization failed.\"}},\"pad\":\"{}\"}}",
+            "x".repeat(BLOCKING_PARSE_BYTES)
+        );
+        let html = format!("<html>{}</html>", " ".repeat(BLOCKING_PARSE_BYTES));
+        let bodies = Arc::new([big, refused, html]);
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let served = Arc::clone(&bodies);
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let served = Arc::clone(&served);
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let which = (0..3)
+                        .find(|i| req.contains(&format!("action=a{i}")))
+                        .unwrap_or(0);
+                    let body = &served[which];
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = sock.write_all(head.as_bytes()).await;
+                    let _ = sock.write_all(body.as_bytes()).await;
+                });
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            tmp.path().to_path_buf(),
+            Arc::new(crate::events::NoopSink),
+            false,
+        )
+        .await
+        .unwrap();
+        let config = StalkerSourceConfig {
+            portal_url: format!("http://127.0.0.1:{port}/c"),
+            mac_address: "00:1a:79:00:00:01".into(),
+            is_full_portal: true,
+            username: None,
+            password: None,
+            headers: Default::default(),
+            serial_number: None,
+            device_id1: None,
+            device_id2: None,
+            signature1: None,
+            signature2: None,
+        };
+        let client = StalkerClient::ephemeral(&state, config).unwrap();
+        let endpoint = format!("http://127.0.0.1:{port}/portal.php");
+        let raw = |i: usize| {
+            let req = Req::new("itv", &format!("a{i}"));
+            let (client, endpoint) = (client.clone(), endpoint.clone());
+            async move { client.raw(&endpoint, &req, None, 1).await }
+        };
+        match raw(0).await.unwrap() {
+            Body::Js(js) => assert_eq!(p::into_list(js).len(), 30_000),
+            other => panic!("{other:?}"),
+        }
+        match raw(1).await.unwrap() {
+            Body::AuthFailure(m) => assert_eq!(m, "Authorization failed."),
+            other => panic!("{other:?}"),
+        }
+        let err = raw(2).await.unwrap_err();
+        assert!(matches!(err, CoreError::Invalid(_)), "{err}");
+        assert!(err.to_string().contains("HTML page"), "{err}");
     }
 
     /// D5: the `raw` call site itself enforces MAX_BODY_BYTES (a declared

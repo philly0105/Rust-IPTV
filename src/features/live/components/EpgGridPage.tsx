@@ -125,9 +125,16 @@ export const GRID_SLOT_PX = 150;
 export const GRID_WINDOW = 6 * HOUR;
 export const GRID_CHUNK = 40;
 const HEADER_H = 36;
-/** How long a window's guide answer counts as fresh (also for the windows prefetched beside it). */
+/**
+ * How long a window's guide answer counts as fresh (also for the windows prefetched beside it), and
+ * how long a prefetched answer nobody displayed stays in memory (F3-3): the table's 5 min for
+ * `epg.grid` (performance.md). A rest prefetches up to six 24 h answers beside the two it shows.
+ */
 const GRID_STALE_MS = 5 * 60_000;
-/** Keep adjacent programme slices ready for a return scroll. */
+/**
+ * Keep the programme slices the grid displayed ready for a return scroll. A prefetched slice that
+ * is displayed later gets this too: TanStack keeps the longest gcTime a query was given.
+ */
 const GRID_CACHE_MS = 15 * 60_000;
 /** Keep toolbar updates off the browser's scroll frames. Data-window crossings still publish at once. */
 const GRID_VIEWPORT_PUBLISH_MS = 100;
@@ -760,7 +767,7 @@ export function EpgGridPage() {
     // A chunk whose channels are not all loaded yet would be asked again once they are.
     if (refs.length < Math.min(GRID_CHUNK, count - c * GRID_CHUNK)) return;
     const args = gridArgs(refs, fromIso, toIso);
-    void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS });
+    void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_STALE_MS });
   });
   const gridsLoaded = !!gridA.data && !gridA.isPlaceholderData && (refsB.length === 0 || (!!gridB.data && !gridB.isPlaceholderData));
   useEffect(() => {
@@ -855,8 +862,8 @@ export function EpgGridPage() {
   // The virtualizer already observes this size. Reading clientHeight during React renders can
   // force layout of newly mounted rows in the middle of a vertical scroll.
   const visibleBottom = visibleTop + (virtualizer.scrollRect?.height || 720);
-  const visibleRefs = vItems
-    .filter((v) => v.start + v.size >= visibleTop && v.start <= visibleBottom)
+  const visibleItems = vItems.filter((v) => v.start + v.size >= visibleTop && v.start <= visibleBottom);
+  const visibleRefs = visibleItems
     .map((v) => paged.getChannel(v.index)?.ref)
     .filter((ref): ref is ItemRef => !!ref);
   const missingVisible = visibleRefs.some((ref) => {
@@ -1605,22 +1612,33 @@ export function EpgGridPage() {
     if (at >= 0 && at <= 1) prefetchWindow(-GRID_DATA_STEP);
   };
 
-  /** Fill the query cache without changing the displayed slice or rebuilding programme rows. */
-  const prefetchSlice = useStable((s: number) => {
+  /**
+   * Fill the query cache without changing the displayed slice or rebuilding programme rows, for
+   * both chunks on screen or only the ones `chunks` names.
+   */
+  const prefetchSlice = useStable((s: number, chunks: { a: boolean; b: boolean } = { a: true, b: true }) => {
     const e = s + dataWindowMs;
     if (!pageMeasured || (s === dataStart && e === dataEnd)) return;
     const from = new Date(s - offsetMs).toISOString();
     const to = new Date(e - offsetMs).toISOString();
-    for (const refs of [refsA, refsB]) {
+    for (const refs of [chunks.a ? refsA : NO_REFS, chunks.b ? refsB : NO_REFS]) {
       if (refs.length === 0) continue;
       const args = gridArgs(refs, from, to);
-      void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_CACHE_MS })
+      void queryClient.prefetchQuery({ queryKey: rpcKey('epg.grid', args), queryFn: () => rpcRaw('epg.grid', args), staleTime: GRID_STALE_MS, gcTime: GRID_STALE_MS })
         .then(() => setPrefetchVersion((v) => v + 1));
     }
   });
   /** Keyboard moves can request a slice before their destination becomes visible. */
   const prefetchWindow = useStable((delta: number) => prefetchSlice(guideDataStart(shownTime[0] + delta)));
   const prefetchRefsKey = `${refsSig(refsA)}#${refsSig(refsB)}`;
+  // Outer slices only for a chunk that holds at least a third of the rows on screen (F3-3). The
+  // other chunk is often there only for a few edge rows or the overscan, and its two 24 h answers
+  // would serve those few rows; during a fling the quick request still covers them. That makes
+  // two outer prefetches per rest on most rests instead of four.
+  const visibleInB = chunkB !== chunkA ? visibleItems.filter((v) => Math.floor(v.index / GRID_CHUNK) === chunkB).length : 0;
+  const visibleInA = visibleItems.length - visibleInB;
+  const outerA = visibleItems.length === 0 || 3 * visibleInA >= visibleItems.length;
+  const outerB = visibleItems.length === 0 || 3 * visibleInB >= visibleItems.length;
   const horizontalPrefetchTimer = useRef(0);
   // The displayed answer takes priority. One outer slice per direction covers a long fling,
   // with only six hours of overlap instead of repeatedly fetching nearly identical 24h slices.
@@ -1632,15 +1650,15 @@ export function EpgGridPage() {
     const delay = Math.max(500, 1000 - verticalIdleMs);
     const id = window.setTimeout(() => {
       horizontalPrefetchTimer.current = 0;
-      prefetchSlice(dataStart - outerShift);
-      prefetchSlice(dataStart + outerShift);
+      prefetchSlice(dataStart - outerShift, { a: outerA, b: outerB });
+      prefetchSlice(dataStart + outerShift, { a: outerA, b: outerB });
     }, delay);
     horizontalPrefetchTimer.current = id;
     return () => {
       window.clearTimeout(id);
       if (horizontalPrefetchTimer.current === id) horizontalPrefetchTimer.current = 0;
     };
-  }, [atRest, gridsLoaded, dataStart, dataEnd, wantedDataStart, wantedDataEnd, outerShift, prefetchRefsKey, prefetchSlice, verticalIdleVersion]);
+  }, [atRest, gridsLoaded, dataStart, dataEnd, wantedDataStart, wantedDataEnd, outerShift, prefetchRefsKey, outerA, outerB, prefetchSlice, verticalIdleVersion]);
   // Both axes scroll natively. Only the vertical axis changes which channel rows are mounted.
   const onGridScroll = (el: HTMLDivElement) => {
     const nativeX = scrollStart(el, rtl);

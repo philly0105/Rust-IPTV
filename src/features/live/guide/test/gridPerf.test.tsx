@@ -483,6 +483,49 @@ describe('memoised rows (L2-perf-ui-1)', () => {
     expect(screen.queryByTestId('row-guide-pending')).toBeNull();
   }, 20_000);
 
+  it('keeps prefetched slices for 5 minutes and displayed ones for 15 (F3-3)', async () => {
+    const at = defaultStart(Date.now());
+    rpc.handlers['epg.grid'] = hourlyWindow(at);
+    const { client } = renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P1,/ });
+    const currentStart = guideDataStart(at);
+    const outerFrom = new Date(currentStart - (GRID_DATA_LENGTH - GRID_DATA_STEP)).toISOString();
+    await waitFor(() => expect((rpc.of('epg.grid') as { from: string }[]).some((a) => a.from === outerFrom)).toBe(true));
+    const gcTimeFrom = (from: string) => client.getQueryCache().findAll({ queryKey: ['epg.grid'] })
+      .filter((q) => (q.queryKey[1] as { from: string; refs: unknown[] }).from === from && (q.queryKey[1] as { refs: unknown[] }).refs.length === channels.length)
+      .map((q) => (q as unknown as { gcTime: number }).gcTime);
+    expect(gcTimeFrom(new Date(currentStart).toISOString())).toEqual([15 * 60_000]);
+    expect(gcTimeFrom(outerFrom)).toEqual([5 * 60_000]);
+  });
+
+  it('prefetches outer slices only for a chunk holding a third of the rows on screen (F3-3)', async () => {
+    channels = Array.from({ length: 3 * GRID_CHUNK }, (_, i) => makeChannel(i));
+    const at = defaultStart(Date.now());
+    const answer = hourlyWindow(at);
+    const currentStart = guideDataStart(at);
+    // The first chunk's own slice holds back until the grid has moved, so nothing is prefetched
+    // for the top rows first (the quick request draws them meanwhile).
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    rpc.handlers['epg.grid'] = async (a) => {
+      const { refs, from, to } = a as { refs: Channel['ref'][]; from: string; to: string };
+      if (refs[0]!.itemId === 'c0' && Date.parse(from) === currentStart && Date.parse(to) - Date.parse(from) >= GRID_DATA_LENGTH) await held;
+      return answer(a);
+    };
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    await screen.findByRole('button', { name: /^c1 P1,/ });
+    const outer = [currentStart - (GRID_DATA_LENGTH - GRID_DATA_STEP), currentStart + (GRID_DATA_LENGTH - GRID_DATA_STEP)].map((t) => new Date(t).toISOString());
+    const outerCalls = () => (rpc.of('epg.grid') as { refs: Channel['ref'][]; from: string }[]).filter((a) => outer.includes(a.from)).map((a) => a.refs[0]!.itemId);
+    // Rows 37 to 52 on screen: chunk 0 holds only three of them, chunk 1 the rest.
+    const grid = screen.getByTestId('epg-grid');
+    act(() => { grid.scrollTop = 37 * GRID_ROW; fireEvent.scroll(grid); });
+    await screen.findByRole('button', { name: /^c45 P1,/ });
+    act(() => release());
+    await waitFor(() => expect(outerCalls()).toEqual(['c40', 'c40']));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1200)));
+    expect(outerCalls()).toEqual(['c40', 'c40']);
+  }, 20_000);
+
   it('shows an outer cached answer immediately when a fast move outruns the exact slice', async () => {
     const at = defaultStart(Date.now());
     const answer = (a: unknown) => {

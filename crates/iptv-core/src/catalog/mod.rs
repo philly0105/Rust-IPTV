@@ -929,7 +929,9 @@ pub fn replace_catalog(
 
 /// Recomputes `item_count` of every category of one source and content type
 /// from `items`, leaving out channels hidden by a channel edit (C2). Called
-/// by the catalog writer and after every change to the hidden set.
+/// by the catalog writer, `channels.reset` and a backup import;
+/// `channels.setHidden` moves the stored counts by the channels it changed
+/// to the same values (R4-4).
 pub fn recount_categories(
     conn: &Connection,
     source_id: &str,
@@ -1562,7 +1564,7 @@ pub fn query_named(
     // 95% of a first page, and up to 12 pages per guide search hit). Every
     // item has a category row (`CatalogWriter::finish` adds "Uncategorized"
     // ones), and `item_count` leaves out the channels a channel edit hides
-    // (`recount_categories` runs after every change to the hidden set), the
+    // (every change to the hidden set keeps it exact), the
     // rows `edited` drops. Every other shape counts its rows.
     let summed = q.category_id.is_none()
         && search.is_none()

@@ -560,7 +560,8 @@ pub fn list(conn: &Connection, source_id: &str, hidden_only: bool) -> CoreResult
 }
 
 /// Recomputes the category and source counts after the hidden set of a
-/// source changed (`catalog.categories` `itemCount`, `source_counts`).
+/// source changed wholesale (`channels.reset`, a backup import):
+/// `catalog.categories` `itemCount` and `source_counts`.
 fn recount(conn: &Connection, source_id: &str, types: &BTreeSet<ContentType>) -> CoreResult<()> {
     for ct in types {
         crate::catalog::recount_categories(conn, source_id, *ct)?;

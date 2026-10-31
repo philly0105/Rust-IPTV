@@ -152,6 +152,16 @@ export class StalkerPreviewQueue {
   }
 
   /**
+   * True when the source holds any answer of this queue's scope, fresh or not. A scan of the
+   * source's cache, for a caller deciding once whether an old scope is worth keeping.
+   */
+  holdsAnswers(): boolean {
+    const prefix = this.cacheKey('' as ItemKey);
+    for (const k of this.shared.cache.keys()) if (k.startsWith(prefix)) return true;
+    return false;
+  }
+
+  /**
    * True after the portal's guide timed out or the network failed, until an answer arrives.
    * Rows keep their cached programmes; the rest show the guide as unavailable.
    */

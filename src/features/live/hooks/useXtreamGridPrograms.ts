@@ -13,11 +13,24 @@ import { releaseStalkerPreviewAnswers, StalkerPreviewQueue } from '../lib/stalke
 export const XTREAM_GRID_CACHED = 200;
 
 /**
+ * Earlier ranges that answered, whose programmes a row still shows while the range asked has none
+ * for it. Each spans three or four days, so three cover a fling of several days either way.
+ */
+const KEPT_RANGES = 3;
+
+interface KeptRange {
+  queue: StalkerPreviewQueue;
+  scope: string;
+}
+
+/**
  * The span of the panel's archive table the grid asks for, in the guide's own time: whole UTC days
- * from the day before the data window's first day to the day after its last (F3-1). It covers the
- * window with a day to spare either way and changes once per day of horizontal scrolling, not on
- * every six-hour data step, so one answer serves a day of moves. About 30-70 programmes a day,
- * where the whole table was up to 5,000 with descriptions (a few thousand for a two-week archive).
+ * from the day before the data window's first day, as many days on as cover the window through its
+ * end (F3-1). It always covers the window; the slack after its end runs from a day down to a few
+ * hours (less with a time shift that is not whole hours). The range changes once per day of
+ * horizontal scrolling, not on every six-hour data step, so one answer serves a day of moves.
+ * About 30-70 programmes a day, where the whole table was up to 5,000 with descriptions (a few
+ * thousand for a two-week archive).
  */
 export function xtreamGridRange(dataStart: number, dataEnd: number, offsetMs: number): { from: number; to: number } {
   const from = Math.floor((dataStart - offsetMs) / DAY) * DAY - DAY;
@@ -27,8 +40,9 @@ export function xtreamGridRange(dataStart: number, dataEnd: number, offsetMs: nu
 export interface XtreamGridPrograms {
   /**
    * The row's programmes from the panel's archive table: the answer for the range asked, else,
-   * while that loads, the answer for the range asked before, so provider cells do not blink when a
-   * horizontal move crosses into the next range (epg.md). undefined while nothing is known.
+   * while that loads, the newest answer of the last few ranges that answered, so provider cells do
+   * not blink when a horizontal move crosses into the next range (epg.md). undefined while nothing
+   * is known.
    */
   get(ref: ItemRef): EpgProgram[] | undefined;
   /** True once the row's answer for the range asked is in. */
@@ -79,12 +93,22 @@ export function useXtreamGridPrograms(
     },
     [sourceId, from, to],
   );
-  // The queue of the range asked before, for the rows the new range has no answer for yet.
-  const shown = useRef({ queue, previous: null as StalkerPreviewQueue | null, sourceId });
+  // The queues of the ranges answered before, newest first, for the rows the new range has no
+  // answer for yet. A range left before any answer came is not kept: a fling across two days
+  // passes a range it never asks (the guide asks nothing while its data window moves), and the
+  // last range that answered still covers the view until the new one does.
+  const scope = `${from}|${to}`;
+  const shown = useRef({ queue, scope, sourceId, older: [] as readonly KeptRange[] });
   if (shown.current.queue !== queue) {
-    shown.current = { queue, previous: shown.current.sourceId === sourceId ? shown.current.queue : null, sourceId };
+    const out = shown.current;
+    let older: readonly KeptRange[] = [];
+    if (out.sourceId === sourceId) {
+      older = out.queue.holdsAnswers() ? [{ queue: out.queue, scope: out.scope }, ...out.older.filter((r) => r.scope !== out.scope)] : out.older;
+      older = older.filter((r) => r.scope !== scope).slice(0, KEPT_RANGES);
+    }
+    shown.current = { queue, scope, sourceId, older };
   }
-  const previous = shown.current.previous;
+  const older = shown.current.older;
   // reset, not destroy: StrictMode re-runs effects on the same memoized queue.
   useEffect(() => () => {
     queue.reset();
@@ -103,10 +127,15 @@ export function useXtreamGridPrograms(
   useEffect(() => queue.sync(enabled ? refsRef.current : []), [queue, enabled, refsKey, now, version]);
 
   const get = useCallback(
-    (ref: ItemRef): EpgProgram[] | undefined => (enabled ? (queue.get(ref) ?? previous?.get(ref)) : undefined),
+    (ref: ItemRef): EpgProgram[] | undefined => {
+      if (!enabled) return undefined;
+      let programs = queue.get(ref);
+      for (let i = 0; programs === undefined && i < older.length; i++) programs = older[i]!.queue.get(ref);
+      return programs;
+    },
     // A stored answer triggers a new getter and a guide render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queue, previous, enabled, version],
+    [queue, older, enabled, version],
   );
   const has = useCallback(
     (ref: ItemRef): boolean => enabled && queue.get(ref) !== undefined,

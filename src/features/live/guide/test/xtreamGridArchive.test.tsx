@@ -174,6 +174,40 @@ describe('Xtream programmes in the grid', () => {
     expect(channelCalls()).toHaveLength(2);
   });
 
+  it('a move back across two days keeps the last answered days on screen while the next load (F3-1)', async () => {
+    const at = eveningBack();
+    const day = at - 20 * HOUR;
+    // 05:00 the day before: inside the first answer's days, two ranges back.
+    const farBack = day - 19 * HOUR;
+    handlers(() => [], (r) => r.itemId === 'c0' ? [
+      program('Far back', farBack, farBack + HOUR),
+      program('Current window', at, at + HOUR),
+    ] : []);
+    renderGuide({ path: `/epg?source=src1&at=${at}`, routes: GRID });
+    expect(await screen.findByRole('button', { name: /^Current window,/ })).toBeTruthy();
+    const first = channelCalls()[0]!;
+    const table = rpc.handlers['catchup.programs']!;
+    let answer!: () => void;
+    const held = new Promise<void>((resolve) => { answer = resolve; });
+    rpc.handlers['catchup.programs'] = async (a) => {
+      if ((a as ProgramsArgs).from !== first.from) await held;
+      return table(a);
+    };
+    // One day back: the next range asks and holds no answer yet.
+    for (let i = 0; i < 5; i++) fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
+    await waitFor(() => expect(channelCalls()).toHaveLength(2));
+    // A second day back in one go (as a fling crosses a range it never asks): the range asked
+    // before has no answer, the first one still covers the view.
+    for (let i = 0; i < 8; i++) fireEvent.click(screen.getByRole('button', { name: '3 hours earlier' }));
+    await waitFor(() => expect(channelCalls()).toHaveLength(3));
+    expect(Date.parse(channelCalls()[2]!.from)).toBe(Date.parse(first.from) - 2 * DAY);
+    expect(screen.getByRole('button', { name: /^Far back,/ })).toBeTruthy();
+    expect(screen.queryByTestId('guide-no-data')).toBeNull();
+    act(() => answer());
+    await new Promise((r) => setTimeout(r, SHORT_EPG_SETTLE_MS + 50));
+    expect(screen.getByRole('button', { name: /^Far back,/ })).toBeTruthy();
+  });
+
   it('lets the provider answers go when the guide unmounts (F3-1)', async () => {
     const at = eveningBack();
     handlers(() => [], (r) => r.itemId === 'c0' ? [program('Current window', at, at + HOUR)] : []);
@@ -358,4 +392,17 @@ it('keeps at most maxCached answers per source, the oldest going first (F3-1)', 
   queue.reset();
   releaseStalkerPreviewAnswers('xtream-grid:cap');
   expect(queue.get(refs[4]!)).toBeUndefined();
+});
+
+it('tells whether the source holds an answer of the queue\'s own scope', async () => {
+  const fetch = vi.fn(async () => [] as EpgProgram[]);
+  const asked = new StalkerPreviewQueue(fetch, () => undefined, { sourceId: 'xtream-grid:holds', scope: '1|2', delayMs: 0 });
+  const passed = new StalkerPreviewQueue(fetch, () => undefined, { sourceId: 'xtream-grid:holds', scope: '2|3', delayMs: 0 });
+  expect(asked.holdsAnswers()).toBe(false);
+  asked.sync([makeChannel(0).ref]);
+  passed.sync([]);
+  await waitFor(() => expect(asked.holdsAnswers()).toBe(true));
+  expect(passed.holdsAnswers()).toBe(false);
+  asked.reset();
+  passed.reset();
 });

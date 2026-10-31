@@ -25,7 +25,7 @@
 //!   folds it, refills `epg_search_rows` (each programme's start, stop,
 //!   feed and guide channel by rowid, migration 0019: the hits are read
 //!   there instead of in the wide programme rows), and sets the marker to
-//!   [`INDEX_VERSION`] in one transaction: after a refresh that found the
+//!   [`index_marker`] in one transaction: after a refresh that found the
 //!   index stale, after `epg.clearAll`, after a prune, and once in the
 //!   background at startup when the marker is missing or from an older
 //!   version and programmes exist (an upgraded database, or a crash between
@@ -59,10 +59,29 @@ use std::sync::Arc;
 
 /// `app_state` key present while `epg_programs_fts` matches `epg_programs`.
 pub const INDEX_MARKER: &str = "epg_search_index";
-/// Marker value of an index of [`fold`]ed titles with its
-/// `epg_search_rows`. A marker with any other value (`ready`: raw titles,
-/// before the fold; `folded-1`: before the search rows) counts as missing.
+/// Version of an index of [`fold`]ed titles with its `epg_search_rows`, the
+/// first part of [`index_marker`]. A marker with any other value (`ready`:
+/// raw titles, before the fold; `folded-1`: before the search rows; one
+/// from other Unicode tables) counts as missing. Bump it with any change to
+/// what [`fold`] returns (`fold_output_is_pinned` fails until then).
 pub const INDEX_VERSION: &str = "folded-2";
+
+/// The marker value [`rebuild_index`] writes and [`index_ready`] expects:
+/// [`INDEX_VERSION`] and the Unicode version of std's case tables. The swap's
+/// per-feed upkeep hands FTS5's `'delete'` each stored title folded again,
+/// which silently corrupts the index unless [`fold`] gives exactly what the
+/// build that indexed it gave (RB-F review). `str::to_lowercase` follows the
+/// toolchain's Unicode tables, and the toolchain floats on stable, so a
+/// build with other tables finds the marker stale and rebuilds the index
+/// once at startup. The diacritic table of `tmdb::normalize` is the crate's
+/// own: a change there needs an [`INDEX_VERSION`] bump.
+pub fn index_marker() -> &'static str {
+    static MARKER: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        let (major, minor, update) = char::UNICODE_VERSION;
+        format!("{INDEX_VERSION}/unicode-{major}.{minor}.{update}")
+    });
+    &MARKER
+}
 /// SQL function [`rebuild_index`] registers to fold titles while indexing.
 const FOLD_SQL_FUNCTION: &str = "epg_search_fold";
 /// Query length bounds, in characters after trimming.
@@ -124,7 +143,7 @@ pub fn index_ready(conn: &Connection) -> CoreResult<bool> {
     Ok(conn
         .query_row(
             "SELECT 1 FROM app_state WHERE key = ?1 AND value = ?2",
-            [INDEX_MARKER, INDEX_VERSION],
+            [INDEX_MARKER, index_marker()],
             |_| Ok(()),
         )
         .optional()?
@@ -271,7 +290,7 @@ pub fn rebuild_index(conn: &mut Connection) -> CoreResult<()> {
     tx.execute(
         "INSERT INTO app_state(key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        [INDEX_MARKER, INDEX_VERSION],
+        [INDEX_MARKER, index_marker()],
     )?;
     tx.commit()?;
     tracing::debug!(
@@ -1016,6 +1035,81 @@ mod tests {
             w("  Le Journal-de 20h! "),
             vec!["le", "journal", "de", "20h"]
         );
+    }
+
+    /// FNV-1a over `fold` of every code point in `ranges`, one at a time.
+    fn fold_digest(ranges: &[std::ops::RangeInclusive<u32>]) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for c in ranges.iter().cloned().flatten().filter_map(char::from_u32) {
+            for b in fold(&c.to_string()).bytes().chain([0]) {
+                h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        h
+    }
+
+    /// RB-F review: the per-feed index upkeep is only correct while `fold`
+    /// gives what the build that indexed a title gave. This pins its output
+    /// on samples and over every block the diacritic table of
+    /// `tmdb::normalize` covers. A change to `fold` or that table breaks it:
+    /// bump INDEX_VERSION, then update the expected values. A toolchain whose
+    /// Unicode tables move the digest changes `index_marker` by itself, so
+    /// only the digest needs updating then.
+    #[test]
+    fn fold_output_is_pinned() {
+        let samples = [
+            (
+                "Ça Ñandú Øre Æsir Straße Łódź Đà",
+                "ca nandu øre æsir straße łodz đa",
+            ),
+            ("ÀÉÎÕÜ àéîõü Ÿÿ Ő ő Ș ș Ț ț", "aeiou aeiou yy o o s s t t"),
+            (
+                "Ελληνικά ΆΈΉΊΌΎΏ ΐΰ Ϊ ϋ ἀρχή ῥ ᾷ",
+                "ελληνικα αεηιουω ιυ ι υ αρχη ρ α",
+            ),
+            ("Thời sự Hà Nội Đường phố", "thoi su ha noi đuong pho"),
+            ("Ёлка Йошкар-Ола Ўзбек Ї", "елка иошкар-ола узбек і"),
+            ("Ω K Å ẞ İ", "ω k a ß i"),
+            ("한국어 ニュース नमस्ते", "한국어 ニュース नमस्ते"),
+            ("ΣΟΦΟΣ σοφος", "σοφοσ σοφοσ"),
+        ];
+        for (input, folded) in samples {
+            assert_eq!(fold(input), folded, "{input}");
+        }
+        let digest = fold_digest(&[
+            0x00C0..=0x04FF,
+            0x1E00..=0x1FFF,
+            0x2100..=0x23FF,
+            0x2A00..=0x2AFF,
+            0x10500..=0x105FF,
+        ]);
+        assert_eq!(digest, 0xe317_aa09_7a63_6acc, "fold digest");
+        assert!(index_marker().starts_with(&format!("{INDEX_VERSION}/unicode-")));
+    }
+
+    /// RB-F review: a marker written by a build with other Unicode tables
+    /// (here, the bare version an older build wrote) is stale, so the
+    /// startup build indexes once with this build's fold.
+    #[test]
+    fn a_marker_from_other_unicode_tables_is_stale() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO app_state(key, value) VALUES (?1, ?2)",
+            [INDEX_MARKER, INDEX_VERSION],
+        )
+        .unwrap();
+        assert!(!index_ready(&conn).unwrap());
+        rebuild_index(&mut conn).unwrap();
+        assert!(index_ready(&conn).unwrap());
+        let stored: String = conn
+            .query_row(
+                "SELECT value FROM app_state WHERE key = ?1",
+                [INDEX_MARKER],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, index_marker());
     }
 
     #[test]

@@ -37,6 +37,8 @@ impl Env {
     }
 
     async fn cached_token(&self) -> Option<Value> {
+        // The session is cached in the background (R1-1).
+        self.state.flush_background_writes().await;
         self.state
             .db_call(|c| {
                 Ok(c.query_row(

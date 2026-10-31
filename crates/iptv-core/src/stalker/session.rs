@@ -434,6 +434,7 @@ impl StalkerClient {
             }
         }
         self.establish(&mut s).await?;
+        self.persist(&s);
         Ok((s.endpoint.clone().unwrap_or_default(), s.token.clone()))
     }
 
@@ -462,11 +463,12 @@ impl StalkerClient {
             }
             None => self.establish(&mut s).await?,
         }
-        self.persist(&s).await;
+        self.persist(&s);
         Ok((s.endpoint.clone().unwrap_or_default(), s.token.clone()))
     }
 
     /// Discovers the endpoint (probing candidates in order) and logs in.
+    /// The caller persists the new session.
     async fn establish(&self, s: &mut SessionState) -> CoreResult<()> {
         let candidates = p::endpoint_candidates(&self.config.portal_url);
         let mut first_err: Option<CoreError> = None;
@@ -479,7 +481,6 @@ impl StalkerClient {
             match outcome {
                 Ok(()) => {
                     s.endpoint = Some(candidate);
-                    self.persist(s).await;
                     return Ok(());
                 }
                 // The portal answered and refused us: other paths will not help.
@@ -655,27 +656,32 @@ impl StalkerClient {
         serde_json::from_str(&raw?).ok()
     }
 
-    async fn persist(&self, s: &SessionState) {
+    /// Caches the session for the next start. Returns at once: the row is
+    /// written in the background through the write gate
+    /// ([`AppState::writer`]). Awaited, the write ran under the session
+    /// mutex, so after a re-login during another source's import save
+    /// every portal call of this source (a zap's create_link, the guide
+    /// previews) queued behind that save's commit (R1-1). A write that
+    /// fails or lands late only costs one handshake on the next start, as
+    /// a stale token does. The row is skipped once the source is gone, so
+    /// a remove leaves nothing behind; a session saved before a config
+    /// change is refused by the identity check of [`Self::ensure_session`].
+    fn persist(&self, s: &SessionState) {
         let Some(id) = self.source_id.clone() else {
             return;
         };
         let Ok(value) = serde_json::to_string(s) else {
             return;
         };
-        let res = self
-            .state
-            .db_call(move |conn| {
-                conn.execute(
-                    "INSERT INTO app_state (key, value, updated_at) VALUES (?1, ?2, CURRENT_TIMESTAMP)
-                     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-                    rusqlite::params![token_key(&id), value],
-                )?;
-                Ok(())
-            })
-            .await;
-        if let Err(err) = res {
-            tracing::warn!(error = %err, "could not cache the Stalker session");
-        }
+        self.state.writer().spawn("stalker session", move |conn| {
+            conn.execute(
+                "INSERT INTO app_state (key, value, updated_at)
+                 SELECT ?1, ?2, CURRENT_TIMESTAMP WHERE EXISTS (SELECT 1 FROM sources WHERE id = ?3)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                rusqlite::params![token_key(&id), value, id],
+            )?;
+            Ok(())
+        });
     }
 }
 

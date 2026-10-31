@@ -10,6 +10,9 @@
 //! DB-1R: the periodic background writes (download progress, a recording's
 //! byte count, the image cache index) pass a gate of their own
 //! (`AppState::db_background`).
+//!
+//! R1-1: a Stalker login caches its session in the background, so a save
+//! never holds the source's session mutex.
 
 use iptv_core::catalog::{replace_catalog, CategoryRow, ItemRow};
 use iptv_core::events::BroadcastSink;
@@ -268,5 +271,74 @@ async fn background_writes_park_one_connection_between_them() {
     for b in background {
         b.await.unwrap().unwrap();
     }
+    drop(long);
+}
+
+/// R1-1: a Stalker login while another source's import save holds the
+/// write lock. The session row used to be written under the session mutex
+/// and waited out the save (up to the 600 s of `long_write`), so every
+/// portal call of the source queued behind it. Now the login and the next
+/// call answer at once and the row lands after the commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stalker_login_during_a_save_keeps_the_session_free() {
+    let mock = iptv_fixtures::spawn_mock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (sink, _rx) = BroadcastSink::channel(16);
+    let state = AppState::new(dir.path().to_path_buf(), Arc::new(sink), false)
+        .await
+        .unwrap();
+    iptv_core::stalker::init(state.clone()).await.unwrap();
+    let cfg = json!({
+        "portalUrl": mock.url("/stalker/portal.php"),
+        "macAddress": "00:1A:79:00:00:01",
+    })
+    .to_string();
+    state
+        .db_call(move |c| {
+            c.execute(
+                "INSERT INTO sources (id, kind, name, config_json) VALUES ('stk', 'stalker', 'Portal', ?1)",
+                [cfg],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let client = iptv_core::stalker::session::StalkerClient::for_source(&state, "stk")
+        .await
+        .unwrap();
+
+    let holder = rusqlite::Connection::open(state.db_path()).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let long = iptv_core::db::long_write();
+    let started = Instant::now();
+    let (endpoint, token) = tokio::time::timeout(Duration::from_secs(10), client.ensure_session())
+        .await
+        .expect("the login waited for the save")
+        .unwrap();
+    let again = tokio::time::timeout(Duration::from_secs(2), client.ensure_session())
+        .await
+        .expect("the next portal call waited for the session")
+        .unwrap();
+    assert_eq!(again, (endpoint.clone(), token.clone()));
+    eprintln!(
+        "l2_import_pool: Stalker login during a save in {:?}",
+        started.elapsed()
+    );
+
+    holder.execute_batch("COMMIT").unwrap();
+    state.flush_background_writes().await;
+    let cached: String = state
+        .db_call(|c| {
+            Ok(c.query_row(
+                "SELECT value FROM app_state WHERE key = 'stalker_token:stk'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let cached: serde_json::Value = serde_json::from_str(&cached).unwrap();
+    assert_eq!(cached["endpoint"], endpoint.as_str());
+    assert_eq!(cached["token"].as_str(), token.as_deref());
     drop(long);
 }

@@ -832,6 +832,15 @@ impl BulkEpgEntry {
         }
     }
 
+    /// Lets go of the guide served during a refresh once the refresh has a
+    /// good answer of its own, which is served from then on: kept, it held
+    /// a second whole index in memory until the next expiry or idle drop.
+    fn drop_replaced(&mut self) {
+        if self.stale.is_some() && self.fut.peek().is_some_and(|b| b.ok) {
+            self.stale = None;
+        }
+    }
+
     /// Stale-while-revalidate (R5-2): a good answer, expired or not, at
     /// once; a row waits only when nothing usable is cached. A failed fetch
     /// with no older answer gives its empty one until [`BULK_EPG_RETRY`].
@@ -932,6 +941,7 @@ fn bulk_epg(state: &AppState, client: &StalkerClient, source_id: &str) -> BulkAn
             *entry = BulkEpgEntry::start(client, stale);
             fresh = true;
         }
+        entry.drop_replaced();
         entry.touch();
         (entry.answer(), entry.used.clone())
     };
@@ -1469,6 +1479,28 @@ mod tests {
         assert!(ready(bulk_entry(None, None).answer()).is_none());
         let empty = ready(bulk_entry(Some(bulk_answer(false)), None).answer()).unwrap();
         assert!(!empty.ok);
+    }
+
+    /// RB-G review: an entry kept the guide it served during its refresh
+    /// for its whole life, so two guides stayed resident. A good refresh
+    /// lets go of it; one in flight or failed keeps serving it.
+    #[tokio::test]
+    async fn a_refreshed_bulk_guide_lets_go_of_the_old_one() {
+        let old = bulk_answer(true);
+        let mut refreshing = bulk_entry(None, Some(old.clone()));
+        refreshing.drop_replaced();
+        let mut failed = bulk_entry(Some(bulk_answer(false)), Some(old.clone()));
+        failed.drop_replaced();
+        assert_eq!(Arc::strong_count(&old), 3);
+        assert!(Arc::ptr_eq(&ready(refreshing.answer()).unwrap(), &old));
+        assert!(Arc::ptr_eq(&ready(failed.answer()).unwrap(), &old));
+        drop((refreshing, failed));
+
+        let new = bulk_answer(true);
+        let mut refreshed = bulk_entry(Some(new.clone()), Some(old.clone()));
+        refreshed.drop_replaced();
+        assert_eq!(Arc::strong_count(&old), 1, "the old guide is freed");
+        assert!(Arc::ptr_eq(&ready(refreshed.answer()).unwrap(), &new));
     }
 
     /// R5-2: the guide stayed resident for the session once fetched. An

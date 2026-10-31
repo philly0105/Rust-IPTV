@@ -7,6 +7,10 @@
  * then resolves from the module cache.
  */
 
+import { queryClient, rpcKey } from '@/api/query';
+import { isDesktop } from '@/api/transport';
+import type { Settings, VideoPlayer } from '@/api/types';
+
 type Loader = () => Promise<unknown>;
 
 const DEFAULT_LOADERS: Record<'hls' | 'mpegts', Loader> = {
@@ -66,12 +70,37 @@ function whenIdle(fn: () => void): void {
   else setTimeout(fn, 300);
 }
 
-/** Both engines, once the browser is idle. For pages that play streams (live TV, VOD, the dashboard). */
+const OUTSIDE_PLAYERS: ReadonlySet<VideoPlayer> = new Set(['mpv', 'vlc', 'embedded-mpv']);
+
+/**
+ * Whether the saved players leave the built-in engines nothing to play (F1-5): desktop, live in
+ * mpv or VLC, VOD and catch-up in those or embedded mpv. Live in embedded mpv still needs them,
+ * because radio plays in the built-in `<audio>` unless the player is mpv or VLC
+ * (`modeForSettings`). Read from the query cache (the shell loads settings at boot), not the
+ * player store, which would pull its 72 kB into the entry chunk; settings not there yet warm as
+ * before.
+ */
+function playersAllOutside(): boolean {
+  if (!isDesktop) return false;
+  const s = queryClient.getQueryData<Settings>(rpcKey('settings.get'));
+  if (!s) return false;
+  const live = s.livePlayer ?? s.player;
+  return (live === 'mpv' || live === 'vlc') && OUTSIDE_PLAYERS.has(s.vodPlayer ?? s.player) && OUTSIDE_PLAYERS.has(s.catchupPlayer ?? s.player);
+}
+
+/**
+ * Both engines, once the browser is idle. For pages that play streams (live TV, VOD, the
+ * dashboard). Skipped when every saved player is mpv or VLC (about 890 kB fetched, compiled and
+ * held for the session otherwise); a built-in play still gets its engine through
+ * `preloadEngineFor` and `createEngine`, both left ungated.
+ */
 export function preloadEngines(): void {
   if (!enabled || idleQueued || (loaded.has('hls') && loaded.has('mpegts'))) return;
   idleQueued = true;
   whenIdle(() => {
     idleQueued = false;
+    // Checked when the work would run: settings that land while the page waits for idle count.
+    if (playersAllOutside()) return;
     load('hls');
     load('mpegts');
   });

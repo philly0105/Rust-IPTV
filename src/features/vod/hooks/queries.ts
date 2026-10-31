@@ -8,7 +8,7 @@ import { hashKey, queryOptions, useInfiniteQuery, useMutation, useQuery, useQuer
 import { useMemo, useRef } from 'react';
 
 import { RECENTLY_ADDED_LIMIT, recentlyAddedArgs } from '@/api/bootPrefetch';
-import { queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
+import { batchedItemQuery, queryDefaultsFor, rpcKey, useRpcQuery } from '@/api/query';
 import type { CatalogSearchResult } from '@/api/rpc';
 import { RpcError, rpcRaw } from '@/api/transport';
 import type {
@@ -268,7 +268,7 @@ function detailCommand(sourceKind: SourceKind, kind: 'movie' | 'series'): string
 }
 
 /** Only the ItemRef fields, so a ref carrying extra properties still hits the same cache entry. */
-function plainRef(ref: ItemRef): ItemRef {
+export function plainRef(ref: ItemRef): ItemRef {
   return { sourceId: ref.sourceId, contentType: ref.contentType, itemId: ref.itemId };
 }
 
@@ -315,8 +315,11 @@ export function seriesDetailQuery(sourceKind: SourceKind | undefined, ref: ItemR
 }
 
 /**
- * The catalog row a grid page, a rail, Recently added or a search answer already holds for `ref`
- * (VOD-DETAIL-PLACEHOLDER): title, poster, year, rating, category and container.
+ * The catalog row a grid page, a rail, Recently added, a search answer or a 'More like this' /
+ * 'Known for' match already holds for `ref` (VOD-DETAIL-PLACEHOLDER): title, poster, year, rating,
+ * category and container. Last, the title's own `catalog.item` row (F4-1), which the detail page
+ * reads for a title no list holds (My List, Recently watched, Favorites, Stats, a cold link) and
+ * the player and other flat readers share.
  */
 export function cachedCatalogRow(qc: QueryClient, ref: ItemRef): VodItem | SeriesItem | undefined {
   const find = (rows: unknown) => (Array.isArray(rows) ? (rows as (VodItem | SeriesItem)[]).find((r) => sameRef(r.ref, ref)) : undefined);
@@ -325,11 +328,17 @@ export function cachedCatalogRow(qc: QueryClient, ref: ItemRef): VodItem | Serie
     ...qc.getQueriesData<Page<VodItem | SeriesItem>>({ queryKey: [movie ? 'catalog.movies' : 'catalog.series'] }).map(([, page]) => page?.items),
     ...qc.getQueriesData<(VodItem | SeriesItem)[]>({ queryKey: ['catalog.recentlyAdded'] }).map(([, rows]) => rows),
     ...qc.getQueriesData<CatalogSearchResult>({ queryKey: ['catalog.search'] }).map(([, result]) => (movie ? result?.movies : result?.series)),
+    // One list of catalog rows per TMDB title the rail asked about; rows match by ref, as above.
+    ...qc.getQueriesData<(VodItem | SeriesItem)[][]>({ queryKey: ['catalog.matchTitles'] }).map(([, lists]) => lists?.flat()),
   ];
   for (const rows of lists) {
     const hit = find(rows);
     if (hit) return hit;
   }
+  // A bare row of this very title only: the key also holds an m3u movie's wrapped detail, and a
+  // channel's row for live refs.
+  const own = qc.getQueryData<unknown>(rpcKey('catalog.item', { ref: plainRef(ref) }));
+  if (own && typeof own === 'object' && !('item' in own) && 'ref' in own && sameRef((own as VodItem | SeriesItem).ref, ref)) return own as VodItem | SeriesItem;
   return undefined;
 }
 
@@ -338,23 +347,38 @@ export function cachedCatalogRow(qc: QueryClient, ref: ItemRef): VodItem | Serie
  * `select` wraps as a detail, so the page shows the hero and Play while the provider answers
  * get_vod_info or get_series_info. Not for m3u, whose detail is the local row already, nor for
  * Stalker, whose page waits for the details to learn the title's category for the parental gate.
+ *
+ * A title no list holds reads its own row from the local catalog (F4-1): one `catalog.item` through
+ * the `catalog.items` batch, a primary-key read that answers long before the provider. Its answer
+ * re-renders the page, and the detail query, still without a placeholder, runs the function again
+ * and finds the row. A failed lookup (a title no longer in the catalog, a locked one) leaves the
+ * skeleton until the provider answers, as before. Read whenever the provider's detail is not cached
+ * yet, rather than only when no list holds the row: deciding that would scan every cached grid page
+ * on each render, which costs more than one local read the player and other readers share anyway.
+ * A cached detail (a revisit, a finished hover prefetch) needs no stand-in, so it skips the read.
  */
-function useRowPlaceholder(sourceKind: SourceKind | undefined, ref: ItemRef): (() => VodItem | SeriesItem | undefined) | undefined {
+function useRowPlaceholder(sourceKind: SourceKind | undefined, ref: ItemRef, detailKey: QueryKey): (() => VodItem | SeriesItem | undefined) | undefined {
   const qc = useQueryClient();
+  const xtream = sourceKind === 'xtream';
+  const wanted = xtream && qc.getQueryData(detailKey) === undefined;
+  // Read so the observer tracks `data` only: its answer re-renders the page, its fetch states do not.
+  void useQuery({ ...batchedItemQuery(plainRef(ref), DETAIL_STALE_MS), enabled: wanted }).data;
   // One function per title: query-core keeps a placeholder only while the function is the same.
-  return useMemo(() => (sourceKind === 'xtream' ? () => cachedCatalogRow(qc, ref) : undefined), [qc, sourceKind, ref]);
+  return useMemo(() => (xtream ? () => cachedCatalogRow(qc, ref) : undefined), [qc, xtream, ref]);
 }
 
 /** The movie's detail; for Xtream, its catalog row stands in until the provider answers (`isPlaceholderData`). */
 export function useMovieDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<VodDetail, RpcError> {
-  const placeholderData = useRowPlaceholder(source?.kind, ref);
-  return useQuery({ ...movieDetailQuery(source?.kind, ref), enabled: !!source, placeholderData });
+  const query = movieDetailQuery(source?.kind, ref);
+  const placeholderData = useRowPlaceholder(source?.kind, ref, query.queryKey);
+  return useQuery({ ...query, enabled: !!source, placeholderData });
 }
 
 /** As {@link useMovieDetail}: the placeholder has no seasons, which come with the provider's answer. */
 export function useSeriesDetail(source: Source | undefined, ref: ItemRef): UseQueryResult<SeriesDetail, RpcError> {
-  const placeholderData = useRowPlaceholder(source?.kind, ref);
-  return useQuery({ ...seriesDetailQuery(source?.kind, ref), enabled: !!source, placeholderData });
+  const query = seriesDetailQuery(source?.kind, ref);
+  const placeholderData = useRowPlaceholder(source?.kind, ref, query.queryKey);
+  return useQuery({ ...query, enabled: !!source, placeholderData });
 }
 
 interface TmdbLookup {

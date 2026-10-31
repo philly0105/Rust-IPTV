@@ -1,10 +1,11 @@
 /** Opening a favorite / recent entry: live and radio play, movies and series open their detail page. */
 
+import { queryClient } from '@/api/query';
 import { sameRef, type ItemRef, type ItemSnapshot, type PlaybackPosition, type Source } from '@/api/types';
 import { queueSeriesFrom } from '@/features/vod/lib/episodeQueue';
 import { intlLocale, relativeTimeFormat } from '@/lib/intl';
 
-import { playItem, usePlayerStore } from '../deps';
+import { playItem, prefetchVodDetail, usePlayerStore } from '../deps';
 
 export function detailPath(ref: ItemRef): string | undefined {
   const sid = encodeURIComponent(ref.sourceId);
@@ -36,6 +37,10 @@ export async function openEntry(
 ): Promise<void> {
   const path = detailPath(ref);
   if (path) {
+    // The provider's detail goes out with the click, beside the route chunk, not after the page's
+    // first render; the page shows the title's catalog row meanwhile (F4-1). Not speculative, so
+    // neither Data Saver nor a coarse pointer skips it.
+    if (source) prefetchVodDetail(queryClient, snapshot.posterUrl ? { ref, sourceKind: source.kind, posterUrl: snapshot.posterUrl } : { ref, sourceKind: source.kind });
     navigate(path);
     return;
   }

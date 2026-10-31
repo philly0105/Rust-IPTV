@@ -9,6 +9,9 @@
  * - Series: the hero at once; Play, the series' Watched button (it marks every episode) and the
  *   episodes wait for the seasons.
  * - Stalker keeps waiting for its details: the parental gate needs the title's category from them.
+ * - A title no list holds (My List, Recently watched, Favorites, Stats, a cold link) reads its own
+ *   row from the local catalog through the catalog.items batch (F4-1); a failed or locked lookup
+ *   keeps the skeleton.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -16,6 +19,7 @@ import { I18nextProvider } from 'react-i18next';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { RpcError } from '@/api/transport';
 import { DEFAULT_SETTINGS, type ItemRef, type Page, type SeriesDetail, type SeriesItem, type VodDetail, type VodItem } from '@/api/types';
 
 import { forgetSpots } from '../hooks/useScrollMemory';
@@ -49,18 +53,20 @@ const seriesRef: ItemRef = { sourceId: 'src1', contentType: 'series', itemId: 's
 const movieRow: VodItem = { ref: movieRef, title: 'Dune: Part Two (2024)', titleBase: 'Dune: Part Two', year: 2024, rating: 8.3, categoryId: 'c1', containerExtension: 'mkv' };
 const seriesRow: SeriesItem = { ref: seriesRef, title: 'Severance', year: 2022, categoryId: 'c1' };
 
-/** A provider answer the test hands out when it wants to. */
+/** A provider answer the test hands out (or refuses) when it wants to. */
 function later<T>() {
   let resolve: (v: T) => void = () => undefined;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
+  let reject: (e: unknown) => void = () => undefined;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 const callsOf = (cmd: string) => rpcMock.calls.filter((c) => c.cmd === cmd);
 
-function handlers(kind: 'xtream' | 'stalker' = 'xtream') {
+function handlers(kind: 'xtream' | 'stalker' | 'm3u' = 'xtream') {
   const h = rpcMock.handlers;
   for (const k of Object.keys(h)) delete h[k];
   rpcMock.calls.length = 0;
@@ -174,11 +180,109 @@ describe('VOD-DETAIL-PLACEHOLDER: movies', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeTruthy();
   });
 
-  it('still shows the skeleton for a title no list holds', async () => {
+  it("finds the row in a 'More like this' or 'Known for' match", async () => {
+    rpcMock.handlers['xtream.vodDetail'] = () => new Promise(() => undefined);
+    // The local read stays out of it: the match answers first.
+    rpcMock.handlers['catalog.items'] = () => new Promise(() => undefined);
+    const other: VodItem = { ...movieRow, ref: { ...movieRef, itemId: 'm8' }, title: 'Dune (2021)', titleBase: 'Dune' };
+    client.setQueryData(
+      ['catalog.matchTitles', { sourceId: 'src1', contentType: 'movie', titles: [{ title: 'Dune', tmdbId: 438631 }, { title: 'Dune: Part Two', tmdbId: 693134 }] }],
+      [[other], [movieRow]],
+    );
+    open('/s/src1/movie/m7');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeTruthy();
+  });
+});
+
+describe('F4-1: a title no list holds', () => {
+  /** catalog.items answering each ref with `answer`. */
+  const items = (answer: (ref: ItemRef) => unknown) => (args: unknown) => (args as { refs: ItemRef[] }).refs.map(answer);
+  const rowOf = (ref: ItemRef) => (ref.contentType === 'movie' ? { item: movieRow } : { item: seriesRow });
+
+  it('shows the hero and Play from its own catalog row before an 800 ms provider answers', async () => {
+    rpcMock.handlers['catalog.items'] = items(rowOf);
+    rpcMock.handlers['xtream.vodDetail'] = () =>
+      new Promise<VodDetail>((r) => setTimeout(() => r({ item: { ...movieRow, plot: 'Paul unites with the Fremen.' }, cast: [], backdrops: [], providerDetailsUnavailable: false }), 800));
+    const t0 = performance.now();
+    open('/s/src1/movie/m7');
+    await screen.findByRole('heading', { level: 1, name: 'Dune: Part Two' }, { timeout: 3000 });
+    const play = await screen.findByRole('button', { name: i18n.t('vod:play') }, { timeout: 3000 });
+    const shown = performance.now() - t0;
+    console.info(`[F4-1] movie no list holds: hero and Play after ${Math.round(shown)} ms (provider answers after 800 ms)`);
+    expect((play as HTMLButtonElement).disabled).toBe(false);
+    expect(shown).toBeLessThan(600);
+    // One local read, through the batch the player and the other flat readers share.
+    expect(callsOf('catalog.items').map((c) => c.args)).toEqual([{ refs: [movieRef] }]);
+    expect(callsOf('catalog.item')).toEqual([]);
+    expect(await screen.findByText('Paul unites with the Fremen.', {}, { timeout: 3000 })).toBeTruthy();
+  });
+
+  it('skips the local read when the provider’s detail is cached already', async () => {
+    rpcMock.handlers['catalog.items'] = items(rowOf);
+    client.setQueryData<VodDetail>(['xtream.vodDetail', { ref: movieRef }], { item: movieRow, cast: [], backdrops: [], providerDetailsUnavailable: false });
+    open('/s/src1/movie/m7');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeTruthy();
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(callsOf('catalog.items')).toEqual([]);
+    expect(callsOf('xtream.vodDetail')).toEqual([]);
+  });
+
+  it('asks Other sources with the detail, not after it', async () => {
+    rpcMock.handlers['catalog.items'] = items(rowOf);
+    rpcMock.handlers['xtream.vodDetail'] = () => new Promise(() => undefined);
+    open('/s/src1/movie/m7');
+    await screen.findByRole('heading', { level: 1, name: 'Dune: Part Two' });
+    expect(callsOf('catalog.sameTitle').map((c) => c.args)).toEqual([{ ref: movieRef }]);
+  });
+
+  it('paints a series hero from its row; Play waits for the seasons', async () => {
+    rpcMock.handlers['catalog.items'] = items(rowOf);
+    rpcMock.handlers['xtream.seriesDetail'] = () => new Promise(() => undefined);
+    open('/s/src1/series/s1');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Severance' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: i18n.t('vod:play') }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('keeps the skeleton when the lookup fails or the title is locked', async () => {
+    rpcMock.handlers['catalog.items'] = items(() => ({ error: { code: 'not_found', message: 'locked', retryable: false, details: { parentalLocked: true } } }));
     rpcMock.handlers['xtream.vodDetail'] = () => new Promise(() => undefined);
     open('/s/src1/movie/m7');
     expect(await screen.findByRole('status')).toBeTruthy();
+    await waitFor(() => expect(callsOf('catalog.items')).toHaveLength(1));
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
     expect(screen.queryByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeNull();
+  });
+
+  it('a row whose title the provider dropped shows the hero, then the provider’s error', async () => {
+    rpcMock.handlers['catalog.items'] = items(rowOf);
+    const detail = later<VodDetail>();
+    rpcMock.handlers['xtream.vodDetail'] = () => detail.promise;
+    // The twin probe finds no series of that id either.
+    rpcMock.handlers['catalog.item'] = () => Promise.reject(new RpcError('not_found', 'no such item'));
+    open('/s/src1/movie/m7');
+    await screen.findByRole('heading', { level: 1, name: 'Dune: Part Two' });
+    await act(async () => detail.reject(new RpcError('not_found', 'gone')));
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeNull();
+  });
+
+  it('leaves Stalker titles waiting, and m3u titles to their own detail read', async () => {
+    handlers('stalker');
+    rpcMock.handlers['stalker.vodDetail'] = () => new Promise(() => undefined);
+    open('/s/src1/movie/m7');
+    expect(await screen.findByRole('status')).toBeTruthy();
+    await act(async () => new Promise((r) => setTimeout(r, 50)));
+    expect(callsOf('catalog.items')).toEqual([]);
+    cleanup();
+    client.clear();
+
+    // An m3u movie's detail is its catalog.item row already, under the same key.
+    handlers('m3u');
+    rpcMock.handlers['catalog.item'] = () => movieRow;
+    open('/s/src1/movie/m7');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dune: Part Two' })).toBeTruthy();
+    expect(callsOf('catalog.item').map((c) => c.args)).toEqual([{ ref: movieRef }]);
+    expect(callsOf('catalog.items')).toEqual([]);
   });
 });
 

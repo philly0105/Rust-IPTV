@@ -18,7 +18,7 @@ import { Link } from 'react-router';
 
 import type { WatchStatsTop } from '@/api/types';
 
-import { IconButton, Poster, PosterCellWidthContext, cn, itemPath, usePosterWidthBox, useScaledPx } from '../deps';
+import { IconButton, Poster, PosterCellWidthContext, cn, itemPath, useOpenPrefetch, usePosterWidthBox, useScaledPx } from '../deps';
 import { formatWatchTime } from '../lib/format';
 
 function TopSection({ title, empty, testId, children }: { title: string; empty: string | null; testId: string; children: ReactNode }) {
@@ -129,6 +129,8 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
   const { t, i18n } = useTranslation('stats');
   const most = items[0]?.seconds ?? 0;
   const artWidth = usePosterWidthBox(useScaledPx(ART_PX, true));
+  // The detail page's data goes out with the click, beside its route chunk (F4-1).
+  const prefetchOpen = useOpenPrefetch();
   return (
     <TopSection title={t('topTitles')} empty={items.length === 0 ? t('noTitles') : null} testId="stats-top-titles">
       {items.map((item, i) => (
@@ -138,6 +140,7 @@ export function TopTitles({ items }: { items: readonly WatchStatsTop[] }) {
           <Link
             to={itemPath(item.ref)}
             aria-label={t('openLabel', { title: item.title })}
+            onClick={() => prefetchOpen(item.ref, item.posterUrl)}
             className="group relative isolate flex min-w-0 flex-1 items-center gap-3 rounded-md before:absolute before:-inset-1 before:-z-10 before:rounded-md before:content-[''] hover:before:bg-hover motion-safe:before:transition-colors"
             data-testid="stats-open"
           >

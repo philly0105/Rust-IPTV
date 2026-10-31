@@ -22,3 +22,6 @@ export { useMediaQuery } from '@/features/live/hooks/useMediaQuery';
 export { POSTER_GAP, useCoverColumn } from '@/features/library/hooks/useCoverColumn';
 export { captureWatched, undoWatched } from '@/features/library/lib/watchedUndo';
 export { invalidateWatched } from '@/features/vod/lib/watchedQueries';
+// vod: a title opened from the list starts its detail page's data with the click, and the list
+// warms the detail chunks at idle (F4-1). The dashboard cards this slice imports load it already.
+export { preloadDetailChunk, useOpenPrefetch } from '@/features/vod/hooks/prefetch';

@@ -246,6 +246,20 @@ describe('an offline title page', () => {
   });
 });
 
+describe('opening a title from Favorites (F4-1)', () => {
+  it('starts its detail data with the click, before its page has loaded', async () => {
+    rpc.handlers['favorites.list'] = () => [makeFavorite('movie', 'm1', 0)];
+    rpc.handlers['xtream.vodDetail'] = () => new Promise(() => undefined);
+    rpc.handlers['catalog.items'] = () => new Promise(() => undefined);
+    renderAt('/favorites', [{ path: '/favorites', element: <FavoritesPage /> }]);
+    const list = await screen.findByTestId('favorites-list');
+    const open = await waitFor(() => within(list).getAllByTestId('entry-artwork')[0]!);
+    fireEvent.click(open);
+    // No route renders the detail page here: the request comes from the open itself.
+    await waitFor(() => expect(rpc.callsOf('xtream.vodDetail')).toEqual([{ ref: { sourceId: 'src1', contentType: 'movie', itemId: 'm1' } }]));
+  });
+});
+
 describe('page tops', () => {
   it("Favorites' first heading row is only as tall as the heading; later ones keep the gap above them", async () => {
     rpc.handlers['favorites.list'] = () => [makeFavorite('live', 'ch1', 0), makeFavorite('movie', 'm1', 1)];

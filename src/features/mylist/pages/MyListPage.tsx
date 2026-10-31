@@ -38,7 +38,9 @@ import {
   VirtualRows,
   errorDescription,
   POSTER_GAP,
+  preloadDetailChunk,
   useCoverColumn,
+  useOpenPrefetch,
   usePendingRemovals,
   useScaledPx,
   useShell,
@@ -192,7 +194,34 @@ export function MyListPage() {
     (list?.querySelector<HTMLElement>('[role="listitem"][tabindex="0"]') ?? list?.querySelector<HTMLElement>('[role="listitem"]'))?.focus();
   }, []);
 
-  const open = useCallback((e: WatchlistEntry) => void navigate(itemPath(e.ref)), [navigate]);
+  // The provider's detail goes out with the click, beside the route chunk, not after the page's
+  // first render; the page shows the title's catalog row meanwhile (F4-1).
+  const prefetchOpen = useOpenPrefetch();
+  const open = useCallback(
+    (e: WatchlistEntry) => {
+      prefetchOpen(e.ref, e.snapshot.posterUrl);
+      void navigate(itemPath(e.ref));
+    },
+    [navigate, prefetchOpen],
+  );
+  // The detail chunks of the kinds the list holds load while it idles, as the category grid's do
+  // (L2-vod-10): touch screens get no hover prefetch, so the first title opened would wait for its code.
+  const hasMovies = useMemo(() => !!all?.some((e) => e.ref.contentType === 'movie'), [all]);
+  const hasSeries = useMemo(() => !!all?.some((e) => e.ref.contentType === 'series'), [all]);
+  useEffect(() => {
+    if (!hasMovies && !hasSeries) return;
+    if ((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
+    const warm = () => {
+      if (hasMovies) preloadDetailChunk('movie');
+      if (hasSeries) preloadDetailChunk('series');
+    };
+    if (typeof requestIdleCallback === 'function') {
+      const h = requestIdleCallback(warm, { timeout: 2000 });
+      return () => cancelIdleCallback(h);
+    }
+    const h = setTimeout(warm, 500);
+    return () => clearTimeout(h);
+  }, [hasMovies, hasSeries]);
   /**
    * Plays a row: from its saved position (a series with the rest of the season queued, as from its
    * page), or a movie from the start. Loaded on use, so the page does not carry the player.

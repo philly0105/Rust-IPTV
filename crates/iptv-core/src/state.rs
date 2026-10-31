@@ -20,8 +20,12 @@ pub struct AppState {
     /// App data root. DB at `data_dir/iptv.db`, logs at `data_dir/logs`,
     /// default downloads at `data_dir/downloads`.
     pub data_dir: PathBuf,
-    /// r2d2 SQLite pool (C3).
+    /// r2d2 SQLite pool (C3): every write, and the reads not moved to
+    /// [`Self::db_read`].
     pub db: DbPool,
+    /// Read-only pool ([`db::open_read`]) for the hot pure reads; see
+    /// [`Self::db_read_call`].
+    pub db_read: DbPool,
     /// Shared client from `http::client(None)`.
     pub http: reqwest::Client,
     /// Event sink (Tauri `app-event` or server WebSocket broadcast).
@@ -185,7 +189,7 @@ impl AppState {
         events: Arc<dyn EventSink>,
         is_desktop: bool,
     ) -> CoreResult<Arc<Self>> {
-        let (data_dir, db, settings) = tokio::task::spawn_blocking(move || -> CoreResult<_> {
+        let (data_dir, db, db_read, settings) = tokio::task::spawn_blocking(move || -> CoreResult<_> {
             let data_dir = std::path::absolute(&data_dir).unwrap_or(data_dir);
             std::fs::create_dir_all(&data_dir).map_err(|e| {
                 CoreError::Io(std::io::Error::new(
@@ -195,12 +199,19 @@ impl AppState {
             })?;
             std::fs::create_dir_all(crate::logging::logs_dir(&data_dir))?;
             std::fs::create_dir_all(data_dir.join("downloads"))?;
-            let pool = db::open_and_migrate(&data_dir.join(db::DB_FILE))?;
+            let path = data_dir.join(db::DB_FILE);
+            let pool = db::open_and_migrate(&path)?;
+            // After the migration and any quarantine: the file the read
+            // pool opens is the one the write pool holds.
+            let read = db::open_read(&path).unwrap_or_else(|err| {
+                tracing::warn!(%err, "could not open the read-only database pool; reads use the write pool");
+                pool.clone()
+            });
             let settings = {
                 let conn = pool.get()?;
                 load_settings(&conn)?
             };
-            Ok((data_dir, pool, settings))
+            Ok((data_dir, pool, read, settings))
         })
         .await??;
 
@@ -208,6 +219,7 @@ impl AppState {
         Ok(Arc::new(Self {
             data_dir,
             db,
+            db_read,
             http: crate::http::client(None),
             events,
             settings: Arc::new(parking_lot::RwLock::new(settings)),
@@ -242,7 +254,33 @@ impl AppState {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> CoreResult<T> + Send + 'static,
     {
-        let pool = self.db.clone();
+        self.call_on(&self.db, f).await
+    }
+
+    /// [`Self::db_call`] on the read-only pool ([`Self::db_read`]), for the
+    /// hot pure reads: catalog pages and lookups, the guide, user-state
+    /// lists and checks, parental reads and image lookups. A WAL reader
+    /// never waits for the write lock, and none of these connections is
+    /// ever parked by a writer waiting out an import's save, so these reads
+    /// keep answering however many writers wait on [`Self::db`] (R1-1).
+    /// The closure must not write: a write fails at once with
+    /// `SQLITE_READONLY` (temp tables are fine). Interrupts on drop inside
+    /// [`cancel_on_drop`] like [`Self::db_call`].
+    pub async fn db_read_call<T, F>(&self, f: F) -> CoreResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> CoreResult<T> + Send + 'static,
+    {
+        self.call_on(&self.db_read, f).await
+    }
+
+    /// The body of [`Self::db_call`] and [`Self::db_read_call`] on `pool`.
+    async fn call_on<T, F>(&self, pool: &DbPool, f: F) -> CoreResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> CoreResult<T> + Send + 'static,
+    {
+        let pool = pool.clone();
         let db_path = self.db_path();
         let slot: Option<CallSlot> = CANCEL_ON_DROP
             .try_with(|_| Arc::new(parking_lot::Mutex::new(CallState::Queued)))
@@ -463,6 +501,71 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(state.settings.read().theme, Theme::Dark);
+    }
+
+    /// R1-1: `db_read_call` runs on the read-only pool. It sees what
+    /// `db_call` committed, refuses a write, and stops its SQL when dropped
+    /// inside `cancel_on_drop`, as `db_call` does.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn db_read_call_reads_commits_refuses_writes_and_interrupts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = AppState::new(tmp.path().to_path_buf(), Arc::new(NoopSink), false)
+            .await
+            .unwrap();
+        state
+            .db_call(|c| {
+                c.execute("INSERT INTO app_state(key, value) VALUES ('k', 'v')", [])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let v: String = state
+            .db_read_call(|c| {
+                Ok(
+                    c.query_row("SELECT value FROM app_state WHERE key = 'k'", [], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(v, "v");
+        let err = state
+            .db_read_call(|c| {
+                c.execute("DELETE FROM app_state", [])?;
+                Ok(())
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, CoreError::Db(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ReadOnly),
+            "{err}"
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let st = state.clone();
+        let call = cancel_on_drop(async move {
+            st.db_read_call(move |c| {
+                let r = c.query_row(
+                    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000000000) SELECT count(*) FROM n",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                );
+                let _ = tx.send(r.map_err(|e| e.to_string()));
+                Ok(())
+            })
+            .await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), call)
+                .await
+                .is_err()
+        );
+        let r = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the dropped read kept running");
+        let err = r.expect_err("the read was interrupted");
+        assert!(err.contains("interrupt"), "{err}");
     }
 
     #[tokio::test]

@@ -905,40 +905,46 @@ pub fn continue_watching_filtered(
         Some(h) => crate::parental::filter::by_ref(conn, "k", h)?,
         None => String::new(),
     };
+    // Unwatched rows newest first through idx_positions_resume (0027), each
+    // kept only when it is its item's newest row (the primary key finds the
+    // item's rows), stopping at the limit. It replaced a ROW_NUMBER() rank
+    // of every row, watched history included: 4.7 ms at 4,283 rows against
+    // 0.13 ms, with the same rows and tie-breaks (R4-3).
     let mut stmt = conn.prepare_cached(&format!(
-        "WITH ranked AS (
-           SELECT p.*, p.rowid AS rid, ROW_NUMBER() OVER (
-             PARTITION BY p.source_id, p.content_type, p.item_id
-             ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
-           FROM playback_positions p
-         )
-         SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
+        "SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
                 k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
                 i.title, COALESCE(i.poster_url, i.logo_url)
-         FROM ranked k
+         FROM playback_positions k
          LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
-         WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2{locked}
-         ORDER BY k.updated_at DESC, k.rid DESC
+         WHERE k.watched = 0 AND k.position_seconds > ?2
+           AND k.rowid = (SELECT n.rowid FROM playback_positions n
+                          WHERE n.source_id = k.source_id AND n.content_type = k.content_type AND n.item_id = k.item_id
+                          ORDER BY n.updated_at DESC, n.rowid DESC LIMIT 1){locked}
+         ORDER BY k.updated_at DESC, k.rowid DESC
          LIMIT ?1"
     ))?;
-    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], |row| {
-        let mut p = position_from_row(row)?;
-        if p.snapshot.is_none() {
-            let title: Option<String> = row.get(9)?;
-            let poster: Option<String> = row.get(10)?;
-            p.snapshot = Some(match title {
-                Some(title) => ItemSnapshot {
-                    title,
-                    subtitle: None,
-                    poster_url: poster,
-                    content_type: p.item_ref.content_type,
-                },
-                None => fallback_snapshot(&p.item_ref),
-            });
-        }
-        Ok(p)
-    })?;
+    let rows = stmt.query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// A continue-watching row: the position columns, then the catalog title
+/// and artwork that fill a missing snapshot.
+fn continue_from_row(row: &Row<'_>) -> rusqlite::Result<PlaybackPosition> {
+    let mut p = position_from_row(row)?;
+    if p.snapshot.is_none() {
+        let title: Option<String> = row.get(9)?;
+        let poster: Option<String> = row.get(10)?;
+        p.snapshot = Some(match title {
+            Some(title) => ItemSnapshot {
+                title,
+                subtitle: None,
+                poster_url: poster,
+                content_type: p.item_ref.content_type,
+            },
+            None => fallback_snapshot(&p.item_ref),
+        });
+    }
+    Ok(p)
 }
 
 /// Removes one position (`episode_id = None` targets the item-level row).
@@ -1138,5 +1144,150 @@ mod tests {
         assert_eq!(done.duration_seconds, Some(1000));
         assert!(continue_watching(&c, Some(10)).unwrap().is_empty());
         assert!(position_set(&c, &p("show", Some("e1"), -1, None)).is_err());
+    }
+
+    /// The window-function statement continue watching ran before R4-3.
+    fn continue_watching_ranked(
+        conn: &Connection,
+        limit: i64,
+        hide: Option<Hide>,
+    ) -> Vec<PlaybackPosition> {
+        let locked = match hide {
+            Some(h) => crate::parental::filter::by_ref(conn, "k", h).unwrap(),
+            None => String::new(),
+        };
+        let mut stmt = conn
+            .prepare(&format!(
+                "WITH ranked AS (
+                   SELECT p.*, p.rowid AS rid, ROW_NUMBER() OVER (
+                     PARTITION BY p.source_id, p.content_type, p.item_id
+                     ORDER BY p.updated_at DESC, p.rowid DESC) AS rn
+                   FROM playback_positions p
+                 )
+                 SELECT k.source_id, k.content_type, k.item_id, k.episode_id, k.position_seconds,
+                        k.duration_seconds, k.updated_at, k.snapshot_json, k.watched,
+                        i.title, COALESCE(i.poster_url, i.logo_url)
+                 FROM ranked k
+                 LEFT JOIN items i ON i.source_id = k.source_id AND i.content_type = k.content_type AND i.item_id = k.item_id
+                 WHERE k.rn = 1 AND k.watched = 0 AND k.position_seconds > ?2{locked}
+                 ORDER BY k.updated_at DESC, k.rid DESC
+                 LIMIT ?1"
+            ))
+            .unwrap();
+        stmt.query_map(params![limit, MIN_RESUME_SECONDS], continue_from_row)
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// The newest-row statement returns what the ranked one did (R4-3):
+    /// ties on `updated_at` broken by rowid, a series whose newest episode
+    /// is watched or at most 5 s in left out (C13) even with older
+    /// half-watched episodes, movies with replay rows, and hide mode with a
+    /// locked item, a locked category and an adult category.
+    #[test]
+    fn continue_watching_matches_the_ranked_statement() {
+        let mut c = conn();
+        crate::db::configure(&mut c).unwrap();
+        c.execute_batch(
+            "INSERT INTO categories (source_id, content_type, category_id, name) VALUES
+               ('s2', 'movie', 'c1', 'Action'), ('s2', 'movie', 'c2', 'Locked'),
+               ('s2', 'movie', 'c3', 'XXX Adult'), ('s2', 'series', 'c1', 'Drama');
+             INSERT INTO items (source_id, content_type, item_id, category_id, title, poster_url) VALUES
+               ('s2', 'movie', 'm1', 'c1', 'One', 'http://p/1'),
+               ('s2', 'movie', 'm2', 'c2', 'Two', NULL),
+               ('s2', 'movie', 'm3', 'c1', 'Three', NULL),
+               ('s2', 'movie', 'm4', 'c3', 'Four', NULL),
+               ('s2', 'series', 'sh1', 'c1', 'Show one', NULL),
+               ('s2', 'series', 'sh2', 'c1', 'Show two', NULL);
+             INSERT INTO parental_locks (source_id, content_type, kind, target_id, created_at) VALUES
+               ('s2', 'movie', 'category', 'c2', '2026-01-01'),
+               ('s2', 'movie', 'item', 'm3', '2026-01-01');",
+        )
+        .unwrap();
+        let rows: &[(&str, &str, &str, &str, i64, &str, i64)] = &[
+            // Ties: same second, so rowid decides between items too.
+            ("s2", "movie", "m1", "", 300, "2026-10-01 10:00:00", 0),
+            ("s2", "movie", "m2", "", 300, "2026-10-01 10:00:00", 0),
+            ("s2", "movie", "m3", "", 300, "2026-10-01 10:00:00", 0),
+            ("s2", "movie", "m4", "", 300, "2026-10-02 09:00:00", 0),
+            // Not in the catalog: fallback snapshot.
+            ("s1", "movie", "gone", "", 120, "2026-10-03 09:00:00", 0),
+            // At or below 5 s: never shown.
+            ("s1", "movie", "short", "", 5, "2026-10-04 09:00:00", 0),
+            // Series 1: newest episode watched hides the older half-watched one.
+            ("s2", "series", "sh1", "e1", 600, "2026-10-01 08:00:00", 0),
+            ("s2", "series", "sh1", "e2", 1000, "2026-10-05 08:00:00", 1),
+            // Series 2: newest episode barely started hides it too; then a
+            // tie between two episodes on the same second.
+            ("s2", "series", "sh2", "e1", 700, "2026-10-01 07:00:00", 0),
+            ("s2", "series", "sh2", "e2", 3, "2026-10-06 07:00:00", 0),
+            ("s1", "series", "sh3", "e1", 400, "2026-10-07 07:00:00", 0),
+            ("s1", "series", "sh3", "e2", 500, "2026-10-07 07:00:00", 0),
+            // A series whose newest episode is the half-watched one.
+            ("s1", "series", "sh4", "e1", 900, "2026-09-01 07:00:00", 1),
+            ("s1", "series", "sh4", "e2", 200, "2026-09-02 07:00:00", 0),
+        ];
+        for (src, ty, id, ep, pos, at, watched) in rows {
+            c.execute(
+                "INSERT INTO playback_positions (source_id, content_type, item_id, episode_id, position_seconds, duration_seconds, updated_at, watched)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1000, ?6, ?7)",
+                params![src, ty, id, ep, pos, at, watched],
+            )
+            .unwrap();
+        }
+        // A replayed movie: its row was rewritten later than its first save.
+        c.execute(
+            "UPDATE playback_positions SET position_seconds = 50, updated_at = '2026-10-08 09:00:00' WHERE item_id = 'm1'",
+            [],
+        )
+        .unwrap();
+        let hides = [
+            None,
+            Some(Hide { auto_adult: false }),
+            Some(Hide { auto_adult: true }),
+        ];
+        for hide in hides {
+            for limit in [1, 2, 3, 20, 200] {
+                let new = continue_watching_filtered(&c, Some(limit), hide).unwrap();
+                assert_eq!(
+                    new,
+                    continue_watching_ranked(&c, limit, hide),
+                    "limit {limit}, hide {hide:?}"
+                );
+            }
+        }
+        let all: Vec<String> = continue_watching_filtered(&c, Some(20), None)
+            .unwrap()
+            .into_iter()
+            .map(|p| format!("{}{}", p.item_ref.item_id, p.episode_id.unwrap_or_default()))
+            .collect();
+        assert_eq!(all, ["m1", "sh3e2", "gone", "m4", "m3", "m2", "sh4e2"]);
+        let hidden: Vec<String> =
+            continue_watching_filtered(&c, Some(20), Some(Hide { auto_adult: true }))
+                .unwrap()
+                .into_iter()
+                .map(|p| p.item_ref.item_id)
+                .collect();
+        assert_eq!(hidden, ["m1", "sh3", "gone", "sh4"]);
+        // The outer scan reads unwatched rows newest first, so it stops at
+        // the limit instead of sorting the whole history.
+        let sql = "EXPLAIN QUERY PLAN SELECT k.rowid FROM playback_positions k
+             WHERE k.watched = 0 AND k.position_seconds > 5
+               AND k.rowid = (SELECT n.rowid FROM playback_positions n
+                              WHERE n.source_id = k.source_id AND n.content_type = k.content_type AND n.item_id = k.item_id
+                              ORDER BY n.updated_at DESC, n.rowid DESC LIMIT 1)
+             ORDER BY k.updated_at DESC, k.rowid DESC LIMIT 20";
+        let plan: Vec<String> = c
+            .prepare(sql)
+            .unwrap()
+            .query_map([], |r| r.get(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|l| l.contains("idx_positions_resume")),
+            "{plan:?}"
+        );
     }
 }

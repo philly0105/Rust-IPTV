@@ -83,22 +83,10 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 
 const { i18n, applyLanguage } = await import('@/i18n');
-const {
-  enterPipWindow,
-  exitPipWindow,
-  recoverPipWindow,
-  placeOnScreen,
-  fitsOnScreen,
-  setWindowFullscreen,
-  bindWindowFullscreen,
-  leaveBareWindowFullscreen,
-  bindTrayLabels,
-  sizeForAspect,
-  setPipWindowAspect,
-  flushBeforeQuit,
-  QUIT_FLUSH_EVENT,
-  QUIT_FLUSH_BUDGET_MS,
-} = await import('./window');
+const { setWindowFullscreen, bindWindowFullscreen, leaveBareWindowFullscreen, bindTrayLabels, flushBeforeQuit, QUIT_FLUSH_EVENT, QUIT_FLUSH_BUDGET_MS } =
+  await import('./window');
+// The PiP window code is its own module (F1-7).
+const { enterPipWindow, exitPipWindow, recoverPipWindow, placeOnScreen, fitsOnScreen, sizeForAspect, setPipWindowAspect } = await import('./pipWindow');
 
 const named = (name: string) => fake.calls.filter(([n]) => n === name).map(([, a]) => a);
 const last = (name: string) => named(name).at(-1);
@@ -523,6 +511,14 @@ describe('recoverPipWindow', () => {
   it('does nothing when the app was not in PiP', async () => {
     expect(await recoverPipWindow()).toBe(false);
     expect(named('setDecorations')).toHaveLength(0);
+  });
+
+  it('runs when the window binding starts, from the PiP module it loads then (F1-7)', async () => {
+    fake.state.saved = { x: 40, y: 30, width: 1400, height: 900, maximized: false };
+    const unbind = bindWindowFullscreen();
+    await vi.waitFor(() => expect(last('invoke:pip_window')).toEqual({ on: false, restore: null }));
+    expect(last('setSize')).toMatchObject({ width: 1400, height: 900 });
+    unbind();
   });
 });
 

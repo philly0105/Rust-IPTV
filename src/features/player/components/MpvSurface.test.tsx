@@ -77,12 +77,14 @@ const placeReads = vi.fn(async (p: { x: number; y: number }) => p);
 vi.mock('@/api/window', () => ({
   cursorPosition: () => cursorReads(),
   screenToViewport: (p: { x: number; y: number }) => placeReads(p),
+  QUIT_FLUSH_EVENT: 'tsrust:flush',
+}));
+vi.mock('@/api/pipWindow', () => ({
   enterPipWindow: async () => true,
   exitPipWindow: async () => undefined,
   recoverPipWindow: async () => false,
   setPipWindowAspect: async () => true,
   PIP_DEFAULT_ASPECT: 16 / 9,
-  QUIT_FLUSH_EVENT: 'tsrust:flush',
 }));
 
 const { usePlayerStore, __resetPlayerForTests, DOUBLE_CLICK_MS, setSettingsCache } = await import('../store');
@@ -1452,7 +1454,7 @@ describe('wheel and context menu over the native video', () => {
 
   it('PiP asks mpv for the video shape', async () => {
     const pip = await import('../pip');
-    const enter = vi.spyOn(await import('@/api/window'), 'enterPipWindow');
+    const enter = vi.spyOn(await import('@/api/pipWindow'), 'enterPipWindow');
     videoParams = { dw: 1440, dh: 1080 };
     await attached();
     await act(async () => {
@@ -1467,7 +1469,7 @@ describe('wheel and context menu over the native video', () => {
 
   it('a zap in PiP to a video of another shape reshapes the window once its first frame is up', async () => {
     const pip = await import('../pip');
-    const reshape = vi.spyOn(await import('@/api/window'), 'setPipWindowAspect');
+    const reshape = vi.spyOn(await import('@/api/pipWindow'), 'setPipWindowAspect');
     await attached();
     act(() => emitState({ ...mpvState, loaded: true, timePos: 1 }));
     await act(async () => {

@@ -22,12 +22,14 @@ const cursorReads = vi.fn(async () => ({ x: 10, y: 10 }));
 vi.mock('@/api/window', () => ({
   cursorPosition: () => cursorReads(),
   screenToViewport: async (p: { x: number; y: number }) => p,
+  QUIT_FLUSH_EVENT: 'tsrust:flush',
+}));
+vi.mock('@/api/pipWindow', () => ({
   enterPipWindow: async () => true,
   exitPipWindow: async () => undefined,
   recoverPipWindow: async () => false,
   setPipWindowAspect: async () => true,
   PIP_DEFAULT_ASPECT: 16 / 9,
-  QUIT_FLUSH_EVENT: 'tsrust:flush',
 }));
 
 const { usePlayerStore, __resetPlayerForTests } = await import('../store');

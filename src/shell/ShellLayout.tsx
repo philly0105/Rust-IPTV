@@ -30,7 +30,7 @@ import { useShellStore } from './store';
 import { ThemeSync, useTheme } from './theme';
 import { useMediaQuery } from './useMediaQuery';
 import { useSettings, useSettingsValue } from './useSettings';
-import { SHELL_BOTTOM_INSET, TabBar, TAB_BAR_HEIGHT } from './TabBar';
+import { SHELL_BOTTOM_INSET, TAB_BAR_HEIGHT } from './tabBarMetrics';
 
 // player: the dock and the external-playback footer carry the whole playback UI (surfaces,
 // controls, engines, the store), about a third of the app's code, in their own chunk (C4 entry
@@ -218,6 +218,9 @@ function ShortcutOverlayHost() {
     </Suspense>
   ) : null;
 }
+// The phone tab bar (F1-7): it renders only below 640 px, so a desktop or tablet launch does not
+// load it; its skeleton holds the bar's place while the chunk comes in.
+const TabBar = lazy(() => import('./TabBar').then((m) => ({ default: m.TabBar })));
 // Run 3 C7: the first-run tour and What's new. The host (decision, store) loads right after the
 // shell; the overlays and release notes are its own lazy chunks. Imported from `host`, not the
 // barrel, so RELEASE_NOTES and its icons stay out of this chunk.
@@ -470,17 +473,22 @@ export function ShellSkeleton({ collapsed, railHidden, phone = false, testId = '
           <Skeleton className="h-5 w-40" />
           <Skeleton className="h-24 w-full max-w-[80rem] rounded-lg" />
         </div>
-        {phone && (
-          <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>
-            {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
-                <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
-                <Skeleton className="h-2 w-10" />
-              </div>
-            ))}
-          </div>
-        )}
+        {phone && <TabBarSkeleton />}
       </div>
+    </div>
+  );
+}
+
+/** The phone tab bar's text-free stand-in: in the shell skeleton, and while the bar's chunk loads. */
+function TabBarSkeleton() {
+  return (
+    <div aria-hidden className="grid shrink-0 grid-cols-5 items-center border-t border-divider bg-surface pb-[env(safe-area-inset-bottom,0px)]" style={{ height: SHELL_BOTTOM_INSET }}>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} className="flex flex-col items-center gap-1.5" style={{ height: TAB_BAR_HEIGHT }}>
+          <Skeleton className="mt-2.5 size-[calc(22rem/15)] rounded-sm" />
+          <Skeleton className="h-2 w-10" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -600,7 +608,11 @@ export function ShellLayout() {
               <ContextPanel inline={wide} />
             </div>
             {player && <player.ExternalPlaybackFooter />}
-            {phone && <TabBar />}
+            {phone && (
+              <Suspense fallback={<TabBarSkeleton />}>
+                <TabBar />
+              </Suspense>
+            )}
           </div>
           {player && <player.PlayerDock />}
           <PaletteHost />

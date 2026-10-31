@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import '@/i18n';
+import { CHANNEL_PAGE_SIZE, channelPageArgs } from '@/api/bootPrefetch';
+import { rpcKey } from '@/api/query';
 import { DEFAULT_SETTINGS, type Channel, type ItemRef } from '@/api/types';
 import { MAX_ACTIVE, resetImageGate } from '@/ui/imageGate';
 
@@ -24,11 +26,17 @@ vi.mock('@/api/transport', () => {
   return { rpc: call, rpcRaw: call, RpcError, isDesktop: false, proxiedUrl: (s: { url: string }) => s.url };
 });
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
+// Unchanged; each call is one row's name rendering, so the calls count row renders.
+vi.mock('@/features/live/components/ChannelLogo', async (orig) => {
+  const real = await orig<typeof import('@/features/live/components/ChannelLogo')>();
+  return { ...real, ChannelName: vi.fn(real.ChannelName) };
+});
 
 const { usePlayerStore, __resetPlayerForTests, setSettingsCache } = await import('../store');
 const { useMediaStore, resetMedia } = await import('../media');
 const { __resetZapBannerForTests } = await import('../zapBanner');
 const { FullscreenChannelPanel } = await import('./FullscreenChannelPanel');
+const { ChannelName } = await import('@/features/live/components/ChannelLogo');
 
 const COUNT = 300;
 const channel = (i: number): Channel => ({
@@ -51,8 +59,7 @@ function play(i: number) {
   );
 }
 
-function mount() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+function mount(client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })) {
   render(
     <QueryClientProvider client={client}>
       <FullscreenChannelPanel available />
@@ -65,7 +72,7 @@ const focusedName = () => (document.activeElement?.getAttribute('role') === 'opt
 const list = () => screen.getByRole('listbox');
 const search = () => screen.getByRole('searchbox');
 const pagesAsked = () =>
-  rpcMock.calls.filter((c) => c.cmd === 'catalog.channels').map((c) => (c.args as { query: { offset: number } }).query.offset / 100);
+  rpcMock.calls.filter((c) => c.cmd === 'catalog.channels').map((c) => (c.args as { query: { offset: number } }).query.offset / CHANNEL_PAGE_SIZE);
 
 // jsdom has no layout: a 520 px list (ten rows) that really scrolls.
 const restore: (() => void)[] = [];
@@ -135,8 +142,9 @@ describe('fullscreen channel panel keyboard (L3-player-6)', () => {
     expect(document.activeElement?.getAttribute('tabindex')).toBe('0');
     // Centred in the list, not at the top.
     expect(list().scrollTop).toBeGreaterThan(200 * 52);
-    // Its number put it on page 2 at once: no walk through the pages before it.
-    expect(pagesAsked()).not.toContain(1);
+    // Its number put it on page 2 at once: no walk through the pages before it (page 1 comes
+    // after, for the rows drawn above it).
+    expect(pagesAsked().slice(0, 2)).toEqual([0, 2]);
   });
 
   it('arrows, Page Up/Down, Home and End walk the rows; Up from the top goes to the search field and Down comes back', async () => {
@@ -330,5 +338,100 @@ describe('fullscreen channel panel names (round 5)', () => {
     await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(0));
     expect(screen.queryAllByTestId('channel-name-tag')).toEqual([]);
     expect(screen.getAllByRole('option')[0]!.textContent).not.toContain('US|');
+  });
+});
+
+describe('fullscreen channel panel paging (F2-1)', () => {
+  /** The app's timings for these reads (query.ts C4 table): a page stays cached across opens. */
+  const appClient = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 2 * 60_000, gcTime: 10 * 60_000 } } });
+  const asked = (cmd: string) => rpcMock.calls.filter((c) => c.cmd === cmd);
+  const rest = () => act(async () => void (await new Promise((r) => setTimeout(r, 250))));
+
+  it("reads Live's pages under Live's keys: a page the Live list holds opens with no request", async () => {
+    const client = appClient();
+    const args = channelPageArgs({ sourceId: 's1' }, 0);
+    client.setQueryData(rpcKey('catalog.channels', args), rpcMock.handlers['catalog.channels']!(args));
+    play(5);
+    mount(client);
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+    expect(asked('catalog.channels')).toEqual([]);
+    // No star in the panel: no favourite flags either.
+    expect(asked('favorites.contains')).toEqual([]);
+  });
+
+  it('a scrollbar drag reads the pages it rests on, in playlist order, not one per page it passes', async () => {
+    const total = 60 * CHANNEL_PAGE_SIZE;
+    rpcMock.handlers['catalog.channels'] = (a) => {
+      const { offset, limit } = (a as { query: { offset: number; limit: number } }).query;
+      const items = Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, k) => channel(offset + k));
+      return { items, total, offset, limit };
+    };
+    play(5);
+    mount(appClient());
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+    const pagesBefore = asked('catalog.channels').length;
+    const guideBefore = asked('epg.nowNext').length;
+    // Thirty frames of a drag towards the end, a page and a half a frame, each frame committed.
+    for (let k = 1; k <= 30; k++) {
+      act(() => {
+        list().scrollTop = k * 180 * 52;
+        fireEvent.scroll(list());
+      });
+    }
+    await waitFor(() => expect(screen.getAllByRole('option').some((o) => o.textContent?.includes('Channel 5402'))).toBe(true));
+    const reads = asked('catalog.channels').slice(pagesBefore);
+    // The page pair the drag stopped on (44 and 45), not the 45 pages it passed: the old panel read each.
+    expect(reads.length).toBeLessThanOrEqual(2);
+    for (const r of reads) {
+      const { offset } = (r.args as { query: { offset: number } }).query;
+      // Live's arguments exactly: no number sort, which no index covers.
+      expect(r.args).toEqual(channelPageArgs({ sourceId: 's1' }, offset / CHANNEL_PAGE_SIZE));
+    }
+    expect(asked('epg.nowNext').length - guideBefore).toBeLessThanOrEqual(2);
+  });
+
+  it('the guide lines come with the pages: one epg.nowNext for a page, however the rows in view move', async () => {
+    play(5);
+    mount(appClient());
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+    await waitFor(() => expect(asked('epg.nowNext')).toHaveLength(1));
+    for (let k = 1; k <= 8; k++) {
+      act(() => {
+        list().scrollTop = k * 10 * 52;
+        fireEvent.scroll(list());
+      });
+    }
+    await rest();
+    // The old panel asked again for each 20-row window the view moved into.
+    expect(asked('epg.nowNext')).toHaveLength(1);
+    expect((asked('epg.nowNext')[0]!.args as { refs: ItemRef[] }).refs).toHaveLength(CHANNEL_PAGE_SIZE);
+  });
+
+  it('opening it again asks nothing the last open read, and nothing while it is closed', async () => {
+    play(5);
+    mount(appClient());
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+    await rest();
+    const reads = rpcMock.calls.length;
+    act(() => useMediaStore.setState({ channelPanelOpen: false }));
+    // It slides out with its rows on.
+    expect(screen.getAllByRole('option', { hidden: true }).length).toBeGreaterThan(0);
+    await rest();
+    expect(rpcMock.calls.length).toBe(reads);
+    act(() => useMediaStore.setState({ channelPanelOpen: true }));
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+    await rest();
+    expect(rpcMock.calls.slice(reads).map((c) => c.cmd)).toEqual([]);
+  });
+
+  it('rows are memoized: a keystroke in the search field re-renders none of them', async () => {
+    play(5);
+    mount();
+    await waitFor(() => expect(focusedName()).toContain('Channel 5'));
+    await rest();
+    vi.mocked(ChannelName).mockClear();
+    fireEvent.change(search(), { target: { value: 'x' } });
+    expect((search() as HTMLInputElement).value).toBe('x');
+    expect(ChannelName).not.toHaveBeenCalled();
   });
 });

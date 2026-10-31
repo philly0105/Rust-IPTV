@@ -1,13 +1,14 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import '@/i18n';
 
-vi.mock('@/api/transport', () => ({
-  rpc: vi.fn(() => Promise.reject(new Error('offline'))),
-  isDesktop: false,
-  proxiedUrl: (s: { url: string }) => s.url,
-}));
+vi.mock('@/api/transport', () => {
+  const rpc = vi.fn((..._args: unknown[]): Promise<unknown> => Promise.reject(new Error('offline')));
+  // Query reads (`useRpcQuery`, the channel panel's pages) go through rpcRaw: the same mock.
+  return { rpc, rpcRaw: (cmd: string, args?: unknown) => rpc(cmd, args), isDesktop: false, proxiedUrl: (s: { url: string }) => s.url };
+});
 // The parental gate has its own tests (parentalHook.test.ts); here everything may play.
 vi.mock('../parentalHook', () => ({ ensurePlaybackAllowed: async () => true }));
 vi.mock('@/api/events', () => ({ onAppEvent: () => () => undefined }));
@@ -592,11 +593,14 @@ describe('fullscreen channel panel focus', () => {
     act(() =>
       usePlayerStore.setState({ source: { ...live, ref: { sourceId: 's1', itemId: 'c1', kind: 'channel' } } as never, mode: 'inline', status: 'playing' }),
     );
+    // The panel reads the source's pages through the query cache: the app's provider is always there.
     render(
-      <div>
-        <button type="button">Before</button>
-        <FullscreenChannelPanel available />
-      </div>,
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <div>
+          <button type="button">Before</button>
+          <FullscreenChannelPanel available />
+        </div>
+      </QueryClientProvider>,
     );
     const before = screen.getByRole('button', { name: 'Before' });
     act(() => before.focus());
@@ -644,7 +648,11 @@ describe('fullscreen channel panel from a channel list', () => {
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 0, left: 0, right: 360, bottom: 600, width: 360, height: 600, x: 0, y: 0, toJSON: () => ({}) });
     const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
     try {
-      render(<FullscreenChannelPanel available />);
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <FullscreenChannelPanel available />
+        </QueryClientProvider>,
+      );
       await act(async () => {
         useMediaStore.setState({ channelPanelOpen: true });
         await Promise.resolve();

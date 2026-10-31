@@ -23,6 +23,11 @@ export interface PagedChannelsArgs {
   radio?: boolean;
   /** Also fetch EPG now/next and favorite flags for loaded pages. */
   withExtras?: boolean;
+  /**
+   * With `withExtras`, also ask `favorites.contains` for loaded pages (default true). A view that
+   * draws no star (the fullscreen channel panel) passes false and saves one request per page.
+   */
+  favorites?: boolean;
   pageSize?: number;
   now?: number;
   /**
@@ -108,11 +113,11 @@ function inPage(page: Page<Channel> | undefined, index: number): Channel | undef
   return i >= 0 && i < page.items.length ? page.items[i] : undefined;
 }
 
-function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offsetMinutes: number) {
+function usePageExtras(page: Page<Channel> | undefined, enabled: boolean, offsetMinutes: number, favorites: boolean) {
   const refs = useMemo(() => page?.items.map((c) => c.ref) ?? [], [page]);
   const has = enabled && refs.length > 0;
   const nowNext = useRpcQuery('epg.nowNext', nowNextArgs(refs, offsetMinutes), { enabled: has, staleTime: NOW_NEXT_STALE_MS });
-  const favs = useRpcQuery('favorites.contains', favoritesContainsArgs(refs), { enabled: has });
+  const favs = useRpcQuery('favorites.contains', favoritesContainsArgs(refs), { enabled: has && favorites });
   const favSet = useMemo(() => new Set<ItemKey>((favs.data ?? []).map(itemKey)), [favs.data]);
   return { nowNext: nowNext.data, favSet };
 }
@@ -170,8 +175,9 @@ export function usePagedChannels(args: PagedChannelsArgs): PagedChannels {
 
   const extrasOn = args.withExtras ?? true;
   const offsetMs = (args.epgOffsetMinutes ?? 0) * MINUTE;
-  const exA = usePageExtras(pageA, extrasOn, args.epgOffsetMinutes ?? 0);
-  const exB = usePageExtras(pageB, extrasOn, args.epgOffsetMinutes ?? 0);
+  const favoritesOn = args.favorites ?? true;
+  const exA = usePageExtras(pageA, extrasOn, args.epgOffsetMinutes ?? 0, favoritesOn);
+  const exB = usePageExtras(pageB, extrasOn, args.epgOffsetMinutes ?? 0, favoritesOn);
 
   // Stalker: the portal's guide for the visible rows (the XMLTV now/next above covers the rest).
   const stalkerOn = extrasOn && !!args.stalkerEpg;

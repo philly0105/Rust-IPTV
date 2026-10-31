@@ -959,19 +959,42 @@ mod tests {
         assert_eq!(staging, 0);
     }
 
+    /// Records, for every `epg.changed` that announces new guide data,
+    /// whether the channel directory of the current generation was built.
+    #[derive(Default)]
+    struct DirectoryAtChange {
+        rt: std::sync::OnceLock<Arc<EpgRuntime>>,
+        seen: Mutex<Vec<bool>>,
+    }
+
+    impl crate::events::EventSink for DirectoryAtChange {
+        fn emit(&self, event: crate::events::AppEvent) {
+            if event.kind != "epg.changed" || event.payload.get("reason").is_some() {
+                return;
+            }
+            let Some(rt) = self.rt.get() else { return };
+            let built = rt
+                .names
+                .lock()
+                .as_ref()
+                .is_some_and(|d| d.generation() == rt.generation());
+            self.seen.lock().push(built);
+        }
+    }
+
     /// R2-4: a refresh that stored data builds the new channel directory
     /// before `epg.changed` goes out, so the reads the event sets off find
     /// it built instead of the first one building it while the rest wait.
+    /// The sink looks at the directory when the event arrives (RB-F
+    /// review): a build after the event, or in a task that finished before
+    /// the assertions, would pass a check made after the refresh.
     #[tokio::test]
     async fn a_refresh_builds_the_directory_before_it_announces_the_change() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = AppState::new(
-            tmp.path().join("data"),
-            Arc::new(crate::events::NoopSink),
-            false,
-        )
-        .await
-        .unwrap();
+        let sink = Arc::new(DirectoryAtChange::default());
+        let state = AppState::new(tmp.path().join("data"), sink.clone(), false)
+            .await
+            .unwrap();
         let path = tmp.path().join("guide.xml");
         std::fs::write(
             &path,
@@ -979,11 +1002,13 @@ mod tests {
         )
         .unwrap();
         let rt = runtime(&state);
+        assert!(sink.rt.set(rt.clone()).is_ok());
         let before = rt.generation();
         refresh_now(state.clone(), &path.to_string_lossy())
             .await
             .unwrap();
         assert!(rt.generation() > before);
+        assert_eq!(*sink.seen.lock(), [true], "built when announced");
         let built = rt.names.lock().clone().expect("the directory is built");
         assert_eq!(built.generation(), rt.generation());
         assert_eq!(built.find_id("ONE.UK"), Some("one.uk"));

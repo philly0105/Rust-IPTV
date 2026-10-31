@@ -698,6 +698,25 @@ describe('a tune does not wait for the guide (F2-4)', () => {
     ]);
   });
 
+  it('sends recent.add writes one after another, so a slow first write cannot land after the next', async () => {
+    const answers: { ok: () => void; fail: () => void }[] = [];
+    handlers['recent.add'] = () => new Promise<void>((ok, no) => answers.push({ ok, fail: () => no(new Error('busy')) }));
+    await usePlayerStore.getState().play(vod('1'));
+    await usePlayerStore.getState().play(vod('2'));
+    await usePlayerStore.getState().play(vod('3'));
+    await flush();
+    // Before, all three were in flight at once and the core could stamp them in any order.
+    expect(recents().map((r) => r.ref.itemId)).toEqual(['1']);
+    answers[0]?.ok();
+    await flush();
+    expect(recents().map((r) => r.ref.itemId)).toEqual(['1', '2']);
+    // A failed write does not hold up the ones after it.
+    answers[1]?.fail();
+    await flush();
+    expect(recents().map((r) => r.ref.itemId)).toEqual(['1', '2', '3']);
+    answers[2]?.ok();
+  });
+
   it("a list click's row answers the zap banner, with no catalog.item lookup of its own", async () => {
     const { fetchChannelInfo } = await import('./zapBanner');
     const ch = channel(34, { url: 'http://m3u/34.ts', logoUrl: 'http://logo/34.png' });

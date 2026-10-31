@@ -293,11 +293,25 @@ function snapshotTitle(source: PlayerSource & { ref: ItemRef }): string {
  * play sends it at once, without the title, so the entries keep the order the items played in.
  */
 let heldRecent: (() => void) | null = null;
+/**
+ * recent.add writes, one after another: the core stamps each row when it handles the call, and
+ * a held entry flushed by the next play goes out right before that play's own, so two calls in
+ * flight at once could land in either order and swap the rows. The chain never rejects, and it
+ * waits for the write only, not for the rails' refetch.
+ */
+let recentChain: Promise<void> = Promise.resolve();
 
 function addRecent(ref: ItemRef, snapshot: ItemSnapshot, subtitle?: Promise<string | undefined>): void {
   heldRecent?.();
   // No event follows recent.add and C4 caches `recent.` for 30 s: refresh the Recently watched rails.
-  const send = (snap: ItemSnapshot): void => void rpc('recent.add', { ref, snapshot: snap }).then(() => invalidate('recent.'), () => undefined);
+  const send = (snap: ItemSnapshot): void => {
+    recentChain = recentChain.then(() =>
+      rpc('recent.add', { ref, snapshot: snap }).then(
+        () => void invalidate('recent.'),
+        () => undefined,
+      ),
+    );
+  };
   if (!subtitle) {
     send(snapshot);
     return;
@@ -2498,6 +2512,7 @@ export function __resetPlayerForTests(): void {
   if (prefetchTimer) clearTimeout(prefetchTimer);
   prefetchTimer = null;
   heldRecent = null;
+  recentChain = Promise.resolve();
   knownChannels.clear();
   favoriteSlot = null;
   queryClient.removeQueries({ queryKey: ['settings.get'] });

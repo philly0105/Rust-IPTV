@@ -755,9 +755,20 @@ pub(crate) fn replace_catalogs_with(
         return Ok(counts);
     }
     let types: Vec<ContentType> = parts.iter().map(|p| p.content_type).collect();
+    // Every row is offered, so the writer can weigh a bulk rewrite before
+    // it deletes the old rows.
+    let offered = parts.iter().map(|p| p.rows.len() as u64).sum();
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    // The written rows are freed after the commit, outside the write lock.
+    let mut spent = Vec::with_capacity(parts.len());
     {
-        let mut w = catalog::CatalogWriter::begin(&tx, source_id, &types, cancel.clone())?;
+        let mut w = catalog::CatalogWriter::begin_with(
+            &tx,
+            source_id,
+            &types,
+            cancel.clone(),
+            Some(offered),
+        )?;
         let mut categories = Vec::with_capacity(parts.len());
         for part in &parts {
             w.declare_categories(part.content_type, &part.categories);
@@ -768,6 +779,7 @@ pub(crate) fn replace_catalogs_with(
                 on_row(part.content_type);
             }
             categories.push((part.content_type, part.categories));
+            spent.push(part.rows);
         }
         for ct in &types {
             counts.insert(*ct, w.inserted_of(*ct));
@@ -779,6 +791,7 @@ pub(crate) fn replace_catalogs_with(
     // Last check: a cancelled run never commits.
     check_cancel()?;
     tx.commit()?;
+    drop(spent);
     Ok(counts)
 }
 
@@ -880,6 +893,15 @@ fn put(extra: &mut Map<String, Value>, key: &str, v: Option<impl Into<Value>>) {
     }
 }
 
+/// `extra` as the writer stores it (`ItemRow::extra_json`), serialized here
+/// on the blocking pool: a sync holds every mapped row of every changed list
+/// until the one catalog write, and a map of a few keys costs about 0.7 KB
+/// against tens of bytes of JSON. The same map is serialized the same way,
+/// so the stored text does not change. `None` for an empty map ("{}").
+fn extra_json(extra: Map<String, Value>) -> Option<Box<str>> {
+    (!extra.is_empty()).then(|| Value::Object(extra).to_string().into_boxed_str())
+}
+
 fn clean_url(u: Option<String>) -> Option<String> {
     u.filter(|s| s.starts_with("http://") || s.starts_with("https://"))
 }
@@ -938,7 +960,8 @@ pub fn live_row(source_id: &str, position: i64, r: RawLive) -> Option<ItemRow> {
         archive_hours: archive
             .then(|| super::meta::archive_days_to_hours(days.unwrap_or(1)))
             .flatten(),
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json: extra_json(extra),
         position,
         item_id: id,
         ..ItemRow::default()
@@ -969,7 +992,8 @@ pub fn vod_row(source_id: &str, position: i64, r: RawVod) -> Option<ItemRow> {
         added: added_to_rfc3339(r.added.as_deref()),
         year: r.year.filter(|y| (1900..=2100).contains(y)),
         container_extension: clean_extension(r.container_extension.as_deref()),
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json: extra_json(extra),
         position,
         item_id: id,
         ..ItemRow::default()
@@ -1004,7 +1028,8 @@ pub fn series_row(source_id: &str, position: i64, r: RawSeries) -> Option<ItemRo
         rating: rating(r.rating, r.rating_5based),
         added: added_to_rfc3339(r.last_modified.as_deref()),
         year,
-        extra: Value::Object(extra),
+        extra: Value::Null,
+        extra_json: extra_json(extra),
         position,
         item_id: id,
         ..ItemRow::default()
@@ -1018,6 +1043,19 @@ mod tests {
 
     fn parse<T: serde::de::DeserializeOwned>(v: Value) -> T {
         serde_json::from_value(v).unwrap()
+    }
+
+    /// The `extra` a mapped row carries for the writer. Its text is what
+    /// the writer stored when it serialized the row's map itself: the
+    /// canonical form, which a parse and serialize returns unchanged.
+    fn extra_of(row: &ItemRow) -> Value {
+        assert!(row.extra.is_null(), "mapped rows carry extra_json only");
+        let Some(text) = row.extra_json.as_deref() else {
+            return json!({});
+        };
+        let v: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(v.to_string(), text);
+        v
     }
 
     #[test]
@@ -1041,7 +1079,10 @@ mod tests {
         assert_eq!(row.number, Some(7));
         assert_eq!(row.archive_hours, Some(72));
         assert_eq!(row.added.as_deref(), Some("2023-11-14T22:13:20Z"));
-        assert_eq!(row.extra["isAdult"], false);
+        assert_eq!(
+            extra_of(&row),
+            json!({"categoryIds": ["3", "4"], "isAdult": false, "tvArchive": 1, "tvArchiveDuration": 3})
+        );
         assert!(
             row.url.is_none(),
             "credentials must not be stored in items.url"
@@ -1085,7 +1126,7 @@ mod tests {
         let row = vod_row("s", 0, v).unwrap();
         assert_eq!(row.rating, Some(7.0));
         assert_eq!(row.container_extension.as_deref(), Some("mkv"));
-        assert_eq!(row.extra["tmdbId"], 550);
+        assert_eq!(extra_of(&row), json!({"tmdbId": 550}));
         assert_eq!(row.category_id, "10");
 
         let s: RawSeries = parse(json!({
@@ -1097,7 +1138,7 @@ mod tests {
         assert_eq!(row.year, Some(2018));
         assert_eq!(row.backdrop_url.as_deref(), Some("http://x/b.jpg"));
         assert_eq!(row.rating, Some(8.3));
-        assert_eq!(row.extra["genres"], json!(["Drama", "Crime"]));
+        assert_eq!(extra_of(&row), json!({"genres": ["Drama", "Crime"]}));
         assert_eq!(row.category_id, "5");
     }
 

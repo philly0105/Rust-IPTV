@@ -629,6 +629,7 @@ impl RowBuilder {
             archive_hours,
             extra: serde_json::Value::Object(extra),
             position,
+            extra_json: None,
         }
     }
 

@@ -1308,3 +1308,270 @@ async fn vod_pages_on_a_182k_movie_catalog_in_category_blocks() {
         failures.join("\n")
     );
 }
+
+const BIG_CHANNELS: usize = 200_000;
+const BIG_GROUPS: usize = 2_000;
+const BIG_RADIO: usize = 20_000;
+const BIG_RADIO_GROUPS: usize = 200;
+
+/// Times one catalog RPC: one warm-up call, then [`SAMPLES`] timed calls.
+/// Returns the last answer with the p50 and p95.
+async fn timed(
+    r: &iptv_core::rpc::RpcRouter,
+    state: &Arc<iptv_core::AppState>,
+    method: &str,
+    args: Value,
+) -> (Value, Duration, Duration) {
+    let mut v = r
+        .dispatch(state.clone(), method, args.clone())
+        .await
+        .unwrap();
+    let mut samples = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        let started = Instant::now();
+        v = r
+            .dispatch(state.clone(), method, args.clone())
+            .await
+            .unwrap();
+        samples.push(started.elapsed());
+    }
+    let (p50, p95) = percentiles(samples);
+    (v, p50, p95)
+}
+
+/// The All channels list of a large live source (200k channels in 2,000
+/// groups, plus 20k radio stations), with nothing hidden and with every
+/// 20th group hidden: the first page, a read-ahead page, LivePage's top
+/// channel number query, and radio. Each total must equal a count of the
+/// rows the list shows, and each call meets [`RPC_BUDGET`] at p95: the
+/// total comes from the stored group counts, where counting the rows took
+/// 11-16 ms a page with nothing hidden and 100-120 ms with hidden groups
+/// on a loaded 4-core machine. Ignored by default (it builds 220k rows):
+/// `cargo test --release -p iptv-core --test l2_query_perf -- --ignored --nocapture all_channels`
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "timing only (200k channels); run with --release -- --ignored --nocapture"]
+async fn all_channels_pages_on_200k_channels_with_hidden_groups() {
+    let _serial = SERIAL.lock().await;
+    let env = env().await;
+    let r = iptv_core::rpc::build_router();
+    bare_source(&env.state, "big").await;
+    let started = Instant::now();
+    env.state
+        .db_call(|c| {
+            for (ct, n, groups) in [
+                (ContentType::Live, BIG_CHANNELS, BIG_GROUPS),
+                (ContentType::Radio, BIG_RADIO, BIG_RADIO_GROUPS),
+            ] {
+                let cats: Vec<CategoryRow> = (0..groups)
+                    .map(|g| CategoryRow {
+                        category_id: format!("g{g}"),
+                        name: format!("Group {g}"),
+                        position: g as i64,
+                    })
+                    .collect();
+                replace_catalog(
+                    c,
+                    "big",
+                    ct,
+                    &cats,
+                    &mut (0..n).map(|i| ItemRow {
+                        source_id: "big".into(),
+                        content_type: ct,
+                        item_id: format!("{i}"),
+                        category_id: format!("g{}", i % groups),
+                        title: format!("Channel {i}"),
+                        number: Some(i as i64 + 1),
+                        url: Some(format!("http://stream.example/{i}.ts")),
+                        is_radio: ct == ContentType::Radio,
+                        position: i as i64,
+                        ..Default::default()
+                    }),
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    eprintln!(
+        "l2_query_perf: big live fixture ({BIG_CHANNELS} channels, {BIG_RADIO} radio) in {:?}",
+        started.elapsed()
+    );
+
+    let count = |ct: &'static str| {
+        env.state.db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT count(*) FROM items i WHERE i.source_id = 'big' AND i.content_type = ?1 AND i.category_id NOT IN (SELECT category_id FROM categories WHERE source_id = 'big' AND content_type = ?1 AND hidden <> 0)",
+                [ct],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+    };
+    let mut table = Vec::new();
+    let mut failures = Vec::new();
+    for phase in ["nothing hidden", "5% of groups hidden"] {
+        if phase != "nothing hidden" {
+            for (ct, groups) in [("live", BIG_GROUPS), ("radio", BIG_RADIO_GROUPS)] {
+                let hidden: Vec<String> =
+                    (0..groups).step_by(20).map(|g| format!("g{g}")).collect();
+                r.dispatch(
+                    env.state.clone(),
+                    "catalog.setCategoriesHidden",
+                    json!({"sourceId": "big", "contentType": ct, "hiddenIds": hidden}),
+                )
+                .await
+                .unwrap();
+            }
+        }
+        let live = count("live").await.unwrap();
+        let radio = count("radio").await.unwrap();
+        for (label, args, want) in [
+            (
+                "live @0",
+                json!({"sourceId": "big", "query": {"offset": 0, "limit": 120}}),
+                live,
+            ),
+            (
+                "live @120",
+                json!({"sourceId": "big", "query": {"offset": 120, "limit": 120}}),
+                live,
+            ),
+            (
+                "live top number",
+                json!({"sourceId": "big", "query": {"sort": "number", "dir": "desc", "limit": 1}}),
+                live,
+            ),
+            (
+                "radio @0",
+                json!({"sourceId": "big", "radio": true, "query": {"offset": 0, "limit": 120}}),
+                radio,
+            ),
+        ] {
+            let (v, p50, p95) = timed(&r, &env.state, "catalog.channels", args).await;
+            assert_eq!(total(&v), want, "{phase}: {label}");
+            if p95 > RPC_BUDGET {
+                failures.push(format!(
+                    "{phase}: {label}: p95 {p95:?} (budget {RPC_BUDGET:?})"
+                ));
+            }
+            let line = format!(
+                "{phase:<20} | {label:<16} | total {:>6} | p50 {:>6.2} ms | p95 {:>6.2} ms",
+                want,
+                p50.as_secs_f64() * 1e3,
+                p95.as_secs_f64() * 1e3
+            );
+            eprintln!("l2_query_perf: big live | {line}");
+            table.push(line);
+        }
+    }
+    eprintln!("l2_query_perf: big live summary\n{}", table.join("\n"));
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+const SHOWS: usize = 3_000;
+
+/// A series row of an M3U source as the importer stores it: its episodes
+/// (`10 + i % 110` of them, about 150 bytes each) in `extra.episodes`.
+fn m3u_show(sid: &str, i: usize) -> ItemRow {
+    let episodes: Vec<Value> = (0..10 + i % 110)
+        .map(|e| {
+            json!({
+                "id": format!("s{i}e{e}"),
+                "season": 1 + e / 12,
+                "episode": 1 + e % 12,
+                "title": format!("Show {i} S{:02}E{:02}", 1 + e / 12, 1 + e % 12),
+                "url": format!("http://stream.example/series/user/pass/{}.mkv", i * 1000 + e),
+                "containerExtension": "mkv",
+            })
+        })
+        .collect();
+    ItemRow {
+        source_id: sid.into(),
+        content_type: ContentType::Series,
+        item_id: format!("show{i}"),
+        category_id: format!("c{}", i % 20),
+        title: format!("{} Show {i}", WORDS[i % WORDS.len()]),
+        position: i as i64,
+        extra: json!({ "episodes": episodes }),
+        ..Default::default()
+    }
+}
+
+/// Series grid pages and a series search on an M3U source whose series
+/// rows carry their episode lists (3,000 shows, 10-119 episodes each).
+/// Timing only, so ignored by default:
+/// `cargo test --release -p iptv-core --test l2_query_perf -- --ignored --nocapture m3u_series`
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "timing only; run with --release -- --ignored --nocapture"]
+async fn m3u_series_pages_with_stored_episodes() {
+    let _serial = SERIAL.lock().await;
+    let env = env().await;
+    let r = iptv_core::rpc::build_router();
+    bare_source(&env.state, "m3u").await;
+    let started = Instant::now();
+    env.state
+        .db_call(|c| {
+            let cats: Vec<CategoryRow> = (0..20)
+                .map(|k| CategoryRow {
+                    category_id: format!("c{k}"),
+                    name: format!("Shows {k}"),
+                    position: k as i64,
+                })
+                .collect();
+            replace_catalog(
+                c,
+                "m3u",
+                ContentType::Series,
+                &cats,
+                &mut (0..SHOWS).map(|i| m3u_show("m3u", i)),
+            )
+        })
+        .await
+        .unwrap();
+    eprintln!(
+        "l2_query_perf: m3u series fixture ({SHOWS} shows) in {:?}",
+        started.elapsed()
+    );
+    let mut table = Vec::new();
+    for (label, method, args) in [
+        (
+            "series @0",
+            "catalog.series",
+            json!({"sourceId": "m3u", "query": {"offset": 0, "limit": PAGE}}),
+        ),
+        (
+            "series @1200",
+            "catalog.series",
+            json!({"sourceId": "m3u", "query": {"offset": 1200, "limit": PAGE}}),
+        ),
+        (
+            "category page",
+            "catalog.series",
+            json!({"sourceId": "m3u", "categoryId": "c7", "query": {"offset": 0, "limit": PAGE}}),
+        ),
+        (
+            "search, 61 rows",
+            "catalog.search",
+            json!({"query": "show", "limit": 61}),
+        ),
+        (
+            "search, 1001 rows",
+            "catalog.search",
+            json!({"query": "show", "limit": 1001}),
+        ),
+    ] {
+        let (v, p50, p95) = timed(&r, &env.state, method, args).await;
+        if method == "catalog.series" {
+            assert_eq!(items(&v).len(), PAGE, "{label}");
+        } else {
+            assert!(!v["series"].as_array().unwrap().is_empty(), "{label}: {v}");
+        }
+        let line = format!(
+            "{label:<18} | p50 {:>6.2} ms | p95 {:>6.2} ms",
+            p50.as_secs_f64() * 1e3,
+            p95.as_secs_f64() * 1e3
+        );
+        eprintln!("l2_query_perf: m3u series | {line}");
+        table.push(line);
+    }
+    eprintln!("l2_query_perf: m3u series summary\n{}", table.join("\n"));
+}

@@ -471,6 +471,238 @@ async fn unfiltered_vod_totals_match_a_count_of_their_titles() {
     assert_eq!(expected(ContentType::Movie, false).await.unwrap(), 14);
 }
 
+/// `n` channels or radio stations of `source`, spread over `cats` in turn.
+fn channel_rows(source: &str, ct: ContentType, cats: &[&str], n: usize) -> Vec<ItemRow> {
+    (0..n)
+        .map(|i| ItemRow {
+            source_id: source.into(),
+            content_type: ct,
+            item_id: format!("{}{i}", ct.as_str()),
+            category_id: cats[i % cats.len()].into(),
+            title: format!("Channel {i}"),
+            number: Some(i as i64 + 1),
+            url: Some(format!("http://h/{}{i}", ct.as_str())),
+            is_radio: ct == ContentType::Radio,
+            position: i as i64,
+            ..Default::default()
+        })
+        .collect()
+}
+
+/// All channels and all radio (Live's default route, the guide, LivePage's
+/// top channel number) take their total from the stored category counts
+/// while no channel of the source is hidden by an edit. It must equal a
+/// count of the channels the list shows through hidden groups,
+/// `include_hidden`, a hidden channel and its unhiding (by the rpc and by a
+/// backup entry), `channels.reset`, an undeclared group (stored as
+/// Uncategorized) and a re-import that shrinks the catalog.
+#[tokio::test]
+async fn unfiltered_channel_totals_match_a_count_of_their_channels() {
+    let env = env().await;
+    bare_source(&env.state, "s1").await;
+    bare_source(&env.state, "s2").await;
+    // With `channels.*`.
+    let r = iptv_core::rpc::build_router();
+    // Declared a, b, c; `x` is undeclared and becomes Uncategorized.
+    let write = |source: &'static str, ct: ContentType, cats: &'static [&'static str], n: usize| {
+        env.state.db_call(move |c| {
+            catalog::replace_catalog(
+                c,
+                source,
+                ct,
+                &[
+                    cat("a", "News", 0),
+                    cat("b", "Sport", 1),
+                    cat("c", "Kids", 2),
+                ],
+                &mut channel_rows(source, ct, cats, n).into_iter(),
+            )
+        })
+    };
+    write("s1", ContentType::Live, &["a", "b", "c", "x"], 53)
+        .await
+        .unwrap();
+    write("s1", ContentType::Radio, &["a", "b", "x"], 23)
+        .await
+        .unwrap();
+    // Another source's channels never count.
+    write("s2", ContentType::Live, &["a"], 9).await.unwrap();
+
+    // The count (and the highest number) every case must match, independent
+    // of `query_named`: visible groups, minus channels hidden by an edit.
+    let expected = |ct: ContentType, include_hidden: bool| {
+        env.state.db_call(move |c| {
+            Ok(c.query_row(
+                "SELECT count(*), max(i.number) FROM items i LEFT JOIN categories c ON c.source_id = i.source_id AND c.content_type = i.content_type AND c.category_id = i.category_id WHERE i.source_id = 's1' AND i.content_type = ?1 AND (?2 OR COALESCE(c.hidden, 0) = 0) AND NOT EXISTS (SELECT 1 FROM channel_edits e WHERE e.source_id = i.source_id AND e.content_type = i.content_type AND e.item_id = i.item_id AND e.hidden <> 0)",
+                rusqlite::params![ct.as_str(), include_hidden],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )?)
+        })
+    };
+    let check = |label: &'static str| {
+        let (r, env) = (&r, &env);
+        async move {
+            for (ct, radio) in [(ContentType::Live, false), (ContentType::Radio, true)] {
+                let (want, top) = expected(ct, false).await.unwrap();
+                let v = r
+                    .dispatch(
+                        env.state.clone(),
+                        "catalog.channels",
+                        json!({"sourceId": "s1", "radio": radio, "query": {"limit": 10}}),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(v["total"], want, "{label}: {ct} page");
+                // LivePage's highest-number query.
+                let v = r
+                    .dispatch(
+                        env.state.clone(),
+                        "catalog.channels",
+                        json!({"sourceId": "s1", "radio": radio, "query": {"sort": "number", "dir": "desc", "limit": 1}}),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(v["total"], want, "{label}: {ct} top number");
+                assert_eq!(
+                    v["items"][0]["number"],
+                    json!(top),
+                    "{label}: {ct} top number"
+                );
+                let (all, _) = expected(ct, true).await.unwrap();
+                let page = env
+                    .state
+                    .db_call(move |c| {
+                        catalog::query(
+                            c,
+                            &CatalogQuery {
+                                include_hidden: true,
+                                ..q("s1", ct, PageQuery::default())
+                            },
+                        )
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(page.total, all, "{label}: {ct}, include_hidden");
+            }
+        }
+    };
+    let set_hidden = |refs: serde_json::Value, hidden: bool| {
+        let (r, env) = (&r, &env);
+        async move {
+            r.dispatch(
+                env.state.clone(),
+                "channels.setHidden",
+                json!({"refs": refs, "hidden": hidden}),
+            )
+            .await
+            .unwrap();
+        }
+    };
+    let last = json!([
+        {"sourceId": "s1", "contentType": "live", "itemId": "live52"},
+        {"sourceId": "s1", "contentType": "radio", "itemId": "radio1"},
+    ]);
+
+    check("nothing hidden").await;
+    assert_eq!(
+        expected(ContentType::Live, false).await.unwrap(),
+        (53, Some(53))
+    );
+
+    for (ct, hidden) in [
+        (ContentType::Live, json!(["b"])),
+        (ContentType::Radio, json!(["a"])),
+    ] {
+        r.dispatch(
+            env.state.clone(),
+            "catalog.setCategoriesHidden",
+            json!({"sourceId": "s1", "contentType": ct, "hiddenIds": hidden}),
+        )
+        .await
+        .unwrap();
+    }
+    check("one group hidden").await;
+    assert_eq!(
+        expected(ContentType::Live, false).await.unwrap(),
+        (40, Some(53))
+    );
+
+    // A hidden channel (the top number among them) is counted row by row ...
+    set_hidden(last.clone(), true).await;
+    check("a channel hidden").await;
+    assert_eq!(
+        expected(ContentType::Live, false).await.unwrap(),
+        (39, Some(52))
+    );
+    // ... and unhiding it must restore the stored counts.
+    set_hidden(last.clone(), false).await;
+    check("the channel unhidden").await;
+    assert_eq!(
+        expected(ContentType::Live, false).await.unwrap(),
+        (40, Some(53))
+    );
+
+    set_hidden(last.clone(), true).await;
+    r.dispatch(
+        env.state.clone(),
+        "channels.reset",
+        json!({"sourceId": "s1"}),
+    )
+    .await
+    .unwrap();
+    check("after channels.reset").await;
+
+    // A newer backup entry hides a channel, and a newer one still unhides
+    // it (an entry that neither hides nor renames is not imported).
+    for hidden in [true, false] {
+        let rows = vec![iptv_core::channeledit::ChannelEditBackup {
+            content_type: ContentType::Live,
+            item_id: "live52".into(),
+            hidden,
+            name: (!hidden).then(|| "Mine".to_string()),
+            original_name: "Channel 52".into(),
+            updated_at: if hidden {
+                "2998-01-01T00:00:00Z".into()
+            } else {
+                "2999-01-01T00:00:00Z".into()
+            },
+        }];
+        env.state
+            .db_call(move |c| iptv_core::channeledit::import_edits(c, "s1", &rows))
+            .await
+            .unwrap();
+        check(if hidden {
+            "hidden by a backup entry"
+        } else {
+            "unhidden by a backup entry"
+        })
+        .await;
+    }
+    assert_eq!(
+        expected(ContentType::Live, false).await.unwrap(),
+        (40, Some(53))
+    );
+
+    // Uncategorized can be hidden like any other group.
+    r.dispatch(
+        env.state.clone(),
+        "catalog.setCategoriesHidden",
+        json!({"sourceId": "s1", "contentType": "live", "hiddenIds": ["b", "x"]}),
+    )
+    .await
+    .unwrap();
+    check("Uncategorized hidden").await;
+    assert_eq!(expected(ContentType::Live, false).await.unwrap().0, 27);
+
+    // A re-import that shrinks the catalog; the hidden flags survive it.
+    write("s1", ContentType::Live, &["a", "b", "x"], 20)
+        .await
+        .unwrap();
+    write("s1", ContentType::Radio, &["b"], 5).await.unwrap();
+    check("after a smaller re-import").await;
+    assert_eq!(expected(ContentType::Live, false).await.unwrap().0, 7);
+}
+
 #[tokio::test]
 async fn number_neighbors_all_live() {
     let env = env().await;

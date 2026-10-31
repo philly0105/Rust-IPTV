@@ -118,6 +118,35 @@ async fn run_flow(srv: stub::Server) {
     assert_eq!(err, None);
     assert_eq!(leaked, 0, "password stored in catalog rows");
 
+    // The sync serializes each row's extra fields while mapping; they are
+    // stored as the writer would have serialized them and read back.
+    if srv.is_stub {
+        let sid2 = sid.clone();
+        let (stored, row) = state
+            .db_call(move |c| {
+                let stored: String = c.query_row(
+                    "SELECT extra_json FROM items WHERE source_id = ?1 AND content_type = 'series' AND item_id = '301'",
+                    [&sid2],
+                    |r| r.get(0),
+                )?;
+                let r = iptv_core::model::ItemRef::new(
+                    sid2,
+                    iptv_core::model::ContentType::Series,
+                    "301",
+                );
+                Ok((stored, iptv_core::catalog::get(c, &r)?))
+            })
+            .await
+            .unwrap();
+        assert_eq!(stored, r#"{"genres":["Comedy","Crime"],"plot":"A plot."}"#);
+        let series = iptv_core::model::SeriesItem::from(row.unwrap());
+        assert_eq!(series.plot.as_deref(), Some("A plot."));
+        assert_eq!(
+            series.genres,
+            Some(vec!["Comedy".to_string(), "Crime".to_string()])
+        );
+    }
+
     // xmltv.php detected.
     let expected_xmltv = format!("{}/xmltv.php?username=demo&password=secret", srv.server_url);
     assert_eq!(

@@ -365,23 +365,62 @@ fn renumber(conn: &Connection, ids: &[String]) -> CoreResult<()> {
 /// The search index and `items_rank` rows go in bulk, as
 /// `catalog::CatalogWriter::begin` deletes them: the per-row triggers are
 /// suspended for the source (`fts_suspend`) while its items cascade (DB-2).
+/// A source that is most of the catalog, by the writer's rule
+/// ([`catalog::BULK_MIN_ROWS`] rows and no fewer than the other sources
+/// keep), is deleted with the secondary indexes of `items` dropped, which
+/// are then built over the rows left, and the only source empties the
+/// search index in one step. Removing 200k channels took 3.3-3.4 s and a
+/// 101 MB WAL, now 0.6-0.8 s and 27 MB (beside 50k other rows 4.3-5.1 s,
+/// now 2.0-2.1 s).
 pub fn delete(conn: &mut Connection, id: &str) -> CoreResult<()> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     tx.execute(
         "INSERT OR IGNORE INTO fts_suspend (source_id) VALUES (?1)",
         [id],
     )?;
-    tx.execute(
-        "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1",
+    let own: i64 = tx.query_row(
+        "SELECT count(*) FROM items WHERE source_id = ?1",
         [id],
+        |r| r.get(0),
     )?;
-    tx.execute(
-        "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1)",
-        [id],
-    )?;
+    // The other sources' rows, counted only when this source is large
+    // enough for either bulk step to pay.
+    let kept = if own as u64 >= catalog::BULK_MIN_ROWS {
+        let all: i64 = tx.query_row("SELECT count(*) FROM items", [], |r| r.get(0))?;
+        Some(all - own)
+    } else {
+        None
+    };
+    if kept == Some(0) {
+        tx.execute(
+            "INSERT INTO items_fts (items_fts) VALUES ('delete-all')",
+            [],
+        )?;
+        tx.execute("DELETE FROM items_rank", [])?;
+    } else {
+        tx.execute(
+            "INSERT INTO items_fts (items_fts, rowid, title) SELECT 'delete', rowid, title FROM items WHERE source_id = ?1",
+            [id],
+        )?;
+        tx.execute(
+            "DELETE FROM items_rank WHERE id IN (SELECT rowid FROM items WHERE source_id = ?1)",
+            [id],
+        )?;
+    }
+    let indexes = match kept {
+        Some(kept) if own >= kept => {
+            let indexes = catalog::drop_item_indexes(&tx)?;
+            tx.execute("DELETE FROM items WHERE source_id = ?1", [id])?;
+            Some(indexes)
+        }
+        _ => None,
+    };
     let n = tx.execute("DELETE FROM sources WHERE id = ?1", [id])?;
     if n == 0 {
         return Err(CoreError::NotFound(format!("source {id} not found")));
+    }
+    if let Some(indexes) = &indexes {
+        catalog::create_item_indexes(&tx, indexes)?;
     }
     tx.execute("DELETE FROM fts_suspend WHERE source_id = ?1", [id])?;
     forget_session(&tx, id)?;

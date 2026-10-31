@@ -110,6 +110,16 @@ interface Cached {
 }
 
 const NO_NETWORKS: ReadonlySet<string> = new Set();
+const NO_SOURCES: readonly Source[] = [];
+
+interface FallbackCached {
+  /** The search answers the hits came from, by identity. */
+  answers: readonly (Channel[] | undefined)[];
+  sources: readonly Source[];
+  /** `isCurrentGame` when matched: all `fallbackMatches` reads `now` for. */
+  current: boolean;
+  list: StreamMatch[];
+}
 
 interface Prepared {
   channels: readonly IndexedChannel[];
@@ -125,12 +135,12 @@ interface Prepared {
  * for them. `loading` while the index, the guide window or a fallback search is still on its first answer,
  * or while the latest index and guide are being prepared for matching, unless they only refresh the last ones.
  * The guide is read over `opts.window` (the page's window, useGrowingWindow.ts), by default the union of the
- * games' windows.
+ * games' windows. `opts.now` is the page's clock; without it the hook keeps a minute clock of its own.
  */
 export function useGameStreams(
   games: readonly Game[],
   enabled = true,
-  opts: { window?: GuideSpan } = {},
+  opts: { window?: GuideSpan; now?: number } = {},
 ): { streams: ReadonlyMap<string, StreamMatch[]>; loading: boolean } {
   const on = enabled && games.length > 0;
   const index = useChannelIndex(on);
@@ -139,7 +149,10 @@ export function useGameStreams(
   const { from, to } = opts.window ?? own;
   // The whole index first: refs arriving source by source would ask the guide again for each.
   const guide = useGuideWindow(index.channels, from, to, on && !index.loading);
-  const now = useNow(MINUTE);
+  // One clock for the page: each instance's own minute timer, unaligned with the page's, re-rendered every
+  // card on its own ticks (F5-2).
+  const ownNow = useNow(opts.now === undefined ? MINUTE : null);
+  const now = opts.now ?? ownNow;
 
   // Matching waits for prepareMatch, which tokenizes the guide text of the whole index in slices with
   // yields between them rather than in one long task. Until it is done, the last prepared index and guide
@@ -208,16 +221,27 @@ export function useGameStreams(
     combine: combineSearches,
   });
 
+  // Kept per game like the matches: a fallback hit list made anew on every tick re-rendered its card each time.
+  const [fallbacks] = useState(() => new WeakMap<Game, FallbackCached>());
   const streams = useMemo(() => {
     if (wanted.length === 0) return matched;
     const byQuery = new Map(queries.map((q, i) => [q, searches.hits[i]]));
+    const visible = sources ?? NO_SOURCES;
     const out = new Map(matched);
     for (const g of wanted) {
-      const hits = fallbackQueries(g).flatMap((q) => byQuery.get(q) ?? []);
-      if (hits.length > 0) out.set(g.key, fallbackMatches(g, hits, sources ?? [], now));
+      const answers = fallbackQueries(g).map((q) => byQuery.get(q));
+      const hits = answers.flatMap((a) => a ?? []);
+      if (hits.length === 0) continue;
+      const current = isCurrentGame(g, now);
+      let cached = fallbacks.get(g);
+      if (!cached || cached.current !== current || cached.sources !== visible || cached.answers.some((a, i) => a !== answers[i])) {
+        cached = { answers, sources: visible, current, list: fallbackMatches(g, hits, visible, now) };
+        fallbacks.set(g, cached);
+      }
+      out.set(g.key, cached.list);
     }
     return out;
-  }, [wanted, matched, queries, searches.hits, sources, now]);
+  }, [wanted, matched, queries, searches.hits, sources, now, fallbacks]);
 
   return { streams, loading: on && (!complete || !current || searches.pending) };
 }

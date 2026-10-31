@@ -8,7 +8,7 @@
  */
 
 import { ChevronDown, ChevronUp, Circle, Clock, History, Play } from 'lucide-react';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { sameRef, type ChannelQuality, type EpgProgram, type ItemRef, type Settings } from '@/api/types';
@@ -63,9 +63,12 @@ function QualityTag({ quality }: { quality: ChannelQuality }) {
   );
 }
 
-/** What every stream row reads, built once per page by {@link useStreamContext}. */
+/**
+ * What every stream row reads, built once per page by {@link useStreamContext}. Nothing in it moves with the
+ * clock: the time comes beside it as each card's `now` ({@link cardNow}), so a tick re-renders only the cards
+ * whose actions it can change (F5-2).
+ */
 export interface StreamContext {
-  now: number;
   /** Channel names under `settings.stripCountryPrefix`. */
   strip: boolean;
   /** More than one source: rows name theirs. */
@@ -82,7 +85,7 @@ export interface StreamContext {
 
 const selectMinQuality = (s: Settings) => s.liveMinQuality ?? null;
 
-export function useStreamContext(now: number, sourceCount: number): StreamContext {
+export function useStreamContext(sourceCount: number): StreamContext {
   const { t } = useTranslation('sports');
   const { toast } = useToast();
   const prefs = useDisplayPrefs();
@@ -130,8 +133,8 @@ export function useStreamContext(now: number, sourceCount: number): StreamContex
   const isRecording = useCallback((ref: ItemRef, program: EpgProgram) => !!markFor(index, ref, program).recording, [index]);
 
   return useMemo(
-    () => ({ now, strip: prefs.stripCountryPrefix, multiSource: sourceCount > 1, canRecord, qualityFiltered, isRecording, watch, replay, record }),
-    [now, prefs.stripCountryPrefix, sourceCount, canRecord, qualityFiltered, isRecording, watch, replay, record],
+    () => ({ strip: prefs.stripCountryPrefix, multiSource: sourceCount > 1, canRecord, qualityFiltered, isRecording, watch, replay, record }),
+    [prefs.stripCountryPrefix, sourceCount, canRecord, qualityFiltered, isRecording, watch, replay, record],
   );
 }
 
@@ -168,7 +171,14 @@ function watchesLater(game: Game, now: number): boolean {
   return game.phase === 'scheduled' && game.timeValid && !game.timeNote && game.startMs - now > WATCH_BEFORE_MS;
 }
 
-/** The one action a row offers for `game` at `now`, or null (no archive, no recording, or a postponed game). */
+/**
+ * The one action a row offers for `game` at `now`, or null (no archive, no recording, or a postponed game).
+ *
+ * Only two kinds of game read `now` here and in {@link watchesLater}: a final (`canCatchUp` and the replay's
+ * end), and a timed scheduled game from {@link WATCH_BEFORE_MS} before its start. For every other game (live,
+ * postponed, canceled, suspended, TBD or with a window note, or scheduled further ahead) both give the same
+ * answer for any earlier `now`, {@link TIMELESS} included, which is what {@link cardNow} relies on.
+ */
 export function streamAction(game: Game, m: StreamMatch, now: number, canRecord: boolean, title: string): StreamAction {
   const soon = game.phase === 'scheduled' && game.timeValid && !game.timeNote && game.startMs - now <= WATCH_BEFORE_MS;
   if (game.phase === 'live' || soon) return { kind: 'watch' };
@@ -182,6 +192,20 @@ export function streamAction(game: Game, m: StreamMatch, now: number, canRecord:
   }
   if (game.phase === 'scheduled' && canRecord) return { kind: 'record', program };
   return null;
+}
+
+/** The `now` a card gets when nothing it shows depends on the time: the earliest there is, and constant. */
+export const TIMELESS = 0;
+
+/**
+ * The `now` to hand `game`'s card: the page clock's for a final or a timed game within
+ * {@link WATCH_BEFORE_MS} of its start (or past it, still scheduled), whose actions the time can change
+ * (see {@link streamAction}), else {@link TIMELESS}. So a clock tick re-renders those few cards only; on a
+ * 60-card college Saturday every tick re-rendered all of them, an estimated 1,000 to 1,500 components (F5-2).
+ */
+export function cardNow(game: Game, now: number): number {
+  if (game.phase === 'final') return now;
+  return game.phase === 'scheduled' && game.timeValid && !game.timeNote && game.startMs - now <= WATCH_BEFORE_MS ? now : TIMELESS;
 }
 
 function WatchFrom({ time }: { time: string }) {
@@ -202,6 +226,7 @@ function StreamRow({
   match,
   title,
   ctx,
+  now,
   first,
   toggle,
 }: {
@@ -209,6 +234,8 @@ function StreamRow({
   match: StreamMatch;
   title: string;
   ctx: StreamContext;
+  /** The card's clock ({@link cardNow}). */
+  now: number;
   first: boolean;
   /** The first row's Show all toggle, at the end of its metadata. */
   toggle?: ReactNode;
@@ -216,7 +243,7 @@ function StreamRow({
   const { t, i18n } = useTranslation('sports');
   const [busy, setBusy] = useState(false);
   const name = displayChannelName(match.channel.name, ctx.strip) || match.channel.name;
-  const action = streamAction(game, match, ctx.now, ctx.canRecord, title);
+  const action = streamAction(game, match, now, ctx.canRecord, title);
   const run = (work: () => Promise<unknown>) => {
     setBusy(true);
     void work().finally(() => setBusy(false));
@@ -321,7 +348,7 @@ function StreamRow({
         </span>
       </div>
       {button ? <div className="shrink-0">{button}</div> : null}
-      {!button && first && watchesLater(game, ctx.now) ? (
+      {!button && first && watchesLater(game, now) ? (
         // Where nothing can be done yet (no recording here), the best row says when Watch comes: a clock
         // and the time, small enough to leave the channel's name its room; the sentence is its name.
         <WatchFrom time={formatClock(game.startMs - WATCH_BEFORE_MS, i18n.language)} />
@@ -330,12 +357,13 @@ function StreamRow({
   );
 }
 
-export function StreamList({
+export const StreamList = memo(function StreamList({
   game,
   title,
   streams,
   loading,
   ctx,
+  now,
 }: {
   game: Game;
   /** "Away at Home": the player's subtitle and the recording's title. */
@@ -343,6 +371,8 @@ export function StreamList({
   streams: readonly StreamMatch[] | undefined;
   loading: boolean;
   ctx: StreamContext;
+  /** The card's clock ({@link cardNow}). */
+  now: number;
 }) {
   const { t } = useTranslation('sports');
   const [all, setAll] = useState(false);
@@ -352,7 +382,7 @@ export function StreamList({
   // player's failover and its Alternate sources menu reach the other copies.
   const list = useMemo(() => {
     const l = streams ?? [];
-    const acts = (m: StreamMatch) => streamAction(game, m, ctx.now, ctx.canRecord, title) !== null;
+    const acts = (m: StreamMatch) => streamAction(game, m, now, ctx.canRecord, title) !== null;
     const seen = new Set<string>();
     return [...l.filter(acts), ...l.filter((m) => !acts(m))].filter((m) => {
       const name = `${m.sourceId}\n${m.channel.name.trim()}`;
@@ -360,7 +390,7 @@ export function StreamList({
       seen.add(name);
       return true;
     });
-  }, [streams, game, ctx.now, ctx.canRecord, title]);
+  }, [streams, game, now, ctx.canRecord, title]);
   if (list.length === 0) {
     if (loading) {
       return (
@@ -410,10 +440,11 @@ export function StreamList({
           match={m}
           title={title}
           ctx={ctx}
+          now={now}
           first={i === 0}
           {...(i === 0 ? { toggle } : {})}
         />
       ))}
     </ul>
   );
-}
+});

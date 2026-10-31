@@ -8,6 +8,7 @@
  */
 
 import { ExternalLink, Star } from 'lucide-react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Badge, LivePill, Menu, MetaLine, cn, displayChannelName, formatClock, formatDay, openExternalUrl, useMultiviewMenuItem } from '../deps';
@@ -114,9 +115,15 @@ export interface GameCardProps {
   /** Every league is on show: the card names its own. */
   showLeague: boolean;
   ctx: StreamContext;
+  /** The page clock where the card's actions follow it, else a constant (`cardNow`). */
+  now: number;
 }
 
-export function GameCard({ game, streams, streamsLoading, showStreams, showLeague, ctx }: GameCardProps) {
+/**
+ * Memoized: a poll leaves unchanged games as they were and their streams come from a per-game cache, so a
+ * poll, a search keystroke or a clock tick re-renders only the cards whose game, streams or `now` moved.
+ */
+export const GameCard = memo(function GameCard({ game, streams, streamsLoading, showStreams, showLeague, ctx, now }: GameCardProps) {
   const { t } = useTranslation('sports');
   const title = t('matchup', { away: game.away.displayName, home: game.home.displayName });
   const networks = [...new Set(game.broadcasts.map((b) => b.name))];
@@ -138,7 +145,7 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
   const gamecast = game.gamecastUrl;
   // While Watch is on offer (the game is on, or starts within 15 minutes), the menu puts the best
   // stream that plays it on the multi-view wall, so a Sunday's games can share the screen.
-  const wallStream = streams?.find((m) => streamAction(game, m, ctx.now, ctx.canRecord, title)?.kind === 'watch');
+  const wallStream = streams?.find((m) => streamAction(game, m, now, ctx.canRecord, title)?.kind === 'watch');
   const wallItem = useMultiviewMenuItem(
     wallStream
       ? {
@@ -224,9 +231,9 @@ export function GameCard({ game, streams, streamsLoading, showStreams, showLeagu
       ) : null}
       {showStreams && playable ? (
         <div className="row-start-4 -mx-1 mt-2.5 min-w-0 border-t border-divider px-1 pt-1">
-          <StreamList game={game} title={title} streams={streams} loading={streamsLoading} ctx={ctx} />
+          <StreamList game={game} title={title} streams={streams} loading={streamsLoading} ctx={ctx} now={now} />
         </div>
       ) : null}
     </li>
   );
-}
+});

@@ -840,6 +840,39 @@ describe('useGameStreams', () => {
   });
 });
 
+describe('useGameStreams with the page clock (F5-2)', () => {
+  it('matches by the clock it is given, and keeps a fallback match list from tick to tick', async () => {
+    const now = Date.now();
+    const live = game('nba', KNICKS, CELTICS, now - 20 * MINUTE, { state: 'in', phase: 'live' });
+    // Undated event names count for a game starting within 24 hours: this one is, an hour from now.
+    const tomorrow = game('nfl', STEELERS, BUCS, now + 24 * HOUR + 30 * MINUTE);
+    handlers['sources.list'] = () => [SOURCES[0]];
+    handlers['settings.get'] = () => ({ epgOffsetMinutes: 0 });
+    handlers['catalog.categories'] = () => [cat('c1', 'USA SPORTS', 1)];
+    handlers['catalog.channels'] = pages({ 's1/c1': [ch('s1', 'nfl2', 'NFL 02: Steelers @ Buccaneers')] });
+    handlers['epg.grid'] = () => ({});
+    // Only the search finds the live game's channel: its group's name doesn't look like sports.
+    handlers['catalog.search'] = (a: SearchArgs) => ({
+      live: a.limit === FALLBACK_LIMIT ? [ch('s1', 'ev', 'NBA 05: Knicks @ Celtics', { categoryName: 'Events' })] : [],
+      movies: [],
+      series: [],
+    });
+    const games = [live, tomorrow];
+    let clock = now;
+    const { result, rerender } = renderHook(() => useGameStreams(games, true, { now: clock }), { wrapper });
+    await waitFor(() => expect(result.current.streams.get(live.key)).toHaveLength(1));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.streams.get(tomorrow.key)).toEqual([]);
+    const hits = result.current.streams.get(live.key);
+
+    clock = now + HOUR;
+    rerender();
+    expect(result.current.streams.get(tomorrow.key)!.map((m) => [m.channel.name, m.reason])).toEqual([['NFL 02: Steelers @ Buccaneers', 'event']]);
+    // Before F5-2 the fallback list was made anew on every tick, and its card re-rendered with it.
+    expect(result.current.streams.get(live.key)).toBe(hits);
+  });
+});
+
 describe('useGrowingWindow', () => {
   const now = Date.parse('2026-10-25T16:00Z');
   const nba = game('nba', KNICKS, CELTICS, now + 3 * HOUR);

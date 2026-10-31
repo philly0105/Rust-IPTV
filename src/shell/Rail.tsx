@@ -2,7 +2,7 @@ import { ChevronDown, ChevronUp, Ellipsis, Keyboard, ListVideo, PanelLeftClose, 
 import { type CSSProperties, type ReactNode, type RefObject, memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router';
+import { Link, NavLink, useLocation } from 'react-router';
 
 import { useRpcQuery } from '@/api/query';
 import type { Source } from '@/api/types';
@@ -11,7 +11,7 @@ import { BrandMark, cn, IconButton, Skeleton, SourceMonogram, Tooltip } from '@/
 import { useOffline } from './connection';
 import { LIBRARY_LINKS, loneSourceRadio, readLastSource, sectionCurrent, sourcesFor, watchLinks, type NavLinkDef } from './navigation';
 import { overlayWarmers } from './overlayChunks';
-import { usePathname } from './pathname';
+import { usePathname, useStableNavigate } from './pathname';
 import { railLinkCurrent, railLinks, routeSourceId } from './railLinks';
 import { useRouteIntent } from './routeIntent';
 import { kindShortKey } from './sourceKind';
@@ -427,7 +427,8 @@ function SourceEntry({
     trigger.focus();
     if (was === 'open') trigger.click();
   }, [RailMenu]);
-  const navigate = useNavigate();
+  // Not useNavigate: it re-rendered every entry and its links on each typed `?q=`.
+  const navigate = useStableNavigate();
   const pathname = usePathname();
   // The collapsed rail's menu lists Radio only once the m3u radio probe has answered: hovering
   // or focusing the monogram starts it, so a narrow window pays for no probe it never opens.

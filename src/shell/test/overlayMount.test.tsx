@@ -1,7 +1,8 @@
 /**
  * F1-3: the command palette and the `?` overlay mount the first time they open, not with the
  * shell. Their chunks load on hover or focus of their buttons and at idle after the player's load,
- * never at boot. The rail reads the pathname alone, so a typed `?q=` does not re-render it.
+ * never at boot. The rail reads the pathname alone and the shell's stable navigate, so a typed
+ * `?q=` re-renders neither it nor its source entries and their links.
  */
 
 import { act, cleanup, configure, fireEvent, screen, waitFor } from '@testing-library/react';
@@ -12,7 +13,7 @@ import { installDomStubs, makeSource, Page, renderRoutes, rpcMock, settings } fr
 
 configure({ asyncUtilTimeout: 4000 });
 
-const seen = vi.hoisted(() => ({ paletteLoads: 0, paletteMounts: 0, overlayLoads: 0, railRenders: 0 }));
+const seen = vi.hoisted(() => ({ paletteLoads: 0, paletteMounts: 0, overlayLoads: 0, railRenders: 0, sourceEntryRenders: 0, railLinkRenders: 0 }));
 
 vi.mock('@/api/transport', async (orig) => ({
   ...(await orig<typeof import('@/api/transport')>()),
@@ -56,6 +57,28 @@ vi.mock('../useVisibleSources', async (orig) => {
   };
 });
 
+// Each source entry builds its links once per render, and each rail link asks its route intent once.
+vi.mock('../railLinks', async (orig) => {
+  const real = await orig<typeof import('../railLinks')>();
+  return {
+    ...real,
+    railLinks: (...args: Parameters<typeof real.railLinks>) => {
+      seen.sourceEntryRenders += 1;
+      return real.railLinks(...args);
+    },
+  };
+});
+vi.mock('../routeIntent', async (orig) => {
+  const real = await orig<typeof import('../routeIntent')>();
+  return {
+    ...real,
+    useRouteIntent: (to: string) => {
+      seen.railLinkRenders += 1;
+      return real.useRouteIntent(to);
+    },
+  };
+});
+
 const { ShellLayout } = await import('../ShellLayout');
 const { useShellStore } = await import('../store');
 
@@ -66,6 +89,7 @@ const routes = [
     children: [
       { path: 'favorites', element: <Page>favorites page</Page> },
       { path: 'recent', element: <Page>recent page</Page> },
+      { path: 's/:sourceId/favorites', element: <Page>source favorites page</Page> },
     ],
   },
 ];
@@ -138,5 +162,26 @@ describe('overlays on demand (F1-3)', () => {
     expect(seen.railRenders).toBeGreaterThan(before);
     const recent = screen.getByRole('link', { name: 'Recently watched' });
     expect(recent.getAttribute('aria-current')).toBe('page');
+  });
+
+  it("leaves the source entries and their links alone while a source page's search types", async () => {
+    rpcMock.handlers['sources.list'] = () => [makeSource('s1', { name: 'Night Portal' }), makeSource('s2', { name: 'Day Portal', position: 1 })];
+    const { router } = renderRoutes(routes, '/s/s1/favorites');
+    await screen.findByText('source favorites page');
+    await screen.findAllByText('Night Portal');
+    await settle();
+    // The page's source is expanded: its links are on screen.
+    expect(screen.getAllByRole('link', { name: 'Favorites' }).length).toBeGreaterThan(0);
+
+    const before = { ...seen };
+    for (const q of ['b', 'bb', 'bbc']) {
+      await act(() => router.navigate(`/s/s1/favorites?q=${q}`, { replace: true }));
+    }
+    await settle();
+    // useNavigate reads the route context, which the router builds again on every location change:
+    // 6 source entry and 18 rail link renders here before the entries took the shell's navigate.
+    expect(seen.railRenders - before.railRenders).toBe(0);
+    expect(seen.sourceEntryRenders - before.sourceEntryRenders).toBe(0);
+    expect(seen.railLinkRenders - before.railLinkRenders).toBe(0);
   });
 });

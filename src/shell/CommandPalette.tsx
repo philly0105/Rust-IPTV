@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router';
 
 import { homeContinueArgs } from '@/api/bootPrefetch';
 import { useRpcQuery } from '@/api/query';
@@ -47,7 +46,7 @@ import { Dialog, Kbd, Poster, cn, toast, errorDescription } from '@/ui';
 
 import { useCommandList } from './commands';
 import { LIBRARY_LINKS, readLastSource, watchLinks } from './navigation';
-import { usePathname } from './pathname';
+import { usePathname, useStableNavigate } from './pathname';
 import { playFromShell, type PlayItemArgs } from './playFromShell';
 import { railFadeMask } from './Rail';
 import { railLinks, routeSourceId } from './railLinks';
@@ -172,7 +171,7 @@ export function matchContent<E extends ContentEntry>(entries: readonly E[], quer
  */
 function useContentItems(query: string, open: boolean): PaletteItem[] {
   const { t } = useTranslation('shell');
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const sources = useVisibleSources();
   const favorites = useRpcQuery('favorites.list', {}, { enabled: open });
   const recent = useRpcQuery('recent.list', RECENT_ARGS, { enabled: open });
@@ -230,7 +229,7 @@ const CATALOG_DEBOUNCE_MS = 120;
  */
 function useCatalogItems(query: string, open: boolean, skip: ReadonlySet<string>): PaletteItem[] {
   const { t } = useTranslation(['shell', 'vod']);
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const sources = useVisibleSources();
   const debounced = normalizeQuery(useDebounced(query, CATALOG_DEBOUNCE_MS));
   // While a newer query waits, the last answer stays and narrows by the filter below, so the
@@ -402,7 +401,7 @@ export function foldProgrammeHits<H extends { program: { title: string; start: s
  */
 function useProgrammeItems(query: string, open: boolean): PaletteItem[] {
   const { t, i18n } = useTranslation('shell');
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const sources = useVisibleSources();
   const prefs = useDisplayPrefs();
   const debounced = useDebounced(query.trim(), 200);
@@ -448,7 +447,7 @@ function settingsKeywords(key: string, section: string, t: TFunction, en: TFunct
 /** Built-in navigation, source, and settings commands. Exported for tests. */
 export function usePaletteItems(): PaletteItem[] {
   const { t, i18n } = useTranslation(['shell', 'parental']);
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   // The pathname alone (F1-3): an open palette has no use for a typed `?q=`.
   const pathname = usePathname();
   const sources = useVisibleSources();
@@ -576,7 +575,7 @@ export function usePaletteItems(): PaletteItem[] {
 /** The empty palette's actions, ahead of the destinations: the theme flip, a new source, the keys. */
 function useSuggestedItems(query: string): PaletteItem[] {
   const { t } = useTranslation('shell');
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const setHelpOpen = useShellStore((s) => s.setHelpOpen);
   const { resolved } = useTheme();
   const empty = !query.trim();
@@ -607,7 +606,7 @@ export function CommandPalette() {
   const setOpen = useShellStore((s) => s.setPaletteOpen);
   const items = usePaletteItems();
   const prefs = useDisplayPrefs();
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const [query, setQuery] = useState('');
   const start = useStartItems(query, open);
   const suggested = useSuggestedItems(query);

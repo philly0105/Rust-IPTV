@@ -28,6 +28,17 @@ vi.mock('@/features/player', () => ({
 }));
 // The shell loads the dock from its own module (F1-1), with the same stand-ins.
 vi.mock('@/features/player/dock', () => import('@/features/player'));
+// Calls of the rail and the palette's item hooks: the shell's renders that read the sources.
+const seen = vi.hoisted(() => ({ sourceReads: 0 }));
+vi.mock('../useVisibleSources', async (orig) => {
+  const real = await orig<typeof import('../useVisibleSources')>();
+  return {
+    useVisibleSources: () => {
+      seen.sourceReads += 1;
+      return real.useVisibleSources();
+    },
+  };
+});
 
 const { ShellLayout } = await import('../ShellLayout');
 const { matchContent, paletteFilter } = await import('../CommandPalette');
@@ -217,6 +228,36 @@ describe('palette favourites and recent (L1-visual-12)', () => {
     fireEvent.click(await within(palette).findByText('BBC Earth'));
     await waitFor(() => expect(router.state.location.pathname).toBe('/s/s1/series/7'));
     expect(playerMock.playItem).not.toHaveBeenCalled();
+  });
+});
+
+describe('a palette opened once (F1-3)', () => {
+  it("stays still, closed, while a page's search types into the location, and still navigates", async () => {
+    const { router } = renderRoutes(routes, '/favorites');
+    await screen.findByText('favorites page');
+    await screen.findAllByText('Backup 1');
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    await screen.findByTestId('command-palette');
+    act(() => useShellStore.getState().setPaletteOpen(false));
+    await waitFor(() => expect(screen.queryByTestId('command-palette')).toBeNull());
+    // Its debounced searches and the close settle first.
+    await act(() => new Promise((r) => setTimeout(r, 300)));
+
+    const before = seen.sourceReads;
+    for (const q of ['b', 'bb', 'bbc']) {
+      await act(() => router.navigate(`/favorites?q=${q}`, { replace: true }));
+    }
+    await act(() => new Promise((r) => setTimeout(r, 80)));
+    // useNavigate reads the route context, new on every location change: the mounted palette and
+    // its item hooks ran again per keystroke (15 reads over these three) before it took the shell's.
+    expect(seen.sourceReads - before).toBe(0);
+
+    // The shell's navigate still goes where the router's did.
+    act(() => useShellStore.getState().setPaletteOpen(true));
+    const palette = await screen.findByTestId('command-palette');
+    fireEvent.change(within(palette).getByPlaceholderText('Type a command or search'), { target: { value: 'bbc earth' } });
+    fireEvent.click(await within(palette).findByText('BBC Earth'));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/s/s1/series/7'));
   });
 });
 

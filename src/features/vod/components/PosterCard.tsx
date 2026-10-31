@@ -1,11 +1,11 @@
 import { Bookmark, BookmarkCheck, BookmarkPlus, Lock, Star } from 'lucide-react';
-import { createContext, memo, useContext, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { createContext, memo, useContext, useLayoutEffect, useMemo, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 
 import { itemKey, type ItemRef, type ItemSnapshot, type SeriesItem, type VodItem } from '@/api/types';
-import { MyListButton, MyListButtonView } from '@/features/mylist/components/MyListButton';
+import { MyListButton, MyListButtonView, type MyListButtonProps } from '@/features/mylist/components/MyListButton';
 import { useMyListState, type MyListStatus } from '@/features/mylist/hooks/useMyList';
 import { useMyListToggle } from '@/features/mylist/hooks/useMyListToggle';
 
@@ -153,15 +153,51 @@ interface PosterText {
   language: string;
 }
 
+/** What a grid's cards read of My List: the saved keys, and whether they can be trusted yet. */
+interface MyListSnapshot {
+  keys: ReadonlySet<string>;
+  status: MyListStatus;
+}
+
+/**
+ * The grid's My List as a small store its cards' leaves select from (F4-4): the saved chip, the
+ * corner toggle and a grid cell's "In My List" name each re-render only when their own title's
+ * answer changes. With the list in the context value, every new list re-rendered every card body
+ * past the cards' memos: about 290 on a scrolled landing, twice per toggle (the optimistic patch,
+ * then the server's rows). Leaves subscribe here rather than to the QueryCache, whose listeners
+ * hear every query event in the app.
+ */
+class MyListStore {
+  private snapshot: MyListSnapshot;
+  private readonly listeners = new Set<() => void>();
+
+  constructor(initial: MyListSnapshot) {
+    this.snapshot = initial;
+  }
+
+  get = (): MyListSnapshot => this.snapshot;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  set(next: MyListSnapshot): void {
+    if (next.keys === this.snapshot.keys && next.status === this.snapshot.status) return;
+    this.snapshot = next;
+    for (const l of this.listeners) l();
+  }
+}
+
 /**
  * My List for every card of one grid: read once by the grid, instead of three list observers per
  * card (L2-vod-1). The grid's strings come with it: three `useTranslation` calls per card made
  * every mount copy the i18n instance three times, which a fast scroll paid for in GC pauses
- * (L3-perf-ui-3). Linked cards (search results, VD-1) read it too, for their corner button.
+ * (L3-perf-ui-3). Linked cards (search results, VD-1) read it too, for their corner button. The
+ * object keeps its identity while the list changes (F4-4): the list itself is in `store`.
  */
 interface GridMyList {
-  keys: ReadonlySet<string>;
-  status: MyListStatus;
+  store: MyListStore;
   retry: () => Promise<boolean>;
   toggle: ReturnType<typeof useMyListToggle>;
   text: PosterText;
@@ -169,15 +205,37 @@ interface GridMyList {
 
 const GridMyListContext = createContext<GridMyList | null>(null);
 
+/** One list subscription, toggle and set of strings, with the list kept in a {@link MyListStore}. */
+function useGridMyList(): GridMyList {
+  const { keys, status, retry } = useMyListState();
+  const toggle = useMyListToggle();
+  const text = usePosterText();
+  const [store] = useState(() => new MyListStore({ keys, status }));
+  // After the commit and before paint: the leaves whose title changed re-render in the same frame.
+  useLayoutEffect(() => store.set({ keys, status }), [store, keys, status]);
+  return useMemo(() => ({ store, retry, toggle, text }), [store, retry, toggle, text]);
+}
+
+/** Whether `itemRef` is saved; only a change of that answer re-renders the caller. */
+function useSaved(store: MyListStore, itemRef: ItemRef): boolean {
+  const key = itemKey(itemRef);
+  // Until the list is known nothing counts as saved (useInMyList's rule).
+  return useSyncExternalStore(store.subscribe, () => {
+    const { keys, status } = store.get();
+    return status === 'ready' && keys.has(key);
+  });
+}
+
+function useListStatus(store: MyListStore): MyListStatus {
+  return useSyncExternalStore(store.subscribe, () => store.get().status);
+}
+
 /**
  * Wrap a poster grid in this so its cards share one subscription to My List. A grid card outside
  * it subscribes on its own (slower on a large grid, same behaviour).
  */
 export function GridMyListProvider({ children }: { children: ReactNode }) {
-  const { keys, status, retry } = useMyListState();
-  const toggle = useMyListToggle();
-  const text = usePosterText();
-  const value = useMemo(() => ({ keys, status, retry, toggle, text }), [keys, status, retry, toggle, text]);
+  const value = useGridMyList();
   return <GridMyListContext.Provider value={value}>{children}</GridMyListContext.Provider>;
 }
 
@@ -243,8 +301,10 @@ function PosterCardBody({
   t,
   locale,
 }: PosterCardViewProps & { t: TFunction; locale: string }) {
-  // A linked card in a shared list knows whether its title is saved; a grid cell is told (GridPosterCardWith).
-  const saved = savedProp ?? (!!myList && !!list && list.status === 'ready' && list.keys.has(itemKey(myList.itemRef)));
+  // A grid cell is told whether its title is saved (GridPosterCardWith). A linked card in a shared
+  // list draws its saved chip through a leaf that follows the list, so the body does not (F4-4).
+  const saved = !!savedProp;
+  const savedLeaf = savedProp === undefined && !!myList && !!list;
   const ownIntent = usePrefetchIntent(intent ? null : (prefetch ?? null));
   const { onPointerEnter, onPointerLeave, onFocus, onBlur } = intent ?? ownIntent;
   const artSourceId = sourceId ?? prefetch?.ref.sourceId ?? myList?.itemRef.sourceId;
@@ -286,7 +346,7 @@ function PosterCardBody({
             {badge}
           </div>
         )}
-        {(r || watched || saved) && (
+        {(r || watched || saved || savedLeaf) && (
           // The state chips share the top-end corner: rating, then saved, then watched. All glass and
           // small, so amber stays on progress and play (DS amber rules); the 36 px toggle is only for hover.
           <div aria-hidden className="pointer-events-none absolute end-1.5 top-1.5 flex items-center gap-1">
@@ -297,11 +357,8 @@ function PosterCardBody({
                 {r}
               </div>
             )}
-            {saved && (
-              <div aria-hidden data-testid="poster-saved" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-glass-strong text-on-glass shadow-1">
-                <BookmarkCheck aria-hidden size={12} strokeWidth={2.5} />
-              </div>
-            )}
+            {saved && <SavedMark />}
+            {savedLeaf && <SavedChip store={list.store} itemRef={myList.itemRef} />}
             {/* Watched is a state, not an action: the kit's glass tick, so amber stays on progress and play. */}
             {watched && <WatchedChip testId="poster-watched" />}
           </div>
@@ -407,10 +464,36 @@ function PosterCardBody({
         without hover, it lets taps through to the poster.
       */}
       <div className={cn('pointer-events-none absolute inset-x-0 top-0 aspect-[2/3]', WRAPPER_HOVER_LAYER)}>
-        {list ? <MyListButtonView {...cornerProps} state={list} t={list.text.tm} /> : <MyListButton {...cornerProps} />}
+        {list ? <SharedMyListButton {...cornerProps} list={list} /> : <MyListButton {...cornerProps} />}
       </div>
     </div>
   );
+}
+
+/** The small glass bookmark a saved title wears among the poster's top-end chips. */
+function SavedMark() {
+  return (
+    <div aria-hidden data-testid="poster-saved" className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-glass-strong text-on-glass shadow-1">
+      <BookmarkCheck aria-hidden size={12} strokeWidth={2.5} />
+    </div>
+  );
+}
+
+/** A linked card's saved chip on the grid's shared list: only it re-renders when the title is saved or taken off. */
+function SavedChip({ store, itemRef }: { store: MyListStore; itemRef: ItemRef }) {
+  return useSaved(store, itemRef) ? <SavedMark /> : null;
+}
+
+/**
+ * A linked card's corner toggle on the grid's shared list. It re-renders when its own title's
+ * state or the list's status changes, not for every other title saved (F4-4).
+ */
+function SharedMyListButton({ list, ...props }: MyListButtonProps & { list: GridMyList }) {
+  const status = useListStatus(list.store);
+  // Subscribes this corner to its title; the view reads the answer from the same keys.
+  useSaved(list.store, props.itemRef);
+  const state = { keys: list.store.get().keys, status, retry: list.retry, toggle: list.toggle };
+  return <MyListButtonView {...props} state={state} t={list.text.tm} />;
 }
 
 /**
@@ -424,18 +507,15 @@ function GridPosterCard(props: PosterCardProps & { myList: { itemRef: ItemRef; s
 
 /** Outside a GridMyListProvider: the card reads My List and its strings itself. */
 function GridPosterCardOwn(props: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot } }) {
-  const { keys, status, retry } = useMyListState();
-  const toggle = useMyListToggle();
-  const text = usePosterText();
-  const list = useMemo(() => ({ keys, status, retry, toggle, text }), [keys, status, retry, toggle, text]);
-  return <GridPosterCardWith {...props} list={list} />;
+  return <GridPosterCardWith {...props} list={useGridMyList()} />;
 }
 
 function GridPosterCardWith({ list, ...props }: PosterCardProps & { myList: { itemRef: ItemRef; snapshot: ItemSnapshot }; list: GridMyList }) {
   const { t, tm, language } = list.text;
   const { itemRef, snapshot } = props.myList;
-  // Until the list is known nothing counts as saved (useInMyList's rule).
-  const inList = list.status === 'ready' && list.keys.has(itemKey(itemRef));
+  // The option's name carries the saved state, so the cell follows its own title (one boolean):
+  // a new list re-renders the cells it saved or took off, not the whole grid (F4-4).
+  const inList = useSaved(list.store, itemRef);
   const hasProgress = showsProgress(props.progress, props.watched);
   return (
     <PosterCardBody
@@ -449,7 +529,7 @@ function GridPosterCardWith({ list, ...props }: PosterCardProps & { myList: { it
           itemRef={itemRef}
           snapshot={snapshot}
           inList={inList}
-          status={list.status}
+          store={list.store}
           toggle={list.toggle}
           raised={hasProgress}
           shown={!!props.active}
@@ -471,7 +551,7 @@ function GridMyListToggle({
   itemRef,
   snapshot,
   inList,
-  status,
+  store,
   toggle,
   raised,
   shown,
@@ -480,7 +560,8 @@ function GridMyListToggle({
   itemRef: ItemRef;
   snapshot: ItemSnapshot;
   inList: boolean;
-  status: MyListStatus;
+  /** The grid's list, for its status (loading, error, ready). */
+  store: MyListStore;
   toggle: GridMyList['toggle'];
   /** Above the progress bar. */
   raised: boolean;
@@ -490,6 +571,7 @@ function GridMyListToggle({
   t: TFunction;
 }) {
   const [pending, setPending] = useState(false);
+  const status = useListStatus(store);
   // Like MyListButton: until the shared list is known the corner is busy, neither pressed nor saved.
   const ready = status === 'ready';
   const loading = status === 'loading';
